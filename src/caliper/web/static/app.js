@@ -107,10 +107,13 @@ controls.enableDamping = true;
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x222a33, 1.1));
 const key = new THREE.DirectionalLight(0xffffff, 1.4); key.position.set(1, 1.4, 1); scene.add(key);
-scene.add(new THREE.GridHelper(400, 20, 0x283039, 0x1b2127));
 
 const modelGroup = new THREE.Group();
 scene.add(modelGroup);
+// grid lives in the model group so SpaceMouse rotation (which spins the group) carries the plane
+// with the part — keeps pan/zoom (camera) and rotation (group) visually consistent.
+const grid = new THREE.GridHelper(400, 20, 0x283039, 0x1b2127);
+modelGroup.add(grid);
 let mesh = null;
 
 const stlLoader = new STLLoader();
