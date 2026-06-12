@@ -12,8 +12,10 @@ from the project board and stop. You never wait for a human.
 2. Move it to **In Progress** in `pm/BOARD.md`.
 3. Implement it against its acceptance criteria. Write/extend tests.
 4. Run `make review`. If the regression guard is **red**, fix it before proceeding — never commit red.
-5. Move the card to **Done**, append a `pm/LOG.md` entry with the commit hash, and `git commit`
-   referencing the `CALI-N` id.
+5. Move the card to **Done**, append a `pm/LOG.md` entry with the commit hash, and update
+   `pm/DEMO.md`: refresh "current capabilities" and add a demo-log entry with the exact command(s)
+   the human can run to test/try the new work (plus expected output). Then `git commit` referencing
+   the `CALI-N` id.
 6. Stop. One card per run.
 
 ## Autonomy rules (hard)

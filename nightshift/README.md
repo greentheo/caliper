@@ -11,6 +11,7 @@ When we're ready to actually let it run unattended, the path is: point `loop.sh`
 | `night_shift.sh` (looping agent) | [`loop.sh`](loop.sh) — one bounded dev iteration | local, on-demand |
 | reviewing agent | [`review.sh`](review.sh) — pytest + ruff + diff summary | the regression guard |
 | `night_chat.md` (shared log) | [`../pm/LOG.md`](../pm/LOG.md) | active |
+| (release notes / demo) | [`../pm/DEMO.md`](../pm/DEMO.md) — capabilities + how-to-try, updated per task | active |
 | `bot_inbox` (task queue) | [`../pm/BOARD.md`](../pm/BOARD.md) + [`TASKS.md`](../pm/TASKS.md) | active |
 | `plugins/` (pre/post hooks) | [`hooks/`](hooks/) | `regression_guard.sh` |
 | `prompt_template.txt` (autonomy rules) | [`prompt_template.md`](prompt_template.md) | for future autonomous runs |

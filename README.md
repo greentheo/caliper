@@ -56,4 +56,6 @@ We run this like an engineering shop: specs → backlog → in-progress → done
 - **Board:** [`pm/BOARD.md`](pm/BOARD.md) — kanban of every task.
 - **Tasks:** [`pm/TASKS.md`](pm/TASKS.md) — the "issues" with acceptance criteria.
 - **Log:** [`pm/LOG.md`](pm/LOG.md) — append-only record of what shipped, when, with commit hashes.
+- **Demo & testing:** [`pm/DEMO.md`](pm/DEMO.md) — **start here to try the build**: current
+  capabilities + the exact commands to run each shipped feature. Updated after every task.
 - **Loop/review:** [`nightshift/`](nightshift/) — `make loop` to run an iteration, `make review` for the regression+review guard.
