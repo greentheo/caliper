@@ -1,0 +1,13 @@
+# pip layer for the caliper conda env (everything that doesn't need conda/OCCT).
+trimesh
+scipy
+manifold3d
+pydantic>=2
+pyyaml
+rich
+pytest
+shapely
+nevergrad
+anthropic
+fastapi
+uvicorn
