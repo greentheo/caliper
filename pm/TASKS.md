@@ -221,7 +221,7 @@ cap (mirrors CALI-6's rails). Author injectable → fully tested. Wired into CLI
 The next ~3 shifts toward the north star ("insert a support between the wheel and the XYZ assembly").
 Each builds on the single-part loop now complete (CALI-16/17) and CALI-10's two-body fit substrate.
 
-### CALI-19 — Tolerances & fits as first-class  · P1 · assembly-spine · ✅ done (`PENDING`)
+### CALI-19 — Tolerances & fits as first-class  · P1 · assembly-spine · ✅ done (`7d237cf`)
 A vocabulary for *fits* + tolerant comparisons, so the loop can target a fit and noise stops causing
 false failures. The user's "fits and tolerances" pillar.
 

@@ -26,7 +26,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   with a clear message instead of silently rebuilding a bracket — CLI + `/api/fit` + `/api/refine`.
   Proper fix (route through the author loop) tracked as CALI-22.
 - Tests: `test_tolerance.py` (8) + band-margin + fit-class loop + authored guards. **121 passed.**
-  Commit: PENDING
+  Commit: 7d237cf
 
 ### 2026-06-12 · CALI-17 · Structural-edit loop — fix failing measurements, not just builds
 - **Closes the two-actor loop** for LLM-authored parts (design spec §2/§5): the LLM revises its own
