@@ -4,18 +4,26 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Caliper — jam in 3D space</title>
-  <link rel="stylesheet" href="/style.css?v=2" />
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/style.css?v=3" />
   <script>
+    // surface load/runtime errors on the page itself (not just devtools), since a failed module
+    // import would otherwise just silently leave the buttons dead.
     window.__err = [];
-    addEventListener('error', (e) => __err.push((e.message || e.type) + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno));
-    addEventListener('unhandledrejection', (e) => __err.push('promise: ' + (e.reason && e.reason.message || e.reason)));
+    function showErr(msg) {
+      __err.push(msg);
+      const b = document.getElementById('errbar');
+      if (b) { b.style.display = 'block'; b.textContent = '⚠ ' + msg; }
+    }
+    addEventListener('error', (e) => showErr((e.message || e.type) + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || '')));
+    addEventListener('unhandledrejection', (e) => showErr('promise: ' + (e.reason && e.reason.message || e.reason)));
   </script>
-  <!-- three.js (no build step) via import map -->
+  <!-- three.js vendored locally (no CDN, works offline) via import map -->
   <script type="importmap">
   {
     "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      "three": "/vendor/three/three.module.js",
+      "three/addons/": "/vendor/three/addons/"
     }
   }
   </script>
@@ -26,6 +34,7 @@
     <span class="tag">measurement is the source of truth</span>
     <span id="health" class="health">…</span>
   </header>
+  <div id="errbar" class="errbar" style="display:none"></div>
 
   <main>
     <!-- LEFT: controls + spec + report -->
@@ -69,6 +78,6 @@
     </section>
   </main>
 
-  <script type="module" src="/app.js?v=2"></script>
+  <script type="module" src="/app.js?v=3"></script>
 </body>
 </html>

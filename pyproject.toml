@@ -27,7 +27,7 @@ caliper = "caliper.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-caliper = ["web/static/*"]
+caliper = ["web/static/*", "web/static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
