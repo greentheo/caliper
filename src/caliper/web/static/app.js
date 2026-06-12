@@ -229,7 +229,14 @@ async function connectSpaceMouse() {
     const dev = devices[0];
     if (!dev.opened) await dev.open();
     attachDevice(dev);
-  } catch (e) { window.showErr('SpaceMouse connect failed: ' + e.message); }
+  } catch (e) {
+    const driverHint = /open/i.test(e.message)
+      ? ' — the 3Dconnexion driver (3DxWare) is holding the device exclusively. Quit it (menu-bar ' +
+        'icon → Quit, or Activity Monitor → quit "3DconnexionHelper") and click Connect again. ' +
+        'WebHID reads the raw device, so it can\'t share with the driver (or Fusion) at the same time.'
+      : '';
+    window.showErr('SpaceMouse connect failed: ' + e.message + driverHint);
+  }
 }
 
 // auto-reattach a device we were already granted, so a reload doesn't need re-picking
