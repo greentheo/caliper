@@ -11,18 +11,22 @@ _Last updated: 2026-06-11_
 - CALI-10 — References · P1 · M3
 
 ## 🔨 In Progress
-- CALI-2 — Measurement API (MVP subset) · P0 · M0 · _mesh side verified; B-rep holes pending OCCT env_
-- CALI-4 — Generator (bracket family) · P0 · M0 · _written; pending OCCT env to verify build/holes_
-- CALI-8 — CLI (M0 end-to-end) · P0 · M0 · _gate verified; one-shot smoke pending OCCT env_
+- _(none)_
 
-## ✅ Done
-- CALI-7 — Decide (route by failure type) · P0 · M0 · _2026-06-11 · optimizer + structural routes verified_
-- CALI-6 — Loop controller · P0 · M0 · _2026-06-11 · converge/cap/oscillation/build-fail verified_
-- CALI-5 — Intake (Claude) · P0 · M0 · _2026-06-11 · offline drafting + clarify gate verified_
+## ✅ Done — Milestone M0 complete 🎉
+- CALI-8 — CLI (M0 end-to-end) · P0 · M0 · _2026-06-11 · `caliper run` produces a real STL, ALL PASS_
+- CALI-4 — Generator (bracket family) · P0 · M0 · _2026-06-11 · builds watertight, 4×Ø5.2 holes_
+- CALI-2 — Measurement API (MVP subset) · P0 · M0 · _2026-06-11 · mesh + B-rep holes verified_
+- CALI-7 — Decide (route by failure type) · P0 · M0 · _2026-06-11_
+- CALI-6 — Loop controller · P0 · M0 · _2026-06-11_
+- CALI-5 — Intake (Claude) · P0 · M0 · _2026-06-11_
 - CALI-3 — Evaluator · P0 · M0 · _2026-06-11_
 - CALI-1 — Spec schema · P0 · M0 · _2026-06-11_
 - CALI-0 — Project scaffolding · P0 · M0 · _2026-06-11_
 
-> Note: CALI-2/4/8 carry OCCT-dependent acceptance (real CadQuery build + hole detection + CLI
-> smoke). Code is written and the non-OCCT logic is green (39 passed, 4 skipped); these flip to Done
-> once the conda/OCCT env finishes building and `make test` runs the 4 skipped CadQuery tests.
+> **M0 done:** loose idea → spec → real mesh → measured against spec → one iteration → downloadable
+> STL. Full suite **47 passed**. Verified end-to-end via a pip CadQuery scratch venv while the
+> conda/conda-forge env (the canonical dev env) finishes solving; re-confirm `make test` there once it lands.
+>
+> **Next milestone — M1 (one iteration cycle):** CALI-1.M1 — feed the report back to decide for a
+> single NL refinement ("make the holes bigger spacing") + a single optimizer tune. Then M2 (webapp).

@@ -79,8 +79,10 @@ def make_bracket(p: BracketParams) -> Any:
         (0, 0), (leg, 0), (leg, t), (t, t), (t, leg), (0, leg),
     ]
     body = cq.Workplane("XZ").polyline(profile_pts).close().extrude(w)
-    # extrude along +Y; recentre so the bracket is symmetric about y=0.
-    body = body.translate((0, -w / 2.0, 0))
+    # The "XZ" plane normal is (0,-1,0), so extrude direction/sign is kernel-defined. Recentre on Y
+    # from the actual bounds so the bracket is symmetric about y=0 and centred bolt holes land true.
+    bb = body.val().BoundingBox()
+    body = body.translate((0, -(bb.ymin + bb.ymax) / 2.0, 0))
 
     # --- bolt holes -------------------------------------------------------
     # Evenly distribute holes along the usable length of each flange (from the corner to the end).
