@@ -25,8 +25,8 @@ _Last updated: 2026-06-11_
 - CALI-0 — Project scaffolding · P0 · M0 · _2026-06-11_
 
 > **M0 done:** loose idea → spec → real mesh → measured against spec → one iteration → downloadable
-> STL. Full suite **47 passed**. Verified end-to-end via a pip CadQuery scratch venv while the
-> conda/conda-forge env (the canonical dev env) finishes solving; re-confirm `make test` there once it lands.
+> STL. Full suite **47 passed** in the canonical conda env (`/opt/anaconda3/envs/caliper`,
+> cadquery 2.7.0 / occt 7.8.1, built with micromamba). `make test` runs clean with zero config.
 >
 > **Next milestone — M1 (one iteration cycle):** CALI-1.M1 — feed the report back to decide for a
 > single NL refinement ("make the holes bigger spacing") + a single optimizer tune. Then M2 (webapp).

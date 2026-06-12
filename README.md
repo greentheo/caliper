@@ -14,19 +14,20 @@ Phase 0 (MVP). Building the core loop library first, UI second. See the project 
 ## Quickstart
 
 ```bash
-# 1. Create the environment (CadQuery/OCCT via conda-forge)
-conda env create -f environment.yml
-conda activate caliper
+# 1. Create the environment (CadQuery/OCCT via conda-forge).
+#    micromamba is STRONGLY recommended here — Anaconda's classic solver took 55+ min and stalled
+#    on cadquery; micromamba solves the same env in seconds.
+micromamba create -p /opt/anaconda3/envs/caliper -c conda-forge -y python=3.11 cadquery
+/opt/anaconda3/envs/caliper/bin/python -m pip install -r requirements-pip.txt
+#    (declarative equivalent, if your solver can handle it: `conda env create -f environment.yml`)
 
-# 2. Install the package (editable)
-pip install -e ".[dev]"
-
-# 3. Run the regression guard
-pytest
+# 2. Run the regression guard (auto-resolves the env above; override with CALIPER_PY=...)
+make test
 ```
 
-> Note: in this machine's sandbox the `conda` shell function is blocked; call the binary
-> directly, e.g. `/opt/anaconda3/bin/conda env create -f environment.yml`.
+> Note: in this machine's sandbox the `conda`/`micromamba` shell functions may be blocked; call the
+> binary directly (e.g. `/tmp/bin/micromamba …`). The canonical env lives at
+> `/opt/anaconda3/envs/caliper`, which `make test` resolves automatically.
 
 ## Layout
 

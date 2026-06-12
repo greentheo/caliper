@@ -16,6 +16,16 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Added `rtree` dependency (trimesh ray casting needs it for `min_wall_thickness`).
 - Commit: _pending_
 
+### 2026-06-11 · CALI-0 · canonical OCCT env via micromamba (Plan B)
+- Anaconda's classic solver stalled 55+ min on cadquery. Switched to standalone **micromamba**
+  (osx-arm64), which solved + built the env in <1 min at `/opt/anaconda3/envs/caliper`:
+  **cadquery 2.7.0 / occt 7.8.1 / ocp 7.8.1.2 / python 3.11**. Then `pip install -r requirements-pip.txt`.
+- cadquery 2.7 dropped the `nptyping` dep → no numpy shim needed (unlike the pip-2.4 scratch venv).
+- **`make test` → 47 passed** in the canonical env (auto-resolves the prefix), confirming the code
+  works on cadquery 2.7 (not just the 2.4 used for the earlier scratch verification). CLI run → STL ✓.
+- Updated README/environment.yml to recommend the micromamba recipe.
+- Commit: _pending_
+
 ### 2026-06-11 · 🎉 M0 COMPLETE · CALI-2/4/8 verified end-to-end with real geometry
 - Verified the OCCT-dependent path. Fixed a generator bug: the CadQuery `"XZ"` plane normal is
   `(0,-1,0)`, so `extrude` is sign-defined and left the body off-centre on Y (bolt holes landed at
