@@ -1,5 +1,6 @@
 # pip layer for the caliper conda env (everything that doesn't need conda/OCCT).
 trimesh
+rtree         # broad-phase spatial index for trimesh ray casting (min_wall_thickness)
 scipy
 manifold3d
 pydantic>=2

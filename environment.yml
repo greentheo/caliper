@@ -14,6 +14,7 @@ dependencies:
   - pip
   - pip:
       - trimesh         # mesh measurements + STL I/O
+      - rtree           # spatial index for trimesh ray casting (min_wall_thickness)
       - scipy           # continuous optimizer (scipy.optimize)
       - manifold3d      # robust booleans (interference / clearance, M3)
       - pydantic>=2     # typed spec schema
