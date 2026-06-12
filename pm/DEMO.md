@@ -15,8 +15,8 @@ Newest demos first.
   "bigger spacing", "thicker walls", "add a rib") → it re-derives the spec, regenerates, re-measures,
   and writes a new STL. The optimizer also auto-tunes a continuous parameter when a numeric check fails.
 - ✅ **M2 — webapp.** `make serve` → a browser UI: intent box, **3D viewer** (three.js), live
-  measurement report, refine box, STL download, and **3Dconnexion SpaceMouse** support (WebHID).
-  "Jam in 3D space."
+  measurement report, refine box, STL download, a **Recent parts** list (click to reload past parts for
+  viewing/editing), and **3Dconnexion SpaceMouse** support (WebHID). "Jam in 3D space."
 
 **Part family so far:** corner brackets for T-slot extrusion (e.g. 2020). One body, bolt holes on
 each flange, optional cable bore + stiffening ribs.
@@ -108,6 +108,15 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-06-12 · Recent parts (browse/load) + hole-count hang fix
+**New:** a "Recent parts" panel in the webapp — every run is listed (newest first, with its label +
+timestamp); click one to load its spec, report, and 3D mesh; refine from there forks a new part.
+**Fixed:** an intent like "…for 2020 with two M6 holes" used to hang (it read the extrusion size 2020
+as the hole count → drilling 2020 holes). Now parsed correctly + clamped. **Try:**
+```bash
+make serve   # build a few parts, then click between them in "Recent parts" on the left
+```
 
 ### 2026-06-11 · M2 — webapp + SpaceMouse
 **New:** `make serve` → 3D webapp (FastAPI + three.js). Build, refine, view, download in the browser;

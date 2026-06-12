@@ -61,12 +61,20 @@ def _parse_extrusion_width(intent: str) -> float:
 
 
 def _parse_holes(intent: str) -> tuple[int, float]:
-    """Return (count, diameter) for an 'N M5 holes' style phrase. Defaults to 4×Ø5.2."""
+    """Return (count, diameter) for an 'N [Msize] holes' phrase. Defaults to 4×Ø5.2.
+
+    The count is anchored on the word "holes" (≤2 filler words before it) and limited to a 1–2 digit
+    number or a word-number — so an extrusion size like "2020" can't be misread as the hole count.
+    """
     count = 4
-    cm = re.search(r"(\d+|one|two|three|four|five|six|eight|ten)\s+(?:[\w-]+\s+){0,2}?m\d", intent, re.I)
+    cm = re.search(
+        r"\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:[\w-]+\s+){0,2}?holes?\b",
+        intent, re.I,
+    )
     if cm:
         tok = cm.group(1).lower()
         count = int(tok) if tok.isdigit() else _WORD_NUM.get(tok, 4)
+    count = max(1, min(12, count))  # sanity clamp
     mm = re.search(r"\bm(\d+(?:\.\d+)?)\b", intent, re.I)
     nominal = float(mm.group(1)) if mm else 5.0
     diameter = _M_CLEARANCE.get(nominal, round(nominal + 0.2, 1))

@@ -53,6 +53,15 @@ def test_cable_bore_adds_a_larger_bore():
     assert measure.largest_through_bore(res.geometry) >= 9.0
 
 
+def test_absurd_hole_count_is_clamped():
+    # defense: a bad/huge hole_count must clamp, not make the kernel drill thousands of holes (hang)
+    spec = Spec(part="bracket", parameters={"hole_count": {"type": "fixed", "value": 2020}})
+    res = generate.build(spec)
+    assert res.build_ok, res.error
+    assert res.params.holes_per_leg <= 8
+    assert measure.is_watertight(res.geometry)
+
+
 def test_build_error_is_captured_not_raised(monkeypatch):
     # Force the kernel call to blow up; build() must return a structured error, not raise.
     monkeypatch.setattr(

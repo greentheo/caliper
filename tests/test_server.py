@@ -55,6 +55,38 @@ def test_run_then_refine_and_stl(tmp_path, monkeypatch):
     assert any("8" in str(c) for c in ref.json()["changes"])
 
 
+def test_list_runs_empty_when_no_runs(tmp_path, monkeypatch):
+    monkeypatch.setenv("CALIPER_RUNS", str(tmp_path / "runs"))
+    r = _client().get("/api/runs")
+    assert r.status_code == 200 and r.json()["runs"] == []
+
+
+def test_get_unknown_run_404(tmp_path, monkeypatch):
+    monkeypatch.setenv("CALIPER_RUNS", str(tmp_path / "runs"))
+    assert _client().get("/api/runs/run_9999").status_code == 404
+
+
+def test_recent_list_and_load(tmp_path, monkeypatch):
+    pytest.importorskip("cadquery")
+    monkeypatch.setenv("CALIPER_RUNS", str(tmp_path / "runs"))
+    c = _client()
+    c.post("/api/run", json={"intent": "a 60 mm corner bracket with four M5 holes",
+                             "no_llm": True, "max_iter": 1})
+    # list shows the run with metadata
+    runs = c.get("/api/runs").json()["runs"]
+    assert len(runs) == 1
+    item = runs[0]
+    assert item["run_id"] == "run_0000"
+    assert item["part"] == "corner_bracket"
+    assert item["stl_url"] and "four M5 holes" in item["label"]
+
+    # load it back without rebuilding: spec + structured report + stl
+    got = c.get("/api/runs/run_0000").json()
+    assert "corner_bracket" in got["spec_yaml"]
+    assert any(r["id"] == "bolt_pattern" for r in got["report"]["results"])
+    assert got["stl_url"] == "/api/runs/run_0000/part.stl"
+
+
 def test_refine_unrecognized_returns_422(tmp_path, monkeypatch):
     pytest.importorskip("cadquery")
     monkeypatch.setenv("CALIPER_RUNS", str(tmp_path / "runs"))

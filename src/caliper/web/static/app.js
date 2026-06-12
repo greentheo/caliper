@@ -65,7 +65,48 @@ function applyResult(data) {
   if (data.stl_url) {
     loadSTL(data.stl_url + '?t=' + Date.now());
     downloadEl.href = data.stl_url; downloadEl.style.display = '';
+  } else {
+    downloadEl.style.display = 'none';
   }
+  markActiveRun();
+  refreshRuns();  // keep the Recent list current
+}
+
+// ---------------------------------------------------------------- Recent parts (CALI-15)
+const recentEl = $('recent'), recentCountEl = $('recentCount');
+
+async function refreshRuns() {
+  try {
+    const { runs } = await (await fetch('/api/runs', { cache: 'no-store' })).json();
+    recentCountEl.textContent = runs.length ? `(${runs.length})` : '';
+    if (!runs.length) { recentEl.innerHTML = '<div class="empty">no parts yet — build one above</div>'; return; }
+    recentEl.innerHTML = runs.map((r) => {
+      const dot = r.status === 'passed' ? 'pass' : (r.build_ok === false ? 'fail' : '');
+      const when = r.created ? r.created.replace('T', ' ').slice(5) : '';
+      return `<div class="item" data-run="${esc(r.run_id)}" title="${esc(r.label || '')}">` +
+        `<span class="dot ${dot}"></span>` +
+        `<span class="lbl">${esc(r.label || r.part || r.run_id)}</span>` +
+        `<span class="rid">${esc(r.run_id.replace('run_', '#'))} ${when}</span></div>`;
+    }).join('');
+    recentEl.querySelectorAll('.item').forEach((el) =>
+      el.addEventListener('click', () => loadRun(el.dataset.run)));
+    markActiveRun();
+  } catch (e) { /* list is best-effort */ }
+}
+
+function markActiveRun() {
+  recentEl.querySelectorAll('.item').forEach((el) =>
+    el.classList.toggle('active', el.dataset.run === currentRunId));
+}
+
+async function loadRun(runId) {
+  busy('loading ' + runId.replace('run_', '#') + '…');
+  try {
+    const data = await (await fetch('/api/runs/' + runId, { cache: 'no-store' })).json();
+    if (data.detail) throw new Error(data.detail);
+    applyResult(data);
+    done('loaded ' + runId.replace('run_', '#') + ' (refine to fork a new part)');
+  } catch (e) { fail('load failed: ' + e.message); }
 }
 
 function renderReport(data) {
@@ -313,3 +354,5 @@ spaceBtn.addEventListener('click', onConnectClick);
 fetch('/api/health').then((r) => r.json()).then((d) => {
   const h = $('health'); h.textContent = d.ok ? 'ready' : 'down'; if (d.ok) h.className = 'health ok';
 }).catch(() => { $('health').textContent = 'offline'; });
+
+refreshRuns();  // populate the Recent parts list on load

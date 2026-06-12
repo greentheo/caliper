@@ -153,6 +153,17 @@ proprietary/driver-served.
 **Acceptance:** with 3DxWare running, the browser connects via NL-Proxy (no quitting) and the cap
 navigates the model. Until then the toggle defaults to WebHID and Driver mode is labelled beta.
 
+### CALI-15 — Recent parts (browse / load past runs)  · P1 · M2 · 🔨 in progress
+Every run already persists under `runs/<id>/`. Surface them so you pull up a part to view + edit
+instead of always generating new.
+**Acceptance:**
+- Persist `report.json` + `meta.json` (part, status, label, timestamp) per run.
+- `GET /api/runs` lists recent runs (newest first); `GET /api/runs/{id}` returns its spec + report +
+  STL url without rebuilding (re-evaluates only for legacy runs missing `report.json`).
+- Front end: a "Recent parts" panel; click a run → loads spec, report, and the mesh into the viewer;
+  refine from there forks a new run. List refreshes after each run/refine.
+- Tests: list + load endpoints (load OCCT-gated only for legacy backfill).
+
 ## Epics / future (stories for later)
 ### CALI-13 — Primitive & geometry library + multi-part assemblies  · P2 · epic · 🧊 backlog
 The corner bracket proved the loop; to make "all kinds of new parts" we need breadth of geometry.

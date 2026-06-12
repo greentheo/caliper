@@ -58,8 +58,10 @@ class BracketParams:
         if (hd := _val("hole_d")) is not None:
             p.hole_d = float(hd)
         if (hc := _val("hole_count")) is not None:
-            # symmetric L-bracket: split the total bolt count evenly across the two flanges
-            p.holes_per_leg = max(1, round(int(hc) / 2))
+            # symmetric L-bracket: split the total bolt count evenly across the two flanges.
+            # Clamp hard: a bad/huge count (e.g. a mis-parsed extrusion size) must never make the
+            # kernel drill thousands of holes and hang.
+            p.holes_per_leg = max(1, min(8, round(int(hc) / 2)))
         return p
 
 

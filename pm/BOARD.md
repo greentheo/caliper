@@ -12,9 +12,10 @@ _Last updated: 2026-06-11_
 - CALI-13 — Primitive & geometry library + multi-part assemblies · P2 · epic (story for later)
 
 ## 🔨 In Progress
-- CALI-14 — SpaceMouse via NL-Proxy (driver coexistence) · P2 · M2 · _owner: claude · phase 1_
+- CALI-14 — SpaceMouse via NL-Proxy (driver coexistence) · P2 · M2 · _phase 1 shipped; phase 2 pending telemetry_
 
 ## ✅ Done — Milestones M0 + M1 + M2 complete 🎉
+- CALI-15 — Recent parts (browse / load past runs) · P1 · M2 · _2026-06-12 · list + click-to-load; fixed a hole-count parse that hung the kernel_
 - CALI-9 — Webapp (M2) + SpaceMouse · P1 · M2 · _2026-06-11 · FastAPI + three.js viewer, refine loop, WebHID SpaceMouse_
 - CALI-1.M1 — Refinement loop · P1 · M1 · _2026-06-11 · NL refine → re-derive → regenerate → re-measure_
 - CALI-8 — CLI (M0 end-to-end) · P0 · M0 · _2026-06-11 · `caliper run` produces a real STL, ALL PASS_

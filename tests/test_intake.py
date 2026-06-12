@@ -31,6 +31,13 @@ def test_offline_detects_cable_passthrough():
     assert any(a.id == "cable_fits" for a in res.spec.assertions)
 
 
+def test_extrusion_size_not_read_as_hole_count():
+    # regression: "...for 2020 with two M6 holes" must NOT read 2020 as the hole count
+    res = intake.offline_draft("a 70 mm corner bracket for 2020 with two M6 holes")
+    assert res.spec.parameters["hole_count"].value == 2
+    assert res.spec.parameters["hole_d"].value == 6.6
+
+
 def test_extrusion_width_parsing():
     res = intake.offline_draft("a 80 mm corner bracket for 3030 extrusion with two M6 holes")
     bolt = next(a for a in res.spec.assertions if a.id == "bolt_pattern")

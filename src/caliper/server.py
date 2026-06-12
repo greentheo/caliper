@@ -55,10 +55,22 @@ def _next_run() -> tuple[str, str]:
 
 def _execute(spec: Spec, max_iter: int, extra: dict) -> dict:
     """Run the loop on a spec, persist the run, and shape the JSON response."""
+    import json
+    from datetime import datetime
+
     result = run_loop(spec, make_eval_fn(), max_iter=max_iter)
     build = generate.build(result.spec)
     run_id, out_dir = _next_run()
     persist_run(out_dir, result.spec, result.report, build.geometry if build.build_ok else None)
+    # meta.json powers the Recent-parts list (CALI-15) without rebuilding
+    meta = {
+        "run_id": run_id, "part": result.spec.part, "status": result.status,
+        "source": extra.get("source", ""), "label": extra.get("label", "") or result.spec.intent,
+        "changes": extra.get("changes", []), "created": datetime.now().isoformat(timespec="seconds"),
+        "build_ok": build.build_ok,
+    }
+    with open(os.path.join(out_dir, "meta.json"), "w") as f:
+        json.dump(meta, f)
     return {
         "run_id": run_id,
         "status": result.status,
@@ -96,7 +108,8 @@ def create_app():
     def run(req: RunRequest):
         intake = draft_spec(req.intent, machine=req.machine, use_llm=not req.no_llm)
         return _execute(intake.spec, req.max_iter,
-                        {"source": intake.source, "questions": intake.questions, "changes": []})
+                        {"source": intake.source, "questions": intake.questions, "changes": [],
+                         "label": req.intent})
 
     @app.post("/api/refine")
     def refine(req: RefineRequest):
@@ -107,7 +120,64 @@ def create_app():
         if not res.changed:
             raise HTTPException(status_code=422, detail="no recognized refinement for that instruction")
         return _execute(res.spec, req.max_iter,
-                        {"source": res.source, "changes": res.changes, "questions": []})
+                        {"source": res.source, "changes": res.changes, "questions": [],
+                         "label": req.instruction})
+
+    @app.get("/api/runs")
+    def list_runs(limit: int = 40):
+        import json
+
+        base = _runs_dir()
+        if not os.path.isdir(base):
+            return {"runs": []}
+        ids = sorted((d for d in os.listdir(base) if d.startswith("run_")), reverse=True)[:limit]
+        runs = []
+        for rid in ids:
+            d = os.path.join(base, rid)
+            info = {"run_id": rid, "part": rid, "status": "", "label": "", "created": None,
+                    "stl_url": f"/api/runs/{rid}/part.stl" if os.path.isfile(os.path.join(d, "part.stl")) else None}
+            mp = os.path.join(d, "meta.json")
+            if os.path.isfile(mp):
+                try:
+                    info.update(json.load(open(mp)))
+                    info["stl_url"] = f"/api/runs/{rid}/part.stl" if os.path.isfile(os.path.join(d, "part.stl")) else None
+                except Exception:
+                    pass
+            runs.append(info)
+        return {"runs": runs}
+
+    @app.get("/api/runs/{run_id}")
+    def get_run(run_id: str):
+        import json
+
+        d = os.path.join(_runs_dir(), run_id)
+        spec_path = os.path.join(d, "spec.yaml")
+        if not os.path.isfile(spec_path):
+            raise HTTPException(status_code=404, detail=f"unknown run {run_id}")
+        spec = Spec.load(spec_path)
+        report_path = os.path.join(d, "report.json")
+        if os.path.isfile(report_path):
+            report = json.load(open(report_path))
+        else:  # legacy run without a stored report → re-evaluate (needs the kernel)
+            from .evaluate import DEFAULT_MACHINE, Report, evaluate
+
+            built = generate.build(spec)
+            report = evaluate(spec, built.geometry, DEFAULT_MACHINE).to_dict() if built.build_ok \
+                else Report().to_dict()
+        meta = {}
+        mp = os.path.join(d, "meta.json")
+        if os.path.isfile(mp):
+            try:
+                meta = json.load(open(mp))
+            except Exception:
+                pass
+        return {
+            "run_id": run_id, "spec_yaml": spec.to_yaml(), "report": report,
+            "stl_url": f"/api/runs/{run_id}/part.stl" if os.path.isfile(os.path.join(d, "part.stl")) else None,
+            "build_ok": os.path.isfile(os.path.join(d, "part.stl")),
+            "status": meta.get("status", ""), "source": meta.get("source", ""),
+            "changes": meta.get("changes", []), "questions": [],
+        }
 
     @app.get("/api/runs/{run_id}/part.stl")
     def stl(run_id: str):

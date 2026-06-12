@@ -104,11 +104,15 @@ def make_eval_fn(machine=DEFAULT_MACHINE) -> EvalFn:
 
 def persist_run(out_dir: str, spec: Spec, report: Report, geometry=None) -> str:
     """Write spec + report (+ STL) for one run so iterations are diffable. Returns the directory."""
+    import json
+
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "spec.yaml"), "w") as f:
         f.write(spec.to_yaml())
     with open(os.path.join(out_dir, "report.txt"), "w") as f:
         f.write(report.to_text())
+    with open(os.path.join(out_dir, "report.json"), "w") as f:  # structured, for fast reload (CALI-15)
+        json.dump(report.to_dict(), f)
     if geometry is not None:
         from . import generate
 
