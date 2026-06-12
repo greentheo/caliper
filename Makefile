@@ -1,6 +1,6 @@
 # Caliper — dev entrypoints. The loop is the product; these keep the dev loop tight.
 # No activation needed: targets resolve the env python (override with CALIPER_PY=...).
-.PHONY: test review loop board fmt run refine run-llm refine-llm fit serve install
+.PHONY: test review loop board fmt run gen refine run-llm refine-llm fit serve install
 
 CALIPER_PY ?= $(firstword $(wildcard /opt/anaconda3/envs/caliper/bin/python $(HOME)/anaconda3/envs/caliper/bin/python $(HOME)/miniforge3/envs/caliper/bin/python) python)
 
@@ -16,6 +16,9 @@ install: ## editable-install caliper into the env (makes the `caliper` command a
 
 run:    ## run on an intent: make run INTENT="a 60mm bracket ... four M5 holes"  [LLM=1 → Claude path]
 	$(CALIPER_PY) -m caliper.cli run "$(INTENT)" $(NOLLM) --yes
+
+gen:    ## LLM-authored generator (any part): make gen INTENT="a phone stand for a 7mm-thick phone"
+	$(CALIPER_PY) -m caliper.cli gen "$(INTENT)" --yes
 
 refine: ## refine a prior run: make refine SOURCE=runs/run_0000 INSTRUCTION="..."  [LLM=1 → Claude path]
 	$(CALIPER_PY) -m caliper.cli refine "$(SOURCE)" "$(INSTRUCTION)" $(NOLLM)

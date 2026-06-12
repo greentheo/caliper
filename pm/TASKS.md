@@ -147,6 +147,61 @@ references render one-at-a-time in the UI (loop supports N); penetration depth i
 
 ---
 
+## Generative generator — the spec's primary strategy (§2)
+The MVP shipped with ONE hardcoded part family (the bracket); the LLM only drafts a spec / picks
+params. The design spec's headline generation strategy is an **LLM-authored parametric script**, with
+a **two-actor loop** (optimizer = continuous moves, LLM = structural edits). These two issues close
+that gap — the difference between "a bracket parameter optimizer" and the measurement-grounded vibe-CAD
+loop the spec describes. Picked over CALI-13 because it unlocks *arbitrary* parts and makes
+breadth/multi-part cheap (the LLM composes geometry instead of us hand-coding each family).
+
+### CALI-16 — LLM-authored generator  · P1 · generator · ✅ done (`PENDING`)
+The LLM writes a CadQuery script from the spec; we run it **sandboxed**, measure it with the existing
+loop, and feed **build errors (tracebacks) back** to the LLM to self-heal — the spec's "stack trace as
+feedback," now closing on geometry.
+- **Sandbox runner** (`sandbox.py` + `_sandbox_runner.py`): exec an authored script in a **subprocess**
+  (timeout, temp cwd), export **STEP** (keeps the B-rep so hole/face probes still work), re-import in
+  the parent → `Geometry`. Structured `{ok, error, traceback}`. Fully testable with no LLM.
+- **Author** (`authoring.py`): spec → prompt → `build(params)` script; on build error, retry with the
+  traceback (bounded). LLM call **injectable** (like `eval_fn`) so the mechanism tests without a key.
+- **Wiring**: a generation-strategy switch — the hardcoded bracket stays as the offline / regression /
+  fast path; LLM authoring is the general path (needs `ANTHROPIC_API_KEY`). The generated **script is
+  stored per run** (`part.py`) — the spec says the script is the human-editable source of truth and
+  must be diffable.
+- **Security posture (local-trust):** subprocess + timeout, run on the user's own machine with their
+  own key — threat model is "LLM writes runaway/buggy code," not a malicious attacker. A hard sandbox
+  (container, seccomp, net block) is the Phase-2 hardening, noted but not built.
+- **Acceptance:** an intent that ISN'T a bracket ("a phone stand", "a flanged tube") → LLM authors a
+  script → it builds (self-healing a deliberate build error) → measures → report + STL, with `part.py`
+  stored. Slice 1 proves author+build+measure; the iterate loop is CALI-17.
+
+**Shipped:** `sandbox.py` + `_sandbox_runner.py` (subprocess, timeout, STEP export→re-import so B-rep
+probes survive), `authoring.py` (injectable author + build-error self-heal), `caliper gen` + `make gen`,
+`part.py` stored per run. **Verified live** (claude-sonnet-4-6): `caliper gen "a cylindrical desk cable
+grommet, 40mm OD, 30mm bore, 25mm tall, 5mm flange"` → the LLM authored a real hollow tube + flange
+union (with reasoning comments), built on attempt 1, watertight, correct OD/height/walls, **7/8 asserts
+pass** (the 1 fail is the CALI-18 bore-probe nuance, not an authoring miss). Tests: `test_sandbox.py`
+(5) + `test_authoring.py` (6, incl. self-heal) + CLI gen wiring + intake-normalize = **105 passed**.
+
+**Bonus bugs fixed while here (LLM intake/refine were silently dead for the user's model):**
+1. **Assistant-prefill rejected.** intake/refine ended the message list with an assistant turn (`{`);
+   `claude-sonnet-4-6` 400s on that ("conversation must end with a user message") → intake *always*
+   fell back to the offline bracket spec. Removed the prefill (extract_json already tolerates fences).
+2. **Schema-laxness.** Even reaching the model, drafts didn't match the schema (bare-string assertions,
+   params missing the `type` discriminator, `part_name`/`description` keys) → validation failed → silent
+   fallback. Added a precise schema+vocabulary prompt and `normalize_spec_dict()` (tolerant coercion).
+   Now `caliper gen "a grommet…"` yields a faithful `desk_cable_grommet` spec, not a bracket.
+
+**Follow-ups:** CALI-17 (structural-edit loop — fix failing *assertions*, not just build errors);
+CALI-18 (bore probe); webapp `gen` button; harder sandbox (container/net-cutoff) for untrusted use;
+the author isn't yet given the measurement *report* to iterate dimensions (that's CALI-17).
+
+### CALI-17 — Structural-edit decide loop  · P1 · loop · 🧊 backlog
+Today `decide` routes continuous failures → optimizer (real) but structural failures → `kind="llm"` →
+the loop returns **"stuck"** (a dead end). Make the LLM actually **revise the authored script** to fix
+a failing *assertion* (same feedback mechanism as CALI-16's build-error heal, triggered by the report:
+value + margin + which assertion). This completes the two-actor loop for LLM-authored parts.
+
 ## Generator capabilities (from real use — backlog)
 ### CALI-11 — Variable bend angle  · P2 · generator · 🧊 backlog
 Today the bracket is a fixed 90° L. Add a `bend_angle` parameter so the two flanges meet at an

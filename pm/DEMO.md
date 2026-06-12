@@ -23,11 +23,18 @@ Newest demos first.
   **CLI** (`caliper fit` / `make fit`) **and the webapp**: drop in an STL, **drag/rotate it into place**
   with a 3D gizmo, hit Fit. The pose you set in 3D is exactly what's measured. "Make it fit *this*."
 
-**Part family so far:** corner brackets for T-slot extrusion (e.g. 2020). One body, bolt holes on
-each flange, optional cable bore + stiffening ribs.
-**Not yet (generator limits):** fixed **90° bend only** (no variable angle — CALI-11), plain
-through-holes only (**no threads/tapped/insert holes** — CALI-12). The LLM can only set parameters
-the generator can build, so these need generator work first, not just a better prompt.
+- ✅ **LLM-authored generator (any part).** `caliper gen "<intent>"` — the LLM **writes the CadQuery
+  script** (not just a bracket), runs it sandboxed, measures it, and **self-heals build errors** from
+  the traceback. The spec's primary generation strategy: loose idea → real geometry, no hand-coded
+  family. The authored script is saved as `part.py` (the editable source of truth).
+
+**Two generators now:** the **hardcoded bracket** (`run`/`refine`/`fit` — fast, offline-capable, the
+optimizer loop) and the **LLM author** (`gen` — arbitrary parts, needs `ANTHROPIC_API_KEY`).
+**Bracket family:** corner brackets for T-slot extrusion (2020…), bolt holes per flange, optional cable
+bore + ribs. **Bracket limits:** 90° only (CALI-11), through-holes only (CALI-12) — these need bracket
+generator work. The **LLM author** sidesteps those (it writes whatever geometry the intent describes),
+but its iterate-to-fix-failing-assertions loop is still pending (CALI-17 — today it self-heals *build*
+errors, not failing *measurements*).
 
 ---
 
@@ -77,7 +84,7 @@ Expect: a `changes` list (e.g. `spacing 60 → 68 mm`), a fresh ALL-PASS report,
 
 **3. Run the regression guard (the test suite):**
 ```bash
-make test          # expect: 90 passed
+make test          # expect: 105 passed
 ```
 
 **4. Inspect a run's artifacts** (everything is saved + diffable):
@@ -113,6 +120,25 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-06-12 · LLM-authored generator — `caliper gen` (any part)
+**New:** the LLM writes the CadQuery script itself, so you're no longer limited to the bracket family.
+It runs the script **sandboxed**, measures it, and **self-heals build errors** (feeds the traceback
+back and retries). **Try (needs `ANTHROPIC_API_KEY`):**
+```bash
+make gen INTENT="a cylindrical desk cable grommet: 40mm outer diameter, 30mm inner bore, 25mm tall, with a 5mm flange lip at the top"
+# or non-bracket things like:
+make gen INTENT="a phone stand for an 8mm-thick phone, angled back 65 degrees"
+make gen INTENT="a 60mm-tall hexagonal pen cup with 3mm walls"
+```
+Expect: a drafted spec (the LLM also asks good clarifying questions), then **"✓ built on attempt N"**,
+a measurement report, and a run dir with **`part.py`** (the script it wrote — open it, it's real
+readable CadQuery) + `part.stl`. The grommet test produced a clean hollow tube + flange union, 7/8
+asserts passing. **Note:** today it self-heals *build* errors but doesn't yet iterate to fix failing
+*measurements* (that's CALI-17). The bracket path (`run`/`refine`/`fit`) is unchanged.
+> **Also fixed:** LLM intake/refine were silently falling back to the offline bracket on your model
+> (`claude-sonnet-4-6`) — an assistant-prefill the model rejects, plus schema mismatches. So
+> `make run-llm` / `make refine-llm` now actually use Claude too, not just `gen`.
 
 ### 2026-06-12 · Fit in 3D — place the reference with a gizmo (webapp)
 **New:** the webapp can now do fit-to-reference, with the reference **positioned in 3D** (you asked the

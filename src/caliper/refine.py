@@ -230,16 +230,16 @@ def llm_refine(spec: Spec, instruction: str, client=None, model: Optional[str] =
         from anthropic import Anthropic
 
         client = Anthropic()
+    # No assistant prefill: some models (e.g. claude-sonnet-4-6) reject a trailing assistant turn.
     msg = client.messages.create(
         model=model,
         max_tokens=2000,
         system=_SYSTEM,
         messages=[
             {"role": "user", "content": f"current spec:\n{spec.to_json()}\n\nchange: {instruction}"},
-            {"role": "assistant", "content": "{"},  # prefill → forces a JSON object
         ],
     )
-    text = "{" + "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
+    text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     data = extract_json(text)
     return RefineResult(spec=Spec.from_dict(data["spec"]), changes=list(data.get("changes", [])), source="llm")
 

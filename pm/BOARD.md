@@ -6,6 +6,8 @@ Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections 
 _Last updated: 2026-06-12 (CALI-10 / M3 references shipped)_
 
 ## 🧊 Backlog
+- CALI-17 — Structural-edit decide loop: on assertion failure, LLM revises the script (today `decide` dead-ends at "stuck") · P1 · loop (spec §2 second actor)
+- CALI-18 — `largest_through_bore` counts a tube's OUTER wall as a bore (both are cylinders); distinguish interior bores · P2 · measure (found authoring a grommet)
 - CALI-11 — Variable bend angle (e.g. 45°) · P2 · generator
 - CALI-12 — Threaded / tapped / insert holes · P2 · generator
 - CALI-13 — Primitive & geometry library + multi-part assemblies · P2 · epic (story for later)
@@ -17,7 +19,8 @@ _Last updated: 2026-06-12 (CALI-10 / M3 references shipped)_
 - _(none)_
 
 ## ✅ Done — Milestones M0 + M1 + M2 + M3 complete 🎉
-- CALI-10 — References (M3) · P1 · M3 · _2026-06-12 · import STL as `role: fixed`; real `interference` + `min_clearance`; `caliper fit` resizes a part **snugly** to clear a reference_
+- CALI-16 — LLM-authored generator · P1 · generator · _2026-06-12 · `caliper gen` — the LLM writes the CadQuery script (any part, not just brackets), run sandboxed, measured, self-heals build errors. Also fixed 2 LLM-intake bugs (prefill, schema-laxness)_
+- CALI-10 — References (M3) · P1 · M3 · _2026-06-12 · import STL as `role: fixed`; real `interference` + `min_clearance`; `caliper fit` resizes a part **snugly** to clear a reference; + webapp gizmo fit UI_
 - CALI-15 — Recent parts (browse / load past runs) · P1 · M2 · _2026-06-12 · list + click-to-load; fixed a hole-count parse that hung the kernel_
 - CALI-9 — Webapp (M2) + SpaceMouse · P1 · M2 · _2026-06-11 · FastAPI + three.js viewer, refine loop, WebHID SpaceMouse_
 - CALI-1.M1 — Refinement loop · P1 · M1 · _2026-06-11 · NL refine → re-derive → regenerate → re-measure_

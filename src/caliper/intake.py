@@ -149,12 +149,105 @@ def extract_json(text: str) -> dict:
 
 
 _SYSTEM = """You are Caliper's intake step. Convert a loose part request into a Caliper spec.
-Formalize every requirement you can into typed parameters and assertion expressions over the
-measurement API (bbox, mass(density), min_wall, holes_matching, body_count, is_watertight, ...).
-HARD RULE: never invent acceptance criteria. If a requirement (load, material, mass, fit) is
-ambiguous or unstated, add a clarifying question instead of guessing.
-Output ONLY a raw JSON object (no markdown, no prose):
-{"spec": <spec-as-dict-with-`assert`-key>, "questions": [<string>, ...]}."""
+
+Output ONLY a raw JSON object (no markdown, no prose), EXACTLY this shape:
+{
+  "spec": {
+    "part": "snake_case_name",
+    "intent": "<the request, restated>",
+    "machine": "generic",
+    "parameters": {
+      "<name>": {"type": "continuous", "min": <n>, "max": <n>, "init": <n>, "unit": "mm"},
+      "<name>": {"type": "discrete", "choices": [..], "init": <one choice>},
+      "<name>": {"type": "fixed", "value": <n>, "unit": "mm"}
+    },
+    "assert": [ {"id": "snake_case", "expr": "<expression>"} ]
+  },
+  "questions": ["<clarifying question>", ...]
+}
+
+Every parameter MUST have a "type" of exactly continuous | discrete | fixed. Every assertion MUST be
+an object with "id" and "expr" (NEVER a bare string). Use ONLY these top-level keys: part, intent,
+machine, parameters, assert.
+
+Assertion expressions are Python predicates over this measurement API (use these names EXACTLY):
+  bbox.dx, bbox.dy, bbox.dz            # bounding-box extents in mm (NOT bbox.x)
+  volume                               # mm^3
+  mass(density=<g/cm3>)                # grams, e.g. PLA density=1.24
+  min_wall                             # thinnest wall (mm)
+  body_count                           # int ; is_watertight, is_manifold # bool
+  largest_through_bore                 # diameter of the largest bore (mm)
+  holes_matching(diameter=<mm>, count=<n>, on=circle(<bolt_circle_dia>))   # bool
+  machine.nozzle                       # e.g. 0.4 ; use `min_wall >= 2 * machine.nozzle`
+Prefer ranges (a <= x <= b) over exact equality for dimensions. Reference a parameter's effect through
+the measurement, not the parameter name.
+
+HARD RULE: never invent acceptance criteria. If a requirement (load, material, mass, fit) is ambiguous
+or unstated, add a clarifying QUESTION instead of asserting a guessed number."""
+
+
+_PARAM_KEYS = {
+    "continuous": {"type", "min", "max", "init", "unit"},
+    "discrete": {"type", "choices", "init", "unit"},
+    "fixed": {"type", "value", "unit"},
+}
+
+
+def normalize_spec_dict(d: dict) -> dict:
+    """Coerce a near-miss LLM spec dict into our schema. Forgiving where it's safe, never inventing.
+
+    LLMs reliably deviate in a few small ways — bare-string assertions, a parameter missing its
+    ``type`` discriminator, ``part_name``/``description`` instead of ``part``/``intent``, stray keys.
+    We map those to the schema so a good draft isn't thrown away over formatting (it would otherwise
+    fall back to the offline bracket).
+    """
+    d = dict(d)
+    # top-level key aliases + drop unknowns
+    if "part" not in d:
+        for k in ("part_name", "name", "title"):
+            if k in d:
+                d["part"] = d.pop(k)
+                break
+    if "intent" not in d:
+        for k in ("description", "desc", "summary"):
+            if k in d:
+                d["intent"] = d.pop(k)
+                break
+    raw_assert = d.get("assert", d.get("assertions", []))
+    known_top = {"part", "intent", "machine", "parameters", "references"}
+    d = {k: v for k, v in d.items() if k in known_top}
+
+    # parameters: infer a missing `type`, strip keys the discriminated model forbids, fill `init`
+    params = dict(d.get("parameters") or {})
+    for name, p in list(params.items()):
+        if not isinstance(p, dict):
+            params.pop(name)
+            continue
+        p = dict(p)
+        if "type" not in p:
+            p["type"] = ("discrete" if "choices" in p
+                         else "continuous" if ("min" in p or "max" in p)
+                         else "fixed")
+        p = {k: v for k, v in p.items() if k in _PARAM_KEYS.get(p["type"], {"type"})}
+        if p["type"] == "continuous" and "init" not in p and "min" in p and "max" in p:
+            p["init"] = (p["min"] + p["max"]) / 2.0
+        if p["type"] == "discrete" and "init" not in p and p.get("choices"):
+            p["init"] = p["choices"][0]
+        params[name] = p
+    if params:
+        d["parameters"] = params
+
+    # assertions: accept a list of {id, expr} OR bare expression strings
+    norm = []
+    for i, a in enumerate(raw_assert or []):
+        if isinstance(a, str):
+            norm.append({"id": f"a{i}", "expr": a})
+        elif isinstance(a, dict):
+            expr = a.get("expr") or a.get("assertion") or a.get("predicate")
+            if expr:
+                norm.append({"id": a.get("id") or f"a{i}", "expr": expr})
+    d["assert"] = norm
+    return d
 
 
 def llm_draft(intent: str, machine: Optional[str] = None, client=None, model: Optional[str] = None) -> IntakeResult:
@@ -163,18 +256,19 @@ def llm_draft(intent: str, machine: Optional[str] = None, client=None, model: Op
         from anthropic import Anthropic  # lazy; may be absent
 
         client = Anthropic()
+    # No assistant prefill: some models (e.g. claude-sonnet-4-6) reject a trailing assistant turn.
+    # The system prompt asks for a bare JSON object and extract_json tolerates fences/prose anyway.
     msg = client.messages.create(
         model=model,
         max_tokens=2000,
         system=_SYSTEM,
         messages=[
             {"role": "user", "content": f"machine: {machine or 'generic'}\nintent: {intent}"},
-            {"role": "assistant", "content": "{"},  # prefill → forces a JSON object
         ],
     )
-    text = "{" + "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
+    text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     data = extract_json(text)
-    spec = Spec.from_dict(data["spec"])
+    spec = Spec.from_dict(normalize_spec_dict(data["spec"]))
     return IntakeResult(spec=spec, questions=list(data.get("questions", [])), source="llm")
 
 

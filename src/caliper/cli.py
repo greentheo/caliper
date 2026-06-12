@@ -123,6 +123,66 @@ def _cmd_refine(args) -> int:
     return _run_and_emit(res.spec, args.max_iter)
 
 
+def _clarify_gate(intake, yes: bool) -> bool:
+    """Ask-don't-assume gate (design spec §5). Returns True to proceed, False to abort."""
+    if not intake.needs_confirmation:
+        return True
+    print("── clarifying questions ──")
+    for q in intake.questions:
+        print(f"  • {q}")
+    if yes:
+        print()
+        return True
+    if sys.stdin.isatty():
+        ans = input("\nProceed with the assumptions above? [y/N] ").strip().lower()
+        if ans not in ("y", "yes"):
+            print("Aborted — refine the intent and re-run.")
+            return False
+        print()
+        return True
+    print("\nNon-interactive: re-run with --yes to accept the assumptions and build.")
+    return False
+
+
+def _cmd_gen(args) -> int:
+    """LLM-authored generator (CALI-16): the LLM writes the CadQuery script; build errors self-heal."""
+    from .authoring import generate_part
+    from .evaluate import evaluate
+    from .intake import draft_spec
+    from .loop import persist_run
+
+    print(f"▶ intent: {args.intent}\n")
+    intake = draft_spec(args.intent, machine=args.machine, use_llm=not args.no_llm)
+    print(f"── draft spec ({intake.source}) ──")
+    print(intake.spec.to_yaml())
+    if not _clarify_gate(intake, args.yes):
+        return 2
+
+    print("── authoring CadQuery (LLM writes build(params); build errors self-heal) ──")
+    try:
+        res = generate_part(intake.spec, max_attempts=args.max_attempts)
+    except Exception as e:  # noqa: BLE001 — almost always a missing/invalid ANTHROPIC_API_KEY
+        print(f"authoring needs the Claude API — {type(e).__name__}: {e}\n"
+              "Set ANTHROPIC_API_KEY (see .env.example); this path can't run offline.")
+        return 1
+    if not res.ok:
+        print(f"author gave up after {res.attempts} attempt(s):\n{res.error}")
+        return 1
+    healed = f" (healed {len(res.history)} build error(s))" if res.history else ""
+    print(f"✓ built on attempt {res.attempts}{healed}\n")
+
+    report = evaluate(intake.spec, res.geometry)
+    print(report.to_text())
+    out_dir = _next_run_dir()
+    persist_run(out_dir, intake.spec, report, res.geometry)
+    with open(os.path.join(out_dir, "part.py"), "w") as f:
+        f.write(res.script + "\n")
+    print(f"\nSTL: {os.path.join(out_dir, 'part.stl')}")
+    print(f"script: {os.path.join(out_dir, 'part.py')}  (the human-editable source of truth)")
+    print(f"run saved: {out_dir}")
+    return 0 if report.all_pass else 3
+
+
 def _cmd_fit(args) -> int:
     """Attach imported STL reference(s) to a prior part and iterate it to fit them (CALI-10)."""
     from .fit import attach_reference, ensure_tunable, pick_free_param
@@ -187,6 +247,14 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--yes", action="store_true", help="accept intake assumptions without prompting")
     p_run.add_argument("--max-iter", type=int, default=4)
     p_run.set_defaults(func=_cmd_run)
+
+    p_gen = sub.add_parser("gen", help="LLM-authored generator: the LLM writes the CadQuery script (any part)")
+    p_gen.add_argument("intent")
+    p_gen.add_argument("--machine", default="generic")
+    p_gen.add_argument("--no-llm", action="store_true", help="offline intake (the author still needs Claude)")
+    p_gen.add_argument("--yes", action="store_true", help="accept intake assumptions without prompting")
+    p_gen.add_argument("--max-attempts", type=int, default=3, help="author retries on a build error")
+    p_gen.set_defaults(func=_cmd_gen)
 
     p_ref = sub.add_parser("refine", help="apply a natural-language change to a prior run/spec, re-run")
     p_ref.add_argument("source", help="a run dir (runs/run_0000) or a spec file (.yaml/.json)")

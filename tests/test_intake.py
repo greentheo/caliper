@@ -74,3 +74,30 @@ def test_llm_failure_falls_back_to_offline():
     res = intake.draft_spec("a 60 mm bracket", use_llm=True, client=Boom())
     assert res.source == "offline"
     assert res.spec.part == "corner_bracket"
+
+
+def test_normalize_coerces_common_llm_deviations():
+    # the real failure mode this session: a faithful draft that just doesn't match the schema exactly.
+    from caliper.intake import normalize_spec_dict
+    from caliper.spec import Spec
+
+    raw = {
+        "part_name": "grommet",                          # → part
+        "description": "a desk cable grommet",           # → intent
+        "parameters": {
+            "od": {"value": 40, "unit": "mm"},                       # missing type → fixed
+            "wall": {"min": 2, "max": 5, "note": "junk"},            # → continuous, strip junk, fill init
+            "ribs": {"choices": [0, 1, 2]},                          # → discrete, init = first
+        },
+        "assertions": [                                  # `assertions` not `assert`; one is a bare string
+            "bbox.dx <= 50",
+            {"id": "wt", "expr": "is_watertight"},
+        ],
+        "weird_top_key": 123,                            # dropped
+    }
+    spec = Spec.from_dict(normalize_spec_dict(raw))      # must validate cleanly
+    assert spec.part == "grommet" and spec.intent == "a desk cable grommet"
+    assert spec.parameters["od"].type == "fixed" and spec.parameters["od"].value == 40
+    assert spec.parameters["wall"].type == "continuous" and spec.parameters["wall"].init == 3.5
+    assert spec.parameters["ribs"].type == "discrete" and spec.parameters["ribs"].init == 0
+    assert [a.id for a in spec.assertions] == ["a0", "wt"]

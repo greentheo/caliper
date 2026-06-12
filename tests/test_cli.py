@@ -69,6 +69,22 @@ def test_fit_missing_reference_file_returns_2(capsys):
     assert "not found" in capsys.readouterr().out
 
 
+def test_gen_cli_wires_author_to_build(tmp_path, monkeypatch):
+    # CALI-16: `caliper gen` drives intake → authored script → build → measure → persist (part.py).
+    # The LLM author is monkeypatched to a known script so this is deterministic + offline.
+    pytest.importorskip("cadquery")
+    monkeypatch.chdir(tmp_path)
+    import caliper.authoring as authoring
+
+    good = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(40, 30, 4)\n"
+    monkeypatch.setattr(authoring, "author_script",
+                        lambda spec, feedback=None, prior=None, client=None, model=None: good)
+    rc = cli.main(["gen", "a 40x30x4 mounting plate", "--no-llm", "--yes", "--max-attempts", "1"])
+    assert rc in (0, 3)  # built; assertions may or may not all pass against the offline spec
+    assert (tmp_path / "runs" / "run_0000" / "part.py").read_text().strip() == good.strip()
+    assert (tmp_path / "runs" / "run_0000" / "part.stl").exists()
+
+
 def test_refine_noop_returns_2(capsys):
     rc = cli.main(["refine", FIXTURE, "paint it a nicer colour", "--no-llm"])
     assert rc == 2
