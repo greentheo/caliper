@@ -21,9 +21,17 @@ micromamba create -p /opt/anaconda3/envs/caliper -c conda-forge -y python=3.11 c
 /opt/anaconda3/envs/caliper/bin/python -m pip install -r requirements-pip.txt
 #    (declarative equivalent, if your solver can handle it: `conda env create -f environment.yml`)
 
-# 2. Run the regression guard (auto-resolves the env above; override with CALIPER_PY=...)
+# 2. Install the package into the env (makes the `caliper` command available)
+make install
+
+# 3. Run the regression guard, and try the loop — both auto-resolve the env (no activation needed).
 make test
+make run INTENT="a 60 mm corner bracket for 2020 extrusion with four M5 holes"
 ```
+
+> No need to activate anything for `make` targets — they resolve `/opt/anaconda3/envs/caliper`
+> directly (override with `CALIPER_PY=/path/to/python`). To activate for ad-hoc use, `conda` works
+> on a path: `conda activate /opt/anaconda3/envs/caliper` (micromamba was only a throwaway build tool).
 
 > Note: in this machine's sandbox the `conda`/`micromamba` shell functions may be blocked; call the
 > binary directly (e.g. `/tmp/bin/micromamba …`). The canonical env lives at
