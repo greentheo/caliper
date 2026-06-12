@@ -32,7 +32,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   end-to-end posed-STL evaluation (pass + fail + fit band). **134 passed.**
 - **Deferred:** webapp assembly viewer (multi-part 3D + mate viz) → CALI-20b. CLI + model + measurement
   is the substance; the viewer is presentation.
-  Commit: PENDING
+  Commit: c24aa9f
 
 ### 2026-06-12 · CALI-19 · Tolerances & fits as first-class
 - **Why now:** the phone-stand failure (user-reported) was mostly *bad assertions*, not bad geometry —
