@@ -39,6 +39,13 @@ class RefineRequest(BaseModel):
     max_iter: int = 4
 
 
+class GenRequest(BaseModel):
+    intent: str
+    no_llm: bool = False          # gen authors with the LLM; no_llm only affects the intake step
+    machine: str = "generic"
+    max_rounds: int = 4           # author/revise rounds (heal build errors + failing checks)
+
+
 class FitRequest(BaseModel):
     run_id: str                       # the part to fit
     reference_b64: str                # the reference STL (base64; may be a data: URL)
@@ -67,24 +74,25 @@ def _next_run() -> tuple[str, str]:
     return run_id, os.path.join(base, run_id)
 
 
-def _execute(spec: Spec, max_iter: int, extra: dict) -> dict:
-    """Run the loop on a spec, persist the run, and shape the JSON response.
+def _finish(spec: Spec, status: str, iterations: int, report, geometry, extra: dict,
+            error: str = "", script=None) -> dict:
+    """Persist a finished run (spec + report + STL, plus references/script) and shape the response.
 
-    ``extra["references"]`` (used by the fit path) is a list of ``{id, file, position, rotation}``;
-    each reference STL is copied into the run dir so the part is self-contained on reload, and the
-    poses are recorded in meta + the response so the viewer can re-render the reference where it sits.
+    Shared by the bracket loop (:func:`_execute`) and the LLM author (``/api/gen``). ``geometry`` is
+    None on a build failure. ``script`` (the authored ``part.py``) is stored + returned when present.
+    ``extra["references"]`` (fit path) is a list of ``{id, file, position, rotation}`` copied into the
+    run dir + recorded so the viewer can re-render references at their pose.
     """
     import json
     import shutil
     from datetime import datetime
 
-    # references load lazily (with pose) inside make_eval_fn from spec.references.
-    result = run_loop(spec, make_eval_fn(), max_iter=max_iter)
-    build = generate.build(result.spec)
     run_id, out_dir = _next_run()
-    persist_run(out_dir, result.spec, result.report, build.geometry if build.build_ok else None)
+    persist_run(out_dir, spec, report, geometry)
+    if script is not None:
+        with open(os.path.join(out_dir, "part.py"), "w") as f:
+            f.write(script if script.endswith("\n") else script + "\n")
 
-    # copy any reference STLs into the run dir and build their viewer metadata (pose + serve url)
     refs_meta = []
     for rinfo in extra.pop("references", []):
         dst = os.path.join(out_dir, f"ref_{rinfo['id']}.stl")
@@ -98,27 +106,34 @@ def _execute(spec: Spec, max_iter: int, extra: dict) -> dict:
             "stl_url": f"/api/runs/{run_id}/ref/{rinfo['id']}.stl",
         })
 
-    # meta.json powers the Recent-parts list (CALI-15) without rebuilding
+    build_ok = geometry is not None
     meta = {
-        "run_id": run_id, "part": result.spec.part, "status": result.status,
-        "source": extra.get("source", ""), "label": extra.get("label", "") or result.spec.intent,
+        "run_id": run_id, "part": spec.part, "status": status,
+        "source": extra.get("source", ""), "label": extra.get("label", "") or spec.intent,
         "changes": extra.get("changes", []), "created": datetime.now().isoformat(timespec="seconds"),
-        "build_ok": build.build_ok, "references": refs_meta,
+        "build_ok": build_ok, "references": refs_meta, "has_script": script is not None,
     }
     with open(os.path.join(out_dir, "meta.json"), "w") as f:
         json.dump(meta, f)
-    return {
-        "run_id": run_id,
-        "status": result.status,
-        "iterations": result.iterations,
-        "spec_yaml": result.spec.to_yaml(),
-        "report": result.report.to_dict(),
-        "stl_url": f"/api/runs/{run_id}/part.stl" if build.build_ok else None,
-        "build_ok": build.build_ok,
-        "error": "" if build.build_ok else build.error,
-        "references": refs_meta,
-        **extra,
+
+    resp = {
+        "run_id": run_id, "status": status, "iterations": iterations,
+        "spec_yaml": spec.to_yaml(), "report": report.to_dict(),
+        "stl_url": f"/api/runs/{run_id}/part.stl" if build_ok else None,
+        "build_ok": build_ok, "error": error, "references": refs_meta, **extra,
     }
+    if script is not None:
+        resp["script"] = script
+    return resp
+
+
+def _execute(spec: Spec, max_iter: int, extra: dict) -> dict:
+    """Run the bracket optimizer loop on a spec, then persist + shape the response."""
+    result = run_loop(spec, make_eval_fn(), max_iter=max_iter)  # references load lazily (with pose)
+    build = generate.build(result.spec)
+    return _finish(result.spec, result.status, result.iterations, result.report,
+                   build.geometry if build.build_ok else None, extra,
+                   error="" if build.build_ok else build.error)
 
 
 def create_app():
@@ -159,6 +174,27 @@ def create_app():
         return _execute(res.spec, req.max_iter,
                         {"source": res.source, "changes": res.changes, "questions": [],
                          "label": req.instruction})
+
+    @app.post("/api/gen")
+    def gen(req: GenRequest):
+        from .authoring import improve
+
+        intake = draft_spec(req.intent, machine=req.machine, use_llm=not req.no_llm)
+        try:
+            res = improve(intake.spec, max_rounds=req.max_rounds)
+        except Exception as e:  # noqa: BLE001 — almost always a missing/invalid ANTHROPIC_API_KEY
+            raise HTTPException(status_code=503, detail=f"authoring needs the Claude API: {e}")
+        if res.geometry is None:
+            raise HTTPException(status_code=422,
+                                detail=f"author couldn't build a part in {res.rounds} round(s)")
+        heals = sum(1 for k, _ in res.history if k == "build_error")
+        revs = sum(1 for k, _ in res.history if k == "measurement_fail")
+        return _finish(
+            intake.spec, "passed" if res.ok else "capped", res.rounds, res.report, res.geometry,
+            {"source": "gen", "label": req.intent, "changes": [], "questions": intake.questions,
+             "rounds": res.rounds, "heals": heals, "revisions": revs},
+            script=res.script,
+        )
 
     @app.post("/api/fit")
     def fit(req: FitRequest):
@@ -250,13 +286,20 @@ def create_app():
                 meta = json.load(open(mp))
             except Exception:
                 pass
+        script = None
+        script_path = os.path.join(d, "part.py")
+        if os.path.isfile(script_path):
+            try:
+                script = open(script_path).read()
+            except Exception:
+                script = None
         return {
             "run_id": run_id, "spec_yaml": spec.to_yaml(), "report": report,
             "stl_url": f"/api/runs/{run_id}/part.stl" if os.path.isfile(os.path.join(d, "part.stl")) else None,
             "build_ok": os.path.isfile(os.path.join(d, "part.stl")),
             "status": meta.get("status", ""), "source": meta.get("source", ""),
             "changes": meta.get("changes", []), "questions": [],
-            "references": meta.get("references", []),
+            "references": meta.get("references", []), "script": script,
         }
 
     @app.get("/api/runs/{run_id}/part.stl")

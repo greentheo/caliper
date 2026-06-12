@@ -32,9 +32,9 @@ Newest demos first.
 optimizer loop) and the **LLM author** (`gen` — arbitrary parts, needs `ANTHROPIC_API_KEY`).
 **Bracket family:** corner brackets for T-slot extrusion (2020…), bolt holes per flange, optional cable
 bore + ribs. **Bracket limits:** 90° only (CALI-11), through-holes only (CALI-12) — these need bracket
-generator work. The **LLM author** sidesteps those (it writes whatever geometry the intent describes),
-but its iterate-to-fix-failing-assertions loop is still pending (CALI-17 — today it self-heals *build*
-errors, not failing *measurements*).
+generator work. The **LLM author** sidesteps those (it writes whatever geometry the intent describes)
+and now **iterates to fix failing measurements** too (CALI-17), not just build errors — in the CLI
+(`gen`) and the webapp ("✦ author any part").
 
 ---
 
@@ -84,7 +84,7 @@ Expect: a `changes` list (e.g. `spacing 60 → 68 mm`), a fresh ALL-PASS report,
 
 **3. Run the regression guard (the test suite):**
 ```bash
-make test          # expect: 105 passed
+make test          # expect: 110 passed
 ```
 
 **4. Inspect a run's artifacts** (everything is saved + diffable):
@@ -120,6 +120,26 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-06-12 · Structural-edit loop — it fixes failing measurements now (CLI + browser)
+**New:** `caliper gen` (and the webapp) don't just author a part once — they **iterate**. When the
+built part fails a measured check, the LLM is handed the failing assertion (value + margin) and revises
+the script, until it's green or it gives up (honestly — it reports "best effort", it won't fake a pass).
+**Try it — CLI:**
+```bash
+make gen INTENT="a hexagonal pen cup, 70mm tall, 60mm across the flats, 3mm walls, closed bottom"
+# watch the header: "after N round(s) (X build-error heal(s), Y revision(s))"
+cat runs/run_00NN/part.py     # the CadQuery it wrote/revised
+```
+**Try it — browser:**
+```bash
+make serve     # Chrome/Edge → http://127.0.0.1:8000
+```
+Tick **“✦ author any part”** (the Build button becomes **Author ▶**), type any part — e.g.
+*"a round coaster, 90mm diameter, 4mm thick, with a 3mm raised lip"* — and hit Author. It renders the
+result in 3D and shows the authored **part.py** in an "Authored script" panel. (Authoring is slower than
+the bracket path — LLM + multiple build rounds, ~30–60s.) Loading an authored part from **Recent parts**
+shows its script too.
 
 ### 2026-06-12 · LLM-authored generator — `caliper gen` (any part)
 **New:** the LLM writes the CadQuery script itself, so you're no longer limited to the bracket family.

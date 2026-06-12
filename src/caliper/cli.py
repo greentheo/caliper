@@ -145,9 +145,9 @@ def _clarify_gate(intake, yes: bool) -> bool:
 
 
 def _cmd_gen(args) -> int:
-    """LLM-authored generator (CALI-16): the LLM writes the CadQuery script; build errors self-heal."""
-    from .authoring import generate_part
-    from .evaluate import evaluate
+    """LLM-authored generator + structural-edit loop (CALI-16/17): the LLM writes AND revises the
+    CadQuery script — build errors and failing measurements both feed back until it's green."""
+    from .authoring import improve
     from .intake import draft_spec
     from .loop import persist_run
 
@@ -158,29 +158,33 @@ def _cmd_gen(args) -> int:
     if not _clarify_gate(intake, args.yes):
         return 2
 
-    print("── authoring CadQuery (LLM writes build(params); build errors self-heal) ──")
+    print("── authoring + iterating (LLM writes build(params); build errors AND failing checks heal) ──")
     try:
-        res = generate_part(intake.spec, max_attempts=args.max_attempts)
+        res = improve(intake.spec, max_rounds=args.max_rounds)
     except Exception as e:  # noqa: BLE001 — almost always a missing/invalid ANTHROPIC_API_KEY
         print(f"authoring needs the Claude API — {type(e).__name__}: {e}\n"
               "Set ANTHROPIC_API_KEY (see .env.example); this path can't run offline.")
         return 1
-    if not res.ok:
-        print(f"author gave up after {res.attempts} attempt(s):\n{res.error}")
+    if res.geometry is None:
+        print(f"author couldn't produce a buildable part in {res.rounds} round(s):\n{res.error}")
         return 1
-    healed = f" (healed {len(res.history)} build error(s))" if res.history else ""
-    print(f"✓ built on attempt {res.attempts}{healed}\n")
 
-    report = evaluate(intake.spec, res.geometry)
-    print(report.to_text())
+    builds = sum(1 for k, _ in res.history if k == "build_error")
+    revs = sum(1 for k, _ in res.history if k == "measurement_fail")
+    notes = ", ".join(p for p in (f"{builds} build-error heal(s)" if builds else "",
+                                  f"{revs} revision(s)" if revs else "") if p)
+    verdict = "✓ all checks pass" if res.ok else "△ best effort (some checks still fail)"
+    print(f"{verdict} after {res.rounds} round(s)" + (f" ({notes})" if notes else "") + "\n")
+    print(res.report.to_text())
+
     out_dir = _next_run_dir()
-    persist_run(out_dir, intake.spec, report, res.geometry)
+    persist_run(out_dir, intake.spec, res.report, res.geometry)
     with open(os.path.join(out_dir, "part.py"), "w") as f:
         f.write(res.script + "\n")
     print(f"\nSTL: {os.path.join(out_dir, 'part.stl')}")
     print(f"script: {os.path.join(out_dir, 'part.py')}  (the human-editable source of truth)")
     print(f"run saved: {out_dir}")
-    return 0 if report.all_pass else 3
+    return 0 if res.ok else 3
 
 
 def _cmd_fit(args) -> int:
@@ -253,7 +257,8 @@ def main(argv: list[str] | None = None) -> int:
     p_gen.add_argument("--machine", default="generic")
     p_gen.add_argument("--no-llm", action="store_true", help="offline intake (the author still needs Claude)")
     p_gen.add_argument("--yes", action="store_true", help="accept intake assumptions without prompting")
-    p_gen.add_argument("--max-attempts", type=int, default=3, help="author retries on a build error")
+    p_gen.add_argument("--max-rounds", type=int, default=4,
+                       help="author/revise rounds (heals build errors + failing checks)")
     p_gen.set_defaults(func=_cmd_gen)
 
     p_ref = sub.add_parser("refine", help="apply a natural-language change to a prior run/spec, re-run")

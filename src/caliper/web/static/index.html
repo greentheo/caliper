@@ -50,6 +50,7 @@
       </label>
       <div class="row">
         <label class="chk"><input type="checkbox" id="useLLM" /> use Claude (LLM)</label>
+        <label class="chk" title="LLM writes the CadQuery itself — any part, not just brackets"><input type="checkbox" id="authorMode" /> ✦ author any part</label>
         <button id="runBtn" class="primary">Build it ▶</button>
       </div>
 
@@ -86,6 +87,11 @@
         <summary>Spec (YAML)</summary>
         <pre id="spec"></pre>
       </details>
+
+      <details class="specbox" id="scriptbox" style="display:none">
+        <summary>Authored script (part.py)</summary>
+        <pre id="scriptpre"></pre>
+      </details>
     </section>
 
     <!-- RIGHT: 3D viewer -->
@@ -111,6 +117,6 @@
     </section>
   </main>
 
-  <script type="module" src="/app.js?v=9"></script>
+  <script type="module" src="/app.js?v=10"></script>
 </body>
 </html>

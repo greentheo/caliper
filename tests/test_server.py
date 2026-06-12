@@ -55,6 +55,38 @@ def test_run_then_refine_and_stl(tmp_path, monkeypatch):
     assert any("8" in str(c) for c in ref.json()["changes"])
 
 
+def test_gen_authors_and_persists(tmp_path, monkeypatch):
+    # CALI-16/17 via the webapp: /api/gen → author/iterate → persist (incl. part.py) → render shape.
+    # improve() is monkeypatched to a known geometry+script so the test is deterministic + offline.
+    pytest.importorskip("cadquery")
+    import trimesh
+
+    import caliper.authoring as authoring
+    from caliper.evaluate import AssertionResult, Report
+    from caliper.measure import Geometry
+
+    monkeypatch.setenv("CALIPER_RUNS", str(tmp_path / "runs"))
+    script = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(40, 30, 4)\n"
+
+    def fake_improve(spec, **kw):
+        geom = Geometry.from_mesh(trimesh.creation.box(extents=(40, 30, 4)))
+        report = Report([AssertionResult("solid", "is_watertight", "pass", True, actual=True)])
+        return authoring.ImproveResult(ok=True, geometry=geom, script=script, report=report, rounds=2,
+                                       history=[("build_error", "x"), ("passed", "")])
+
+    monkeypatch.setattr(authoring, "improve", fake_improve)
+    c = _client()
+    r = c.post("/api/gen", json={"intent": "a 40x30x4 plate", "max_rounds": 4})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["build_ok"] and body["status"] == "passed" and body["rounds"] == 2
+    assert body["script"] == script and body["report"]["all_pass"]
+    assert c.get(body["stl_url"]).status_code == 200
+    # reloading the run returns the authored script too
+    got = c.get(f"/api/runs/{body['run_id']}").json()
+    assert got["script"] == script
+
+
 def test_fit_unknown_run_404():
     r = _client().post("/api/fit", json={"run_id": "run_9999", "reference_b64": ""})
     assert r.status_code == 404

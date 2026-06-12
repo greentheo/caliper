@@ -9,6 +9,7 @@ const intentEl = $('intent'), refineEl = $('refine'), statusEl = $('status');
 const runBtn = $('runBtn'), refineBtn = $('refineBtn'), useLLM = $('useLLM');
 const reportEl = $('report'), specEl = $('spec'), downloadEl = $('download');
 const spaceBtn = $('spaceBtn'), spaceStatus = $('spaceStatus'), axesEl = $('axes');
+const authorMode = $('authorMode'), scriptbox = $('scriptbox'), scriptpre = $('scriptpre');
 // fit-to-reference (M3 / CALI-10)
 const refFile = $('refFile'), fitBtn = $('fitBtn'), fitClear = $('fitClear');
 const fitNoOverlap = $('fitNoOverlap'), fitHint = $('fitHint');
@@ -39,11 +40,22 @@ function fail(msg) { statusEl.textContent = msg; statusEl.className = 'status ba
 async function doRun() {
   const intent = intentEl.value.trim();
   if (!intent) return;
-  runBtn.disabled = true; busy('building…');
+  runBtn.disabled = true;
   try {
-    const data = await postJSON('/api/run', { intent, no_llm: !useLLM.checked, max_iter: 4 });
-    applyResult(data);
-    done(`${data.status} · ${data.iterations} iter · ${data.source}`);
+    if (authorMode.checked) {
+      // CALI-16/17: the LLM authors + iterates the CadQuery itself (any part). Slow (LLM + builds).
+      busy('authoring + iterating… (the LLM writes the CAD; can take ~30–60s)');
+      const data = await postJSON('/api/gen', { intent, max_rounds: 4 });
+      applyResult(data);
+      const notes = [data.heals ? `${data.heals} build-heal(s)` : '',
+                     data.revisions ? `${data.revisions} revision(s)` : ''].filter(Boolean).join(', ');
+      done(`${data.status} · ${data.rounds} round(s)${notes ? ' (' + notes + ')' : ''}`);
+    } else {
+      busy('building…');
+      const data = await postJSON('/api/run', { intent, no_llm: !useLLM.checked, max_iter: 4 });
+      applyResult(data);
+      done(`${data.status} · ${data.iterations} iter · ${data.source}`);
+    }
   } catch (e) { fail(e.message); }
   finally { runBtn.disabled = false; }
 }
@@ -66,6 +78,9 @@ function applyResult(data) {
   currentRunId = data.run_id;
   refineBtn.disabled = false;
   specEl.textContent = data.spec_yaml || '';
+  // authored parts carry their CadQuery source (part.py) — show it as the editable source of truth
+  if (data.script) { scriptpre.textContent = data.script; scriptbox.style.display = ''; }
+  else { scriptbox.style.display = 'none'; }
   renderReport(data);
   if (data.stl_url) {
     loadSTL(data.stl_url + '?t=' + Date.now());
@@ -473,6 +488,10 @@ if ('hid' in navigator) {
 
 // ---------------------------------------------------------------- wire up
 runBtn.addEventListener('click', doRun);
+authorMode.addEventListener('change', () => {
+  runBtn.textContent = authorMode.checked ? 'Author ▶' : 'Build it ▶';
+  if (authorMode.checked) useLLM.checked = true;  // authoring drafts the spec with Claude too
+});
 refineBtn.addEventListener('click', doRefine);
 refineEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doRefine(); });
 intentEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) doRun(); });

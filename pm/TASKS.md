@@ -196,11 +196,46 @@ pass** (the 1 fail is the CALI-18 bore-probe nuance, not an authoring miss). Tes
 CALI-18 (bore probe); webapp `gen` button; harder sandbox (container/net-cutoff) for untrusted use;
 the author isn't yet given the measurement *report* to iterate dimensions (that's CALI-17).
 
-### CALI-17 — Structural-edit decide loop  · P1 · loop · 🧊 backlog
-Today `decide` routes continuous failures → optimizer (real) but structural failures → `kind="llm"` →
-the loop returns **"stuck"** (a dead end). Make the LLM actually **revise the authored script** to fix
-a failing *assertion* (same feedback mechanism as CALI-16's build-error heal, triggered by the report:
-value + margin + which assertion). This completes the two-actor loop for LLM-authored parts.
+### CALI-17 — Structural-edit loop  · P1 · loop · ✅ done (`PENDING`)
+Make the LLM actually **revise the authored script** to fix a failing *measurement*, not just a build
+error — completing the two-actor loop for LLM-authored parts.
+
+**Shipped:** `authoring.improve(spec, author, max_rounds)` — each round the LLM writes/revises the
+script, we build it sandboxed and measure it; a **build error → traceback feedback**, a **failing
+assertion → the report (id + expr + actual + margin) feedback**, until green / oscillation / round
+cap (mirrors CALI-6's rails). Author injectable → fully tested. Wired into CLI `caliper gen`
+(`--max-rounds`) and the **webapp** (`POST /api/gen` + a "✦ author any part" toggle that routes Build →
+`/api/gen`; authored `part.py` shown + persisted; reload shows it via `get_run`).
+- **Verified live (CLI):** `gen "a hexagonal pen cup…"` ran 4 rounds (2 build-heals + 2 revisions) and
+  honestly reported "best effort" — the 2 residual fails were a *contradictory intake-drafted assertion*
+  (a hexagon can't be 60×60 in bbox) and *measurement noise* (min_wall 2.99 vs a hard ≥3.0), not author
+  misses. **Verified in browser:** "✦ author any part" → "a round coaster with a 3mm raised lip" → ALL
+  PASS in 1 round, rendered in 3D, authored script shown. No console errors.
+- Tests: 4 `improve` tests (pass-first-try, heal-measurement, heal-build-then-measurement, oscillation)
+  + `/api/gen` server test. **110 passed.**
+- **Note:** this is a *separate* loop from the bracket `run_loop`/`decide` (which still dead-ends a
+  structural failure at "stuck" — fine, the bracket family has no script to revise). The two converge
+  once authored parts also get optimizer-tuned continuous params (a CALI-19 follow-on).
+
+## Assembly spine — the path to multi-part design with fits & tolerances
+The next ~3 shifts toward the north star ("insert a support between the wheel and the XYZ assembly").
+Each builds on the single-part loop now complete (CALI-16/17) and CALI-10's two-body fit substrate.
+
+### CALI-19 — Tolerances & fits as first-class  · P1 · assembly-spine · 🧊 backlog
+A vocabulary for *fits*: fit classes (clearance / transition / press, e.g. H7/g6), tolerance bands on
+dimensions, and a **multi-parameter optimizer** (today: 1-D grid) so the loop can *tune* a fit to a
+target. Also fixes the "hard threshold vs measurement noise" problem seen in CALI-17 (min_wall 2.99 vs
+≥3.0 → tolerance band). This is the user's stated "fits and tolerances" pillar.
+
+### CALI-20 — Assembly model (N parts + interfaces)  · P1 · assembly-spine · 🧊 backlog
+Represent multiple parts, their **mates / datums / joints**, and **assembly-level assertions** (no pair
+interferes, mates touch, fastener stacks align). Generalizes CALI-10's two-body interference/clearance
+to N bodies with *named* relationships. "This collection of parts."
+
+### CALI-21 — Insert-into-assembly  · P1 · assembly-spine · 🧊 backlog
+Load an assembly, name two interfaces, ask for a part "here" at a target fit → the LLM authors a part
+that **mates to both sides** with the right clearance, verified by measurement. The headline
+interaction: "insert a support between the wheel and the XYZ assembly." Needs CALI-19 + CALI-20.
 
 ## Generator capabilities (from real use — backlog)
 ### CALI-11 — Variable bend angle  · P2 · generator · 🧊 backlog

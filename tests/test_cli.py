@@ -79,7 +79,7 @@ def test_gen_cli_wires_author_to_build(tmp_path, monkeypatch):
     good = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(40, 30, 4)\n"
     monkeypatch.setattr(authoring, "author_script",
                         lambda spec, feedback=None, prior=None, client=None, model=None: good)
-    rc = cli.main(["gen", "a 40x30x4 mounting plate", "--no-llm", "--yes", "--max-attempts", "1"])
+    rc = cli.main(["gen", "a 40x30x4 mounting plate", "--no-llm", "--yes", "--max-rounds", "1"])
     assert rc in (0, 3)  # built; assertions may or may not all pass against the offline spec
     assert (tmp_path / "runs" / "run_0000" / "part.py").read_text().strip() == good.strip()
     assert (tmp_path / "runs" / "run_0000" / "part.stl").exists()

@@ -6,7 +6,9 @@ Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections 
 _Last updated: 2026-06-12 (CALI-10 / M3 references shipped)_
 
 ## 🧊 Backlog
-- CALI-17 — Structural-edit decide loop: on assertion failure, LLM revises the script (today `decide` dead-ends at "stuck") · P1 · loop (spec §2 second actor)
+- CALI-19 — Tolerances & fits as first-class: fit classes (clearance/press), tolerance bands, multi-param optimizer · P1 · assembly-spine (the "fits and tolerances" pillar)
+- CALI-20 — Assembly model: N parts + named mates/interfaces + assembly-level assertions (generalize CALI-10 to N bodies) · P1 · assembly-spine
+- CALI-21 — Insert-into-assembly: author a new part against two named interfaces at a target fit · P1 · assembly-spine ("insert a support between the wheel and the XYZ assembly")
 - CALI-18 — `largest_through_bore` counts a tube's OUTER wall as a bore (both are cylinders); distinguish interior bores · P2 · measure (found authoring a grommet)
 - CALI-11 — Variable bend angle (e.g. 45°) · P2 · generator
 - CALI-12 — Threaded / tapped / insert holes · P2 · generator
@@ -19,6 +21,7 @@ _Last updated: 2026-06-12 (CALI-10 / M3 references shipped)_
 - _(none)_
 
 ## ✅ Done — Milestones M0 + M1 + M2 + M3 complete 🎉
+- CALI-17 — Structural-edit loop · P1 · loop · _2026-06-12 · `authoring.improve` — the LLM revises its script to fix failing **measurements**, not just build errors (two-actor loop closed). In CLI (`gen`) + webapp (✦ author any part)_
 - CALI-16 — LLM-authored generator · P1 · generator · _2026-06-12 · `caliper gen` — the LLM writes the CadQuery script (any part, not just brackets), run sandboxed, measured, self-heals build errors. Also fixed 2 LLM-intake bugs (prefill, schema-laxness)_
 - CALI-10 — References (M3) · P1 · M3 · _2026-06-12 · import STL as `role: fixed`; real `interference` + `min_clearance`; `caliper fit` resizes a part **snugly** to clear a reference; + webapp gizmo fit UI_
 - CALI-15 — Recent parts (browse / load past runs) · P1 · M2 · _2026-06-12 · list + click-to-load; fixed a hole-count parse that hung the kernel_

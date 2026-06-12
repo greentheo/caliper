@@ -75,3 +75,70 @@ def test_gives_up_after_max_attempts():
 def test_author_result_dataclass_defaults():
     r = AuthorResult(ok=False)
     assert r.geometry is None and r.attempts == 0 and r.history == []
+
+
+# --- CALI-17: the structural-edit loop (heal failing MEASUREMENTS, not just builds) ---------
+from caliper import authoring  # noqa: E402
+
+_SMALL = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(20, 20, 4)\n"
+_GOOD41 = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(41, 20, 4)\n"
+
+
+def _width_spec():
+    return Spec(
+        part="plate", intent="a ~41mm-wide plate",
+        parameters={"x": {"type": "fixed", "value": 41.0, "unit": "mm"}},
+        assertions=[
+            Assertion(id="width", expr="40 <= bbox.dx <= 42"),
+            Assertion(id="solid", expr="is_watertight"),
+        ],
+    )
+
+
+def test_improve_passes_first_try():
+    pytest.importorskip("cadquery")
+    res = authoring.improve(_width_spec(), author=lambda s, fb, prior: _GOOD41, max_rounds=3)
+    assert res.ok and res.rounds == 1 and res.report.all_pass
+
+
+def test_improve_heals_a_failing_measurement():
+    pytest.importorskip("cadquery")
+    calls = {"n": 0}
+
+    def author(spec, feedback, prior):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            assert feedback is None
+            return _SMALL                       # builds, but fails the width check (dx=20)
+        # the revision is handed the FAILING ASSERTION (id + actual), not a traceback
+        assert prior == _SMALL and feedback and "width" in feedback and "actual" in feedback
+        return _GOOD41
+
+    res = authoring.improve(_width_spec(), author=author, max_rounds=4)
+    assert res.ok and res.rounds == 2 and res.report.all_pass
+    assert any(kind == "measurement_fail" for kind, _ in res.history)
+
+
+def test_improve_heals_build_error_then_measurement():
+    pytest.importorskip("cadquery")
+    seq = [BAD, _SMALL, _GOOD41]
+    i = {"n": 0}
+
+    def author(spec, feedback, prior):
+        s = seq[i["n"]]
+        i["n"] += 1
+        if s is _SMALL:  # came after a build error
+            assert feedback and ("error" in feedback.lower() or "build" in feedback.lower())
+        return s
+
+    res = authoring.improve(_width_spec(), author=author, max_rounds=5)
+    assert res.ok and res.rounds == 3
+    kinds = [k for k, _ in res.history]
+    assert kinds[0] == "build_error" and "measurement_fail" in kinds
+
+
+def test_improve_stops_on_oscillation():
+    pytest.importorskip("cadquery")
+    res = authoring.improve(_width_spec(), author=lambda s, fb, prior: _SMALL, max_rounds=6)
+    assert not res.ok
+    assert res.report is not None and not res.report.all_pass  # returns the best (last) attempt
