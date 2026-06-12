@@ -36,3 +36,21 @@ def test_run_end_to_end_smoke(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     stls = list(runs.glob("run_*/part.stl"))
     assert stls, "expected an STL artifact"
+
+
+def test_refine_noop_returns_2(capsys):
+    rc = cli.main(["refine", FIXTURE, "paint it a nicer colour", "--no-llm"])
+    assert rc == 2
+    assert "No recognized refinement" in capsys.readouterr().out
+
+
+def test_refine_end_to_end(tmp_path, monkeypatch):
+    pytest.importorskip("cadquery")
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["run", "a 60 mm corner bracket with four M5 holes",
+                     "--no-llm", "--yes", "--max-iter", "2"]) in (0, 3)
+    # refine the run we just produced
+    rc = cli.main(["refine", "runs/run_0000", "make the holes 8 mm", "--no-llm", "--max-iter", "2"])
+    assert rc in (0, 3)
+    stls = sorted((tmp_path / "runs").glob("run_*/part.stl"))
+    assert len(stls) >= 2  # original + refined

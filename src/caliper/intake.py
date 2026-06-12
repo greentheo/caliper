@@ -79,6 +79,9 @@ def offline_draft(intent: str, machine: Optional[str] = None) -> IntakeResult:
         "wall": {"type": "continuous", "min": 2.4, "max": 6, "init": 3, "unit": "mm"},
         "rib_count": {"type": "discrete", "choices": [0, 1, 2], "init": 0},
         "bolt_circle": {"type": "fixed", "value": size, "unit": "mm"},
+        # hole geometry is parameterised so refinements (M1) flow through to the mesh, not just the assert
+        "hole_d": {"type": "fixed", "value": hole_d, "unit": "mm"},
+        "hole_count": {"type": "fixed", "value": hole_count},
     }
     if wants_cable:
         parameters["cable_bore"] = {

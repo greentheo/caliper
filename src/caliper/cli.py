@@ -27,9 +27,7 @@ def _cmd_spec(args) -> int:
 
 
 def _cmd_run(args) -> int:
-    from . import generate
     from .intake import draft_spec
-    from .loop import make_eval_fn, persist_run, run_loop
 
     print(f"▶ intent: {args.intent}\n")
     intake_res = draft_spec(args.intent, machine=args.machine, use_llm=not args.no_llm)
@@ -52,23 +50,54 @@ def _cmd_run(args) -> int:
                 return 2
         print()
 
+    return _run_and_emit(intake_res.spec, args.max_iter)
+
+
+def _run_and_emit(spec, max_iter: int) -> int:
+    """Run the loop on a spec, print the report, and emit STL + run dir. Shared by run/refine."""
+    from . import generate
+    from .loop import make_eval_fn, persist_run, run_loop
+
     print("── running loop (build → measure → evaluate → decide) ──")
-    result = run_loop(intake_res.spec, make_eval_fn(), max_iter=args.max_iter)
+    result = run_loop(spec, make_eval_fn(), max_iter=max_iter)
     print(f"\nstatus: {result.status}  ({result.iterations} iteration(s))")
     print(result.report.to_text())
 
-    # rebuild the final spec to emit geometry + STL
     build = generate.build(result.spec)
     out_dir = _next_run_dir()
     persist_run(out_dir, result.spec, result.report, build.geometry if build.build_ok else None)
-    if build.build_ok:
-        stl = os.path.join(out_dir, "part.stl")
-        print(f"\nSTL: {stl}")
-        print(f"run saved: {out_dir}")
-    else:
+    if not build.build_ok:
         print(f"\nbuild failed:\n{build.error}")
         return 1
+    print(f"\nSTL: {os.path.join(out_dir, 'part.stl')}")
+    print(f"run saved: {out_dir}")
     return 0 if result.status == "passed" else 3
+
+
+def _load_spec_from_source(source: str):
+    """Load a spec from a run dir (``runs/run_0000``) or a spec file (``spec.yaml``/``.json``)."""
+    from .spec import Spec
+
+    if os.path.isdir(source):
+        source = os.path.join(source, "spec.yaml")
+    return Spec.load(source)
+
+
+def _cmd_refine(args) -> int:
+    from .refine import apply_refinement
+
+    spec = _load_spec_from_source(args.source)
+    print(f"▶ refining {args.source}: \"{args.instruction}\"\n")
+    res = apply_refinement(spec, args.instruction, use_llm=not args.no_llm)
+    if not res.changed:
+        print("No recognized refinement — try naming a dimension (holes, spacing, wall, "
+              "cable bore, ribs), or run with the LLM path for free-form edits.")
+        return 2
+    print(f"── changes ({res.source}) ──")
+    for c in res.changes:
+        print(f"  • {c}")
+    print()
+    return _run_and_emit(res.spec, args.max_iter)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -86,6 +115,13 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--yes", action="store_true", help="accept intake assumptions without prompting")
     p_run.add_argument("--max-iter", type=int, default=4)
     p_run.set_defaults(func=_cmd_run)
+
+    p_ref = sub.add_parser("refine", help="apply a natural-language change to a prior run/spec, re-run")
+    p_ref.add_argument("source", help="a run dir (runs/run_0000) or a spec file (.yaml/.json)")
+    p_ref.add_argument("instruction", help='e.g. "make the holes 8mm" or "bigger spacing"')
+    p_ref.add_argument("--no-llm", action="store_true", help="use the deterministic offline refiner")
+    p_ref.add_argument("--max-iter", type=int, default=4)
+    p_ref.set_defaults(func=_cmd_refine)
 
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):
