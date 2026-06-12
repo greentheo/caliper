@@ -28,7 +28,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   precise schema+vocabulary prompt and `normalize_spec_dict()` (tolerant coercion). Now `gen` produces a
   faithful `desk_cable_grommet` spec, not a bracket.
 - Tests: `test_sandbox.py` (5) + `test_authoring.py` (6) + CLI gen wiring + intake-normalize. **105
-  passed.** Commit: PENDING
+  passed.** Commit: c44403a
 
 ### 2026-06-12 · CALI-10 · Webapp fit UI + reference pose (in-3D placement)
 - **Why:** fit was computed in baked coordinates — the reference had no pose, so it only "worked"

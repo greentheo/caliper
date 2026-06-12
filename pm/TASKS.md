@@ -155,7 +155,7 @@ that gap — the difference between "a bracket parameter optimizer" and the meas
 loop the spec describes. Picked over CALI-13 because it unlocks *arbitrary* parts and makes
 breadth/multi-part cheap (the LLM composes geometry instead of us hand-coding each family).
 
-### CALI-16 — LLM-authored generator  · P1 · generator · ✅ done (`PENDING`)
+### CALI-16 — LLM-authored generator  · P1 · generator · ✅ done (`c44403a`)
 The LLM writes a CadQuery script from the spec; we run it **sandboxed**, measure it with the existing
 loop, and feed **build errors (tracebacks) back** to the LLM to self-heal — the spec's "stack trace as
 feedback," now closing on geometry.
