@@ -49,6 +49,14 @@ def test_draft_spec_no_llm_uses_offline():
     assert res.source == "offline"
 
 
+def test_extract_json_handles_fences_and_prose():
+    # the exact failure mode the user hit: model wraps JSON in markdown / adds prose
+    assert intake.extract_json('{"a": 1}') == {"a": 1}
+    assert intake.extract_json('```json\n{"a": 1}\n```') == {"a": 1}
+    assert intake.extract_json('Here you go:\n```\n{"a": 1}\n```\nDone.') == {"a": 1}
+    assert intake.extract_json('Sure — {"a": 1, "b": 2} hope that helps') == {"a": 1, "b": 2}
+
+
 def test_llm_failure_falls_back_to_offline():
     class Boom:
         class messages:

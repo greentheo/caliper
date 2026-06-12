@@ -105,6 +105,22 @@ STL intake as `role: fixed`; add `interference` + `min_clearance` measurements a
 
 ---
 
+## Generator capabilities (from real use — backlog)
+### CALI-11 — Variable bend angle  · P2 · generator · 🧊 backlog
+Today the bracket is a fixed 90° L. Add a `bend_angle` parameter so the two flanges meet at an
+arbitrary angle (e.g. 45°). **Sketch:** build the profile with the second flange rotated by the
+angle; place that flange's holes along the rotated axis; keep it watertight/one-body. Add a
+`bend_angle` (continuous/fixed) param read by `BracketParams.from_spec`, and teach the refiner the
+phrasing ("bend at 45°", "make it an acute bracket").
+
+### CALI-12 — Threaded / tapped holes (or insert bosses)  · P2 · generator · 🧊 backlog
+"Thread the holes for M8 bolts." Options, cheapest first: (a) **tapped hole** = drill at the tap
+diameter (M8 ≈ 6.75 mm) and label it threaded — no modeled helix; (b) **heat-set insert boss** =
+counterbore sized for a brass insert (the FDM-friendly real-world answer); (c) **modeled helix
+thread** via CadQuery sweep (heavy mesh, slow — last resort). Add a `hole_style`
+(clearance|tapped|insert) parameter + the matching measurement/assertion. Note real threads ≠ a
+bigger clearance hole.
+
 ## Cross-cutting / infra
 ### CALI-0 — Project scaffolding  · P0 · M0 · ✅ done (`aa00b5d`, `45cd6b9`)
 Repo init, conda env, package layout, PM board, nightshift loop/review/test scaffolding.

@@ -19,6 +19,9 @@ Newest demos first.
 
 **Part family so far:** corner brackets for T-slot extrusion (e.g. 2020). One body, bolt holes on
 each flange, optional cable bore + stiffening ribs.
+**Not yet (generator limits):** fixed **90° bend only** (no variable angle — CALI-11), plain
+through-holes only (**no threads/tapped/insert holes** — CALI-12). The LLM can only set parameters
+the generator can build, so these need generator work first, not just a better prompt.
 
 ---
 
@@ -81,6 +84,17 @@ cat runs/run_0000/report.txt     # the measurement report
 ---
 
 ## 📓 Demo log (newest first)
+
+### 2026-06-11 · LLM path — robust JSON parsing
+**Fixed:** `make refine-llm` failed with `JSONDecodeError` when Claude wrapped its reply in markdown.
+The parser now strips code fences / prose and prefills `{` to force a clean object.
+**Try (needs `ANTHROPIC_API_KEY`):**
+```bash
+make refine-llm SOURCE=runs/run_0000 INSTRUCTION="lighten it and round the outer corners"
+# header should read "── changes (llm) ──"; if it says (offline), run CALIPER_DEBUG=1 make refine-llm ...
+```
+Note: the LLM can only set existing bracket params — variable bend angle (CALI-11) and threaded holes
+(CALI-12) need generator work, not a prompt.
 
 ### 2026-06-11 · refine parser — per-side & word-number hole counts
 **New:** the offline refiner now understands singular "hole", word-numbers ("one"…"ten"), and

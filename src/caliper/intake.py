@@ -120,17 +120,36 @@ def offline_draft(intent: str, machine: Optional[str] = None) -> IntakeResult:
 # ---------------------------------------------------------------------------
 # LLM intake — Claude drafts the spec + clarifying questions (best-effort)
 # ---------------------------------------------------------------------------
+def extract_json(text: str) -> dict:
+    """Parse a JSON object out of an LLM reply that may be fenced or wrapped in prose.
+
+    Models often answer ```json ...``` or add a sentence before the object; raw ``json.loads`` then
+    fails at char 0. Strip code fences, else take the outermost ``{...}``.
+    """
+    import json
+    import re as _re
+
+    t = text.strip()
+    fence = _re.search(r"```(?:json)?\s*(.*?)```", t, _re.S)
+    if fence:
+        t = fence.group(1).strip()
+    if not t.startswith("{"):
+        i, j = t.find("{"), t.rfind("}")
+        if i != -1 and j > i:
+            t = t[i : j + 1]
+    return json.loads(t)
+
+
 _SYSTEM = """You are Caliper's intake step. Convert a loose part request into a Caliper spec.
 Formalize every requirement you can into typed parameters and assertion expressions over the
 measurement API (bbox, mass(density), min_wall, holes_matching, body_count, is_watertight, ...).
 HARD RULE: never invent acceptance criteria. If a requirement (load, material, mass, fit) is
 ambiguous or unstated, add a clarifying question instead of guessing.
-Respond with JSON: {"spec": <spec-as-dict-with-`assert`-key>, "questions": [<string>, ...]}."""
+Output ONLY a raw JSON object (no markdown, no prose):
+{"spec": <spec-as-dict-with-`assert`-key>, "questions": [<string>, ...]}."""
 
 
 def llm_draft(intent: str, machine: Optional[str] = None, client=None, model: Optional[str] = None) -> IntakeResult:
-    import json
-
     model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
@@ -140,10 +159,13 @@ def llm_draft(intent: str, machine: Optional[str] = None, client=None, model: Op
         model=model,
         max_tokens=2000,
         system=_SYSTEM,
-        messages=[{"role": "user", "content": f"machine: {machine or 'generic'}\nintent: {intent}"}],
+        messages=[
+            {"role": "user", "content": f"machine: {machine or 'generic'}\nintent: {intent}"},
+            {"role": "assistant", "content": "{"},  # prefill → forces a JSON object
+        ],
     )
-    text = "".join(block.text for block in msg.content if getattr(block, "type", None) == "text")
-    data = json.loads(text)
+    text = "{" + "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
+    data = extract_json(text)
     spec = Spec.from_dict(data["spec"])
     return IntakeResult(spec=spec, questions=list(data.get("questions", [])), source="llm")
 

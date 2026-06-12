@@ -23,7 +23,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .intake import _M_CLEARANCE, _WORD_NUM, DEFAULT_MODEL
+from .intake import _M_CLEARANCE, _WORD_NUM, DEFAULT_MODEL, extract_json
 from .spec import Assertion, Spec
 
 
@@ -218,12 +218,13 @@ def offline_refine(spec: Spec, instruction: str) -> RefineResult:
 _SYSTEM = """You are Caliper's refinement step. Given a current part spec (JSON) and a natural-language
 change, return the edited spec. Only change what the instruction asks. Keep parameters and assertions
 consistent (a hole-size change must update both the `hole_d` parameter and the `bolt_pattern` assertion).
-Respond with JSON: {"spec": <edited-spec-with-`assert`-key>, "changes": [<short string>, ...]}."""
+The generator only understands the bracket parameters present in the spec (wall, bolt_circle, hole_d,
+hole_count, rib_count, cable_bore); do not invent parameters the generator cannot build.
+Output ONLY a raw JSON object (no markdown, no prose):
+{"spec": <edited-spec-with-`assert`-key>, "changes": [<short string>, ...]}."""
 
 
 def llm_refine(spec: Spec, instruction: str, client=None, model: Optional[str] = None) -> RefineResult:
-    import json
-
     model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic
@@ -233,10 +234,13 @@ def llm_refine(spec: Spec, instruction: str, client=None, model: Optional[str] =
         model=model,
         max_tokens=2000,
         system=_SYSTEM,
-        messages=[{"role": "user", "content": f"current spec:\n{spec.to_json()}\n\nchange: {instruction}"}],
+        messages=[
+            {"role": "user", "content": f"current spec:\n{spec.to_json()}\n\nchange: {instruction}"},
+            {"role": "assistant", "content": "{"},  # prefill → forces a JSON object
+        ],
     )
-    text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
-    data = json.loads(text)
+    text = "{" + "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
+    data = extract_json(text)
     return RefineResult(spec=Spec.from_dict(data["spec"]), changes=list(data.get("changes", [])), source="llm")
 
 
