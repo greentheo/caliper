@@ -17,11 +17,13 @@ so the change flows all the way to the mesh — not just to the acceptance text.
 
 from __future__ import annotations
 
+import os
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .intake import _M_CLEARANCE, _WORD_NUM
+from .intake import _M_CLEARANCE, _WORD_NUM, DEFAULT_MODEL
 from .spec import Assertion, Spec
 
 
@@ -219,9 +221,10 @@ consistent (a hole-size change must update both the `hole_d` parameter and the `
 Respond with JSON: {"spec": <edited-spec-with-`assert`-key>, "changes": [<short string>, ...]}."""
 
 
-def llm_refine(spec: Spec, instruction: str, client=None, model: str = "claude-opus-4-8") -> RefineResult:
+def llm_refine(spec: Spec, instruction: str, client=None, model: Optional[str] = None) -> RefineResult:
     import json
 
+    model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic
 
@@ -242,6 +245,7 @@ def apply_refinement(spec: Spec, instruction: str, use_llm: bool = True, client=
     if use_llm:
         try:
             return llm_refine(spec, instruction, client=client)
-        except Exception:
-            pass
+        except Exception as e:
+            if os.environ.get("CALIPER_DEBUG"):
+                print(f"[refine] LLM path failed → offline: {type(e).__name__}: {e}", file=sys.stderr)
     return offline_refine(spec, instruction)

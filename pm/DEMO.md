@@ -33,6 +33,14 @@ make install            # makes the `caliper` command available
 ```
 > `make` targets resolve the env automatically — no `conda activate` needed.
 
+**Optional — enable free-form (LLM) intake/refine** (the `--no-llm` paths need none of this):
+```bash
+cp .env.example .env        # then edit .env and set ANTHROPIC_API_KEY=sk-ant-...
+```
+The CLI auto-loads `.env` from the repo root (or cwd). Or export it for the session:
+`export ANTHROPIC_API_KEY=sk-ant-...`. Override the model with `CALIPER_MODEL=...`; set
+`CALIPER_DEBUG=1` to see why an LLM call fell back to offline. `.env` is gitignored.
+
 ---
 
 ## ▶️ Try it (current build)

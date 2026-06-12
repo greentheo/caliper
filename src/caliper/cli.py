@@ -13,6 +13,26 @@ import os
 import sys
 
 
+def _load_dotenv() -> None:
+    """Load KEY=VALUE pairs from a `.env` file (cwd, then repo root) without overriding the shell.
+
+    Lets you keep ANTHROPIC_API_KEY / CALIPER_MODEL in a gitignored `.env` instead of exporting them.
+    No dependency — a tiny parser; values already in the environment win.
+    """
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    for path in (os.path.join(os.getcwd(), ".env"), os.path.join(repo_root, ".env")):
+        if not os.path.isfile(path):
+            continue
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                key, val = key.strip(), val.strip().strip('"').strip("'")
+                os.environ.setdefault(key, val)
+
+
 def _next_run_dir(base: str = "runs") -> str:
     os.makedirs(base, exist_ok=True)
     n = len([d for d in os.listdir(base) if d.startswith("run_")])
@@ -32,6 +52,8 @@ def _cmd_run(args) -> int:
     print(f"▶ intent: {args.intent}\n")
     intake_res = draft_spec(args.intent, machine=args.machine, use_llm=not args.no_llm)
     print(f"── draft spec ({intake_res.source}) ──")
+    if not args.no_llm and intake_res.source == "offline":
+        print("  (LLM path unavailable — used offline. Set ANTHROPIC_API_KEY, or CALIPER_DEBUG=1 for why.)")
     print(intake_res.spec.to_yaml())
 
     # Ask-don't-assume gate (design spec §5): stop for confirmation before building.
@@ -90,8 +112,9 @@ def _cmd_refine(args) -> int:
     print(f"▶ refining {args.source}: \"{args.instruction}\"\n")
     res = apply_refinement(spec, args.instruction, use_llm=not args.no_llm)
     if not res.changed:
+        hint = "" if args.no_llm else " (LLM path needs ANTHROPIC_API_KEY; CALIPER_DEBUG=1 shows why)"
         print("No recognized refinement — try naming a dimension (holes, spacing, wall, "
-              "cable bore, ribs), or run with the LLM path for free-form edits.")
+              f"cable bore, ribs), or use the LLM path for free-form edits.{hint}")
         return 2
     print(f"── changes ({res.source}) ──")
     for c in res.changes:
@@ -101,6 +124,7 @@ def _cmd_refine(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _load_dotenv()
     parser = argparse.ArgumentParser(prog="caliper", description=__doc__)
     sub = parser.add_subparsers(dest="cmd")
 

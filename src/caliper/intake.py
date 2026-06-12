@@ -15,9 +15,13 @@ Two paths:
 
 from __future__ import annotations
 
+import os
 import re
+import sys
 from dataclasses import dataclass, field
 from typing import Optional
+
+DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
 
 from .spec import Assertion, Spec
 
@@ -124,9 +128,10 @@ ambiguous or unstated, add a clarifying question instead of guessing.
 Respond with JSON: {"spec": <spec-as-dict-with-`assert`-key>, "questions": [<string>, ...]}."""
 
 
-def llm_draft(intent: str, machine: Optional[str] = None, client=None, model: str = "claude-opus-4-8") -> IntakeResult:
+def llm_draft(intent: str, machine: Optional[str] = None, client=None, model: Optional[str] = None) -> IntakeResult:
     import json
 
+    model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
 
@@ -153,6 +158,7 @@ def draft_spec(
     if use_llm:
         try:
             return llm_draft(intent, machine=machine, client=client)
-        except Exception:
-            pass  # SDK/key/network unavailable or bad response → deterministic fallback
+        except Exception as e:  # SDK/key/network unavailable or bad response → deterministic fallback
+            if os.environ.get("CALIPER_DEBUG"):
+                print(f"[intake] LLM path failed → offline: {type(e).__name__}: {e}", file=sys.stderr)
     return offline_draft(intent, machine=machine)
