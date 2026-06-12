@@ -28,7 +28,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   clean ≥2mm clearance (`min-clearance 2`), or to 42mm just-touching for no-overlap. Tests:
   `tests/test_references.py` (11) + 2 CLI fit tests; updated the two evaluator/measure tests that
   assumed deferral. Full suite **90 passed**.
-- Commit: PENDING
+- Commit: d402e38
 
 ### 2026-06-12 · CALI-15 · Recent parts (+ hole-count hang fix)
 - Browse/load past runs instead of always generating new. Persist `report.json` + `meta.json`

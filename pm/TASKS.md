@@ -111,7 +111,7 @@ FastAPI around the library + a three.js front end. The demoable "jam in 3D space
 ---
 
 ## Milestone M3 — references
-### CALI-10 — References  · P1 · M3 · ✅ done (`PENDING`)
+### CALI-10 — References  · P1 · M3 · ✅ done (`d402e38`)
 STL intake as `role: fixed`; add `interference` + `min_clearance` measurements and assertions; iterate a part to fit a reference. The FEA-free Stage 2 loop.
 
 **Shipped:**
