@@ -139,6 +139,20 @@ class AssertionResult:
     def symbol(self) -> str:
         return {"pass": "✓", "fail": "✗", "deferred": "·", "error": "!"}[self.status]
 
+    def to_dict(self) -> dict:
+        def _j(v):
+            if isinstance(v, float):
+                return round(v, 4)
+            if isinstance(v, list):
+                return [_j(x) for x in v]
+            return v
+
+        return {
+            "id": self.id, "expr": self.expr, "status": self.status, "passed": self.passed,
+            "actual": _j(self.actual), "margin": _j(self.margin), "detail": self.detail,
+            "symbol": self.symbol,
+        }
+
 
 @dataclass
 class Report:
@@ -152,6 +166,9 @@ class Report:
     @property
     def failures(self) -> list[AssertionResult]:
         return [r for r in self.results if r.status in ("fail", "error")]
+
+    def to_dict(self) -> dict:
+        return {"all_pass": self.all_pass, "results": [r.to_dict() for r in self.results]}
 
     def to_text(self) -> str:
         lines = []

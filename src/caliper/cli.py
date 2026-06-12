@@ -123,6 +123,14 @@ def _cmd_refine(args) -> int:
     return _run_and_emit(res.spec, args.max_iter)
 
 
+def _cmd_serve(args) -> int:
+    from .server import serve
+
+    print(f"▶ Caliper webapp on http://{args.host}:{args.port}  (Ctrl-C to stop)")
+    serve(host=args.host, port=args.port)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _load_dotenv()
     parser = argparse.ArgumentParser(prog="caliper", description=__doc__)
@@ -146,6 +154,11 @@ def main(argv: list[str] | None = None) -> int:
     p_ref.add_argument("--no-llm", action="store_true", help="use the deterministic offline refiner")
     p_ref.add_argument("--max-iter", type=int, default=4)
     p_ref.set_defaults(func=_cmd_refine)
+
+    p_serve = sub.add_parser("serve", help="launch the webapp (3D viewer + spec/report + refine)")
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8000)
+    p_serve.set_defaults(func=_cmd_serve)
 
     args = parser.parse_args(argv)
     if not getattr(args, "func", None):

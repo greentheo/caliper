@@ -14,8 +14,9 @@ Newest demos first.
 - ✅ **M1 — refinement loop.** Take an existing part and a plain-English tweak ("make the holes 8 mm",
   "bigger spacing", "thicker walls", "add a rib") → it re-derives the spec, regenerates, re-measures,
   and writes a new STL. The optimizer also auto-tunes a continuous parameter when a numeric check fails.
-- ⏳ **Next (M2):** a web UI (FastAPI + React/three.js) — intent box, live spec editor, 3D viewer,
-  report panel, STL download. Until then everything is CLI.
+- ✅ **M2 — webapp.** `make serve` → a browser UI: intent box, **3D viewer** (three.js), live
+  measurement report, refine box, STL download, and **3Dconnexion SpaceMouse** support (WebHID).
+  "Jam in 3D space."
 
 **Part family so far:** corner brackets for T-slot extrusion (e.g. 2020). One body, bolt holes on
 each flange, optional cable bore + stiffening ribs.
@@ -83,7 +84,29 @@ cat runs/run_0000/report.txt     # the measurement report
 
 ---
 
+## 🌐 The webapp (M2)
+
+```bash
+make serve            # → http://127.0.0.1:8000  (or: caliper serve --port 8000)
+```
+In the browser: type an intent → **Build it ▶** → the bracket renders in 3D with the ALL-PASS report;
+type a tweak in **Refine** → it regenerates in place; **⬇ STL** downloads the mesh.
+
+**3Dconnexion SpaceMouse:** click **Connect SpaceMouse** (Chrome/Edge only — uses WebHID), pick your
+device in the chooser. Push/twist the cap to pan/dolly/rotate the model; the mouse still orbits as a
+fallback. Axis mapping & sensitivity are constants at the top of the WebHID section in
+`web/static/app.js` (tweak `SM_GAIN_*` if an axis feels reversed/too fast — hardware varies).
+
 ## 📓 Demo log (newest first)
+
+### 2026-06-11 · M2 — webapp + SpaceMouse
+**New:** `make serve` → 3D webapp (FastAPI + three.js). Build, refine, view, download in the browser;
+3Dconnexion SpaceMouse via WebHID. **Try:**
+```bash
+make serve
+# open http://127.0.0.1:8000 → Build it → Refine "make the holes 8mm and add a rib" → ⬇ STL
+# SpaceMouse: click "Connect SpaceMouse" (Chrome/Edge), pick the device, push/twist to fly the model
+```
 
 ### 2026-06-11 · LLM path — robust JSON parsing
 **Fixed:** `make refine-llm` failed with `JSONDecodeError` when Claude wrapped its reply in markdown.

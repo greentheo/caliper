@@ -27,6 +27,9 @@ make install
 # 3. Run the regression guard, and try the loop — both auto-resolve the env (no activation needed).
 make test
 make run INTENT="a 60 mm corner bracket for 2020 extrusion with four M5 holes"
+
+# 4. Or jam in 3D space — the webapp (3D viewer, refine loop, STL download, SpaceMouse):
+make serve            # → http://127.0.0.1:8000
 ```
 
 > No need to activate anything for `make` targets — they resolve `/opt/anaconda3/envs/caliper`

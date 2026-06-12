@@ -12,3 +12,4 @@ nevergrad
 anthropic
 fastapi
 uvicorn
+httpx         # FastAPI TestClient (server tests)

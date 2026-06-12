@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Caliper — jam in 3D space</title>
+  <link rel="stylesheet" href="/style.css?v=2" />
+  <script>
+    window.__err = [];
+    addEventListener('error', (e) => __err.push((e.message || e.type) + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno));
+    addEventListener('unhandledrejection', (e) => __err.push('promise: ' + (e.reason && e.reason.message || e.reason)));
+  </script>
+  <!-- three.js (no build step) via import map -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header>
+    <h1>Caliper</h1>
+    <span class="tag">measurement is the source of truth</span>
+    <span id="health" class="health">…</span>
+  </header>
+
+  <main>
+    <!-- LEFT: controls + spec + report -->
+    <section class="panel left">
+      <label class="field">
+        <span>Intent</span>
+        <textarea id="intent" rows="3" placeholder="a 60 mm corner bracket for 2020 extrusion with four M5 holes"></textarea>
+      </label>
+      <div class="row">
+        <label class="chk"><input type="checkbox" id="useLLM" /> use Claude (LLM)</label>
+        <button id="runBtn" class="primary">Build it ▶</button>
+      </div>
+
+      <label class="field">
+        <span>Refine the current part</span>
+        <input id="refine" type="text" placeholder='e.g. "make the holes 8mm", "bigger spacing", "add a rib"' />
+      </label>
+      <div class="row">
+        <button id="refineBtn" disabled>Refine ↻</button>
+        <span id="status" class="status"></span>
+      </div>
+
+      <div id="report" class="report"></div>
+
+      <details class="specbox">
+        <summary>Spec (YAML)</summary>
+        <pre id="spec"></pre>
+      </details>
+    </section>
+
+    <!-- RIGHT: 3D viewer -->
+    <section class="panel right">
+      <div id="viewer"></div>
+      <div class="viewer-bar">
+        <button id="spaceBtn" title="3Dconnexion SpaceMouse (Chrome/Edge, WebHID)">🖱️ Connect SpaceMouse</button>
+        <span id="spaceStatus" class="space-status"></span>
+        <span class="spacer"></span>
+        <a id="download" class="download" href="#" download style="display:none">⬇ STL</a>
+      </div>
+      <div id="axes" class="axes"></div>
+    </section>
+  </main>
+
+  <script type="module" src="/app.js?v=2"></script>
+</body>
+</html>

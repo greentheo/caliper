@@ -24,3 +24,7 @@ runs/
 .DS_Store
 .idea/
 .vscode/
+
+# local Claude config (machine-specific paths)
+.claude/launch.json
+.claude/settings.local.json

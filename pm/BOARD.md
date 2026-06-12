@@ -12,9 +12,10 @@ _Last updated: 2026-06-11_
 - CALI-13 — Primitive & geometry library + multi-part assemblies · P2 · epic (story for later)
 
 ## 🔨 In Progress
-- CALI-9 — Webapp (M2) + SpaceMouse · P1 · M2 · _owner: claude_
+- _(none)_
 
-## ✅ Done — Milestones M0 + M1 complete 🎉
+## ✅ Done — Milestones M0 + M1 + M2 complete 🎉
+- CALI-9 — Webapp (M2) + SpaceMouse · P1 · M2 · _2026-06-11 · FastAPI + three.js viewer, refine loop, WebHID SpaceMouse_
 - CALI-1.M1 — Refinement loop · P1 · M1 · _2026-06-11 · NL refine → re-derive → regenerate → re-measure_
 - CALI-8 — CLI (M0 end-to-end) · P0 · M0 · _2026-06-11 · `caliper run` produces a real STL, ALL PASS_
 - CALI-4 — Generator (bracket family) · P0 · M0 · _2026-06-11 · builds watertight, 4×Ø5.2 holes_
@@ -26,11 +27,11 @@ _Last updated: 2026-06-11_
 - CALI-1 — Spec schema · P0 · M0 · _2026-06-11_
 - CALI-0 — Project scaffolding · P0 · M0 · _2026-06-11_
 
-> **M0 + M1 done.** loose idea → spec → mesh → measure → **NL refinement → re-derive → regenerate →
-> re-measure** → downloadable STL. Full suite **61 passed** in the canonical conda env
-> (`/opt/anaconda3/envs/caliper`, cadquery 2.7.0 / occt 7.8.1). `make test` / `make run` / `caliper
-> refine` all work with zero config.
+> **M0 + M1 + M2 done.** loose idea → spec → mesh → measure → refine → STL, now with a **3D webapp**:
+> `make serve` → http://127.0.0.1:8000 → intent box, 3D viewer (three.js), measurement report, refine
+> box, STL download, and **3Dconnexion SpaceMouse** (WebHID). Full suite **71 passed** in the
+> canonical conda env (cadquery 2.7.0 / occt 7.8.1).
 >
-> **Next milestone — M2 (webapp wrapper):** CALI-9 — FastAPI around the library + React/three.js
-> front end (intent box, live spec editor, 3D viewer, report panel, STL download). The demoable
-> "YouTube moment". Then M3 (references: STL intake + interference/clearance).
+> **Next milestone — M3 (references):** CALI-10 — import an STL as `role: fixed`, add interference +
+> min_clearance, iterate a part to fit it (the FEA-free Stage 2 loop). Generator-breadth epic CALI-13
+> tracks new primitives + multi-part assemblies for later.

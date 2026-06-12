@@ -25,6 +25,18 @@ def test_resize_holes_updates_param_and_assertion():
     assert "diameter=8" in bolt.expr  # assertion re-synced to the new geometry
 
 
+def test_resize_holes_no_space():
+    # "8mm" (no space) must work the same as "8 mm"
+    r = refine.offline_refine(_base(), "enlarge the holes to 8mm")
+    assert _get(r.spec, "hole_d") == 8.0
+
+
+def test_explicit_mm_wins_over_m_size():
+    # "8mm ... m8 bolts" → honour the explicit 8 mm, don't switch to M8 clearance
+    r = refine.offline_refine(_base(), "enlarge the holes to 8mm for m8 bolts")
+    assert _get(r.spec, "hole_d") == 8.0
+
+
 def test_m_size_holes():
     r = refine.offline_refine(_base(), "switch to M6 holes")
     assert _get(r.spec, "hole_d") == 6.6  # M6 clearance

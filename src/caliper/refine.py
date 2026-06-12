@@ -130,12 +130,12 @@ def offline_refine(spec: Spec, instruction: str) -> RefineResult:
     # --- hole diameter (only when 'hole' is mentioned with size, not 'spacing') ---
     elif re.search(r"\bholes?\b", text) and not re.search(r"\bholes?\b\s*(?:count|number)", text):
         before = _get(s, "hole_d") or 5.2
-        mm = re.search(r"m(\d+(?:\.\d+)?)\b", text)
-        n = _num(text)
-        if mm:
-            after = _M_CLEARANCE.get(float(mm.group(1)), float(mm.group(1)) + 0.2)
-        elif n is not None and re.search(r"\bmm\b|wider|bigger|larger|diameter", text):
-            after = before + n if re.search(r"bigger|larger|wider|increase", text) and n < before else n
+        mmval = re.search(r"(\d+(?:\.\d+)?)\s*mm\b", text)   # explicit "8mm" or "8 mm" (boundary-free)
+        msize = re.search(r"\bm(\d+(?:\.\d+)?)\b", text)     # "M6" → clearance diameter
+        if mmval:                                            # an explicit mm value wins over M-size
+            after = float(mmval.group(1))
+        elif msize:
+            after = _M_CLEARANCE.get(float(msize.group(1)), float(msize.group(1)) + 0.2)
         elif re.search(r"bigger|larger|wider", text):
             after = before + 1.5
         elif re.search(r"smaller|tighter", text):
