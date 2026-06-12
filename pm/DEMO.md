@@ -101,6 +101,11 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   and Fusion at once.)
 - **Tuning:** axis mapping/sensitivity are constants (`SM_GAIN_*`, `SM_SCALE`) at the top of the WebHID
   section in `web/static/app.js` — tweak if an axis feels reversed or too hot; the raw readout helps.
+- **Driver / NL-Proxy mode (beta, CALI-14):** pick "Driver / NL-Proxy" in the dropdown to use the
+  SpaceMouse *without quitting 3DxWare* (coexists with Fusion). It loads 3Dconnexion's proxy lib from
+  `https://127.51.68.120:8181`. First time, **open that URL in a tab once to accept the driver's
+  certificate**, then click Connect. Phase 1 connects + reports the API surface on-screen; full camera
+  navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
 

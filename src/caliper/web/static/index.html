@@ -69,7 +69,11 @@
     <section class="panel right">
       <div id="viewer"></div>
       <div class="viewer-bar">
-        <button id="spaceBtn" title="3Dconnexion SpaceMouse (Chrome/Edge, WebHID)">🖱️ Connect SpaceMouse</button>
+        <select id="smMode" title="how to talk to the SpaceMouse">
+          <option value="webhid">WebHID (quit 3DxWare)</option>
+          <option value="driver">Driver / NL-Proxy (beta)</option>
+        </select>
+        <button id="spaceBtn" title="3Dconnexion SpaceMouse">🖱️ Connect SpaceMouse</button>
         <span id="spaceStatus" class="space-status"></span>
         <span class="spacer"></span>
         <a id="download" class="download" href="#" download style="display:none">⬇ STL</a>
@@ -78,6 +82,6 @@
     </section>
   </main>
 
-  <script type="module" src="/app.js?v=5"></script>
+  <script type="module" src="/app.js?v=6"></script>
 </body>
 </html>

@@ -65,6 +65,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .viewer-bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
   border-top: 1px solid var(--line); background: var(--panel); }
 .viewer-bar .spacer { flex: 1; }
+.viewer-bar select { background: #222a33; color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 8px; font: inherit; }
 .space-status { font-size: 12px; color: var(--muted); }
 .space-status.on { color: var(--ok); }
 .download { color: var(--accent); text-decoration: none; font-weight: 600; }

@@ -12,7 +12,7 @@ _Last updated: 2026-06-11_
 - CALI-13 — Primitive & geometry library + multi-part assemblies · P2 · epic (story for later)
 
 ## 🔨 In Progress
-- _(none)_
+- CALI-14 — SpaceMouse via NL-Proxy (driver coexistence) · P2 · M2 · _owner: claude · phase 1_
 
 ## ✅ Done — Milestones M0 + M1 + M2 complete 🎉
 - CALI-9 — Webapp (M2) + SpaceMouse · P1 · M2 · _2026-06-11 · FastAPI + three.js viewer, refine loop, WebHID SpaceMouse_

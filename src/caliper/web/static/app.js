@@ -239,6 +239,58 @@ async function connectSpaceMouse() {
   }
 }
 
+// --- Driver / NL-Proxy mode (CALI-14, phase 1: connect + introspect) -----------------------------
+// Coexists with 3DxWare/Fusion (no quitting). Loads 3Dconnexion's own proxy lib, which speaks the
+// WAMP/WSS + navlib protocol. The exact API varies by driver version, so phase 1 connects + reports
+// the surface/telemetry; phase 2 wires the navlib camera callbacks from what we learn here.
+const NLPROXY_LIB = 'https://127.51.68.120:8181/3dconnexion/3dconnexion.js';
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = () => rej(new Error('script load failed'));
+    document.head.appendChild(s);
+  });
+}
+
+async function connectViaDriver() {
+  spaceStatus.textContent = 'loading 3Dconnexion proxy lib…';
+  try {
+    await loadScript(NLPROXY_LIB);
+  } catch (e) {
+    window.showErr('Could not load the NL-Proxy lib from ' + NLPROXY_LIB + '. Check: (1) 3DxWare is ' +
+      'running; (2) open ' + NLPROXY_LIB + ' in a tab once to accept the driver certificate, then ' +
+      'retry. (This path coexists with Fusion — no need to quit the driver.)');
+    return;
+  }
+  if (typeof window._3Dconnexion === 'undefined') {
+    window.showErr('proxy lib loaded but window._3Dconnexion is undefined — unexpected driver version.');
+    return;
+  }
+  try {
+    // introspect: report the API surface so we can finish phase 2 (navlib camera) for this driver.
+    const sm = new window._3Dconnexion(document.getElementById('viewer'));
+    window.__caliperSM = sm;
+    const keys = []; for (const k in sm) keys.push(k);
+    spaceStatus.textContent = '_3Dconnexion ready · methods: ' + keys.slice(0, 16).join(',');
+    axesEl.style.display = 'block';
+    axesEl.textContent = 'NL-Proxy API:\n' + keys.join('\n');
+    if (typeof sm.onconnect !== 'undefined') {
+      sm.onconnect = () => { spaceStatus.textContent = 'NL-Proxy connected ✓'; spaceStatus.className = 'space-status on'; };
+    }
+    if (typeof sm.connect === 'function') sm.connect();
+    else window.showErr('phase 1: _3Dconnexion has no connect(); methods are shown top-right — send me that list and I\'ll wire phase 2.');
+  } catch (e) {
+    window.showErr('NL-Proxy init error: ' + e.message + ' — send me this + the method list and I\'ll finish it.');
+  }
+}
+
+function onConnectClick() {
+  const mode = document.getElementById('smMode').value;
+  if (mode === 'driver') connectViaDriver();
+  else connectSpaceMouse();
+}
+
 // auto-reattach a device we were already granted, so a reload doesn't need re-picking
 if ('hid' in navigator) {
   navigator.hid.getDevices().then((ds) => {
@@ -253,7 +305,7 @@ runBtn.addEventListener('click', doRun);
 refineBtn.addEventListener('click', doRefine);
 refineEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doRefine(); });
 intentEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) doRun(); });
-spaceBtn.addEventListener('click', connectSpaceMouse);
+spaceBtn.addEventListener('click', onConnectClick);
 
 fetch('/api/health').then((r) => r.json()).then((d) => {
   const h = $('health'); h.textContent = d.ok ? 'ready' : 'down'; if (d.ok) h.className = 'health ok';

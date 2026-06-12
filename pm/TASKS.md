@@ -132,6 +132,27 @@ thread** via CadQuery sweep (heavy mesh, slow — last resort). Add a `hole_styl
 (clearance|tapped|insert) parameter + the matching measurement/assertion. Note real threads ≠ a
 bigger clearance hole.
 
+## Webapp follow-ups
+### CALI-14 — SpaceMouse via 3Dconnexion NL-Proxy (driver coexistence)  · P2 · M2 · 🔨 in progress
+The WebHID path (CALI-9) needs the user to **quit 3DxWare** (raw HID can't be shared). This task adds
+the *driver* path so the SpaceMouse works in the browser **and** Fusion/Prusa at once.
+**Research (2026-06-12):** 3Dconnexion's web SDK connects to the **NL-Proxy** at
+`https://127.51.68.120:8181/3dconnexion/nlproxy` over **WAMP/secure-WebSocket**, using a
+driver-installed **certificate** (special loopback IP the cert is issued for). Apps load
+3Dconnexion's own `3dconnexion.js` (the `_3Dconnexion` global) which handles the protocol and drives
+the camera via the **Navigation Library (navlib)** callback interface (get/set camera matrix, view +
+model extents, hit-testing, etc.). Official three.js sample exists but is Cloudflare-gated; lib is
+proprietary/driver-served.
+**Plan:**
+- **Phase 1 (this session):** UI mode toggle (WebHID | Driver-NL-Proxy); dynamically load the proxy
+  lib; attempt `new _3Dconnexion(...)` + connect; introspect the API surface and stream any telemetry
+  to the on-screen readout; surface every failure (driver down, cert untrusted, lib missing) clearly.
+  Cannot be verified here — needs Theo's hardware + 3DxWare.
+- **Phase 2 (after on-hardware telemetry):** implement the navlib callbacks to drive the three.js
+  camera; tune mapping; document the cert-accept step.
+**Acceptance:** with 3DxWare running, the browser connects via NL-Proxy (no quitting) and the cap
+navigates the model. Until then the toggle defaults to WebHID and Driver mode is labelled beta.
+
 ## Epics / future (stories for later)
 ### CALI-13 — Primitive & geometry library + multi-part assemblies  · P2 · epic · 🧊 backlog
 The corner bracket proved the loop; to make "all kinds of new parts" we need breadth of geometry.
