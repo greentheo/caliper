@@ -15,7 +15,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Also: `<link rel="icon" href="data:,">` to kill the noisy favicon 404; an on-page error bar that
   shows load/runtime errors (so a dead button is never silent again); recursive package-data glob.
 - Verified in-browser: zero external requests (all `localhost`), build → ALL PASS + render. 71 passed.
-- Commit: 159991b
+- Commit: 95a2e4a
 
 ### 2026-06-11 · 🎉 M2 COMPLETE · CALI-9 · webapp + SpaceMouse
 - **FastAPI backend** (`server.py`): `/api/run`, `/api/refine`, `/api/runs/{id}/part.stl`,
