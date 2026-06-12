@@ -27,7 +27,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   `[52,0,2]` with ALL PASS and `min_clearance(obstacle) actual=3`. No console errors.
 - **Known caveat:** `/api/fit` is synchronous; a *coincident full-bracket* reference took ~30s (many
   mesh booleans × optimizer samples). A simple obstacle box is seconds. Logged as a follow-up.
-- Tests: `tests/test_server.py` fit end-to-end + 404 (now **92 passed**). Commit: PENDING
+- Tests: `tests/test_server.py` fit end-to-end + 404 (now **92 passed**). Commit: 6f048a8
 
 ### 2026-06-12 · CALI-10 · References / fit-to-reference (M3)
 - **Measurements (real now, no longer deferred):** `measure.interference(g, ref)` → overlap volume in
