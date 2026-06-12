@@ -17,7 +17,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   generator so no bad count can ever hang the kernel.
 - Verified in-browser: build (1 iter, fast), new part tops the list with its label/timestamp, clicking
   an older run loads it (incl. legacy re-evaluate). Tests: **76 passed** (+5: list/load, parse, clamp).
-- Commit: _pending_
+- Commit: b582b54
 
 ### 2026-06-12 · CALI-9 · SpaceMouse: grid rotates with the part
 - Feedback (real-use): with the SpaceMouse, the part rotated/panned/zoomed but the ground grid didn't
