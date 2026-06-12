@@ -192,13 +192,36 @@ def _fmt(v: Any) -> str:
 # ---------------------------------------------------------------------------
 # Context + evaluation
 # ---------------------------------------------------------------------------
-def build_context(spec: Spec, g: Geometry, machine: SimpleNamespace = DEFAULT_MACHINE) -> dict:
+def load_references(spec: Spec, base_dir: str = ".") -> dict[str, Geometry]:
+    """Load every reference STL named in ``spec`` into a :class:`Geometry` keyed by reference id.
+
+    Relative ``file`` paths resolve against ``base_dir``. These geometries are what bind the
+    ``interference`` / ``min_clearance`` probes to real imported parts (CALI-10).
+    """
+    import os
+
+    refs: dict[str, Geometry] = {}
+    for ref in spec.references:
+        path = ref.file if os.path.isabs(ref.file) else os.path.join(base_dir, ref.file)
+        refs[ref.id] = Geometry.from_stl(path)
+    return refs
+
+
+def build_context(
+    spec: Spec,
+    g: Geometry,
+    machine: SimpleNamespace = DEFAULT_MACHINE,
+    references: Optional[dict] = None,
+) -> dict:
     """Bind the measurement names/helpers an assertion can reference, against this geometry.
 
     Scalars are computed lazily via attribute access on a namespace object so we don't measure what
     nothing asserts (design spec §5). Callables (mass, holes_matching, interference…) defer the
-    actual measurement until the expression calls them.
+    actual measurement until the expression calls them. ``references`` maps reference id → loaded
+    :class:`Geometry`; a referenced id without a loaded geometry resolves to an opaque handle (so
+    ``interference``/``min_clearance`` over it surface as an actionable error, not a silent pass).
     """
+    references = references or {}
     ctx: dict[str, Any] = {
         "bbox": measure.bounding_box(g),
         "machine": machine,
@@ -219,9 +242,11 @@ def build_context(spec: Spec, g: Geometry, machine: SimpleNamespace = DEFAULT_MA
     ctx["volume"] = measure.volume(g)
     ctx["min_wall"] = measure.min_wall_thickness(g)
     ctx["largest_through_bore"] = measure.largest_through_bore(g)
-    # reference parts resolve as opaque handles (used by interference/min_clearance in M3)
+    # reference parts resolve to loaded geometry (for interference/min_clearance); opaque otherwise.
     for ref in spec.references:
-        ctx[ref.id] = SimpleNamespace(id=ref.id, file=ref.file, role=ref.role)
+        ctx[ref.id] = references.get(ref.id) or SimpleNamespace(
+            id=ref.id, file=ref.file, role=ref.role
+        )
     return ctx
 
 
@@ -244,7 +269,12 @@ def evaluate_assertion(assertion, ctx: dict) -> AssertionResult:
         )
 
 
-def evaluate(spec: Spec, g: Geometry, machine: SimpleNamespace = DEFAULT_MACHINE) -> Report:
+def evaluate(
+    spec: Spec,
+    g: Geometry,
+    machine: SimpleNamespace = DEFAULT_MACHINE,
+    references: Optional[dict] = None,
+) -> Report:
     """Evaluate every assertion in ``spec`` against geometry ``g`` → a :class:`Report`."""
-    ctx = build_context(spec, g, machine)
+    ctx = build_context(spec, g, machine, references=references)
     return Report([evaluate_assertion(a, ctx) for a in spec.assertions])

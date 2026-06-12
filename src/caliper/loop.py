@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from .decide import EvalFn, decide
-from .evaluate import DEFAULT_MACHINE, AssertionResult, Report, evaluate
+from .evaluate import DEFAULT_MACHINE, AssertionResult, Report, evaluate, load_references
 from .spec import Spec
 
 LoopStatus = str  # "passed" | "capped" | "oscillation" | "stuck" | "build_failed"
@@ -85,19 +85,28 @@ def run_loop(spec: Spec, eval_fn: EvalFn, max_iter: int = 6) -> LoopResult:
     return LoopResult(status, current, final, max_iter, history)
 
 
-def make_eval_fn(machine=DEFAULT_MACHINE) -> EvalFn:
+def make_eval_fn(machine=DEFAULT_MACHINE, references=None, ref_base: str = ".") -> EvalFn:
     """Production eval_fn: build geometry (CALI-4), then measure+evaluate (CALI-2/3).
 
     A build error becomes a single ``error`` assertion with id ``build`` carrying the captured
     trace, so the controller can route it (the "stack trace" feedback channel).
+
+    ``references`` is a pre-loaded ``{id: Geometry}`` map for the fit probes (CALI-10); if omitted,
+    any references named in the spec are loaded once from their STL files (resolved against
+    ``ref_base``). Loading once and reusing keeps the fit loop from re-reading STLs every iteration.
     """
     from . import generate  # lazy: pulls CadQuery
 
+    refs = references  # None until first build; loaded from spec.references then cached
+
     def _eval(spec: Spec) -> Report:
+        nonlocal refs
         res = generate.build(spec)
         if not res.build_ok:
             return Report([AssertionResult("build", "kernel build", "error", None, detail=res.error)])
-        return evaluate(spec, res.geometry, machine)
+        if refs is None and spec.references:
+            refs = load_references(spec, ref_base)
+        return evaluate(spec, res.geometry, machine, references=refs)
 
     return _eval
 

@@ -8,9 +8,11 @@ MVP subset implemented (design spec §8):
     bounding_box, volume, mass, min_wall_thickness, holes / holes_matching,
     largest_through_bore, is_watertight, is_manifold, body_count, render_views.
 
-Deferred probes (overhang, slice, fea, interference, min_clearance, mates) are present as
-documented no-ops that raise :class:`NotImplementedError` so nothing has to be re-plumbed later.
-``interference`` / ``min_clearance`` arrive in M3 (references); the rest in Phase 2+.
+Reference probes ``interference`` / ``min_clearance`` (CALI-10 / M3) measure a part against an
+imported fixed STL — overlap volume and signed gap — so the loop can fit a part to existing
+geometry. The remaining deferred probes (overhang, slice, fea, mates) are present as documented
+no-ops that raise :class:`NotImplementedError` so nothing has to be re-plumbed later (mates arrives
+with multi-part assemblies, CALI-13; the rest in Phase 2+).
 
 Geometry is carried by :class:`Geometry`, which may hold a triangle mesh (``trimesh``) and/or a
 B-rep solid (CadQuery). Feature queries (holes, faces) prefer the B-rep where it's exact and cheap;
@@ -280,18 +282,138 @@ def render_views(g: Geometry, views=("front", "top", "iso"), out_dir: str = "run
 
 
 # ---------------------------------------------------------------------------
+# References — fit/clearance against an imported fixed part (CALI-10 / M3)
+# ---------------------------------------------------------------------------
+# These are the "Stage 2" probes (design spec §4): does the part collide with, or keep enough
+# room around, an imported reference? Both are computed on meshes so they work on STL references
+# without a B-rep. `interference` reports the *overlap volume* (0.0 = clean); `min_clearance`
+# reports the signed gap (positive = smallest air gap, negative = deepest penetration). The
+# evaluator turns these into margins, and the loop tunes the part until they pass.
+
+_FIT_SAMPLES = 3000  # surface samples per body for the proximity probes (deterministic seeds)
+_FIT_EPS = 1e-6
+
+
+def _as_mesh(obj: Any) -> trimesh.Trimesh:
+    """Coerce a reference handle to a mesh: a :class:`Geometry`, a raw mesh, or a wrapper with one."""
+    if isinstance(obj, Geometry):
+        return obj.require_mesh()
+    if isinstance(obj, trimesh.Trimesh):
+        return obj
+    geom = getattr(obj, "geometry", None)
+    if isinstance(geom, Geometry):
+        return geom.require_mesh()
+    mesh = getattr(obj, "mesh", None)
+    if isinstance(mesh, trimesh.Trimesh):
+        return mesh
+    raise ValueError(
+        "reference has no geometry to measure against — load it first "
+        "(Geometry.from_stl(...)) and pass it as the reference."
+    )
+
+
+def _aabb_overlap(a: trimesh.Trimesh, b: trimesh.Trimesh, pad: float = 0.0) -> bool:
+    alo, ahi = a.bounds
+    blo, bhi = b.bounds
+    return bool(np.all(ahi + pad >= blo) and np.all(bhi + pad >= alo))
+
+
+def _aabb_overlap_volume(a: trimesh.Trimesh, b: trimesh.Trimesh) -> float:
+    alo, ahi = a.bounds
+    blo, bhi = b.bounds
+    d = np.clip(np.minimum(ahi, bhi) - np.maximum(alo, blo), 0.0, None)
+    return float(d.prod())
+
+
+def _sample(mesh: trimesh.Trimesh, n: int, seed: int) -> np.ndarray:
+    pts, _ = trimesh.sample.sample_surface(mesh, n, seed=seed)
+    return np.asarray(pts)
+
+
+def _boolean_intersection_volume(a: trimesh.Trimesh, b: trimesh.Trimesh) -> Optional[float]:
+    """Exact overlap volume via a robust boolean (manifold3d). None if the kernel is unavailable."""
+    try:
+        inter = trimesh.boolean.intersection([a, b])
+    except Exception:
+        return None
+    if inter is None:
+        return None
+    if getattr(inter, "is_empty", False) or len(getattr(inter, "faces", [])) == 0:
+        return 0.0
+    return float(abs(inter.volume))
+
+
+def _meshes_overlap(a: trimesh.Trimesh, b: trimesh.Trimesh, n: int = _FIT_SAMPLES) -> bool:
+    """Containment-sampling overlap test — the boolean-free fallback for detecting interference."""
+    try:
+        if b.contains(_sample(a, n, seed=1)).any():
+            return True
+        if a.contains(_sample(b, n, seed=2)).any():
+            return True
+    except Exception:
+        return False
+    return False
+
+
+def interference(g: Geometry, ref: Any) -> float:
+    """Volume of material the part shares with the reference, in mm^3 (0.0 = no collision).
+
+    Exact via a robust mesh boolean (manifold3d) when available; falls back to a containment test
+    bounded by the AABB-overlap volume if the boolean kernel is missing. AABB-disjoint pairs short
+    circuit to 0.0. Use in an assertion as ``interference(part_ref) <= 0``.
+    """
+    a = g.require_mesh()
+    b = _as_mesh(ref)
+    if not _aabb_overlap(a, b):
+        return 0.0
+    vol = _boolean_intersection_volume(a, b)
+    if vol is not None:
+        return vol
+    return _aabb_overlap_volume(a, b) if _meshes_overlap(a, b) else 0.0
+
+
+def _penetration_depth(a: trimesh.Trimesh, b: trimesh.Trimesh, n: int = _FIT_SAMPLES) -> float:
+    """Deepest distance any surface point of one body lies inside the other (0.0 if disjoint)."""
+    depth = 0.0
+    for first, second, seed in ((a, b, 1), (b, a, 2)):
+        try:
+            pts = _sample(first, n, seed=seed)
+            inside = second.contains(pts)
+            if inside.any():
+                _, dist, _ = second.nearest.on_surface(pts[inside])
+                depth = max(depth, float(np.max(dist)))
+        except Exception:
+            continue
+    return depth
+
+
+def _surface_gap(a: trimesh.Trimesh, b: trimesh.Trimesh, n: int = _FIT_SAMPLES) -> float:
+    """Smallest distance between the two surfaces (assumes they don't intersect)."""
+    _, d_ab, _ = b.nearest.on_surface(_sample(a, n, seed=1))
+    _, d_ba, _ = a.nearest.on_surface(_sample(b, n, seed=2))
+    return float(min(np.min(d_ab), np.min(d_ba)))
+
+
+def min_clearance(g: Geometry, ref: Any) -> float:
+    """Smallest gap between the part and the reference, in mm (negative if they interpenetrate).
+
+    Positive = the thinnest air gap between the two surfaces; negative = the deepest penetration
+    (so an assertion ``min_clearance(part_ref) >= 0.4`` fails both when too close and when colliding).
+    Mesh-based (works on STL references); deterministic via fixed sampling seeds.
+    """
+    a = g.require_mesh()
+    b = _as_mesh(ref)
+    pen = _penetration_depth(a, b)
+    if pen > _FIT_EPS:
+        return -pen
+    return _surface_gap(a, b)
+
+
+# ---------------------------------------------------------------------------
 # DEFERRED probes — present as documented no-ops (design spec §4, §7)
 # ---------------------------------------------------------------------------
-def interference(g: Geometry, ref: Any):
-    raise NotImplementedError("interference(): deferred to M3 (references / robust booleans).")
-
-
-def min_clearance(g: Geometry, ref: Any):
-    raise NotImplementedError("min_clearance(): deferred to M3 (references).")
-
-
 def mates(g: Geometry, ref: Any, tol: float = 0.2):
-    raise NotImplementedError("mates(): deferred to M3 (references).")
+    raise NotImplementedError("mates(): deferred to CALI-13 (multi-part assemblies / joints).")
 
 
 def overhang_area(g: Geometry, angle: float, build_dir: Any):

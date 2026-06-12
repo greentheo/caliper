@@ -72,15 +72,22 @@ def test_end_to_end_on_box(box_geom):
             Assertion(id="mass_budget", expr="mass(density=1.24) <= 80"),
             Assertion(id="one_body", expr="body_count == 1 and is_watertight"),
             Assertion(id="walls", expr="min_wall >= 2 * machine.nozzle"),
-            Assertion(id="no_collision", expr="interference(ref) == 0"),
+            Assertion(id="no_collision", expr="interference(ref) <= 0"),
         ],
     )
-    report = evaluate.evaluate(spec, box_geom(10, 20, 30))
+    # bind the reference to a disjoint box → interference resolves to 0 (CALI-10).
+    import trimesh
+
+    from caliper.measure import Geometry
+
+    far = trimesh.creation.box(extents=(10, 10, 10))
+    far.apply_translation([100, 0, 0])
+    report = evaluate.evaluate(spec, box_geom(10, 20, 30), references={"ref": Geometry.from_mesh(far)})
     by_id = {r.id: r for r in report.results}
     assert by_id["fits_bed"].status == "pass"
     assert by_id["mass_budget"].status == "pass"
     assert by_id["one_body"].status == "pass"
     assert by_id["walls"].status == "pass"
-    assert by_id["no_collision"].status == "deferred"  # interference is M3
-    assert report.all_pass is True  # deferred excluded from the verdict
+    assert by_id["no_collision"].status == "pass"  # interference is real now (M3 / CALI-10)
+    assert report.all_pass is True
     assert "ALL PASS" in report.to_text()

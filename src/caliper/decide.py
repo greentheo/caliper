@@ -31,6 +31,24 @@ DEFAULT_TUNING: dict[str, str] = {
     "cable_fits": "cable_bore",
 }
 
+# Fit assertions (CALI-10) reference these probes; a failing one routes to a size parameter so the
+# optimizer can shrink/grow the part until it clears the reference — no per-spec id wiring needed.
+FIT_PREDICATES: tuple[str, ...] = ("interference", "min_clearance", "clearance")
+# Preferred continuous parameter to vary for a fit failure (largest extent first).
+FIT_PARAM_PREFERENCE: tuple[str, ...] = ("bolt_circle", "leg", "width", "wall")
+
+
+def _fit_param(spec: Spec) -> Optional[str]:
+    """Pick the continuous parameter that most changes the part's footprint, for fit tuning."""
+    for name in FIT_PARAM_PREFERENCE:
+        prm = spec.parameters.get(name)
+        if prm is not None and getattr(prm, "type", None) == "continuous":
+            return name
+    for name, prm in spec.parameters.items():  # any continuous param as a last resort
+        if getattr(prm, "type", None) == "continuous":
+            return name
+    return None
+
 
 @dataclass
 class DecideResult:
@@ -63,22 +81,36 @@ def _pass_count(report: Report) -> int:
 
 
 def tune_continuous(
-    spec: Spec, param: str, target_id: str, eval_fn: EvalFn, samples: int = 13
+    spec: Spec, param: str, target_id: str, eval_fn: EvalFn, samples: int = 13,
+    prefer: Optional[float] = None,
 ) -> tuple[float, Spec, Report]:
     """1-D search of a continuous parameter to satisfy ``target_id`` while keeping the rest passing.
 
     Scores each candidate by (all_pass, #passing assertions, target margin) and returns the best.
     Grid over [min, max] then one local refinement around the winner.
+
+    ``prefer`` requests a *minimal-change* (snug) solution: among feasible candidates, pick the one
+    closest to ``prefer`` rather than the one with the largest margin. This is what makes a fit shrink
+    *just enough* to clear a reference instead of collapsing to the smallest possible part.
     """
     p = spec.parameters[param]
     lo, hi = float(p.min), float(p.max)
+
+    def _score(v: float, rep: Report):
+        feasible = rep.all_pass
+        if prefer is not None:
+            # feasible → minimise distance to the preferred (original) value; infeasible → make
+            # progress by maximising passing assertions and the target margin.
+            proximity = -abs(v - prefer) if feasible else float("-inf")
+            return (feasible, proximity, _pass_count(rep), _margin_of(rep, target_id))
+        return (feasible, _pass_count(rep), _margin_of(rep, target_id))
 
     def _best_over(values):
         best = None
         for v in values:
             s = with_param(spec, param, float(v))
             rep = eval_fn(s)
-            score = (rep.all_pass, _pass_count(rep), _margin_of(rep, target_id))
+            score = _score(float(v), rep)
             if best is None or score > best[3]:
                 best = (float(v), s, rep, score)
         return best
@@ -102,8 +134,15 @@ def decide(spec: Spec, report: Report, eval_fn: EvalFn, tuning: Optional[dict] =
     # 1) continuous route — a tunable continuous parameter governs a failing numeric assertion.
     for r in report.failures:
         param = tuning.get(r.id)
+        # fit failures (interference/clearance) auto-route to a size parameter — no id wiring needed.
+        is_fit = not param and any(p in r.expr for p in FIT_PREDICATES)
+        if is_fit:
+            param = _fit_param(spec)
         if param and param in spec.parameters and getattr(spec.parameters[param], "type", None) == "continuous":
-            value, new_spec, rep = tune_continuous(spec, param, r.id, eval_fn)
+            # a fit resizes minimally (snug) — keep the part as close to its current size as it can
+            # while clearing the reference, rather than maximising clearance into a tiny stub.
+            prefer = float(spec.parameters[param].init) if is_fit else None
+            value, new_spec, rep = tune_continuous(spec, param, r.id, eval_fn, prefer=prefer)
             return DecideResult(
                 new_spec=new_spec,
                 move=f"optimizer: {param} → {value:.3g} to satisfy {r.id}",

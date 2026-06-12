@@ -19,6 +19,8 @@ runs/
 *.step
 *.png
 !tests/fixtures/**/*.stl   # keep checked-in test fixtures
+!examples/*.stl            # keep checked-in demo references (e.g. the fit obstacle)
+!examples/**/*.stl
 
 # OS / editor
 .DS_Store

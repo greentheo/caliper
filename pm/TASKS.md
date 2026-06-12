@@ -111,8 +111,29 @@ FastAPI around the library + a three.js front end. The demoable "jam in 3D space
 ---
 
 ## Milestone M3 — references
-### CALI-10 — References  · P1 · M3 · 🧊 backlog
+### CALI-10 — References  · P1 · M3 · ✅ done (`PENDING`)
 STL intake as `role: fixed`; add `interference` + `min_clearance` measurements and assertions; iterate a part to fit a reference. The FEA-free Stage 2 loop.
+
+**Shipped:**
+- `measure.interference(g, ref)` → overlap volume (mm³) via a robust mesh boolean (manifold3d), AABB
+  short-circuit + containment fallback; `measure.min_clearance(g, ref)` → signed gap (mm), negative =
+  penetration depth. Both mesh-based so they work on raw STL references.
+- Evaluator binds references to loaded geometry (`evaluate.load_references`, `references=` kwarg);
+  an *unloaded* reference surfaces an actionable error rather than a silent pass.
+- `decide` auto-routes fit failures (any `interference`/`min_clearance` assertion) to a size
+  parameter, and `tune_continuous(prefer=…)` makes the fit **snug** — shrink just enough to clear,
+  not collapse to the smallest part.
+- `caliper fit SOURCE --ref ID=FILE.stl [--min-clearance MM] [--no-overlap] [--free PARAM]` — attaches
+  the reference + fit assertions, promotes a size param to continuous, runs the loop. `make fit`.
+- Demo fixture `examples/obstacle.stl` (+ `make_obstacle.py`). Tests: `tests/test_references.py`
+  (11) + CLI fit smoke tests; full suite **90 passed**.
+
+**Acceptance:** ✅ import STL as fixed · ✅ interference + min_clearance measured + asserted · ✅ a
+part iterates to fit a reference (60mm bracket → 39mm to clear a block with 2mm clearance).
+
+**Follow-ups (not blocking):** webapp fit UI (upload a reference STL + fit in the browser); multiple
+references at once is supported in the loop but untested at scale; penetration depth is sampled
+(approximate) — fine for the pass/fail gate, exact depth would need a boolean.
 
 ---
 

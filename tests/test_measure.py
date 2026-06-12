@@ -46,10 +46,10 @@ def test_largest_through_bore_zero_without_solid(box_geom):
 
 
 def test_deferred_probes_raise(box_geom):
+    # interference/min_clearance are real now (CALI-10); mates et al. remain deferred.
     g = box_geom()
-    for fn in (measure.interference, measure.min_clearance):
-        with pytest.raises(NotImplementedError):
-            fn(g, ref=None)
+    with pytest.raises(NotImplementedError):
+        measure.mates(g, ref=None)
 
 
 # --- B-rep hole detection (needs CadQuery/OCCT) ---------------------------

@@ -3,10 +3,9 @@
 Kanban of every task. One line per card: `CALI-N — title · priority · milestone`.
 Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections as state changes.
 
-_Last updated: 2026-06-12_
+_Last updated: 2026-06-12 (CALI-10 / M3 references shipped)_
 
 ## 🧊 Backlog
-- CALI-10 — References · P1 · M3
 - CALI-11 — Variable bend angle (e.g. 45°) · P2 · generator
 - CALI-12 — Threaded / tapped / insert holes · P2 · generator
 - CALI-13 — Primitive & geometry library + multi-part assemblies · P2 · epic (story for later)
@@ -17,7 +16,8 @@ _Last updated: 2026-06-12_
 ## 🔨 In Progress
 - _(none)_
 
-## ✅ Done — Milestones M0 + M1 + M2 complete 🎉
+## ✅ Done — Milestones M0 + M1 + M2 + M3 complete 🎉
+- CALI-10 — References (M3) · P1 · M3 · _2026-06-12 · import STL as `role: fixed`; real `interference` + `min_clearance`; `caliper fit` resizes a part **snugly** to clear a reference_
 - CALI-15 — Recent parts (browse / load past runs) · P1 · M2 · _2026-06-12 · list + click-to-load; fixed a hole-count parse that hung the kernel_
 - CALI-9 — Webapp (M2) + SpaceMouse · P1 · M2 · _2026-06-11 · FastAPI + three.js viewer, refine loop, WebHID SpaceMouse_
 - CALI-1.M1 — Refinement loop · P1 · M1 · _2026-06-11 · NL refine → re-derive → regenerate → re-measure_
@@ -31,11 +31,11 @@ _Last updated: 2026-06-12_
 - CALI-1 — Spec schema · P0 · M0 · _2026-06-11_
 - CALI-0 — Project scaffolding · P0 · M0 · _2026-06-11_
 
-> **M0 + M1 + M2 done.** loose idea → spec → mesh → measure → refine → STL, now with a **3D webapp**:
-> `make serve` → http://127.0.0.1:8000 → intent box, 3D viewer (three.js), measurement report, refine
-> box, STL download, and **3Dconnexion SpaceMouse** (WebHID). Full suite **71 passed** in the
-> canonical conda env (cadquery 2.7.0 / occt 7.8.1).
+> **M0 + M1 + M2 + M3 done.** loose idea → spec → mesh → measure → refine → STL, with a **3D webapp**
+> (`make serve`) and now **fit-to-reference**: import an STL as `role: fixed` and `caliper fit` resizes
+> a part until it clears it (`interference`/`min_clearance` measured exactly on meshes). Full suite
+> **90 passed** in the canonical conda env (cadquery 2.7.0 / occt 7.8.1).
 >
-> **Next milestone — M3 (references):** CALI-10 — import an STL as `role: fixed`, add interference +
-> min_clearance, iterate a part to fit it (the FEA-free Stage 2 loop). Generator-breadth epic CALI-13
-> tracks new primitives + multi-part assemblies for later.
+> **Next — CALI-13 (generator breadth, epic):** primitive & geometry library + multi-part assemblies.
+> The assembly thread reuses CALI-10's interference/clearance substrate (now built) for *our own*
+> generated parts, not just imported STLs. CALI-13 also scopes the first batch of new primitives to add.

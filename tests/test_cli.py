@@ -38,6 +38,37 @@ def test_run_end_to_end_smoke(tmp_path, monkeypatch):
     assert stls, "expected an STL artifact"
 
 
+def test_fit_end_to_end(tmp_path, monkeypatch):
+    pytest.importorskip("cadquery")
+    import trimesh
+
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["run", "a 60 mm corner bracket for 2020 extrusion with four M5 holes",
+                     "--no-llm", "--yes", "--max-iter", "2"]) in (0, 3)
+    # an obstacle that collides with the 60mm flange end → the fit must shrink the bracket to clear it.
+    obstacle = tmp_path / "obstacle.stl"
+    m = trimesh.creation.box(extents=(20, 24, 8))
+    m.apply_translation([52, 0, 2])
+    m.export(str(obstacle))
+    rc = cli.main(["fit", "runs/run_0000", "--ref", f"obstacle={obstacle}",
+                   "--min-clearance", "2", "--max-iter", "6"])
+    assert rc == 0  # converged to a clearing fit
+    # the fitted spec must carry the reference and a fit assertion, and shrink the bracket.
+    from caliper.spec import Spec
+
+    fitted = Spec.load(str(tmp_path / "runs" / "run_0001" / "spec.yaml"))
+    assert any(r.id == "obstacle" for r in fitted.references)
+    assert any("clearance" in a.id for a in fitted.assertions)
+    leg = fitted.parameters["bolt_circle"].init
+    assert leg < 60.0  # resized smaller to fit
+
+
+def test_fit_missing_reference_file_returns_2(capsys):
+    rc = cli.main(["fit", FIXTURE, "--ref", "obstacle=/nonexistent/obstacle.stl"])
+    assert rc == 2
+    assert "not found" in capsys.readouterr().out
+
+
 def test_refine_noop_returns_2(capsys):
     rc = cli.main(["refine", FIXTURE, "paint it a nicer colour", "--no-llm"])
     assert rc == 2
