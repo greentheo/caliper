@@ -16,7 +16,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   hint included). Verified the graceful-failure path in the preview (no driver → clear error, no crash).
   Cannot verify the happy path here — needs Theo's hardware + 3DxWare; phase 2 (camera nav) follows the
   on-screen telemetry. 71 passed.
-- Commit: 5184f31
+- Commit: 9420ca8
 
 ### 2026-06-12 · CALI-9 · webapp fix — vendor three.js locally (no CDN)
 - Bug (real-use): on Theo's machine the Build button did nothing + a 404 in devtools. Cause: three.js
