@@ -3,7 +3,7 @@
 Kanban of every task. One line per card: `CALI-N — title · priority · milestone`.
 Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections as state changes.
 
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-12_
 
 ## 🧊 Backlog
 - CALI-10 — References · P1 · M3
@@ -11,8 +11,11 @@ _Last updated: 2026-06-11_
 - CALI-12 — Threaded / tapped / insert holes · P2 · generator
 - CALI-13 — Primitive & geometry library + multi-part assemblies · P2 · epic (story for later)
 
+## ⏸ Blocked / waiting
+- CALI-14 — SpaceMouse via NL-Proxy (driver coexistence) · P2 · M2 · _phase 1 shipped; phase 2 blocked on Theo's on-screen API telemetry_
+
 ## 🔨 In Progress
-- CALI-14 — SpaceMouse via NL-Proxy (driver coexistence) · P2 · M2 · _phase 1 shipped; phase 2 pending telemetry_
+- _(none)_
 
 ## ✅ Done — Milestones M0 + M1 + M2 complete 🎉
 - CALI-15 — Recent parts (browse / load past runs) · P1 · M2 · _2026-06-12 · list + click-to-load; fixed a hole-count parse that hung the kernel_

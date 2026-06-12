@@ -133,7 +133,10 @@ thread** via CadQuery sweep (heavy mesh, slow — last resort). Add a `hole_styl
 bigger clearance hole.
 
 ## Webapp follow-ups
-### CALI-14 — SpaceMouse via 3Dconnexion NL-Proxy (driver coexistence)  · P2 · M2 · 🔨 in progress
+### CALI-14 — SpaceMouse via 3Dconnexion NL-Proxy (driver coexistence)  · P2 · M2 · ⏸ phase 1 done (`9420ca8`), phase 2 blocked on telemetry
+> **Next action (Theo):** in the webapp pick "Driver / NL-Proxy", accept the cert at
+> `https://127.51.68.120:8181` once, click Connect, and paste back the on-screen `_3Dconnexion` API
+> readout — that unblocks phase 2 (navlib camera wiring). WebHID mode works today (quit 3DxWare).
 The WebHID path (CALI-9) needs the user to **quit 3DxWare** (raw HID can't be shared). This task adds
 the *driver* path so the SpaceMouse works in the browser **and** Fusion/Prusa at once.
 **Research (2026-06-12):** 3Dconnexion's web SDK connects to the **NL-Proxy** at
@@ -153,7 +156,7 @@ proprietary/driver-served.
 **Acceptance:** with 3DxWare running, the browser connects via NL-Proxy (no quitting) and the cap
 navigates the model. Until then the toggle defaults to WebHID and Driver mode is labelled beta.
 
-### CALI-15 — Recent parts (browse / load past runs)  · P1 · M2 · 🔨 in progress
+### CALI-15 — Recent parts (browse / load past runs)  · P1 · M2 · ✅ done (`b582b54`)
 Every run already persists under `runs/<id>/`. Surface them so you pull up a part to view + edit
 instead of always generating new.
 **Acceptance:**
