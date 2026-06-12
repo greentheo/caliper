@@ -67,6 +67,17 @@ cat runs/run_0000/report.txt     # the measurement report
 
 ## 📓 Demo log (newest first)
 
+### 2026-06-11 · refine parser — per-side & word-number hole counts
+**New:** the offline refiner now understands singular "hole", word-numbers ("one"…"ten"), and
+**per-flange** phrasing ("on each side", "per leg"). A single hole per flange is centered by
+construction. **Try:**
+```bash
+make run INTENT="a 60 mm corner bracket for 2020 extrusion with four M5 holes"
+make refine SOURCE=runs/run_0000 INSTRUCTION="only do one hole on each side, in the middle"
+# → hole count 4 → 2 (1 per side), centred; report shows bolt_pattern count=2
+make refine SOURCE=runs/run_0000 INSTRUCTION="put three holes per leg"   # → 6 total
+```
+
 ### 2026-06-11 · M1 — refinement loop
 **New:** `caliper refine` / `make refine`. Apply a plain-English change to a prior run and re-run.
 **Try:**
@@ -75,8 +86,9 @@ make run INTENT="a 60 mm corner bracket for 2020 extrusion with four M5 holes"
 make refine SOURCE=runs/run_0000 INSTRUCTION="make the holes 8mm"
 # verify it changed: the new report shows bolt_pattern diameter=8.0, and runs/run_0001/part.stl differs
 ```
-Recognized tweaks: hole size (`"8mm holes"`, `"M6 holes"`), hole count (`"6 holes"`), bolt spacing
-(`"bigger spacing"`, `"spacing 75mm"`), wall (`"thicker walls"`, `"wall 4.5mm"`), cable bore, ribs.
+Recognized tweaks: hole size (`"8mm holes"`, `"M6 holes"`), hole count (`"6 holes"`, `"one hole per
+side"`, `"three holes per leg"`), bolt spacing (`"bigger spacing"`, `"spacing 75mm"`), wall
+(`"thicker walls"`, `"wall 4.5mm"`), cable bore, ribs. Free-form edits → use the LLM path (drop `--no-llm`).
 
 ### 2026-06-11 · M0 — one-shot loop
 **New:** `caliper run` / `make run`. Idea → spec → build → measure → report → STL, with the

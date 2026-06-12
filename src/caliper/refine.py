@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .intake import _M_CLEARANCE
+from .intake import _M_CLEARANCE, _WORD_NUM
 from .spec import Assertion, Spec
 
 
@@ -143,13 +143,24 @@ def offline_refine(spec: Spec, instruction: str) -> RefineResult:
         _set(s, "hole_d", after, template={"type": "fixed", "unit": "mm"})
         _record("hole Ø", before, _get(s, "hole_d"), " mm")
 
-    # --- hole count --- (\b avoids matching the '6' in 'M6 holes')
-    cnt = re.search(r"\b(\d+)\s+holes\b", text)
+    # --- hole count: "N holes", "one hole per side", "two holes each leg" ---
+    # \b avoids matching the '6' in 'M6 holes'; singular 'hole' and word-numbers are accepted.
+    cnt = re.search(r"\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+holes?\b", text)
     if cnt:
-        before = _get(s, "hole_count")
-        after = int(cnt.group(1))
-        _set(s, "hole_count", after, template={"type": "fixed"})
-        _record("hole count", before, after)
+        tok = cnt.group(1)
+        n = int(tok) if tok.isdigit() else _WORD_NUM.get(tok)
+        if n:
+            # "per side / each leg / both sides" means that count is PER FLANGE → double for the total
+            per_side = bool(re.search(r"each (side|leg|flange|arm|face)|per (side|leg|flange|arm|face)"
+                                      r"|on each|both sides|either side", text))
+            before = _get(s, "hole_count")
+            after = 2 * n if per_side else n
+            _set(s, "hole_count", after, template={"type": "fixed"})
+            if before != after:
+                changes.append(f"hole count {before} → {after}" + (f" ({n} per side)" if per_side else ""))
+            # a single hole per flange sits centred by construction — acknowledge "in the middle"
+            if per_side and n == 1 and re.search(r"middle|cent(er|re)", text):
+                changes.append("hole position: centred on each flange")
 
     # --- wall thickness / sturdiness ---
     if re.search(r"\bwall|thick|thin|sturd|strong|stiff|rigid", text):

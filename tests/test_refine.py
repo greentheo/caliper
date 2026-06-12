@@ -48,6 +48,20 @@ def test_hole_count_change():
     assert "count=6" in bolt.expr
 
 
+def test_one_hole_per_side_is_two_total():
+    r = refine.offline_refine(_base(), "only do one hole on each side, directly in the middle")
+    assert r.changed
+    assert _get(r.spec, "hole_count") == 2  # 1 per flange × 2 flanges
+    bolt = next(a for a in r.spec.assertions if a.id == "bolt_pattern")
+    assert "count=2" in bolt.expr
+    assert any("centred" in c for c in r.changes)
+
+
+def test_word_number_and_per_side_count():
+    r = refine.offline_refine(_base(), "put three holes per leg")
+    assert _get(r.spec, "hole_count") == 6  # three per leg × 2
+
+
 def test_thicker_walls_relative():
     r = refine.offline_refine(_base(), "make the walls thicker")
     assert _get(r.spec, "wall") == 4.0  # 3 + 1
