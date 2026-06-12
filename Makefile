@@ -1,17 +1,30 @@
 # Caliper — dev entrypoints. The loop is the product; these keep the dev loop tight.
 # No activation needed: targets resolve the env python (override with CALIPER_PY=...).
-.PHONY: test review loop board fmt run refine install
+.PHONY: test review loop board fmt run refine run-llm refine-llm install
 
 CALIPER_PY ?= $(firstword $(wildcard /opt/anaconda3/envs/caliper/bin/python $(HOME)/anaconda3/envs/caliper/bin/python $(HOME)/miniforge3/envs/caliper/bin/python) python)
+
+# Intake/refine use the deterministic OFFLINE parser by default (reproducible). Pass LLM=1 to route
+# through Claude instead (needs ANTHROPIC_API_KEY — see .env.example). `run-llm`/`refine-llm` are aliases.
+NOLLM := --no-llm
+ifdef LLM
+NOLLM :=
+endif
 
 install: ## editable-install caliper into the env (makes the `caliper` command available)
 	$(CALIPER_PY) -m pip install -e ".[dev]"
 
-run:    ## run the loop on an intent: make run INTENT="a 60mm bracket for 2020 with four M5 holes"
-	$(CALIPER_PY) -m caliper.cli run "$(INTENT)" --no-llm --yes
+run:    ## run on an intent: make run INTENT="a 60mm bracket ... four M5 holes"  [LLM=1 → Claude path]
+	$(CALIPER_PY) -m caliper.cli run "$(INTENT)" $(NOLLM) --yes
 
-refine: ## refine a prior run: make refine SOURCE=runs/run_0000 INSTRUCTION="make the holes 8mm"
-	$(CALIPER_PY) -m caliper.cli refine "$(SOURCE)" "$(INSTRUCTION)" --no-llm
+refine: ## refine a prior run: make refine SOURCE=runs/run_0000 INSTRUCTION="..."  [LLM=1 → Claude path]
+	$(CALIPER_PY) -m caliper.cli refine "$(SOURCE)" "$(INSTRUCTION)" $(NOLLM)
+
+run-llm:    ## run via the Claude LLM path (needs ANTHROPIC_API_KEY): make run-llm INTENT="..."
+	@$(MAKE) run LLM=1 INTENT="$(INTENT)"
+
+refine-llm: ## refine via Claude: make refine-llm SOURCE=runs/run_0000 INSTRUCTION="..."
+	@$(MAKE) refine LLM=1 SOURCE="$(SOURCE)" INSTRUCTION="$(INSTRUCTION)"
 
 test:   ## regression guard: pytest only
 	bash nightshift/hooks/regression_guard.sh

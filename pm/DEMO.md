@@ -41,6 +41,13 @@ The CLI auto-loads `.env` from the repo root (or cwd). Or export it for the sess
 `export ANTHROPIC_API_KEY=sk-ant-...`. Override the model with `CALIPER_MODEL=...`; set
 `CALIPER_DEBUG=1` to see why an LLM call fell back to offline. `.env` is gitignored.
 
+Then drive the Claude path through `make` with the `*-llm` targets (or `LLM=1` on `run`/`refine`):
+```bash
+make run-llm    INTENT="a sturdy 80mm bracket for 3030 with countersunk M6 holes"
+make refine-llm SOURCE=runs/run_0000 INSTRUCTION="round the outer corners and lighten it"
+# equivalently:  make refine LLM=1 SOURCE=... INSTRUCTION=...
+```
+
 ---
 
 ## ▶️ Try it (current build)
