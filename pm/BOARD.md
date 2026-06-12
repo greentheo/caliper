@@ -3,13 +3,15 @@
 Kanban of every task. One line per card: `CALI-N — title · priority · milestone`.
 Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections as state changes.
 
-_Last updated: 2026-06-12 (CALI-10 / M3 references shipped)_
+_Last updated: 2026-06-12 (CALI-19 tolerances & fits shipped; single-part loop complete)_
+
+## 🎯 Next shift — the assembly spine (do these three)
+- CALI-20 — Assembly model: N parts + named mates/interfaces + assembly-level assertions (generalize CALI-10 to N bodies) · P1 · assembly-spine — _the heart of the north star_
+- CALI-22 — Author-loop fit & refine: route fit/refine of LLM-authored parts through `improve()` (seeded from part.py) so they edit the real part, not a bracket · P1 · generator (guarded now; the bug Theo hit)
+- CALI-19b — Multi-parameter optimizer (nevergrad/scipy): joint tuning of N continuous params for coupled fits · P2 · assembly-spine (1-D + iterative-refine shipped in CALI-19)
 
 ## 🧊 Backlog
-- CALI-22 — Author-loop fit & refine: route fit/refine of LLM-authored parts through `improve()` (seeded from part.py) so they edit the real part, not a bracket · P1 · generator (guarded now; bug they hit)
-- CALI-19b — Multi-parameter optimizer (nevergrad/scipy): joint tuning of N continuous params for coupled fits · P2 · assembly-spine (1-D + iterative-refine ships in CALI-19)
-- CALI-20 — Assembly model: N parts + named mates/interfaces + assembly-level assertions (generalize CALI-10 to N bodies) · P1 · assembly-spine
-- CALI-21 — Insert-into-assembly: author a new part against two named interfaces at a target fit · P1 · assembly-spine ("insert a support between the wheel and the XYZ assembly")
+- CALI-21 — Insert-into-assembly: author a new part against two named interfaces at a target fit · P1 · assembly-spine ("insert a support between the wheel and the XYZ assembly") — _needs CALI-20 + CALI-22_
 - CALI-18 — `largest_through_bore` counts a tube's OUTER wall as a bore (both are cylinders); distinguish interior bores · P2 · measure (found authoring a grommet)
 - CALI-11 — Variable bend angle (e.g. 45°) · P2 · generator
 - CALI-12 — Threaded / tapped / insert holes · P2 · generator
@@ -39,11 +41,15 @@ _Last updated: 2026-06-12 (CALI-10 / M3 references shipped)_
 - CALI-1 — Spec schema · P0 · M0 · _2026-06-11_
 - CALI-0 — Project scaffolding · P0 · M0 · _2026-06-11_
 
-> **M0 + M1 + M2 + M3 done.** loose idea → spec → mesh → measure → refine → STL, with a **3D webapp**
-> (`make serve`) and now **fit-to-reference**: import an STL as `role: fixed` and `caliper fit` resizes
-> a part until it clears it (`interference`/`min_clearance` measured exactly on meshes). Full suite
-> **90 passed** in the canonical conda env (cadquery 2.7.0 / occt 7.8.1).
+> **The single-part loop is complete.** loose idea → spec → **LLM-authored geometry** → measured →
+> **revised until correct** → **dimensioned to a fit**. Two generators: the hardcoded **bracket**
+> (`run`/`refine`/`fit`, offline + optimizer) and the **LLM author** (`gen` / ✦ author any part — writes
+> the CadQuery itself, self-heals build errors AND failing measurements). Plus a **3D webapp** with a
+> gizmo **fit-to-reference** UI and **fit classes** (press/slip/free…). Full suite **121 passed**
+> (cadquery 2.7.0 / occt 7.8.1).
 >
-> **Next — CALI-13 (generator breadth, epic):** primitive & geometry library + multi-part assemblies.
-> The assembly thread reuses CALI-10's interference/clearance substrate (now built) for *our own*
-> generated parts, not just imported STLs. CALI-13 also scopes the first batch of new primitives to add.
+> **Next — the assembly spine:** **CALI-20** (assembly model: N parts + mates + assembly assertions, the
+> heart), **CALI-22** (author-loop fit/refine so authored parts are fully editable), **CALI-19b**
+> (multi-param optimizer for coupled fits). Together they reach **CALI-21** — "insert a support between
+> the wheel and the XYZ assembly." The lesson from the phone stand: complexity scales by *decomposition*
+> into small, well-fit parts, not by one ever-bigger monolith.
