@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 // ---------------------------------------------------------------- DOM
 const $ = (id) => document.getElementById(id);
@@ -8,6 +9,10 @@ const intentEl = $('intent'), refineEl = $('refine'), statusEl = $('status');
 const runBtn = $('runBtn'), refineBtn = $('refineBtn'), useLLM = $('useLLM');
 const reportEl = $('report'), specEl = $('spec'), downloadEl = $('download');
 const spaceBtn = $('spaceBtn'), spaceStatus = $('spaceStatus'), axesEl = $('axes');
+// fit-to-reference (M3 / CALI-10)
+const refFile = $('refFile'), fitBtn = $('fitBtn'), fitClear = $('fitClear');
+const fitNoOverlap = $('fitNoOverlap'), fitHint = $('fitHint');
+const gizmoEl = $('gizmo'), gMove = $('gMove'), gRot = $('gRot'), gClear = $('gClear');
 
 let currentRunId = null;
 
@@ -68,6 +73,10 @@ function applyResult(data) {
   } else {
     downloadEl.style.display = 'none';
   }
+  // render any imported references at their pose (or clear a stale one on a plain build/refine)
+  renderReferences(data.references);
+  fitBtn.disabled = !(currentRunId && refMesh);
+  updateFitHint();
   markActiveRun();
   refreshRuns();  // keep the Recent list current
 }
@@ -155,29 +164,147 @@ scene.add(modelGroup);
 // with the part — keeps pan/zoom (camera) and rotation (group) visually consistent.
 const grid = new THREE.GridHelper(400, 20, 0x283039, 0x1b2127);
 modelGroup.add(grid);
-let mesh = null;
+let partMesh = null;      // the generated part (rendered in its TRUE build frame, corner at origin)
+let refMesh = null;       // the imported reference, posable with the gizmo (null when none)
+let refBytes = null;      // the reference STL bytes — base64'd and sent on Fit
+
+// Both part and reference live in modelGroup at their real coordinates (no recentring), so the pose
+// you set in the viewer is exactly the pose the backend measures — what you see is what's measured.
+const partMat = () => new THREE.MeshStandardMaterial({ color: 0x4ea1ff, metalness: 0.1, roughness: 0.55 });
+const refMat = () => new THREE.MeshStandardMaterial({ color: 0xffb454, transparent: true, opacity: 0.45, roughness: 0.85 });
+
+// gizmo to place the reference in the part's frame (M3). Added to the scene (not modelGroup) but it
+// tracks the reference's world matrix; reading refMesh.position gives the pose in the part frame.
+const gizmo = new TransformControls(camera, renderer.domElement);
+gizmo.setSpace('local');
+gizmo.setSize(0.8);
+gizmo.addEventListener('dragging-changed', (e) => { controls.enabled = !e.value; });
+gizmo.addEventListener('objectChange', updateFitHint);
+scene.add(gizmo);
 
 const stlLoader = new STLLoader();
+
 async function loadSTL(url) {
   const buf = await (await fetch(url)).arrayBuffer();
-  const geom = stlLoader.parse(buf);
-  geom.center();
-  geom.computeVertexNormals();
-  if (mesh) modelGroup.remove(mesh);
-  mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0x4ea1ff, metalness: 0.1, roughness: 0.55 }));
-  modelGroup.add(mesh);
-  modelGroup.rotation.set(0, 0, 0);
-  frameObject(geom);
+  setPart(stlLoader.parse(buf));
 }
 
-function frameObject(geom) {
-  geom.computeBoundingSphere();
-  const r = geom.boundingSphere.radius || 50;
-  controls.target.set(0, 0, 0);
-  const d = r * 2.6;
-  camera.position.set(d * 0.6, d * 0.5, d * 0.9);
+function setPart(geom) {
+  geom.computeVertexNormals();
+  if (partMesh) modelGroup.remove(partMesh);
+  partMesh = new THREE.Mesh(geom, partMat());
+  modelGroup.add(partMesh);
+  modelGroup.rotation.set(0, 0, 0);
+  frameScene();
+}
+
+function frameScene() {
+  const box = new THREE.Box3();
+  if (partMesh) box.expandByObject(partMesh);
+  if (refMesh) box.expandByObject(refMesh);
+  if (box.isEmpty()) return;
+  const c = box.getCenter(new THREE.Vector3());
+  const r = box.getSize(new THREE.Vector3()).length() / 2 || 50;
+  controls.target.copy(c);
+  const d = r * 2.4;
+  camera.position.set(c.x + d * 0.6, c.y + d * 0.5, c.z + d * 0.9);
   camera.near = r / 100; camera.far = r * 100; camera.updateProjectionMatrix();
   controls.update();
+}
+
+// ---------------------------------------------------------------- reference + fit (M3)
+function clearReference() {
+  gizmo.detach();
+  if (refMesh) { modelGroup.remove(refMesh); refMesh = null; }
+  refBytes = null;
+  if (refFile) refFile.value = '';
+  gizmoEl.style.display = 'none';
+  fitBtn.disabled = true;
+  updateFitHint();
+}
+
+function addReference(geom, bytes, pose) {
+  if (refMesh) modelGroup.remove(refMesh);
+  geom.computeVertexNormals();
+  refMesh = new THREE.Mesh(geom, refMat());
+  if (pose) {
+    refMesh.position.fromArray(pose.position || [0, 0, 0]);
+    const r = (pose.rotation || [0, 0, 0]).map(THREE.MathUtils.degToRad);
+    refMesh.rotation.set(r[0], r[1], r[2], 'XYZ');
+  }
+  modelGroup.add(refMesh);
+  if (bytes) refBytes = bytes;
+  gizmo.attach(refMesh);
+  setGizmoMode('translate');
+  gizmoEl.style.display = '';
+  fitBtn.disabled = !currentRunId;
+  frameScene();
+  updateFitHint();
+}
+
+async function onRefFile(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  const bytes = await file.arrayBuffer();
+  let geom;
+  try { geom = stlLoader.parse(bytes); }
+  catch (e) { window.showErr('could not parse STL: ' + e.message); return; }
+  addReference(geom, bytes, null);
+  done('reference added — drag/rotate it into place, then Fit');
+}
+
+function refPose() {
+  const p = refMesh.position, e = refMesh.rotation;
+  return {
+    position: [p.x, p.y, p.z].map((v) => +v.toFixed(4)),
+    rotation: [e.x, e.y, e.z].map((v) => +THREE.MathUtils.radToDeg(v).toFixed(3)),
+  };
+}
+
+function updateFitHint() {
+  if (!refMesh) { fitHint.textContent = 'add an STL, place it, then Fit'; return; }
+  if (!currentRunId) { fitHint.textContent = 'build or load a part first'; return; }
+  fitHint.textContent = `ref @ [${refPose().position.join(', ')}] mm`;
+}
+
+function setGizmoMode(mode) {
+  gizmo.setMode(mode);
+  gMove.classList.toggle('gactive', mode === 'translate');
+  gRot.classList.toggle('gactive', mode === 'rotate');
+}
+
+function bytesToB64(buf) {
+  let bin = ''; const arr = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for (let i = 0; i < arr.length; i += chunk) bin += String.fromCharCode.apply(null, arr.subarray(i, i + chunk));
+  return btoa(bin);
+}
+
+async function doFit() {
+  if (!currentRunId || !refMesh || !refBytes) return;
+  fitBtn.disabled = true; busy('fitting…');
+  try {
+    const pose = refPose();
+    const data = await postJSON('/api/fit', {
+      run_id: currentRunId, reference_b64: bytesToB64(refBytes), reference_id: 'reference',
+      position: pose.position, rotation: pose.rotation,
+      no_overlap: fitNoOverlap.checked,
+      min_clearance: fitClear.value === '' ? null : parseFloat(fitClear.value),
+    });
+    applyResult(data);
+    done(`${data.status} · fit · ${data.iterations} iter`);
+  } catch (e) { fail(e.message); }
+  finally { fitBtn.disabled = !(currentRunId && refMesh); }
+}
+
+// render server-returned references (after a fit, or when loading a fit run) at their stored pose
+async function renderReferences(refs) {
+  const r = refs && refs[0];   // v1: a single reference
+  if (!r || !r.stl_url) { clearReference(); return; }
+  try {
+    const bytes = await (await fetch(r.stl_url + '?t=' + Date.now())).arrayBuffer();
+    addReference(stlLoader.parse(bytes), bytes, { position: r.position, rotation: r.rotation });
+  } catch (e) { /* best-effort render */ }
 }
 
 function resize() {
@@ -350,6 +477,18 @@ refineBtn.addEventListener('click', doRefine);
 refineEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doRefine(); });
 intentEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) doRun(); });
 spaceBtn.addEventListener('click', onConnectClick);
+
+// fit-to-reference wiring (M3)
+refFile.addEventListener('change', onRefFile);
+fitBtn.addEventListener('click', doFit);
+gMove.addEventListener('click', () => setGizmoMode('translate'));
+gRot.addEventListener('click', () => setGizmoMode('rotate'));
+gClear.addEventListener('click', clearReference);
+addEventListener('keydown', (e) => {
+  if (!refMesh || /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+  if (e.key === 'w' || e.key === 'W') setGizmoMode('translate');
+  else if (e.key === 'e' || e.key === 'E' || e.key === 'r' || e.key === 'R') setGizmoMode('rotate');
+});
 
 fetch('/api/health').then((r) => r.json()).then((d) => {
   const h = $('health'); h.textContent = d.ok ? 'ready' : 'down'; if (d.ok) h.className = 'health ok';

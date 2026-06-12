@@ -203,7 +203,9 @@ def load_references(spec: Spec, base_dir: str = ".") -> dict[str, Geometry]:
     refs: dict[str, Geometry] = {}
     for ref in spec.references:
         path = ref.file if os.path.isabs(ref.file) else os.path.join(base_dir, ref.file)
-        refs[ref.id] = Geometry.from_stl(path)
+        refs[ref.id] = Geometry.from_stl_posed(
+            path, getattr(ref, "position", None), getattr(ref, "rotation", None)
+        )
     return refs
 
 

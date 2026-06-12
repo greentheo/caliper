@@ -123,46 +123,13 @@ def _cmd_refine(args) -> int:
     return _run_and_emit(res.spec, args.max_iter)
 
 
-def _pick_free_param(spec) -> str | None:
-    from .decide import FIT_PARAM_PREFERENCE
-
-    for name in FIT_PARAM_PREFERENCE:
-        if name in spec.parameters:
-            return name
-    return next(iter(spec.parameters), None)
-
-
-def _ensure_tunable(spec, name: str) -> str | None:
-    """Make ``name`` a continuous parameter so the optimizer can resize the part to fit.
-
-    A fit needs a free dimension; intake often locks the bracket size as ``fixed``. Promote it to a
-    continuous range around its current value (shrink to clear, room to grow) without touching the
-    rest of the spec.
-    """
-    from .spec import ContinuousParam
-
-    if not name or name not in spec.parameters:
-        return None
-    prm = spec.parameters[name]
-    if getattr(prm, "type", None) == "continuous":
-        return name
-    v = float(getattr(prm, "init", getattr(prm, "value", 60.0)) or 60.0)
-    spec.parameters[name] = ContinuousParam(
-        min=max(8.0, round(v * 0.3, 1)), max=round(v * 1.5, 1), init=v,
-        unit=getattr(prm, "unit", None) or "mm",
-    )
-    return name
-
-
 def _cmd_fit(args) -> int:
     """Attach imported STL reference(s) to a prior part and iterate it to fit them (CALI-10)."""
-    from .measure import Geometry
-    from .spec import Assertion, Reference
+    from .fit import attach_reference, ensure_tunable, pick_free_param
 
     spec = _load_spec_from_source(args.source)
     # default constraint: if none specified, enforce no collision with the reference.
     no_overlap = args.no_overlap or args.min_clearance is None
-    references: dict = {}
     summary: list[str] = []
     for item in args.ref:
         rid, _, path = item.partition("=")
@@ -173,24 +140,14 @@ def _cmd_fit(args) -> int:
         if not os.path.isfile(path):
             print(f"reference file not found: {path}")
             return 2
-        abspath = os.path.abspath(path)
-        spec.references = [r for r in spec.references if r.id != rid]  # replace same-id
-        spec.references.append(Reference(id=rid, file=abspath))
-        references[rid] = Geometry.from_stl(abspath)
-        # drop any prior fit assertions for this id, then add the requested ones
-        spec.assertions = [a for a in spec.assertions if not a.id.startswith(f"{rid}_")]
-        if no_overlap:
-            spec.assertions.append(Assertion(id=f"{rid}_no_interference", expr=f"interference({rid}) <= 0"))
-        if args.min_clearance is not None:
-            spec.assertions.append(
-                Assertion(id=f"{rid}_clearance", expr=f"min_clearance({rid}) >= {args.min_clearance}")
-            )
+        attach_reference(spec, rid, os.path.abspath(path),
+                         min_clearance=args.min_clearance, no_overlap=no_overlap)
         summary.append(f"{rid} ← {path}")
 
-    if not references:
+    if not summary:
         print("no references given; use --ref ID=path/to/reference.stl (repeatable)")
         return 2
-    free = _ensure_tunable(spec, args.free or _pick_free_param(spec))
+    free = ensure_tunable(spec, args.free or pick_free_param(spec))
     print(f"▶ fitting {args.source} to: {', '.join(summary)}")
     if free:
         p = spec.parameters[free]
@@ -202,7 +159,8 @@ def _cmd_fit(args) -> int:
         if any(a.id.endswith(s) for s in ("_no_interference", "_clearance")):
             print(f"  • {a.id}: {a.expr}")
     print()
-    return _run_and_emit(spec, args.max_iter, references=references)
+    # references load lazily (with their pose) inside make_eval_fn from spec.references.
+    return _run_and_emit(spec, args.max_iter)
 
 
 def _cmd_serve(args) -> int:

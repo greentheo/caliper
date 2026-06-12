@@ -55,6 +55,50 @@ def test_run_then_refine_and_stl(tmp_path, monkeypatch):
     assert any("8" in str(c) for c in ref.json()["changes"])
 
 
+def test_fit_unknown_run_404():
+    r = _client().post("/api/fit", json={"run_id": "run_9999", "reference_b64": ""})
+    assert r.status_code == 404
+
+
+def test_fit_end_to_end(tmp_path, monkeypatch):
+    pytest.importorskip("cadquery")
+    import base64
+
+    import trimesh
+
+    monkeypatch.setenv("CALIPER_RUNS", str(tmp_path / "runs"))
+    c = _client()
+    run = c.post("/api/run", json={
+        "intent": "a 60 mm corner bracket for 2020 extrusion with four M5 holes",
+        "no_llm": True, "max_iter": 1,
+    })
+    rid = run.json()["run_id"]
+
+    # a reference box centered on its own origin; pose it against the bracket flange end.
+    m = trimesh.creation.box(extents=(20, 24, 8))
+    b64 = base64.b64encode(m.export(file_type="stl")).decode()
+
+    fit = c.post("/api/fit", json={
+        "run_id": rid, "reference_b64": b64, "reference_id": "obstacle",
+        "position": [52, 0, 2], "rotation": [0, 0, 0], "min_clearance": 2, "max_iter": 6,
+    })
+    assert fit.status_code == 200, fit.text
+    body = fit.json()
+    assert body["build_ok"] and body["status"] == "passed"
+    # the reference comes back with a pose + a serve url, and is fetchable for rendering
+    assert body["references"] and body["references"][0]["id"] == "obstacle"
+    ref_url = body["references"][0]["stl_url"]
+    assert c.get(ref_url).status_code == 200
+    # the clearance assertion is satisfied and the bracket shrank to fit
+    assert any(r["id"] == "obstacle_clearance" and r["status"] == "pass"
+               for r in body["report"]["results"])
+    assert "bolt_circle: 60" not in body["spec_yaml"]  # resized off the original 60mm
+
+    # reloading the fit run returns the reference pose too
+    got = c.get(f"/api/runs/{body['run_id']}").json()
+    assert got["references"] and got["references"][0]["position"] == [52, 0, 2]
+
+
 def test_list_runs_empty_when_no_runs(tmp_path, monkeypatch):
     monkeypatch.setenv("CALIPER_RUNS", str(tmp_path / "runs"))
     r = _client().get("/api/runs")

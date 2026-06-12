@@ -44,6 +44,20 @@ class Geometry:
         return cls(mesh=trimesh.load(path, force="mesh"))
 
     @classmethod
+    def from_stl_posed(cls, path: str, position=None, rotation_deg=None) -> "Geometry":
+        """Load an STL and place it by ``position`` (mm) + ``rotation_deg`` (three.js XYZ euler).
+
+        Baking the pose at load time keeps the fit probes pose-agnostic — the geometry handed to
+        ``interference``/``min_clearance`` is already where the user put it in the viewer (CALI-10).
+        """
+        m = trimesh.load(path, force="mesh")
+        T = pose_matrix(position, rotation_deg)
+        if not np.allclose(T, np.eye(4)):
+            m = m.copy()
+            m.apply_transform(T)
+        return cls(mesh=m)
+
+    @classmethod
     def from_mesh(cls, mesh: trimesh.Trimesh) -> "Geometry":
         return cls(mesh=mesh)
 
@@ -292,6 +306,22 @@ def render_views(g: Geometry, views=("front", "top", "iso"), out_dir: str = "run
 
 _FIT_SAMPLES = 3000  # surface samples per body for the proximity probes (deterministic seeds)
 _FIT_EPS = 1e-6
+
+
+def pose_matrix(position=None, rotation_deg=None) -> np.ndarray:
+    """4×4 transform from a translation (mm) and an XYZ-intrinsic euler rotation (degrees).
+
+    Matches three.js ``object.matrix`` for an Euler of default order ``XYZ`` (rotate about the
+    object's local origin, then translate) so the viewer gizmo and the measured pose agree.
+    """
+    T = np.eye(4)
+    if rotation_deg is not None and any(abs(float(a)) > 1e-9 for a in rotation_deg):
+        from scipy.spatial.transform import Rotation  # lazy: scipy only needed for posed references
+
+        T[:3, :3] = Rotation.from_euler("XYZ", [float(a) for a in rotation_deg], degrees=True).as_matrix()
+    if position is not None:
+        T[:3, 3] = [float(x) for x in position]
+    return T
 
 
 def _as_mesh(obj: Any) -> trimesh.Trimesh:

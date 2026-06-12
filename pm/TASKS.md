@@ -131,8 +131,18 @@ STL intake as `role: fixed`; add `interference` + `min_clearance` measurements a
 **Acceptance:** ✅ import STL as fixed · ✅ interference + min_clearance measured + asserted · ✅ a
 part iterates to fit a reference (60mm bracket → 39mm to clear a block with 2mm clearance).
 
-**Follow-ups (not blocking):** webapp fit UI (upload a reference STL + fit in the browser); multiple
-references at once is supported in the loop but untested at scale; penetration depth is sampled
+**Webapp fit UI (shipped):** `POST /api/fit` (base64 reference STL + pose + clearance) + a browser
+flow — import an STL, drag/rotate it with a **TransformControls gizmo** (vendored, r160), Fit resizes
+the part and re-renders. References carry a **pose** (`position` + `rotation` on `Reference`, three.js
+XYZ euler) baked in at load (`measure.pose_matrix`/`from_stl_posed`), so what you place in 3D is
+exactly what's measured. The viewer now renders the part in its **true build frame** (no recentring)
+so part + reference share one coordinate system. Reference STL + pose persist in the run dir/meta and
+re-render on reload. Verified in-browser (build → add ref → Fit → load fit run, ALL PASS).
+
+**Follow-ups (not blocking):** `/api/fit` is synchronous and can be **slow for complex references**
+(repeated mesh booleans × optimizer samples — a coincident full-bracket reference took ~30s; a simple
+obstacle box is seconds) — consider fewer fit-grid samples or a background job + progress; multiple
+references render one-at-a-time in the UI (loop supports N); penetration depth is sampled
 (approximate) — fine for the pass/fail gate, exact depth would need a boolean.
 
 ---

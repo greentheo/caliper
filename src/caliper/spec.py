@@ -73,11 +73,19 @@ Parameter = Annotated[
 
 
 class Reference(_Base):
-    """An imported fixed part (STL). Mate to it; never intersect it."""
+    """An imported fixed part (STL). Mate to it; never intersect it.
+
+    ``position`` (mm) and ``rotation`` (degrees, three.js ``XYZ`` intrinsic euler) place the reference
+    in the part's coordinate frame — the part is the datum at the origin, the reference is posed
+    relative to it. The fit probes (``interference`` / ``min_clearance``) measure against the *posed*
+    geometry, so the pose you set in the viewer is exactly what's measured (CALI-10).
+    """
 
     id: str
     file: str
     role: Literal["fixed"] = "fixed"
+    position: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
+    rotation: list[float] = Field(default_factory=lambda: [0.0, 0.0, 0.0])
 
 
 class Assertion(_Base):

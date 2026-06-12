@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import os
 
+from typing import Optional
+
 from pydantic import BaseModel
 
 from . import generate
@@ -36,6 +38,18 @@ class RefineRequest(BaseModel):
     no_llm: bool = True
     max_iter: int = 4
 
+
+class FitRequest(BaseModel):
+    run_id: str                       # the part to fit
+    reference_b64: str                # the reference STL (base64; may be a data: URL)
+    reference_id: str = "reference"
+    position: list[float] = [0.0, 0.0, 0.0]   # mm, in the part's frame
+    rotation: list[float] = [0.0, 0.0, 0.0]   # degrees, three.js XYZ euler
+    min_clearance: Optional[float] = None     # require min_clearance(ref) >= this
+    no_overlap: bool = True                   # require interference(ref) <= 0
+    free: Optional[str] = None                # parameter to resize (default: auto size param)
+    max_iter: int = 6
+
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
 STATIC_DIR = os.path.join(WEB_DIR, "static")
 
@@ -54,20 +68,42 @@ def _next_run() -> tuple[str, str]:
 
 
 def _execute(spec: Spec, max_iter: int, extra: dict) -> dict:
-    """Run the loop on a spec, persist the run, and shape the JSON response."""
+    """Run the loop on a spec, persist the run, and shape the JSON response.
+
+    ``extra["references"]`` (used by the fit path) is a list of ``{id, file, position, rotation}``;
+    each reference STL is copied into the run dir so the part is self-contained on reload, and the
+    poses are recorded in meta + the response so the viewer can re-render the reference where it sits.
+    """
     import json
+    import shutil
     from datetime import datetime
 
+    # references load lazily (with pose) inside make_eval_fn from spec.references.
     result = run_loop(spec, make_eval_fn(), max_iter=max_iter)
     build = generate.build(result.spec)
     run_id, out_dir = _next_run()
     persist_run(out_dir, result.spec, result.report, build.geometry if build.build_ok else None)
+
+    # copy any reference STLs into the run dir and build their viewer metadata (pose + serve url)
+    refs_meta = []
+    for rinfo in extra.pop("references", []):
+        dst = os.path.join(out_dir, f"ref_{rinfo['id']}.stl")
+        try:
+            shutil.copyfile(rinfo["file"], dst)
+        except Exception:
+            continue
+        refs_meta.append({
+            "id": rinfo["id"], "position": rinfo.get("position", [0, 0, 0]),
+            "rotation": rinfo.get("rotation", [0, 0, 0]),
+            "stl_url": f"/api/runs/{run_id}/ref/{rinfo['id']}.stl",
+        })
+
     # meta.json powers the Recent-parts list (CALI-15) without rebuilding
     meta = {
         "run_id": run_id, "part": result.spec.part, "status": result.status,
         "source": extra.get("source", ""), "label": extra.get("label", "") or result.spec.intent,
         "changes": extra.get("changes", []), "created": datetime.now().isoformat(timespec="seconds"),
-        "build_ok": build.build_ok,
+        "build_ok": build.build_ok, "references": refs_meta,
     }
     with open(os.path.join(out_dir, "meta.json"), "w") as f:
         json.dump(meta, f)
@@ -80,6 +116,7 @@ def _execute(spec: Spec, max_iter: int, extra: dict) -> dict:
         "stl_url": f"/api/runs/{run_id}/part.stl" if build.build_ok else None,
         "build_ok": build.build_ok,
         "error": "" if build.build_ok else build.error,
+        "references": refs_meta,
         **extra,
     }
 
@@ -122,6 +159,48 @@ def create_app():
         return _execute(res.spec, req.max_iter,
                         {"source": res.source, "changes": res.changes, "questions": [],
                          "label": req.instruction})
+
+    @app.post("/api/fit")
+    def fit(req: FitRequest):
+        import base64
+
+        from .fit import attach_reference, ensure_tunable, pick_free_param
+
+        spec_path = os.path.join(_runs_dir(), req.run_id, "spec.yaml")
+        if not os.path.isfile(spec_path):
+            raise HTTPException(status_code=404, detail=f"unknown run {req.run_id}")
+        spec = Spec.load(spec_path)
+
+        try:
+            raw = base64.b64decode(req.reference_b64.split(",")[-1])
+        except Exception:
+            raise HTTPException(status_code=400, detail="reference_b64 is not valid base64")
+        if not raw:
+            raise HTTPException(status_code=400, detail="reference STL is empty")
+        safe = "".join(c for c in req.reference_id if c.isalnum() or c in "-_") or "reference"
+        refs_dir = os.path.join(_runs_dir(), "_refs")
+        os.makedirs(refs_dir, exist_ok=True)
+        ref_path = os.path.abspath(os.path.join(refs_dir, f"{req.run_id}_{safe}.stl"))
+        with open(ref_path, "wb") as f:
+            f.write(raw)
+
+        no_overlap = req.no_overlap or req.min_clearance is None
+        attach_reference(spec, safe, ref_path, position=req.position, rotation=req.rotation,
+                         min_clearance=req.min_clearance, no_overlap=no_overlap)
+        ensure_tunable(spec, req.free or pick_free_param(spec))
+        return _execute(spec, req.max_iter, {
+            "source": f"fit {req.run_id}", "changes": [], "questions": [], "label": f"fit → {safe}",
+            "references": [{"id": safe, "file": ref_path,
+                            "position": req.position, "rotation": req.rotation}],
+        })
+
+    @app.get("/api/runs/{run_id}/ref/{ref_id}.stl")
+    def ref_stl(run_id: str, ref_id: str):
+        safe = "".join(c for c in ref_id if c.isalnum() or c in "-_")
+        path = os.path.join(_runs_dir(), run_id, f"ref_{safe}.stl")
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail="no such reference")
+        return FileResponse(path, media_type="model/stl")
 
     @app.get("/api/runs")
     def list_runs(limit: int = 40):
@@ -177,6 +256,7 @@ def create_app():
             "build_ok": os.path.isfile(os.path.join(d, "part.stl")),
             "status": meta.get("status", ""), "source": meta.get("source", ""),
             "changes": meta.get("changes", []), "questions": [],
+            "references": meta.get("references", []),
         }
 
     @app.get("/api/runs/{run_id}/part.stl")
