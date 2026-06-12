@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Optional
 
-from . import measure
+from . import measure, tolerance
 from .measure import Geometry
 from .spec import Spec
 
@@ -118,6 +118,17 @@ def _margin(node: ast.AST, ctx: dict) -> tuple[Optional[float], Any]:
             return -abs(float(lhs - rhs)), lhs
         if op is ast.NotEq:
             return abs(float(lhs - rhs)), lhs
+    if isinstance(node, ast.Compare) and len(node.ops) == 2:
+        # a two-sided band `lo <= x <= hi` (fits/tolerances, CALI-19): the middle term is the
+        # measurement; margin is the signed distance to the *nearest* bound (negative ⇒ outside).
+        lo = _eval(node.left, ctx)
+        mid = _eval(node.comparators[0], ctx)
+        hi = _eval(node.comparators[1], ctx)
+        ops = [type(o) for o in node.ops]
+        if all(o in (ast.Lt, ast.LtE) for o in ops):       # lo <= x <= hi
+            return float(min(mid - lo, hi - mid)), mid
+        if all(o in (ast.Gt, ast.GtE) for o in ops):        # hi >= x >= lo
+            return float(min(lo - mid, mid - hi)), mid
     # bare bool / call / non-comparison
     return None, _eval(node, ctx)
 
@@ -233,6 +244,10 @@ def build_context(
             g, diameter, on=on, count=count, tol=tol
         ),
         "circle": measure.circle,
+        # tolerances & fits (CALI-19) — tolerant comparisons usable in assertion expressions
+        "approx": tolerance.approx,
+        "within": tolerance.within,
+        "fits": tolerance.fits,
         "interference": lambda ref: measure.interference(g, ref),
         "min_clearance": lambda ref: measure.min_clearance(g, ref),
         "mates": lambda ref, tol=0.2: measure.mates(g, ref, tol=tol),

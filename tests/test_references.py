@@ -151,3 +151,49 @@ def test_fit_is_snug_not_collapsed():
     result = loop.run_loop(_clearance_spec(init=60.0), _clearance_eval, max_iter=6)
     leg = result.spec.parameters["bolt_circle"].init
     assert 40.0 <= leg <= 48.0
+
+
+# --- CALI-19: fit classes (tunable clearance bands) -----------------------
+def test_attach_reference_fit_class_emits_band():
+    from caliper.fit import attach_reference
+
+    spec = Spec(part="b", parameters={}, assertions=[])
+    attach_reference(spec, "obs", "/abs/obs.stl", fit="slip")
+    band = [a for a in spec.assertions if a.id == "obs_fit"]
+    assert band and "<= min_clearance(obs) <=" in band[0].expr
+    assert any(r.id == "obs" for r in spec.references)
+
+
+def test_decide_is_band_detects_two_sided():
+    from caliper.decide import _is_band
+
+    assert _is_band("0.12 <= min_clearance(obs) <= 0.3")
+    assert not _is_band("min_clearance(obs) >= 2")
+
+
+def _band_spec(init=42.0):
+    return Spec(
+        part="bracket",
+        parameters={"bolt_circle": {"type": "continuous", "min": 40.0, "max": 55.0, "init": init}},
+        references=[Reference(id="obs", file="o.stl")],
+        assertions=[Assertion(id="obs_fit", expr="0.12 <= min_clearance(obs) <= 0.3")],
+    )
+
+
+def _band_eval(spec):
+    from caliper.evaluate import AssertionResult, Report
+
+    leg = spec.parameters["bolt_circle"].init
+    clearance = 50.0 - leg                       # obstacle at x=50
+    margin = min(clearance - 0.12, 0.30 - clearance)   # two-sided band margin
+    status = "pass" if margin >= 0 else "fail"
+    return Report([AssertionResult("obs_fit", "0.12 <= min_clearance(obs) <= 0.3", status,
+                                   status == "pass", actual=clearance, margin=margin)])
+
+
+def test_fit_band_loop_lands_in_band():
+    # the optimizer must tune the part until the clearance sits inside the (narrow) slip band.
+    result = loop.run_loop(_band_spec(42.0), _band_eval, max_iter=6)
+    assert result.status == "passed"
+    clearance = 50.0 - result.spec.parameters["bolt_circle"].init
+    assert 0.12 <= clearance <= 0.30

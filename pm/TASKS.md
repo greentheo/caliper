@@ -221,11 +221,34 @@ cap (mirrors CALI-6's rails). Author injectable → fully tested. Wired into CLI
 The next ~3 shifts toward the north star ("insert a support between the wheel and the XYZ assembly").
 Each builds on the single-part loop now complete (CALI-16/17) and CALI-10's two-body fit substrate.
 
-### CALI-19 — Tolerances & fits as first-class  · P1 · assembly-spine · 🧊 backlog
-A vocabulary for *fits*: fit classes (clearance / transition / press, e.g. H7/g6), tolerance bands on
-dimensions, and a **multi-parameter optimizer** (today: 1-D grid) so the loop can *tune* a fit to a
-target. Also fixes the "hard threshold vs measurement noise" problem seen in CALI-17 (min_wall 2.99 vs
-≥3.0 → tolerance band). This is the user's stated "fits and tolerances" pillar.
+### CALI-19 — Tolerances & fits as first-class  · P1 · assembly-spine · ✅ done (`PENDING`)
+A vocabulary for *fits* + tolerant comparisons, so the loop can target a fit and noise stops causing
+false failures. The user's "fits and tolerances" pillar.
+
+**Shipped:**
+- `tolerance.py`: printer-friendly **fit classes** (press/snug/slip/free/running) → `(lo, hi)` clearance
+  bands (FDM-absolute, ~0.2 mm; gentle widening for big nominals). Helpers `approx(x, nom, tol)`,
+  `within(x, lo, hi)`, `fits(clearance, kind)` bound into the evaluator namespace.
+- Evaluator: **two-sided band margins** — `lo <= x <= hi` now reports a signed margin = distance to the
+  nearest bound, so a fit band is *tunable* (was `None` before → optimizer couldn't steer).
+- Optimizer: `tune_continuous` does **progressive refinement** (4 shrinking rounds) so it converges onto
+  a narrow 0.2 mm band; `decide` skips the snug `prefer` for band targets so they centre in the band.
+- `caliper fit --fit slip [--nominal MM]` and a **webapp fit-class dropdown** → a band assertion. Intake
+  taught to write tolerant asserts (`approx`, bands) and **not** to assert internal features via `bbox.*`
+  (the phone-stand `slot_fits_phone` bug).
+- **Verified live:** `fit --fit slip` tuned a bracket 60 → 41.8 mm to land clearance = **0.188 mm**, dead
+  centre of the slip band. Browser dropdown wired (hides manual clearance), no console errors.
+- **Bonus guard (the fit bug they hit):** `fit`/`refine` now **refuse LLM-authored parts** (part.py
+  present) with a clear message instead of silently rebuilding a bracket — CLI + `/api/fit` + `/api/refine`.
+- Tests: `test_tolerance.py` (8) + band-margin/fit-class loop + authored guards (CLI + server). **121 passed.**
+- **Deferred:** multi-parameter (N-D) joint optimization → CALI-19b (nevergrad/scipy). 1-D + iterative
+  refine is enough for single-fit targets; coupled fits across many params need the real optimizer.
+
+### CALI-22 — Author-loop fit & refine  · P1 · generator · 🧊 backlog
+Today fit/refine rebuild via the bracket generator, so they can't touch LLM-authored parts (guarded in
+CALI-19 to fail honestly). Route fit/refine of an authored run through `improve()` **seeded with its
+`part.py`** + the new constraint ("…and clear this reference at a slip fit"), so the LLM edits the real
+part. This is also the front edge of CALI-21 (insert-into-assembly).
 
 ### CALI-20 — Assembly model (N parts + interfaces)  · P1 · assembly-spine · 🧊 backlog
 Represent multiple parts, their **mates / datums / joints**, and **assembly-level assertions** (no pair

@@ -92,6 +92,17 @@ def test_fit_unknown_run_404():
     assert r.status_code == 404
 
 
+def test_fit_refuses_authored_run(tmp_path, monkeypatch):
+    # CALI-19 guard: fitting an LLM-authored part (has part.py) must 422, not rebuild a bracket.
+    monkeypatch.setenv("CALIPER_RUNS", str(tmp_path / "runs"))
+    d = tmp_path / "runs" / "run_0000"
+    d.mkdir(parents=True)
+    (d / "spec.yaml").write_text("part: gizmo\n")
+    (d / "part.py").write_text("def build(params):\n    return None\n")
+    r = _client().post("/api/fit", json={"run_id": "run_0000", "reference_b64": "AAAA"})
+    assert r.status_code == 422 and "authored" in r.json()["detail"].lower()
+
+
 def test_fit_end_to_end(tmp_path, monkeypatch):
     pytest.importorskip("cadquery")
     import base64

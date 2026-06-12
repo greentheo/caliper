@@ -13,6 +13,7 @@ injected an ``eval_fn(spec) -> Report`` so this logic is testable without the ge
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -36,6 +37,15 @@ DEFAULT_TUNING: dict[str, str] = {
 FIT_PREDICATES: tuple[str, ...] = ("interference", "min_clearance", "clearance")
 # Preferred continuous parameter to vary for a fit failure (largest extent first).
 FIT_PARAM_PREFERENCE: tuple[str, ...] = ("bolt_circle", "leg", "width", "wall")
+
+
+def _is_band(expr: str) -> bool:
+    """True if ``expr`` is a two-sided band like ``lo <= x <= hi`` (a fit target, not a one-sided bound)."""
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError:
+        return False
+    return any(isinstance(n, ast.Compare) and len(n.ops) >= 2 for n in ast.walk(tree))
 
 
 def _fit_param(spec: Spec) -> Optional[str]:
@@ -116,14 +126,17 @@ def tune_continuous(
         return best
 
     best = _best_over(np.linspace(lo, hi, samples))
-    # local refine around the winner
+    # progressive local refinement around the winner — each round shrinks the window, so the search
+    # converges onto tight targets (a 0.2 mm fit band, CALI-19) the coarse grid alone would skip over.
     step = (hi - lo) / (samples - 1) if samples > 1 else 0.0
-    if step:
+    for _ in range(4):
+        if step <= 1e-6:
+            break
         v0 = best[0]
-        refine = np.linspace(max(lo, v0 - step), min(hi, v0 + step), 5)
-        cand = _best_over(refine)
+        cand = _best_over(np.linspace(max(lo, v0 - step), min(hi, v0 + step), 5))
         if cand[3] > best[3]:
             best = cand
+        step /= 4.0
     return best[0], best[1], best[2]
 
 
@@ -139,9 +152,10 @@ def decide(spec: Spec, report: Report, eval_fn: EvalFn, tuning: Optional[dict] =
         if is_fit:
             param = _fit_param(spec)
         if param and param in spec.parameters and getattr(spec.parameters[param], "type", None) == "continuous":
-            # a fit resizes minimally (snug) — keep the part as close to its current size as it can
-            # while clearing the reference, rather than maximising clearance into a tiny stub.
-            prefer = float(spec.parameters[param].init) if is_fit else None
+            # a one-sided fit (min_clearance >= X) resizes minimally (snug) — stay close to the current
+            # size. A two-sided fit BAND (lo <= clearance <= hi, CALI-19) instead maximises the chained
+            # margin, which centres the part in the band; no `prefer` so it doesn't fight that.
+            prefer = float(spec.parameters[param].init) if (is_fit and not _is_band(r.expr)) else None
             value, new_spec, rep = tune_continuous(spec, param, r.id, eval_fn, prefer=prefer)
             return DecideResult(
                 new_spec=new_spec,

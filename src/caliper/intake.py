@@ -179,8 +179,15 @@ Assertion expressions are Python predicates over this measurement API (use these
   largest_through_bore                 # diameter of the largest bore (mm)
   holes_matching(diameter=<mm>, count=<n>, on=circle(<bolt_circle_dia>))   # bool
   machine.nozzle                       # e.g. 0.4 ; use `min_wall >= 2 * machine.nozzle`
-Prefer ranges (a <= x <= b) over exact equality for dimensions. Reference a parameter's effect through
-the measurement, not the parameter name.
+  approx(x, nominal, tol)              # |x-nominal| <= tol — for noise-prone dims (min_wall, exact size)
+  within(x, lo, hi)                    # tolerance band as a call
+  fits(min_clearance(ref), "slip")     # fit class: press|snug|slip|free|running (clearance band)
+Prefer a two-sided band `lo <= x <= hi` or `approx(x, nominal, 0.1)` over exact `==` or a hard
+one-sided threshold — a 0.01 mm measurement wobble must not fail a check (e.g. write `2.9 <= min_wall`,
+not `min_wall == 3`). CRITICAL: `bbox.dx/dy/dz` is the WHOLE part's extent — NEVER use it to assert a
+small internal feature like a slot or pocket width (the measurement API can't see those yet); only
+assert what it can actually measure. Reference a parameter's effect through the measurement, not the
+parameter name.
 
 HARD RULE: never invent acceptance criteria. If a requirement (load, material, mass, fit) is ambiguous
 or unstated, add a clarifying QUESTION instead of asserting a guessed number."""

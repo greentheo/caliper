@@ -52,11 +52,14 @@ def attach_reference(
     rotation=None,
     min_clearance: Optional[float] = None,
     no_overlap: bool = True,
+    fit: Optional[str] = None,
+    nominal: Optional[float] = None,
 ) -> None:
     """Add (or replace) a posed reference and its fit assertion(s) on ``spec`` in place.
 
-    ``no_overlap`` adds ``interference(ref) <= 0``; ``min_clearance`` adds ``min_clearance(ref) >= MM``.
-    Re-fitting the same id replaces its prior reference and assertions so specs stay clean.
+    Constraint precedence: ``fit`` (a class like ``slip``/``press`` → a tunable clearance **band**,
+    CALI-19) wins; else ``min_clearance`` adds ``min_clearance(ref) >= MM``; else/also ``no_overlap``
+    adds ``interference(ref) <= 0``. Re-fitting the same id replaces its prior reference + assertions.
     """
     spec.references = [r for r in spec.references if r.id != ref_id]
     spec.references.append(Reference(
@@ -65,6 +68,13 @@ def attach_reference(
         rotation=[float(x) for x in (rotation or [0.0, 0.0, 0.0])],
     ))
     spec.assertions = [a for a in spec.assertions if not a.id.startswith(f"{ref_id}_")]
+    if fit:
+        from .tolerance import fit_band
+
+        lo, hi = fit_band(fit, nominal)
+        spec.assertions.append(Assertion(
+            id=f"{ref_id}_fit", expr=f"{lo} <= min_clearance({ref_id}) <= {hi}"))
+        return
     if no_overlap:
         spec.assertions.append(Assertion(id=f"{ref_id}_no_interference", expr=f"interference({ref_id}) <= 0"))
     if min_clearance is not None:

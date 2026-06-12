@@ -63,6 +63,19 @@ def test_fit_end_to_end(tmp_path, monkeypatch):
     assert leg < 60.0  # resized smaller to fit
 
 
+def test_fit_and_refine_guard_authored_runs(tmp_path, monkeypatch, capsys):
+    # CALI-19 guard: fit/refine rebuild via the bracket generator, so they must refuse an authored
+    # part (part.py present) rather than silently produce a bracket.
+    monkeypatch.chdir(tmp_path)
+    d = tmp_path / "runs" / "run_0000"
+    d.mkdir(parents=True)
+    (d / "spec.yaml").write_text("part: gizmo\n")
+    (d / "part.py").write_text("def build(params):\n    return None\n")
+    assert cli.main(["fit", str(d), "--ref", "o=/nope.stl"]) == 2
+    assert "authored" in capsys.readouterr().out.lower()
+    assert cli.main(["refine", str(d), "make the holes 8mm", "--no-llm"]) == 2
+
+
 def test_fit_missing_reference_file_returns_2(capsys):
     rc = cli.main(["fit", FIXTURE, "--ref", "obstacle=/nonexistent/obstacle.stl"])
     assert rc == 2

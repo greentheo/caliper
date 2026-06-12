@@ -54,6 +54,8 @@ class FitRequest(BaseModel):
     rotation: list[float] = [0.0, 0.0, 0.0]   # degrees, three.js XYZ euler
     min_clearance: Optional[float] = None     # require min_clearance(ref) >= this
     no_overlap: bool = True                   # require interference(ref) <= 0
+    fit: Optional[str] = None                 # fit class (press/snug/slip/free/running) → clearance band
+    nominal: Optional[float] = None           # mating size for the fit band (optional)
     free: Optional[str] = None                # parameter to resize (default: auto size param)
     max_iter: int = 6
 
@@ -64,6 +66,11 @@ STATIC_DIR = os.path.join(WEB_DIR, "static")
 def _runs_dir() -> str:
     # resolved per-call so tests can point CALIPER_RUNS at a temp dir
     return os.environ.get("CALIPER_RUNS", "runs")
+
+
+def _is_authored(run_id: str) -> bool:
+    """True if a run is an LLM-authored part (has part.py) — fit/refine can't rebuild it as a bracket."""
+    return os.path.isfile(os.path.join(_runs_dir(), run_id, "part.py"))
 
 
 def _next_run() -> tuple[str, str]:
@@ -168,6 +175,10 @@ def create_app():
         spec_path = os.path.join(_runs_dir(), req.run_id, "spec.yaml")
         if not os.path.isfile(spec_path):
             raise HTTPException(status_code=404, detail=f"unknown run {req.run_id}")
+        if _is_authored(req.run_id):
+            raise HTTPException(status_code=422, detail="This is an LLM-authored part — refine rebuilds "
+                                "via the bracket generator. Re-run with the author (✦ author any part) "
+                                "and an adjusted intent instead.")
         res = apply_refinement(Spec.load(spec_path), req.instruction, use_llm=not req.no_llm)
         if not res.changed:
             raise HTTPException(status_code=422, detail="no recognized refinement for that instruction")
@@ -205,6 +216,10 @@ def create_app():
         spec_path = os.path.join(_runs_dir(), req.run_id, "spec.yaml")
         if not os.path.isfile(spec_path):
             raise HTTPException(status_code=404, detail=f"unknown run {req.run_id}")
+        if _is_authored(req.run_id):
+            raise HTTPException(status_code=422, detail="This is an LLM-authored part — fit rebuilds "
+                                "via the bracket generator and can't fit authored parts yet. Fit a "
+                                "bracket-family part for now.")
         spec = Spec.load(spec_path)
 
         try:
@@ -220,9 +235,10 @@ def create_app():
         with open(ref_path, "wb") as f:
             f.write(raw)
 
-        no_overlap = req.no_overlap or req.min_clearance is None
+        no_overlap = req.no_overlap or (req.min_clearance is None and req.fit is None)
         attach_reference(spec, safe, ref_path, position=req.position, rotation=req.rotation,
-                         min_clearance=req.min_clearance, no_overlap=no_overlap)
+                         min_clearance=req.min_clearance, no_overlap=no_overlap,
+                         fit=req.fit, nominal=req.nominal)
         ensure_tunable(spec, req.free or pick_free_param(spec))
         return _execute(spec, req.max_iter, {
             "source": f"fit {req.run_id}", "changes": [], "questions": [], "label": f"fit → {safe}",

@@ -70,6 +70,17 @@
             Caliper resizes the part to clear it.</p>
           <input type="file" id="refFile" accept=".stl,model/stl" />
           <div class="row">
+            <label class="num">fit
+              <select id="fitClass" title="a fit class targets a clearance band the optimizer tunes into">
+                <option value="">— clearance / none —</option>
+                <option value="press">press (interference)</option>
+                <option value="snug">snug</option>
+                <option value="slip">slip</option>
+                <option value="free">free</option>
+                <option value="running">running</option>
+              </select></label>
+          </div>
+          <div class="row" id="clearRow">
             <label class="chk"><input type="checkbox" id="fitNoOverlap" checked /> no collision</label>
             <label class="num">clearance
               <input type="number" id="fitClear" value="2" step="0.5" min="0" /> mm</label>
@@ -117,6 +128,6 @@
     </section>
   </main>
 
-  <script type="module" src="/app.js?v=10"></script>
+  <script type="module" src="/app.js?v=11"></script>
 </body>
 </html>

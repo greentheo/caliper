@@ -13,6 +13,7 @@ const authorMode = $('authorMode'), scriptbox = $('scriptbox'), scriptpre = $('s
 // fit-to-reference (M3 / CALI-10)
 const refFile = $('refFile'), fitBtn = $('fitBtn'), fitClear = $('fitClear');
 const fitNoOverlap = $('fitNoOverlap'), fitHint = $('fitHint');
+const fitClassEl = $('fitClass'), clearRow = $('clearRow');
 const gizmoEl = $('gizmo'), gMove = $('gMove'), gRot = $('gRot'), gClear = $('gClear');
 
 let currentRunId = null;
@@ -300,11 +301,13 @@ async function doFit() {
   fitBtn.disabled = true; busy('fitting…');
   try {
     const pose = refPose();
+    const fitClass = fitClassEl.value || null;   // a fit class (slip/press/…) overrides clearance
     const data = await postJSON('/api/fit', {
       run_id: currentRunId, reference_b64: bytesToB64(refBytes), reference_id: 'reference',
       position: pose.position, rotation: pose.rotation,
-      no_overlap: fitNoOverlap.checked,
-      min_clearance: fitClear.value === '' ? null : parseFloat(fitClear.value),
+      fit: fitClass,
+      no_overlap: fitClass ? false : fitNoOverlap.checked,
+      min_clearance: fitClass || fitClear.value === '' ? null : parseFloat(fitClear.value),
     });
     applyResult(data);
     done(`${data.status} · fit · ${data.iterations} iter`);
@@ -503,6 +506,9 @@ fitBtn.addEventListener('click', doFit);
 gMove.addEventListener('click', () => setGizmoMode('translate'));
 gRot.addEventListener('click', () => setGizmoMode('rotate'));
 gClear.addEventListener('click', clearReference);
+fitClassEl.addEventListener('change', () => {
+  clearRow.style.display = fitClassEl.value ? 'none' : '';  // a fit class supersedes manual clearance
+});
 addEventListener('keydown', (e) => {
   if (!refMesh || /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
   if (e.key === 'w' || e.key === 'W') setGizmoMode('translate');

@@ -96,6 +96,15 @@ def _run_and_emit(spec, max_iter: int, references=None) -> int:
     return 0 if result.status == "passed" else 3
 
 
+def _authored_source(source: str) -> bool:
+    """True if ``source`` is a run dir for an LLM-authored part (has a ``part.py``).
+
+    Fit/refine rebuild via the bracket generator, which ignores an authored script — so they'd
+    silently produce a bracket. Guard against that until fit/refine route through the author loop.
+    """
+    return os.path.isdir(source) and os.path.isfile(os.path.join(source, "part.py"))
+
+
 def _load_spec_from_source(source: str):
     """Load a spec from a run dir (``runs/run_0000``) or a spec file (``spec.yaml``/``.json``)."""
     from .spec import Spec
@@ -108,6 +117,11 @@ def _load_spec_from_source(source: str):
 def _cmd_refine(args) -> int:
     from .refine import apply_refinement
 
+    if _authored_source(args.source):
+        print("This run is an LLM-authored part (has part.py); `refine` rebuilds via the bracket "
+              "generator, so it would produce a bracket. Re-run `gen` with an adjusted intent for now "
+              "(routing refine through the author loop is tracked).")
+        return 2
     spec = _load_spec_from_source(args.source)
     print(f"▶ refining {args.source}: \"{args.instruction}\"\n")
     res = apply_refinement(spec, args.instruction, use_llm=not args.no_llm)
@@ -191,9 +205,14 @@ def _cmd_fit(args) -> int:
     """Attach imported STL reference(s) to a prior part and iterate it to fit them (CALI-10)."""
     from .fit import attach_reference, ensure_tunable, pick_free_param
 
+    if _authored_source(args.source):
+        print("This run is an LLM-authored part (has part.py); `fit` rebuilds via the bracket "
+              "generator, so it can't fit authored parts yet. (Tracked: route fit through the author "
+              "loop.) Use a bracket-family run for now.")
+        return 2
     spec = _load_spec_from_source(args.source)
     # default constraint: if none specified, enforce no collision with the reference.
-    no_overlap = args.no_overlap or args.min_clearance is None
+    no_overlap = args.no_overlap or (args.min_clearance is None and args.fit is None)
     summary: list[str] = []
     for item in args.ref:
         rid, _, path = item.partition("=")
@@ -204,9 +223,9 @@ def _cmd_fit(args) -> int:
         if not os.path.isfile(path):
             print(f"reference file not found: {path}")
             return 2
-        attach_reference(spec, rid, os.path.abspath(path),
-                         min_clearance=args.min_clearance, no_overlap=no_overlap)
-        summary.append(f"{rid} ← {path}")
+        attach_reference(spec, rid, os.path.abspath(path), min_clearance=args.min_clearance,
+                         no_overlap=no_overlap, fit=args.fit, nominal=args.nominal)
+        summary.append(f"{rid} ← {path}" + (f" [{args.fit} fit]" if args.fit else ""))
 
     if not summary:
         print("no references given; use --ref ID=path/to/reference.stl (repeatable)")
@@ -220,7 +239,7 @@ def _cmd_fit(args) -> int:
         print("  (warning: no continuous parameter to vary — the fit can't resize the part)\n")
     print(f"── fit constraints ──")
     for a in spec.assertions:
-        if any(a.id.endswith(s) for s in ("_no_interference", "_clearance")):
+        if any(a.id.endswith(s) for s in ("_no_interference", "_clearance", "_fit")):
             print(f"  • {a.id}: {a.expr}")
     print()
     # references load lazily (with their pose) inside make_eval_fn from spec.references.
@@ -274,6 +293,10 @@ def main(argv: list[str] | None = None) -> int:
                        help="attach a reference STL as role:fixed (repeatable)")
     p_fit.add_argument("--min-clearance", type=float, default=None, metavar="MM",
                        help="require min_clearance(ref) >= MM for each reference")
+    p_fit.add_argument("--fit", default=None, metavar="CLASS",
+                       help="target a fit class (press/snug/slip/free/running) → a tunable clearance band")
+    p_fit.add_argument("--nominal", type=float, default=None, metavar="MM",
+                       help="mating size for the fit band (optional; FDM bands are ~absolute)")
     p_fit.add_argument("--no-overlap", action="store_true",
                        help="require interference(ref) <= 0 for each reference (no collision)")
     p_fit.add_argument("--free", default=None, metavar="PARAM",

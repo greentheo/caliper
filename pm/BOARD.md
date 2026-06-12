@@ -6,7 +6,8 @@ Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections 
 _Last updated: 2026-06-12 (CALI-10 / M3 references shipped)_
 
 ## 🧊 Backlog
-- CALI-19 — Tolerances & fits as first-class: fit classes (clearance/press), tolerance bands, multi-param optimizer · P1 · assembly-spine (the "fits and tolerances" pillar)
+- CALI-22 — Author-loop fit & refine: route fit/refine of LLM-authored parts through `improve()` (seeded from part.py) so they edit the real part, not a bracket · P1 · generator (guarded now; bug they hit)
+- CALI-19b — Multi-parameter optimizer (nevergrad/scipy): joint tuning of N continuous params for coupled fits · P2 · assembly-spine (1-D + iterative-refine ships in CALI-19)
 - CALI-20 — Assembly model: N parts + named mates/interfaces + assembly-level assertions (generalize CALI-10 to N bodies) · P1 · assembly-spine
 - CALI-21 — Insert-into-assembly: author a new part against two named interfaces at a target fit · P1 · assembly-spine ("insert a support between the wheel and the XYZ assembly")
 - CALI-18 — `largest_through_bore` counts a tube's OUTER wall as a bore (both are cylinders); distinguish interior bores · P2 · measure (found authoring a grommet)
@@ -21,6 +22,7 @@ _Last updated: 2026-06-12 (CALI-10 / M3 references shipped)_
 - _(none)_
 
 ## ✅ Done — Milestones M0 + M1 + M2 + M3 complete 🎉
+- CALI-19 — Tolerances & fits · P1 · assembly-spine · _2026-06-12 · fit classes (press/snug/slip/free/running) → tunable clearance **bands**; two-sided band margins + iterative optimizer refine; `approx`/`within`/`fits` helpers; `fit --fit slip` & webapp dropdown; intake taught tolerant asserts. + guard: fit/refine refuse authored parts (no more silent bracket)_
 - CALI-17 — Structural-edit loop · P1 · loop · _2026-06-12 · `authoring.improve` — the LLM revises its script to fix failing **measurements**, not just build errors (two-actor loop closed). In CLI (`gen`) + webapp (✦ author any part)_
 - CALI-16 — LLM-authored generator · P1 · generator · _2026-06-12 · `caliper gen` — the LLM writes the CadQuery script (any part, not just brackets), run sandboxed, measured, self-heals build errors. Also fixed 2 LLM-intake bugs (prefill, schema-laxness)_
 - CALI-10 — References (M3) · P1 · M3 · _2026-06-12 · import STL as `role: fixed`; real `interference` + `min_clearance`; `caliper fit` resizes a part **snugly** to clear a reference; + webapp gizmo fit UI_
