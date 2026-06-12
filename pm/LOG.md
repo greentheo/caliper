@@ -24,7 +24,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - **Verified in browser (Preview MCP):** "✦ author any part" → "a round coaster, 90mm, 4mm, 3mm raised
   lip" → **ALL PASS in 1 round**, rendered in 3D, authored CadQuery shown in the script panel. No
   console errors.
-- Tests: 4 `improve` tests + `/api/gen` server test. **110 passed.** Commit: PENDING
+- Tests: 4 `improve` tests + `/api/gen` server test. **110 passed.** Commit: 6ee3e52
 - Roadmap stamped: next is the **assembly spine** — CALI-19 (tolerances & fits), CALI-20 (assembly
   model), CALI-21 (insert-into-assembly).
 

@@ -196,7 +196,7 @@ pass** (the 1 fail is the CALI-18 bore-probe nuance, not an authoring miss). Tes
 CALI-18 (bore probe); webapp `gen` button; harder sandbox (container/net-cutoff) for untrusted use;
 the author isn't yet given the measurement *report* to iterate dimensions (that's CALI-17).
 
-### CALI-17 — Structural-edit loop  · P1 · loop · ✅ done (`PENDING`)
+### CALI-17 — Structural-edit loop  · P1 · loop · ✅ done (`6ee3e52`)
 Make the LLM actually **revise the authored script** to fix a failing *measurement*, not just a build
 error — completing the two-actor loop for LLM-authored parts.
 
