@@ -1,0 +1,39 @@
+part: corner_bracket
+
+intent: >
+  A bracket that bolts two 2020 aluminium extrusions at 90 degrees,
+  with a hole through the middle big enough to route a cable bundle.
+
+references:
+  - id: ext_a
+    file: extrusion_a.stl
+    role: fixed
+  - id: ext_b
+    file: extrusion_b.stl
+    role: fixed
+
+machine: ender3
+
+parameters:
+  wall:        {type: continuous, min: 2.4, max: 6, init: 3, unit: mm}
+  rib_count:   {type: discrete, choices: [0, 1, 2], init: 1}
+  cable_bore:  {type: continuous, min: 6, max: 14, init: 10, unit: mm}
+  bolt_circle: {type: fixed, value: 60, unit: mm}
+
+assert:
+  - id: fits_bed
+    expr: bbox.dx <= 220 and bbox.dy <= 220 and bbox.dz <= 250
+  - id: walls_printable
+    expr: min_wall >= 2 * machine.nozzle
+  - id: bolt_pattern
+    expr: holes_matching(diameter=5.2, on=circle(60), count=4)
+  - id: no_collision
+    expr: interference(ext_a) == 0 and interference(ext_b) == 0
+  - id: mates_a
+    expr: min_clearance(ext_a) <= 0.2
+  - id: cable_fits
+    expr: largest_through_bore >= 8
+  - id: mass_budget
+    expr: mass(density=1.24) <= 80
+  - id: one_body
+    expr: body_count == 1 and is_watertight

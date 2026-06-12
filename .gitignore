@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# Env
+.venv/
+.env
+*.local
+
+# Caliper run artifacts (generated meshes, reports, render images)
+runs/
+*.stl
+*.step
+*.png
+!tests/fixtures/**/*.stl   # keep checked-in test fixtures
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

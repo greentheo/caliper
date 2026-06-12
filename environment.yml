@@ -1,0 +1,24 @@
+name: caliper
+# Caliper dev environment.
+# CadQuery/OCCT install cleanly from conda-forge (far smoother than pip wheels on macOS).
+# Create/update with:  conda env create -f environment.yml   (or  conda env update -f environment.yml --prune)
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - cadquery            # parametric B-rep generator (brings OCCT)
+  - trimesh             # mesh measurements + STL I/O
+  - numpy
+  - scipy               # continuous optimizer (scipy.optimize) for the MVP
+  - pytest              # regression guard
+  - rich                # nice CLI/report output
+  - pyyaml              # spec (de)serialization
+  - pydantic>=2         # typed spec schema
+  - shapely             # 2D geometry helpers (plasma flat-pattern, later)
+  - pip
+  - pip:
+      - manifold3d      # robust booleans (interference / clearance)
+      - nevergrad       # discrete/black-box search (later milestones)
+      - anthropic       # Claude API: intake + decide
+      - fastapi         # M2 webapp backend
+      - uvicorn         # ASGI server for M2
