@@ -12,7 +12,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Fix: parent the GridHelper to `modelGroup` so rotation carries the plane with the part — pan/zoom
   (camera) and rotation (group) are now visually consistent. Verified render (no regression); rotation
   feel pending Theo's confirmation on hardware. 71 passed.
-- Commit: _pending_
+- Commit: cae162f
 
 ### 2026-06-12 · CALI-14 · SpaceMouse NL-Proxy (driver coexistence) — phase 1
 - WebHID needs the user to quit 3DxWare (raw HID can't be shared — confirmed on Theo's SpaceMouse
