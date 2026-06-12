@@ -158,7 +158,10 @@ animate();
 // (SM state + smOn are declared near the top so the render loop can read them from frame 1.)
 function norm(v) { const n = Math.max(-1, Math.min(1, v / SM_SCALE)); return Math.abs(n) < SM_DEAD ? 0 : n; }
 
+let smReports = 0;
+
 function onInputReport(e) {
+  smReports++;
   const d = e.data; // DataView
   const a = (i) => d.byteLength > i + 1 ? d.getInt16(i, true) : 0;
   if (e.reportId === 1) {            // translation (some devices pack rotation at bytes 6..11)
@@ -167,9 +170,13 @@ function onInputReport(e) {
   } else if (e.reportId === 2) {     // rotation
     SM.rx = a(0); SM.ry = a(2); SM.rz = a(4);
   }
+  // live diagnostics: report id, byte length, parsed axes, raw bytes (helps confirm data + calibrate)
   axesEl.style.display = 'block';
+  const raw = []; for (let i = 0; i < d.byteLength; i++) raw.push(d.getUint8(i).toString(16).padStart(2, '0'));
   axesEl.textContent =
-    `T ${pad(SM.tx)} ${pad(SM.ty)} ${pad(SM.tz)}\nR ${pad(SM.rx)} ${pad(SM.ry)} ${pad(SM.rz)}`;
+    `rpt ${e.reportId} · ${d.byteLength}B · #${smReports}\n` +
+    `T ${pad(SM.tx)} ${pad(SM.ty)} ${pad(SM.tz)}\nR ${pad(SM.rx)} ${pad(SM.ry)} ${pad(SM.rz)}\n${raw.join(' ')}`;
+  spaceStatus.textContent = `live · ${smReports} reports`;
 }
 const pad = (n) => String(n).padStart(6);
 
@@ -190,20 +197,48 @@ function applySpaceMouse() {
   camera.position.copy(controls.target).add(dir.multiplyScalar(1 - norm(SM.ty) * SM_GAIN_DOLLY * SM_SCALE));
 }
 
+function attachDevice(dev) {
+  dev.addEventListener('inputreport', onInputReport);
+  smOn = true;
+  smReports = 0;
+  const vid = dev.vendorId.toString(16).padStart(4, '0'), pid = dev.productId.toString(16).padStart(4, '0');
+  spaceStatus.textContent = `${dev.productName || 'device'} (${vid}:${pid}) opened — move the cap…`;
+  spaceStatus.className = 'space-status on';
+  spaceBtn.textContent = '🖱️ SpaceMouse on';
+  // watchdog: opened but silent almost always means the OS driver is holding the device
+  setTimeout(() => {
+    if (smReports === 0)
+      window.showErr('SpaceMouse opened but sent no data. On macOS the 3Dconnexion driver (3DxWare) ' +
+        'usually holds the device — quit it (menu-bar icon → Quit 3DxWare, or Activity Monitor → quit ' +
+        '"3DconnexionHelper") and click Connect again. Otherwise wiggle/twist the cap.');
+  }, 2500);
+}
+
 async function connectSpaceMouse() {
-  if (!('hid' in navigator)) { spaceStatus.textContent = 'WebHID unsupported (use Chrome/Edge)'; return; }
+  if (!('hid' in navigator)) { window.showErr('WebHID unsupported — use Chrome or Edge (not Safari).'); return; }
   try {
-    const filters = [{ vendorId: 0x256f }, { vendorId: 0x046d }]; // 3Dconnexion / Logitech
+    // multi-axis controller usage (0x01/0x08) catches 3D mice regardless of vendor; plus known vendors
+    const filters = [{ usagePage: 0x01, usage: 0x08 }, { vendorId: 0x256f }, { vendorId: 0x046d }];
     const devices = await navigator.hid.requestDevice({ filters });
+    if (!devices.length) {
+      spaceStatus.textContent = 'no device chosen';
+      window.showErr('No device picked. If your SpaceMouse was not listed in the chooser, it may be ' +
+        'held by the 3Dconnexion driver — quit 3DxWare and retry. (Run the console snippet to inspect HID.)');
+      return;
+    }
     const dev = devices[0];
-    if (!dev) { spaceStatus.textContent = 'no device selected'; return; }
     if (!dev.opened) await dev.open();
-    dev.addEventListener('inputreport', onInputReport);
-    smOn = true;
-    spaceStatus.textContent = `${dev.productName || 'SpaceMouse'} connected`;
-    spaceStatus.className = 'space-status on';
-    spaceBtn.textContent = '🖱️ SpaceMouse on';
-  } catch (e) { spaceStatus.textContent = 'connect failed: ' + e.message; }
+    attachDevice(dev);
+  } catch (e) { window.showErr('SpaceMouse connect failed: ' + e.message); }
+}
+
+// auto-reattach a device we were already granted, so a reload doesn't need re-picking
+if ('hid' in navigator) {
+  navigator.hid.getDevices().then((ds) => {
+    const dev = ds.find((d) => d.collections.some((c) => c.usagePage === 0x01 && c.usage === 0x08))
+      || ds.find((d) => [0x256f, 0x046d].includes(d.vendorId));
+    if (dev) dev.open().then(() => attachDevice(dev)).catch(() => {});
+  });
 }
 
 // ---------------------------------------------------------------- wire up

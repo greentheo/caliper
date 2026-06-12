@@ -92,10 +92,15 @@ make serve            # → http://127.0.0.1:8000  (or: caliper serve --port 800
 In the browser: type an intent → **Build it ▶** → the bracket renders in 3D with the ALL-PASS report;
 type a tweak in **Refine** → it regenerates in place; **⬇ STL** downloads the mesh.
 
-**3Dconnexion SpaceMouse:** click **Connect SpaceMouse** (Chrome/Edge only — uses WebHID), pick your
-device in the chooser. Push/twist the cap to pan/dolly/rotate the model; the mouse still orbits as a
-fallback. Axis mapping & sensitivity are constants at the top of the WebHID section in
-`web/static/app.js` (tweak `SM_GAIN_*` if an axis feels reversed/too fast — hardware varies).
+**3Dconnexion SpaceMouse** (Chrome/Edge — WebHID; not Safari): click **Connect SpaceMouse**, pick the
+device. A live readout (rpt id / bytes / axes / raw) shows in the viewer's top-right once data flows;
+push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
+- **macOS gotcha:** the 3Dconnexion **3DxWare** driver usually holds the device, so WebHID opens it but
+  sees no data → the app shows a red hint. **Quit 3DxWare** (menu-bar icon → Quit, or Activity Monitor →
+  quit "3DconnexionHelper"), then click Connect again. (It's the same reason it can't run in the browser
+  and Fusion at once.)
+- **Tuning:** axis mapping/sensitivity are constants (`SM_GAIN_*`, `SM_SCALE`) at the top of the WebHID
+  section in `web/static/app.js` — tweak if an axis feels reversed or too hot; the raw readout helps.
 
 ## 📓 Demo log (newest first)
 
