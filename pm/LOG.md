@@ -5,17 +5,6 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 
 ---
 
-### 2026-06-11 · CALI-1, CALI-3, CALI-5 · spec schema, evaluator, intake (verified)
-- **CALI-1** spec schema: pydantic models (continuous/discrete/fixed params, references, machine stub,
-  assertions under the `assert` alias); lossless YAML/JSON round-trip; validation on bad input.
-- **CALI-3** evaluator: safe AST interpreter (no `eval`), signed margins for comparisons, compound
-  `and` reports the binding margin, deferred probes (e.g. `interference`) marked `deferred` not failed.
-- **CALI-5** intake: deterministic offline drafting for the bracket family (parses size, hole spec,
-  extrusion width, cable), ask-don't-assume clarify gate, LLM path with offline fallback.
-- Tests: **29 passed, 3 skipped** (CadQuery-only tests await the OCCT env) in a throwaway venv.
-- Added `rtree` dependency (trimesh ray casting needs it for `min_wall_thickness`).
-- Commit: _pending_
-
 ### 2026-06-11 · 🎉 M1 COMPLETE · CALI-1.M1 · refinement loop (one iteration cycle)
 - New `refine.py`: a natural-language refinement → mutated spec. Offline deterministic parser for the
   common bracket edits (hole Ø, hole count, bolt spacing, wall, cable bore, ribs) plus an LLM path
@@ -25,22 +14,24 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Wired hole geometry into the generator: `BracketParams.from_spec` now reads `hole_d`/`hole_count`;
   intake emits them as parameters. (Backward compatible — defaults unchanged.)
 - CLI: `caliper refine <run-dir|spec> "<instruction>"` loads a prior run, applies the change, re-runs
-  the loop, emits a new run/STL. `_run_and_emit` shared with `run`.
+  the loop, emits a new run/STL. `_run_and_emit` shared with `run`. `make refine` target added.
 - Demo: `run` → 4×Ø5.2; `refine "make the holes 8 mm"` → `bolt_pattern` re-synced to diameter=8.0,
   ALL PASS, new STL whose bytes differ (geometry changed; same triangle count). Optimizer tune
   already lived in the loop (CALI-6/7), so this completes the M1 "one NL refinement + one tune" cycle.
 - Tests: **61 passed** (M1 added 14, incl. an OCCT end-to-end proving the rebuilt part has 4×Ø8 holes).
-- Commit: _pending_
+- Commits: `f78da23` (refinement loop), `cd857a4` (`make refine` target).
 
-### 2026-06-11 · CALI-0 · canonical OCCT env via micromamba (Plan B)
+### 2026-06-11 · CALI-0 · canonical OCCT env via micromamba (Plan B) + zero-activation workflow
 - Anaconda's classic solver stalled 55+ min on cadquery. Switched to standalone **micromamba**
   (osx-arm64), which solved + built the env in <1 min at `/opt/anaconda3/envs/caliper`:
   **cadquery 2.7.0 / occt 7.8.1 / ocp 7.8.1.2 / python 3.11**. Then `pip install -r requirements-pip.txt`.
 - cadquery 2.7 dropped the `nptyping` dep → no numpy shim needed (unlike the pip-2.4 scratch venv).
 - **`make test` → 47 passed** in the canonical env (auto-resolves the prefix), confirming the code
   works on cadquery 2.7 (not just the 2.4 used for the earlier scratch verification). CLI run → STL ✓.
-- Updated README/environment.yml to recommend the micromamba recipe.
-- Commit: _pending_
+- Editable-installed the package (`caliper` command) and added `make install`/`make run` targets that
+  resolve the env python directly — no shell activation needed. Updated README/environment.yml to
+  recommend the micromamba recipe.
+- Commits: `e999d31` (micromamba env), `2c64680` (make targets + zero-activation docs).
 
 ### 2026-06-11 · 🎉 M0 COMPLETE · CALI-2/4/8 verified end-to-end with real geometry
 - Verified the OCCT-dependent path. Fixed a generator bug: the CadQuery `"XZ"` plane normal is
@@ -53,9 +44,8 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   clarify gate → loop → **ALL PASS** (bbox [60,20,60], min_wall 2.99, 4×Ø5.2 ✓, mass 8.1 g,
   watertight 1 body, bore Ø10) → 128 KB `runs/run_0000/part.stl`.
 - **Full suite: 47 passed.** Verified in a pip CadQuery scratch venv (numpy-2 alias shim for the
-  abandoned `nptyping`) because the conda/conda-forge env was still solving. The conda env remains
-  the canonical dev env (cleaner deps, no shim) — re-run `make test` there to re-confirm when it builds.
-- Commit: _pending_
+  abandoned `nptyping`) because the conda env was still solving; re-confirmed later in the conda env.
+- Commit: `ff8e154`.
 
 ### 2026-06-11 · CALI-6, CALI-7, CALI-8 · loop controller, decide, CLI
 - **CALI-7** decide: continuous route (1-D grid+refine optimizer over a continuous param, scored by
@@ -68,21 +58,28 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   ask-don't-assume clarify gate blocks non-interactive builds. Gate verified; end-to-end smoke
   (real STL) is OCCT-gated.
 - Whole suite: **39 passed, 4 skipped** (CadQuery-only) in a clean venv.
-- Commit: _pending_
+- Commit: `a223b13`.
 
-### 2026-06-11 · CALI-2, CALI-4 · measurement + generator (in progress)
-- **CALI-2** measurement API written; mesh side verified (bbox, volume, mass, watertight, body_count,
-  ray-cast `min_wall_thickness`, deferred probes). B-rep hole detection awaits the OCCT env.
+### 2026-06-11 · CALI-1, CALI-3, CALI-5 verified; CALI-2, CALI-4 written
+- **CALI-1** spec schema: pydantic models (continuous/discrete/fixed params, references, machine stub,
+  assertions under the `assert` alias); lossless YAML/JSON round-trip; validation on bad input.
+- **CALI-3** evaluator: safe AST interpreter (no `eval`), signed margins for comparisons, compound
+  `and` reports the binding margin, deferred probes (e.g. `interference`) marked `deferred` not failed.
+- **CALI-5** intake: deterministic offline drafting for the bracket family (parses size, hole spec,
+  extrusion width, cable), ask-don't-assume clarify gate, LLM path with offline fallback.
+- **CALI-2** measurement API: mesh side verified (bbox, volume, mass, watertight, body_count, ray-cast
+  `min_wall_thickness`, deferred probes); B-rep hole detection written, OCCT-gated.
 - **CALI-4** corner-bracket CadQuery generator written (L-profile extrude, per-leg bolt holes, optional
-  ribs + cable bore, structured build-error capture). Awaits the OCCT env to verify.
-- Commit: _pending_
+  ribs + cable bore, structured build-error capture); OCCT-gated.
+- Tests: **29 passed, 3 skipped** (CadQuery-only) in a throwaway venv. Added `rtree` dependency
+  (trimesh ray casting needs it for `min_wall_thickness`).
+- Commit: `0d93efa`.
 
----
-
-### 2026-06-11 · CALI-0 · Project scaffolding
+### 2026-06-11 · CALI-0 · project scaffolding + environment
 - Initialized local git repo. Created `src/caliper/` package layout, `tests/`, `pm/`, `nightshift/`.
-- Conda env `caliper` from `environment.yml` (CadQuery/OCCT + trimesh + manifold3d + scipy + pydantic).
 - Stood up the .md PM system: `BOARD.md`, `TASKS.md`, `LOG.md`, `pm/README.md`.
 - Adopted ai-night-shift conventions locally (loop/review/test guard) without cron — see `nightshift/`.
-- Decisions: conda for the env; nightshift conventions-only (no autonomous cron yet); start M0 core this session.
-- Commit: _pending_
+- Env: moved all non-OCCT deps to a pip layer (`requirements-pip.txt`) so conda only resolves
+  `cadquery` under strict conda-forge priority (the full mixed-channel solve stalled).
+- Decisions: conda for the env; nightshift conventions-only (no autonomous cron yet); start M0 core.
+- Commits: `aa00b5d` (scaffolding + M0 skeleton), `45cd6b9` (lean conda env).
