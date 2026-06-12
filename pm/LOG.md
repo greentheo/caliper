@@ -13,7 +13,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   by the generator's positioning; "middle"/"centre" is acknowledged in the change list.
 - Tests: **63 passed** (added 2). Verified the user's exact instruction → hole count 4 → 2,
   `bolt_pattern count=2`, ALL PASS, new STL.
-- Commit: a854547
+- Commit: c9523c8
 
 ### 2026-06-11 · 🎉 M1 COMPLETE · CALI-1.M1 · refinement loop (one iteration cycle)
 - New `refine.py`: a natural-language refinement → mutated spec. Offline deterministic parser for the
