@@ -94,8 +94,19 @@ Feed the report back to decide; support one NL refinement ("make the holes bigge
 ---
 
 ## Milestone M2 — webapp wrapper
-### CALI-9 — Webapp  · P1 · M2 · 🧊 backlog (next)
-FastAPI around the library; React + three.js front end: intent box, live spec editor, 3D viewer, report panel, STL download.
+### CALI-9 — Webapp  · P1 · M2 · 🔨 in progress
+FastAPI around the library + a three.js front end. The demoable "jam in 3D space" moment.
+**Acceptance:**
+- FastAPI app: `POST /api/run` (intent → spec/build/measure/report → run_id + STL url),
+  `POST /api/refine` (run_id + instruction → re-run), `GET /api/runs/{id}/part.stl`, `GET /api/health`.
+- Front end: intent box, refine box, spec view, measurement report panel (✓/✗ + margins), 3D viewer
+  (three.js STL loader + orbit), STL download. MVP uses no-build vanilla three.js (ESM via import map);
+  React is a later refactor — the loop is the product, the UI is a wrapper.
+- **3Dconnexion SpaceMouse support** (key ask — Theo has one; standard for 3D modelling, works in
+  Prusa/Fusion): drive the viewer camera via **WebHID** (`navigator.hid`) — 6DOF translate/rotate →
+  pan/dolly/orbit, with a "Connect SpaceMouse" button, deadzone + sensitivity, graceful fallback to
+  mouse when WebHID/hardware is absent. (WebHID needs Chrome/Edge over localhost/https.)
+- `caliper serve` CLI + `make serve`. Tests: FastAPI TestClient for the endpoints (run/refine OCCT-gated).
 
 ---
 
@@ -120,6 +131,22 @@ counterbore sized for a brass insert (the FDM-friendly real-world answer); (c) *
 thread** via CadQuery sweep (heavy mesh, slow — last resort). Add a `hole_style`
 (clearance|tapped|insert) parameter + the matching measurement/assertion. Note real threads ≠ a
 bigger clearance hole.
+
+## Epics / future (stories for later)
+### CALI-13 — Primitive & geometry library + multi-part assemblies  · P2 · epic · 🧊 backlog
+The corner bracket proved the loop; to make "all kinds of new parts" we need breadth of geometry.
+A larger body of work, to scope and schedule later. Three threads:
+1. **Lots of new primitives & geometries.** A library of parametric building blocks (plates, boxes,
+   tubes, ribs, gussets, flanges, bosses, fillets/chamfers, lofts, revolves, patterns, sheet-metal
+   bends, …) the generator/LLM can compose — the vocabulary for new part families beyond brackets.
+2. **Multi-part assemblies that fit together.** Scheme out how Caliper represents *multiple* parts
+   and the mating relationships between them (datums, joints, fits/clearances, fastener stacks),
+   so the measurement layer can assert assembly-level constraints (no interference, mates, fit) —
+   builds on the references/M3 work (CALI-10) but for our *own* generated parts, not just imported STLs.
+3. **Run out the catalog.** Actually enumerate and implement the primitive/geometry list from (1)
+   with tests + measurement coverage, turning the vocabulary into real, composable parts.
+Known limitations that motivate this (logged 2026-06-11 from real use): no variable bend angle
+(CALI-11), no threaded/insert holes (CALI-12), single part family only.
 
 ## Cross-cutting / infra
 ### CALI-0 — Project scaffolding  · P0 · M0 · ✅ done (`aa00b5d`, `45cd6b9`)

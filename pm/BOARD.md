@@ -6,13 +6,13 @@ Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections 
 _Last updated: 2026-06-11_
 
 ## 🧊 Backlog
-- CALI-9 — Webapp · P1 · M2
 - CALI-10 — References · P1 · M3
 - CALI-11 — Variable bend angle (e.g. 45°) · P2 · generator
 - CALI-12 — Threaded / tapped / insert holes · P2 · generator
+- CALI-13 — Primitive & geometry library + multi-part assemblies · P2 · epic (story for later)
 
 ## 🔨 In Progress
-- _(none)_
+- CALI-9 — Webapp (M2) + SpaceMouse · P1 · M2 · _owner: claude_
 
 ## ✅ Done — Milestones M0 + M1 complete 🎉
 - CALI-1.M1 — Refinement loop · P1 · M1 · _2026-06-11 · NL refine → re-derive → regenerate → re-measure_
