@@ -94,7 +94,7 @@ Feed the report back to decide; support one NL refinement ("make the holes bigge
 ---
 
 ## Milestone M2 — webapp wrapper
-### CALI-9 — Webapp  · P1 · M2 · ✅ done (`<pending>`)
+### CALI-9 — Webapp  · P1 · M2 · ✅ done (`3c78fff`)
 FastAPI around the library + a three.js front end. The demoable "jam in 3D space" moment.
 **Acceptance:**
 - FastAPI app: `POST /api/run` (intent → spec/build/measure/report → run_id + STL url),

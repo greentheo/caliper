@@ -23,7 +23,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   prefers an explicit mm value over an M-size; a TDZ bug (`smOn` read before init in the render loop);
   dev `Cache-Control: no-store` so the browser never serves a stale module.
 - Tests: **71 passed** (added server tests via FastAPI TestClient + refine regressions).
-- Commit: _pending_
+- Commit: 3c78fff
 
 ### 2026-06-11 · CALI-1.M1 · refine parser — per-side & word-number hole counts
 - Real-use gap: "only do one hole on each side … in the middle" wasn't recognized (parser only knew
