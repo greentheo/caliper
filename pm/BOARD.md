@@ -3,15 +3,15 @@
 Kanban of every task. One line per card: `CALI-N — title · priority · milestone`.
 Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections as state changes.
 
-_Last updated: 2026-06-12 (CALI-19 tolerances & fits shipped; single-part loop complete)_
+_Last updated: 2026-06-12 (CALI-20 assembly model shipped; on the assembly-spine branch)_
 
-## 🎯 Next shift — the assembly spine (do these three)
-- CALI-20 — Assembly model: N parts + named mates/interfaces + assembly-level assertions (generalize CALI-10 to N bodies) · P1 · assembly-spine — _the heart of the north star_
+## 🔨 This shift — the assembly spine
 - CALI-22 — Author-loop fit & refine: route fit/refine of LLM-authored parts through `improve()` (seeded from part.py) so they edit the real part, not a bracket · P1 · generator (guarded now; the bug Theo hit)
 - CALI-19b — Multi-parameter optimizer (nevergrad/scipy): joint tuning of N continuous params for coupled fits · P2 · assembly-spine (1-D + iterative-refine shipped in CALI-19)
 
 ## 🧊 Backlog
-- CALI-21 — Insert-into-assembly: author a new part against two named interfaces at a target fit · P1 · assembly-spine ("insert a support between the wheel and the XYZ assembly") — _needs CALI-20 + CALI-22_
+- CALI-21 — Insert-into-assembly: author a new part against two named interfaces at a target fit · P1 · assembly-spine ("insert a support between the wheel and the XYZ assembly") — _needs CALI-20 ✓ + CALI-22_
+- CALI-20b — Webapp assembly viewer: multi-part 3D load + mate/interference visualization · P2 · M2 (CLI + model shipped in CALI-20; this is the presentation layer)
 - CALI-18 — `largest_through_bore` counts a tube's OUTER wall as a bore (both are cylinders); distinguish interior bores · P2 · measure (found authoring a grommet)
 - CALI-11 — Variable bend angle (e.g. 45°) · P2 · generator
 - CALI-12 — Threaded / tapped / insert holes · P2 · generator
@@ -24,6 +24,7 @@ _Last updated: 2026-06-12 (CALI-19 tolerances & fits shipped; single-part loop c
 - _(none)_
 
 ## ✅ Done — Milestones M0 + M1 + M2 + M3 complete 🎉
+- CALI-20 — Assembly model · P1 · assembly-spine · _2026-06-12 · N parts + named **mates** (no_interference/clearance/fit/touch) + assembly assertions. `assembly.py` (Part/Mate/Assembly, YAML round-trip); N-body probes `pairwise_interference`/`max_interference`/`min_pair_clearance`; mates → measured assertions; reuses the single-part evaluator (margins, Report). `caliper assemble`. 134 passed._
 - CALI-19 — Tolerances & fits · P1 · assembly-spine · _2026-06-12 · fit classes (press/snug/slip/free/running) → tunable clearance **bands**; two-sided band margins + iterative optimizer refine; `approx`/`within`/`fits` helpers; `fit --fit slip` & webapp dropdown; intake taught tolerant asserts. + guard: fit/refine refuse authored parts (no more silent bracket)_
 - CALI-17 — Structural-edit loop · P1 · loop · _2026-06-12 · `authoring.improve` — the LLM revises its script to fix failing **measurements**, not just build errors (two-actor loop closed). In CLI (`gen`) + webapp (✦ author any part)_
 - CALI-16 — LLM-authored generator · P1 · generator · _2026-06-12 · `caliper gen` — the LLM writes the CadQuery script (any part, not just brackets), run sandboxed, measured, self-heals build errors. Also fixed 2 LLM-intake bugs (prefill, schema-laxness)_
@@ -48,8 +49,9 @@ _Last updated: 2026-06-12 (CALI-19 tolerances & fits shipped; single-part loop c
 > gizmo **fit-to-reference** UI and **fit classes** (press/slip/free…). Full suite **121 passed**
 > (cadquery 2.7.0 / occt 7.8.1).
 >
-> **Next — the assembly spine:** **CALI-20** (assembly model: N parts + mates + assembly assertions, the
-> heart), **CALI-22** (author-loop fit/refine so authored parts are fully editable), **CALI-19b**
-> (multi-param optimizer for coupled fits). Together they reach **CALI-21** — "insert a support between
-> the wheel and the XYZ assembly." The lesson from the phone stand: complexity scales by *decomposition*
-> into small, well-fit parts, not by one ever-bigger monolith.
+> **The assembly spine is underway.** **CALI-20** ✓ — Caliper now represents **N parts + named mates +
+> assembly-level assertions** and *measures* them (`caliper assemble`): every mate is a measured fit
+> between two parts, and `max_interference() <= 0` proves no pair collides. Next: **CALI-22** (author-loop
+> fit/refine so authored parts are fully editable), **CALI-19b** (multi-param optimizer for coupled fits).
+> Together they reach **CALI-21** — "insert a support between the wheel and the XYZ assembly." The lesson
+> from the phone stand: complexity scales by *decomposition* into small, well-fit parts, not one monolith.

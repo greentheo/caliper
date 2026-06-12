@@ -27,6 +27,10 @@ Newest demos first.
   script** (not just a bracket), runs it sandboxed, measures it, and **self-heals build errors** from
   the traceback. The spec's primary generation strategy: loose idea → real geometry, no hand-coded
   family. The authored script is saved as `part.py` (the editable source of truth).
+- ✅ **Assembly model (CALI-20).** `caliper assemble <file>` — represent **N parts + named mates +
+  assembly-level assertions** and measure them. Each mate (`touch`/`clearance`/`fit`/`no_interference`)
+  between two posed parts is a measured fit; `max_interference() <= 0` proves no pair collides. The
+  first step from "a part" to "a machine." (Webapp viewer is CALI-20b.)
 
 **Two generators now:** the **hardcoded bracket** (`run`/`refine`/`fit` — fast, offline-capable, the
 optimizer loop) and the **LLM author** (`gen` — arbitrary parts, needs `ANTHROPIC_API_KEY`).
@@ -120,6 +124,24 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-06-12 · Assembly model — a collection of parts that fit together (CALI-20)
+**New:** Caliper now represents **N parts + named mates + assembly-level assertions** and *measures*
+them. Each mate (`touch` / `clearance` / `fit` / `no_interference`) between two parts becomes a measured
+check — "these two seat flush", "this slips into that at a slip fit" — and `max_interference() <= 0`
+proves no pair collides. This is the first step toward the north star ("insert a support between the
+wheel and the XYZ assembly"): the geometry of a *machine*, not just one part.
+**Try it — CLI:**
+```bash
+python examples/make_assembly.py          # (re)generate base/post/cap STLs (centered, local origin)
+make assemble                             # measures examples/assembly.yaml → ALL PASS
+#   caliper assemble examples/assembly.yaml
+# → base→post→cap stack; two `touch` mates (clearance ≈ 0.000) + nothing_collides → ALL PASS.
+#   Parts are posed by `position:` in the YAML; the fit probes measure them where they sit.
+```
+The assembly file (`examples/assembly.yaml`): `parts` (id + source STL/run-dir + position/rotation),
+`mates` (between two part ids, a kind), and free-form `assert`. Bump a part's `position` so two boxes
+overlap → the mate **and** `nothing_collides` both flip to `fail` with the overlap volume as the actual.
 
 ### 2026-06-12 · Fits & tolerances — target a fit class, stop fighting noise
 **New:** ask for a **fit** (press / snug / slip / free / running) and Caliper tunes the part until the

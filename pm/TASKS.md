@@ -250,10 +250,25 @@ CALI-19 to fail honestly). Route fit/refine of an authored run through `improve(
 `part.py`** + the new constraint ("…and clear this reference at a slip fit"), so the LLM edits the real
 part. This is also the front edge of CALI-21 (insert-into-assembly).
 
-### CALI-20 — Assembly model (N parts + interfaces)  · P1 · assembly-spine · 🧊 backlog
+### CALI-20 — Assembly model (N parts + interfaces)  · P1 · assembly-spine · ✅ done (2026-06-12)
 Represent multiple parts, their **mates / datums / joints**, and **assembly-level assertions** (no pair
 interferes, mates touch, fastener stacks align). Generalizes CALI-10's two-body interference/clearance
 to N bodies with *named* relationships. "This collection of parts."
+- **`assembly.py`** — `Part` (id + geometry `source` [STL or run dir] + placement position/rotation +
+  role fixed|movable), `Mate` (`between: [a, b]` + kind `no_interference`/`clearance`/`fit`/`touch`),
+  `Assembly` (parts + mates + assembly assertions). YAML/JSON round-trip; validates mate refs + dup ids.
+- **Mates → measured assertions** (`mate_assertion`): touch → `-tol <= min_clearance(a,b) <= tol`; fit →
+  CALI-19 band; clearance → `>= v`; no_interference → `interference(a,b) <= 0`. `derived_assertions`
+  = per-mate then free-form assembly assertions.
+- **N-body measure** — `pairwise_interference` (all pairs), `max_interference` ("nothing collides"),
+  `min_pair_clearance` (tightest gap anywhere). Reuses the two-body probes (they already took any pair).
+- **Evaluation reuses the single-part evaluator** — same AST interpreter, signed margins (fit band
+  between two parts is tunable), same `Report`. Namespace: part ids → posed `Geometry`; probes take two
+  parts; `max_interference()`/`min_clearance_all()`/`bbox(part)` bound in.
+- **`caliper assemble <file>`** (+ `make assemble`); example `examples/assembly.yaml` (post-stand:
+  base→post→cap, two touch mates) → ALL PASS. Tests: `test_assembly.py` (13). **134 passed.**
+- **Deferred:** webapp assembly viewer → CALI-20b. Spec-source parts (build from a spec via the
+  author/bracket generator at assemble time) → fold into CALI-21. Today parts load from STL / run dirs.
 
 ### CALI-21 — Insert-into-assembly  · P1 · assembly-spine · 🧊 backlog
 Load an assembly, name two interfaces, ask for a part "here" at a target fit → the LLM authors a part

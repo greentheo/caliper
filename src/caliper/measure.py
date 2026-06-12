@@ -440,6 +440,63 @@ def min_clearance(g: Geometry, ref: Any) -> float:
 
 
 # ---------------------------------------------------------------------------
+# N-body — the assembly substrate (CALI-20): the same pair probes, over every pair
+# ---------------------------------------------------------------------------
+# An assembly is N posed bodies with named relationships. The two-body probes above already accept
+# any pair of Geometry-likes (``interference``/``min_clearance`` coerce both sides via ``_as_mesh``),
+# so the N-body layer is just "run the pair probe over every unordered pair" plus the worst-case
+# reductions an assembly-level assertion wants (``no pair collides`` / ``every pair keeps clearance``).
+
+def _as_pairs(parts: Any) -> list[tuple[str, Any]]:
+    """Normalize ``{id: geom}`` or ``[(id, geom), ...]`` (or a bare list) to ``[(id, geom)]``."""
+    if isinstance(parts, dict):
+        return list(parts.items())
+    out: list[tuple[str, Any]] = []
+    for i, p in enumerate(parts):
+        if isinstance(p, (tuple, list)) and len(p) == 2:
+            out.append((str(p[0]), p[1]))
+        else:
+            out.append((str(i), p))
+    return out
+
+
+def pairwise_interference(parts: Any) -> list[tuple[str, str, float]]:
+    """Overlap volume (mm^3) for every unordered pair of bodies — ``[(id_a, id_b, volume), ...]``.
+
+    ``parts`` is ``{id: Geometry}`` (or ``[(id, geom), ...]``). The collision substrate for an
+    assembly: a clean assembly has every entry's volume == 0.
+    """
+    items = _as_pairs(parts)
+    out: list[tuple[str, str, float]] = []
+    for i in range(len(items)):
+        for j in range(i + 1, len(items)):
+            (ida, ga), (idb, gb) = items[i], items[j]
+            out.append((ida, idb, interference(ga, gb)))
+    return out
+
+
+def max_interference(parts: Any) -> float:
+    """Worst overlap volume across all pairs (0.0 if nothing collides / fewer than two bodies).
+
+    Use as ``max_interference() <= 0`` — one assertion that no pair of parts interpenetrates.
+    """
+    return max((v for _, _, v in pairwise_interference(parts)), default=0.0)
+
+
+def min_pair_clearance(parts: Any) -> float:
+    """Smallest signed gap across all pairs (``inf`` if fewer than two bodies).
+
+    Negative ⇒ some pair interpenetrates; otherwise the tightest air gap anywhere in the assembly.
+    """
+    items = _as_pairs(parts)
+    gaps = [
+        min_clearance(items[i][1], items[j][1])
+        for i in range(len(items)) for j in range(i + 1, len(items))
+    ]
+    return min(gaps) if gaps else float("inf")
+
+
+# ---------------------------------------------------------------------------
 # DEFERRED probes — present as documented no-ops (design spec §4, §7)
 # ---------------------------------------------------------------------------
 def mates(g: Geometry, ref: Any, tol: float = 0.2):

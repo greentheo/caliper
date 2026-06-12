@@ -246,6 +246,28 @@ def _cmd_fit(args) -> int:
     return _run_and_emit(spec, args.max_iter)
 
 
+def _cmd_assemble(args) -> int:
+    """Load an assembly (N parts + named mates), measure every mate + assembly assertion (CALI-20)."""
+    from .assembly import Assembly, derived_assertions, evaluate_assembly
+
+    asm = Assembly.load(args.path)
+    base_dir = args.base_dir or os.path.dirname(os.path.abspath(args.path)) or "."
+    print(f"▶ assembly: {asm.name}" + (f" — {asm.intent}" if asm.intent else "") + "\n")
+    print(f"── {len(asm.parts)} part(s) ──")
+    for p in asm.parts:
+        pose = ""
+        if any(p.position) or any(p.rotation):
+            pose = f"  @ pos={p.position} rot={p.rotation}"
+        print(f"  • {p.id:<14} [{p.role}]  ← {p.source}{pose}")
+    print(f"\n── {len(asm.mates)} mate(s) + {len(asm.assertions)} assembly assertion(s) ──")
+    for a in derived_assertions(asm):
+        print(f"  • {a.id}: {a.expr}")
+    print("\n── measuring (build geometry → N-body fit probes → evaluate) ──")
+    report = evaluate_assembly(asm, base_dir=base_dir)
+    print(report.to_text())
+    return 0 if report.all_pass else 3
+
+
 def _cmd_serve(args) -> int:
     from .server import serve
 
@@ -303,6 +325,12 @@ def main(argv: list[str] | None = None) -> int:
                        help="parameter the optimizer may resize to fit (default: auto-pick a size param)")
     p_fit.add_argument("--max-iter", type=int, default=6)
     p_fit.set_defaults(func=_cmd_fit)
+
+    p_asm = sub.add_parser("assemble", help="measure a multi-part assembly (mates + interference) — CALI-20")
+    p_asm.add_argument("path", help="an assembly file (.yaml/.json): parts + mates + assembly assertions")
+    p_asm.add_argument("--base-dir", default=None,
+                       help="resolve part sources against this dir (default: the assembly file's dir)")
+    p_asm.set_defaults(func=_cmd_assemble)
 
     p_serve = sub.add_parser("serve", help="launch the webapp (3D viewer + spec/report + refine)")
     p_serve.add_argument("--host", default="127.0.0.1")
