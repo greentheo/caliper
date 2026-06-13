@@ -31,7 +31,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   + bad-between 400 + unknown-assembly 404. **153 passed.**
 - **Deferred:** in-browser assembly *authoring* (build parts from intent at insert time) → CALI-23;
   per-part red/green collision shading → polish (the report already shows per-mate pass/fail).
-  Commit: PENDING
+  Commit: 914a791
 
 ### 2026-06-12 · CALI-21 · Insert-into-assembly — the north-star headline, end to end
 - **What it is:** *"insert a support between the wheel and the XYZ assembly."* The whole spine converges:
