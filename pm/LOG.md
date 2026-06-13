@@ -33,7 +33,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   grows-when-offset; deferred without holes; full eval pass + fail). **156 passed.**
 - **Deferred:** mate lines in the viewer + per-part build cache invalidation across processes; threaded
   helix modeling (CALI-12); optimizer-in-author-loop (CALI-24, still queued).
-  Commit: PENDING
+  Commit: b2e4bb9
 
 ### 2026-06-13 · CALI-21c · Viewer UX — monitor-resize, middle-mouse pan, fit-to-view + adaptive grid
 - **Reported (Theo, after plugging into a different monitor):** the 3D view didn't resize correctly,
