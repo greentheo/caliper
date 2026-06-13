@@ -336,20 +336,44 @@ choose fit + intent, Insert → the LLM authors the bridge, it renders green, th
   authored in 1 round, rendered green, both mates 0.21 mm, nothing collides, saved as `insert_demo.inserted`.
 - Tests: `test_server.py` +5 (list/get/part-stl/insert-route-through/400/404). **153 passed.**
 
-### CALI-25 — North-star stress test: a whole (small) machine  · P1 · assembly-spine · 🧊 next
-The real test of everything: decompose a small machine (a mini gantry, or a "3D-printer frame" corner)
-into a handful of parts, assemble + insert them against each other, and keep the **whole assembly green**
-(no collisions, every mate in its fit band). Expect the bottleneck to be the **measurement vocabulary**
-(datums / axes / hole-alignment / coplanarity) more than the LLM — surface what's missing as new probes.
+### CALI-25 — A whole (small) machine: a corner leg  · P1 · assembly-spine · ✅ done (2026-06-13)
+The real test of everything, passing. A 4-part **corner leg** — two solid **20×40 mm bars** (vertical
+post + horizontal beam) at a right angle, a **gusset bracket**, and a **foot**, screwed with M5s through
+**aligned holes** — `caliper assemble examples/machine.yaml` → ALL PASS (4 touch mates, no collisions,
+3 hole-alignment checks at ~1e-15 mm). The predicted bottleneck (measurement vocabulary) was real and
+addressed with a hole-alignment probe.
+- **New measurement (`measure.py`):** `holes_world(g)` (holes transformed to the assembly frame via the
+  part's `pose`) + `min_hole_misalignment(a, b)` (smallest perpendicular offset between a hole of `a`
+  and a near-parallel hole of `b`; 0 = coaxial → a screw passes through both). Bound as
+  `hole_misalignment(a, b)` / `holes_aligned(a, b, tol)`. Added `pose` to `Geometry`.
+- **Parts** (`examples/machine/{bar_v,bar_h,corner_bracket,foot}.py` + `examples/machine.yaml`): built in
+  world coords; tap-diameter holes in the solid bars (threaded), clearance holes in bracket/foot.
+- Tests: `test_assembly.py` (+5). Verified CLI + in-browser (bracket bolt holes visible, ALL PASS).
+- **Threaded** = tap-diameter holes (no modeled helix; the FDM-real answer). Full threads → CALI-12.
+
+### CALI-23 — Assembly parts built from a script at assemble time  · P2 · assembly-spine · ✅ done (2026-06-13)
+An assembly `Part.source` can be a CadQuery `build(params)` **`.py`** (not just STL/run-dir).
+`assembly._build_py_local` runs it in the sandbox — keeping the **B-rep** so hole/face probes work —
+cached by path+mtime; `_build_py_part` poses it. The machine's 4 parts use this. The webapp serves
+`.py` parts as STL (local mesh; the front end poses it). *(Building from a free-text intent at assemble
+time, vs a committed script, is a further step — left for later.)*
+
+### CALI-26 — Per-part collision shading in the viewer  · P2 · M2 · ✅ done (2026-06-13)
+`/api/assembly/{id}` and `/api/insert` return `collisions` (pairs with interference > 0); the viewer
+shades any colliding part **red** (resets to its role color otherwise). *Mate lines deferred — the
+report panel + red shading already make pass/fail and collisions obvious.*
 
 ### CALI-24 — Optimizer in the author loop  · P2 · assembly-spine · 🧊 backlog
 Today an insert relies on the LLM revising dimensions to hit the fit. Fold CALI-19b's `tune_multi` into
 the authored path so a part that mates **3+ faces at once** gets its continuous params *optimized*, not
 just LLM-guessed. Likely: author a parametric `build(params)`, expose its params to `tune_multi`.
 
-### CALI-26 — Per-part collision shading in the viewer  · P2 · M2 · 🧊 backlog
-Color a colliding pair red (and draw mate lines) in the assembly viewer, derived from the report's
-per-pair `interference`. The report panel already lists per-mate pass/fail; this is the visual layer.
+### CALI-27 — Assemblies / refine hardening  · P1 · M2 · 🧊 next
+Chase the rough edges hit in real use (Theo, 2026-06-13): script-built assemblies are slow on first
+load (sandbox builds — cache helps but the first hit blocks); refine UX/expectations (offline vs LLM,
+bracket vs authored) need clarifying in-product; error surfacing on a failed part build. See
+`TESTING.md` §7 for the catalog. Likely: build parts in parallel / pre-warm, clearer in-UI status,
+and a friendlier "this needs the LLM" hint.
 
 ## Generator capabilities (from real use — backlog)
 ### CALI-11 — Variable bend angle  · P2 · generator · 🧊 backlog

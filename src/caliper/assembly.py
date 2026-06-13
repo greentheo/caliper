@@ -26,6 +26,7 @@ import json
 import os
 from typing import Any, Literal, Optional
 
+import numpy as np
 import yaml
 from pydantic import Field, model_validator
 
@@ -159,24 +160,67 @@ def derived_assertions(asm: Assembly) -> list[Assertion]:
 # Geometry loading
 # ---------------------------------------------------------------------------
 def _resolve_source(source: str, base_dir: str) -> str:
-    """An STL path, or a run directory whose ``part.stl`` we load."""
+    """An STL path, a CadQuery ``build(params)`` script (``.py``), or a run dir whose ``part.stl`` we load."""
     path = source if os.path.isabs(source) else os.path.join(base_dir, source)
     if os.path.isdir(path):
         path = os.path.join(path, "part.stl")
     return path
 
 
+_PART_CACHE: dict = {}   # (abspath, mtime) -> built Geometry in LOCAL frame (B-rep kept)
+
+
+def _build_py_local(path: str) -> Geometry:
+    """Build a CadQuery ``build(params)`` script in its LOCAL frame (cached by path + mtime).
+
+    Runs in the sandbox (same path as the LLM author), so the part keeps its **B-rep** — exact hole/
+    face probes work, which is what hole-alignment needs. Cached so a re-`assemble` (or the webapp
+    fetching the same part for measurement *and* rendering) doesn't rebuild it.
+    """
+    from . import sandbox
+
+    key = (os.path.abspath(path), os.path.getmtime(path))
+    cached = _PART_CACHE.get(key)
+    if cached is not None:
+        return cached
+    with open(path) as f:
+        script = f.read()
+    res = sandbox.run_script(script, {})
+    if not res.ok:
+        raise ValueError(f"failed to build part script {path}:\n{res.feedback[:400]}")
+    _PART_CACHE[key] = res.geometry
+    return res.geometry
+
+
+def _build_py_part(path: str, position, rotation) -> Geometry:
+    """Build a ``.py`` part (CALI-23) and pose it into the assembly frame.
+
+    The pose is baked into the mesh; the solid stays in its local frame with the pose recorded on the
+    Geometry, so feature probes (holes) transform their results to the assembly frame.
+    """
+    base = _build_py_local(path)
+    T = measure.pose_matrix(position, rotation)
+    if np.allclose(T, np.eye(4)):
+        return Geometry(mesh=base.mesh, solid=base.solid, pose=T)
+    m = base.require_mesh().copy()
+    m.apply_transform(T)
+    return Geometry(mesh=m, solid=base.solid, pose=T)
+
+
 def load_parts(asm: Assembly, base_dir: str = ".") -> dict[str, Geometry]:
     """Load and pose every part's geometry → ``{part_id: Geometry}``.
 
-    Each part's ``position``/``rotation`` is baked into its mesh at load (via
-    :meth:`Geometry.from_stl_posed`), so the fit probes measure the parts *where they sit* in the
-    assembly — no per-probe pose bookkeeping.
+    Each part's ``position``/``rotation`` is baked into its mesh at load, so the fit probes measure the
+    parts *where they sit* in the assembly. A ``.py`` source is **built** (CALI-23, keeps the B-rep so
+    hole probes work); anything else is loaded as a posed STL (run-dir → ``part.stl``).
     """
     parts: dict[str, Geometry] = {}
     for p in asm.parts:
         path = _resolve_source(p.source, base_dir)
-        parts[p.id] = Geometry.from_stl_posed(path, p.position, p.rotation)
+        if path.endswith(".py"):
+            parts[p.id] = _build_py_part(path, p.position, p.rotation)
+        else:
+            parts[p.id] = Geometry.from_stl_posed(path, p.position, p.rotation)
     return parts
 
 
@@ -199,6 +243,9 @@ def build_context(asm: Assembly, parts: dict[str, Geometry]) -> dict:
         # whole-assembly reductions
         "max_interference": lambda: measure.max_interference(parts),
         "min_clearance_all": lambda: measure.min_pair_clearance(parts),
+        # hole alignment across parts (CALI-25) — does a screw pass through both?
+        "hole_misalignment": lambda a, b: measure.min_hole_misalignment(a, b),
+        "holes_aligned": lambda a, b, tol=0.5: measure.min_hole_misalignment(a, b) <= tol,
         # per-part dimensional query
         "bbox": lambda part: measure.bounding_box(part),
         # tolerant comparisons (CALI-19)

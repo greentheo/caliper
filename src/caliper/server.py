@@ -330,7 +330,8 @@ def create_app():
 
     @app.get("/api/assembly/{aid}")
     def get_assembly(aid: str):
-        from .assembly import Assembly, evaluate_assembly
+        from . import measure
+        from .assembly import Assembly, evaluate_assembly, load_parts
 
         try:
             path, base = _find_assembly(aid)
@@ -342,15 +343,19 @@ def create_app():
                  for p in asm.parts]
         mates = [{"id": m.id, "between": m.between, "kind": m.kind, "fit": m.fit} for m in asm.mates]
         try:
-            report = evaluate_assembly(asm, base_dir=base).to_dict()
-        except Exception as e:  # noqa: BLE001 — a missing part STL shouldn't 500 the whole load
-            report = {"all_pass": False, "results": [], "error": str(e)}
+            geoms = load_parts(asm, base_dir=base)
+            report = evaluate_assembly(asm, base_dir=base, parts=geoms).to_dict()
+            collisions = [[a, b] for a, b, v in measure.pairwise_interference(geoms) if v > 1e-6]
+        except Exception as e:  # noqa: BLE001 — a failing part build shouldn't 500 the whole load
+            report, collisions = {"all_pass": False, "results": [], "error": str(e)}, []
         return {"id": aid, "name": asm.name, "intent": asm.intent, "parts": parts,
-                "mates": mates, "report": report}
+                "mates": mates, "report": report, "collisions": collisions}
 
     @app.get("/api/assembly/{aid}/part/{pid}.stl")
     def assembly_part_stl(aid: str, pid: str):
-        from .assembly import Assembly, _resolve_source
+        import tempfile
+
+        from .assembly import Assembly, _build_py_local, _resolve_source
 
         try:
             path, base = _find_assembly(aid)
@@ -360,17 +365,25 @@ def create_app():
         part = next((p for p in asm.parts if p.id == pid), None)
         if part is None:
             raise HTTPException(status_code=404, detail=f"no part {pid} in {aid}")
-        stl = _resolve_source(part.source, base)
-        if not os.path.isfile(stl):
+        src = _resolve_source(part.source, base)
+        if src.endswith(".py"):  # CALI-23/25: build the part and serve its LOCAL mesh (front end poses it)
+            try:
+                geom = _build_py_local(src)
+            except Exception as e:  # noqa: BLE001
+                raise HTTPException(status_code=422, detail=f"could not build part {pid}: {e}")
+            out = os.path.join(tempfile.mkdtemp(prefix="caliper_part_"), f"{pid}.stl")
+            geom.require_mesh().export(out)
+            return FileResponse(out, media_type="model/stl")
+        if not os.path.isfile(src):
             raise HTTPException(status_code=404, detail=f"missing STL for {pid}: {part.source}")
-        return FileResponse(stl, media_type="model/stl")
+        return FileResponse(src, media_type="model/stl")
 
     @app.post("/api/insert")
     def insert(req: InsertRequest):
         import json
         from datetime import datetime
 
-        from .assembly import Assembly, evaluate_assembly
+        from .assembly import Assembly, evaluate_assembly, load_parts
         from .insert import add_part_to_assembly, insert_part
 
         try:
@@ -409,13 +422,16 @@ def create_app():
             saved_id = f"{req.assembly_id}.inserted"
         except Exception:
             saved_id = None
-        report2 = evaluate_assembly(new_asm, base_dir=base).to_dict()
+        from . import measure
+        new_geoms = load_parts(new_asm, base_dir=base)
+        report2 = evaluate_assembly(new_asm, base_dir=base, parts=new_geoms).to_dict()
+        collisions = [[a, b] for a, b, v in measure.pairwise_interference(new_geoms) if v > 1e-6]
         return {
             "ok": res.ok, "run_id": run_id, "new_id": req.new_id, "rounds": res.rounds,
             "new_part": {"id": req.new_id, "stl_url": f"/api/runs/{run_id}/part.stl",
                          "position": [0, 0, 0], "rotation": [0, 0, 0]},
             "report": report2, "script": res.script, "assembly_yaml": new_asm.to_yaml(),
-            "saved_as": saved_id,
+            "saved_as": saved_id, "collisions": collisions,
             "bridge": ({"axis": res.bridge.axis_name, "gap": round(res.bridge.gap, 2)}
                        if res.bridge else None),
         }

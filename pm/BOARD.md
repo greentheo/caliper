@@ -3,15 +3,12 @@
 Kanban of every task. One line per card: `CALI-N — title · priority · milestone`.
 Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections as state changes.
 
-_Last updated: 2026-06-13 (CALI-21c viewer UX: monitor-resize + middle-mouse pan + fit-to-view/adaptive grid)_
+_Last updated: 2026-06-13 (CALI-25 a whole small machine — bars+bracket+foot with MEASURED bolt-hole alignment; +CALI-23/26)_
 
-## 🎯 Next shift — build a whole (small) machine
-- CALI-25 — North-star stress test: decompose a small machine (mini gantry / 3D-printer frame) into well-fit parts, assemble + insert, keep the whole thing green · P1 · assembly-spine (the real test of everything built)
+## 🎯 Next shift — harden + extend
 - CALI-24 — Optimizer-in-the-author-loop: let CALI-19b tune the authored part's continuous params (not just LLM revision) for coupled inserts · P2 · assembly-spine
-- CALI-23 — Assembly parts from a spec/intent (build at assemble/insert time), not just STL/run-dir · P2 · assembly-spine
-
-## 🧊 Backlog
-- CALI-26 — Per-part collision shading in the viewer (red on a colliding pair) + mate lines · P2 · M2 (report already shows per-mate pass/fail)
+- CALI-27 — Assemblies/refine hardening: chase the rough edges Theo hit (first-load build time, refine UX, error surfacing) — see TESTING.md §7 · P1 · M2
+- CALI-12 — Threaded holes done right (tapped/insert vs clearance; the machine uses tap-diameter today) · P2 · generator
 - CALI-18 — `largest_through_bore` counts a tube's OUTER wall as a bore (both are cylinders); distinguish interior bores · P2 · measure (found authoring a grommet)
 - CALI-11 — Variable bend angle (e.g. 45°) · P2 · generator
 - CALI-12 — Threaded / tapped / insert holes · P2 · generator
@@ -24,6 +21,7 @@ _Last updated: 2026-06-13 (CALI-21c viewer UX: monitor-resize + middle-mouse pan
 - _(none)_
 
 ## ✅ Done — Milestones M0 + M1 + M2 + M3 complete 🎉
+- CALI-25 + CALI-23 + CALI-26 — A whole small machine · P1 · assembly-spine · _2026-06-13 · a 4-part **corner leg** (two solid 20×40 bars + gusset bracket + foot, M5s through aligned holes) → `caliper assemble examples/machine.yaml` ALL PASS incl. **bolt-hole alignment** measured at ~1e-15mm. **CALI-23:** assembly parts build from a `.py` CadQuery script at assemble time (B-rep kept). **CALI-25:** `holes_world`/`min_hole_misalignment` + `hole_misalignment(a,b)` probe. **CALI-26:** viewer shades colliding parts red; serves `.py` parts as STL. Verified CLI + in-browser._
 - CALI-21c — Viewer UX · P1 · M2 · _2026-06-13 · fixed monitor/DPI resize (re-apply pixelRatio + CSS-fill canvas + DPR watcher), **middle-mouse pan** (CAD-style mouseButtons), and a **⤢ fit** button + `F` key with a **content-sized grid** (was a fixed 400mm plane). Left-click-only picking. Verified in-browser._
 - CALI-21b + CALI-20b — Webapp insert UI + assembly viewer · P1 · M2 · _2026-06-13 · load an assembly in 3D, **click two parts to pick interfaces**, choose fit + intent, Insert → the LLM authors the bridge live, it renders green, the assembly re-measures. `/api/assemblies`, `/api/assembly/{id}`(+part STL), `/api/insert`. **VERIFIED LIVE in-browser** (Preview MCP): bridged two posts in 1 round at 0.21mm/side. Fixed a double-path-resolution bug. 153 passed._
 - CALI-21 — Insert-into-assembly · P1 · assembly-spine · _2026-06-12 · **the north-star headline.** `caliper insert <asm> --between a,b --fit slip` — the LLM authors a part **in world coords** that mates to two named interfaces at a fit band, measured against the posed parts + no-collision, then it's added back to the assembly (run-dir source + fit mates) and re-measured. `insert.py` (`insert_spec`/`_bridge`/`insert_part`/`add_part_to_assembly`). **VERIFIED LIVE:** bridged a 50mm gap first try at 0.21mm/side. 148 passed._
@@ -54,10 +52,16 @@ _Last updated: 2026-06-13 (CALI-21c viewer UX: monitor-resize + middle-mouse pan
 > gizmo **fit-to-reference** UI and **fit classes** (press/slip/free…). Full suite **121 passed**
 > (cadquery 2.7.0 / occt 7.8.1).
 >
+> **A whole small machine, measured green.** **CALI-25** ✓ — `caliper assemble examples/machine.yaml`
+> builds a **corner leg** (two solid 20×40 bars + a gusset bracket + a foot, screwed with M5s) and proves
+> it: 4 mates touch, nothing collides, and the **bolt holes line up** (a new `hole_misalignment` probe,
+> measured at ~0). Parts are CadQuery scripts built at assemble time (**CALI-23**, B-rep kept → exact
+> hole probes); the viewer shades collisions red (**CALI-26**). The measurement vocabulary grew to match
+> the geometry — exactly the predicted bottleneck. See **TESTING.md** for the full walkthrough.
+>
 > **The headline is now clickable.** **CALI-21b/20b** ✓ — the webapp loads an assembly in 3D, you
 > **click two parts to pick the interfaces**, choose a fit, and the LLM authors the bridging part live
-> (it renders green; the assembly re-measures). Verified in-browser: two posts bridged in 1 round at
-> 0.21 mm/side. Next: assemble a whole small **machine** (CALI-25).
+> (it renders green; the assembly re-measures).
 >
 > **The north star is reachable end to end.** **CALI-21** ✓ — `caliper insert <asm> --between wheel,frame
 > --fit slip` makes the LLM **author a part in assembly coordinates that mates to two named interfaces at

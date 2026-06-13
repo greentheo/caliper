@@ -365,6 +365,12 @@ const asmMat = (role, inserted) => new THREE.MeshStandardMaterial({
   metalness: 0.1, roughness: role === 'fixed' ? 0.7 : 0.55,
 });
 
+// CALI-26: shade any part in a colliding pair red, so interference is obvious at a glance
+function shadeCollisions(collisions) {
+  const bad = new Set((collisions || []).flat());
+  for (const [pid, m] of asmMeshes) m.material.color.setHex(bad.has(pid) ? 0xf85149 : m.userData.baseColor);
+}
+
 function clearAssembly() {
   for (const m of asmMeshes.values()) modelGroup.remove(m);
   asmMeshes.clear();
@@ -406,11 +412,13 @@ async function loadAssembly(aid) {
       const r = (p.rotation || [0, 0, 0]).map(THREE.MathUtils.degToRad);
       mesh.rotation.set(r[0], r[1], r[2], 'XYZ');
       mesh.userData.partId = p.id;
+      mesh.userData.baseColor = mesh.material.color.getHex();
       modelGroup.add(mesh);
       asmMeshes.set(p.id, mesh);
     }
     modelGroup.rotation.set(0, 0, 0);
     frameAssembly();
+    shadeCollisions(data.collisions);
     renderReport({ report: data.report, build_ok: true });
     specEl.textContent = `# assembly: ${data.name || aid}\n# ${data.intent || ''}`;
     scriptbox.style.display = 'none';
@@ -476,8 +484,10 @@ async function doInsert() {
     const geom = stlLoader.parse(buf); geom.computeVertexNormals();
     const mesh = new THREE.Mesh(geom, asmMat('movable', true));   // green = the inserted part
     mesh.userData.partId = data.new_id;
+    mesh.userData.baseColor = mesh.material.color.getHex();
     modelGroup.add(mesh);
     asmMeshes.set(data.new_id, mesh);
+    shadeCollisions(data.collisions);
     renderReport({ report: data.report, build_ok: true });
     if (data.script) { scriptpre.textContent = data.script; scriptbox.style.display = ''; }
     selected = []; updatePicks(); frameAssembly(); refreshRuns();

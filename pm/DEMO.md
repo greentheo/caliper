@@ -37,6 +37,10 @@ Newest demos first.
   --fit slip` — the LLM **authors a new part that mates to two named interfaces** at a measured fit, in
   assembly coordinates, then it's added back and the whole assembly is re-measured. *"Insert a support
   between the wheel and the XYZ assembly."* Verified live (bridged a 50mm gap at 0.21mm/side, first try).
+- ✅ **A whole small machine (CALI-25).** `caliper assemble examples/machine.yaml` — a 4-part corner leg
+  (two solid 20×40 bars + gusset bracket + foot, M5s) measured green, **including bolt-hole alignment**
+  (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
+  collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
 **Two generators now:** the **hardcoded bracket** (`run`/`refine`/`fit` — fast, offline-capable, the
 optimizer loop) and the **LLM author** (`gen` — arbitrary parts, needs `ANTHROPIC_API_KEY`).
@@ -130,6 +134,25 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-06-13 · A whole small machine — a corner leg with measured bolt alignment (CALI-25/23/26)
+**New:** Caliper now measures a **multi-part machine**, including whether the **bolt holes line up**.
+The demo `examples/machine.yaml` is a corner leg: two solid **20×40 mm bars** (post + beam) at a right
+angle, a **gusset bracket**, and a **foot**, screwed with M5s through aligned holes.
+```bash
+caliper assemble examples/machine.yaml
+# → ALL PASS: 4 touch mates, nothing_collides, and three hole-alignment checks at ~0mm:
+#     hole_misalignment(corner_bracket, bar_v) <= 0.5   ✓
+#     hole_misalignment(corner_bracket, bar_h) <= 0.5   ✓
+#     hole_misalignment(foot, bar_v) <= 0.5             ✓
+```
+Each part is a CadQuery script built at assemble time (CALI-23, B-rep kept → exact hole probes). The new
+`hole_misalignment(a, b)` probe detects each part's holes, poses them into the assembly frame, and
+returns the smallest axis offset between a near-parallel pair (0 = a screw passes straight through both).
+In the **webapp** (Assemblies → corner-leg) the parts render with the bracket's bolt holes visible, and
+any colliding pair is shaded **red** (CALI-26). To see the measurement bite: nudge a hole's coordinate
+in one of `examples/machine/*.py` and re-assemble → the matching `*_bolts_align` check fails.
+**See `TESTING.md` for the full hands-on walkthrough of everything built so far.**
 
 ### 2026-06-13 · Viewer UX — resize, panning, fit-to-view (CALI-21c)
 **Fixed** (from real use on a second monitor): the 3D view now **resizes correctly across monitors/DPI**

@@ -169,3 +169,69 @@ def test_load_parts_bakes_the_pose(tmp_path):
     parts = assembly.load_parts(asm, base_dir=str(tmp_path))
     bb = measure.bounding_box(parts["p"])
     assert math.isclose((bb.min[0] + bb.max[0]) / 2, 100.0, abs_tol=1e-3)  # centered at x=100
+
+
+# --- CALI-23: parts built from a CadQuery script + CALI-25 hole alignment --
+def _plate_py(path, expr_translate="(0,0,0)", d=6):
+    # a 40x40x8 plate with a central Z-hole, drilled then translated into place
+    path.write_text(
+        "def build(params):\n"
+        "    import cadquery as cq\n"
+        f"    return cq.Workplane('XY').box(40, 40, 8).faces('>Z').workplane().hole({d}).translate({expr_translate})\n"
+    )
+    return str(path)
+
+
+def test_py_part_builds_with_brep_and_detects_holes(tmp_path):
+    pytest.importorskip("cadquery")
+    g = assembly._build_py_local(_plate_py(tmp_path / "plate.py"))
+    assert g.solid is not None                      # CALI-23 keeps the B-rep
+    hs = measure.holes_world(g)
+    assert len(hs) >= 1 and abs(hs[0].diameter - 6) < 0.3
+
+
+def test_hole_misalignment_zero_when_coaxial_grows_when_offset(tmp_path):
+    pytest.importorskip("cadquery")
+    a = assembly._build_py_local(_plate_py(tmp_path / "a.py", "(0,0,0)"))
+    b0 = assembly._build_py_local(_plate_py(tmp_path / "b0.py", "(0,0,20)"))    # same XY, 20mm up
+    b5 = assembly._build_py_local(_plate_py(tmp_path / "b5.py", "(5,0,20)"))    # offset 5mm in X
+    assert measure.min_hole_misalignment(a, b0) < 0.2          # coaxial
+    assert measure.min_hole_misalignment(a, b5) == pytest.approx(5.0, abs=0.3)  # offset measured
+
+
+def test_hole_misalignment_deferred_without_holes(tmp_path):
+    # a mesh-only part (no B-rep) can't expose holes → the probe defers, not silently passes
+    _write_box(tmp_path / "p.stl", (10, 10, 10))
+    asm = Assembly(
+        name="x",
+        parts=[Part(id="a", source="p.stl"), Part(id="b", source="p.stl", position=[20, 0, 0])],
+        assertions=[{"id": "align", "expr": "hole_misalignment(a, b) <= 0.5"}],
+    )
+    report = assembly.evaluate_assembly(asm, base_dir=str(tmp_path))
+    assert report.results[0].status == "deferred"
+
+
+def test_evaluate_assembly_with_script_parts_and_hole_alignment(tmp_path):
+    pytest.importorskip("cadquery")
+    _plate_py(tmp_path / "bot.py", "(0,0,0)")        # z -4..4, hole at (0,0)
+    _plate_py(tmp_path / "top.py", "(0,0,8)")        # z 4..12, hole at (0,0) — coaxial, just touching
+    asm = Assembly(
+        name="stack",
+        parts=[Part(id="bot", source="bot.py"), Part(id="top", source="top.py")],
+        assertions=[
+            {"id": "aligned", "expr": "hole_misalignment(top, bot) <= 0.5"},
+            {"id": "clean", "expr": "max_interference() <= 0"},
+        ],
+    )
+    report = assembly.evaluate_assembly(asm, base_dir=str(tmp_path))
+    by = {r.id: r for r in report.results}
+    assert by["aligned"].status == "pass" and by["clean"].status == "pass"
+
+    # offset the top plate's hole in X → the alignment assertion must now fail
+    _plate_py(tmp_path / "top.py", "(6,0,8)")
+    asm2 = Assembly(
+        name="stack2",
+        parts=[Part(id="bot", source="bot.py"), Part(id="top", source="top.py")],
+        assertions=[{"id": "aligned", "expr": "hole_misalignment(top, bot) <= 0.5"}],
+    )
+    assert assembly.evaluate_assembly(asm2, base_dir=str(tmp_path)).results[0].status == "fail"

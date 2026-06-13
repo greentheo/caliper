@@ -1,0 +1,42 @@
+name: corner-leg
+intent: >
+  a leg corner — two solid 20x40mm bars meeting at a right angle, joined by a gusset bracket and
+  standing on a foot, screwed together with M5s through aligned holes.
+
+# every part is built from a CadQuery script at assemble time (CALI-23), in world coordinates, so
+# placement is the identity — the scripts already put each part where it belongs in the corner.
+parts:
+  - id: bar_v
+    source: machine/bar_v.py        # vertical post,  z 0..100
+    role: fixed
+  - id: bar_h
+    source: machine/bar_h.py        # horizontal beam, x 10..110 at the top
+    role: fixed
+  - id: corner_bracket
+    source: machine/corner_bracket.py
+  - id: foot
+    source: machine/foot.py
+
+mates:
+  - id: corner
+    between: [bar_v, bar_h]
+    kind: touch                      # beam end face meets the post's side at the corner
+  - id: bracket_on_post
+    between: [corner_bracket, bar_v]
+    kind: touch
+  - id: bracket_on_beam
+    between: [corner_bracket, bar_h]
+    kind: touch
+  - id: foot_under_post
+    between: [foot, bar_v]
+    kind: touch
+
+assert:
+  - id: nothing_collides
+    expr: max_interference() <= 0
+  - id: bracket_post_bolts_align
+    expr: hole_misalignment(corner_bracket, bar_v) <= 0.5
+  - id: bracket_beam_bolts_align
+    expr: hole_misalignment(corner_bracket, bar_h) <= 0.5
+  - id: foot_bolts_align
+    expr: hole_misalignment(foot, bar_v) <= 0.5

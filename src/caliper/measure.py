@@ -38,6 +38,10 @@ class Geometry:
 
     mesh: Optional[trimesh.Trimesh] = None
     solid: Any = None  # a cadquery.Workplane or cadquery Solid, when available
+    # world transform applied to this part in an assembly (CALI-25). The mesh is baked into world frame
+    # at load; the B-rep solid is kept in its LOCAL frame, so feature probes that read the solid (holes)
+    # transform their results by this pose to compare parts in the assembly frame. None == identity.
+    pose: Any = None
 
     @classmethod
     def from_stl(cls, path: str) -> "Geometry":
@@ -55,7 +59,7 @@ class Geometry:
         if not np.allclose(T, np.eye(4)):
             m = m.copy()
             m.apply_transform(T)
-        return cls(mesh=m)
+        return cls(mesh=m, pose=T)
 
     @classmethod
     def from_mesh(cls, mesh: trimesh.Trimesh) -> "Geometry":
@@ -249,6 +253,65 @@ def largest_through_bore(g: Geometry) -> float:
     """Diameter of the largest cylindrical bore (0.0 if none detected)."""
     hs = holes(g) if g.solid is not None else []
     return max((h.diameter for h in hs), default=0.0)
+
+
+# ---------------------------------------------------------------------------
+# Hole alignment across parts (CALI-25) — "do the bolt holes line up?"
+# ---------------------------------------------------------------------------
+# An assembly joins parts with fasteners; the measurement that proves a joint is buildable is that a
+# hole in one part is coaxial with a hole in the next, so a screw passes through both. Holes are exact
+# on the B-rep (`holes`), detected in the part's LOCAL frame; `holes_world` applies the part's `pose`
+# so holes from different parts are comparable in the assembly frame.
+
+def holes_world(g: Geometry) -> list[Hole]:
+    """Holes of ``g`` with center + axis transformed into the assembly (world) frame by ``g.pose``."""
+    if g.solid is None:
+        return []
+    hs = _holes_from_cadquery(g.solid)
+    T = getattr(g, "pose", None)
+    if T is None or np.allclose(T, np.eye(4)):
+        return hs
+    R, t = np.asarray(T)[:3, :3], np.asarray(T)[:3, 3]
+    out = []
+    for h in hs:
+        c = R @ np.asarray(h.center, float) + t
+        a = R @ np.asarray(h.axis, float)
+        out.append(Hole(center=[float(x) for x in c], axis=[float(x) for x in a],
+                        diameter=h.diameter, depth=h.depth))
+    return out
+
+
+def _unit(v) -> np.ndarray:
+    v = np.asarray(v, float)
+    n = np.linalg.norm(v)
+    return v / n if n > 1e-12 else v
+
+
+def min_hole_misalignment(a: Geometry, b: Geometry, parallel_tol_deg: float = 25.0) -> float:
+    """Smallest axis-offset (mm) between a hole of ``a`` and a (near-parallel) hole of ``b``.
+
+    0.0 = some pair of holes is perfectly coaxial (a screw passes straight through both). Only pairs
+    whose axes are within ``parallel_tol_deg`` of parallel are considered; the metric is the
+    perpendicular distance from one hole's center to the other hole's axis line. ``inf`` if no parallel
+    pair exists (→ the assertion ``hole_misalignment(a, b) <= tol`` fails). Raises
+    :class:`NotImplementedError` if either part has no detectable holes (needs a B-rep source).
+    """
+    ha, hb = holes_world(a), holes_world(b)
+    if not ha or not hb:
+        raise NotImplementedError(
+            "hole alignment needs detectable holes on both parts (a B-rep source, e.g. a .py part)")
+    cos_tol = float(np.cos(np.radians(parallel_tol_deg)))
+    best = float("inf")
+    for h1 in ha:
+        u1, c1 = _unit(h1.axis), np.asarray(h1.center, float)
+        for h2 in hb:
+            u2, c2 = _unit(h2.axis), np.asarray(h2.center, float)
+            if abs(float(np.dot(u1, u2))) < cos_tol:
+                continue  # axes not parallel enough to share a screw
+            w = c2 - c1
+            perp = w - np.dot(w, u1) * u1   # offset of c2 from the line through c1 along u1
+            best = min(best, float(np.linalg.norm(perp)))
+    return best
 
 
 def faces(g: Geometry) -> list[dict]:
