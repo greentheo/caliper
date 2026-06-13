@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Caliper — jam in 3D space</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="/style.css?v=5" />
+  <link rel="stylesheet" href="/style.css?v=6" />
   <script>
     // surface load/runtime errors on the page itself (not just devtools), since a failed module
     // import would otherwise just silently leave the buttons dead.
@@ -146,6 +146,7 @@
     <section class="panel right">
       <div id="viewer"></div>
       <div class="viewer-bar">
+        <button id="fitView" title="recenter / fit to view (F)">⤢ fit</button>
         <span id="gizmo" class="gizmo" style="display:none">
           <button id="gMove" class="gactive" title="move reference (W)">⤢ move</button>
           <button id="gRot" title="rotate reference (E)">⟳ rotate</button>
@@ -165,6 +166,6 @@
     </section>
   </main>
 
-  <script type="module" src="/app.js?v=12"></script>
+  <script type="module" src="/app.js?v=13"></script>
 </body>
 </html>
