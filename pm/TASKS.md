@@ -316,8 +316,40 @@ interaction: "insert a support between the wheel and the XYZ assembly."
   The script reasons from the bboxes, applies the clearance, `.box(...)` in world coords. Also live-
   confirmed `gen` and authored `refine` ("6 mm taller in z" → edited the real `part.py`).
 - Tests: `test_insert.py` (6). **148 passed.**
-- **Deferred:** webapp insert UI → CALI-21b; build assembly parts from a spec/intent → CALI-23;
+- **Deferred:** webapp insert UI → CALI-21b (done); build assembly parts from a spec/intent → CALI-23;
   optimizer-in-the-author-loop for coupled inserts → CALI-24.
+
+### CALI-21b + CALI-20b — Webapp insert UI + assembly viewer  · P1 · M2 · ✅ done (2026-06-13) — VERIFIED LIVE
+The CALI-21 headline, clickable in the browser: load an assembly, click two parts to pick interfaces,
+choose fit + intent, Insert → the LLM authors the bridge, it renders green, the assembly re-measures.
+- **Backend:** `GET /api/assemblies` (scan `CALIPER_ASSEMBLIES`, default `examples/`, for YAMLs that
+  parse as Assembly), `GET /api/assembly/{id}` (parts + poses + stl_urls + measured report),
+  `GET /api/assembly/{id}/part/{pid}.stl`, `POST /api/insert` (wraps `insert.insert_part` → persists
+  the authored part as a run → `add_part_to_assembly` → saves `<id>.inserted.yaml` → re-measures →
+  returns new-part stl_url + report + script + bridge).
+- **Frontend:** Assemblies list; multi-part render (posed, role-colored, green=inserted); **click-to-pick**
+  via raycast (drag/click disambiguated by pointer travel) + emissive highlight + picks readout; insert
+  panel (intent/id/fit); `window.__asm` debug seam; filtered the benign `ResizeObserver loop` warning.
+- **Fixed live:** double path resolution — `insert_spec` now stores **absolute** reference paths
+  (`improve`/`load_references` was re-resolving a relative path against `ref_base`).
+- **Verified live in-browser (Preview MCP + real API):** two posts → picked both → Insert → cross-bar
+  authored in 1 round, rendered green, both mates 0.21 mm, nothing collides, saved as `insert_demo.inserted`.
+- Tests: `test_server.py` +5 (list/get/part-stl/insert-route-through/400/404). **153 passed.**
+
+### CALI-25 — North-star stress test: a whole (small) machine  · P1 · assembly-spine · 🧊 next
+The real test of everything: decompose a small machine (a mini gantry, or a "3D-printer frame" corner)
+into a handful of parts, assemble + insert them against each other, and keep the **whole assembly green**
+(no collisions, every mate in its fit band). Expect the bottleneck to be the **measurement vocabulary**
+(datums / axes / hole-alignment / coplanarity) more than the LLM — surface what's missing as new probes.
+
+### CALI-24 — Optimizer in the author loop  · P2 · assembly-spine · 🧊 backlog
+Today an insert relies on the LLM revising dimensions to hit the fit. Fold CALI-19b's `tune_multi` into
+the authored path so a part that mates **3+ faces at once** gets its continuous params *optimized*, not
+just LLM-guessed. Likely: author a parametric `build(params)`, expose its params to `tune_multi`.
+
+### CALI-26 — Per-part collision shading in the viewer  · P2 · M2 · 🧊 backlog
+Color a colliding pair red (and draw mate lines) in the assembly viewer, derived from the report's
+per-pair `interference`. The report panel already lists per-mate pass/fail; this is the visual layer.
 
 ## Generator capabilities (from real use — backlog)
 ### CALI-11 — Variable bend angle  · P2 · generator · 🧊 backlog

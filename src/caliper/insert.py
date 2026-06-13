@@ -17,6 +17,7 @@ added back to the assembly (as a new run-dir source + two `fit` mates) and the a
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -132,8 +133,10 @@ def insert_spec(
     others = [ifaces[p.id] for p in asm.parts if p.id not in between]
 
     lo, hi = tolerance.fit_band(fit)
+    # absolute paths: improve()/load_references would otherwise re-resolve a relative file against
+    # ref_base, doubling the dir (e.g. examples/examples/post.stl).
     references = [
-        Reference(id=p.id, file=_asm._resolve_source(p.source, base_dir),
+        Reference(id=p.id, file=os.path.abspath(_asm._resolve_source(p.source, base_dir)),
                   position=list(p.position), rotation=list(p.rotation))
         for p in asm.parts
     ]

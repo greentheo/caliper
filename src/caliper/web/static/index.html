@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Caliper — jam in 3D space</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="/style.css?v=4" />
+  <link rel="stylesheet" href="/style.css?v=5" />
   <script>
     // surface load/runtime errors on the page itself (not just devtools), since a failed module
     // import would otherwise just silently leave the buttons dead.
@@ -15,7 +15,11 @@
       const b = document.getElementById('errbar');
       if (b) { b.style.display = 'block'; b.textContent = '⚠ ' + msg; }
     }
-    addEventListener('error', (e) => showErr((e.message || e.type) + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || '')));
+    addEventListener('error', (e) => {
+      // benign browser noise from ResizeObserver + a resizing canvas — not a real error
+      if (/ResizeObserver loop/.test(e.message || '')) return;
+      showErr((e.message || e.type) + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || ''));
+    });
     addEventListener('unhandledrejection', (e) => showErr('promise: ' + (e.reason && e.reason.message || e.reason)));
   </script>
   <!-- three.js vendored locally (no CDN, works offline) via import map -->
@@ -42,6 +46,39 @@
       <details class="recentbox" open>
         <summary>Recent parts <span id="recentCount" class="muted"></span></summary>
         <div id="recent" class="recent"></div>
+      </details>
+
+      <details class="asmbox" id="asmbox">
+        <summary>Assemblies <span id="asmCount" class="muted"></span> <span class="badge">insert</span></summary>
+        <div id="asmList" class="recent"></div>
+        <div id="insertPanel" class="insert" style="display:none">
+          <p class="muted small">Click <b>two parts</b> in the viewer to pick the interfaces, then insert a
+            part that mates both at a fit.</p>
+          <div class="picks">
+            <span class="muted small">interfaces:</span>
+            <span id="pickA" class="pick empty">— pick 1 —</span>
+            <span id="pickB" class="pick empty">— pick 2 —</span>
+            <button id="pickClear" class="ghost small" title="clear selection">✕</button>
+          </div>
+          <label class="field">
+            <span>what to insert</span>
+            <input id="insIntent" type="text" value="a cross-bar"
+                   placeholder='e.g. "a support bracket"' />
+          </label>
+          <div class="row">
+            <label class="num">id <input id="insId" type="text" value="insert" size="8" /></label>
+            <label class="num">fit
+              <select id="insFit">
+                <option value="press">press</option>
+                <option value="snug">snug</option>
+                <option value="slip" selected>slip</option>
+                <option value="free">free</option>
+                <option value="running">running</option>
+              </select></label>
+            <button id="insertBtn" class="primary" disabled>Insert ▶</button>
+          </div>
+          <span id="insHint" class="muted small"></span>
+        </div>
       </details>
 
       <label class="field">
@@ -128,6 +165,6 @@
     </section>
   </main>
 
-  <script type="module" src="/app.js?v=11"></script>
+  <script type="module" src="/app.js?v=12"></script>
 </body>
 </html>

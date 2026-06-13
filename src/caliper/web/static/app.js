@@ -76,6 +76,7 @@ async function doRefine() {
 }
 
 function applyResult(data) {
+  clearAssembly();           // a single-part build/load exits assembly mode (CALI-21b)
   currentRunId = data.run_id;
   refineBtn.disabled = false;
   specEl.textContent = data.spec_yaml || '';
@@ -325,6 +326,155 @@ async function renderReferences(refs) {
   } catch (e) { /* best-effort render */ }
 }
 
+// ---------------------------------------------------------------- Assemblies + insert (CALI-20b / 21b)
+const asmListEl = $('asmList'), asmCountEl = $('asmCount'), insertPanel = $('insertPanel');
+const pickAEl = $('pickA'), pickBEl = $('pickB'), insertBtn = $('insertBtn'), pickClear = $('pickClear');
+const insIntent = $('insIntent'), insId = $('insId'), insFit = $('insFit'), insHint = $('insHint');
+
+const asmMeshes = new Map();   // partId -> THREE.Mesh (rendered at its assembly pose)
+let asmId = null;              // loaded assembly id (null in single-part mode)
+let selected = [];             // up to two selected interface part ids
+
+const asmMat = (role, inserted) => new THREE.MeshStandardMaterial({
+  color: inserted ? 0x36d399 : (role === 'fixed' ? 0x8a93a3 : 0x4ea1ff),
+  metalness: 0.1, roughness: role === 'fixed' ? 0.7 : 0.55,
+});
+
+function clearAssembly() {
+  for (const m of asmMeshes.values()) modelGroup.remove(m);
+  asmMeshes.clear();
+  asmId = null; selected = [];
+  if (insertPanel) insertPanel.style.display = 'none';
+  updatePicks();
+}
+
+async function refreshAssemblies() {
+  try {
+    const { assemblies } = await (await fetch('/api/assemblies', { cache: 'no-store' })).json();
+    asmCountEl.textContent = assemblies.length ? `(${assemblies.length})` : '';
+    if (!assemblies.length) {
+      asmListEl.innerHTML = '<div class="empty">no assemblies — add a YAML under examples/</div>'; return;
+    }
+    asmListEl.innerHTML = assemblies.map((a) =>
+      `<div class="item" data-asm="${esc(a.id)}" title="${esc(a.intent || '')}">` +
+      `<span class="dot"></span><span class="lbl">${esc(a.name || a.id)}</span>` +
+      `<span class="rid">${a.parts}p · ${a.mates}m</span></div>`).join('');
+    asmListEl.querySelectorAll('.item').forEach((el) =>
+      el.addEventListener('click', () => loadAssembly(el.dataset.asm)));
+  } catch (e) { /* best-effort */ }
+}
+
+async function loadAssembly(aid) {
+  busy('loading assembly ' + aid + '…');
+  try {
+    const data = await (await fetch('/api/assembly/' + aid, { cache: 'no-store' })).json();
+    if (data.detail) throw new Error(data.detail);
+    if (partMesh) { modelGroup.remove(partMesh); partMesh = null; }
+    clearReference();
+    clearAssembly();
+    asmId = aid;
+    for (const p of data.parts) {
+      const buf = await (await fetch(p.stl_url + '?t=' + Date.now())).arrayBuffer();
+      const geom = stlLoader.parse(buf); geom.computeVertexNormals();
+      const mesh = new THREE.Mesh(geom, asmMat(p.role, false));
+      mesh.position.fromArray(p.position || [0, 0, 0]);
+      const r = (p.rotation || [0, 0, 0]).map(THREE.MathUtils.degToRad);
+      mesh.rotation.set(r[0], r[1], r[2], 'XYZ');
+      mesh.userData.partId = p.id;
+      modelGroup.add(mesh);
+      asmMeshes.set(p.id, mesh);
+    }
+    modelGroup.rotation.set(0, 0, 0);
+    frameAssembly();
+    renderReport({ report: data.report, build_ok: true });
+    specEl.textContent = `# assembly: ${data.name || aid}\n# ${data.intent || ''}`;
+    scriptbox.style.display = 'none';
+    insertPanel.style.display = '';
+    currentRunId = null; refineBtn.disabled = true; downloadEl.style.display = 'none';
+    updatePicks();
+    markActiveRun();
+    done(`assembly "${data.name || aid}" — click two parts to pick interfaces`);
+  } catch (e) { fail('assembly load failed: ' + e.message); }
+}
+
+function frameAssembly() {
+  const box = new THREE.Box3();
+  for (const m of asmMeshes.values()) box.expandByObject(m);
+  if (box.isEmpty()) return;
+  const c = box.getCenter(new THREE.Vector3());
+  const rad = box.getSize(new THREE.Vector3()).length() / 2 || 50;
+  controls.target.copy(c);
+  const d = rad * 2.4;
+  camera.position.set(c.x + d * 0.6, c.y + d * 0.5, c.z + d * 0.9);
+  camera.near = rad / 100; camera.far = rad * 100; camera.updateProjectionMatrix();
+  controls.update();
+}
+
+// click-to-pick interfaces (distinguish a click from an orbit-drag by pointer travel)
+const raycaster = new THREE.Raycaster();
+let downXY = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { downXY = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!asmId || !downXY) { downXY = null; return; }
+  const moved = Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]);
+  downXY = null;
+  if (moved > 6) return;                       // a drag (orbit), not a pick
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(
+    ((e.clientX - rect.left) / rect.width) * 2 - 1,
+    -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hits = raycaster.intersectObjects([...asmMeshes.values()], false);
+  if (hits.length) toggleSelect(hits[0].object.userData.partId);
+});
+
+function toggleSelect(pid) {
+  const i = selected.indexOf(pid);
+  if (i >= 0) selected.splice(i, 1);
+  else { selected.push(pid); if (selected.length > 2) selected.shift(); }  // keep the latest two
+  updatePicks();
+}
+
+function updatePicks() {
+  for (const [pid, m] of asmMeshes) {
+    const sel = selected.includes(pid);
+    m.material.emissive.setHex(sel ? 0x1f6feb : 0x000000);
+    m.material.emissiveIntensity = sel ? 0.7 : 0;
+  }
+  if (pickAEl) { pickAEl.textContent = selected[0] || '— pick 1 —'; pickAEl.classList.toggle('empty', !selected[0]); }
+  if (pickBEl) { pickBEl.textContent = selected[1] || '— pick 2 —'; pickBEl.classList.toggle('empty', !selected[1]); }
+  if (insertBtn) insertBtn.disabled = selected.length !== 2;
+}
+
+// debug/test seam (mirrors window.__caliperSM): drive selection + insert without 3D clicks
+window.__asm = { meshes: asmMeshes, pick: toggleSelect, picks: () => [...selected], insert: () => doInsert() };
+
+async function doInsert() {
+  if (!asmId || selected.length !== 2) return;
+  insertBtn.disabled = true; insHint.textContent = '';
+  busy('authoring the insert… (the LLM writes the CAD; ~10–60s)');
+  try {
+    const data = await postJSON('/api/insert', {
+      assembly_id: asmId, between: [...selected], fit: insFit.value,
+      intent: insIntent.value.trim() || 'a connecting part', new_id: insId.value.trim() || 'insert',
+    });
+    const buf = await (await fetch(data.new_part.stl_url + '?t=' + Date.now())).arrayBuffer();
+    const geom = stlLoader.parse(buf); geom.computeVertexNormals();
+    const mesh = new THREE.Mesh(geom, asmMat('movable', true));   // green = the inserted part
+    mesh.userData.partId = data.new_id;
+    modelGroup.add(mesh);
+    asmMeshes.set(data.new_id, mesh);
+    renderReport({ report: data.report, build_ok: true });
+    if (data.script) { scriptpre.textContent = data.script; scriptbox.style.display = ''; }
+    selected = []; updatePicks(); frameAssembly(); refreshRuns();
+    const b = data.bridge ? ` · bridged ${data.bridge.gap}mm` : '';
+    done(`${data.ok ? '✓ mates both' : '△ best effort'} · ${data.rounds} round(s)${b}`);
+    insHint.textContent = data.saved_as ? `saved as "${data.saved_as}" — reload it to insert again` : '';
+    refreshAssemblies();
+  } catch (e) { fail(e.message); }
+  finally { insertBtn.disabled = selected.length !== 2; }
+}
+
 function resize() {
   const w = viewer.clientWidth, h = viewer.clientHeight;
   renderer.setSize(w, h, false);
@@ -519,4 +669,9 @@ fetch('/api/health').then((r) => r.json()).then((d) => {
   const h = $('health'); h.textContent = d.ok ? 'ready' : 'down'; if (d.ok) h.className = 'health ok';
 }).catch(() => { $('health').textContent = 'offline'; });
 
-refreshRuns();  // populate the Recent parts list on load
+// assembly insert wiring (CALI-21b)
+insertBtn.addEventListener('click', doInsert);
+pickClear.addEventListener('click', () => { selected = []; updatePicks(); });
+
+refreshRuns();          // populate the Recent parts list on load
+refreshAssemblies();    // populate the Assemblies list on load
