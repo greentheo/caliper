@@ -218,8 +218,10 @@ cap (mirrors CALI-6's rails). Author injectable → fully tested. Wired into CLI
   once authored parts also get optimizer-tuned continuous params (a CALI-19 follow-on).
 
 ## Assembly spine — the path to multi-part design with fits & tolerances
-The next ~3 shifts toward the north star ("insert a support between the wheel and the XYZ assembly").
-Each builds on the single-part loop now complete (CALI-16/17) and CALI-10's two-body fit substrate.
+The path to the north star ("insert a support between the wheel and the XYZ assembly"). Built on the
+single-part loop (CALI-16/17) and CALI-10's two-body fit substrate. **Spine complete:** CALI-19 (fits) +
+CALI-19b (multi-param optimizer) + CALI-20 (assembly model) + CALI-22 (author-loop fit/refine) all
+shipped — **CALI-21 (insert-into-assembly) is now unblocked** and is the headline next step.
 
 ### CALI-19 — Tolerances & fits as first-class  · P1 · assembly-spine · ✅ done (`7d237cf`)
 A vocabulary for *fits* + tolerant comparisons, so the loop can target a fit and noise stops causing
