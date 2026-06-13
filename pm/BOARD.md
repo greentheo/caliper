@@ -3,7 +3,7 @@
 Kanban of every task. One line per card: `CALI-N — title · priority · milestone`.
 Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections as state changes.
 
-_Last updated: 2026-06-13 (CALI-21b/20b webapp insert UI + assembly viewer shipped + VERIFIED LIVE in-browser)_
+_Last updated: 2026-06-13 (CALI-21c viewer UX: monitor-resize + middle-mouse pan + fit-to-view/adaptive grid)_
 
 ## 🎯 Next shift — build a whole (small) machine
 - CALI-25 — North-star stress test: decompose a small machine (mini gantry / 3D-printer frame) into well-fit parts, assemble + insert, keep the whole thing green · P1 · assembly-spine (the real test of everything built)
@@ -24,6 +24,7 @@ _Last updated: 2026-06-13 (CALI-21b/20b webapp insert UI + assembly viewer shipp
 - _(none)_
 
 ## ✅ Done — Milestones M0 + M1 + M2 + M3 complete 🎉
+- CALI-21c — Viewer UX · P1 · M2 · _2026-06-13 · fixed monitor/DPI resize (re-apply pixelRatio + CSS-fill canvas + DPR watcher), **middle-mouse pan** (CAD-style mouseButtons), and a **⤢ fit** button + `F` key with a **content-sized grid** (was a fixed 400mm plane). Left-click-only picking. Verified in-browser._
 - CALI-21b + CALI-20b — Webapp insert UI + assembly viewer · P1 · M2 · _2026-06-13 · load an assembly in 3D, **click two parts to pick interfaces**, choose fit + intent, Insert → the LLM authors the bridge live, it renders green, the assembly re-measures. `/api/assemblies`, `/api/assembly/{id}`(+part STL), `/api/insert`. **VERIFIED LIVE in-browser** (Preview MCP): bridged two posts in 1 round at 0.21mm/side. Fixed a double-path-resolution bug. 153 passed._
 - CALI-21 — Insert-into-assembly · P1 · assembly-spine · _2026-06-12 · **the north-star headline.** `caliper insert <asm> --between a,b --fit slip` — the LLM authors a part **in world coords** that mates to two named interfaces at a fit band, measured against the posed parts + no-collision, then it's added back to the assembly (run-dir source + fit mates) and re-measured. `insert.py` (`insert_spec`/`_bridge`/`insert_part`/`add_part_to_assembly`). **VERIFIED LIVE:** bridged a 50mm gap first try at 0.21mm/side. 148 passed._
 - CALI-19b — Multi-parameter optimizer · P2 · assembly-spine · _2026-06-12 · `decide.tune_multi` jointly tunes N continuous knobs against a global objective (all_pass, #passing, worst margin, −change). Coordinate descent by default (eval-frugal); **escalates to seeded scipy `differential_evolution` only when CD can't reach feasibility** (the coupled case). `decide` route 0 fires with ≥2 knobs + a numeric fail. 142 passed._

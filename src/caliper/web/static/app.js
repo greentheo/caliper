@@ -171,6 +171,10 @@ camera.position.set(120, 90, 160);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
+controls.screenSpacePanning = true;   // pan in the view plane (feels right for inspecting a part)
+// CAD-style mouse: left = orbit, MIDDLE (wheel-press) = pan, right = pan, scroll = zoom
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
+controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 
 scene.add(new THREE.HemisphereLight(0xffffff, 0x222a33, 1.1));
 const key = new THREE.DirectionalLight(0xffffff, 1.4); key.position.set(1, 1.4, 1); scene.add(key);
@@ -179,8 +183,18 @@ const modelGroup = new THREE.Group();
 scene.add(modelGroup);
 // grid lives in the model group so SpaceMouse rotation (which spins the group) carries the plane
 // with the part — keeps pan/zoom (camera) and rotation (group) visually consistent.
-const grid = new THREE.GridHelper(400, 20, 0x283039, 0x1b2127);
+let grid = new THREE.GridHelper(400, 20, 0x283039, 0x1b2127);
 modelGroup.add(grid);
+
+// size the ground grid to the content so it never dwarfs a small part or gets dwarfed by a big one
+function fitGrid(extent, center, baseY) {
+  const size = Math.max(40, Math.ceil((extent * 1.8) / 20) * 20);   // round up to 20mm, floor 40mm
+  modelGroup.remove(grid);
+  grid.geometry.dispose();
+  grid = new THREE.GridHelper(size, 20, 0x283039, 0x1b2127);
+  grid.position.set(center ? center.x : 0, baseY == null ? 0 : baseY, center ? center.z : 0);
+  modelGroup.add(grid);
+}
 let partMesh = null;      // the generated part (rendered in its TRUE build frame, corner at origin)
 let refMesh = null;       // the imported reference, posable with the gizmo (null when none)
 let refBytes = null;      // the reference STL bytes — base64'd and sent on Fit
@@ -215,19 +229,30 @@ function setPart(geom) {
   frameScene();
 }
 
-function frameScene() {
+// the bbox of everything visible (part + reference + any assembly parts) — used for framing & the grid
+function contentBox() {
   const box = new THREE.Box3();
   if (partMesh) box.expandByObject(partMesh);
   if (refMesh) box.expandByObject(refMesh);
+  for (const m of asmMeshes.values()) box.expandByObject(m);
+  return box;
+}
+
+function frameBox(box) {
   if (box.isEmpty()) return;
   const c = box.getCenter(new THREE.Vector3());
-  const r = box.getSize(new THREE.Vector3()).length() / 2 || 50;
+  const size = box.getSize(new THREE.Vector3());
+  const r = size.length() / 2 || 50;
   controls.target.copy(c);
   const d = r * 2.4;
   camera.position.set(c.x + d * 0.6, c.y + d * 0.5, c.z + d * 0.9);
-  camera.near = r / 100; camera.far = r * 100; camera.updateProjectionMatrix();
+  camera.near = Math.max(r / 100, 0.01); camera.far = r * 100; camera.updateProjectionMatrix();
   controls.update();
+  fitGrid(Math.max(size.x, size.z), c, box.min.y);
 }
+
+// recenter / fit the view to whatever is on screen (button + F key)
+function frameScene() { frameBox(contentBox()); }
 
 // ---------------------------------------------------------------- reference + fit (M3)
 function clearReference() {
@@ -397,28 +422,17 @@ async function loadAssembly(aid) {
   } catch (e) { fail('assembly load failed: ' + e.message); }
 }
 
-function frameAssembly() {
-  const box = new THREE.Box3();
-  for (const m of asmMeshes.values()) box.expandByObject(m);
-  if (box.isEmpty()) return;
-  const c = box.getCenter(new THREE.Vector3());
-  const rad = box.getSize(new THREE.Vector3()).length() / 2 || 50;
-  controls.target.copy(c);
-  const d = rad * 2.4;
-  camera.position.set(c.x + d * 0.6, c.y + d * 0.5, c.z + d * 0.9);
-  camera.near = rad / 100; camera.far = rad * 100; camera.updateProjectionMatrix();
-  controls.update();
-}
+function frameAssembly() { frameBox(contentBox()); }
 
 // click-to-pick interfaces (distinguish a click from an orbit-drag by pointer travel)
 const raycaster = new THREE.Raycaster();
 let downXY = null;
-renderer.domElement.addEventListener('pointerdown', (e) => { downXY = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerdown', (e) => { downXY = [e.clientX, e.clientY, e.button]; });
 renderer.domElement.addEventListener('pointerup', (e) => {
-  if (!asmId || !downXY) { downXY = null; return; }
-  const moved = Math.hypot(e.clientX - downXY[0], e.clientY - downXY[1]);
-  downXY = null;
-  if (moved > 6) return;                       // a drag (orbit), not a pick
+  const d = downXY; downXY = null;
+  if (!asmId || !d) return;
+  if (d[2] !== 0 || e.button !== 0) return;     // only a LEFT click picks; middle/right pan the camera
+  if (Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 6) return;   // a drag (orbit), not a pick
   const rect = renderer.domElement.getBoundingClientRect();
   const ndc = new THREE.Vector2(
     ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -477,10 +491,25 @@ async function doInsert() {
 
 function resize() {
   const w = viewer.clientWidth, h = viewer.clientHeight;
+  if (!w || !h) return;
+  // re-apply the pixel ratio every time: moving to a different monitor can change devicePixelRatio
+  // (and would otherwise leave the canvas rendering at the old DPI — blurry or mis-sized). CSS sizes
+  // the canvas to fill #viewer (width/height:100%); we only set the draw buffer here (updateStyle=false).
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(w, h, false);
-  camera.aspect = w / Math.max(1, h); camera.updateProjectionMatrix();
+  camera.aspect = w / h; camera.updateProjectionMatrix();
 }
 new ResizeObserver(resize).observe(viewer);
+addEventListener('resize', resize);
+// a monitor change can alter devicePixelRatio with no CSS-size change (so ResizeObserver won't fire) —
+// watch the resolution media query and re-arm it after each change.
+function watchDPR() {
+  try {
+    matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`)
+      .addEventListener('change', () => { resize(); watchDPR(); }, { once: true });
+  } catch (e) { /* older browsers: the window 'resize' listener still covers most cases */ }
+}
+watchDPR();
 resize();
 
 function animate() {
@@ -672,6 +701,13 @@ fetch('/api/health').then((r) => r.json()).then((d) => {
 // assembly insert wiring (CALI-21b)
 insertBtn.addEventListener('click', doInsert);
 pickClear.addEventListener('click', () => { selected = []; updatePicks(); });
+
+// recenter / fit-to-view: button + F key (ignored while typing)
+$('fitView').addEventListener('click', frameScene);
+addEventListener('keydown', (e) => {
+  if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+  if (e.key === 'f' || e.key === 'F') frameScene();
+});
 
 refreshRuns();          // populate the Recent parts list on load
 refreshAssemblies();    // populate the Assemblies list on load

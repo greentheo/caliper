@@ -131,6 +131,13 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-06-13 · Viewer UX — resize, panning, fit-to-view (CALI-21c)
+**Fixed** (from real use on a second monitor): the 3D view now **resizes correctly across monitors/DPI**
+(canvas always fills the panel, crisp at any pixel ratio); **middle-mouse (wheel-press) drag pans**
+(CAD-style: left = orbit, middle/right = pan, scroll = zoom); and a **⤢ fit** button (or the `F` key)
+**recenters** the view with the **ground grid sized to the content**. Just `make serve` and drag with the
+wheel button, or hit `F` to refit after rotating away.
+
 ### 2026-06-13 · Webapp insert UI + assembly viewer (CALI-21b / 20b) ✅ live in-browser
 **New:** the insert headline is now **clickable in the browser**. Open the Assemblies panel, load an
 assembly, **click two parts in the 3D view to pick the interfaces**, choose a fit + what to insert, hit
