@@ -1,0 +1,26 @@
+name: post-stand
+intent: a base, a post standing on it, and a cap on top — the smallest real assembly
+
+parts:
+  - id: base
+    source: asm_base.stl
+    role: fixed
+    position: [0, 0, 0]          # 40x40x4, ground at z -2..2
+  - id: post
+    source: asm_post.stl
+    position: [0, 0, 17]         # 10x10x30, sits on the base: z 2..32
+  - id: cap
+    source: asm_cap.stl
+    position: [0, 0, 34]         # 16x16x4, sits on the post: z 32..36
+
+mates:
+  - id: post_on_base
+    between: [base, post]
+    kind: touch                  # post bottom meets base top (flush, within 0.1mm)
+  - id: cap_on_post
+    between: [post, cap]
+    kind: touch                  # cap bottom meets post top
+
+assert:
+  - id: nothing_collides
+    expr: max_interference() <= 0

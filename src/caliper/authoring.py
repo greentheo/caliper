@@ -184,6 +184,9 @@ def improve(
     timeout: float = 25.0,
     client=None,
     machine=None,
+    seed_script: Optional[str] = None,
+    seed_feedback: Optional[str] = None,
+    ref_base: str = ".",
 ) -> ImproveResult:
     """Author a part and drive it to green: build errors AND failing measurements both feed back.
 
@@ -191,6 +194,11 @@ def improve(
     revises) the script; we build it sandboxed and measure it; a build error or a failing assertion
     becomes the feedback for the next revision. Stops on success, an unchanged failure signature
     (oscillation), or the round cap — mirroring the bracket loop's safety rails (CALI-6).
+
+    ``seed_script`` + ``seed_feedback`` **prime round 1 with an existing part** so the LLM *edits the
+    real part* instead of starting over — the basis for author-loop fit & refine (CALI-22): pass a
+    prior run's ``part.py`` as the seed and the new constraint (clear this reference / apply this edit)
+    as the feedback. ``ref_base`` resolves relative reference paths (the run dir, for a re-fit).
 
     ``author`` is injectable (tests pass a deterministic stub); it defaults to the real Claude call.
     """
@@ -201,11 +209,11 @@ def improve(
             return author_script(s, feedback=feedback, prior=prior, client=client)
 
     params = params_from_spec(spec)
-    references = load_references(spec) if spec.references else None
+    references = load_references(spec, ref_base) if spec.references else None
     machine = machine or DEFAULT_MACHINE
 
-    feedback: Optional[str] = None
-    prior: Optional[str] = None
+    feedback: Optional[str] = seed_feedback
+    prior: Optional[str] = seed_script
     history: list[tuple] = []
     seen: set = set()
     best: Optional[tuple] = None  # (geometry, script, report)
@@ -242,3 +250,60 @@ def improve(
                              rounds=max_rounds, history=history)
     return ImproveResult(ok=False, script=prior or "", rounds=max_rounds,
                          error=feedback or "author failed", history=history)
+
+
+# ---------------------------------------------------------------------------
+# CALI-22 — author-loop fit & refine: edit the REAL part, not a bracket
+# ---------------------------------------------------------------------------
+# Fit/refine used to rebuild via the bracket generator, so they ignored an authored part.py (CALI-19
+# guarded them to fail honestly). These route through ``improve`` **seeded with the existing script**:
+# the LLM edits the real part to satisfy a new fit constraint or apply a plain-language change, with
+# the same build-error + failing-measurement healing as ``gen``.
+
+def refit_authored(
+    spec: Spec,
+    script: str,
+    max_rounds: int = 4,
+    ref_base: str = ".",
+    author: Optional[Author] = None,
+    client=None,
+) -> ImproveResult:
+    """Re-fit an authored part: the LLM revises ``part.py`` to satisfy the fit assertions now on ``spec``.
+
+    ``spec`` must already carry the reference(s) + fit assertion(s) (via ``fit.attach_reference``). The
+    existing ``script`` seeds round 1 so the model edits dimensions/placement rather than starting over.
+    """
+    constraints = "\n".join(
+        f"  - {a.id}: {a.expr}" for a in spec.assertions
+        if any(a.id.endswith(s) for s in ("_no_interference", "_clearance", "_fit"))
+    )
+    feedback = (
+        "The part below already builds. It now must also FIT imported reference geometry. Revise the "
+        "script — change dimensions or placement as needed, keep it ONE watertight solid and keep the "
+        "other checks passing — so these measured checks pass:\n" + (constraints or "  (fit checks)")
+    )
+    return improve(spec, author=author, max_rounds=max_rounds, client=client,
+                   seed_script=script, seed_feedback=feedback, ref_base=ref_base)
+
+
+def refine_authored(
+    spec: Spec,
+    script: str,
+    instruction: str,
+    max_rounds: int = 4,
+    ref_base: str = ".",
+    author: Optional[Author] = None,
+    client=None,
+) -> ImproveResult:
+    """Apply a natural-language change to an authored part by revising its script (CALI-22).
+
+    The instruction is folded into ``spec.intent`` so it persists across revision rounds (otherwise a
+    later round, fed only the failing-measurement summary, could quietly undo the requested edit).
+    """
+    spec.intent = (spec.intent + "  " if spec.intent else "") + instruction
+    feedback = (
+        "Apply this change to the part below, keeping the existing measured checks passing (change as "
+        "little else as possible):\n  " + instruction
+    )
+    return improve(spec, author=author, max_rounds=max_rounds, client=client,
+                   seed_script=script, seed_feedback=feedback, ref_base=ref_base)

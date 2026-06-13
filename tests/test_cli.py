@@ -63,17 +63,36 @@ def test_fit_end_to_end(tmp_path, monkeypatch):
     assert leg < 60.0  # resized smaller to fit
 
 
-def test_fit_and_refine_guard_authored_runs(tmp_path, monkeypatch, capsys):
-    # CALI-19 guard: fit/refine rebuild via the bracket generator, so they must refuse an authored
-    # part (part.py present) rather than silently produce a bracket.
+def test_fit_and_refine_route_authored_through_author_loop(tmp_path, monkeypatch):
+    # CALI-22: fit/refine of an LLM-authored part (part.py present) now route through the author loop
+    # (seeded with the existing script), revising the REAL part instead of refusing / building a bracket.
+    pytest.importorskip("cadquery")
+    import trimesh
+
+    import caliper.authoring as authoring
+
     monkeypatch.chdir(tmp_path)
+    box = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(40, 30, 4)\n"
+    monkeypatch.setattr(authoring, "author_script",
+                        lambda spec, feedback=None, prior=None, client=None, model=None: box)
+
     d = tmp_path / "runs" / "run_0000"
     d.mkdir(parents=True)
     (d / "spec.yaml").write_text("part: gizmo\n")
-    (d / "part.py").write_text("def build(params):\n    return None\n")
-    assert cli.main(["fit", str(d), "--ref", "o=/nope.stl"]) == 2
-    assert "authored" in capsys.readouterr().out.lower()
-    assert cli.main(["refine", str(d), "make the holes 8mm", "--no-llm"]) == 2
+    (d / "part.py").write_text(box)
+    ref = tmp_path / "ref.stl"
+    m = trimesh.creation.box(extents=(10, 10, 10)); m.apply_translation([100, 0, 0]); m.export(str(ref))
+
+    # fit: the part (x∈[-20,20]) already clears the far reference → routes through the author loop, passes
+    rc = cli.main(["fit", str(d), "--ref", f"o={ref}", "--no-overlap", "--max-iter", "1"])
+    assert rc in (0, 3)
+    assert (tmp_path / "runs" / "run_0001" / "part.py").exists()
+
+    # refine: the LLM edits the authored script; instruction is folded into the persisted intent
+    rc = cli.main(["refine", str(d), "make it a touch wider", "--max-iter", "1"])
+    assert rc in (0, 3)
+    new_spec = (tmp_path / "runs" / "run_0002" / "spec.yaml").read_text()
+    assert "make it a touch wider" in new_spec
 
 
 def test_fit_missing_reference_file_returns_2(capsys):

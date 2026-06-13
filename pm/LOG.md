@@ -5,6 +5,80 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 
 ---
 
+### 2026-06-12 · CALI-19b · Multi-parameter optimizer — joint tuning for coupled fits
+- **Why now:** CALI-19's tuner is **1-D** (one knob per failing check). Assembly fits *couple*: one
+  clearance depends on two dimensions, or two mates fight over the same wall. Tuning one knob at a time
+  stalls at a saddle the per-axis sweeps can't leave. The assembly spine needs joint N-D tuning.
+- **`decide.tune_multi(spec, params, eval_fn, engine="coord")`:** searches the joint continuous space
+  against a **global** objective — maximize `(all_pass, #passing, worst signed margin, −total
+  normalized change)`. Worst-margin drives every assertion toward/over its threshold at once;
+  change-from-init keeps the solution snug.
+- **Engine = coordinate descent by default** — deterministic and *eval-frugal* (geometry rebuilds are
+  the expensive thing): sweep each knob over a coarse grid + a refined local window against the global
+  score, until a sweep stops improving. **Escalates to a global `scipy.optimize.differential_evolution`
+  (seeded, deterministic) ONLY if coordinate descent can't reach feasibility** — i.e. the genuinely
+  coupled case CD traps on. Cheap-first keeps separable problems off the expensive path.
+- **`decide` route 0 (CALI-19b):** with ≥2 continuous knobs and a failing numeric check, tune the whole
+  vector jointly; taken only if it improves (more passing / all-pass), else fall through to the 1-D +
+  snug path. Single-knob specs are untouched — the common case stays 1-D.
+- Tests: a deliberately **coupled** 2-knob problem (gap band on `W+D` + budget on `W*D`, feasible only
+  asymmetric) — coordinate descent escalates to scipy and solves it; `engine="scipy"` solves it
+  directly; a **separable** 2-knob problem is solved by CD alone (scipy spy asserts it's never called);
+  `decide` routes coupled failures to the multi move. **142 passed.**
+  Commit: a84397b
+
+### 2026-06-12 · CALI-22 · Author-loop fit & refine — edit the real part, not a bracket
+- **Why now:** the fit bug Theo hit — fit/refine rebuilt via the bracket generator, so they ignored an
+  authored `part.py` (CALI-19 guarded them to *fail honestly*). Now they **edit the real part**: route
+  through `improve()` **seeded with the existing script**, so the LLM revises `part.py` to clear a
+  reference or apply a plain-language change — the front edge of CALI-21 (insert-into-assembly).
+- **`authoring.improve(..., seed_script, seed_feedback, ref_base)`:** primes round 1 with an existing
+  part + the new constraint, so the model revises rather than starting over. Same build-error +
+  failing-measurement healing as `gen`.
+- **`refit_authored(spec, script, …)`** — spec already carries the reference + fit assertion(s) (via
+  `fit.attach_reference`); seeds the loop with `part.py` and feeds the fit checks. **`refine_authored(
+  spec, script, instruction, …)`** — folds the instruction into `spec.intent` (so a later round can't
+  quietly undo it) and seeds the loop.
+- **CLI:** `caliper fit <authored-run> --fit slip` and `caliper refine <authored-run> "…"` now route
+  through the author loop (no more "refuse authored" return-2). **Webapp:** `/api/fit` + `/api/refine`
+  do the same (the 422 guards are gone); a shared `_finish_authored()` persists script+STL+refs.
+  `/api/gen` refactored onto it too.
+- Tests: `improve` seed-priming; `refit_authored` drives a 60→30 mm box to clear a reference (2 rounds,
+  fed the failing `interference`); `refine_authored` intent-fold; CLI fit+refine route-through; server
+  `/api/fit` + `/api/refine` route-through (replacing the old 422 guards). **138 passed.**
+- **Live (LLM) path** needs `ANTHROPIC_API_KEY`; the routing is verified deterministically via injected
+  authors. Webapp/CLI live runs are Theo's to drive.
+  Commit: 72b0df4
+
+### 2026-06-12 · CALI-20 · Assembly model — N parts + named mates + assembly assertions
+- **Why now:** the single-part loop is complete; the north star ("a 3D printer 10ft tall", "insert a
+  support between the wheel and the XYZ assembly") is fundamentally about *a collection of parts that fit
+  together*. This is the heart of the assembly spine — and the lesson from the phone-stand failure
+  (complexity scales by **decomposition into well-fit parts**, not one monolith).
+- **`assembly.py`:** three pydantic models mirroring the single-part spec — `Part` (id + geometry
+  `source` + **placement** position/rotation, role fixed|movable), `Mate` (a **named relationship between
+  two parts**: `no_interference` / `clearance` / `fit` / `touch`), `Assembly` (parts + mates +
+  assembly-level assertions). YAML/JSON round-trip; validates mate part-refs + dup ids.
+- **Each mate expands to one measured assertion** (`mate_assertion`): "wheel & support mate at a slip
+  fit" → `0.12 <= min_clearance(wheel, support) <= 0.30` — measured, not eyeballed. `touch` → a flush
+  band `-tol <= min_clearance <= tol`; `fit` reuses CALI-19 fit bands.
+- **`measure.py` — N-body substrate:** `pairwise_interference(parts)` (every unordered pair),
+  `max_interference()` (worst overlap — "nothing collides"), `min_pair_clearance()` (tightest gap). The
+  two-body probes already accepted any Geometry pair, so N-body = run the pair probe over every pair.
+- **Evaluation reuses the single-part evaluator wholesale** — same safe AST interpreter, same signed
+  margins (so a fit *band between two parts* is tunable too), same `Report`. Only the namespace differs:
+  part ids → posed `Geometry`, fit probes take **two parts**. Posing is baked at load (`from_stl_posed`),
+  so parts are measured *where they sit*.
+- **`caliper assemble examples/assembly.yaml`** (+ `make assemble`) loads, lists parts/mates, measures.
+- **Verified live:** the demo `post-stand` (base → post → cap, two `touch` mates + `max_interference()
+  <= 0`) → **ALL PASS** (clearances 0.000, no collisions). A deliberately-overlapping pair → both the
+  mate and the assembly assertion `fail`.
+- Tests: `test_assembly.py` (13) — model round-trip/validation, N-body helpers, mate expansion,
+  end-to-end posed-STL evaluation (pass + fail + fit band). **134 passed.**
+- **Deferred:** webapp assembly viewer (multi-part 3D + mate viz) → CALI-20b. CLI + model + measurement
+  is the substance; the viewer is presentation.
+  Commit: c24aa9f
+
 ### 2026-06-12 · CALI-19 · Tolerances & fits as first-class
 - **Why now:** the phone-stand failure (user-reported) was mostly *bad assertions*, not bad geometry —
   a contradictory `slot_fits_phone: 8 <= bbox.dx <= 12` (the part is ~75 mm wide; `bbox.dx` is the whole

@@ -27,6 +27,10 @@ Newest demos first.
   script** (not just a bracket), runs it sandboxed, measures it, and **self-heals build errors** from
   the traceback. The spec's primary generation strategy: loose idea → real geometry, no hand-coded
   family. The authored script is saved as `part.py` (the editable source of truth).
+- ✅ **Assembly model (CALI-20).** `caliper assemble <file>` — represent **N parts + named mates +
+  assembly-level assertions** and measure them. Each mate (`touch`/`clearance`/`fit`/`no_interference`)
+  between two posed parts is a measured fit; `max_interference() <= 0` proves no pair collides. The
+  first step from "a part" to "a machine." (Webapp viewer is CALI-20b.)
 
 **Two generators now:** the **hardcoded bracket** (`run`/`refine`/`fit` — fast, offline-capable, the
 optimizer loop) and the **LLM author** (`gen` — arbitrary parts, needs `ANTHROPIC_API_KEY`).
@@ -120,6 +124,46 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-06-12 · Multi-parameter optimizer — coupled fits (CALI-19b)
+**New (loop-internal):** when a part has **two or more continuous dimensions** and a numeric check fails,
+the decide step now tunes the **whole vector jointly** (`decide.tune_multi`) instead of one knob at a
+time — so coupled fits (a clearance that depends on two dimensions, two mates sharing a wall) actually
+converge. Coordinate descent does the cheap work; it **escalates to a global scipy search only when the
+fits genuinely couple** (the case one-knob-at-a-time gets stuck on). No new command — `run`/`fit`/the
+loop just solve harder fit problems now. Covered by `test_decide.py` (a coupled `W+D` / `W*D` problem).
+
+### 2026-06-12 · Author-loop fit & refine — edit the real authored part (CALI-22)
+**New:** `fit` and `refine` now work on **LLM-authored parts** (the ones with a `part.py`). They no
+longer rebuild a bracket / refuse — they route through the author loop **seeded with the existing
+script**, so the LLM revises the real part to clear a reference or apply a plain-language change.
+**Try it — CLI** (needs `ANTHROPIC_API_KEY`):
+```bash
+caliper gen "a 50x30x6 mounting plate with an 8mm hole"        # → runs/run_00NN (writes part.py)
+caliper fit runs/run_00NN --ref bolt=examples/obstacle.stl --fit slip   # LLM revises part.py to fit
+caliper refine runs/run_00NN "add a 4mm chamfer on the top edge"        # LLM edits the real part
+```
+**Try it — browser:** `make serve` → "✦ author any part" → build → drop in a reference, pose it, **Fit**
+(or type a change in the refine box). Both now edit the authored script instead of erroring. The header
+reports the rounds + heals/revisions, same as `gen`.
+
+### 2026-06-12 · Assembly model — a collection of parts that fit together (CALI-20)
+**New:** Caliper now represents **N parts + named mates + assembly-level assertions** and *measures*
+them. Each mate (`touch` / `clearance` / `fit` / `no_interference`) between two parts becomes a measured
+check — "these two seat flush", "this slips into that at a slip fit" — and `max_interference() <= 0`
+proves no pair collides. This is the first step toward the north star ("insert a support between the
+wheel and the XYZ assembly"): the geometry of a *machine*, not just one part.
+**Try it — CLI:**
+```bash
+python examples/make_assembly.py          # (re)generate base/post/cap STLs (centered, local origin)
+make assemble                             # measures examples/assembly.yaml → ALL PASS
+#   caliper assemble examples/assembly.yaml
+# → base→post→cap stack; two `touch` mates (clearance ≈ 0.000) + nothing_collides → ALL PASS.
+#   Parts are posed by `position:` in the YAML; the fit probes measure them where they sit.
+```
+The assembly file (`examples/assembly.yaml`): `parts` (id + source STL/run-dir + position/rotation),
+`mates` (between two part ids, a kind), and free-form `assert`. Bump a part's `position` so two boxes
+overlap → the mate **and** `nothing_collides` both flip to `fail` with the overlap volume as the actual.
 
 ### 2026-06-12 · Fits & tolerances — target a fit class, stop fighting noise
 **New:** ask for a **fit** (press / snug / slip / free / running) and Caliper tunes the part until the

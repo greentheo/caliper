@@ -140,9 +140,143 @@ def tune_continuous(
     return best[0], best[1], best[2]
 
 
+# ---------------------------------------------------------------------------
+# CALI-19b — multi-parameter optimizer: joint tuning of N coupled continuous params
+# ---------------------------------------------------------------------------
+# `tune_continuous` moves one knob for one target. Assembly fits couple: one clearance depends on two
+# dimensions, or two mates fight over the same wall. Tuning them one-at-a-time can stall or oscillate.
+# `tune_multi` searches the joint space against a *global* objective (every assertion at once):
+#   maximize (all_pass, #passing, worst signed margin, −total normalized change-from-init).
+# The default engine is **coordinate descent** — deterministic and eval-frugal (geometry rebuilds are
+# the expensive thing here), sweeping each param against the global score until no sweep improves. An
+# optional `engine="scipy"` runs `differential_evolution` (seeded) for cheap eval_fns / offline tuning.
+
+def _continuous_params(spec: Spec) -> list[str]:
+    return [n for n, p in spec.parameters.items() if getattr(p, "type", None) == "continuous"]
+
+
+def _global_score(spec: Spec, rep: Report, params: list[str], inits: dict, spans: dict):
+    """Comparable tuple (bigger = better): feasibility, #passing, worst margin, then minimal change."""
+    margins = [r.margin for r in rep.results if r.margin is not None]
+    worst = min(margins) if margins else 0.0
+    change = sum(abs(float(spec.parameters[p].init) - inits[p]) / spans[p] for p in params)
+    return (rep.all_pass, _pass_count(rep), round(float(worst), 6), -round(change, 6))
+
+
+def tune_multi(
+    spec: Spec, params: list[str], eval_fn: EvalFn, samples: int = 7, sweeps: int = 4,
+    engine: str = "coord",
+) -> tuple[Spec, Report]:
+    """Jointly tune ``params`` (continuous) to drive every assertion to pass, snugly. Returns (spec, report).
+
+    Coordinate descent (default): each sweep, scan every param over a coarse grid + a window refined
+    around its current value, keeping any candidate that improves the global score; stop when a whole
+    sweep yields no improvement. ``engine="scipy"`` swaps in a global ``differential_evolution`` search
+    (deterministic via a fixed seed) where eval is cheap.
+    """
+    params = [p for p in params if getattr(spec.parameters.get(p), "type", None) == "continuous"]
+    if not params:
+        return spec, eval_fn(spec)
+    inits = {p: float(spec.parameters[p].init) for p in params}
+    spans = {p: max(float(spec.parameters[p].max) - float(spec.parameters[p].min), 1e-9) for p in params}
+
+    def score(s: Spec, rep: Report):
+        return _global_score(s, rep, params, inits, spans)
+
+    current = spec
+    cur_rep = eval_fn(current)
+    cur_score = score(current, cur_rep)
+
+    if engine == "scipy":
+        polished = _scipy_tune_multi(spec, params, eval_fn, inits, spans, score)
+        if polished is not None and polished[2] > cur_score:
+            return polished[0], polished[1]
+        return current, cur_rep
+
+    for _ in range(sweeps):
+        improved = False
+        for p in params:
+            lo, hi = float(spec.parameters[p].min), float(spec.parameters[p].max)
+            v0 = float(current.parameters[p].init)
+            candidates = list(np.linspace(lo, hi, samples))
+            step = (hi - lo) / (samples - 1) if samples > 1 else 0.0
+            for _r in range(3):  # progressive local refinement around the current value (tight bands)
+                if step <= 1e-7:
+                    break
+                candidates += list(np.linspace(max(lo, v0 - step), min(hi, v0 + step), 5))
+                step /= 4.0
+            best = (cur_score, current, cur_rep)
+            for v in candidates:
+                s = with_param(current, p, float(v))
+                rep = eval_fn(s)
+                sc = score(s, rep)
+                if sc > best[0]:
+                    best = (sc, s, rep)
+            if best[0] > cur_score:
+                cur_score, current, cur_rep = best
+                improved = True
+        if not improved:
+            break
+
+    # Escalate to a global search only if coordinate descent couldn't reach feasibility — coupled
+    # objectives (a target that needs two knobs moved together) trap coordinate descent at a saddle the
+    # per-axis sweeps can't leave. Cheap-first keeps the common (separable) case frugal on geometry builds.
+    if not cur_rep.all_pass:
+        polished = _scipy_tune_multi(spec, params, eval_fn, inits, spans, score)
+        if polished is not None and polished[2] > cur_score:
+            return polished[0], polished[1]
+    return current, cur_rep
+
+
+def _scipy_tune_multi(spec, params, eval_fn, inits, spans, score):
+    """Global joint search via scipy ``differential_evolution`` (seeded). None if scipy is absent."""
+    try:
+        from scipy.optimize import differential_evolution
+    except Exception:
+        return None
+    bounds = [(float(spec.parameters[p].min), float(spec.parameters[p].max)) for p in params]
+
+    def _apply(x):
+        s = spec
+        for p, v in zip(params, x):
+            s = with_param(s, p, float(v))
+        return s
+
+    def loss(x):
+        s = _apply(x)
+        rep = eval_fn(s)
+        margins = [r.margin for r in rep.results if r.margin is not None]
+        worst = float(np.clip(min(margins) if margins else 0.0, -1e3, 1e3))
+        base = -(_pass_count(rep) * 1000.0 + worst)
+        if rep.all_pass:  # among feasible, prefer minimal change (snug)
+            base += 1e-2 * sum(abs(float(v) - inits[p]) / spans[p] for p, v in zip(params, x))
+        return base
+
+    res = differential_evolution(loss, bounds, seed=0, maxiter=20, popsize=8, tol=1e-3, polish=True)
+    s = _apply(res.x)
+    rep = eval_fn(s)
+    return s, rep, score(s, rep)
+
+
 def decide(spec: Spec, report: Report, eval_fn: EvalFn, tuning: Optional[dict] = None) -> DecideResult:
     """Pick the next move given a failing report. Continuous first, then structural, then defer to LLM."""
     tuning = tuning or DEFAULT_TUNING
+
+    # 0) coupled-fit route (CALI-19b) — with ≥2 continuous knobs and a failing numeric check, the fits
+    # may be coupled (one target needs two knobs moved together), which the 1-D path can't escape. Tune
+    # the whole vector jointly. Only taken if it actually improves (more passing / all pass), else fall
+    # through to the 1-D path. Single-knob specs skip this entirely (the common case stays 1-D + snug).
+    continuous = _continuous_params(spec)
+    numeric_fails = [r for r in report.failures if r.margin is not None]
+    if len(continuous) >= 2 and len(numeric_fails) >= 1:
+        new_spec, rep = tune_multi(spec, continuous, eval_fn)
+        if rep.all_pass or _pass_count(rep) > _pass_count(report):
+            return DecideResult(
+                new_spec=new_spec,
+                move=f"optimizer(multi): jointly tuned {', '.join(continuous)}",
+                kind="continuous",
+                projected_report=rep,
+            )
 
     # 1) continuous route — a tunable continuous parameter governs a failing numeric assertion.
     for r in report.failures:

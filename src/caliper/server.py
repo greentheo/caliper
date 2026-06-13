@@ -143,6 +143,25 @@ def _execute(spec: Spec, max_iter: int, extra: dict) -> dict:
                    error="" if build.build_ok else build.error)
 
 
+def _read_run_script(run_id: str) -> str:
+    with open(os.path.join(_runs_dir(), run_id, "part.py")) as f:
+        return f.read()
+
+
+def _finish_authored(spec: Spec, res, extra: dict) -> dict:
+    """Persist + shape an authored ``improve()`` result. Shared by /api/gen, /api/fit, /api/refine."""
+    from fastapi import HTTPException
+
+    if res.geometry is None:
+        raise HTTPException(status_code=422,
+                            detail=f"author couldn't build a part in {res.rounds} round(s): {res.error}")
+    heals = sum(1 for k, _ in res.history if k == "build_error")
+    revs = sum(1 for k, _ in res.history if k == "measurement_fail")
+    extra = {**extra, "rounds": res.rounds, "heals": heals, "revisions": revs}
+    return _finish(spec, "passed" if res.ok else "capped", res.rounds, res.report, res.geometry,
+                   extra, script=res.script)
+
+
 def create_app():
     from fastapi import FastAPI, HTTPException
     from fastapi.responses import FileResponse
@@ -175,10 +194,20 @@ def create_app():
         spec_path = os.path.join(_runs_dir(), req.run_id, "spec.yaml")
         if not os.path.isfile(spec_path):
             raise HTTPException(status_code=404, detail=f"unknown run {req.run_id}")
-        if _is_authored(req.run_id):
-            raise HTTPException(status_code=422, detail="This is an LLM-authored part — refine rebuilds "
-                                "via the bracket generator. Re-run with the author (✦ author any part) "
-                                "and an adjusted intent instead.")
+        if _is_authored(req.run_id):  # CALI-22: the LLM revises the real part.py
+            from .authoring import refine_authored
+
+            spec = Spec.load(spec_path)
+            try:
+                res = refine_authored(spec, _read_run_script(req.run_id), req.instruction,
+                                      max_rounds=req.max_iter,
+                                      ref_base=os.path.join(_runs_dir(), req.run_id))
+            except Exception as e:  # noqa: BLE001 — missing/invalid ANTHROPIC_API_KEY
+                raise HTTPException(status_code=503, detail=f"authoring needs the Claude API: {e}")
+            return _finish_authored(spec, res, {
+                "source": f"refine {req.run_id}", "label": req.instruction,
+                "changes": [req.instruction], "questions": [],
+            })
         res = apply_refinement(Spec.load(spec_path), req.instruction, use_llm=not req.no_llm)
         if not res.changed:
             raise HTTPException(status_code=422, detail="no recognized refinement for that instruction")
@@ -195,17 +224,9 @@ def create_app():
             res = improve(intake.spec, max_rounds=req.max_rounds)
         except Exception as e:  # noqa: BLE001 — almost always a missing/invalid ANTHROPIC_API_KEY
             raise HTTPException(status_code=503, detail=f"authoring needs the Claude API: {e}")
-        if res.geometry is None:
-            raise HTTPException(status_code=422,
-                                detail=f"author couldn't build a part in {res.rounds} round(s)")
-        heals = sum(1 for k, _ in res.history if k == "build_error")
-        revs = sum(1 for k, _ in res.history if k == "measurement_fail")
-        return _finish(
-            intake.spec, "passed" if res.ok else "capped", res.rounds, res.report, res.geometry,
-            {"source": "gen", "label": req.intent, "changes": [], "questions": intake.questions,
-             "rounds": res.rounds, "heals": heals, "revisions": revs},
-            script=res.script,
-        )
+        return _finish_authored(intake.spec, res, {
+            "source": "gen", "label": req.intent, "changes": [], "questions": intake.questions,
+        })
 
     @app.post("/api/fit")
     def fit(req: FitRequest):
@@ -216,11 +237,8 @@ def create_app():
         spec_path = os.path.join(_runs_dir(), req.run_id, "spec.yaml")
         if not os.path.isfile(spec_path):
             raise HTTPException(status_code=404, detail=f"unknown run {req.run_id}")
-        if _is_authored(req.run_id):
-            raise HTTPException(status_code=422, detail="This is an LLM-authored part — fit rebuilds "
-                                "via the bracket generator and can't fit authored parts yet. Fit a "
-                                "bracket-family part for now.")
         spec = Spec.load(spec_path)
+        authored = _is_authored(req.run_id)
 
         try:
             raw = base64.b64decode(req.reference_b64.split(",")[-1])
@@ -239,12 +257,23 @@ def create_app():
         attach_reference(spec, safe, ref_path, position=req.position, rotation=req.rotation,
                          min_clearance=req.min_clearance, no_overlap=no_overlap,
                          fit=req.fit, nominal=req.nominal)
-        ensure_tunable(spec, req.free or pick_free_param(spec))
-        return _execute(spec, req.max_iter, {
+        extra = {
             "source": f"fit {req.run_id}", "changes": [], "questions": [], "label": f"fit → {safe}",
             "references": [{"id": safe, "file": ref_path,
                             "position": req.position, "rotation": req.rotation}],
-        })
+        }
+        if authored:  # CALI-22: the LLM revises the real part.py to clear the reference
+            from .authoring import refit_authored
+
+            try:
+                res = refit_authored(spec, _read_run_script(req.run_id), max_rounds=req.max_iter,
+                                     ref_base=os.path.join(_runs_dir(), req.run_id))
+            except Exception as e:  # noqa: BLE001 — missing/invalid ANTHROPIC_API_KEY
+                raise HTTPException(status_code=503, detail=f"authoring needs the Claude API: {e}")
+            return _finish_authored(spec, res, extra)
+
+        ensure_tunable(spec, req.free or pick_free_param(spec))
+        return _execute(spec, req.max_iter, extra)
 
     @app.get("/api/runs/{run_id}/ref/{ref_id}.stl")
     def ref_stl(run_id: str, ref_id: str):

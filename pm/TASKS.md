@@ -218,8 +218,10 @@ cap (mirrors CALI-6's rails). Author injectable → fully tested. Wired into CLI
   once authored parts also get optimizer-tuned continuous params (a CALI-19 follow-on).
 
 ## Assembly spine — the path to multi-part design with fits & tolerances
-The next ~3 shifts toward the north star ("insert a support between the wheel and the XYZ assembly").
-Each builds on the single-part loop now complete (CALI-16/17) and CALI-10's two-body fit substrate.
+The path to the north star ("insert a support between the wheel and the XYZ assembly"). Built on the
+single-part loop (CALI-16/17) and CALI-10's two-body fit substrate. **Spine complete:** CALI-19 (fits) +
+CALI-19b (multi-param optimizer) + CALI-20 (assembly model) + CALI-22 (author-loop fit/refine) all
+shipped — **CALI-21 (insert-into-assembly) is now unblocked** and is the headline next step.
 
 ### CALI-19 — Tolerances & fits as first-class  · P1 · assembly-spine · ✅ done (`7d237cf`)
 A vocabulary for *fits* + tolerant comparisons, so the loop can target a fit and noise stops causing
@@ -238,22 +240,64 @@ false failures. The user's "fits and tolerances" pillar.
   (the phone-stand `slot_fits_phone` bug).
 - **Verified live:** `fit --fit slip` tuned a bracket 60 → 41.8 mm to land clearance = **0.188 mm**, dead
   centre of the slip band. Browser dropdown wired (hides manual clearance), no console errors.
-- **Bonus guard (the fit bug they hit):** `fit`/`refine` now **refuse LLM-authored parts** (part.py
-  present) with a clear message instead of silently rebuilding a bracket — CLI + `/api/fit` + `/api/refine`.
+- **Bonus guard (the fit bug they hit):** `fit`/`refine` **refused LLM-authored parts** (part.py present)
+  with a clear message instead of silently rebuilding a bracket. _(Superseded by CALI-22 — they now route
+  through the author loop and edit the real part.)_
 - Tests: `test_tolerance.py` (8) + band-margin/fit-class loop + authored guards (CLI + server). **121 passed.**
-- **Deferred:** multi-parameter (N-D) joint optimization → CALI-19b (nevergrad/scipy). 1-D + iterative
-  refine is enough for single-fit targets; coupled fits across many params need the real optimizer.
+- **Deferred:** multi-parameter (N-D) joint optimization → CALI-19b (now shipped).
 
-### CALI-22 — Author-loop fit & refine  · P1 · generator · 🧊 backlog
-Today fit/refine rebuild via the bracket generator, so they can't touch LLM-authored parts (guarded in
-CALI-19 to fail honestly). Route fit/refine of an authored run through `improve()` **seeded with its
-`part.py`** + the new constraint ("…and clear this reference at a slip fit"), so the LLM edits the real
-part. This is also the front edge of CALI-21 (insert-into-assembly).
+### CALI-19b — Multi-parameter optimizer (coupled fits)  · P2 · assembly-spine · ✅ done (2026-06-12)
+CALI-19's tuner is 1-D (one knob per failing check). Assembly fits *couple* — one clearance depends on
+two dimensions, two mates fight over one wall — and tuning one knob at a time stalls at a saddle.
+- **`decide.tune_multi(spec, params, eval_fn, engine="coord")`** searches the joint continuous space
+  against a **global** objective: maximize `(all_pass, #passing, worst signed margin, −total normalized
+  change)`. Worst-margin pushes every assertion over its threshold together; change-from-init keeps it snug.
+- **Coordinate descent by default** (deterministic, eval-frugal — geometry rebuilds are the cost):
+  sweep each knob over a coarse grid + a refined local window against the global score; stop when a
+  sweep doesn't improve. **Escalates to seeded `scipy.optimize.differential_evolution` ONLY when CD
+  can't reach feasibility** — the genuinely-coupled case. `engine="scipy"` forces the global search.
+- **`decide` route 0:** with ≥2 continuous knobs and a failing numeric check, tune the whole vector;
+  taken only if it improves (more passing / all-pass), else fall through to the 1-D + snug path.
+  Single-knob specs are untouched.
+- Tests: coupled 2-knob problem (`W+D` band + `W*D` budget, feasible only asymmetric) solved via CD→scipy
+  escalation and via `engine="scipy"`; separable 2-knob solved by CD alone (spy asserts scipy unused);
+  `decide` routes coupled failures to the multi move. **142 passed.**
 
-### CALI-20 — Assembly model (N parts + interfaces)  · P1 · assembly-spine · 🧊 backlog
+### CALI-22 — Author-loop fit & refine  · P1 · generator · ✅ done (2026-06-12)
+Fit/refine used to rebuild via the bracket generator, so they couldn't touch LLM-authored parts (guarded
+in CALI-19 to fail honestly). Now they route through `improve()` **seeded with the run's `part.py`**, so
+the LLM edits the real part — the front edge of CALI-21 (insert-into-assembly).
+- **`improve(..., seed_script, seed_feedback, ref_base)`** — primes round 1 with an existing part + the
+  new constraint (revise, don't restart). Same build-error + failing-measurement healing as `gen`.
+- **`refit_authored(spec, script, …)`** — spec carries the reference + fit assertion (via
+  `fit.attach_reference`); seeds the loop + feeds the fit checks. **`refine_authored(spec, script,
+  instruction, …)`** — folds the instruction into `spec.intent` (so later rounds can't undo it) + seeds.
+- **CLI** `fit`/`refine` of an authored run route through the loop (no more return-2). **Webapp**
+  `/api/fit` + `/api/refine` route through (422 guards removed); shared `_finish_authored()` persists
+  script+STL+refs; `/api/gen` refactored onto it.
+- Tests: seed-priming, `refit_authored` (60→30 mm box clears a reference in 2 rounds, fed the failing
+  `interference`), `refine_authored` intent-fold, CLI + server route-through. **138 passed.** Live LLM
+  path needs `ANTHROPIC_API_KEY` (routing verified with injected authors).
+
+### CALI-20 — Assembly model (N parts + interfaces)  · P1 · assembly-spine · ✅ done (2026-06-12)
 Represent multiple parts, their **mates / datums / joints**, and **assembly-level assertions** (no pair
 interferes, mates touch, fastener stacks align). Generalizes CALI-10's two-body interference/clearance
 to N bodies with *named* relationships. "This collection of parts."
+- **`assembly.py`** — `Part` (id + geometry `source` [STL or run dir] + placement position/rotation +
+  role fixed|movable), `Mate` (`between: [a, b]` + kind `no_interference`/`clearance`/`fit`/`touch`),
+  `Assembly` (parts + mates + assembly assertions). YAML/JSON round-trip; validates mate refs + dup ids.
+- **Mates → measured assertions** (`mate_assertion`): touch → `-tol <= min_clearance(a,b) <= tol`; fit →
+  CALI-19 band; clearance → `>= v`; no_interference → `interference(a,b) <= 0`. `derived_assertions`
+  = per-mate then free-form assembly assertions.
+- **N-body measure** — `pairwise_interference` (all pairs), `max_interference` ("nothing collides"),
+  `min_pair_clearance` (tightest gap anywhere). Reuses the two-body probes (they already took any pair).
+- **Evaluation reuses the single-part evaluator** — same AST interpreter, signed margins (fit band
+  between two parts is tunable), same `Report`. Namespace: part ids → posed `Geometry`; probes take two
+  parts; `max_interference()`/`min_clearance_all()`/`bbox(part)` bound in.
+- **`caliper assemble <file>`** (+ `make assemble`); example `examples/assembly.yaml` (post-stand:
+  base→post→cap, two touch mates) → ALL PASS. Tests: `test_assembly.py` (13). **134 passed.**
+- **Deferred:** webapp assembly viewer → CALI-20b. Spec-source parts (build from a spec via the
+  author/bracket generator at assemble time) → fold into CALI-21. Today parts load from STL / run dirs.
 
 ### CALI-21 — Insert-into-assembly  · P1 · assembly-spine · 🧊 backlog
 Load an assembly, name two interfaces, ask for a part "here" at a target fit → the LLM authors a part

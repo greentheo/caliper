@@ -92,15 +92,77 @@ def test_fit_unknown_run_404():
     assert r.status_code == 404
 
 
-def test_fit_refuses_authored_run(tmp_path, monkeypatch):
-    # CALI-19 guard: fitting an LLM-authored part (has part.py) must 422, not rebuild a bracket.
+def test_fit_routes_authored_through_author_loop(tmp_path, monkeypatch):
+    # CALI-22: fitting an LLM-authored part routes through the author loop (refit_authored, seeded with
+    # the existing part.py) and persists a revised part — no longer a 422. refit is faked for determinism.
+    pytest.importorskip("cadquery")
+    import base64
+
+    import trimesh
+
+    import caliper.authoring as authoring
+    from caliper.evaluate import AssertionResult, Report
+    from caliper.measure import Geometry
+
     monkeypatch.setenv("CALIPER_RUNS", str(tmp_path / "runs"))
+    script = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(30, 20, 4)\n"
     d = tmp_path / "runs" / "run_0000"
     d.mkdir(parents=True)
     (d / "spec.yaml").write_text("part: gizmo\n")
-    (d / "part.py").write_text("def build(params):\n    return None\n")
-    r = _client().post("/api/fit", json={"run_id": "run_0000", "reference_b64": "AAAA"})
-    assert r.status_code == 422 and "authored" in r.json()["detail"].lower()
+    (d / "part.py").write_text(script)
+
+    captured = {}
+
+    def fake_refit(spec, seed, **kw):
+        captured["seed"] = seed
+        geom = Geometry.from_mesh(trimesh.creation.box(extents=(30, 20, 4)))
+        report = Report([AssertionResult("o_no_interference", "interference(o) <= 0", "pass", True,
+                                         actual=0.0)])
+        return authoring.ImproveResult(ok=True, geometry=geom, script=script, report=report, rounds=1,
+                                       history=[("passed", "")])
+
+    monkeypatch.setattr(authoring, "refit_authored", fake_refit)
+
+    b64 = base64.b64encode(b"solid s\nendsolid s\n").decode()
+    r = _client().post("/api/fit", json={"run_id": "run_0000", "reference_b64": b64,
+                                         "reference_id": "o", "fit": "slip"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["build_ok"] and body["script"] == script
+    assert captured["seed"] == script  # the author loop was seeded with the existing part.py
+
+
+def test_refine_routes_authored_through_author_loop(tmp_path, monkeypatch):
+    # CALI-22: refining an LLM-authored part revises its script via the author loop, not the bracket
+    # refiner. refine_authored is faked; we assert it ran and the instruction reached it.
+    pytest.importorskip("cadquery")
+    import trimesh
+
+    import caliper.authoring as authoring
+    from caliper.evaluate import AssertionResult, Report
+    from caliper.measure import Geometry
+
+    monkeypatch.setenv("CALIPER_RUNS", str(tmp_path / "runs"))
+    script = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(30, 20, 4)\n"
+    d = tmp_path / "runs" / "run_0000"
+    d.mkdir(parents=True)
+    (d / "spec.yaml").write_text("part: gizmo\n")
+    (d / "part.py").write_text(script)
+
+    captured = {}
+
+    def fake_refine(spec, seed, instruction, **kw):
+        captured["instruction"] = instruction
+        geom = Geometry.from_mesh(trimesh.creation.box(extents=(30, 20, 4)))
+        report = Report([AssertionResult("solid", "is_watertight", "pass", True, actual=True)])
+        return authoring.ImproveResult(ok=True, geometry=geom, script=script, report=report, rounds=1,
+                                       history=[("passed", "")])
+
+    monkeypatch.setattr(authoring, "refine_authored", fake_refine)
+    r = _client().post("/api/refine", json={"run_id": "run_0000", "instruction": "make it 2mm taller"})
+    assert r.status_code == 200, r.text
+    assert captured["instruction"] == "make it 2mm taller"
+    assert r.json()["script"] == script
 
 
 def test_fit_end_to_end(tmp_path, monkeypatch):

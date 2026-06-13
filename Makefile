@@ -32,6 +32,9 @@ refine-llm: ## refine via Claude: make refine-llm SOURCE=runs/run_0000 INSTRUCTI
 fit:    ## fit a prior part to a reference STL: make fit SOURCE=runs/run_0000 REF=obstacle=examples/obstacle.stl [CLEAR=2]
 	$(CALIPER_PY) -m caliper.cli fit "$(SOURCE)" --ref "$(or $(REF),obstacle=examples/obstacle.stl)" $(if $(CLEAR),--min-clearance $(CLEAR),)
 
+assemble: ## measure a multi-part assembly: make assemble ASM=examples/assembly.yaml
+	$(CALIPER_PY) -m caliper.cli assemble "$(or $(ASM),examples/assembly.yaml)"
+
 serve:  ## launch the webapp (3D viewer + refine loop): make serve  [PORT=8000]
 	$(CALIPER_PY) -m caliper.cli serve --port $(or $(PORT),8000)
 

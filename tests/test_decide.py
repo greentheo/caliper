@@ -58,3 +58,97 @@ def test_no_move_defers_to_llm():
     report = Report([AssertionResult("one_body", "body_count==1", "fail", False, margin=None)])
     dec = decide.decide(spec, report, _mass_eval)
     assert dec.kind == "llm"
+
+
+# --- CALI-19b: multi-parameter optimizer (coupled fits) --------------------
+def _coupled_spec(w_init=20.0, d_init=20.0):
+    # two knobs, two coupled checks: a gap band on (W+D) and a budget on (W*D). Feasible only with an
+    # ASYMMETRIC pair (W=D drives the product over budget) — the case coordinate descent can't solve.
+    return Spec(
+        part="pocket",
+        parameters={
+            "W": {"type": "continuous", "min": 10.0, "max": 30.0, "init": w_init},
+            "D": {"type": "continuous", "min": 10.0, "max": 30.0, "init": d_init},
+        },
+        assertions=[
+            Assertion(id="gap", expr="0.0 <= 40 - W - D <= 0.5"),
+            Assertion(id="budget", expr="W * D <= 380"),
+        ],
+    )
+
+
+def _coupled_eval(spec):
+    W = spec.parameters["W"].init
+    D = spec.parameters["D"].init
+    gap = 40.0 - W - D
+    gmargin = min(gap - 0.0, 0.5 - gap)                 # two-sided band margin
+    gstatus = "pass" if 0.0 <= gap <= 0.5 else "fail"
+    mass = W * D
+    mstatus = "pass" if mass <= 380.0 else "fail"
+    return Report([
+        AssertionResult("gap", "0.0 <= 40 - W - D <= 0.5", gstatus, gstatus == "pass",
+                        actual=gap, margin=gmargin),
+        AssertionResult("budget", "W * D <= 380", mstatus, mstatus == "pass",
+                        actual=mass, margin=380.0 - mass),
+    ])
+
+
+def _assert_coupled_feasible(spec):
+    W, D = spec.parameters["W"].init, spec.parameters["D"].init
+    assert 0.0 <= 40.0 - W - D <= 0.5
+    assert W * D <= 380.0
+
+
+def test_tune_multi_solves_a_coupled_fit():
+    # init (20,20): gap=0 ok-ish but product=400 > 380 → both can't hold without moving BOTH knobs.
+    new_spec, rep = decide.tune_multi(_coupled_spec(), ["W", "D"], _coupled_eval)
+    assert rep.all_pass
+    _assert_coupled_feasible(new_spec)
+
+
+def test_tune_multi_scipy_engine_solves_coupled_fit():
+    new_spec, rep = decide.tune_multi(_coupled_spec(), ["W", "D"], _coupled_eval, engine="scipy")
+    assert rep.all_pass
+    _assert_coupled_feasible(new_spec)
+
+
+def test_decide_routes_coupled_failures_to_multi():
+    spec = _coupled_spec()
+    report = _coupled_eval(spec)
+    assert len(report.failures) >= 1  # product over budget at init
+    dec = decide.decide(spec, report, _coupled_eval)
+    assert dec.kind == "continuous" and "multi" in dec.move
+    assert dec.projected_report.all_pass
+    _assert_coupled_feasible(dec.new_spec)
+
+
+def test_tune_multi_separable_stays_cheap_via_coordinate_descent(monkeypatch):
+    # a SEPARABLE 2-knob problem must be solved by coordinate descent alone — scipy must NOT be invoked.
+    import caliper.decide as d
+
+    called = {"scipy": False}
+    orig = d._scipy_tune_multi
+
+    def spy(*a, **k):
+        called["scipy"] = True
+        return orig(*a, **k)
+
+    monkeypatch.setattr(d, "_scipy_tune_multi", spy)
+
+    spec = Spec(
+        part="x",
+        parameters={
+            "a": {"type": "continuous", "min": 0.0, "max": 10.0, "init": 9.0},
+            "b": {"type": "continuous", "min": 0.0, "max": 10.0, "init": 9.0},
+        },
+        assertions=[Assertion(id="a_ok", expr="a <= 5"), Assertion(id="b_ok", expr="b <= 5")],
+    )
+
+    def ev(s):
+        a, b = s.parameters["a"].init, s.parameters["b"].init
+        ra = AssertionResult("a_ok", "a<=5", "pass" if a <= 5 else "fail", a <= 5, actual=a, margin=5 - a)
+        rb = AssertionResult("b_ok", "b<=5", "pass" if b <= 5 else "fail", b <= 5, actual=b, margin=5 - b)
+        return Report([ra, rb])
+
+    new_spec, rep = d.tune_multi(spec, ["a", "b"], ev)
+    assert rep.all_pass and not called["scipy"]  # CD reached feasibility, no global search needed
