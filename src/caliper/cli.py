@@ -298,6 +298,67 @@ def _cmd_assemble(args) -> int:
     return 0 if report.all_pass else 3
 
 
+def _cmd_insert(args) -> int:
+    """Author a new part that mates to two named interfaces at a target fit, then add it (CALI-21)."""
+    from .assembly import Assembly, evaluate_assembly
+    from .insert import add_part_to_assembly, insert_part
+    from .loop import persist_run
+
+    asm = Assembly.load(args.path)
+    base_dir = args.base_dir or os.path.dirname(os.path.abspath(args.path)) or "."
+    between = [s.strip() for s in args.between.split(",") if s.strip()]
+    if len(between) != 2:
+        print("--between needs exactly two part ids, e.g. --between post_left,post_right")
+        return 2
+
+    print(f"▶ insert: '{args.intent}' between {between[0]} and {between[1]} at a {args.fit} fit\n")
+    try:
+        res = insert_part(asm, between, fit=args.fit, new_intent=args.intent, new_id=args.new_id,
+                          max_rounds=args.max_rounds, base_dir=base_dir)
+    except ValueError as e:
+        print(f"cannot insert: {e}")
+        return 2
+    except Exception as e:  # noqa: BLE001 — almost always a missing/invalid ANTHROPIC_API_KEY
+        print(f"authoring needs the Claude API — {type(e).__name__}: {e}\n"
+              "Set ANTHROPIC_API_KEY (see .env.example); this path can't run offline.")
+        return 1
+
+    if res.bridge:
+        b = res.bridge
+        print(f"  gap: {b.gap:.1f} mm along {b.axis_name}  "
+              f"({between[0]} face {b.axis_name}={b.face_a:.2f} ↔ {between[1]} face {b.axis_name}={b.face_b:.2f})\n")
+    if res.geometry is None:
+        print(f"author couldn't build an insert part in {res.rounds} round(s):\n{res.error}")
+        return 1
+
+    builds = sum(1 for k, _ in res.history if k == "build_error")
+    revs = sum(1 for k, _ in res.history if k == "measurement_fail")
+    notes = ", ".join(p for p in (f"{builds} build-error heal(s)" if builds else "",
+                                  f"{revs} revision(s)" if revs else "") if p)
+    verdict = "✓ mates both interfaces" if res.ok else "△ best effort (some checks still fail)"
+    print(f"{verdict} after {res.rounds} round(s)" + (f" ({notes})" if notes else "") + "\n")
+    print(res.report.to_text())
+
+    out_dir = _next_run_dir()
+    persist_run(out_dir, res.spec, res.report, res.geometry)
+    with open(os.path.join(out_dir, "part.py"), "w") as f:
+        f.write(res.script + "\n")
+    print(f"\nSTL: {os.path.join(out_dir, 'part.stl')}")
+    print(f"script: {os.path.join(out_dir, 'part.py')}  (the human-editable source of truth)")
+    print(f"run saved: {out_dir}")
+
+    new_asm = add_part_to_assembly(asm, args.new_id, os.path.abspath(out_dir), between, fit=args.fit)
+    if args.save:
+        with open(args.save, "w") as f:
+            f.write(new_asm.to_yaml())
+        print(f"\nupdated assembly saved: {args.save}  (part '{args.new_id}' + two {args.fit} mates)")
+        print("── re-measuring the assembly with the inserted part ──")
+        print(evaluate_assembly(new_asm, base_dir=base_dir).to_text())
+    else:
+        print(f"\n(part '{args.new_id}' authored; re-run with --save FILE.yaml to add it to the assembly)")
+    return 0 if res.ok else 3
+
+
 def _cmd_serve(args) -> int:
     from .server import serve
 
@@ -361,6 +422,22 @@ def main(argv: list[str] | None = None) -> int:
     p_asm.add_argument("--base-dir", default=None,
                        help="resolve part sources against this dir (default: the assembly file's dir)")
     p_asm.set_defaults(func=_cmd_assemble)
+
+    p_ins = sub.add_parser("insert", help="author a new part that mates to two assembly interfaces (CALI-21)")
+    p_ins.add_argument("path", help="an assembly file (.yaml/.json)")
+    p_ins.add_argument("--between", required=True, metavar="A,B",
+                       help="the two existing part ids to mate to, e.g. post_left,post_right")
+    p_ins.add_argument("--intent", default="a connecting part",
+                       help='what to build, e.g. "a cross-bar" or "a support bracket"')
+    p_ins.add_argument("--as", dest="new_id", default="insert", metavar="ID",
+                       help="id for the new part (default: insert)")
+    p_ins.add_argument("--fit", default="slip", metavar="CLASS",
+                       help="fit class against each interface (press/snug/slip/free/running)")
+    p_ins.add_argument("--save", default=None, metavar="FILE.yaml",
+                       help="write the assembly with the new part added, then re-measure it")
+    p_ins.add_argument("--base-dir", default=None, help="resolve part sources against this dir")
+    p_ins.add_argument("--max-rounds", type=int, default=6)
+    p_ins.set_defaults(func=_cmd_insert)
 
     p_serve = sub.add_parser("serve", help="launch the webapp (3D viewer + spec/report + refine)")
     p_serve.add_argument("--host", default="127.0.0.1")

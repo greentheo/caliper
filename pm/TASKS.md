@@ -299,10 +299,25 @@ to N bodies with *named* relationships. "This collection of parts."
 - **Deferred:** webapp assembly viewer → CALI-20b. Spec-source parts (build from a spec via the
   author/bracket generator at assemble time) → fold into CALI-21. Today parts load from STL / run dirs.
 
-### CALI-21 — Insert-into-assembly  · P1 · assembly-spine · 🧊 backlog
+### CALI-21 — Insert-into-assembly  · P1 · assembly-spine · ✅ done (2026-06-12) — VERIFIED LIVE
 Load an assembly, name two interfaces, ask for a part "here" at a target fit → the LLM authors a part
 that **mates to both sides** with the right clearance, verified by measurement. The headline
-interaction: "insert a support between the wheel and the XYZ assembly." Needs CALI-19 + CALI-20.
+interaction: "insert a support between the wheel and the XYZ assembly."
+- **`insert.py`:** `insert_spec(asm, between, fit, new_intent, new_id)` → a spec whose **references are
+  the existing parts, posed**, asserting a fit **band** vs each interface + `interference <= 0` vs every
+  other part + one-body/watertight. `_bridge()` finds the separation axis + the two facing faces;
+  `build_insert_intent()` hands the author the interface bboxes, gap, and facing-face coords in WORLD
+  space so it builds *in place*. `insert_part()` runs the author loop (`improve`, injectable author);
+  `add_part_to_assembly()` appends the part (run-dir source, identity placement) + two `fit` mates.
+- **CLI** `caliper insert <asm> --between a,b --as id --intent "…" --fit slip --save out.yaml` + `make
+  insert`: authors → persists STL + `part.py` → adds to the assembly → re-measures the whole assembly.
+- **Verified live (real Claude API):** two posts, 50 mm gap → LLM authored a cross-bar **first try**,
+  **0.21 mm clearance to each post** (centre of the slip band); the saved assembly re-`assemble`s green.
+  The script reasons from the bboxes, applies the clearance, `.box(...)` in world coords. Also live-
+  confirmed `gen` and authored `refine` ("6 mm taller in z" → edited the real `part.py`).
+- Tests: `test_insert.py` (6). **148 passed.**
+- **Deferred:** webapp insert UI → CALI-21b; build assembly parts from a spec/intent → CALI-23;
+  optimizer-in-the-author-loop for coupled inserts → CALI-24.
 
 ## Generator capabilities (from real use — backlog)
 ### CALI-11 — Variable bend angle  · P2 · generator · 🧊 backlog

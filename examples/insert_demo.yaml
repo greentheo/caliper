@@ -1,0 +1,19 @@
+name: two-posts
+intent: two posts standing apart, awaiting a cross-bar inserted between them
+
+parts:
+  - id: post_left
+    source: asm_post.stl            # 10x10x30, centered at local origin
+    role: fixed
+    position: [-30, 0, 0]           # x -35..-25
+  - id: post_right
+    source: asm_post.stl
+    role: fixed
+    position: [30, 0, 0]            # x  25..35  → 50mm gap along x
+
+# no mates yet — `caliper insert` authors a part that bridges post_left ↔ post_right:
+#   caliper insert examples/insert_demo.yaml --between post_left,post_right \
+#       --as crossbar --intent "a cross-bar" --fit slip --save examples/inserted.yaml
+assert:
+  - id: nothing_collides
+    expr: max_interference() <= 0
