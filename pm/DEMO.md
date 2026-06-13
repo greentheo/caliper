@@ -31,6 +31,10 @@ Newest demos first.
   assembly-level assertions** and measure them. Each mate (`touch`/`clearance`/`fit`/`no_interference`)
   between two posed parts is a measured fit; `max_interference() <= 0` proves no pair collides. The
   first step from "a part" to "a machine." (Webapp viewer is CALI-20b.)
+- ✅ **Insert-into-assembly (CALI-21) — the north-star headline.** `caliper insert <asm> --between a,b
+  --fit slip` — the LLM **authors a new part that mates to two named interfaces** at a measured fit, in
+  assembly coordinates, then it's added back and the whole assembly is re-measured. *"Insert a support
+  between the wheel and the XYZ assembly."* Verified live (bridged a 50mm gap at 0.21mm/side, first try).
 
 **Two generators now:** the **hardcoded bracket** (`run`/`refine`/`fit` — fast, offline-capable, the
 optimizer loop) and the **LLM author** (`gen` — arbitrary parts, needs `ANTHROPIC_API_KEY`).
@@ -124,6 +128,23 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-06-12 · Insert-into-assembly — the north-star headline (CALI-21) ✅ live
+**New:** point at an assembly, name **two existing parts**, and Caliper makes the LLM **author a new
+part that mates to both at a target fit** — built in assembly coordinates, *measured* against the real
+posed parts, then added back to the assembly and re-verified. This is "insert a support between the
+wheel and the XYZ assembly," working end to end.
+**Try it** (needs `ANTHROPIC_API_KEY` — your `.env` has it):
+```bash
+make insert        # bridges examples/insert_demo.yaml (two posts, 50mm gap) with a cross-bar
+#   caliper insert examples/insert_demo.yaml --between post_left,post_right \
+#       --as crossbar --intent "a cross-bar" --fit slip --save examples/inserted.yaml
+caliper assemble examples/inserted.yaml    # re-measure the assembly WITH the inserted part
+```
+**Verified live (2026-06-12):** the LLM authored the cross-bar on the **first round**, landing **0.21 mm
+clearance to each post** — dead centre of the slip band (0.12–0.30). It reasons from the interface
+bounding boxes, applies the clearance, and places the bar in world coordinates. Try `--fit press` / `free`
+or a wider gap to watch it re-size. Want it taller? `caliper refine runs/run_NNNN "make it 6mm taller in z"`.
 
 ### 2026-06-12 · Multi-parameter optimizer — coupled fits (CALI-19b)
 **New (loop-internal):** when a part has **two or more continuous dimensions** and a numeric check fails,

@@ -35,6 +35,12 @@ fit:    ## fit a prior part to a reference STL: make fit SOURCE=runs/run_0000 RE
 assemble: ## measure a multi-part assembly: make assemble ASM=examples/assembly.yaml
 	$(CALIPER_PY) -m caliper.cli assemble "$(or $(ASM),examples/assembly.yaml)"
 
+insert: ## author a part between two interfaces (needs ANTHROPIC_API_KEY): make insert
+	$(CALIPER_PY) -m caliper.cli insert "$(or $(ASM),examples/insert_demo.yaml)" \
+		--between "$(or $(BETWEEN),post_left,post_right)" --as "$(or $(AS),crossbar)" \
+		--intent "$(or $(INTENT),a cross-bar)" --fit "$(or $(FIT),slip)" \
+		--save "$(or $(SAVE),examples/inserted.yaml)"
+
 serve:  ## launch the webapp (3D viewer + refine loop): make serve  [PORT=8000]
 	$(CALIPER_PY) -m caliper.cli serve --port $(or $(PORT),8000)
 
