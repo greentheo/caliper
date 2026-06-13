@@ -26,7 +26,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   `/api/fit` + `/api/refine` route-through (replacing the old 422 guards). **138 passed.**
 - **Live (LLM) path** needs `ANTHROPIC_API_KEY`; the routing is verified deterministically via injected
   authors. Webapp/CLI live runs are Theo's to drive.
-  Commit: PENDING
+  Commit: 72b0df4
 
 ### 2026-06-12 · CALI-20 · Assembly model — N parts + named mates + assembly assertions
 - **Why now:** the single-part loop is complete; the north star ("a 3D printer 10ft tall", "insert a
