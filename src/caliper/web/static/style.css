@@ -56,7 +56,26 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .changes { font-size: 12px; color: var(--accent); }
 .questions { font-size: 12px; color: #d2a857; }
 
-.recentbox summary, .specbox summary, .fitbox summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+.recentbox summary, .specbox summary, .fitbox summary, .asmbox summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+
+/* assemblies + insert (CALI-20b / CALI-21b) */
+.asmbox { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #0c0f13; }
+.badge { background: #1f6feb33; color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 10px; padding: 0 7px; font-size: 10px; vertical-align: middle; }
+.insert { display: flex; flex-direction: column; gap: 8px; margin-top: 10px;
+  border-top: 1px solid var(--line); padding-top: 10px; }
+.insert p { margin: 0; }
+.insert .num { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 5px; }
+.insert input[type=text] { padding: 5px 8px; }
+.insert select { background: #0c0f13; color: var(--ink); border: 1px solid var(--line);
+  border-radius: 6px; padding: 4px 6px; font: inherit; }
+.picks { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pick { background: #11202f; border: 1px solid var(--accent); color: var(--accent);
+  border-radius: 6px; padding: 2px 8px; font: 12px ui-monospace, monospace; }
+.pick.empty { background: #0c0f13; border-color: var(--line); color: var(--muted); }
+button.ghost { padding: 2px 8px; font-size: 12px; }
+button.small { padding: 3px 8px; font-size: 12px; }
+.asmbox .item .dot { background: var(--muted); }
 .muted { color: var(--muted); }
 .small { font-size: 11px; }
 

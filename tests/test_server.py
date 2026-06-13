@@ -245,3 +245,83 @@ def test_refine_unrecognized_returns_422(tmp_path, monkeypatch):
     rid = run.json()["run_id"]
     bad = c.post("/api/refine", json={"run_id": rid, "instruction": "make it prettier"})
     assert bad.status_code == 422
+
+
+# --- CALI-20b / CALI-21b: assemblies + insert via the webapp ---------------
+def _asm_dir(tmp_path):
+    import trimesh
+
+    d = tmp_path / "asm"
+    d.mkdir()
+    trimesh.creation.box(extents=(10, 10, 30)).export(str(d / "post.stl"))
+    (d / "twoposts.yaml").write_text(
+        "name: two-posts\n"
+        "parts:\n"
+        "  - id: post_left\n    source: post.stl\n    role: fixed\n    position: [-30, 0, 0]\n"
+        "  - id: post_right\n    source: post.stl\n    role: fixed\n    position: [30, 0, 0]\n"
+        "assert:\n  - id: clean\n    expr: max_interference() <= 0\n"
+    )
+    return d
+
+
+def test_list_and_get_assembly(tmp_path, monkeypatch):
+    d = _asm_dir(tmp_path)
+    monkeypatch.setenv("CALIPER_ASSEMBLIES", str(d))
+    c = _client()
+    lst = c.get("/api/assemblies").json()["assemblies"]
+    assert any(a["id"] == "twoposts" and a["parts"] == 2 for a in lst)
+
+    got = c.get("/api/assembly/twoposts").json()
+    assert got["name"] == "two-posts" and len(got["parts"]) == 2
+    assert got["report"]["all_pass"]                      # the two posts don't collide
+    assert got["parts"][0]["stl_url"].endswith("/part/post_left.stl")
+    assert c.get("/api/assembly/twoposts/part/post_left.stl").status_code == 200
+    assert c.get("/api/assembly/nope").status_code == 404
+
+
+def test_insert_routes_through_author_loop(tmp_path, monkeypatch):
+    import trimesh
+
+    import caliper.insert as insert_mod
+    from caliper.evaluate import AssertionResult, Report
+    from caliper.insert import Bridge, InsertResult
+    from caliper.measure import Geometry
+    from caliper.spec import Spec
+
+    d = _asm_dir(tmp_path)
+    monkeypatch.setenv("CALIPER_ASSEMBLIES", str(d))
+    monkeypatch.setenv("CALIPER_RUNS", str(tmp_path / "runs"))
+
+    def fake_insert_part(asm, between, **kw):
+        # a bar x∈[-24.8, 24.8] — bridges the 50mm gap at ~0.2mm clearance to each post
+        geom = Geometry.from_mesh(trimesh.creation.box(extents=(49.6, 10, 10)))
+        rep = Report([AssertionResult("mate_post_left", "x", "pass", True, actual=0.2, margin=0.08)])
+        return InsertResult(ok=True, new_id=kw.get("new_id", "insert"), spec=Spec(part="crossbar"),
+                            geometry=geom, script="def build(params):\n    pass\n", report=rep,
+                            bridge=Bridge(0, 50.0, -25.0, 25.0), rounds=1)
+
+    monkeypatch.setattr(insert_mod, "insert_part", fake_insert_part)
+
+    c = _client()
+    r = c.post("/api/insert", json={"assembly_id": "twoposts", "new_id": "crossbar",
+                                    "between": ["post_left", "post_right"], "fit": "slip"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] and body["new_part"]["id"] == "crossbar"
+    assert body["new_part"]["stl_url"].endswith("/part.stl")
+    assert c.get(body["new_part"]["stl_url"]).status_code == 200      # the bridge STL serves
+    assert "crossbar" in body["assembly_yaml"] and body["bridge"]["gap"] == 50.0
+    # the inserted assembly re-measures green (bar clears both posts at slip)
+    assert body["report"]["all_pass"]
+
+
+def test_insert_bad_between_is_400(tmp_path, monkeypatch):
+    monkeypatch.setenv("CALIPER_ASSEMBLIES", str(_asm_dir(tmp_path)))
+    r = _client().post("/api/insert", json={"assembly_id": "twoposts", "between": ["post_left"]})
+    assert r.status_code == 400
+
+
+def test_insert_unknown_assembly_404(tmp_path, monkeypatch):
+    monkeypatch.setenv("CALIPER_ASSEMBLIES", str(_asm_dir(tmp_path)))
+    r = _client().post("/api/insert", json={"assembly_id": "ghost", "between": ["a", "b"]})
+    assert r.status_code == 404

@@ -46,6 +46,15 @@ class GenRequest(BaseModel):
     max_rounds: int = 4           # author/revise rounds (heal build errors + failing checks)
 
 
+class InsertRequest(BaseModel):
+    assembly_id: str                  # which assembly (a YAML stem under the assemblies dir)
+    between: list[str]                # the two existing part ids to mate to
+    fit: str = "slip"                 # fit class against each interface
+    intent: str = "a connecting part"
+    new_id: str = "insert"
+    max_rounds: int = 6
+
+
 class FitRequest(BaseModel):
     run_id: str                       # the part to fit
     reference_b64: str                # the reference STL (base64; may be a data: URL)
@@ -71,6 +80,45 @@ def _runs_dir() -> str:
 def _is_authored(run_id: str) -> bool:
     """True if a run is an LLM-authored part (has part.py) — fit/refine can't rebuild it as a bracket."""
     return os.path.isfile(os.path.join(_runs_dir(), run_id, "part.py"))
+
+
+# --- assemblies (CALI-20b / CALI-21b) -------------------------------------
+def _assemblies_dirs() -> list[str]:
+    """Directories scanned for assembly YAML files. ``CALIPER_ASSEMBLIES`` (os.pathsep) overrides."""
+    raw = os.environ.get("CALIPER_ASSEMBLIES", "examples")
+    return [d for d in raw.split(os.pathsep) if d]
+
+
+def _list_assemblies() -> list[dict]:
+    """Every YAML in the assemblies dir(s) that parses as an :class:`Assembly` — id is the file stem."""
+    import glob
+
+    from .assembly import Assembly
+
+    out, seen = [], set()
+    for d in _assemblies_dirs():
+        for path in sorted(glob.glob(os.path.join(d, "*.yaml")) + glob.glob(os.path.join(d, "*.yml"))):
+            stem = os.path.splitext(os.path.basename(path))[0]
+            if stem in seen:
+                continue
+            try:
+                asm = Assembly.load(path)
+            except Exception:
+                continue  # not an assembly (e.g. a single-part spec) — skip
+            seen.add(stem)
+            out.append({"id": stem, "name": asm.name, "intent": asm.intent,
+                        "parts": len(asm.parts), "mates": len(asm.mates)})
+    return out
+
+
+def _find_assembly(aid: str) -> tuple[str, str]:
+    """Resolve an assembly id (file stem) to ``(path, base_dir)``. Raises KeyError if not found."""
+    for d in _assemblies_dirs():
+        for ext in (".yaml", ".yml"):
+            path = os.path.join(d, aid + ext)
+            if os.path.isfile(path):
+                return path, (d or ".")
+    raise KeyError(aid)
 
 
 def _next_run() -> tuple[str, str]:
@@ -274,6 +322,103 @@ def create_app():
 
         ensure_tunable(spec, req.free or pick_free_param(spec))
         return _execute(spec, req.max_iter, extra)
+
+    # --- assemblies (CALI-20b viewer) + insert (CALI-21b) --------------------
+    @app.get("/api/assemblies")
+    def assemblies():
+        return {"assemblies": _list_assemblies()}
+
+    @app.get("/api/assembly/{aid}")
+    def get_assembly(aid: str):
+        from .assembly import Assembly, evaluate_assembly
+
+        try:
+            path, base = _find_assembly(aid)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"unknown assembly {aid}")
+        asm = Assembly.load(path)
+        parts = [{"id": p.id, "role": p.role, "position": p.position, "rotation": p.rotation,
+                  "source": p.source, "stl_url": f"/api/assembly/{aid}/part/{p.id}.stl"}
+                 for p in asm.parts]
+        mates = [{"id": m.id, "between": m.between, "kind": m.kind, "fit": m.fit} for m in asm.mates]
+        try:
+            report = evaluate_assembly(asm, base_dir=base).to_dict()
+        except Exception as e:  # noqa: BLE001 — a missing part STL shouldn't 500 the whole load
+            report = {"all_pass": False, "results": [], "error": str(e)}
+        return {"id": aid, "name": asm.name, "intent": asm.intent, "parts": parts,
+                "mates": mates, "report": report}
+
+    @app.get("/api/assembly/{aid}/part/{pid}.stl")
+    def assembly_part_stl(aid: str, pid: str):
+        from .assembly import Assembly, _resolve_source
+
+        try:
+            path, base = _find_assembly(aid)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"unknown assembly {aid}")
+        asm = Assembly.load(path)
+        part = next((p for p in asm.parts if p.id == pid), None)
+        if part is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid} in {aid}")
+        stl = _resolve_source(part.source, base)
+        if not os.path.isfile(stl):
+            raise HTTPException(status_code=404, detail=f"missing STL for {pid}: {part.source}")
+        return FileResponse(stl, media_type="model/stl")
+
+    @app.post("/api/insert")
+    def insert(req: InsertRequest):
+        import json
+        from datetime import datetime
+
+        from .assembly import Assembly, evaluate_assembly
+        from .insert import add_part_to_assembly, insert_part
+
+        try:
+            path, base = _find_assembly(req.assembly_id)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"unknown assembly {req.assembly_id}")
+        if len(req.between) != 2:
+            raise HTTPException(status_code=400, detail="`between` needs exactly two part ids")
+        asm = Assembly.load(path)
+        try:
+            res = insert_part(asm, req.between, fit=req.fit, new_intent=req.intent,
+                              new_id=req.new_id, max_rounds=req.max_rounds, base_dir=base)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:  # noqa: BLE001 — almost always a missing/invalid ANTHROPIC_API_KEY
+            raise HTTPException(status_code=503, detail=f"authoring needs the Claude API: {e}")
+        if res.geometry is None:
+            raise HTTPException(status_code=422,
+                                detail=f"author couldn't build an insert part in {res.rounds} round(s)")
+
+        run_id, out_dir = _next_run()
+        persist_run(out_dir, res.spec, res.report, res.geometry)
+        with open(os.path.join(out_dir, "part.py"), "w") as f:
+            f.write(res.script if res.script.endswith("\n") else res.script + "\n")
+        with open(os.path.join(out_dir, "meta.json"), "w") as f:
+            json.dump({"run_id": run_id, "part": req.new_id, "status": "passed" if res.ok else "capped",
+                       "source": f"insert into {req.assembly_id}", "label": req.intent,
+                       "created": datetime.now().isoformat(timespec="seconds"),
+                       "build_ok": True, "references": [], "has_script": True}, f)
+
+        new_asm = add_part_to_assembly(asm, req.new_id, os.path.abspath(out_dir), req.between, fit=req.fit)
+        saved = os.path.join(base, f"{req.assembly_id}.inserted.yaml")
+        try:
+            with open(saved, "w") as f:
+                f.write(new_asm.to_yaml())
+            saved_id = f"{req.assembly_id}.inserted"
+        except Exception:
+            saved_id = None
+        report2 = evaluate_assembly(new_asm, base_dir=base).to_dict()
+        return {
+            "ok": res.ok, "run_id": run_id, "new_id": req.new_id, "rounds": res.rounds,
+            "new_part": {"id": req.new_id, "stl_url": f"/api/runs/{run_id}/part.stl",
+                         "position": [0, 0, 0], "rotation": [0, 0, 0]},
+            "report": report2, "script": res.script, "assembly_yaml": new_asm.to_yaml(),
+            "saved_as": saved_id,
+            "bridge": ({"axis": res.bridge.axis_name, "gap": round(res.bridge.gap, 2)}
+                       if res.bridge else None),
+        }
 
     @app.get("/api/runs/{run_id}/ref/{ref_id}.stl")
     def ref_stl(run_id: str, ref_id: str):
