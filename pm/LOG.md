@@ -32,7 +32,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - **Deferred:** webapp insert UI → CALI-21b; assembly parts built from a spec/intent at assemble time →
   CALI-23. Insert authors the geometry directly today; the multi-param optimizer (CALI-19b) isn't yet
   folded into the authored path (LLM revises dimensions instead).
-  Commit: PENDING
+  Commit: 7fb4d32
 
 ### 2026-06-12 · CALI-19b · Multi-parameter optimizer — joint tuning for coupled fits
 - **Why now:** CALI-19's tuner is **1-D** (one knob per failing check). Assembly fits *couple*: one
