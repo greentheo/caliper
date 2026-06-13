@@ -242,8 +242,24 @@ false failures. The user's "fits and tolerances" pillar.
   with a clear message instead of silently rebuilding a bracket. _(Superseded by CALI-22 — they now route
   through the author loop and edit the real part.)_
 - Tests: `test_tolerance.py` (8) + band-margin/fit-class loop + authored guards (CLI + server). **121 passed.**
-- **Deferred:** multi-parameter (N-D) joint optimization → CALI-19b (nevergrad/scipy). 1-D + iterative
-  refine is enough for single-fit targets; coupled fits across many params need the real optimizer.
+- **Deferred:** multi-parameter (N-D) joint optimization → CALI-19b (now shipped).
+
+### CALI-19b — Multi-parameter optimizer (coupled fits)  · P2 · assembly-spine · ✅ done (2026-06-12)
+CALI-19's tuner is 1-D (one knob per failing check). Assembly fits *couple* — one clearance depends on
+two dimensions, two mates fight over one wall — and tuning one knob at a time stalls at a saddle.
+- **`decide.tune_multi(spec, params, eval_fn, engine="coord")`** searches the joint continuous space
+  against a **global** objective: maximize `(all_pass, #passing, worst signed margin, −total normalized
+  change)`. Worst-margin pushes every assertion over its threshold together; change-from-init keeps it snug.
+- **Coordinate descent by default** (deterministic, eval-frugal — geometry rebuilds are the cost):
+  sweep each knob over a coarse grid + a refined local window against the global score; stop when a
+  sweep doesn't improve. **Escalates to seeded `scipy.optimize.differential_evolution` ONLY when CD
+  can't reach feasibility** — the genuinely-coupled case. `engine="scipy"` forces the global search.
+- **`decide` route 0:** with ≥2 continuous knobs and a failing numeric check, tune the whole vector;
+  taken only if it improves (more passing / all-pass), else fall through to the 1-D + snug path.
+  Single-knob specs are untouched.
+- Tests: coupled 2-knob problem (`W+D` band + `W*D` budget, feasible only asymmetric) solved via CD→scipy
+  escalation and via `engine="scipy"`; separable 2-knob solved by CD alone (spy asserts scipy unused);
+  `decide` routes coupled failures to the multi move. **142 passed.**
 
 ### CALI-22 — Author-loop fit & refine  · P1 · generator · ✅ done (2026-06-12)
 Fit/refine used to rebuild via the bracket generator, so they couldn't touch LLM-authored parts (guarded
