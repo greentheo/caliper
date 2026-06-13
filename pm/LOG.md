@@ -25,7 +25,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   asymmetric) — coordinate descent escalates to scipy and solves it; `engine="scipy"` solves it
   directly; a **separable** 2-knob problem is solved by CD alone (scipy spy asserts it's never called);
   `decide` routes coupled failures to the multi move. **142 passed.**
-  Commit: PENDING
+  Commit: a84397b
 
 ### 2026-06-12 · CALI-22 · Author-loop fit & refine — edit the real part, not a bracket
 - **Why now:** the fit bug Theo hit — fit/refine rebuilt via the bracket generator, so they ignored an
