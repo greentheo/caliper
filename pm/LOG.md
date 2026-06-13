@@ -26,7 +26,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   (`bufferMatchesDpr: true`); resizing the viewport 1280→1100px re-fills correctly; loading two-posts +
   ⤢ fit recenters with a content-sized grid; zero console warnings/errors. Web-only change (no Python) —
   full suite still **153 passed**.
-  Commit: PENDING
+  Commit: c4aec8c
 
 ### 2026-06-13 · CALI-21b + CALI-20b · Webapp insert UI + assembly viewer — VERIFIED LIVE
 - **What it is:** the CALI-21 headline, now **clickable in the browser**. Load an assembly, see all its
