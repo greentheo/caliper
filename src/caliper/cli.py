@@ -99,10 +99,40 @@ def _run_and_emit(spec, max_iter: int, references=None) -> int:
 def _authored_source(source: str) -> bool:
     """True if ``source`` is a run dir for an LLM-authored part (has a ``part.py``).
 
-    Fit/refine rebuild via the bracket generator, which ignores an authored script — so they'd
-    silently produce a bracket. Guard against that until fit/refine route through the author loop.
+    Fit/refine of an authored part route through the author loop (CALI-22), seeded with this script,
+    rather than rebuilding via the bracket generator.
     """
     return os.path.isdir(source) and os.path.isfile(os.path.join(source, "part.py"))
+
+
+def _read_script(source: str) -> str:
+    with open(os.path.join(source, "part.py")) as f:
+        return f.read()
+
+
+def _emit_authored(spec, res) -> int:
+    """Persist + print an authored ``improve()`` result (script + STL + report). Shared by gen/fit/refine."""
+    from .loop import persist_run
+
+    if res.geometry is None:
+        print(f"author couldn't produce a buildable part in {res.rounds} round(s):\n{res.error}")
+        return 1
+    builds = sum(1 for k, _ in res.history if k == "build_error")
+    revs = sum(1 for k, _ in res.history if k == "measurement_fail")
+    notes = ", ".join(p for p in (f"{builds} build-error heal(s)" if builds else "",
+                                  f"{revs} revision(s)" if revs else "") if p)
+    verdict = "✓ all checks pass" if res.ok else "△ best effort (some checks still fail)"
+    print(f"{verdict} after {res.rounds} round(s)" + (f" ({notes})" if notes else "") + "\n")
+    print(res.report.to_text())
+
+    out_dir = _next_run_dir()
+    persist_run(out_dir, spec, res.report, res.geometry)
+    with open(os.path.join(out_dir, "part.py"), "w") as f:
+        f.write(res.script + "\n")
+    print(f"\nSTL: {os.path.join(out_dir, 'part.stl')}")
+    print(f"script: {os.path.join(out_dir, 'part.py')}  (the human-editable source of truth)")
+    print(f"run saved: {out_dir}")
+    return 0 if res.ok else 3
 
 
 def _load_spec_from_source(source: str):
@@ -117,11 +147,21 @@ def _load_spec_from_source(source: str):
 def _cmd_refine(args) -> int:
     from .refine import apply_refinement
 
-    if _authored_source(args.source):
-        print("This run is an LLM-authored part (has part.py); `refine` rebuilds via the bracket "
-              "generator, so it would produce a bracket. Re-run `gen` with an adjusted intent for now "
-              "(routing refine through the author loop is tracked).")
-        return 2
+    if _authored_source(args.source):  # CALI-22: revise the real part.py, don't rebuild a bracket
+        from .authoring import refine_authored
+
+        spec = _load_spec_from_source(args.source)
+        script = _read_script(args.source)
+        print(f"▶ refining authored part {args.source}: \"{args.instruction}\"\n")
+        print("── revising the script (the LLM edits part.py to apply the change, keeping checks green) ──")
+        try:
+            res = refine_authored(spec, script, args.instruction, max_rounds=args.max_iter,
+                                  ref_base=os.path.abspath(args.source))
+        except Exception as e:  # noqa: BLE001 — almost always a missing/invalid ANTHROPIC_API_KEY
+            print(f"authoring needs the Claude API — {type(e).__name__}: {e}\n"
+                  "Set ANTHROPIC_API_KEY (see .env.example); this path can't run offline.")
+            return 1
+        return _emit_authored(spec, res)
     spec = _load_spec_from_source(args.source)
     print(f"▶ refining {args.source}: \"{args.instruction}\"\n")
     res = apply_refinement(spec, args.instruction, use_llm=not args.no_llm)
@@ -163,7 +203,6 @@ def _cmd_gen(args) -> int:
     CadQuery script — build errors and failing measurements both feed back until it's green."""
     from .authoring import improve
     from .intake import draft_spec
-    from .loop import persist_run
 
     print(f"▶ intent: {args.intent}\n")
     intake = draft_spec(args.intent, machine=args.machine, use_llm=not args.no_llm)
@@ -179,37 +218,14 @@ def _cmd_gen(args) -> int:
         print(f"authoring needs the Claude API — {type(e).__name__}: {e}\n"
               "Set ANTHROPIC_API_KEY (see .env.example); this path can't run offline.")
         return 1
-    if res.geometry is None:
-        print(f"author couldn't produce a buildable part in {res.rounds} round(s):\n{res.error}")
-        return 1
-
-    builds = sum(1 for k, _ in res.history if k == "build_error")
-    revs = sum(1 for k, _ in res.history if k == "measurement_fail")
-    notes = ", ".join(p for p in (f"{builds} build-error heal(s)" if builds else "",
-                                  f"{revs} revision(s)" if revs else "") if p)
-    verdict = "✓ all checks pass" if res.ok else "△ best effort (some checks still fail)"
-    print(f"{verdict} after {res.rounds} round(s)" + (f" ({notes})" if notes else "") + "\n")
-    print(res.report.to_text())
-
-    out_dir = _next_run_dir()
-    persist_run(out_dir, intake.spec, res.report, res.geometry)
-    with open(os.path.join(out_dir, "part.py"), "w") as f:
-        f.write(res.script + "\n")
-    print(f"\nSTL: {os.path.join(out_dir, 'part.stl')}")
-    print(f"script: {os.path.join(out_dir, 'part.py')}  (the human-editable source of truth)")
-    print(f"run saved: {out_dir}")
-    return 0 if res.ok else 3
+    return _emit_authored(intake.spec, res)
 
 
 def _cmd_fit(args) -> int:
-    """Attach imported STL reference(s) to a prior part and iterate it to fit them (CALI-10)."""
+    """Attach imported STL reference(s) to a prior part and iterate it to fit them (CALI-10/22)."""
     from .fit import attach_reference, ensure_tunable, pick_free_param
 
-    if _authored_source(args.source):
-        print("This run is an LLM-authored part (has part.py); `fit` rebuilds via the bracket "
-              "generator, so it can't fit authored parts yet. (Tracked: route fit through the author "
-              "loop.) Use a bracket-family run for now.")
-        return 2
+    authored = _authored_source(args.source)
     spec = _load_spec_from_source(args.source)
     # default constraint: if none specified, enforce no collision with the reference.
     no_overlap = args.no_overlap or (args.min_clearance is None and args.fit is None)
@@ -230,18 +246,32 @@ def _cmd_fit(args) -> int:
     if not summary:
         print("no references given; use --ref ID=path/to/reference.stl (repeatable)")
         return 2
-    free = ensure_tunable(spec, args.free or pick_free_param(spec))
     print(f"▶ fitting {args.source} to: {', '.join(summary)}")
+    print("── fit constraints ──")
+    for a in spec.assertions:
+        if any(a.id.endswith(s) for s in ("_no_interference", "_clearance", "_fit")):
+            print(f"  • {a.id}: {a.expr}")
+    print()
+
+    if authored:  # CALI-22: the LLM revises the real part.py to clear the reference
+        from .authoring import refit_authored
+
+        print("── fitting the authored part (the LLM revises part.py to satisfy the fit checks) ──")
+        try:
+            res = refit_authored(spec, _read_script(args.source), max_rounds=args.max_iter,
+                                 ref_base=os.path.abspath(args.source))
+        except Exception as e:  # noqa: BLE001 — almost always a missing/invalid ANTHROPIC_API_KEY
+            print(f"authoring needs the Claude API — {type(e).__name__}: {e}\n"
+                  "Set ANTHROPIC_API_KEY (see .env.example); this path can't run offline.")
+            return 1
+        return _emit_authored(spec, res)
+
+    free = ensure_tunable(spec, args.free or pick_free_param(spec))
     if free:
         p = spec.parameters[free]
         print(f"  free dimension: {free} ∈ [{p.min:g}, {p.max:g}] mm (optimizer resizes to fit)\n")
     else:
         print("  (warning: no continuous parameter to vary — the fit can't resize the part)\n")
-    print(f"── fit constraints ──")
-    for a in spec.assertions:
-        if any(a.id.endswith(s) for s in ("_no_interference", "_clearance", "_fit")):
-            print(f"  • {a.id}: {a.expr}")
-    print()
     # references load lazily (with their pose) inside make_eval_fn from spec.references.
     return _run_and_emit(spec, args.max_iter)
 

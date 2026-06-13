@@ -142,3 +142,53 @@ def test_improve_stops_on_oscillation():
     res = authoring.improve(_width_spec(), author=lambda s, fb, prior: _SMALL, max_rounds=6)
     assert not res.ok
     assert res.report is not None and not res.report.all_pass  # returns the best (last) attempt
+
+
+# --- CALI-22: author-loop fit & refine (seed the loop with an existing part) ----------------
+def test_improve_seed_primes_round_one():
+    pytest.importorskip("cadquery")
+    seen = {}
+
+    def author(spec, feedback, prior):
+        seen["feedback"], seen["prior"] = feedback, prior
+        return _GOOD41
+
+    authoring.improve(_width_spec(), author=author, max_rounds=1,
+                      seed_script="SEED-SCRIPT", seed_feedback="apply this change")
+    assert seen["prior"] == "SEED-SCRIPT" and seen["feedback"] == "apply this change"
+
+
+def test_refit_authored_drives_part_to_clear_reference(tmp_path):
+    pytest.importorskip("cadquery")
+    import trimesh
+
+    from caliper.fit import attach_reference
+
+    ref = tmp_path / "ref.stl"
+    m = trimesh.creation.box(extents=(20, 20, 20)); m.apply_translation([30, 0, 0]); m.export(str(ref))
+    spec = Spec(part="block", parameters={}, assertions=[])
+    attach_reference(spec, "ref", str(ref), no_overlap=True)  # → interference(ref) <= 0
+
+    wide = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(60, 20, 4)\n"
+    narrow = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(30, 20, 4)\n"
+    calls = {"n": 0}
+
+    def author(spec, feedback, prior):
+        calls["n"] += 1
+        if calls["n"] == 1:                                  # seeded with the part + the fit feedback
+            assert prior == wide and feedback and "FIT" in feedback
+            return wide                                      # x∈[-30,30] still overlaps the ref → fails
+        assert feedback and "interference" in feedback       # fed the failing fit measurement
+        return narrow                                        # x∈[-15,15] clears
+
+    res = authoring.refit_authored(spec, wide, max_rounds=4, author=author)
+    assert res.ok and res.rounds == 2 and res.report.all_pass
+
+
+def test_refine_authored_folds_instruction_into_intent():
+    pytest.importorskip("cadquery")
+    spec = _width_spec()
+    res = authoring.refine_authored(spec, _GOOD41, "make it 41mm wide", max_rounds=1,
+                                    author=lambda s, fb, prior: _GOOD41)
+    assert "make it 41mm wide" in spec.intent  # persists across revision rounds
+    assert res.ok and res.report.all_pass

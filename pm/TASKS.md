@@ -238,17 +238,28 @@ false failures. The user's "fits and tolerances" pillar.
   (the phone-stand `slot_fits_phone` bug).
 - **Verified live:** `fit --fit slip` tuned a bracket 60 → 41.8 mm to land clearance = **0.188 mm**, dead
   centre of the slip band. Browser dropdown wired (hides manual clearance), no console errors.
-- **Bonus guard (the fit bug they hit):** `fit`/`refine` now **refuse LLM-authored parts** (part.py
-  present) with a clear message instead of silently rebuilding a bracket — CLI + `/api/fit` + `/api/refine`.
+- **Bonus guard (the fit bug they hit):** `fit`/`refine` **refused LLM-authored parts** (part.py present)
+  with a clear message instead of silently rebuilding a bracket. _(Superseded by CALI-22 — they now route
+  through the author loop and edit the real part.)_
 - Tests: `test_tolerance.py` (8) + band-margin/fit-class loop + authored guards (CLI + server). **121 passed.**
 - **Deferred:** multi-parameter (N-D) joint optimization → CALI-19b (nevergrad/scipy). 1-D + iterative
   refine is enough for single-fit targets; coupled fits across many params need the real optimizer.
 
-### CALI-22 — Author-loop fit & refine  · P1 · generator · 🧊 backlog
-Today fit/refine rebuild via the bracket generator, so they can't touch LLM-authored parts (guarded in
-CALI-19 to fail honestly). Route fit/refine of an authored run through `improve()` **seeded with its
-`part.py`** + the new constraint ("…and clear this reference at a slip fit"), so the LLM edits the real
-part. This is also the front edge of CALI-21 (insert-into-assembly).
+### CALI-22 — Author-loop fit & refine  · P1 · generator · ✅ done (2026-06-12)
+Fit/refine used to rebuild via the bracket generator, so they couldn't touch LLM-authored parts (guarded
+in CALI-19 to fail honestly). Now they route through `improve()` **seeded with the run's `part.py`**, so
+the LLM edits the real part — the front edge of CALI-21 (insert-into-assembly).
+- **`improve(..., seed_script, seed_feedback, ref_base)`** — primes round 1 with an existing part + the
+  new constraint (revise, don't restart). Same build-error + failing-measurement healing as `gen`.
+- **`refit_authored(spec, script, …)`** — spec carries the reference + fit assertion (via
+  `fit.attach_reference`); seeds the loop + feeds the fit checks. **`refine_authored(spec, script,
+  instruction, …)`** — folds the instruction into `spec.intent` (so later rounds can't undo it) + seeds.
+- **CLI** `fit`/`refine` of an authored run route through the loop (no more return-2). **Webapp**
+  `/api/fit` + `/api/refine` route through (422 guards removed); shared `_finish_authored()` persists
+  script+STL+refs; `/api/gen` refactored onto it.
+- Tests: seed-priming, `refit_authored` (60→30 mm box clears a reference in 2 rounds, fed the failing
+  `interference`), `refine_authored` intent-fold, CLI + server route-through. **138 passed.** Live LLM
+  path needs `ANTHROPIC_API_KEY` (routing verified with injected authors).
 
 ### CALI-20 — Assembly model (N parts + interfaces)  · P1 · assembly-spine · ✅ done (2026-06-12)
 Represent multiple parts, their **mates / datums / joints**, and **assembly-level assertions** (no pair
