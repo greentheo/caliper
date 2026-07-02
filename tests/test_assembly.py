@@ -235,3 +235,18 @@ def test_evaluate_assembly_with_script_parts_and_hole_alignment(tmp_path):
         assertions=[{"id": "aligned", "expr": "hole_misalignment(top, bot) <= 0.5"}],
     )
     assert assembly.evaluate_assembly(asm2, base_dir=str(tmp_path)).results[0].status == "fail"
+
+
+# --- CALI-27: one broken part must not sink the assembly -------------------
+def test_load_parts_tolerant_names_the_broken_part(tmp_path):
+    pytest.importorskip("cadquery")
+    _write_box(tmp_path / "good.stl", (10, 10, 10))
+    (tmp_path / "bad.py").write_text("def build(params):\n    raise RuntimeError('boom')\n")
+    asm = Assembly(
+        name="mixed",
+        parts=[Part(id="good", source="good.stl"),
+               Part(id="bad", source="bad.py", position=[30, 0, 0])],
+    )
+    loaded, errors = assembly.load_parts_tolerant(asm, base_dir=str(tmp_path))
+    assert "good" in loaded and "bad" not in loaded
+    assert "bad" in errors and "boom" in errors["bad"]

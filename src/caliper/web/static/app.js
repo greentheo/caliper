@@ -395,8 +395,31 @@ async function refreshAssemblies() {
   } catch (e) { /* best-effort */ }
 }
 
+// fetch + parse one part's STL; returns the mesh or throws with a useful message
+async function fetchPartMesh(p) {
+  const r = await fetch(p.stl_url + '?t=' + Date.now());
+  if (!r.ok) {
+    let msg = `HTTP ${r.status}`;
+    try { msg = (await r.json()).detail || msg; } catch (e) { /* not JSON */ }
+    throw new Error(msg);
+  }
+  const geom = stlLoader.parse(await r.arrayBuffer());
+  geom.computeVertexNormals();
+  const mesh = new THREE.Mesh(geom, asmMat(p.role, false));
+  mesh.position.fromArray(p.position || [0, 0, 0]);
+  const rot = (p.rotation || [0, 0, 0]).map(THREE.MathUtils.degToRad);
+  mesh.rotation.set(rot[0], rot[1], rot[2], 'XYZ');
+  mesh.userData.partId = p.id;
+  mesh.userData.baseColor = mesh.material.color.getHex();
+  return mesh;
+}
+
 async function loadAssembly(aid) {
-  busy('loading assembly ' + aid + '…');
+  // a stale error from a previous load shouldn't haunt this one
+  const errbar = document.getElementById('errbar');
+  if (errbar) { errbar.style.display = 'none'; errbar.textContent = ''; }
+  // measuring + script-built parts compile server-side on first load — say so, don't look hung
+  busy(`loading assembly ${aid}… (first load builds each part — can take ~5–20s)`);
   try {
     const data = await (await fetch('/api/assembly/' + aid, { cache: 'no-store' })).json();
     if (data.detail) throw new Error(data.detail);
@@ -404,29 +427,36 @@ async function loadAssembly(aid) {
     clearReference();
     clearAssembly();
     asmId = aid;
-    for (const p of data.parts) {
-      const buf = await (await fetch(p.stl_url + '?t=' + Date.now())).arrayBuffer();
-      const geom = stlLoader.parse(buf); geom.computeVertexNormals();
-      const mesh = new THREE.Mesh(geom, asmMat(p.role, false));
-      mesh.position.fromArray(p.position || [0, 0, 0]);
-      const r = (p.rotation || [0, 0, 0]).map(THREE.MathUtils.degToRad);
-      mesh.rotation.set(r[0], r[1], r[2], 'XYZ');
-      mesh.userData.partId = p.id;
-      mesh.userData.baseColor = mesh.material.color.getHex();
-      modelGroup.add(mesh);
-      asmMeshes.set(p.id, mesh);
+
+    // CALI-27: load every part in parallel; ONE failed part must not blank the rest of the machine.
+    busy(`loading ${data.parts.length} part(s) of "${data.name || aid}"…`);
+    const results = await Promise.all(data.parts.map((p) =>
+      fetchPartMesh(p).then((mesh) => ({ p, mesh })).catch((e) => ({ p, err: e.message }))));
+    const failed = [];
+    for (const r of results) {
+      if (r.mesh) { modelGroup.add(r.mesh); asmMeshes.set(r.p.id, r.mesh); }
+      else failed.push(`${r.p.id}: ${r.err}`);
     }
+    for (const [pid, msg] of Object.entries(data.part_errors || {})) {
+      if (!failed.some((f) => f.startsWith(pid + ':'))) failed.push(`${pid}: ${msg}`);
+    }
+
     modelGroup.rotation.set(0, 0, 0);
     frameAssembly();
     shadeCollisions(data.collisions);
-    renderReport({ report: data.report, build_ok: true });
+    renderReport({ report: data.report, build_ok: failed.length === 0 });
     specEl.textContent = `# assembly: ${data.name || aid}\n# ${data.intent || ''}`;
     scriptbox.style.display = 'none';
     insertPanel.style.display = '';
     currentRunId = null; refineBtn.disabled = true; downloadEl.style.display = 'none';
     updatePicks();
     markActiveRun();
-    done(`assembly "${data.name || aid}" — click two parts to pick interfaces`);
+    if (failed.length) {
+      window.showErr(`${failed.length} part(s) failed to load — ` + failed.join(' · '));
+      fail(`loaded ${asmMeshes.size}/${data.parts.length} parts — see the error bar for what broke`);
+    } else {
+      done(`assembly "${data.name || aid}" — ${asmMeshes.size} parts · click two to pick interfaces`);
+    }
   } catch (e) { fail('assembly load failed: ' + e.message); }
 }
 
@@ -466,6 +496,12 @@ function updatePicks() {
   if (pickAEl) { pickAEl.textContent = selected[0] || '— pick 1 —'; pickAEl.classList.toggle('empty', !selected[0]); }
   if (pickBEl) { pickBEl.textContent = selected[1] || '— pick 2 —'; pickBEl.classList.toggle('empty', !selected[1]); }
   if (insertBtn) insertBtn.disabled = selected.length !== 2;
+  // say exactly what to do next, so the disabled button explains itself (CALI-27)
+  if (insHint && asmId) {
+    insHint.textContent = selected.length === 0 ? 'left-click a part in the 3D view to pick interface 1 of 2'
+      : selected.length === 1 ? `${selected[0]} picked — left-click a second part`
+      : `ready — Insert authors a part mating ${selected[0]} ↔ ${selected[1]} (needs the API key, ~10–60s)`;
+  }
 }
 
 // debug/test seam (mirrors window.__caliperSM): drive selection + insert without 3D clicks

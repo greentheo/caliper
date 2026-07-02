@@ -6,6 +6,10 @@ Companion to [`pm/DEMO.md`](pm/DEMO.md) (chronological log) — this file is the
 > **The one idea:** measurement is the source of truth. Every feature ends in a *measured* report
 > (`✓ / ✗` per assertion), not a render you have to eyeball.
 
+> **📍 Where it runs:** nowhere, until you start it. `make serve` from the repo root →
+> **http://127.0.0.1:8000** in your browser (local only). Ctrl-C stops it. If the UI looks stale
+> after an update, hard-refresh (⌘⇧R). CLI commands run from the repo root too.
+
 ---
 
 ## 0. Setup (once)
@@ -138,8 +142,13 @@ If you had a tab open from a previous version, **hard-refresh** (⌘⇧R) to pic
 ## 7. Known rough edges / troubleshooting
 
 - **Assemblies feel slow to load the first time.** Script-built parts (the machine) are compiled in a
-  sandbox subprocess on first load (a few seconds each, 4 for the corner-leg). They're cached after, so
-  it's snappy on reload. If a part fails to build, the report carries an `error` instead of 500-ing.
+  sandbox subprocess on first load (a few seconds each, 4 for the corner-leg); the status line says so
+  while it works. They're cached after, so it's snappy on reload. Parts load in parallel, and **one
+  broken part no longer blanks the rest** — the viewer renders what loaded and the error bar names the
+  broken part with its actual exception (CALI-27).
+- **Lost in the UI?** Open the **"❓ How this works"** panel at the top-left — it walks the 4-step flow
+  (build one part → refine → fit → assemblies/insert) and says which actions need the API key. The
+  intent box builds **one part**; a whole machine is an *assembly* (load one in the Assemblies panel).
 - **"authoring needs the Claude API"** on gen/insert/authored-refine → `ANTHROPIC_API_KEY` isn't set or
   is invalid. Check `.env`. These paths can't run offline.
 - **Refine did nothing (offline path).** For a *bracket-family* part, the offline refiner only knows a

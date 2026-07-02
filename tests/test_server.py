@@ -325,3 +325,28 @@ def test_insert_unknown_assembly_404(tmp_path, monkeypatch):
     monkeypatch.setenv("CALIPER_ASSEMBLIES", str(_asm_dir(tmp_path)))
     r = _client().post("/api/insert", json={"assembly_id": "ghost", "between": ["a", "b"]})
     assert r.status_code == 404
+
+
+def test_get_assembly_reports_part_errors_not_500(tmp_path, monkeypatch):
+    # CALI-27: an assembly with one broken part still returns 200, names the broken part in
+    # part_errors, and the other parts' STLs still serve.
+    import trimesh
+
+    d = tmp_path / "asm"
+    d.mkdir()
+    trimesh.creation.box(extents=(10, 10, 10)).export(str(d / "ok.stl"))
+    (d / "bad.py").write_text("def build(params):\n    raise RuntimeError('kaboom')\n")
+    (d / "mixed.yaml").write_text(
+        "name: mixed\nparts:\n"
+        "  - id: ok\n    source: ok.stl\n"
+        "  - id: bad\n    source: bad.py\n    position: [30, 0, 0]\n"
+        "assert:\n  - id: clean\n    expr: max_interference() <= 0\n"
+    )
+    monkeypatch.setenv("CALIPER_ASSEMBLIES", str(d))
+    c = _client()
+    r = c.get("/api/assembly/mixed")
+    assert r.status_code == 200
+    body = r.json()
+    assert "bad" in body["part_errors"] and "kaboom" in body["part_errors"]["bad"]
+    assert c.get("/api/assembly/mixed/part/ok.stl").status_code == 200   # the good part still serves
+    assert c.get("/api/assembly/mixed/part/bad.stl").status_code == 422  # the broken one 422s clearly

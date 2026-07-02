@@ -7,9 +7,24 @@ Caliper is "test-driven development for physical parts." Instead of emitting CAD
 
 See [`specs/caliper-design-spec.md`](specs/caliper-design-spec.md) for the full design.
 
+## ▶ Run it (the two commands that matter)
+
+```bash
+make serve     # the webapp →  http://127.0.0.1:8000   (local only; Ctrl-C to stop)
+make test      # the regression guard (pytest)
+```
+
+The webapp is **not hosted anywhere** — it runs on your machine when `make serve` is running, at
+**http://127.0.0.1:8000**. Hard-refresh (⌘⇧R) after an update. LLM features (✦ author any part,
+Insert, refining authored parts) need `ANTHROPIC_API_KEY` in a gitignored `.env` at the repo root.
+**New here? [`TESTING.md`](TESTING.md) is the full hands-on walkthrough.**
+
 ## Status
 
-Phase 0 (MVP). Building the core loop library first, UI second. See the project board: [`pm/BOARD.md`](pm/BOARD.md).
+The single-part loop **and** the assembly spine are complete: intent → spec → LLM-authored CadQuery →
+measured → revised → fitted → **inserted into multi-part assemblies with measured fits and bolt-hole
+alignment** (see the corner-leg machine: `caliper assemble examples/machine.yaml`). See the board:
+[`pm/BOARD.md`](pm/BOARD.md).
 
 ## Quickstart
 
@@ -45,12 +60,18 @@ make serve            # → http://127.0.0.1:8000
 ```
 src/caliper/        # the library — the loop is the product
   spec.py           # CALI-1  typed spec schema (params, refs, assertions, machine)
-  measure.py        # CALI-2  measurement API (bbox, mass, walls, holes, watertight…)
+  measure.py        # CALI-2  measurement API (bbox, walls, holes, interference, hole alignment…)
   evaluate.py       # CALI-3  evaluator: assertion exprs → {pass, actual, margin}
+  decide.py         # CALI-7/19b  optimizer routing (1-D snug + multi-param joint tuning)
+  authoring.py      # CALI-16/17/22  LLM writes/revises the CadQuery (gen, refit, refine)
+  assembly.py       # CALI-20/23  N parts + named mates + assembly assertions; .py part sources
+  insert.py         # CALI-21  author a part that mates two named interfaces
+  server.py + web/  # CALI-9/21b  the webapp (three.js viewer, assemblies, insert UI)
 tests/              # regression guard (pytest) against known parts
+examples/           # demo specs, assemblies, and the corner-leg machine (machine.yaml)
 pm/                 # lightweight .md project management (board + tasks + log)
-nightshift/         # local looping/review/test scaffolding (adopted from ai-night-shift)
 specs/              # design spec
+TESTING.md          # ← the hands-on walkthrough of everything
 ```
 
 ## Working conventions

@@ -187,7 +187,11 @@ def _build_py_local(path: str) -> Geometry:
         script = f.read()
     res = sandbox.run_script(script, {})
     if not res.ok:
-        raise ValueError(f"failed to build part script {path}:\n{res.feedback[:400]}")
+        # surface the traceback's LAST line — that's the actual exception; the head is boilerplate
+        # that used to crowd it out of truncated error messages (CALI-27).
+        lines = [ln for ln in res.feedback.strip().splitlines() if ln.strip()]
+        tail = lines[-1].strip() if lines else "unknown build error"
+        raise ValueError(f"failed to build part script {os.path.basename(path)}: {tail}")
     _PART_CACHE[key] = res.geometry
     return res.geometry
 
@@ -222,6 +226,27 @@ def load_parts(asm: Assembly, base_dir: str = ".") -> dict[str, Geometry]:
         else:
             parts[p.id] = Geometry.from_stl_posed(path, p.position, p.rotation)
     return parts
+
+
+def load_parts_tolerant(asm: Assembly, base_dir: str = ".") -> tuple[dict[str, Geometry], dict[str, str]]:
+    """Like :func:`load_parts`, but one broken part doesn't sink the assembly (CALI-27).
+
+    Returns ``(loaded, errors)`` — every part that loads, plus ``{part_id: message}`` for the ones that
+    didn't (missing STL, script build failure). Callers can measure what loaded and *name* what's broken
+    instead of failing the whole assembly with one opaque error.
+    """
+    loaded: dict[str, Geometry] = {}
+    errors: dict[str, str] = {}
+    for p in asm.parts:
+        try:
+            path = _resolve_source(p.source, base_dir)
+            if path.endswith(".py"):
+                loaded[p.id] = _build_py_part(path, p.position, p.rotation)
+            else:
+                loaded[p.id] = Geometry.from_stl_posed(path, p.position, p.rotation)
+        except Exception as e:  # noqa: BLE001 — collect, don't sink the assembly
+            errors[p.id] = str(e)[-300:]   # tail: that's where the actual exception lives
+    return loaded, errors
 
 
 # ---------------------------------------------------------------------------
