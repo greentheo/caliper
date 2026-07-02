@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Caliper — jam in 3D space</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="/style.css?v=6" />
+  <link rel="stylesheet" href="/style.css?v=7" />
   <script>
     // surface load/runtime errors on the page itself (not just devtools), since a failed module
     // import would otherwise just silently leave the buttons dead.
@@ -81,19 +81,34 @@
         </div>
       </details>
 
+      <details class="helpbox">
+        <summary>❓ How this works</summary>
+        <ol class="help small">
+          <li><b>Build one part</b> — describe it below, hit <b>Build it ▶</b>. Tick <b>✦ author any part</b>
+            to have Claude write the CAD (any shape, not just brackets — needs your API key).</li>
+          <li><b>Refine it</b> — plain-English tweaks. Offline mode only knows bracket phrasings
+            (holes / spacing / wall / ribs); tick <b>use Claude</b> for free-form edits.</li>
+          <li><b>Fit it</b> — import a reference STL, drag it into place, pick a fit class, hit Fit.</li>
+          <li><b>Assemblies</b> — machines are <i>collections</i> of parts. Load one above, click two parts
+            in the 3D view, and <b>Insert ▶</b> authors a new part that mates both.</li>
+        </ol>
+        <p class="muted small">LLM actions (✦ author, Insert, refining an authored part) need
+          <code>ANTHROPIC_API_KEY</code> in <code>.env</code>. Everything else runs offline.</p>
+      </details>
+
       <label class="field">
-        <span>Intent</span>
+        <span>Intent — describe <b>one part</b> <span class="muted">(a whole machine = an assembly, see above)</span></span>
         <textarea id="intent" rows="3" placeholder="a 60 mm corner bracket for 2020 extrusion with four M5 holes"></textarea>
       </label>
       <div class="row">
-        <label class="chk"><input type="checkbox" id="useLLM" /> use Claude (LLM)</label>
-        <label class="chk" title="LLM writes the CadQuery itself — any part, not just brackets"><input type="checkbox" id="authorMode" /> ✦ author any part</label>
+        <label class="chk" title="draft the spec with Claude instead of the offline pattern-matcher"><input type="checkbox" id="useLLM" /> use Claude (LLM)</label>
+        <label class="chk" title="Claude writes the CadQuery itself — any part, not just brackets. Needs ANTHROPIC_API_KEY."><input type="checkbox" id="authorMode" /> ✦ author any part</label>
         <button id="runBtn" class="primary">Build it ▶</button>
       </div>
 
       <label class="field">
         <span>Refine the current part</span>
-        <input id="refine" type="text" placeholder='e.g. "make the holes 8mm", "bigger spacing", "add a rib"' />
+        <input id="refine" type="text" title="offline knows bracket phrasings (holes/spacing/wall/ribs); tick 'use Claude' for free-form edits; authored parts always use Claude" placeholder='e.g. "make the holes 8mm", "bigger spacing", "add a rib"' />
       </label>
       <div class="row">
         <button id="refineBtn" disabled>Refine ↻</button>
@@ -166,6 +181,6 @@
     </section>
   </main>
 
-  <script type="module" src="/app.js?v=14"></script>
+  <script type="module" src="/app.js?v=15"></script>
 </body>
 </html>

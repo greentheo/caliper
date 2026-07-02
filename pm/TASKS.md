@@ -368,12 +368,24 @@ Today an insert relies on the LLM revising dimensions to hit the fit. Fold CALI-
 the authored path so a part that mates **3+ faces at once** gets its continuous params *optimized*, not
 just LLM-guessed. Likely: author a parametric `build(params)`, expose its params to `tune_multi`.
 
-### CALI-27 — Assemblies / refine hardening  · P1 · M2 · 🧊 next
-Chase the rough edges hit in real use (Theo, 2026-06-13): script-built assemblies are slow on first
-load (sandbox builds — cache helps but the first hit blocks); refine UX/expectations (offline vs LLM,
-bracket vs authored) need clarifying in-product; error surfacing on a failed part build. See
-`TESTING.md` §7 for the catalog. Likely: build parts in parallel / pre-warm, clearer in-UI status,
-and a friendlier "this needs the LLM" hint.
+### CALI-27 — Assemblies / refine hardening  · P1 · M2 · ✅ done (2026-06-13)
+Chase the rough edges hit in real use. Theo reported: confusing UI ("didn't know which options to
+click"), adding parts "didn't seem to work", the machine "only made part of the machine", and "where is
+it even hosted?"
+- **The partial-machine bug (root cause):** `loadAssembly` fetched part STLs *sequentially with no
+  `response.ok` check* — one failure threw out of the loop, stranding a partial machine on screen.
+  Now: **parallel per-part loading**, render what succeeded, error bar **names what failed and why**,
+  status shows `loaded N/M parts`; progress text explains first-load script builds (~5–20 s).
+- **Server:** `assembly.load_parts_tolerant` (one broken part doesn't sink the assembly) +
+  `part_errors` on `/api/assembly/{id}`; build errors surface the traceback's **last line** (the real
+  exception). Stale error bar cleared per load.
+- **UI:** "❓ How this works" primer (4-step flow + which actions need the API key); intent label =
+  "describe **one part**" (a machine = an assembly — `gen` authors ONE watertight part by design);
+  tooltips; Insert hint narrates each pick step and why the button is disabled.
+- **Docs:** README "▶ Run it" → **`make serve` → http://127.0.0.1:8000 (local, not hosted)**;
+  TESTING.md opens with the same; README status/layout refreshed.
+- Tests +2 (tolerant load names the broken part; `/api/assembly` 200s with `part_errors`, good part
+  serves, broken 422s). Verified in-browser with a deliberately-broken assembly. **158 passed.**
 
 ## Generator capabilities (from real use — backlog)
 ### CALI-11 — Variable bend angle  · P2 · generator · 🧊 backlog

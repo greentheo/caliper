@@ -331,7 +331,7 @@ def create_app():
     @app.get("/api/assembly/{aid}")
     def get_assembly(aid: str):
         from . import measure
-        from .assembly import Assembly, evaluate_assembly, load_parts
+        from .assembly import Assembly, evaluate_assembly, load_parts_tolerant
 
         try:
             path, base = _find_assembly(aid)
@@ -342,14 +342,16 @@ def create_app():
                   "source": p.source, "stl_url": f"/api/assembly/{aid}/part/{p.id}.stl"}
                  for p in asm.parts]
         mates = [{"id": m.id, "between": m.between, "kind": m.kind, "fit": m.fit} for m in asm.mates]
+        # CALI-27: one broken part must not sink the assembly — measure what loads, NAME what didn't.
+        geoms, part_errors = load_parts_tolerant(asm, base_dir=base)
         try:
-            geoms = load_parts(asm, base_dir=base)
             report = evaluate_assembly(asm, base_dir=base, parts=geoms).to_dict()
             collisions = [[a, b] for a, b, v in measure.pairwise_interference(geoms) if v > 1e-6]
-        except Exception as e:  # noqa: BLE001 — a failing part build shouldn't 500 the whole load
+        except Exception as e:  # noqa: BLE001 — evaluation itself failing still shouldn't 500
             report, collisions = {"all_pass": False, "results": [], "error": str(e)}, []
         return {"id": aid, "name": asm.name, "intent": asm.intent, "parts": parts,
-                "mates": mates, "report": report, "collisions": collisions}
+                "mates": mates, "report": report, "collisions": collisions,
+                "part_errors": part_errors}
 
     @app.get("/api/assembly/{aid}/part/{pid}.stl")
     def assembly_part_stl(aid: str, pid: str):

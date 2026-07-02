@@ -3,11 +3,10 @@
 Kanban of every task. One line per card: `CALI-N — title · priority · milestone`.
 Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections as state changes.
 
-_Last updated: 2026-06-13 (CALI-25 a whole small machine — bars+bracket+foot with MEASURED bolt-hole alignment; +CALI-23/26)_
+_Last updated: 2026-06-13 (CALI-27 hardening: partial-machine bug fixed, UI primer + hints, README "Run it")_
 
-## 🎯 Next shift — harden + extend
+## 🎯 Next shift — extend
 - CALI-24 — Optimizer-in-the-author-loop: let CALI-19b tune the authored part's continuous params (not just LLM revision) for coupled inserts · P2 · assembly-spine
-- CALI-27 — Assemblies/refine hardening: chase the rough edges Theo hit (first-load build time, refine UX, error surfacing) — see TESTING.md §7 · P1 · M2
 - CALI-12 — Threaded holes done right (tapped/insert vs clearance; the machine uses tap-diameter today) · P2 · generator
 - CALI-18 — `largest_through_bore` counts a tube's OUTER wall as a bore (both are cylinders); distinguish interior bores · P2 · measure (found authoring a grommet)
 - CALI-11 — Variable bend angle (e.g. 45°) · P2 · generator
@@ -21,6 +20,7 @@ _Last updated: 2026-06-13 (CALI-25 a whole small machine — bars+bracket+foot w
 - _(none)_
 
 ## ✅ Done — Milestones M0 + M1 + M2 + M3 complete 🎉
+- CALI-27 — Hardening (Theo's reports) · P1 · M2 · _2026-06-13 · **fixed the partial-machine bug** (one failed part STL aborted the load loop → now parallel + per-part tolerant, error bar names what broke); `load_parts_tolerant` + `part_errors` on `/api/assembly`; build errors show the exception line, not boilerplate; **"❓ How this works" primer** + intent="one part" label + step-by-step Insert hints; README **"▶ Run it → http://127.0.0.1:8000"**. Verified in-browser incl. a deliberately-broken assembly. 158 passed._
 - CALI-25 + CALI-23 + CALI-26 — A whole small machine · P1 · assembly-spine · _2026-06-13 · a 4-part **corner leg** (two solid 20×40 bars + gusset bracket + foot, M5s through aligned holes) → `caliper assemble examples/machine.yaml` ALL PASS incl. **bolt-hole alignment** measured at ~1e-15mm. **CALI-23:** assembly parts build from a `.py` CadQuery script at assemble time (B-rep kept). **CALI-25:** `holes_world`/`min_hole_misalignment` + `hole_misalignment(a,b)` probe. **CALI-26:** viewer shades colliding parts red; serves `.py` parts as STL. Verified CLI + in-browser._
 - CALI-21c — Viewer UX · P1 · M2 · _2026-06-13 · fixed monitor/DPI resize (re-apply pixelRatio + CSS-fill canvas + DPR watcher), **middle-mouse pan** (CAD-style mouseButtons), and a **⤢ fit** button + `F` key with a **content-sized grid** (was a fixed 400mm plane). Left-click-only picking. Verified in-browser._
 - CALI-21b + CALI-20b — Webapp insert UI + assembly viewer · P1 · M2 · _2026-06-13 · load an assembly in 3D, **click two parts to pick interfaces**, choose fit + intent, Insert → the LLM authors the bridge live, it renders green, the assembly re-measures. `/api/assemblies`, `/api/assembly/{id}`(+part STL), `/api/insert`. **VERIFIED LIVE in-browser** (Preview MCP): bridged two posts in 1 round at 0.21mm/side. Fixed a double-path-resolution bug. 153 passed._
