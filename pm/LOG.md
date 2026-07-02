@@ -32,7 +32,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   next load; zero console warnings.
 - Tests: +2 (`load_parts_tolerant` names the broken part; `/api/assembly` returns `part_errors`, good
   part still serves, broken part 422s with a clear detail). **158 passed.**
-  Commit: PENDING
+  Commit: ab9db2c
 
 ### 2026-06-13 · CALI-25 + CALI-23 + CALI-26 · A whole (small) machine, with measured bolt alignment
 - **The north-star stress test, passing:** a 4-part **corner leg** — two solid **20×40 mm bars** (a
