@@ -133,3 +133,46 @@ def test_refine_end_to_end(tmp_path, monkeypatch):
     assert rc in (0, 3)
     stls = sorted((tmp_path / "runs").glob("run_*/part.stl"))
     assert len(stls) >= 2  # original + refined
+
+
+# --- CALI-28: the design container ----------------------------------------
+def test_design_new_list_show_round_trip(tmp_path, capsys):
+    """`caliper design` is the demonstrable surface of the Design store."""
+    from caliper.cli import main
+
+    base = str(tmp_path / "designs")
+    assert main(["design", "new", "a 3D printer gantry", "--base", base]) == 0
+    slug = capsys.readouterr().out.split("'")[1]
+
+    assert main(["design", "list", "--base", base]) == 0
+    assert slug in capsys.readouterr().out
+
+    # an empty design shows cleanly (nothing to measure yet) rather than erroring
+    assert main(["design", "show", slug, "--base", base]) == 0
+    out = capsys.readouterr().out
+    assert "a 3D printer gantry" in out and "(none yet)" in out
+
+
+def test_design_show_reports_requirements_and_feedback_history(tmp_path, capsys):
+    from caliper.cli import main
+    from caliper.design import DesignStore
+
+    base = str(tmp_path / "designs")
+    store = DesignStore.create("a gantry", base=base)
+    store.add_requirement("rail type?", "MGN12")
+    script = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(40,20,10)\n"
+    store.write_part("carriage", script, intent="the X carriage")
+    store.write_part("carriage", script, feedback="clear the rail", action="refine")
+
+    main(["design", "show", store.design.slug, "--base", base])
+    out = capsys.readouterr().out
+    assert "rail type? → MGN12" in out
+    assert "the X carriage" in out
+    assert '"clear the rail" → v2' in out
+
+
+def test_design_show_names_an_unknown_slug(tmp_path, capsys):
+    from caliper.cli import main
+
+    assert main(["design", "show", "nope", "--base", str(tmp_path)]) == 2
+    assert "no design at" in capsys.readouterr().out

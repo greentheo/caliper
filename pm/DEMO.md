@@ -42,6 +42,14 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **A Design — the container for what you're building (CALI-28, M4).** `caliper design new "..."`
+  creates `designs/<slug>/`: the **root prompt**, the **requirements** clarified once (never re-asked),
+  a **part tree**, and per part a **feedback history** plus a snapshot of **every revision**. It *is* an
+  assembly underneath, so the whole engine (`assemble`, mates, `insert`) works on it unchanged — and a
+  one-part design is just a one-part assembly. This is the spine of **M4: the design session**, where
+  the UI becomes a viewport + a conversation instead of a control panel. See
+  [`specs/caliper-conversational-spec.md`](../specs/caliper-conversational-spec.md).
+
 **Two generators now:** the **hardcoded bracket** (`run`/`refine`/`fit` — fast, offline-capable, the
 optimizer loop) and the **LLM author** (`gen` — arbitrary parts, needs `ANTHROPIC_API_KEY`).
 **Bracket family:** corner brackets for T-slot extrusion (2020…), bolt holes per flange, optional cable
@@ -77,6 +85,91 @@ make run-llm    INTENT="a sturdy 80mm bracket for 3030 with countersunk M6 holes
 make refine-llm SOURCE=runs/run_0000 INSTRUCTION="round the outer corners and lighten it"
 # equivalently:  make refine LLM=1 SOURCE=... INSTRUCTION=...
 ```
+
+---
+
+## 🆕 CALI-28 — a Design: root prompt, part tree, per-part feedback history
+
+**What's new:** the thing that was missing for conversational design — a durable container for *"the
+thing I am building"*. Until now the only durable artifacts were a snapshot of one part (`runs/`) and a
+hand-written assembly YAML; neither held the root prompt, the requirements you clarified once, or the
+history of feedback on each part.
+
+```bash
+# 1. start a design (this is the root prompt — what we're trying to build)
+caliper design new "a 3D printer gantry, 300x300x400 build volume"
+
+# 2. see what designs exist
+caliper design list
+
+# 3. inspect one — requirements, the part tree, each part's feedback narrative,
+#    and a measurement of the WHOLE design
+caliper design show <slug>
+```
+
+A fresh design has no parts yet (the chat turn handler that authors them is **CALI-29**), so to see the
+shape of it today, seed one from Python:
+
+```bash
+python - <<'EOF'
+from caliper.design import DesignStore
+from caliper.spec import Assertion
+
+s = DesignStore.load("<slug>")                       # or DesignStore.create("a gantry")
+s.add_requirement("extrusion profile?", "2040 V-slot")
+s.add_requirement("belt or leadscrew on X?", "belt (GT2 6mm)", source="assumed")
+
+box = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box({w},20,10)\n"
+s.write_part("carriage", box.format(w=40), intent="the X carriage that rides the rail")
+s.write_part("carriage", box.format(w=52), feedback="it needs to clear the rail by at least 1mm",
+             action="refine")                        # a revision, with the feedback that caused it
+s.assembly.assertions.append(Assertion(id="nothing_collides", expr="max_interference() <= 0"))
+s.save()
+EOF
+
+caliper design show <slug>
+```
+
+**What you should see:**
+
+```
+▶ a 3D printer gantry, 300x300x400 build volume  [a-3d-printer-gantry-300x300x400-build]
+  goal: a 3D printer gantry, 300x300x400 build volume
+  units: mm
+
+── 2 clarified requirement(s) ──
+  • extrusion profile? → 2040 V-slot
+  • belt or leadscrew on X? → belt (GT2 6mm)  [assumed]
+
+── 2 part(s) ──
+  • carriage         v2   [authored]  the X carriage that rides the rail
+      ↳ "it needs to clear the rail by at least 1mm" → v2 (not measured)
+  • rail             v1   [authored]  the MGN12 linear rail it rides on
+
+── measuring the whole design ──
+Measurement report — ALL PASS
+  ✓ nothing_collides max_interference() <= 0  actual=0  (margin +0)
+```
+
+**Things worth poking at:**
+- `ls designs/<slug>/parts/carriage/versions/` — **every revision is snapshotted**; nothing is
+  overwritten. `DesignStore.restore("carriage", 1)` rolls back *as a new revision*, so the rollback is
+  itself part of the history.
+- `cat designs/<slug>/parts/carriage/history.jsonl` — the append-only record: what was asked, what
+  changed, what it measured.
+- `python -c "from caliper.design import DesignStore; print(DesignStore.load('<slug>').prompt_context('carriage'))"`
+  — the **distilled context** a future revision of that part will see: goal, requirements, sibling
+  parts, mates that must keep holding, enforced assertions, and a bounded tail of feedback. Not a
+  transcript — that's what keeps it from growing without bound (conversational spec §2).
+- Break a part on purpose (`raise RuntimeError('boom')` in its `part.py`) and re-run
+  `caliper design show` — it **names the broken part and still measures the rest** (CALI-27's
+  discipline, inherited).
+
+**What this does NOT do yet** — deliberately, so the interaction gets proven before the hard parts:
+- No chat. Parts are added from Python/CLI; the scope-aware turn handler is **CALI-29**, which also
+  closes the real gap: *there is no code path today to refine a part that lives inside an assembly*.
+- No decomposition. "A gantry" does not yet become a part list — that's **CALI-35 (M5)**.
+- Feedback isn't promoted to assertions yet — that's **CALI-30**.
 
 ---
 

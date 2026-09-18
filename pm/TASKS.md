@@ -438,6 +438,98 @@ instead of always generating new.
   refine from there forks a new run. List refreshes after each run/refine.
 - Tests: list + load endpoints (load OCCT-gated only for legacy backfill).
 
+## Milestone M4 — the design session (conversational UI)
+> The engine works; the UI is a control panel for the engine. M4 makes the product a **viewport + a
+> conversation**: state what you're building, answer a few questions, click a part, talk about that part.
+> Full rationale in [`specs/caliper-conversational-spec.md`](../specs/caliper-conversational-spec.md).
+> Decisions taken up front (Theo, 2026-09-18): **chat-first on a single part** before decomposition;
+> old panel **demoted to an Advanced drawer**, not deleted; assertion promotion is **proposed and
+> confirmed**, never silent.
+
+### CALI-28 — Design object + store  · P0 · M4 · ✅ done (`pending`)
+The container that doesn't exist today: "the thing I am building" — root prompt, clarified requirements,
+a part tree, and per-part feedback history. Everything else in M4 hangs off this.
+**Acceptance:**
+- `Design` model + `designs/<slug>/` on-disk layout per spec §3: `design.yaml`, `assembly.yaml`,
+  `log.jsonl`, `parts/<id>/{part.py, spec.yaml, history.jsonl, versions/vNNN/}`.
+- `assembly.yaml` is the **existing** `assembly.py` format — `evaluate_assembly`/`assemble`/`insert` work
+  against a design unchanged; a **single-part design is a one-part assembly** (no second code path).
+- Create / load / save round-trips losslessly. Slug collisions resolved deterministically.
+- `add_part` / `update_part` write a new `versions/vNNN/` snapshot (part.py + report.json) and append a
+  `history.jsonl` entry; nothing is ever overwritten in place.
+- Requirements block (from the clarify round) is stored and retrievable as prompt context.
+- `runs/` is untouched and still browsable; a design may adopt an existing run as a part.
+- Tests: round-trip, versioning/snapshot, history append, one-part-design evaluates via `evaluate_assembly`.
+
+### CALI-29 — Chat turn handler (scope-aware)  · P0 · M4 · 🧊 backlog
+The loop behind the conversation: a message, optionally scoped to a clicked part, becomes an action.
+**Acceptance:**
+- `turn(design, message, scope=part_id|None)` → classify intent (clarify / author / refine / promote /
+  answer) → dispatch to the **existing** engine (`authoring.improve`, `refine_authored`, `insert_part`).
+- **Closes the biggest gap:** refine a part that lives *inside an assembly* — today `refine_authored` only
+  works on a single-part run and assembly members are static `.py` with no revision path.
+- After any geometry change, **re-measure the whole design** (every mate + assembly assertion) and report
+  what the change broke, in the same turn.
+- Unscoped message = design scope; scoped = that part. No mode toggles.
+- Appends to `history.jsonl` (part) / `log.jsonl` (design) per spec §3.
+- Tests: scope routing, refine-in-assembly rebuilds + re-measures, a cross-part break is reported.
+
+### CALI-30 — Feedback → assertion promotion  · P1 · M4 · 🧊 backlog
+The idea that makes the history worth keeping: measurable feedback becomes a permanent test.
+**Acceptance:**
+- Given feedback + part context, draft an assertion in the **existing** expr vocabulary (§4 design spec).
+- **Validate before offering:** it must parse and evaluate against the current geometry (no proposing a
+  probe that doesn't exist or an expr that throws).
+- **Proposed, never silent** — shown in chat, accepted/declined inline; accepted → appended to that part's
+  `spec.assert` and enforced on every later build; declined → logged as a plain edit.
+- Non-measurable feedback ("less chunky") is honestly labelled unenforceable, not faked into a number.
+- Tests: promotion round-trip, invalid-expr rejection, decline path, regression caught on a later revision.
+
+### CALI-31 — Streaming (job + SSE)  · P1 · M4 · 🧊 backlog
+Authoring is many LLM round-trips over tens of seconds; the server is synchronous POST today, so the chat
+would sit dead and read as broken.
+**Acceptance:**
+- `POST /api/design/{id}/chat` returns a job id immediately; `GET /api/design/{id}/events` (SSE) streams
+  progress events (`authoring`, `built`, `measured`, `revising i/n`, `done`, `error`).
+- Chat narrates each event; the viewport updates per part as parts complete (not one batch at the end).
+- Errors surface the real exception line (the CALI-27 discipline), never boilerplate.
+- Tests: job lifecycle, event ordering, error event carries the traceback tail.
+
+### CALI-32 — Front end: viewport + chat  · P1 · M4 · 🧊 backlog
+The reskin, once the machinery above is real.
+**Acceptance:**
+- Default page = 3D viewport + chat column. **Three surfaces only**: viewport, chat, Advanced drawer.
+- Click a part → chat scopes to it (dismissible chip); unscoped = design scope.
+- The internal-seam toggles are **gone from view**: "use Claude", "✦ author any part", offline-vs-LLM.
+- Current panel survives **collapsed** behind Advanced: spec YAML, `part.py`, raw report.
+- Keeps working: picking, collision shading, ⤢ fit, STL download, the error bar.
+- Verified in-browser (Preview MCP, `caliper-web`), not just unit-tested.
+
+### CALI-33 — Clarify round → stored requirements  · P1 · M4 · 🧊 backlog
+Ask once, never re-ask.
+**Acceptance:**
+- A new design runs a **bounded** round of questions that actually change geometry (profile, drive, rail,
+  process) — reuses `intake.py`'s ask-don't-assume gate; no interrogation, no unbounded loop.
+- Answers stored as the requirements block in `design.yaml` and injected as permanent prompt context.
+- Skippable: the user can say "just build it" and Caliper proceeds on stated assumptions.
+- Tests: questions stored, requirements reach the author prompt, skip path works.
+
+## Milestone M5 — whole machines from one prompt (after M4)
+
+### CALI-35 — Decomposition planner  · P0 · M5 · 🧊 backlog
+Root prompt → part list with interfaces. The highest-value and least-proven capability; deliberately
+scheduled *after* the interaction is proven, so the planner and a new UI aren't debugged simultaneously.
+**Acceptance:** plan is emitted as an **assembly skeleton** (parts + mates + assertions) — i.e. something
+measurable — reviewed before any geometry is authored; parts then authored in dependency order.
+
+### CALI-36 — Nested sub-assemblies  · P1 · M5 · 🧊 backlog
+Descend into a part that is itself a design (a "roller carriage" opens as its own part tree). Covers most
+of the "zoom into components" ask without face-level picking.
+
+### CALI-37 — Feature-level selection  · P2 · M5 · 🧊 backlog
+Click a specific hole/face. Needs per-face group export + a B-rep face-id round-trip through the
+tessellation. Deferred deliberately: the cheap 80% is "click the part, say *the 5mm hole on the top face*".
+
 ## Epics / future (stories for later)
 ### CALI-13 — Primitive & geometry library + multi-part assemblies  · P2 · epic · 🧊 backlog
 The corner bracket proved the loop; to make "all kinds of new parts" we need breadth of geometry.

@@ -367,6 +367,61 @@ def _cmd_serve(args) -> int:
     return 0
 
 
+def _cmd_design(args) -> int:
+    """CALI-28 — inspect/create the container for a whole design (prompt + parts + history)."""
+    from .design import DesignStore
+
+    if args.action == "new":
+        store = DesignStore.create(args.prompt, base=args.base)
+        print(f"▶ created design '{store.design.slug}' at {store.root}")
+        print(f"  goal: {store.design.prompt}")
+        print("\n  next: add parts to it (the chat turn handler lands in CALI-29), or inspect with")
+        print(f"        caliper design show {store.design.slug}")
+        return 0
+
+    if args.action == "list":
+        designs = DesignStore.list_designs(base=args.base)
+        if not designs:
+            print("no designs yet — start one with:  caliper design new \"a 3D printer gantry ...\"")
+            return 0
+        print(f"── {len(designs)} design(s) ──")
+        for d in designs:
+            print(f"  • {d['slug']:<28} {d['parts']:>2} part(s)  {d['updated'][:19]}  — {d['prompt'][:60]}")
+        return 0
+
+    # show
+    try:
+        store = DesignStore.load(args.slug, base=args.base)
+    except FileNotFoundError as e:
+        print(e)
+        return 2
+    d = store.design
+    print(f"▶ {d.name}  [{d.slug}]")
+    print(f"  goal: {d.prompt}")
+    print(f"  units: {d.units}" + (f"  machine: {d.machine}" if d.machine else ""))
+    if d.requirements:
+        print(f"\n── {len(d.requirements)} clarified requirement(s) ──")
+        for r in d.requirements:
+            mark = "" if r.source == "answered" else "  [assumed]"
+            print(f"  • {r.question} → {r.answer}{mark}")
+    print(f"\n── {len(d.parts)} part(s) ──")
+    for p in d.parts:
+        print(f"  • {p.id:<16} v{p.version:<3} [{p.origin}]  {p.intent}")
+        for h in store.history(p.id):
+            if h.get("feedback"):
+                print(f"      ↳ \"{h['feedback']}\" → v{h.get('version','?')} "
+                      f"({h.get('result') or 'not measured'})")
+    if not d.parts:
+        print("  (none yet)")
+        return 0
+    print("\n── measuring the whole design ──")
+    report, errors = store.evaluate(tolerant=True)
+    for pid, err in errors.items():
+        print(f"  ⚠ {pid}: {err}")
+    print(report.to_text())
+    return 0 if report.all_pass and not errors else 3
+
+
 def main(argv: list[str] | None = None) -> int:
     _load_dotenv()
     parser = argparse.ArgumentParser(prog="caliper", description=__doc__)
@@ -439,12 +494,22 @@ def main(argv: list[str] | None = None) -> int:
     p_ins.add_argument("--max-rounds", type=int, default=6)
     p_ins.set_defaults(func=_cmd_insert)
 
+    p_des = sub.add_parser("design", help="a whole design: root prompt + parts + per-part history (CALI-28)")
+    p_des.add_argument("action", choices=["new", "list", "show"], help="new | list | show")
+    p_des.add_argument("prompt", nargs="?", default="",
+                       help='for `new`: what you are building, e.g. "a 3D printer gantry, 300x300x400"')
+    p_des.add_argument("--slug", default=None, help="for `show`: which design (default: the last argument)")
+    p_des.add_argument("--base", default=None, help="designs directory (default: $CALIPER_DESIGNS or designs/)")
+    p_des.set_defaults(func=_cmd_design)
+
     p_serve = sub.add_parser("serve", help="launch the webapp (3D viewer + spec/report + refine)")
     p_serve.add_argument("--host", default="127.0.0.1")
     p_serve.add_argument("--port", type=int, default=8000)
     p_serve.set_defaults(func=_cmd_serve)
 
     args = parser.parse_args(argv)
+    if getattr(args, "cmd", None) == "design" and not getattr(args, "slug", None):
+        args.slug = args.prompt or ""   # `design show <slug>` reads the positional
     if not getattr(args, "func", None):
         parser.print_help()
         return 0
