@@ -52,7 +52,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - **Verified by hand:** created a gantry design, seeded two parts + a refine + requirements,
   `caliper design show` printed the tree, the feedback narrative, and `ALL PASS`.
 - `designs/` gitignored (user artifacts, like `runs/`).
-- Commit: `pending`
+- Commit: `658c52e`
 
 ---
 

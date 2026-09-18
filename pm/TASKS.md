@@ -446,7 +446,7 @@ instead of always generating new.
 > old panel **demoted to an Advanced drawer**, not deleted; assertion promotion is **proposed and
 > confirmed**, never silent.
 
-### CALI-28 — Design object + store  · P0 · M4 · ✅ done (`pending`)
+### CALI-28 — Design object + store  · P0 · M4 · ✅ done (`658c52e`)
 The container that doesn't exist today: "the thing I am building" — root prompt, clarified requirements,
 a part tree, and per-part feedback history. Everything else in M4 hangs off this.
 **Acceptance:**
