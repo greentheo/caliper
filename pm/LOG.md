@@ -57,7 +57,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
     catch.
   - *"roll it back"* → restored v2 as v4, **"✓ That fixed: carriage_clears_rail / The whole design
     measures green."**
-- Commit: `pending`
+- Commit: `48a35fb`
 
 ---
 
