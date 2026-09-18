@@ -461,7 +461,7 @@ a part tree, and per-part feedback history. Everything else in M4 hangs off this
 - `runs/` is untouched and still browsable; a design may adopt an existing run as a part.
 - Tests: round-trip, versioning/snapshot, history append, one-part-design evaluates via `evaluate_assembly`.
 
-### CALI-29 — Chat turn handler (scope-aware)  · P0 · M4 · 🧊 backlog
+### CALI-29 — Chat turn handler (scope-aware)  · P0 · M4 · ✅ done (`pending`)
 The loop behind the conversation: a message, optionally scoped to a clicked part, becomes an action.
 **Acceptance:**
 - `turn(design, message, scope=part_id|None)` → classify intent (clarify / author / refine / promote /
@@ -473,6 +473,9 @@ The loop behind the conversation: a message, optionally scoped to a clicked part
 - Unscoped message = design scope; scoped = that part. No mode toggles.
 - Appends to `history.jsonl` (part) / `log.jsonl` (design) per spec §3.
 - Tests: scope routing, refine-in-assembly rebuilds + re-measures, a cross-part break is reported.
+- _Added during the task:_ a **`revert`** action — the break reply offered a rollback the handler had no
+  verb for, and "roll it back" would have routed to *refine*. `DesignStore.restore` makes the undo a new
+  revision, so it lands in the history rather than erasing it.
 
 ### CALI-30 — Feedback → assertion promotion  · P1 · M4 · 🧊 backlog
 The idea that makes the history worth keeping: measurable feedback becomes a permanent test.

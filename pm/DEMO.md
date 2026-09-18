@@ -42,6 +42,12 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **Talk to a design (CALI-29, M4).** `caliper chat <slug> "<message>" [--part ID]` — one
+  conversational turn: it routes the message (Claude, or a deterministic parser offline), **revises the
+  part you selected**, and **re-measures the whole design**, naming anything the change broke. Closes the
+  real gap: until now there was *no way to refine a part that lives inside an assembly*. Say **"roll it
+  back"** to undo. `--part` is what clicking a part in the viewer will do once CALI-32 lands.
+
 - 🆕 **A Design — the container for what you're building (CALI-28, M4).** `caliper design new "..."`
   creates `designs/<slug>/`: the **root prompt**, the **requirements** clarified once (never re-asked),
   a **part tree**, and per part a **feedback history** plus a snapshot of **every revision**. It *is* an
@@ -85,6 +91,105 @@ make run-llm    INTENT="a sturdy 80mm bracket for 3030 with countersunk M6 holes
 make refine-llm SOURCE=runs/run_0000 INSTRUCTION="round the outer corners and lighten it"
 # equivalently:  make refine LLM=1 SOURCE=... INSTRUCTION=...
 ```
+
+---
+
+## 🆕 CALI-29 — talk to a design; it tells you what your change broke
+
+**What's new:** the conversation. One message, optionally scoped to a part, becomes a measured move —
+and the reply names what the change broke **elsewhere in the design**, which is the whole point of
+building this on top of a measurement engine.
+
+This also closes a real gap: until now there was **no code path to refine a part inside an assembly**.
+`refine` only worked on single-part runs; assembly members were static scripts with no revision path.
+
+```bash
+# seed a two-part design with a mate that must keep holding
+python - <<'EOF'
+from caliper.design import DesignStore
+from caliper.assembly import Mate
+
+box = ("def build(params):\n"
+       "    import cadquery as cq\n"
+       "    return cq.Workplane('XY').box({dx}, {dy}, 10).translate((0, {y}, 0))\n")
+
+s = DesignStore.create("a 3D printer gantry, 300x300x400", slug="gantry")
+s.add_requirement("rail type?", "MGN12 linear rail")
+s.write_part("rail",     box.format(dx=200, dy=12, y=0),  intent="the MGN12 linear rail, 200mm long")
+s.write_part("carriage", box.format(dx=40,  dy=20, y=40), intent="the X carriage that rides the rail")
+s.assembly.mates.append(Mate(id="carriage_clears_rail", between=["carriage", "rail"],
+                             kind="no_interference"))
+s.save()
+EOF
+```
+
+```bash
+# 1. ask about it — no key needed, no geometry moves
+caliper chat gantry "what parts exist?" --no-llm
+```
+
+```bash
+# 2. change the part you'd have clicked  (needs ANTHROPIC_API_KEY)
+caliper chat gantry "make it 60mm wide and give it four M3 mounting holes on the top face" --part carriage
+```
+
+```bash
+# 3. now break something on purpose, and watch it get caught
+caliper chat gantry "make it 120mm deep in the Y direction, keeping the same centre" --part carriage
+```
+
+```bash
+# 4. undo
+caliper chat gantry "roll it back" --part carriage
+```
+
+**What step 3 actually printed (live, real Claude call):**
+
+```
+  · routed → refine → carriage  (routed by Claude, via llm)
+  · revising carriage…
+  · carriage built in 1 round(s)
+  · carriage → v3
+  · measured the whole design
+
+✗ revised **carriage** → v3 (1 round(s))
+Every check on this part passes.
+
+⚠ This change **broke 1 design check(s)** that passed before:
+  • carriage_clears_rail: interference(carriage, rail) <= 0 → actual=7200.0 (margin -7.2e+03)
+_Tell me how to fix it, or say **roll it back** to undo this revision._
+```
+
+Read that twice: **the part passes every one of its own checks.** It's the *design* that's broken, three
+lines of conversation away from where you were looking. That's what re-measuring everything buys you.
+
+And step 4:
+
+```
+↩ rolled **carriage** back to v2 (saved as v4)
+✓ That fixed: carriage_clears_rail
+The whole design measures green.
+```
+
+**Things worth poking at:**
+- `cat designs/gantry/parts/carriage/part.py` after step 2 — it kept the world-coordinate
+  `translate((0, 40, 0))` on its own. The revision is handed the design context (siblings, mates,
+  enforced assertions, prior feedback) and told to build in the design's frame.
+- `cat designs/gantry/log.jsonl` — every message and reply, with how it was routed.
+- Try an ambiguous one: `caliper chat gantry "5mm wider please" --no-llm` — it **asks which part**
+  instead of guessing. A wrong guess costs a whole authoring run.
+- Try `--no-llm` on a change: routing goes offline, but *authoring* still needs the key.
+- The rollback is itself a revision (`versions/` gains `v004`), so the undo is in the history, not a
+  hole in it.
+
+**What this does NOT do yet:**
+- **No UI** — this is the CLI surface of the turn handler. Viewport + chat is **CALI-32**; `--part` is
+  what clicking a part will do.
+- **No streaming** — the turn blocks while Claude authors. The progress lines you see are the same
+  events **CALI-31** will stream to the chat over SSE.
+- **Feedback isn't promoted to assertions yet** (**CALI-30**), so "it must clear the rail" is applied as
+  an edit but not yet locked in as a permanent test.
+- **No decomposition** — "a gantry" still doesn't become a part list (**CALI-35**, M5).
 
 ---
 

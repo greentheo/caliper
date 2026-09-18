@@ -422,6 +422,42 @@ def _cmd_design(args) -> int:
     return 0 if report.all_pass and not errors else 3
 
 
+def _cmd_chat(args) -> int:
+    """CALI-29 — one conversational turn against a design: route, act, re-measure, reply."""
+    from . import chat
+    from .design import DesignStore
+
+    try:
+        store = DesignStore.load(args.slug, base=args.base)
+    except FileNotFoundError as e:
+        print(e)
+        return 2
+
+    scope = args.part
+    if scope and store.design.part(scope) is None:
+        print(f"no part {scope!r} in this design — parts: "
+              + (", ".join(p.id for p in store.design.parts) or "(none)"))
+        return 2
+
+    where = f" [on {scope}]" if scope else ""
+    print(f"▶ {store.design.name}{where}\n  you: {args.message}\n")
+
+    def narrate(ev):
+        if ev.kind == "classified":
+            print(f"  · routed → {ev.text}  ({ev.data.get('note', '')}, via {ev.data.get('source')})")
+        elif ev.kind not in ("done",):
+            print(f"  · {ev.text}")
+
+    res = chat.turn(store, args.message, scope=scope, use_llm=not args.no_llm,
+                    max_rounds=args.max_rounds, on_event=narrate)
+    print()
+    print(res.reply)
+    if res.report is not None and not res.report.all_pass:
+        print("\n── the whole design ──")
+        print(res.report.to_text())
+    return 0 if res.ok else 3
+
+
 def main(argv: list[str] | None = None) -> int:
     _load_dotenv()
     parser = argparse.ArgumentParser(prog="caliper", description=__doc__)
@@ -501,6 +537,17 @@ def main(argv: list[str] | None = None) -> int:
     p_des.add_argument("--slug", default=None, help="for `show`: which design (default: the last argument)")
     p_des.add_argument("--base", default=None, help="designs directory (default: $CALIPER_DESIGNS or designs/)")
     p_des.set_defaults(func=_cmd_design)
+
+    p_chat = sub.add_parser("chat", help="talk to a design: one turn — route, act, re-measure (CALI-29)")
+    p_chat.add_argument("slug", help="which design (see `caliper design list`)")
+    p_chat.add_argument("message", help='what you want, e.g. "make it 5mm wider" or "add a foot"')
+    p_chat.add_argument("--part", default=None, metavar="ID",
+                        help="scope the message to one part — what clicking it in the viewer will do")
+    p_chat.add_argument("--base", default=None, help="designs directory (default: $CALIPER_DESIGNS or designs/)")
+    p_chat.add_argument("--no-llm", action="store_true",
+                        help="route with the deterministic parser instead of Claude (authoring still needs a key)")
+    p_chat.add_argument("--max-rounds", type=int, default=4)
+    p_chat.set_defaults(func=_cmd_chat)
 
     p_serve = sub.add_parser("serve", help="launch the webapp (3D viewer + spec/report + refine)")
     p_serve.add_argument("--host", default="127.0.0.1")

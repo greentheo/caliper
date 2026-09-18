@@ -176,3 +176,35 @@ def test_design_show_names_an_unknown_slug(tmp_path, capsys):
 
     assert main(["design", "show", "nope", "--base", str(tmp_path)]) == 2
     assert "no design at" in capsys.readouterr().out
+
+
+# --- CALI-29: one conversational turn -------------------------------------
+def test_chat_answers_a_question_about_a_design(tmp_path, capsys):
+    from caliper.cli import main
+    from caliper.design import DesignStore
+
+    base = str(tmp_path / "designs")
+    store = DesignStore.create("a gantry", base=base, slug="gantry")
+    script = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box(40,20,10)\n"
+    store.write_part("carriage", script, intent="the X carriage")
+
+    assert main(["chat", "gantry", "what parts exist?", "--base", base, "--no-llm"]) == 0
+    out = capsys.readouterr().out
+    assert "routed → answer" in out and "carriage" in out
+
+
+def test_chat_rejects_a_scope_that_is_not_in_the_design(tmp_path, capsys):
+    from caliper.cli import main
+    from caliper.design import DesignStore
+
+    base = str(tmp_path / "designs")
+    DesignStore.create("a gantry", base=base, slug="gantry")
+    assert main(["chat", "gantry", "wider", "--part", "nope", "--base", base, "--no-llm"]) == 2
+    assert "no part 'nope'" in capsys.readouterr().out
+
+
+def test_chat_names_an_unknown_design(tmp_path, capsys):
+    from caliper.cli import main
+
+    assert main(["chat", "nope", "hi", "--base", str(tmp_path)]) == 2
+    assert "no design at" in capsys.readouterr().out

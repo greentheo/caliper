@@ -3,14 +3,13 @@
 Kanban of every task. One line per card: `CALI-N — title · priority · milestone`.
 Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections as state changes.
 
-_Last updated: 2026-09-18 (**M4 kickoff** — the design session: viewport + chat, see [`specs/caliper-conversational-spec.md`](../specs/caliper-conversational-spec.md))_
+_Last updated: 2026-09-18 (**M4**: CALI-28 Design object + CALI-29 chat turn handler shipped; see [`specs/caliper-conversational-spec.md`](../specs/caliper-conversational-spec.md))_
 
 ## 🎯 M4 — the design session (current milestone)
 > The engine works; the UI is a control panel for it. M4 makes the product a **viewport + a conversation**.
 > Decisions (Theo, 2026-09-18): chat-first on a **single part** before decomposition · old panel **demoted**
 > to an Advanced drawer, not deleted · assertion promotion **proposed & confirmed**, never silent.
 
-- CALI-29 — Chat turn handler: scope-aware turns; **refine a part inside an assembly** (the missing verb); re-measure the whole design · P0 · M4
 - CALI-30 — Feedback → assertion promotion (propose, validate, confirm) · P1 · M4
 - CALI-31 — Streaming: job + SSE so the chat narrates long authoring runs · P1 · M4
 - CALI-32 — Front end: viewport + chat as default; panel → Advanced drawer · P1 · M4
@@ -36,6 +35,7 @@ _Last updated: 2026-09-18 (**M4 kickoff** — the design session: viewport + cha
 - _(none)_
 
 ## ✅ Done — Milestones M0 + M1 + M2 + M3 complete 🎉
+- CALI-29 — Chat turn handler · P0 · M4 · _2026-09-18 · `chat.turn(store, message, scope)` — **scope is the selection** (unscoped = the design, scoped = the clicked part). Closes the real gap: **there was no code path to refine a part inside an assembly**. Revisions are handed the design context (siblings, mates, enforced assertions, feedback tail) on a *copy* of the spec, told to build in world coords, and **every change re-measures the WHOLE design** — the reply names what it broke, by id, with the number. Routing = Claude with a deterministic fallback that degrades instead of crashing, and **asks instead of guessing** when ambiguous. Added `revert` mid-task because the break reply offered a rollback the handler couldn't perform. A revision that never builds is never written. `caliper chat`. **Verified live**: widened a carriage (kept its world pose), then broke `carriage_clears_rail` at interference=7200 and got told, then rolled it back to green. 217 passed._
 - CALI-28 — Design object + store · P0 · M4 · _2026-09-18 · **the M4 spine**: `designs/<slug>/` holds the **root prompt**, the **requirements clarified once**, a **part tree**, and per part a **feedback history** + a snapshot of **every revision**. It *is* an assembly underneath (sources relative to the design root), so `evaluate_assembly`/`assemble`/`insert` consume a design unchanged and **a one-part design is a one-part assembly** — no second code path. `write_part` snapshots + indexes + appends history in one step (history can't drift from the geometry) and **evicts the mtime-keyed build cache**, which would otherwise let a re-measure 'prove' the pre-change part. `adopt_run` pulls in existing runs; `prompt_context` builds the **distilled** (not transcript) context for a revision. `caliper design new|list|show`. 184 passed._
 - CALI-27 — Hardening (Theo's reports) · P1 · M2 · _2026-06-13 · **fixed the partial-machine bug** (one failed part STL aborted the load loop → now parallel + per-part tolerant, error bar names what broke); `load_parts_tolerant` + `part_errors` on `/api/assembly`; build errors show the exception line, not boilerplate; **"❓ How this works" primer** + intent="one part" label + step-by-step Insert hints; README **"▶ Run it → http://127.0.0.1:8000"**. Verified in-browser incl. a deliberately-broken assembly. 158 passed._
 - CALI-25 + CALI-23 + CALI-26 — A whole small machine · P1 · assembly-spine · _2026-06-13 · a 4-part **corner leg** (two solid 20×40 bars + gusset bracket + foot, M5s through aligned holes) → `caliper assemble examples/machine.yaml` ALL PASS incl. **bolt-hole alignment** measured at ~1e-15mm. **CALI-23:** assembly parts build from a `.py` CadQuery script at assemble time (B-rep kept). **CALI-25:** `holes_world`/`min_hole_misalignment` + `hole_misalignment(a,b)` probe. **CALI-26:** viewer shades colliding parts red; serves `.py` parts as STL. Verified CLI + in-browser._
