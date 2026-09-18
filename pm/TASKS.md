@@ -461,7 +461,7 @@ a part tree, and per-part feedback history. Everything else in M4 hangs off this
 - `runs/` is untouched and still browsable; a design may adopt an existing run as a part.
 - Tests: round-trip, versioning/snapshot, history append, one-part-design evaluates via `evaluate_assembly`.
 
-### CALI-29 — Chat turn handler (scope-aware)  · P0 · M4 · ✅ done (`pending`)
+### CALI-29 — Chat turn handler (scope-aware)  · P0 · M4 · ✅ done (`48a35fb`)
 The loop behind the conversation: a message, optionally scoped to a clicked part, becomes an action.
 **Acceptance:**
 - `turn(design, message, scope=part_id|None)` → classify intent (clarify / author / refine / promote /
