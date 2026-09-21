@@ -42,6 +42,13 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **Feedback becomes a test (CALI-30, M4).** Say *"it must clear the rail by at least 2mm"* and
+  Caliper doesn't just make the change — it drafts the **assertion** that locks it in
+  (`min_clearance(carriage, rail) >= 2.0`), **validates that it actually measures**, and offers it. Say
+  **yes** and every future revision is checked against it, forever, by the same evaluator that grades
+  everything else. Say **no** and it stays a one-off. Unmeasurable feedback is labelled as such, never
+  faked into a number — and if a new rule contradicts one you already locked in, it says so.
+
 - 🆕 **Talk to a design (CALI-29, M4).** `caliper chat <slug> "<message>" [--part ID]` — one
   conversational turn: it routes the message (Claude, or a deterministic parser offline), **revises the
   part you selected**, and **re-measures the whole design**, naming anything the change broke. Closes the
@@ -91,6 +98,78 @@ make run-llm    INTENT="a sturdy 80mm bracket for 3030 with countersunk M6 holes
 make refine-llm SOURCE=runs/run_0000 INSTRUCTION="round the outer corners and lighten it"
 # equivalently:  make refine LLM=1 SOURCE=... INSTRUCTION=...
 ```
+
+---
+
+## 🆕 CALI-30 — say it once, and it's a test forever
+
+**What's new:** the thing that makes the whole conversational approach hold up. A chat tool that only
+*edits* drifts — you ask for something, it happens, and nothing stops revision #14 from undoing it.
+Caliper turns measurable feedback into an **assertion**, enforced by the same evaluator that grades
+everything else.
+
+Continuing from the CALI-29 gantry:
+
+```bash
+caliper chat gantry "the carriage must clear the rail by at least 3mm" --part carriage
+```
+
+```
+✓ revised **carriage** → v5 (1 round(s))
+Every check on this part passes.
+The whole design still measures green.
+
+💡 I can lock that in as a test on the design:
+    carriage_rail_clearance: min_clearance(carriage, rail) >= 3
+    ✓ it holds now (measured 6). Every future revision would be checked against it.
+    Say **yes** to enforce it, or **no** to leave it as a one-off change.
+```
+
+```bash
+caliper chat gantry "yes, lock it in"
+```
+
+```
+✓ Locked in on the design: **carriage_rail_clearance** — `min_clearance(carriage, rail) >= 3`
+Every future revision is measured against it; if something breaks it, I'll say so.
+```
+
+From here it's a **test**. Any later revision — of any part — that violates it gets named:
+
+```bash
+caliper chat gantry "move it closer to the rail" --part carriage
+```
+
+```
+⚠ This change **broke 1 design check(s)** that passed before:
+  • carriage_rail_clearance: min_clearance(carriage, rail) >= 3 → actual=1.0 (margin -2)
+```
+
+**Things worth poking at:**
+- `cat designs/gantry/assembly.yaml` — a cross-part rule lands in `assert:` on the assembly, so it's
+  checked when **anything** changes. A rule about one part alone
+  (`caliper chat gantry "it must be no taller than 40mm" --part carriage`) lands in
+  `designs/gantry/parts/carriage/spec.yaml` instead, where the author loop enforces it every revision.
+- Say something vague: `caliper chat gantry "make it look less chunky" --part carriage` — no proposal,
+  no invented number. But phrase a rule it *can't* measure — **"it must look less chunky"** — and it
+  tells you plainly that it can't be enforced, instead of letting you assume it stuck.
+- Ask for something that contradicts a rule you locked in
+  (`"it should sit within 1mm of the rail"` after locking in `>= 3mm`) and it names the clash:
+  *"It contradicts a rule you already locked in — carriage_rail_clearance. Both can't hold. Saying yes
+  replaces that older rule with this one."*
+- `cat designs/gantry/parts/carriage/history.jsonl` — every promotion records the **feedback it came
+  from**, so months later you can ask why a rule exists and get the sentence that created it.
+- `cat designs/gantry/pending.json` after an offer — the proposal is parked between turns. A new change
+  supersedes it; a rollback drops it. It's never silently accepted.
+
+**Why the two-step matters:** an over-constrained spec fails in confusing ways, and you have to know
+which rules exist. Nothing is ever promoted without you saying yes.
+
+**What this does NOT do yet:**
+- **No UI** (**CALI-32**) and **no streaming** (**CALI-31**) — same as CALI-29.
+- **No way to drop a rule by name** in chat. Accepting a *contradicting* rule retires the one it
+  replaces, but otherwise you edit `assembly.yaml` / the part's `spec.yaml` by hand.
+- **No decomposition** — "a gantry" still doesn't become a part list (**CALI-35**, M5).
 
 ---
 

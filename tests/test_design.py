@@ -259,3 +259,19 @@ def test_a_broken_part_is_named_not_fatal(store):
     report, errors = store.evaluate(tolerant=True)
     assert "bad" in errors and "boom" in errors["bad"]
     assert "good" not in errors
+
+
+def test_prompt_context_carries_design_rules_that_involve_the_part(store):
+    """CALI-30 promotes cross-part rules onto the assembly; the author has to SEE them."""
+    store.write_part("carriage", _script(), intent="the X carriage")
+    store.write_part("rail", _script(), intent="the rail")
+    store.assembly.assertions.append(
+        Assertion(id="carriage_clears_rail", expr="min_clearance(carriage, rail) >= 2.0"))
+    store.assembly.assertions.append(
+        Assertion(id="foot_height", expr="bbox(foot).dz <= 10"))
+    store.save()
+
+    ctx = store.prompt_context("carriage")
+    assert "DESIGN RULES IN FORCE" in ctx
+    assert "carriage_clears_rail: min_clearance(carriage, rail) >= 2.0" in ctx
+    assert "foot_height" not in ctx            # not about this part — don't crowd the prompt

@@ -485,6 +485,15 @@ class DesignStore:
             lines.append("\nMATES (measured relationships that must keep holding):")
             for m in self.assembly.mates:
                 lines.append(f"  - {m.id}: {m.kind} between {m.between[0]} and {m.between[1]}")
+        # Design-level assertions (CALI-30 promotes cross-part rules here). The author must SEE these,
+        # not just be judged by them afterwards — otherwise a revision can unknowingly violate a rule
+        # the human deliberately locked in, and we only find out once it's built.
+        relevant = [a for a in self.assembly.assertions
+                    if part_id is None or part_id in a.expr]
+        if relevant:
+            lines.append("\nDESIGN RULES IN FORCE (locked in by the human — do not violate):")
+            for a in relevant:
+                lines.append(f"  - {a.id}: {a.expr}")
         if part_id:
             spec = self.read_spec(part_id)
             if spec is not None and spec.assertions:

@@ -36,7 +36,7 @@ def gantry(store):
     """A rail and a carriage beside it, with a mate asserting they don't collide."""
     store.write_part("rail", _box(dx=200, dy=12), intent="the linear rail")
     store.write_part("carriage", _box(dx=40, dy=20, y=40), intent="the X carriage")
-    store.assembly.mates.append(Mate(id="carriage_clears_rail", between=["carriage", "rail"],
+    store.assembly.mates.append(Mate(id="carriage_misses_rail", between=["carriage", "rail"],
                                      kind="no_interference"))
     store.save()
     return store
@@ -177,10 +177,10 @@ def test_a_change_that_breaks_another_part_is_named_in_the_same_turn(gantry):
     pytest.importorskip("cadquery")
     res = chat.turn(gantry, "make it much deeper", scope="carriage", use_llm=False,
                     author=_author(_box(dx=40, dy=120, y=40)), max_rounds=2)
-    assert res.broke == ["carriage_clears_rail"]
+    assert res.broke == ["carriage_misses_rail"]
     assert not res.ok                                       # the part passes; the DESIGN does not
     assert "broke 1 design check" in res.reply
-    assert "carriage_clears_rail" in res.reply
+    assert "carriage_misses_rail" in res.reply
     assert "roll it back" in res.reply                      # and it offers the way out
 
 
@@ -190,7 +190,7 @@ def test_fixing_the_break_is_reported_too(gantry):
               author=_author(_box(dx=40, dy=120, y=40)), max_rounds=2)
     res = chat.turn(gantry, "pull it back off the rail", scope="carriage", use_llm=False,
                     author=_author(_box(dx=40, dy=20, y=40)), max_rounds=2)
-    assert res.fixed == ["carriage_clears_rail"] and res.ok
+    assert res.fixed == ["carriage_misses_rail"] and res.ok
     assert "still measures green" in res.reply
 
 
@@ -248,7 +248,7 @@ def test_the_revision_sees_the_design_context(gantry):
 
     chat.turn(gantry, "make it 60mm wide", scope="carriage", use_llm=False, author=author,
               max_rounds=2)
-    assert "carriage_clears_rail" in seen["intent"]      # knows what must keep holding
+    assert "carriage_misses_rail" in seen["intent"]      # knows what must keep holding
     assert "the linear rail" in seen["intent"]           # knows what else exists
     assert "WORLD COORDINATES" in seen["intent"]         # knows the frame it must build in
     assert seen["prior"] and "40" in seen["prior"]       # edits the real part, not from scratch
@@ -287,7 +287,7 @@ def test_revert_undoes_the_change_and_re_measures(gantry):
 
     res = chat.turn(gantry, "roll it back", scope="carriage", use_llm=False)
     assert res.action == "revert" and res.ok
-    assert res.fixed == ["carriage_clears_rail"]
+    assert res.fixed == ["carriage_misses_rail"]
     assert "rolled **carriage** back to v1" in res.reply
     assert gantry.evaluate().all_pass
 

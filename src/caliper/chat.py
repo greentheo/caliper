@@ -55,6 +55,9 @@ _BREAK_WORDS = {"it", "its", "that", "this", "for", "to", "with", "on", "in", "i
                 "so", "at", "of", "from", "under", "over", "between", "next", "then"}
 _ADD_VERBS = re.compile(r"\b(add|create|build|make|generate|model|design|insert|need)\b")
 _REVERT = re.compile(r"\b(roll(\s+\w+)?\s*back|revert|undo|go\s+back|put\s+it\s+back)\b")
+#: Feedback phrased as an obligation is a *rule*, not a one-off tweak — worth saying so even
+#: when Caliper can't turn it into a number (CALI-30).
+_OBLIGATION = re.compile(r"\b(must|always|never|needs? to|has to|should (?:never|always|not)?)\b")
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +67,7 @@ _REVERT = re.compile(r"\b(roll(\s+\w+)?\s*back|revert|undo|go\s+back|put\s+it\s+
 class Intent:
     """What the turn decided the message was asking for."""
 
-    action: str                       # "refine" | "author" | "revert" | "answer"
+    action: str                       # refine | author | revert | accept | decline | answer
     part: Optional[str] = None        # the part to revise, or the id for a new one
     intent: str = ""                  # for `author`: what the new part is
     source: str = "offline"           # "offline" | "llm" | "injected"
@@ -94,6 +97,7 @@ class TurnResult:
     broke: list[str] = field(default_factory=list)   # passed before, failing now
     fixed: list[str] = field(default_factory=list)   # failing before, passing now
     part_errors: dict = field(default_factory=dict)  # parts that wouldn't build
+    proposal: Any = None              # CALI-30: an assertion offered for confirmation
     events: list[Event] = field(default_factory=list)
     error: str = ""
 
@@ -330,7 +334,8 @@ def _emit(events: list[Event], on_event, kind: str, text: str, **data) -> None:
 
 
 def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, client=None,
-                max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None) -> TurnResult:
+                max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
+                use_llm: bool = True, drafter=None, promote_feedback: bool = True) -> TurnResult:
     """Revise a part **that lives inside a design** and re-measure the whole thing.
 
     The gap CALI-29 exists to close. Everything here is plumbing around one existing call —
@@ -378,15 +383,54 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     _emit(events, on_event, "measured", "measured the whole design", part=part_id)
     broke, fixed = _delta(before, after)
 
+    reply = _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb="revised")
+    proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
+                                       drafter=drafter, enabled=promote_feedback,
+                                       events=events, on_event=on_event)
+    if offer:
+        reply += "\n\n" + offer
+
     return TurnResult(action="refine", ok=bool(res.ok) and not broke, part=part_id, version=version,
                       part_report=res.report, report=after, broke=broke, fixed=fixed,
-                      part_errors=part_errors, events=events,
-                      reply=_compose(store, part_id, version, res, after, broke, fixed, part_errors,
-                                     verb="revised"))
+                      part_errors=part_errors, proposal=proposal, events=events, reply=reply)
+
+
+def _offer_promotion(store: DesignStore, part_id: str, feedback: str, *, use_llm: bool,
+                     client, drafter, enabled: bool, events: list[Event], on_event):
+    """Turn the feedback into a proposed test — or say honestly why it can't be one (CALI-30).
+
+    Silence is the default for vague tweaks: offering to enshrine "a bit wider" as a rule is noise.
+    But feedback phrased as an **obligation** ("it must clear the rail", "never thicker than 6mm") is a
+    rule the user is stating out loud, so when that can't be measured we say so rather than letting
+    them assume it stuck.
+    """
+    from . import promote
+
+    if not enabled:
+        return None, ""
+    promote.clear(store)                     # a new change supersedes any stale offer
+    try:
+        got = promote.draft(store, part_id, feedback, use_llm=use_llm, client=client, drafter=drafter)
+    except Exception as e:  # noqa: BLE001 — the user's edit already landed; an offer is a bonus
+        _emit(events, on_event, "error", f"could not draft an assertion: {e}", part=part_id)
+        return None, ""
+
+    if got.proposal is not None:
+        promote.park(store, got.proposal)
+        _emit(events, on_event, "proposed", f"{got.proposal.id}: {got.proposal.expr}",
+              part=part_id, assertion=got.proposal.id, holds_now=got.proposal.holds_now)
+        return got.proposal, got.proposal.describe()
+
+    if _OBLIGATION.search((feedback or "").lower()):
+        why = got.reason or "it isn't something Caliper can measure"
+        return None, (f"_You phrased that as a rule, but I can't make it one: {why}. "
+                      f"It's applied as a one-off change — a later revision could undo it._")
+    return None, ""
 
 
 def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, client=None,
-                max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None) -> TurnResult:
+                max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
+                use_llm: bool = True, drafter=None, promote_feedback: bool = True) -> TurnResult:
     """Author a brand-new part into the design, then measure the design with it in place."""
     from . import authoring
 
@@ -417,11 +461,48 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     _emit(events, on_event, "measured", "measured the whole design", part=part_id)
     broke, fixed = _delta(before, after)
 
+    reply = _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb="built")
+    proposal, offer = _offer_promotion(store, part_id, intent, use_llm=use_llm, client=client,
+                                       drafter=drafter, enabled=promote_feedback,
+                                       events=events, on_event=on_event)
+    if offer:
+        reply += "\n\n" + offer
+
     return TurnResult(action="author", ok=bool(res.ok) and not broke, part=part_id, version=version,
                       part_report=res.report, report=after, broke=broke, fixed=fixed,
-                      part_errors=part_errors, events=events,
-                      reply=_compose(store, part_id, version, res, after, broke, fixed, part_errors,
-                                     verb="built"))
+                      part_errors=part_errors, proposal=proposal, events=events, reply=reply)
+
+
+def _accept(store: DesignStore, proposal, events: list[Event], on_event) -> TurnResult:
+    """Lock the proposed assertion in. From here the engine enforces it, not the conversation."""
+    from . import promote
+
+    where = promote.accept(store, proposal)
+    _emit(events, on_event, "wrote", f"promoted {proposal.id}", part=proposal.part,
+          assertion=proposal.id, level=proposal.level)
+    lines = [f"\u2713 Locked in on {where}: **{proposal.id}** — `{proposal.expr}`",
+             "Every future revision is measured against it; if something breaks it, I'll say so."]
+    for _, cid, cexpr in proposal.conflicts:
+        lines.append(f"\u21ba Retired **{cid}** (`{cexpr}`) — it couldn't hold alongside this one.")
+    if not proposal.holds_now:
+        lines.append("\u26a0 Note: it does **not** hold right now — so the design reads as failing until "
+                     "we fix it. Tell me to have a go.")
+    report, part_errors = _measure_design(store)
+    return TurnResult(action="accept", ok=proposal.holds_now, part=proposal.part,
+                      report=report, part_errors=part_errors, proposal=proposal,
+                      events=events, reply="\n".join(lines))
+
+
+def _decline(store: DesignStore, proposal, events: list[Event], on_event) -> TurnResult:
+    """Leave it as a one-off edit — and record that the choice was deliberate."""
+    from . import promote
+
+    promote.decline(store, proposal)
+    _emit(events, on_event, "wrote", f"declined {proposal.id}", part=proposal.part)
+    return TurnResult(action="decline", ok=True, part=proposal.part, proposal=proposal,
+                      events=events,
+                      reply=(f"Fine — left as a one-off change. `{proposal.expr}` is **not** enforced, "
+                             f"so a later revision may undo it."))
 
 
 def revert_part(store: DesignStore, part_id: str, *, events=None, on_event=None) -> TurnResult:
@@ -442,6 +523,9 @@ def revert_part(store: DesignStore, part_id: str, *, events=None, on_event=None)
                           error=f"{part_id} has only one version",
                           reply=f"'{part_id}' has only one version — there's nothing to roll back to.")
 
+    from . import promote
+
+    promote.clear(store)                      # the change the offer referred to is being undone
     before, _ = _measure_design(store)
     target = versions[-2]
     version = store.restore(part_id, target)
@@ -536,14 +620,34 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
 # ---------------------------------------------------------------------------
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
          use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
-         on_event=None) -> TurnResult:
+         on_event=None, drafter=None, promote_feedback: bool = True) -> TurnResult:
     """One conversational turn: route the message, make the move, measure the whole design, reply.
 
-    ``scope`` is the part the user clicked (``None`` = the design). ``author``/``classifier`` are
-    injectable so the whole turn is testable without a key; ``on_event`` receives progress as it
-    happens (CALI-31 will stream these to the chat).
+    ``scope`` is the part the user clicked (``None`` = the design). ``author``/``classifier``/
+    ``drafter`` are injectable so the whole turn is testable without a key; ``on_event`` receives
+    progress as it happens (CALI-31 will stream these to the chat).
+
+    A **parked assertion proposal** (CALI-30) owns the next turn if the message answers it — so "yes"
+    confirms the test rather than being misread as a request to change geometry. Set
+    ``promote_feedback=False`` to suppress the offers entirely.
     """
+    from . import promote
+
     events: list[Event] = []
+
+    # A parked proposal owns the next turn if the message answers it — deterministic, no LLM round
+    # trip, and it keeps "yes" from being read as a request to change geometry.
+    parked = promote.pending(store)
+    if parked is not None:
+        verdict = promote.reads_as_yes(message)
+        if verdict is not None:
+            result = (_accept(store, parked, events, on_event) if verdict
+                      else _decline(store, parked, events, on_event))
+            store.append_log({"kind": "message", "text": message, "scope": scope,
+                              "action": result.action, "part": result.part, "routed_by": "pending"})
+            _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)
+            return result
+
     intent = classify(store, message, scope, use_llm=use_llm, client=client, classifier=classifier)
     _emit(events, on_event, "classified", f"{intent.action}"
           + (f" → {intent.part}" if intent.part else ""),
@@ -554,12 +658,14 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
 
     if intent.action == "refine" and intent.part:
         result = refine_part(store, intent.part, message, author=author, client=client,
-                             max_rounds=max_rounds, events=events, on_event=on_event)
+                             max_rounds=max_rounds, events=events, on_event=on_event,
+                             use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
     elif intent.action == "revert" and intent.part:
         result = revert_part(store, intent.part, events=events, on_event=on_event)
     elif intent.action == "author" and intent.part:
         result = author_part(store, intent.part, intent.intent or message, author=author,
-                             client=client, max_rounds=max_rounds, events=events, on_event=on_event)
+                             client=client, max_rounds=max_rounds, events=events, on_event=on_event,
+                             use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
     else:
         result = answer(store, message, scope=scope or intent.part, note=intent.note, events=events)
 

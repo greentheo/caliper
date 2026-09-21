@@ -477,7 +477,7 @@ The loop behind the conversation: a message, optionally scoped to a clicked part
   verb for, and "roll it back" would have routed to *refine*. `DesignStore.restore` makes the undo a new
   revision, so it lands in the history rather than erasing it.
 
-### CALI-30 — Feedback → assertion promotion  · P1 · M4 · 🧊 backlog
+### CALI-30 — Feedback → assertion promotion  · P1 · M4 · ✅ done (`pending`)
 The idea that makes the history worth keeping: measurable feedback becomes a permanent test.
 **Acceptance:**
 - Given feedback + part context, draft an assertion in the **existing** expr vocabulary (§4 design spec).
@@ -487,6 +487,10 @@ The idea that makes the history worth keeping: measurable feedback becomes a per
   `spec.assert` and enforced on every later build; declined → logged as a plain edit.
 - Non-measurable feedback ("less chunky") is honestly labelled unenforceable, not faked into a number.
 - Tests: promotion round-trip, invalid-expr rejection, decline path, regression caught on a later revision.
+- _Added during the task, driven by the live run:_ promoted **design-level rules are shown to the
+  author** (they were enforced but invisible, so a revision could violate a rule the human locked in);
+  a proposal that doesn't hold now states that **the edit missed the ask**; and **conflict detection**
+  names a rule the new one contradicts, retiring it on accept.
 
 ### CALI-31 — Streaming (job + SSE)  · P1 · M4 · 🧊 backlog
 Authoring is many LLM round-trips over tens of seconds; the server is synchronous POST today, so the chat
