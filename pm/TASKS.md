@@ -477,7 +477,7 @@ The loop behind the conversation: a message, optionally scoped to a clicked part
   verb for, and "roll it back" would have routed to *refine*. `DesignStore.restore` makes the undo a new
   revision, so it lands in the history rather than erasing it.
 
-### CALI-30 — Feedback → assertion promotion  · P1 · M4 · ✅ done (`pending`)
+### CALI-30 — Feedback → assertion promotion  · P1 · M4 · ✅ done (`1855322`)
 The idea that makes the history worth keeping: measurable feedback becomes a permanent test.
 **Acceptance:**
 - Given feedback + part context, draft an assertion in the **existing** expr vocabulary (§4 design spec).

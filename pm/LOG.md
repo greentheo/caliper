@@ -59,7 +59,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   then offered `carriage_rail_clearance: min_clearance(carriage, rail) >= 3` (✓ holds now, measured 6) →
   *"yes, lock it in"* → promoted onto the design → *"it should sit within 1mm of the rail"* → the reply
   named the contradiction with the rule just locked in and offered to replace it.
-- Commit: `pending`
+- Commit: `1855322`
 
 ---
 
