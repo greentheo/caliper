@@ -27,7 +27,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   the box's centre sits ~40 in behind the receiver — the empty box + frame (~110 lb est.) already puts ~3,800
   in·lb there vs ~2,000–2,500 for a typical Class II rating; departure angle ~8° at a 12 in floor.
 - Tests: +2 (`test_aero`). 77 passed across aero/chat/API.
-- Commit: `pending`
+- Commit: `990fe80`
 
 ---
 
