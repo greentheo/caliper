@@ -37,7 +37,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - **Depends on whittle's uncommitted `physics-and-slider` branch** (installed editable into the caliper env
   — dry-run clean, adds scikit-image only). Kept on its own branch until that lands.
 - **Tests:** +21 (`test_aero` 15 incl. two real studies at minimal effort, API 4, chat 1, worker via aero).
-- Commit: `pending`
+- Commit: `abb1d59`
 
 ---
 
