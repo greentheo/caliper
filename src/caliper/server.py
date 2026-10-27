@@ -517,6 +517,17 @@ def create_app():
             raise HTTPException(status_code=404, detail="no STL for that run")
         return FileResponse(path, media_type="model/stl", filename=f"caliper_{run_id}.stl")
 
+    # M4 — the design session: designs, chat turns, clarify, jobs/SSE, whittle (CALI-31/32/33/38)
+    from .design_api import router as design_router
+
+    app.include_router(design_router())
+
+    # the M2 control panel moved to /classic when the design session became the home page (CALI-32)
+    @app.get("/classic")
+    def classic():
+        return FileResponse(os.path.join(STATIC_DIR, "classic.html"),
+                            headers={"Cache-Control": "no-store"})
+
     # the front end (registered last so /api/* wins)
     if os.path.isdir(STATIC_DIR):
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

@@ -275,3 +275,101 @@ def test_prompt_context_carries_design_rules_that_involve_the_part(store):
     assert "DESIGN RULES IN FORCE" in ctx
     assert "carriage_clears_rail: min_clearance(carriage, rail) >= 2.0" in ctx
     assert "foot_height" not in ctx            # not about this part — don't crowd the prompt
+
+
+# --- mesh revisions: a station brought back from whittle (CALI-38) -------
+def _stl_box(extents=(50, 20, 10)):
+    import io
+
+    import trimesh
+
+    buf = io.BytesIO()
+    trimesh.creation.box(extents=extents).export(buf, file_type="stl")
+    return buf.getvalue()
+
+
+def test_a_mesh_revision_becomes_the_parts_current_geometry(store):
+    store.write_part("box", _script(), intent="the cargo box")
+    v = store.write_mesh_part("box", _stl_box(), extra={"station": 3})
+    assert v == 2
+    assert store.design.part("box").origin == "whittled"
+    assert [p.source for p in store.assembly.parts] == [os.path.join("parts", "box", "part.stl")]
+    assert not store.is_scripted("box")
+    assert os.path.exists(os.path.join(store.version_dir("box", 2), "part.stl"))
+    last = store.history("box")[-1]
+    assert (last["action"], last["geometry"], last["station"]) == ("whittle", "mesh", 3)
+
+
+def test_the_script_survives_underneath_a_mesh_revision(store):
+    store.write_part("box", _script(40))
+    store.write_mesh_part("box", _stl_box())
+    assert "40" in store.read_script("box")          # not deleted — just not current
+
+
+def test_rolling_back_a_mesh_revision_restores_the_parametric_part(store):
+    store.write_part("box", _script(40), intent="the cargo box")
+    store.write_mesh_part("box", _stl_box())
+    v = store.restore("box", 1)
+    assert v == 3 and store.is_scripted("box")
+    assert store.design.part("box").origin == "authored"
+    assert [p.source for p in store.assembly.parts] == [os.path.join("parts", "box", "part.py")]
+
+
+def test_restoring_a_mesh_version_brings_the_mesh_back(store):
+    store.write_part("box", _script(40))
+    store.write_mesh_part("box", _stl_box())
+    store.restore("box", 1)
+    store.restore("box", 2)                           # forward again, to the carved shape
+    assert not store.is_scripted("box") and store.design.part("box").origin == "whittled"
+
+
+def test_a_new_script_revision_after_a_mesh_makes_it_parametric_again(store):
+    store.write_part("box", _script(40))
+    store.write_mesh_part("box", _stl_box())
+    store.write_part("box", _script(60), action="refine")
+    assert store.is_scripted("box") and store.design.part("box").origin == "authored"
+
+
+def test_a_junk_mesh_is_refused(store):
+    with pytest.raises(ValueError):
+        store.write_mesh_part("box", b"not an stl")
+
+
+def test_display_units_round_trip_and_reach_the_author(store):
+    store.design.display_units = "in"
+    store.save()
+    again = DesignStore.load(store.root)
+    assert again.design.display_units == "in" and again.design.units == "mm"
+    ctx = again.prompt_context()
+    assert "THE HUMAN WORKS IN INCHES" in ctx and "never model in inches" in ctx
+
+
+def test_old_designs_without_display_units_still_load(store):
+    import yaml
+
+    data = yaml.safe_load(open(store.design_path))
+    data.pop("display_units", None)
+    open(store.design_path, "w").write(yaml.safe_dump(data))
+    assert DesignStore.load(store.root).design.display_units == "mm"
+
+
+def test_part_stl_exports_the_part_where_it_sits(store):
+    pytest.importorskip("cadquery")
+    import io
+
+    import trimesh
+
+    store.write_part("box", _script(40))
+    mesh = trimesh.load(io.BytesIO(store.part_stl("box")), file_type="stl")
+    assert mesh.is_watertight
+    assert mesh.extents[0] == pytest.approx(40, abs=0.1)
+
+
+def test_a_mesh_part_measures_like_any_other(store):
+    pytest.importorskip("cadquery")
+    store.write_part("rail", _script(40))
+    store.write_mesh_part("box", _stl_box())
+    store.assembly.assertions.append(Assertion(id="any", expr="max_interference() >= 0"))
+    store.save()
+    report, errors = store.evaluate(tolerant=True)
+    assert not errors and report.all_pass

@@ -313,3 +313,23 @@ def test_the_break_reply_offers_a_verb_that_exists(gantry):
     assert "roll it back" in res.reply
     follow_up = chat.offline_classify(gantry, "roll it back", scope="carriage")
     assert follow_up.action == "revert"
+
+
+def test_a_whittled_part_is_not_revised_underneath_its_carving(store):
+    """Revising part.py under a whittled mesh would silently discard the carving."""
+    import io
+
+    import trimesh
+
+    store.write_part("box", _box(), intent="the cargo box")
+    buf = io.BytesIO()
+    trimesh.creation.box(extents=(40, 20, 10)).export(buf, file_type="stl")
+    store.write_mesh_part("box", buf.getvalue())
+    res = chat.refine_part(store, "box", "make it taller")
+    assert not res.ok and "whittle's carved shape" in res.reply and "roll it back" in res.reply
+    assert store.design.part("box").version == 2       # nothing was written
+
+
+def test_the_reply_text_is_logged_so_a_reload_can_redraw_the_conversation(gantry):
+    res = chat.turn(gantry, "what parts exist?", use_llm=False)
+    assert gantry.log()[-1]["reply"] == res.reply

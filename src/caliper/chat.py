@@ -351,11 +351,18 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
         return TurnResult(action="error", ok=False, part=part_id, events=events,
                           error=f"unknown part {part_id!r}",
                           reply=f"There's no part called '{part_id}' in this design.")
-    if entry.origin == "imported" or not os.path.exists(store.script_path(part_id)):
+    if not store.is_scripted(part_id):
+        # Revising the part.py underneath a whittled mesh would silently throw the carving away —
+        # so say what the part currently is, and how to get back to something revisable.
+        if entry.origin == "whittled":
+            reply = (f"'{part_id}' is currently whittle's carved shape (v{entry.version}) — a mesh, "
+                     f"with no script behind it to revise. Say **roll it back** to return to the "
+                     f"parametric version, then ask for the change there.")
+        else:
+            reply = (f"'{part_id}' is imported geometry — there's no script behind it to revise. "
+                     f"Re-author it as a new part if you want it to change.")
         return TurnResult(action="error", ok=False, part=part_id, events=events,
-                          error=f"{part_id} has no script to revise",
-                          reply=(f"'{part_id}' is imported geometry — there's no script behind it to "
-                                 f"revise. Re-author it as a new part if you want it to change."))
+                          error=f"{part_id} has no script to revise", reply=reply)
 
     before, _ = _measure_design(store)
     spec = _working_spec(store, part_id, entry.intent)
@@ -645,6 +652,8 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
                       else _decline(store, parked, events, on_event))
             store.append_log({"kind": "message", "text": message, "scope": scope,
                               "action": result.action, "part": result.part, "routed_by": "pending"})
+            store.append_log({"kind": "reply", "action": result.action, "part": result.part,
+                              "ok": result.ok, "reply": result.reply})
             _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)
             return result
 
@@ -670,8 +679,10 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         result = answer(store, message, scope=scope or intent.part, note=intent.note, events=events)
 
     _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)
+    # the reply TEXT is logged too, so a reloaded page can redraw the conversation as it was
     store.append_log({"kind": "reply", "action": result.action, "part": result.part,
                       "version": result.version, "ok": result.ok,
-                      "broke": result.broke, "fixed": result.fixed,
+                      "broke": result.broke, "fixed": result.fixed, "reply": result.reply,
+                      **({"proposal": result.proposal.to_dict()} if result.proposal else {}),
                       **({"error": result.error} if result.error else {})})
     return result

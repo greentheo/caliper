@@ -74,6 +74,13 @@ def _write_atomic(path: str, text: str) -> None:
     os.replace(tmp, path)
 
 
+def _write_bytes_atomic(path: str, data: bytes) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
 def _append_jsonl(path: str, entry: dict) -> dict:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "a") as f:
@@ -124,7 +131,7 @@ class DesignPart(_Base):
     id: str
     intent: str = ""
     version: int = 0
-    origin: Literal["authored", "adopted", "imported"] = "authored"
+    origin: Literal["authored", "adopted", "imported", "whittled"] = "authored"
     created: str = Field(default_factory=_now)
     updated: str = Field(default_factory=_now)
 
@@ -135,7 +142,11 @@ class Design(_Base):
     slug: str
     name: str
     prompt: str = ""
-    units: str = "mm"
+    units: str = "mm"                     # MODEL units — geometry, measurements and whittle are mm
+    #: How the human talks and reads numbers. Geometry stays mm; the UI converts for display and the
+    #: author is told to convert what the human says. Kept separate from ``units`` on purpose: an
+    #: author told "UNITS: in" would happily model in inches and every measurement would be off 25x.
+    display_units: Literal["mm", "in"] = "mm"
     machine: Optional[str] = None
     requirements: list[Requirement] = Field(default_factory=list)
     parts: list[DesignPart] = Field(default_factory=list)
@@ -202,6 +213,28 @@ class DesignStore:
 
     def script_path(self, part_id: str) -> str:
         return os.path.join(self.part_dir(part_id), "part.py")
+
+    def mesh_path(self, part_id: str) -> str:
+        return os.path.join(self.part_dir(part_id), "part.stl")
+
+    def _script_source(self, part_id: str) -> str:
+        return os.path.join("parts", part_id, "part.py")
+
+    def _mesh_source(self, part_id: str) -> str:
+        return os.path.join("parts", part_id, "part.stl")
+
+    def is_scripted(self, part_id: str) -> bool:
+        """Is this part's *current* revision a script we can revise (vs. a mesh or imported geometry)?"""
+        part = next((p for p in self.assembly.parts if p.id == part_id), None)
+        return (part is not None and part.source == self._script_source(part_id)
+                and os.path.exists(self.script_path(part_id)))
+
+    def _set_source(self, part_id: str, source: str) -> None:
+        part = next((p for p in self.assembly.parts if p.id == part_id), None)
+        if part is None:
+            self.assembly.parts.append(Part(id=part_id, source=source))
+        else:
+            part.source = source
 
     def spec_path(self, part_id: str) -> str:
         return os.path.join(self.part_dir(part_id), "spec.yaml")
@@ -332,11 +365,10 @@ class DesignStore:
             entry.updated = _now()
             if intent:
                 entry.intent = intent
+            if entry.origin == "whittled":    # a script revision makes it parametric again
+                entry.origin = "authored"
 
-        if not any(p.id == part_id for p in self.assembly.parts):
-            self.assembly.parts.append(
-                Part(id=part_id, source=os.path.join("parts", part_id, "part.py"))
-            )
+        self._set_source(part_id, self._script_source(part_id))
         self.save()
 
         self.append_history(part_id, {
@@ -344,6 +376,45 @@ class DesignStore:
             **({"feedback": feedback} if feedback else {}),
             **({"intent": intent} if intent else {}),
             **({"measured": measured} if measured else {}),
+            **({"result": ("all_pass" if report.get("all_pass") else "fail")} if report else {}),
+            **(extra or {}),
+        })
+        return version
+
+    def write_mesh_part(self, part_id: str, stl: bytes, *, origin: str = "whittled",
+                        action: str = "whittle", feedback: Optional[str] = None,
+                        report: Optional[dict] = None, extra: Optional[dict] = None) -> int:
+        """Make a **mesh** the part's current revision — e.g. a station brought back from whittle.
+
+        The part's ``part.py`` is left where it is and every earlier revision stays in ``versions/``,
+        so :meth:`restore` (or "roll it back" in chat) returns to the parametric version. The history
+        records the switch, so it's never a mystery why a part stopped being revisable by script.
+        """
+        if not _ID_OK.match(part_id):
+            raise ValueError(f"part id {part_id!r} must be a valid identifier (letters/digits/_)")
+        if not stl or len(stl) < 84:
+            raise ValueError("that isn't an STL — too short to hold even a header")
+
+        entry = self.design.part(part_id)
+        version = (entry.version if entry else 0) + 1
+        os.makedirs(self.part_dir(part_id), exist_ok=True)
+        _write_bytes_atomic(self.mesh_path(part_id), stl)
+        vdir = self.version_dir(part_id, version)
+        os.makedirs(vdir, exist_ok=True)
+        _write_bytes_atomic(os.path.join(vdir, "part.stl"), stl)
+        if report is not None:
+            _write_atomic(os.path.join(vdir, "report.json"), json.dumps(report, indent=2, default=str))
+
+        if entry is None:
+            entry = DesignPart(id=part_id, version=version, origin=origin)
+            self.design.parts.append(entry)
+        else:
+            entry.version, entry.origin, entry.updated = version, origin, _now()
+        self._set_source(part_id, self._mesh_source(part_id))
+        self.save()
+        self.append_history(part_id, {
+            "kind": "revision", "action": action, "version": version, "geometry": "mesh",
+            **({"feedback": feedback} if feedback else {}),
             **({"result": ("all_pass" if report.get("all_pass") else "fail")} if report else {}),
             **(extra or {}),
         })
@@ -422,12 +493,22 @@ class DesignStore:
 
     def restore(self, part_id: str, version: int) -> int:
         """Roll a part back to an earlier snapshot — as a *new* revision, so the rollback is itself history."""
-        src = os.path.join(self.version_dir(part_id, version), "part.py")
-        if not os.path.exists(src):
-            raise FileNotFoundError(f"{part_id} has no version v{version:03d}")
-        with open(src) as f:
-            script = f.read()
-        return self.write_part(part_id, script, action="restore", extra={"restored_from": version})
+        vdir = self.version_dir(part_id, version)
+        script_src, mesh_src = os.path.join(vdir, "part.py"), os.path.join(vdir, "part.stl")
+        if os.path.exists(script_src):
+            with open(script_src) as f:
+                script = f.read()
+            return self.write_part(part_id, script, action="restore",
+                                   extra={"restored_from": version})
+        if os.path.exists(mesh_src):
+            with open(mesh_src, "rb") as f:
+                stl = f.read()
+            entry = self.design.part(part_id)
+            return self.write_mesh_part(part_id, stl, action="restore",
+                                        origin=(entry.origin if entry and entry.origin != "authored"
+                                                else "whittled"),
+                                        extra={"restored_from": version})
+        raise FileNotFoundError(f"{part_id} has no version v{version:03d}")
 
     # --- history / log -----------------------------------------------------
     def append_history(self, part_id: str, entry: dict) -> dict:
@@ -443,6 +524,28 @@ class DesignStore:
 
     def log(self) -> list[dict]:
         return _read_jsonl(self.log_path)
+
+    def part_geometry(self, part_id: str):
+        """Build/load one part as it sits in the design (posed, B-rep kept for scripts)."""
+        from .assembly import _build_py_part, _resolve_source
+        from .measure import Geometry
+
+        part = next((p for p in self.assembly.parts if p.id == part_id), None)
+        if part is None:
+            raise KeyError(f"unknown part {part_id!r}")
+        path = _resolve_source(part.source, self.root)
+        if path.endswith(".py"):
+            return _build_py_part(path, part.position, part.rotation)
+        return Geometry.from_stl_posed(path, part.position, part.rotation)
+
+    def part_stl(self, part_id: str) -> bytes:
+        """The part as a binary STL, in design (world) coordinates."""
+        import io
+
+        mesh = self.part_geometry(part_id).require_mesh()
+        buf = io.BytesIO()
+        mesh.export(buf, file_type="stl")
+        return buf.getvalue()
 
     # --- evaluation --------------------------------------------------------
     def evaluate(self, tolerant: bool = False):
@@ -468,7 +571,10 @@ class DesignStore:
         grows (conversational spec §2).
         """
         lines = [f"DESIGN: {self.design.name}", f"GOAL: {self.design.prompt}",
-                 f"UNITS: {self.design.units}"]
+                 f"UNITS: {self.design.units} (model every dimension in {self.design.units})"]
+        if self.design.display_units == "in":
+            lines.append("THE HUMAN WORKS IN INCHES: convert every dimension they give "
+                         "(1 in = 25.4 mm) — never model in inches.")
         if self.design.machine:
             lines.append(f"MACHINE: {self.design.machine}")
         if self.design.requirements:

@@ -42,6 +42,14 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **The design session, in the browser (CALI-31/32/33).** `make serve` → **http://127.0.0.1:8000** now
+  opens a **viewport + a conversation**: describe what you're building, answer a few questions, then
+  **click any part and talk about it**. The inspector shows its size (inches or mm), the rules locked in
+  on it, and its history. Long turns stream their progress. The old control panel lives at `/classic`.
+- 🆕 **whittle bridge (CALI-38).** With whittle running (`python -m whittle.gui` in `~/githubrepo/whittle`),
+  select a part → **Send to whittle** → a slider of shapes with the drag they save, in **kWh per 100 mi** →
+  click one to see it in place → **Bring this back**. "Roll it back" returns to the parametric part.
+
 - 🆕 **Feedback becomes a test (CALI-30, M4).** Say *"it must clear the rail by at least 2mm"* and
   Caliper doesn't just make the change — it drafts the **assertion** that locks it in
   (`min_clearance(carriage, rail) >= 2.0`), **validates that it actually measures**, and offers it. Say
@@ -98,6 +106,62 @@ make run-llm    INTENT="a sturdy 80mm bracket for 3030 with countersunk M6 holes
 make refine-llm SOURCE=runs/run_0000 INSTRUCTION="round the outer corners and lighten it"
 # equivalently:  make refine LLM=1 SOURCE=... INSTRUCTION=...
 ```
+
+---
+
+## 🆕 CALI-31/32/33/38 — design in the browser, study it in whittle
+
+**What's new:** the design session is the home page, and a part can go to **whittle** for an aero or
+load study and come back. Built for Theo's hitch cargo box behind the Leaf.
+
+**Start both tools:**
+
+```bash
+make serve
+```
+
+```bash
+cd ~/githubrepo/whittle && .venv/bin/python -m whittle.gui --no-browser
+```
+
+Open **http://127.0.0.1:8000**. The dot top-right goes green when whittle is reachable.
+
+**Walkthrough — the hitch box:**
+1. **+ New design** → describe it, e.g. *"a cargo box on the trailer hitch behind my Nissan Leaf: 74 in
+   wide, 41 in high, 39 in deep, 18 in behind the car, on a 2 in square steel tube frame that slides into
+   the receiver; foam covered in poor man's fiberglass, with a door and a roof fan."* Because you wrote
+   inches, it shows inches (the model is always mm).
+2. **Answer the questions** (receiver height, hatch clearance, …) or **Just build it** — blanks become
+   *assumed* requirements, labelled as such, and every part is built against them.
+3. **Build parts by talking:** *"build a block standing in for the rear of the Leaf: 70.5 in wide, from
+   6 in to 61.4 in off the ground, its rear face at x = 0, extending forward 60 in"* → then *"now the box"* →
+   then *"the frame"*. Coordinates: the car drives **+X**, **Z up**, ground at z = 0, y = 0 on the centreline.
+4. Click the Leaf block → tick **treat as a reference** (it turns translucent grey).
+5. Click the box → in the inspector **whittle** panel: study *airflow*, carve **the tail only** (the default
+   once something is a reference), 65 mph, 20% → **Send to whittle**. ~2–3 minutes, progress streams.
+6. Read the table — the **saved lbf** and **kWh/100mi** columns are the ones to act on. Click a row to see
+   that shape in place (the original box as a blue ghost). **Bring this back as box** to adopt it; if it
+   grew anywhere, the chat says so. **"roll it back"** in chat returns to the parametric box.
+
+**What it found, live, for that box (tail only, 65 mph):** about **8 lbf saved ≈ 1.7 kWh per 100 mi**
+from tapering the rear ~8% of the box, after which more carving stops helping. Free air claims far more
+(~107 lbf) but gets it by rounding the *front* — which, behind the car, sits in its wake.
+
+**Things worth knowing:**
+- whittle's drag model **ranks** shapes well; absolute numbers are good to perhaps 30%, and it can't
+  model the car's wake yet. That's why the tail-only study exists.
+- whittle rebuilds parts on a voxel grid, so its shapes come back slightly bigger (~1 in at this size).
+  "removed" is measured against **your** part, so station 0 may read negative; bringing one back reports
+  the growth.
+- A whittled part is a **mesh** — chat won't revise it (that would throw the carving away); roll back first.
+- `designs/<slug>/whittle/<run>/` holds every station STL and the run record.
+
+**What this does NOT do yet:**
+- **Shelter behind the car** — needs whittle to accept obstacle bodies (raised with the whittle-agent).
+- **A parametric shape back** (CALI-39) — today a station returns as a mesh; the parametric loop
+  (Caliper's parameters, whittle's drag score, Caliper's optimizer) is next.
+- The **frame's** strength is not a whittle job — 2 in steel tube walls are far finer than its voxels.
+  That's beam math (moment at the receiver), and Caliper can assert it.
 
 ---
 

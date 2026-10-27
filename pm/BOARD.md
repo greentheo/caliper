@@ -3,18 +3,17 @@
 Kanban of every task. One line per card: `CALI-N — title · priority · milestone`.
 Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections as state changes.
 
-_Last updated: 2026-09-18 (**M4**: CALI-28 Design + CALI-29 chat turns + CALI-30 feedback→assertion shipped; see [`specs/caliper-conversational-spec.md`](../specs/caliper-conversational-spec.md))_
+_Last updated: 2026-10-27 (**M4 complete** in the browser + whittle bridge (CALI-31/32/33/38); see [`specs/caliper-conversational-spec.md`](../specs/caliper-conversational-spec.md))_
 
-## 🎯 M4 — the design session (current milestone)
+## ✅ M4 — the design session (complete)
 > The engine works; the UI is a control panel for it. M4 makes the product a **viewport + a conversation**.
 > Decisions (Theo, 2026-09-18): chat-first on a **single part** before decomposition · old panel **demoted**
 > to an Advanced drawer, not deleted · assertion promotion **proposed & confirmed**, never silent.
 
-- CALI-31 — Streaming: job + SSE so the chat narrates long authoring runs · P1 · M4
-- CALI-32 — Front end: viewport + chat as default; panel → Advanced drawer · P1 · M4
-- CALI-33 — Clarify round → stored requirements (ask once, never re-ask) · P1 · M4
+- _(all shipped — CALI-28…33 + CALI-38, see Done)_
 
 ## 🚀 M5 — whole machines from one prompt (after M4)
+- CALI-39 — Parametric aero loop: Caliper owns `build(params)`, whittle scores, optimizer searches → a parametric part back, not a mesh · P1 · M5
 - CALI-35 — Decomposition planner: prompt → assembly skeleton (parts + interfaces + asserts), reviewed before authoring · P0 · M5
 - CALI-36 — Nested sub-assemblies (descend into a part that is itself a design) · P1 · M5
 - CALI-37 — Feature-level selection (per-face export + face-id round-trip) · P2 · M5
@@ -33,7 +32,9 @@ _Last updated: 2026-09-18 (**M4**: CALI-28 Design + CALI-29 chat turns + CALI-30
 ## 🔨 In Progress
 - _(none)_
 
-## ✅ Done — Milestones M0 + M1 + M2 + M3 complete 🎉
+## ✅ Done — Milestones M0–M3 + M4 (the design session) complete 🎉
+- CALI-38 — whittle bridge · P1 · M4 · _2026-10-27 · Caliper drives Theo's **whittle** over its local JSON API (no whittle changes): send a part with the setup pre-filled, stream progress, file every station with the design, **bring one back** as the part's revision (script survives; roll back returns to it). **Carve the tail only** for a part riding behind something. Removal **measured** against the part (whittle's stations are voxel remeshes ~½ voxel larger — found live), growth reported on bring-back, savings in **kWh/100 mi**. Dropped after a live test: a frozen car stand-in in the same upload makes whittle carve nothing — needs obstacle support in whittle._
+- CALI-31 + CALI-32 + CALI-33 — The design session in the browser · P1 · M4 · _2026-10-27 · **The home page is now a viewport + a conversation** (old panel at `/classic`). Click a part to talk about it; inspector shows size (in/mm), rules, history, whittle. Chat turns run as **jobs streamed over SSE** with per-design write locks (no lost updates). New designs open with a **bounded clarify round** whose answers become permanent requirements (blanks recorded as *assumed*). Inches shown when you speak inches; geometry stays mm._
 - CALI-30 — Feedback → assertion promotion · P1 · M4 · _2026-09-18 · **the idea M4 rests on**: measurable feedback becomes a **test**, enforced forever by the existing evaluator. `promote.py` drafts (LLM, with deterministic patterns under it), **validates by actually evaluating** against current geometry — a probe that doesn't exist or an expr that throws is never offered — parks it in `pending.json`, and the **next turn** accepts or declines. Two levels: a one-part rule → the part's `spec.assert` (author loop enforces it), a cross-part rule → `assembly.assertions` (checked when anything changes). Unmeasurable feedback phrased as an obligation is **labelled**, not faked. `turn()` short-circuits on a parked proposal so "yes" isn't misread as a geometry request. **The live run drove two fixes**: promoted design rules are now **visible to the author** (they were enforced but unseen — the author then moved a part to 4mm instead of not at all), and a proposal that doesn't hold now says **the change didn't achieve what you asked**. Plus **conflict detection**: a rule contradicting one you locked in is named, and accepting retires it. 265 passed._
 - CALI-29 — Chat turn handler · P0 · M4 · _2026-09-18 · `chat.turn(store, message, scope)` — **scope is the selection** (unscoped = the design, scoped = the clicked part). Closes the real gap: **there was no code path to refine a part inside an assembly**. Revisions are handed the design context (siblings, mates, enforced assertions, feedback tail) on a *copy* of the spec, told to build in world coords, and **every change re-measures the WHOLE design** — the reply names what it broke, by id, with the number. Routing = Claude with a deterministic fallback that degrades instead of crashing, and **asks instead of guessing** when ambiguous. Added `revert` mid-task because the break reply offered a rollback the handler couldn't perform. A revision that never builds is never written. `caliper chat`. **Verified live**: widened a carriage (kept its world pose), then broke `carriage_clears_rail` at interference=7200 and got told, then rolled it back to green. 217 passed._
 - CALI-28 — Design object + store · P0 · M4 · _2026-09-18 · **the M4 spine**: `designs/<slug>/` holds the **root prompt**, the **requirements clarified once**, a **part tree**, and per part a **feedback history** + a snapshot of **every revision**. It *is* an assembly underneath (sources relative to the design root), so `evaluate_assembly`/`assemble`/`insert` consume a design unchanged and **a one-part design is a one-part assembly** — no second code path. `write_part` snapshots + indexes + appends history in one step (history can't drift from the geometry) and **evicts the mtime-keyed build cache**, which would otherwise let a re-measure 'prove' the pre-change part. `adopt_run` pulls in existing runs; `prompt_context` builds the **distilled** (not transcript) context for a revision. `caliper design new|list|show`. 184 passed._

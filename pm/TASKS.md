@@ -492,7 +492,7 @@ The idea that makes the history worth keeping: measurable feedback becomes a per
   a proposal that doesn't hold now states that **the edit missed the ask**; and **conflict detection**
   names a rule the new one contradicts, retiring it on accept.
 
-### CALI-31 — Streaming (job + SSE)  · P1 · M4 · 🧊 backlog
+### CALI-31 — Streaming (job + SSE)  · P1 · M4 · ✅ done (`pending`)
 Authoring is many LLM round-trips over tens of seconds; the server is synchronous POST today, so the chat
 would sit dead and read as broken.
 **Acceptance:**
@@ -502,7 +502,7 @@ would sit dead and read as broken.
 - Errors surface the real exception line (the CALI-27 discipline), never boilerplate.
 - Tests: job lifecycle, event ordering, error event carries the traceback tail.
 
-### CALI-32 — Front end: viewport + chat  · P1 · M4 · 🧊 backlog
+### CALI-32 — Front end: viewport + chat  · P1 · M4 · ✅ done (`pending`)
 The reskin, once the machinery above is real.
 **Acceptance:**
 - Default page = 3D viewport + chat column. **Three surfaces only**: viewport, chat, Advanced drawer.
@@ -512,7 +512,7 @@ The reskin, once the machinery above is real.
 - Keeps working: picking, collision shading, ⤢ fit, STL download, the error bar.
 - Verified in-browser (Preview MCP, `caliper-web`), not just unit-tested.
 
-### CALI-33 — Clarify round → stored requirements  · P1 · M4 · 🧊 backlog
+### CALI-33 — Clarify round → stored requirements  · P1 · M4 · ✅ done (`pending`)
 Ask once, never re-ask.
 **Acceptance:**
 - A new design runs a **bounded** round of questions that actually change geometry (profile, drive, rail,
@@ -520,6 +520,41 @@ Ask once, never re-ask.
 - Answers stored as the requirements block in `design.yaml` and injected as permanent prompt context.
 - Skippable: the user can say "just build it" and Caliper proceeds on stated assumptions.
 - Tests: questions stored, requirements reach the author prompt, skip path works.
+
+### CALI-38 — whittle bridge (aero / load studies)  · P1 · M4 · ✅ done (`pending`)
+Theo's sibling project **whittle** (`~/githubrepo/whittle`) evolves a part under physics and returns a
+slider of stations. Caliper drives its local server over its JSON API — no whittle changes, no shared
+Python env — so a design part can be studied and a station brought back.
+**Acceptance (met):**
+- Send a part (world coords, mm) with the setup Caliper knows pre-filled: flow, mirror, flat bottom,
+  speed, budget, interior keep box; `flow` and `dual` (carve + lighten, held from underneath, cargo).
+- **Carve where the air is:** `carve="tail"` lets whittle reshape only the downstream end, for a part
+  riding behind something (the hitch box behind the car).
+- Progress streams; every station is filed under `designs/<slug>/whittle/<run>/` with the run record.
+- **Removal measured, not reported:** station volume vs the part as built (whittle's stations are voxel
+  remeshes, ~½ voxel larger). Flow stations report force saved and **kWh / 100 mi**.
+- **Bring a station back** as the part's current revision (a mesh; the script survives underneath, and
+  "roll it back" returns to it). Caliper reports every side the shape grew past where the part was.
+- Chat refuses to revise a whittled mesh's stale script (it would silently discard the carving).
+- Tested against an in-process fake whittle (incl. one that inflates stations like the real one);
+  verified live against Theo's running whittle.
+**Not done, by design — needs whittle:** sheltering by the car. Uploading a frozen stand-in alongside
+the part makes whittle carve nothing (one lattice spans everything). Needs obstacle bodies in whittle's
+drag model. Coordinated with the whittle-agent session.
+
+### CALI-39 — Parametric aero loop  · P1 · M5 · 🧊 backlog (waiting on whittle's `ParametricStudy`)
+Return a **parametric** part, not a mesh. **Agreed split with the whittle-agent session (2026-10-27):**
+whittle drives — its new `ParametricStudy(build, bounds, start=, flow=, speed_kmh=, obstacles=[car])`
+searches the parameters against its drag model and returns the same volume-vs-drag slider, with
+`sweep.at(x).design` → a params dict. Caliper supplies `build(params) -> (vertices, triangles)` straight
+from CadQuery's `tessellate(0.5, 0.2)` (whittle welds + splits long edges), **in-process**
+(`pip install -e ~/githubrepo/whittle` into the caliper env — dry-run clean: adds scikit-image only, no
+numpy/scipy change). Scoring exact geometry removes the remesh inflation entirely. whittle is also adding
+`obstacles=` (the car shelters, isn't scored or moved) — fixes the shelter problem for FlowStudy too.
+**Caliper side:** a warm build worker (the sandbox's cold start is 1–2 s; ~5k builds per sweep), writing
+the chosen design back as a new **parametric** revision of the part, and "Shape it for drag" in the UI.
+Hitch-box params: `tail_len` 0–500 mm, `top_taper_deg` 0–20, `side_taper_deg` 0–15, `tail_edge_r` 5–100 mm,
+optional `nose_top_r` 5–150 mm; flat bottom (sits on the frame).
 
 ## Milestone M5 — whole machines from one prompt (after M4)
 
