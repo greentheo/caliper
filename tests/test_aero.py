@@ -178,3 +178,28 @@ def test_a_parameter_pinned_at_its_limit_is_named():
     assert not any("tail_drop" in n for n in notes)            # mid-range: not a limit
     assert not any("tail_edge_r" in n for n in notes)          # started at 0: a choice, not a limit
     assert any(n.startswith("width ended at its lower limit (1800)") for n in notes)
+
+
+def test_params_written_inside_build_with_inch_arithmetic_are_still_found():
+    """Seen live: the author put PARAMS inside build() and wrote `70.5 * 25.4` — both still searchable."""
+    script = (
+        "def build(params):\n"
+        "    import cadquery as cq\n"
+        "    PARAMS = {\n"
+        '        "width_mm": 70.5 * 25.4,   # full car width\n'
+        '        "p0z": 12  * 25.4,\n'
+        '        "gap": -(18 * 25.4) / 2,\n'
+        "    }\n"
+        "    p = {**PARAMS, **(params or {})}\n"
+        "    return cq.Workplane().box(p['width_mm'], 10, 10)\n"
+    )
+    got = aero.read_params(script)
+    assert got["width_mm"] == pytest.approx(1790.7) and got["p0z"] == pytest.approx(304.8)
+    assert got["gap"] == pytest.approx(-228.6)
+    out = aero.write_params(script, {"width_mm": 1800})
+    assert '"width_mm": 1800,   # full car width' in out          # the whole expression replaced
+    assert aero.read_params(out)["p0z"] == pytest.approx(304.8)    # the rest untouched
+
+
+def test_a_division_by_zero_is_not_a_number():
+    assert aero.read_params('PARAMS = {"a": 1 / 0, "b": 2.0}\n') == {"b": 2.0}

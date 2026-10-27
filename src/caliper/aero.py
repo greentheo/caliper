@@ -49,8 +49,8 @@ KWH_PER_N_PER_100MI = 160_934.4 / 3.6e6
 # ---------------------------------------------------------------------------
 # PARAMS: read and rewrite the numbers in a script, leaving everything else alone
 # ---------------------------------------------------------------------------
-def _params_node(tree: ast.Module) -> Optional[ast.Dict]:
-    for node in tree.body:
+def _params_assign(body: list) -> Optional[ast.Dict]:
+    for node in body:
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name) and node.targets[0].id == PARAMS_NAME
                 and isinstance(node.value, ast.Dict)):
@@ -58,7 +58,24 @@ def _params_node(tree: ast.Module) -> Optional[ast.Dict]:
     return None
 
 
+def _params_node(tree: ast.Module) -> Optional[ast.Dict]:
+    """The PARAMS dict: at module level as asked, or — as authors sometimes write it — at the top of
+    ``build()``. Either way ``build`` merges overrides into it, so either can be searched."""
+    found = _params_assign(tree.body)
+    if found is not None:
+        return found
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "build":
+            return _params_assign(node.body)
+    return None
+
+
+_FOLD = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b,
+         ast.Mult: lambda a, b: a * b, ast.Div: lambda a, b: a / b}
+
+
 def _number(node: ast.AST) -> Optional[float]:
+    """A plain number, or arithmetic on plain numbers (``70.5 * 25.4`` — inches converted in place)."""
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
             and not isinstance(node.value, bool):
         return float(node.value)
@@ -66,6 +83,10 @@ def _number(node: ast.AST) -> Optional[float]:
         inner = _number(node.operand)
         if inner is not None:
             return -inner if isinstance(node.op, ast.USub) else inner
+    if isinstance(node, ast.BinOp) and type(node.op) in _FOLD:
+        a, b = _number(node.left), _number(node.right)
+        if a is not None and b is not None and not (isinstance(node.op, ast.Div) and b == 0):
+            return float(_FOLD[type(node.op)](a, b))
     return None
 
 

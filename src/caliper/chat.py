@@ -330,14 +330,20 @@ def _working_spec(store: DesignStore, part_id: str, intent: str) -> Spec:
 #: (whittle's ParametricStudy) can vary them and write the chosen numbers straight back into the script.
 TUNABLE = """
 
-SCRIPT SHAPE (required): put every key dimension and shape choice in a module-level dict, in mm,
-and merge overrides in build:
-    PARAMS = {"width": ..., "depth": ..., "height": ..., ...}
+SCRIPT SHAPE (required): the FIRST statement of the file — at module level, OUTSIDE build() — is a
+dict of every key dimension and shape choice, as plain numbers in mm; build() merges overrides:
+    PARAMS = {
+        "width": 1879.6,   # 74 in
+        "height": 1041.4,  # 41 in
+        ...
+    }
+
     def build(params):
         p = {**PARAMS, **(params or {})}
         ...   # use p["..."] everywhere; never repeat those numbers inline
-PARAMS must hold plain numbers only. A radius or chamfer of 0 must mean "none" (skip the fillet), and
-every value in PARAMS must build — they are the part as it stands."""
+Write each value as a finished number (1879.6, not 74 * 25.4); put the inch value in a comment. A
+radius or chamfer of 0 must mean "none" (skip the fillet), and every value in PARAMS must build —
+they are the part as it stands."""
 
 
 def _emit(events: list[Event], on_event, kind: str, text: str, **data) -> None:
