@@ -492,7 +492,7 @@ The idea that makes the history worth keeping: measurable feedback becomes a per
   a proposal that doesn't hold now states that **the edit missed the ask**; and **conflict detection**
   names a rule the new one contradicts, retiring it on accept.
 
-### CALI-31 — Streaming (job + SSE)  · P1 · M4 · ✅ done (`pending`)
+### CALI-31 — Streaming (job + SSE)  · P1 · M4 · ✅ done (`4fe957a`)
 Authoring is many LLM round-trips over tens of seconds; the server is synchronous POST today, so the chat
 would sit dead and read as broken.
 **Acceptance:**
@@ -502,7 +502,7 @@ would sit dead and read as broken.
 - Errors surface the real exception line (the CALI-27 discipline), never boilerplate.
 - Tests: job lifecycle, event ordering, error event carries the traceback tail.
 
-### CALI-32 — Front end: viewport + chat  · P1 · M4 · ✅ done (`pending`)
+### CALI-32 — Front end: viewport + chat  · P1 · M4 · ✅ done (`4fe957a`)
 The reskin, once the machinery above is real.
 **Acceptance:**
 - Default page = 3D viewport + chat column. **Three surfaces only**: viewport, chat, Advanced drawer.
@@ -512,7 +512,7 @@ The reskin, once the machinery above is real.
 - Keeps working: picking, collision shading, ⤢ fit, STL download, the error bar.
 - Verified in-browser (Preview MCP, `caliper-web`), not just unit-tested.
 
-### CALI-33 — Clarify round → stored requirements  · P1 · M4 · ✅ done (`pending`)
+### CALI-33 — Clarify round → stored requirements  · P1 · M4 · ✅ done (`4fe957a`)
 Ask once, never re-ask.
 **Acceptance:**
 - A new design runs a **bounded** round of questions that actually change geometry (profile, drive, rail,
@@ -521,7 +521,7 @@ Ask once, never re-ask.
 - Skippable: the user can say "just build it" and Caliper proceeds on stated assumptions.
 - Tests: questions stored, requirements reach the author prompt, skip path works.
 
-### CALI-38 — whittle bridge (aero / load studies)  · P1 · M4 · ✅ done (`pending`)
+### CALI-38 — whittle bridge (aero / load studies)  · P1 · M4 · ✅ done (`4fe957a`)
 Theo's sibling project **whittle** (`~/githubrepo/whittle`) evolves a part under physics and returns a
 slider of stations. Caliper drives its local server over its JSON API — no whittle changes, no shared
 Python env — so a design part can be studied and a station brought back.

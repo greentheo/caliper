@@ -64,7 +64,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   dir, `caliper-web-scratch` launch config): units toggle, click-to-scope, a station previewed in place
   with the original as a ghost, bring-back, the chat refusing to revise the mesh, "roll it back" through
   chat, marking the car as a reference, and a tail-only study streamed from the page.
-- Commit: `pending`
+- Commit: `4fe957a`
 
 ---
 
