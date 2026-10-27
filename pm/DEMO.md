@@ -42,6 +42,11 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **Shape it for drag — numbers back (CALI-39).** Select a part → **Shape it for drag**: whittle searches
+  the numbers in its script (tail length, top drop, side pinch, edge radius…) against its drag model, with
+  the car as a real obstacle. Pick a design from the slider → **Use these numbers** → they're written into
+  the script. The part stays parametric — no mesh, no remesh inflation.
+
 - 🆕 **The design session, in the browser (CALI-31/32/33).** `make serve` → **http://127.0.0.1:8000** now
   opens a **viewport + a conversation**: describe what you're building, answer a few questions, then
   **click any part and talk about it**. The inspector shows its size (inches or mm), the rules locked in
@@ -106,6 +111,41 @@ make run-llm    INTENT="a sturdy 80mm bracket for 3030 with countersunk M6 holes
 make refine-llm SOURCE=runs/run_0000 INSTRUCTION="round the outer corners and lighten it"
 # equivalently:  make refine LLM=1 SOURCE=... INSTRUCTION=...
 ```
+
+---
+
+## 🆕 CALI-39 — shape it for drag, and keep it parametric
+
+**What's new:** instead of whittle carving a mesh, whittle searches the **numbers** in the part's script,
+and the one you pick is written back into it. Built with the whittle-agent session.
+
+**Needs** whittle installed into Caliper's environment (already done on Theo's machine):
+
+```bash
+/opt/anaconda3/envs/caliper/bin/python -m pip install -e ~/githubrepo/whittle
+```
+
+**Try it (hitch box):**
+1. Select the box. Under **Shape it for drag**, its `PARAMS` are listed. If it says the script has none,
+   click **Make it tunable** — the chat restructures it and adds `tail_len`, `tail_drop`, `tail_pinch`,
+   `tail_edge_r`, all 0 (the shape doesn't change).
+2. Leave the tail numbers ticked (suggested ranges are filled in; widen `tail_len` to ~700), make sure the
+   Leaf block is ticked under **rides behind**, 65 mph, 15%, *normal* → **Shape it**. ~3 minutes; it shows
+   build count and time left.
+3. Click a row to see that design in place. **Use these numbers for box** writes them into its script.
+
+**What it found, live:** a ~16° boat tail — the last 500 mm tapers, the top falls 146 mm, each side draws
+in 140 mm — about **11 lbf less than the square box ≈ 2.2 kWh per 100 mi** at 65 mph (estimated; treat as
+±30%), giving up 7% of the box's volume. The box's outside is still exactly 39 × 74 × 41 in at the front,
+floor at 18 in.
+
+**Things worth knowing:** act on the **savings**, not the totals — behind the car the model scores the
+box alone, so it misses the box partly filling the car's wake; what the box really costs the car is
+likely lower, and the savings, if anything, conservative. `tail_len` hit its 500 mm limit (the page now
+names a pinned parameter), so a longer taper may help — then the volume you allow becomes the limit.
+Flat-panel tapers should settle around 12–18°: the model's flow starts tearing off near 20°. Building
+candidates uses a warm worker, ~0.1–0.3 s each. Every new part is now written with its dimensions in `PARAMS`, so
+it can be shaped this way without the restructure step.
 
 ---
 

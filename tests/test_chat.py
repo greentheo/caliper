@@ -333,3 +333,16 @@ def test_a_whittled_part_is_not_revised_underneath_its_carving(store):
 def test_the_reply_text_is_logged_so_a_reload_can_redraw_the_conversation(gantry):
     res = chat.turn(gantry, "what parts exist?", use_llm=False)
     assert gantry.log()[-1]["reply"] == res.reply
+
+
+def test_the_author_is_told_to_keep_dimensions_in_params(gantry):
+    """CALI-39: parts are born tunable, so a drag search can vary them and write numbers back."""
+    pytest.importorskip("cadquery")
+    seen = {}
+
+    def author(spec, feedback, prior):
+        seen["intent"] = spec.intent
+        return _box(dx=60, dy=20, y=40)
+
+    chat.turn(gantry, "make it 60mm wide", scope="carriage", use_llm=False, author=author, max_rounds=2)
+    assert "PARAMS = {" in seen["intent"] and "p = {**PARAMS, **(params or {})}" in seen["intent"]

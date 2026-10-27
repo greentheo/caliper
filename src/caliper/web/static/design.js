@@ -351,6 +351,11 @@ function renderThread() {
     } else if (e.kind === 'assertion') {
       html.push(`<div class="note">${e.action === 'promoted'
         ? `🔒 locked in <code>${esc(e.id)}</code>` : `left <code>${esc(e.id)}</code> as a one-off`}</div>`);
+    } else if (e.kind === 'aero' && e.action === 'studied') {
+      html.push(`<div class="note">whittle searched <b>${esc(e.part)}</b>'s shape — results in the inspector</div>`);
+    } else if (e.kind === 'aero' && e.action === 'adopted') {
+      const nums = Object.entries(e.params || {}).map(([k, v]) => `${esc(k)} ${(+v).toFixed(0)}`).join(', ');
+      html.push(`<div class="note">used station ${e.station}'s numbers as v${e.version} (${nums}) — still a parametric script</div>`);
     } else if (e.kind === 'whittle' && e.action === 'studied') {
       html.push(`<div class="note">whittle studied <b>${esc(e.part)}</b> — results in the inspector</div>`);
     } else if (e.kind === 'whittle' && e.action === 'adopted') {
@@ -546,7 +551,8 @@ function designView(d) {
 
 function historyItem(h) {
   if (h.kind === 'revision') {
-    const what = h.action === 'whittle' ? `from whittle${h.station != null ? ' — station ' + h.station : ''}`
+    const what = h.action === 'aero' ? `shaped for drag — station ${h.station}`
+      : h.action === 'whittle' ? `from whittle${h.station != null ? ' — station ' + h.station : ''}`
       : h.action === 'restore' ? `rolled back to v${h.restored_from}` : h.action;
     return `<li class="hist"><span class="v">v${h.version}</span>${esc(what)}
       ${h.feedback && h.action !== 'author' ? `<div>“${esc(h.feedback)}”</div>` : ''}
@@ -556,6 +562,7 @@ function historyItem(h) {
     return `<li class="hist">${h.action === 'promoted' ? '🔒 locked in' : 'declined'} <code>${esc(h.expr || h.id)}</code></li>`;
   }
   if (h.kind === 'whittle') return `<li class="hist">studied in whittle (${esc(h.study)}, ${h.stations} stations)</li>`;
+  if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
   if (h.kind === 'setting') return `<li class="hist">marked ${h.role === 'fixed' ? 'as a reference' : 'as a design part'}</li>`;
   return '';
 }
@@ -580,7 +587,9 @@ function partView(p) {
     ${p.rules.length || designRules.length ? '<ul class="list">' +
       [...p.rules, ...designRules].map((r) => `<li class="rule">🔒 <b>${esc(r.id)}</b> <code>${esc(r.expr)}</code></li>`).join('') + '</ul>'
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
-    <h4>whittle</h4>
+    <h4>Shape it for drag <span class="badge">numbers back</span></h4>
+    <div id="aeroBox">${aeroView(p)}</div>
+    <h4>whittle carving <span class="badge">mesh back</span></h4>
     <div id="whittleBox">${whittleView(p)}</div>
     <h4>History</h4>
     <ul class="list">${p.history.slice().reverse().map(historyItem).join('')}</ul>
@@ -606,6 +615,111 @@ function wireInspector(p) {
     } catch (e) { $('advBody').textContent = e.message; }
   };
   wireWhittle(p);
+  wireAero(p);
+}
+
+// ------------------------------------------------------------- shape it for drag (CALI-39)
+// whittle searches the numbers in the part's PARAMS; a design comes back as numbers written into the
+// script, so the part stays parametric. The carving study below it returns a mesh instead.
+const MAKE_TUNABLE = 'Restructure this part\'s script so every key dimension lives in a module-level PARAMS ' +
+  'dict (mm), and add tail_len, tail_drop, tail_pinch and tail_edge_r, all 0 so the shape does not change: ' +
+  'tail_len is how much of the back tapers, tail_drop how far the top falls by the very back, tail_pinch how ' +
+  'far each side draws in by the very back, tail_edge_r the rounding of the back\'s top and side edges ' +
+  '(0 = sharp). Build the taper as flat panels (a ruled loft) and keep the bottom flat.';
+
+function aeroRuns(pid) { return (S.design.aero_runs || []).filter((r) => r.part === pid); }
+
+function aeroView(p) {
+  if (!S.design.aero_available) {
+    return '<div class="empty">whittle\'s parametric search isn\'t installed in Caliper\'s environment.</div>';
+  }
+  if (!p.scripted) return '<div class="empty">This part is a mesh right now — say <b>roll it back</b> to get its script back.</div>';
+  if (!p.params || !Object.keys(p.params).length) {
+    return `<div class="empty">Its script doesn't keep its dimensions in <code>PARAMS</code> yet, so there's
+      nothing for whittle to vary.</div>
+      <div class="actions"><button id="aTunable">Make it tunable</button></div>`;
+  }
+  const mph = inches();
+  const behind = S.design.parts.filter((x) => x.id !== p.id && x.role === 'fixed');
+  const rows = Object.entries(p.params).map(([k, v]) => {
+    const sg = (p.suggest || {})[k] || { search: false, bounds: [v, v] };
+    return `<tr><td><label><input type="checkbox" class="aOn" data-k="${esc(k)}" ${sg.search ? 'checked' : ''}> ${esc(k)}</label></td>
+      <td>${fixed(v, 1)}</td>
+      <td><input type="number" class="aLo" data-k="${esc(k)}" value="${sg.bounds[0]}" step="any" style="width:70px"></td>
+      <td><input type="number" class="aHi" data-k="${esc(k)}" value="${sg.bounds[1]}" step="any" style="width:70px"></td></tr>`;
+  }).join('');
+  const runs = aeroRuns(p.id);
+  return `<div class="tw"><table class="st"><tr><th>search</th><th>now</th><th>from</th><th>to</th></tr>${rows}</table></div>
+    <div class="muted small" style="margin:4px 0 8px">Values in mm (or degrees). The current value must sit inside its range.</div>
+    <div class="form">
+      ${behind.length ? `<span>rides behind</span><span>${behind.map((b) => `<label><input type="checkbox" class="aObs" value="${esc(b.id)}" checked> ${esc(b.id)}</label>`).join(' ')}</span>` : ''}
+      <span>${mph ? 'speed (mph)' : 'speed (km/h)'}</span><input type="number" id="aSpeed" value="${mph ? 65 : 105}" min="5" max="200">
+      <span>give up at most</span><span><input type="number" id="aBudget" value="15" min="1" max="60"> % of the volume</span>
+      <span>protect interior</span><span><input type="number" id="aKeep" placeholder="none" min="0" step="0.5"> ${mph ? 'in' : 'mm'} inset</span>
+      <span>designs</span><input type="number" id="aStations" value="4" min="2" max="8">
+      <span>search</span><select id="aEffort"><option value="0.3">quick</option><option value="0.6" selected>normal</option><option value="1">thorough</option></select>
+    </div>
+    <div class="actions"><button class="primary" id="aGo">Shape it</button></div>
+    <div id="aProgress"></div>
+    ${runs.length ? aeroResults(p, runs[0]) : ''}`;
+}
+
+function aeroResults(p, run) {
+  const on = S.station && S.station.run === run.id ? S.station.index : -1;
+  const saved = (s) => s.derived ? fixed(inches() ? s.derived.saved_lbf : s.derived.saved_n, 1) : '—';
+  return `<div class="small" style="margin-top:12px"><b>Last search</b> · ${run.builds} builds in ${run.seconds}s
+      ${run.obstacles && run.obstacles.length ? ' · behind ' + esc(run.obstacles.join(', ')) : ' · free air'}</div>
+    <div class="tw"><table class="st"><tr><th>#</th><th>volume</th><th>drag</th><th>${inches() ? 'saved lbf' : 'saved N'}</th><th>kWh/100mi</th>
+      ${run.searched.map((k) => `<th>${esc(k)}</th>`).join('')}</tr>
+      ${run.stations.map((s) => `<tr class="pick ${s.index === on ? 'on' : ''}" data-ast="${s.index}"><td>${s.index}</td>
+        <td>${pct(-s.removed)}</td><td>${pct(s.metrics.drag)}</td><td>${saved(s)}</td>
+        <td>${s.derived ? fixed(s.derived.saved_kwh_per_100mi, 2) : '—'}</td>
+        ${run.searched.map((k) => `<td>${fixed(s.design[k], 0)}</td>`).join('')}</tr>`).join('')}</table></div>
+    <div class="muted small" style="margin-top:6px">Click a row to see it in place; “volume” is the change against the part as it stands.
+      Using a design writes those numbers into the script — it stays parametric.</div>
+    ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`;
+}
+
+function wireAero(p) {
+  const tun = $('aTunable');
+  if (tun) tun.onclick = () => send(MAKE_TUNABLE, p.id);
+  const go = $('aGo');
+  if (go) go.onclick = () => runAero(p);
+  document.querySelectorAll('#inspector tr[data-ast]').forEach((tr) => {
+    tr.onclick = () => showStation(p.id, aeroRuns(p.id)[0], +tr.dataset.ast);
+  });
+}
+
+async function runAero(p) {
+  const bounds = {};
+  for (const cb of document.querySelectorAll('.aOn:checked')) {
+    const k = cb.dataset.k;
+    bounds[k] = [+document.querySelector(`.aLo[data-k="${k}"]`).value, +document.querySelector(`.aHi[data-k="${k}"]`).value];
+  }
+  const prog = $('aProgress'), go = $('aGo');
+  if (!Object.keys(bounds).length) { prog.innerHTML = '<div class="small" style="color:var(--bad)">Tick at least one number to search.</div>'; return; }
+  const mph = inches();
+  const speed = +$('aSpeed').value || 65;
+  const keep = $('aKeep').value === '' ? null : (+$('aKeep').value) * (mph ? IN : 1);
+  const body = {
+    part: p.id, bounds, obstacles: [...document.querySelectorAll('.aObs:checked')].map((c) => c.value),
+    speed_kmh: mph ? speed * 1.609344 : speed, remove_up_to: (+$('aBudget').value || 15) / 100,
+    keep_inset_mm: keep, stations: +$('aStations').value || 4, effort: +$('aEffort').value,
+  };
+  go.disabled = true;
+  prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="aMsg">starting…</div>';
+  try {
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/aero`, body);
+    await follow(job_id, (ev) => {
+      const msg = $('aMsg'), bar = prog.querySelector('.bar > i');
+      if (ev.text && msg && ev.kind !== 'started' && ev.kind !== 'finished') msg.textContent = ev.text;
+      if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
+    });
+    await refresh();
+  } catch (e) {
+    prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    go.disabled = false;
+  }
 }
 
 // --------------------------------------------------------------------------------- whittle
@@ -658,9 +772,9 @@ function whittleResults(p, runs) {
         ${esc(r.id)} · ${esc(r.kind)} · ${r.carve === 'tail' ? 'tail only' : 'free air'}</option>`).join('')}</select>`
       : `<b>${esc(run.kind)} study</b> · ${run.carve === 'tail' ? 'tail only' : 'free air'}`}
     </div>
-    <table class="st"><tr><th>#</th>${cols.map((c) => `<th>${esc(c[0])}</th>`).join('')}</tr>
+    <div class="tw"><table class="st"><tr><th>#</th>${cols.map((c) => `<th>${esc(c[0])}</th>`).join('')}</tr>
       ${run.stations.map((s) => `<tr class="pick ${s.index === on ? 'on' : ''}" data-st="${s.index}"><td>${s.index}</td>
-        ${cols.map((c) => `<td>${c[1](s)}</td>`).join('')}</tr>`).join('')}</table>
+        ${cols.map((c) => `<td>${c[1](s)}</td>`).join('')}</tr>`).join('')}</table></div>
     <div class="muted small" style="margin-top:6px">Click a row to see that shape in place.
       “removed” is measured against your part as built (negative = whittle's remesh came back bigger).
       ${flow ? 'Savings are against the starting shape, at the study speed.' : ''}</div>
@@ -716,8 +830,9 @@ async function runWhittle(p) {
 
 // show a station in place of its part, with the part's current shape as a ghost around it
 async function showStation(pid, run, index) {
+  const parametric = run.kind === 'parametric';
   try {
-    const r = await fetch(`/api/designs/${S.slug}/whittle/${run.id}/stations/${index}.stl`);
+    const r = await fetch(`/api/designs/${S.slug}/${parametric ? 'aero' : 'whittle'}/${run.id}/stations/${index}.stl`);
     if (!r.ok) throw new Error(`station ${index}: HTTP ${r.status}`);
     const geom = loader.parse(await r.arrayBuffer());
     geom.computeVertexNormals();
@@ -734,12 +849,13 @@ async function showStation(pid, run, index) {
     const st = run.stations.find((s) => s.index === index) || {};
     const bar = $('stationBar');
     bar.hidden = false;
-    bar.innerHTML = `<span>whittle station <b>${index}</b> · ${pct(st.removed_part)} removed
+    const removed = parametric ? st.removed : st.removed_part;
+    bar.innerHTML = `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume
       ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>
-      <button class="primary" id="adoptBtn">Bring this back as ${esc(pid)}</button>
+      <button class="primary" id="adoptBtn">${parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };
-    $('adoptBtn').onclick = () => adoptStation(pid, run.id, index);
+    $('adoptBtn').onclick = () => adoptStation(pid, run.id, index, parametric);
     paint(); renderInspector();
   } catch (e) { showErr(e.message); }
 }
@@ -749,10 +865,10 @@ function clearStation(keepBar) {
   if (!keepBar) $('stationBar').hidden = true;
   if (S.design) paint();
 }
-async function adoptStation(pid, wid, index) {
+async function adoptStation(pid, wid, index, parametric) {
   $('adoptBtn').disabled = true;
   try {
-    await api('POST', `/api/designs/${S.slug}/whittle/${wid}/adopt`, { station: index });
+    await api('POST', `/api/designs/${S.slug}/${parametric ? 'aero' : 'whittle'}/${wid}/adopt`, { station: index });
     clearStation();
     await refresh();
   } catch (e) { showErr(e.message); $('adoptBtn').disabled = false; }
@@ -768,7 +884,7 @@ async function checkWhittle() {
   dot.className = 'dot ' + (S.whittle.ok ? 'ok' : 'bad');
   dot.title = S.whittle.ok ? `whittle is running at ${S.whittle.url}` : (S.whittle.error || 'whittle is not reachable');
   // redraw only when whittle came up or went down — a periodic redraw would wipe a half-filled form
-  if (was !== S.whittle.ok && S.scope && !document.querySelector('#wProgress .bar')) renderInspector();
+  if (was !== S.whittle.ok && S.scope && !document.querySelector('#wProgress .bar, #aProgress .bar')) renderInspector();
 }
 checkWhittle();
 setInterval(checkWhittle, 15000);

@@ -542,7 +542,7 @@ Python env — so a design part can be studied and a station brought back.
 the part makes whittle carve nothing (one lattice spans everything). Needs obstacle bodies in whittle's
 drag model. Coordinated with the whittle-agent session.
 
-### CALI-39 — Parametric aero loop  · P1 · M5 · 🧊 backlog (waiting on whittle's `ParametricStudy`)
+### CALI-39 — Parametric aero loop  · P1 · M5 · ✅ done (`pending`) — on branch `cali-39-parametric-aero`; needs whittle's `physics-and-slider` committed before merging
 Return a **parametric** part, not a mesh. **Agreed split with the whittle-agent session (2026-10-27):**
 whittle drives — its new `ParametricStudy(build, bounds, start=, flow=, speed_kmh=, obstacles=[car])`
 searches the parameters against its drag model and returns the same volume-vs-drag slider, with
@@ -555,6 +555,12 @@ numpy/scipy change). Scoring exact geometry removes the remesh inflation entirel
 the chosen design back as a new **parametric** revision of the part, and "Shape it for drag" in the UI.
 Hitch-box params: `tail_len` 0–500 mm, `top_taper_deg` 0–20, `side_taper_deg` 0–15, `tail_edge_r` 5–100 mm,
 optional `nose_top_r` 5–150 mm; flat bottom (sits on the frame).
+**Shipped (2026-10-27):** `aero.py` (PARAMS read/rewrite by AST position, `study`, `adopt`),
+`sandbox.BuildWorker` + `_build_worker.py` (warm sandboxed builds, ~0.13 s vs 1–2 s cold), the
+PARAMS convention in every authoring prompt, `/api/designs/{slug}/aero*`, and "Shape it for drag" in
+the inspector. Live: 4 tail params behind the car → **11 lbf ≈ 2.2 kWh/100 mi** at 7% of the volume,
+returned as numbers in the script (envelope exact — no inflation). As built the params are mm-based
+(`tail_len`, `tail_drop`, `tail_pinch`, `tail_edge_r`) rather than the angles first proposed.
 
 ## Milestone M5 — whole machines from one prompt (after M4)
 

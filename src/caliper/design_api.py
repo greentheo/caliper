@@ -16,7 +16,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import chat, clarify, promote
+from . import aero, chat, clarify, promote
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -62,6 +62,27 @@ class Adopt(BaseModel):
     station: int
 
 
+class AeroRequest(BaseModel):
+    part: str
+    bounds: dict[str, list[float]]          # {name: [lo, hi]} — the PARAMS to search
+    obstacles: list[str] = []               # parts it rides behind (shelter only)
+    keep_inset_mm: Optional[float] = None
+    remove_up_to: float = 0.15
+    stations: int = 4
+    effort: float = 0.5
+    speed_kmh: float = 105.0
+    resolution: int = 20
+
+
+def _aero_available() -> bool:
+    try:
+        import whittle  # noqa: F401
+
+        return hasattr(whittle, "ParametricStudy")
+    except ImportError:
+        return False
+
+
 class PartSettings(BaseModel):
     role: Optional[str] = None        # "fixed" = a reference (e.g. the car) — drawn as context
 
@@ -91,7 +112,10 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     for p in d.parts:
         spec = store.read_spec(p.id) if store.is_scripted(p.id) or os.path.exists(
             store.spec_path(p.id)) else None
+        params = aero.read_params(store.read_script(p.id)) if store.is_scripted(p.id) else None
         parts.append({
+            "params": params,
+            "suggest": {k: aero.suggest(k, v) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
             "stl_url": f"/api/designs/{slug}/parts/{p.id}.stl?v={p.version}",
@@ -120,6 +144,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "clarify": [q.to_dict() for q in clarify.pending(store)],
         "log": store.log(),
         "whittle_runs": [_run_summary(r) for r in wb.list_runs(store)],
+        "aero_runs": aero.list_runs(store),
+        "aero_available": _aero_available(),
     }
 
 
@@ -316,6 +342,56 @@ def router():
                 raise HTTPException(status_code=404, detail=str(e))
             store.append_log({"kind": "whittle", "action": "adopted", "run": wid,
                               "station": req.station, "version": got["version"],
+                              **({"grew_mm": got["grew_mm"]} if got["grew_mm"] else {})})
+            return {**got, "design": design_state(store)}
+
+    # -- parametric drag search (CALI-39): whittle searches PARAMS, numbers come back ---------------
+    @r.post("/api/designs/{slug}/aero")
+    def aero_run(slug: str, req: AeroRequest):
+        store = load(slug)
+        if store.design.part(req.part) is None:
+            raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
+        if not _aero_available():
+            raise HTTPException(status_code=503, detail="whittle with ParametricStudy isn't installed "
+                                "in Caliper's environment (pip install -e ~/githubrepo/whittle)")
+        bounds = {k: (float(v[0]), float(v[1])) for k, v in req.bounds.items() if len(v) == 2}
+
+        def work(j):
+            s = DesignStore.load(slug)
+            return aero.study(s, req.part, bounds, obstacles=req.obstacles,
+                              keep_inset_mm=req.keep_inset_mm, remove_up_to=req.remove_up_to,
+                              stations=req.stations, effort=req.effort, speed_kmh=req.speed_kmh,
+                              resolution=req.resolution,
+                              emit=lambda k, t="", **d: j.emit(k, t, **d))
+
+        job = RUNNER.submit("aero", work, label=f"shape {req.part} for drag", lock=f"aero:{slug}")
+        return {"job_id": job.id}
+
+    @r.get("/api/designs/{slug}/aero/{rid}/stations/{index}.stl")
+    def aero_station(slug: str, rid: str, index: int):
+        store = load(slug)
+        try:
+            path = aero.station_path(store, rid, index)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="bad run id")
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="no such station")
+        with open(path, "rb") as f:
+            return Response(f.read(), media_type="model/stl")
+
+    @r.post("/api/designs/{slug}/aero/{rid}/adopt")
+    def aero_adopt(slug: str, rid: str, req: Adopt):
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                got = aero.adopt(store, rid, req.station)
+            except FileNotFoundError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+            except (KeyError, ValueError) as e:
+                raise HTTPException(status_code=409, detail=str(e))
+            store.append_log({"kind": "aero", "action": "adopted", "run": rid,
+                              "station": req.station, "version": got["version"],
+                              "params": got["params"],
                               **({"grew_mm": got["grew_mm"]} if got["grew_mm"] else {})})
             return {**got, "design": design_state(store)}
 

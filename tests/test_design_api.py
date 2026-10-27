@@ -224,3 +224,48 @@ def test_a_part_can_be_marked_as_a_reference(client, hitch):
     assert next(p for p in state["parts"] if p["id"] == "car")["role"] == "fixed"
     assert client.patch("/api/designs/hitch/parts/car", json={"role": "x"}).status_code == 422
     assert client.patch("/api/designs/hitch/parts/nope", json={"role": "fixed"}).status_code == 404
+
+
+# --- CALI-39: parametric drag search over the API ----------------------------------------
+from .test_aero import SCRIPT as TUNABLE_SCRIPT  # noqa: E402
+
+
+@pytest.fixture
+def tunable(client, tmp_path):
+    s = DesignStore.create("a tunable box", base=str(tmp_path / "designs"), slug="tunable")
+    s.write_part("box", TUNABLE_SCRIPT, intent="a box with a tunable tail")
+    return s
+
+
+def test_state_lists_a_parts_params_with_suggestions(client, tunable):
+    pytest.importorskip("cadquery")
+    box = client.get("/api/designs/tunable").json()["parts"][0]
+    assert box["params"]["tail_len"] == 0.0 and box["params"]["width"] == 200.0
+    assert box["suggest"]["tail_len"]["search"] and not box["suggest"]["width"]["search"]
+
+
+def test_a_parametric_study_runs_and_its_numbers_come_back_as_a_script_revision(client, tunable):
+    pytest.importorskip("cadquery")
+    pytest.importorskip("whittle")
+    job = client.post("/api/designs/tunable/aero", json={
+        "part": "box", "bounds": {"tail_len": [0, 90], "tail_drop": [0, 50]},
+        "remove_up_to": 0.1, "stations": 2, "effort": 0.05, "resolution": 10}).json()
+    done = _follow(client, job["job_id"], timeout=180)
+    assert done["status"] == "done", done["error"]
+    rid = done["result"]["id"]
+    assert client.get(f"/api/designs/tunable/aero/{rid}/stations/1.stl").status_code == 200
+
+    back = client.post(f"/api/designs/tunable/aero/{rid}/adopt", json={"station": 1}).json()
+    box = back["design"]["parts"][0]
+    assert box["scripted"] and box["origin"] == "authored"      # parametric, not a mesh
+    assert set(back["params"]) == {"tail_len", "tail_drop"}
+    assert back["design"]["log"][-1]["action"] == "adopted"
+
+
+def test_a_study_on_an_unknown_part_is_a_404(client, tunable):
+    r = client.post("/api/designs/tunable/aero", json={"part": "nope", "bounds": {"x": [0, 1]}})
+    assert r.status_code == 404
+
+
+def test_adopting_from_a_missing_study_is_a_404(client, tunable):
+    assert client.post("/api/designs/tunable/aero/nope/adopt", json={"station": 0}).status_code == 404

@@ -322,8 +322,22 @@ def _working_spec(store: DesignStore, part_id: str, intent: str) -> Spec:
     context = store.prompt_context(part_id)
     frame = ("\n\nBuild this part in the DESIGN'S WORLD COORDINATES (the other parts are already placed "
              "there); the assembly applies no extra transform." if len(store.design.parts) > 1 else "")
-    spec.intent = f"{spec.intent or intent}\n\n--- design context ---\n{context}{frame}"
+    spec.intent = f"{spec.intent or intent}\n\n--- design context ---\n{context}{frame}{TUNABLE}"
     return spec
+
+
+#: CALI-39: every design part keeps its key dimensions in a module-level PARAMS dict, so a search
+#: (whittle's ParametricStudy) can vary them and write the chosen numbers straight back into the script.
+TUNABLE = """
+
+SCRIPT SHAPE (required): put every key dimension and shape choice in a module-level dict, in mm,
+and merge overrides in build:
+    PARAMS = {"width": ..., "depth": ..., "height": ..., ...}
+    def build(params):
+        p = {**PARAMS, **(params or {})}
+        ...   # use p["..."] everywhere; never repeat those numbers inline
+PARAMS must hold plain numbers only. A radius or chamfer of 0 must mean "none" (skip the fillet), and
+every value in PARAMS must build — they are the part as it stands."""
 
 
 def _emit(events: list[Event], on_event, kind: str, text: str, **data) -> None:
