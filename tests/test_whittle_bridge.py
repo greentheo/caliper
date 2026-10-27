@@ -166,7 +166,7 @@ def test_a_free_air_plan_carries_caliper_defaults(hitch):
     assert (s["kind"], s["flow"], s["mirror"], s["flat"]) == ("flow", [-1, 0, 0], "y", ["-z"])
     assert s["removeUpTo"] == 0.2 and s["keepBoxes"] == [] and s["surfaces"] == []
     assert any("Free air" in n for n in p["notes"])
-    assert any("voxel grid" in n for n in p["notes"])       # says stations can come back bigger
+    assert not any("rebuilt the mesh" in n for n in p["notes"])   # only said once it's measured
 
 
 def test_a_tail_plan_lets_whittle_reshape_only_the_tail(hitch):
@@ -289,11 +289,20 @@ def inflating():
 
 
 def test_an_inflated_station_zero_is_measured_as_bigger_than_the_part(hitch, inflating):
-    """Seen live: whittle's '0% removed' station was 8% bigger than the box that was sent."""
+    """Seen live (older whittle): its '0% removed' station was 8% bigger than the box that was sent."""
     pytest.importorskip("cadquery")
     rec = wb.run(hitch, "box", base=inflating.url, poll=0.01)
     assert rec["stations"][0]["removed_part"] < 0
     assert rec["stations"][0]["volume_ratio"] > 1.0
+    assert any("rebuilt the mesh" in n for n in rec["notes"])     # measured, so it's said
+
+
+def test_a_part_carved_as_sent_gets_no_remesh_note(hitch, fake):
+    """Current whittle carves a clean part as sent — then there's nothing to warn about."""
+    pytest.importorskip("cadquery")
+    rec = wb.run(hitch, "box", base=fake.url, poll=0.01)
+    assert rec["stations"][0]["volume_ratio"] == pytest.approx(1.0, abs=1e-3)
+    assert not any("rebuilt the mesh" in n for n in rec["notes"])
 
 
 def test_bringing_back_an_inflated_station_reports_how_far_it_grew(hitch, inflating):

@@ -18,10 +18,11 @@ What Caliper adds is what it already knows, and what it can measure that whittle
   deforms one lattice over everything uploaded, so every move that reshapes the part also moves the
   frozen stand-in, the penalty makes it infeasible, and nothing is carved at all (seen live: every
   station 0% removed). Real shelter needs whittle to accept obstacle bodies.
-- **Measured, not reported, removal.** whittle's stations are voxel remeshes about half a voxel larger
-  than what was sent (seen live: ~1 in on a 74 in box, +8% volume at "0% removed"), so its "% removed"
-  is against its own remesh. Caliper measures every station's volume against the part as built, and
-  when a station is brought back, how far it reaches past where the part used to be.
+- **Measured, not reported, removal.** Earlier whittle rebuilt every part as a voxel remesh about half a
+  voxel larger than what was sent (seen live: ~1 in on a 74 in box, +8% volume at "0% removed"); current
+  whittle carves a clean part as sent and only remeshes messy ones. Either way Caliper measures every
+  station's volume against the part as built, says so when the starting shape doesn't match, and when a
+  station is brought back, reports how far it reaches past where the part used to be.
 - **Units people decide with** — the drag force saved against the starting shape, and what that is in
   **kWh per 100 miles** (1 N over 100 mi = 0.0447 kWh).
 
@@ -163,11 +164,7 @@ def plan(store: DesignStore, part_id: str, *, kind: str = "flow", flow=(-1.0, 0.
     if not part_mesh.is_watertight:
         raise ValueError(f"'{part_id}' isn't watertight — whittle can't voxelize or carve it")
     plo, phi = part_mesh.bounds
-    voxel = float((phi - plo).max()) / max(int(resolution), 1)
-    notes = ["whittle's drag model ranks shapes well; its absolute numbers are good to perhaps 30%.",
-             f"whittle rebuilds the part on a ~{voxel:.0f} mm voxel grid, so its stations can come "
-             f"back up to ~{voxel / 2:.0f} mm larger than the part. Removal here is measured "
-             f"against your part as built, and bringing a station back reports any growth."]
+    notes = ["whittle's drag model ranks shapes well; its absolute numbers are good to perhaps 30%."]
 
     surfaces = []
     if carve == "tail":
@@ -290,6 +287,14 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
             f.write(raw)
         s["_volume"] = float(abs(_mesh_of(raw).volume))
     _derive(stations, planned["part_volume"])
+    # Say it only when it's measured: older whittle remeshed every part (stations came back ~half a
+    # voxel proud); current whittle carves a clean part as sent and only remeshes messy ones.
+    ratio = stations[0].get("volume_ratio") if stations else None
+    if ratio is not None and abs(ratio - 1.0) > 0.005:
+        planned["notes"].append(
+            f"whittle's starting shape is {ratio - 1.0:+.1%} by volume against your part — it rebuilt "
+            f"the mesh rather than carving it as sent. Removal here is measured against your part as "
+            f"built, and bringing a station back reports any growth.")
 
     record = {
         "id": wid, "part": part_id, "kind": planned["setup"]["kind"], "created": time.time(),
