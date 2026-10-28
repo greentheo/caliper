@@ -25,6 +25,7 @@ _Last updated: 2026-10-28 (**M4 complete** in the browser + whittle bridge (CALI
 - CALI-46 — Joinery in the cut plan: tube end cuts (true lengths, mitres/copes), foam band bevels, skeleton placement · P1 · M5
 - ✅ CALI-47 — Scorecard v1: checks + objectives + trust, cost & waste at editable prices; *Score it* on the design page · P0 · M6 · _2026-10-28_
 - ✅ CALI-52 — The skeleton: box inside the box + roof beams, searched under 20 lb/ft² snow → 1x2 frames + two 2x2 beams across (57 lb box) · P1 · M6 · _2026-10-28_
+- ✅ CALI-53 — Parked on the jacks with someone inside; the floor under a knee · P1 · M6 · _2026-10-28 · frame 2.24×, jacks ≤ 288 lb, floor 3.3× on the mattress; hitch 356 lb kneeling at the very front, under Theo's 420 lb (rating + 20%) — scorecard 11/11_
 - CALI-48 — The shop: machines + stock as a design input; manufacturability checks; per-machine cut plans · P0 · M6
 - CALI-49 — Moves: one interface over design / optimize / make tools · P1 · M6
 - CALI-50 — The loop runner: propose → run → measure → keep/revert, budgets, journal, gates · P1 · M6

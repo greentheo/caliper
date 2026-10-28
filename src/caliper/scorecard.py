@@ -227,6 +227,37 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                     "least of a corner weld's moment the plates take", "model", "plate mode")
         break
 
+    # parked: the frame on its jacks with someone inside, and the floor under a knee (CALI-53)
+    pk = settings.get("parked")
+    if pk:
+        from . import parked as P
+
+        for p in store.design.parts:
+            script = store.read_script(p.id) if store.is_scripted(p.id) else ""
+            if "def jacks(" not in script:
+                continue
+            emit("parked", f"{p.id} parked on its jacks")
+            r = P.run(store, p.id, person_lb=float(pk.get("person_lb", 200)), gear_lb=float(pk.get("gear_lb", 50)),
+                      knee_lb=float(pk.get("knee_lb", 150)), factor=float(pk.get("factor", 1.5)),
+                      walls=bool(settings.get("walls", True)))
+            w = r["worst"]
+            _metric(metrics, "parked.frame_safety", w["safety"], "×", f"{p.id} parked, worst {w['case']} "
+                    f"({w['governing']})", "model", "parked")
+            if r["walls_min"] is not None:
+                _metric(metrics, "parked.walls_safety", r["walls_min"], "×", "weakest wall, parked", "rough", "parked")
+            _metric(metrics, "parked.jack_lb", r["jacks_max_lb"], "lb", "the most a jack carries", "model", "parked")
+            _metric(metrics, "parked.hitch_lb", r["hitch_max_lb"], "lb", "the most the hitch carries, parked",
+                    "model", "parked")
+            fl = r["floor"]
+            _metric(metrics, "floor.mattress_safety", fl["on_mattress"]["safety"], "×",
+                    f"the floor under a {r['knee_lb']:g} lb knee on the mattress ({fl['clear_span_in']} in clear span)",
+                    "rough", "napkin", note="the mattress spreads a knee to ~10 in")
+            _metric(metrics, "floor.bare_safety", fl["bare"]["safety"], "×",
+                    f"the floor under a knee on bare {M.nominal(fl['thickness_mm'])} plywood", "rough", "napkin")
+            _metric(metrics, "floor.clear_span_in", fl["clear_span_in"], "in", "the floor's widest clear span",
+                    "measured", "parked")
+            break
+
     # optimization: snow on any roof a part describes
     psf = float(settings.get("snow_psf", 0) or 0)
     if psf:

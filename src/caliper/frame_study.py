@@ -58,7 +58,8 @@ def frame_def(store: DesignStore, part_id: str, timeout: float = 60.0,
              f"_p = _json.loads({over!r})\n"
              "_m = members(_p) if 'members' in globals() else None\n"
              "_s = supports(_p) if 'supports' in globals() else []\n"
-             "print('@@FRAME@@' + _json.dumps({'members': _m, 'supports': _s}, default=list))\n")
+             "_j = jacks(_p) if 'jacks' in globals() else []\n"
+             "print('@@FRAME@@' + _json.dumps({'members': _m, 'supports': _s, 'jacks': _j}, default=list))\n")
     try:
         out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
                              timeout=timeout)

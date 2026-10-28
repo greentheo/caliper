@@ -743,6 +743,21 @@ floor and roof — and cross beams under the roof for a mild snow load; 1x1 ribs
 job for the loop: the skeleton as structural options (posts, rails, N roof beams, their size, an inside
 skin on the roof) checked under snow + driving against weight and cost — exhaustive over a handful.
 
+### CALI-53 — Parked: on the jacks with someone inside, and the floor under a knee · P1 · M6 · ✅ done (v1)
+A frame says where it stands when parked (`jacks(params)`: points that only push). `parked.run()` solves
+the frame on the hitch + jacks with the box's walls carrying load: lying down (person + gear spread on the
+floor, ×1.5 for moving about) and kneeling (two knees, tried at nine spots across the floor). A jack that
+would have to pull lifts off and the case is solved again. Reports: weakest member and wall, what each jack
+and the hitch carry, and the floor under a knee (`floor_knee`: a plywood strip over the floor's widest clear
+gap to a tube or wall, the knee spread ~10 in on the mattress or ~3 in bare). Scorecard settings `parked`,
+metrics `parked.*` and `floor.*`.
+Theo's camper (jacks under the X's back corners; 200 lb + 50 lb; 150 lb a knee): frame 2.24× (kneeling at a
+front corner), walls ≥ 2.45×, a jack carries ≤ 288 lb, floor on the mattress 3.3× (clear span 22.6 in), bare
+⅜ ply 1.84×. **The hitch carries up to 356 lb** kneeling at the front middle (rating 350) — 260 lb with
+100 lb knees (no bounce), 285 lb with a pair of jacks under the X's front corners too. **Theo:** no front
+jacks (the back ones are a bit overkill already); the 350 lb rating is conservative — check against 420 lb
+(+20%). Scorecard **11/11 pass**.
+
 ## Milestone M5 — whole machines from one prompt (after M4)
 
 ### CALI-35 — Decomposition planner  · P0 · M5 · 🧊 backlog

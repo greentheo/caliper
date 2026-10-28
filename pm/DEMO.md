@@ -540,6 +540,12 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-10-28 · Parked on the jacks (CALI-53)
+**Try it:** *Score it* on the design — the scorecard now has the parked case: the frame on the hitch and two
+jacks under the X's back corners with someone kneeling anywhere (2.24×), the floor under a knee on the
+mattress (3.3×), the most a jack carries (288 lb), and the hitch at 356 lb with someone kneeling at the very front —
+under Theo's 420 lb (the 350 lb rating + 20%). All 11 checks pass. The settings (person, gear, knee) are in `scorecard.yaml` under `parked`.
+
 ### 2026-10-28 · See how it's built (CALI-52)
 **Try it:** click **cargo_box** → **Built from** → *Show how it's built*. The box turns into its pieces: pink
 foam panels, the shell bands, the tan floor, teal glass patches on the front corners, and the 1x2 frames with
