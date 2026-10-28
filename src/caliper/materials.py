@@ -17,18 +17,29 @@ SHEETS = {
             "basis": "~1.5 lb/ft³ (Foamular 250-class); 1 in board ≈ 0.13 lb/ft²",
             # a sandwich core: stiff enough to hold the skins apart and carry shear between them
             "mech": {"E": 10.0, "G": 4.0, "strength": 0.4, "shear_strength": 0.2,
-                     "basis": "Foamular 250: compressive modulus ~1,500 psi; shear ~30 psi (rough)"}},
+                     "basis": "Foamular 250: compressive modulus ~1,500 psi; shear ~30 psi (rough)"},
+            # cutting it (CALI-45): scored on the inside, 1 in board bends ~45° at a V-groove
+            "cut": {"kerf": 3.175, "margin": 6.35, "grain": False, "fold_deg": 45.0, "score_min_deg": 5.0,
+                    "note": "1 in XPS: cut with a knife or hot wire; a V-groove scored on the inside lets it "
+                            "fold ~45°, and a bend under ~5° it takes without one; butt joints glued with "
+                            "foam-safe adhesive, taped and glassed over"}},
     "eps": {"name": "EPS foam board", "density": 16.0, "stock": (4 * 12 * IN, 8 * 12 * IN),
             "basis": "~1 lb/ft³",
             "mech": {"E": 4.0, "G": 2.0, "strength": 0.2, "shear_strength": 0.1,
-                     "basis": "1 lb/ft³ EPS (rough)"}},
+                     "basis": "1 lb/ft³ EPS (rough)"},
+            "cut": {"kerf": 3.175, "margin": 6.35, "grain": False, "fold_deg": 45.0,
+                    "note": "EPS: hot wire; score on the inside to fold"}},
     "plywood": {"name": "softwood plywood", "density": 560.0, "stock": (4 * 12 * IN, 8 * 12 * IN),
                 "basis": "~35 lb/ft³: a 4x8 sheet of 3/8 in ≈ 35 lb, 1/2 in ≈ 47 lb",
                 "mech": {"E": 8000.0, "G": 500.0, "strength": 30.0, "shear_strength": 2.0,
-                         "basis": "softwood ply along its face grain (rough; across it, about half)"}},
+                         "basis": "softwood ply along its face grain (rough; across it, about half)"},
+                "cut": {"kerf": 3.175, "margin": 12.7, "grain": False, "fold_deg": 0.0,
+                        "note": "circular saw or CNC router; doesn't fold — every crease is a cut"}},
     # plate for gussets and brackets, plasma-cut from a sheet
     "steel": {"name": "steel plate", "density": 7850.0, "stock": (4 * 12 * IN, 8 * 12 * IN),
-              "basis": "~490 lb/ft³: 3/16 in plate ≈ 7.7 lb/ft², 1/8 in ≈ 5.1 lb/ft²"},
+              "basis": "~490 lb/ft³: 3/16 in plate ≈ 7.7 lb/ft², 1/8 in ≈ 5.1 lb/ft²",
+              "cut": {"kerf": 1.5, "margin": 12.7, "grain": False, "fold_deg": 0.0,
+                      "note": "CNC plasma; offcuts are fine — a gusset needs no full sheet"}},
 }
 
 #: Sticks: density (kg/m³), stock length (mm), and nominal sizes -> actual section (mm).

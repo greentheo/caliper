@@ -643,8 +643,35 @@ the fold-down rear seat, so the hatch needn't open: a few inches' clearance.
 **Acceptance:** wall section/shear/wrinkling tested; walls fastened, carrying via-wall loads, fixing force =
 the load; fiberglass BOM; full suite green.
 
-Next: CALI-45 cut plan + CNC DXF (panels flattened from their outlines; post and tube cut lists; gusset
-plates for plasma); then plate mode for the gussets (whittle-agent), legs + the parked/sleeping case.
+### CALI-45 — The cut plan: panels unfolded onto sheets (unfold-to-sheets), sticks cut-listed · P1 · M5 · ✅ done
+Theo: "I will like to see what the cut plan looks like for sure" — and pointed at his own
+`game-dev/unfold-to-sheets` (unfold a mesh, nest onto stock, score lines, DXF), thinking of 1 in foam that
+folds at scored lines and spray foam + a rasp where it's too curvy.
+- **Integration, no change to that repo:** `cutplan.py` writes a part's `construction()` sheets as one OBJ
+  per material, **one group per panel** (authored seams → segment by group), and `unfold_driver.mjs` runs
+  its pipeline with stock/material *objects* from `materials.SHEETS[...]["cut"]` (XPS: foldable to 45° at a
+  V-groove, butt joints; ply and steel plate: no folds). Folds under the material's `score_min_deg` (5° on
+  1 in foam) are left off the drawings — the tool scores anything over 0.5°, right for card. Per material:
+  sheets as SVG + DXF (layers cut / score-mountain / score-valley / seam / label), assembly drawing, seam
+  list, PDF; Caliper adds the stick cut list. Filed under `designs/<slug>/cutplans/<id>/`.
+- **The shoulders are strip-built now** (box v11): bands front to back, one per facet of the shoulder curve
+  — each bends one way and lays flat. One big shoulder had ~330 score lines in a crosshatch (doubly curved
+  nose and tail); bands: 21 pieces on 4 sheets of XPS at 59% (was 5 at 47%), edges exact, 118 score lines
+  (nose and tail only).
+- **Page:** Built from → *Cut plan* — sheets as pictures (click for full size), DXF per sheet, PDF, which
+  piece is which, seam list, the stick cut list; says when the part has changed since.
+- Also this round (Theo's calls): the box's skin is **fiberglass** (box v10, 47.5 lb); the frame's shank is
+  **2x2x5/16** (3.3× is fine) and the box is **fastened to the spine** — the riser moved under the box's
+  front wall (x −4 in) and the spine runs to the back, so the walls are fixed at the middle of the front and
+  back too (`build_spec` splits a wall wherever a frame joint sits under it). That lets the X drop to
+  **1x1x1/16**: frame v17 = 33.0 lb, 3.57×, sag 0.31 in; hitch 3,147 lb·in standing with 50 lb aboard.
+**Acceptance:** OBJ groups per panel; a crate's plan nests both materials, writes the files, cut-lists its
+posts; file paths can't leave the plan; full suite green.
+
+Next: CALI-46 — joinery in the cut plan (the panels are cut to the outside surface today; bevels and
+inside-face offsets for 1 in foam, the internal 2x2 skeleton placed where the shell needs it), tube end cuts
+(copes and mitres for the X at the spine), and plate mode for the gussets (whittle-agent, waits for Theo);
+legs + the parked/sleeping case.
 
 ## Milestone M5 — whole machines from one prompt (after M4)
 

@@ -170,7 +170,25 @@ def build_spec(fd: dict, *, load_lb: float = 100.0, factor: float = 2.5,
     steel = len(members)
     joints = sorted({n for m in members for n in (m["a"], m["b"])})
     wall_ix, fastened, checks = [], set(), []
-    for w in walls or []:
+
+    def over_joints(w):
+        """A wall split wherever a frame joint sits under it (within SNAP_MM): the box is fixed there too."""
+        a, b = [list(map(float, w[k])) for k in ("a", "b")]
+        span = [b[i] - a[i] for i in range(3)]
+        length2 = sum(v * v for v in span) or 1.0
+        cuts = []
+        for j in joints:
+            p = nodes[j]
+            t = sum((p[i] - a[i]) * span[i] for i in range(3)) / length2
+            if 0.0 < t < 1.0 and math.dist(p, [a[i] + t * span[i] for i in range(3)]) <= SNAP_MM:
+                cuts.append((t, [a[i] + t * span[i] for i in range(3)]))
+        pts = [a] + [p for _, p in sorted(cuts)] + [b]
+        if len(pts) == 2:
+            return [w]
+        return [dict(w, name=f"{w['name']}_{k}", a=tuple(p0), b=tuple(p1))
+                for k, (p0, p1) in enumerate(zip(pts, pts[1:]))]
+
+    for w in (piece for wall in walls or [] for piece in over_joints(wall)):
         ends = []
         for xyz in (w["a"], w["b"]):
             n = nearest(xyz, SNAP_MM, [j for j in joints if j not in ends])   # not both ends to one joint

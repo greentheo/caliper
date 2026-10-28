@@ -16,7 +16,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import aero, chat, clarify, construction, frame_study, promote
+from . import aero, chat, clarify, construction, cutplan, frame_study, promote
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -178,6 +178,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "whittle_runs": [_run_summary(r) for r in wb.list_runs(store)],
         "aero_runs": aero.list_runs(store),
         "frame_runs": frame_study.list_runs(store),
+        "cutplans": cutplan.list_runs(store),
+        "cutplan_unavailable": cutplan.available(),
         "aero_available": _aero_available(),
     }
 
@@ -398,6 +400,40 @@ def router():
 
         job = RUNNER.submit("frame", work, label=f"size {req.part}", lock=f"frame:{slug}")
         return {"job_id": job.id}
+
+    # -- cut plan (CALI-45): panels unfolded and nested by unfold-to-sheets, sticks cut-listed ----------
+    @r.post("/api/designs/{slug}/parts/{pid}/cutplan")
+    def cutplan_run(slug: str, pid: str):
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+        why = cutplan.available()
+        if why:
+            raise HTTPException(status_code=503, detail=why)
+
+        def work(j):
+            return cutplan.run(DesignStore.load(slug), pid, emit=lambda k, t="", **d: j.emit(k, t, **d))
+
+        job = RUNNER.submit("cutplan", work, label=f"cut plan for {pid}", lock=_lock(slug))
+        return {"job_id": job.id}
+
+    @r.get("/api/designs/{slug}/cutplans/{rid}/files/{path:path}")
+    def cutplan_file(slug: str, rid: str, path: str):
+        store = load(slug)
+        if cutplan.load_run(store, rid) is None:
+            raise HTTPException(status_code=404, detail="no such cut plan")
+        try:
+            full = cutplan.file_path(store, rid, path)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="no such file")
+        types = {".svg": "image/svg+xml", ".dxf": "application/dxf", ".pdf": "application/pdf",
+                 ".txt": "text/plain; charset=utf-8", ".obj": "text/plain", ".json": "application/json"}
+        with open(full, "rb") as f:
+            data = f.read()
+        media = types.get(os.path.splitext(full)[1].lower(), "application/octet-stream")
+        headers = {} if media.startswith(("image/", "text/", "application/pdf")) else {
+            "Content-Disposition": f'attachment; filename="{rid}-{path.replace("/", "-")}"'}
+        return Response(data, media_type=media, headers=headers)
 
     @r.get("/api/designs/{slug}/frame-study/{rid}/stations/{index}.stl")
     def frame_station(slug: str, rid: str, index: int):

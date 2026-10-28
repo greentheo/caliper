@@ -745,12 +745,67 @@ function builtResults(p, c) {
     </ul>
     ${(r.notes || []).map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}
     <div class="muted small" style="margin-top:4px">Counts are a shopping estimate (panels packed on whole sheets, cuts on
-      whole sticks), not a cut plan. Densities: <code>materials.py</code>.</div>`;
+      whole sticks); the cut plan below nests the real shapes. Densities: <code>materials.py</code>.</div>
+    <div id="cutplanBox">${cutplanView(p)}</div>`;
+}
+
+// --------------------------------------------------------------------- cut plan (CALI-45)
+// Every panel flattened and nested onto the sheets it's cut from by Theo's unfold-to-sheets — score lines
+// where a panel bends — and every stick cut-listed. Sheets as SVG (click for full size) and DXF for CAM.
+function cutplanView(p) {
+  if (S.design.cutplan_unavailable) return `<h5 style="margin:14px 0 4px">Cut plan</h5>
+    <div class="muted small">Not here: ${esc(S.design.cutplan_unavailable)}.</div>`;
+  const run = (S.design.cutplans || []).find((r) => r.part === p.id);
+  const url = (path) => `/api/designs/${S.slug}/cutplans/${run.id}/files/${path}`;
+  const sheets = run ? run.sheets.map((g) => {
+    const svgs = g.files.filter((f) => f.name.startsWith('sheets/') && f.name.endsWith('.svg')).map((f) => f.name);
+    return `<div style="margin-top:10px"><b>${g.sheets} × ${esc(g.stock)}</b>
+        <span class="muted small">· ${esc(g.label)} · ${g.pieces} piece${g.pieces === 1 ? '' : 's'} · ${pct(g.utilisation)} used${g.scored ? ` · ${g.scored} score lines` : ''}</span>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">${svgs.map((n) => `<a href="${url(`${g.key}/${n}`)}" target="_blank"
+          title="${esc(n)} — open full size"><img src="${url(`${g.key}/${n}`)}" alt="${esc(n)}" style="width:100%;background:#fff;border-radius:4px;display:block"></a>`).join('')}</div>
+        <div class="small" style="margin-top:4px">${svgs.map((n, i) => `<a href="${url(`${g.key}/${n.replace(/\.svg$/, '.dxf')}`)}">sheet ${i + 1} DXF</a>`).join(' · ')}
+          · <a href="${url(`${g.key}/pattern.pdf`)}" target="_blank">printable PDF</a>
+          · <a href="${url(`${g.key}/assembly.svg`)}" target="_blank">which piece is which</a>
+          · <a href="${url(`${g.key}/assembly.txt`)}" target="_blank">seam list</a></div>
+        ${g.worst_edge_error > 0.5 ? `<div class="muted small">Curved pieces don't lie perfectly flat: an edge is out by up to ${len(g.worst_edge_error, 1)}.</div>` : ''}
+        ${(g.missing || []).length ? `<div class="small" style="color:var(--bad)">✗ ${g.missing.length} piece(s) didn't fit a sheet: ${g.missing.map((m) => esc(m.label)).join(', ')}</div>` : ''}
+      </div>`;
+  }).join('') : '';
+  const sticks = run && run.sticks.length ? `<table class="st" style="margin-top:10px"><tr><th style="text-align:left">cut</th><th>length</th><th style="text-align:left">piece</th></tr>
+      ${run.sticks.map((g) => `<tr><td colspan="3" style="text-align:left"><b>${esc(g.label)}</b> <span class="muted">${g.count} × ${+(g.stock_len_mm / IN / 12).toFixed(1)} ft</span></td></tr>
+        ${g.cuts.map((c) => `<tr><td></td><td>${len(c.length_mm, 1)}</td><td style="text-align:left">${esc(c.name)}</td></tr>`).join('')}`).join('')}</table>
+      <div class="small"><a href="${url('cutlist.txt')}" target="_blank">cut list as text</a></div>` : '';
+  const stale = run && run.version !== p.version
+    ? `<div class="small" style="color:var(--bad)">Made for v${run.version}; the part is v${p.version} now — make it again.</div>` : '';
+  return `<h5 style="margin:14px 0 4px">Cut plan</h5>
+    ${run ? `${stale}${sheets}${sticks}${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`
+      : `<div class="muted small">Flatten every panel onto the sheets it's cut from — score lines where it bends — and list every
+         stick to cut. Uses unfold-to-sheets.</div>`}
+    <div class="actions"><button id="cpGo">${run ? 'Make it again' : 'Make the cut plan'}</button></div><div id="cpProgress"></div>`;
+}
+
+function wireCutplan(p) {
+  const go = $('cpGo');
+  if (!go) return;
+  go.onclick = async () => {
+    const prog = $('cpProgress');
+    go.disabled = true;
+    prog.innerHTML = '<div class="small muted" id="cpMsg">unfolding…</div>';
+    try {
+      const { job_id } = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/cutplan`);
+      await follow(job_id, (ev) => { const m = $('cpMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
+      await refresh();
+    } catch (e) {
+      prog.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`;
+      go.disabled = false;
+    }
+  };
 }
 
 function wireBuilt(p) {
   const c = S.built[p.id];
   if (!c || !c.report) return;
+  wireCutplan(p);
   document.querySelectorAll('#buildBox [data-bk]').forEach((el) => {
     el.onchange = () => {
       const tried = {};

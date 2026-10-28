@@ -42,6 +42,9 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **Cut plan (CALI-45).** Any part that says what it's built from gets a cut plan: its panels unfolded
+  and nested onto real sheets by Theo's unfold-to-sheets (SVG + DXF per sheet, score lines where a panel
+  bends, seam tokens, a printable PDF), and its sticks cut-listed.
 - 🆕 **Walls that carry load (CALI-44).** A part can say how its walls work as structure (`shell()` —
   foam sandwiches as deep beams); the frame study solves them with the tubes and says how strong each wall
   is and what its fixings carry. Fiberglass skins are a construction choice (cloth + epoxy in the shopping list).
@@ -532,6 +535,16 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-28 · The cut plan (CALI-45)
+**Try it:** click **cargo_box** → scroll to **Built from → Cut plan**. 1 sheet of ⅜ ply and **4 sheets of 1 in
+XPS** — click a sheet to open it full size: the front panel with the shoulder bands nested round it, dash-dot
+(mountain) and dashed (valley) score lines at the nose and tail ends of the bands, a seam token on both sides
+of every joint. *sheet N DXF* goes to CAM; *printable PDF* has a scale bar; *which piece is which* draws them
+on the box. The 2x2 post cuts are listed underneath. Click **frame** → its cut plan has the tube cut list
+(13 in shank, 8 in riser, 38 in spine, four 42 in X arms) and the two gusset halves. *Make it again* after a
+change; the panel says when the plan is out of date. Needs node and `game-dev/unfold-to-sheets` (or
+`CALIPER_UNFOLD_DIR`).
 
 ### 2026-10-28 · The box moves in and carries itself (CALI-44)
 **Try it:** the camper is now drag design 2, 3 in behind the bumper (the hatch rule is gone; *bumper_clearance*
