@@ -73,3 +73,44 @@ def test_holes_matching_bolt_circle():
     )
     g = Geometry.from_cadquery(wp)
     assert measure.holes_matching(g, diameter=5.2, on=measure.circle(60), count=4)
+
+
+
+# --- body_count: cavities are not bodies -------------------------------------------------
+def _box_with_cavity():
+    """A 20 mm cube with a sealed 10 mm cubic void inside: one body, two surfaces."""
+    import trimesh
+
+    outer = trimesh.creation.box(extents=(20, 20, 20))
+    inner = trimesh.creation.box(extents=(10, 10, 10))
+    inner.invert()                                   # a cavity's surface faces into the cavity
+    return Geometry.from_mesh(trimesh.util.concatenate([outer, inner]))
+
+
+def test_a_sealed_cavity_is_not_counted_as_a_body():
+    """Seen live: a welded hollow-tube frame read as 6 bodies — its tubes' enclosed bores."""
+    g = _box_with_cavity()
+    assert len(g.require_mesh().split(only_watertight=False)) == 2      # two surfaces...
+    assert measure.body_count(g) == 1                                            # ...one body
+
+
+def test_separate_solids_are_still_counted(two_box_geom):
+    assert measure.body_count(two_box_geom) == 2
+
+
+def test_a_hollow_tube_frame_with_enclosed_bores_is_one_body():
+    pytest.importorskip("cadquery")
+    import cadquery as cq
+
+    def tube(lo, hi, axis):
+        size, inner = [20, 20, 20], [16, 16, 16]
+        size[axis], inner[axis] = hi - lo, hi - lo + 2
+        c = [0, 0, 0]
+        c[axis] = (lo + hi) / 2
+        o = cq.Workplane("XY").box(*size).translate(tuple(c))
+        return o.cut(cq.Workplane("XY").box(*inner).translate(tuple(c)))
+
+    # a cross tube along y, and a tube along x whose open end sits inside it (its bore is sealed)
+    t = tube(-50, 50, 1).union(tube(-8, 100, 0))
+    g = Geometry.from_cadquery(t)
+    assert measure.body_count(g) == 1

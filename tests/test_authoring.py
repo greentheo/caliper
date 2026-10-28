@@ -192,3 +192,35 @@ def test_refine_authored_folds_instruction_into_intent():
                                     author=lambda s, fb, prior: _GOOD41)
     assert "make it 41mm wide" in spec.intent  # persists across revision rounds
     assert res.ok and res.report.all_pass
+
+
+
+class _CutOffClient:
+    """A reply that hit the token limit mid-script."""
+
+    def __init__(self, text, stop="max_tokens"):
+        self._text, self._stop = text, stop
+        self.messages = self
+        self.seen = {}
+
+    def create(self, **kw):
+        self.seen = kw
+        blk = type("B", (), {"type": "text", "text": self._text})
+        return type("M", (), {"content": [blk], "stop_reason": self._stop})()
+
+
+def test_a_cut_off_script_fails_with_the_real_reason():
+    """Seen live: a long frame script overran the cap and came back as a baffling SyntaxError."""
+    from caliper.authoring import author_script
+
+    client = _CutOffClient("def build(params):\n    x = 1\n    y = (x +\n")
+    code = author_script(Spec(part="p", intent="x"), client=client)
+    assert "was cut off" in code and "more compactly" in code
+    assert client.seen["max_tokens"] >= 8000
+
+
+def test_a_complete_script_is_left_alone():
+    from caliper.authoring import author_script
+
+    client = _CutOffClient("def build(params):\n    return None\n", stop="end_turn")
+    assert "cut off" not in author_script(Spec(part="p", intent="x"), client=client)

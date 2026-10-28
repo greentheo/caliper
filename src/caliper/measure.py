@@ -129,9 +129,26 @@ def is_manifold(g: Geometry) -> bool:
 
 
 def body_count(g: Geometry) -> int:
-    """Number of disconnected bodies."""
+    """Number of separate solid bodies — enclosed cavities are not bodies.
+
+    Counting connected mesh surfaces over-counts hollow parts: where a tube's open end sits inside
+    another tube, its bore becomes an enclosed pocket of air whose surface is a separate shell (seen
+    live: a one-piece welded tube frame read as 6 "bodies"). With a B-rep, count its solids, which is
+    exact. With only a mesh, count outward-facing shells: a cavity's surface faces into the cavity, so
+    its signed volume is negative.
+    """
+    solid = getattr(g, "solid", None)
+    if solid is not None:
+        try:
+            shape = solid.val() if hasattr(solid, "val") else solid
+            n = len(shape.Solids())
+            if n:
+                return int(n)
+        except Exception:  # noqa: BLE001 — fall back to the mesh
+            pass
     m = g.require_mesh()
-    return int(len(m.split(only_watertight=False)))
+    shells = m.split(only_watertight=False)
+    return int(sum(1 for s in shells if not s.is_watertight or s.volume > 0))
 
 
 # ---------------------------------------------------------------------------
