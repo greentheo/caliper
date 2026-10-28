@@ -24,7 +24,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   faces are ¼ in apart — a cheek plate needs a spacer, or a 2 in riser.
 - Fixes: score-line count counts only what's drawn; cut-plan notes only for the materials present.
 - Tests: `test_cutplan.py` +1. Full suite green.
-- Commit: _(pending)_
+- Commit: `005321a`
 
 ### 2026-10-28 · CALI-45 · The cut plan — and the frame gets its 1 in X
 - **Theo's calls:** switch to fiberglass; 5/16 shank at 3.3× is fine; fasten the box to the spine too; show
