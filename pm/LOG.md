@@ -20,7 +20,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - **Next:** the parked case on jacks under the X's back corners, with Theo inside (< 350 lb total) — the
   floor over the X under a person, the jacks' loads.
 - Tests: `test_construction.py` +2. Full suite green.
-- Commit: _(pending)_
+- Commit: `568880b`
 
 ### 2026-10-28 · CALI-52 · The skeleton, searched under snow — and Theo's hitch call
 - **Theo:** the hitch: 350 lb tongue weight (a Class III does 800); since the whole weight sits on the tongue,
