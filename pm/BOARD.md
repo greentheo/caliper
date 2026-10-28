@@ -17,6 +17,18 @@ _Last updated: 2026-10-28 (**M4 complete** in the browser + whittle bridge (CALI
 - CALI-36 — Nested sub-assemblies (descend into a part that is itself a design) · P1 · M5
 - CALI-37 — Feature-level selection (per-face export + face-id round-trip) · P2 · M5
 
+## 🧭 M6 — the design ⇄ optimize ⇄ make loop (draft: [`specs/caliper-make-loop-spec.md`](../specs/caliper-make-loop-spec.md))
+> Theo (2026-10-28): design, optimization and *how it gets made* as one iterative cycle — his shop (CNC
+> plasma, CNC router, small 3D printer, a large printer later) as constraints, him in the loop at a few gates,
+> Caliper doing the rest.
+
+- CALI-46 — Joinery in the cut plan: tube end cuts (true lengths, mitres/copes), foam band bevels, skeleton placement · P1 · M5
+- CALI-47 — Scorecard: every requirement as a measured check or objective, with how much to trust it · P0 · M6
+- CALI-48 — The shop: machines + stock as a design input; manufacturability checks; per-machine cut plans · P0 · M6
+- CALI-49 — Moves: one interface over design / optimize / make tools · P1 · M6
+- CALI-50 — The loop runner: propose → run → measure → keep/revert, budgets, journal, gates · P1 · M6
+- CALI-51 — Build package: release a revision to the shop · P1 · M6
+
 ## 🧊 Parked — engine breadth (pre-M4 backlog)
 - CALI-24 — Optimizer-in-the-author-loop: let CALI-19b tune the authored part's continuous params (not just LLM revision) for coupled inserts · P2 · assembly-spine
 - CALI-12 — Threaded holes done right (tapped/insert vs clearance; the machine uses tap-diameter today) · P2 · generator

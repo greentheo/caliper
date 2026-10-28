@@ -668,10 +668,22 @@ folds at scored lines and spray foam + a rasp where it's too curvy.
 **Acceptance:** OBJ groups per panel; a crate's plan nests both materials, writes the files, cut-lists its
 posts; file paths can't leave the plan; full suite green.
 
-Next: CALI-46 — joinery in the cut plan (the panels are cut to the outside surface today; bevels and
-inside-face offsets for 1 in foam, the internal 2x2 skeleton placed where the shell needs it), tube end cuts
-(copes and mitres for the X at the spine), and plate mode for the gussets (whittle-agent, waits for Theo);
-legs + the parked/sleeping case.
+### CALI-46 — Joinery in the cut plan: tube end cuts, foam bevels · P1 · M5 · 🔨 in progress
+- ✅ **Tube end cuts** (`cutplan.tube_cuts`): one length per straight run; an end that meets a bigger tube is
+  set back to its face (half its width ÷ sin of the angle) and mitred to lie flat on it (a stub inside a joint
+  stands for the tube it joins); an end that only smaller tubes meet runs on by half their width to close
+  the corner. Theo's frame: shank 11.75 in, riser 10.00 in, spine 36.75 in, X 4 @ 40.92 in mitred 27° to
+  the spine. In the cut list and the page.
+- ✅ **Foam bevels**: unfold-to-sheets' seams grouped by the pair of pieces they join, with the angle they
+  meet at; each edge bevelled at half of it (band seams 0–6°, the top band to the roof a corner ~25–35°
+  mitre each side).
+- ⏳ Inside-face offsets for thick foam at corners; **the 2x2 skeleton** placed where the shell needs it
+  (the corner posts are short now the shoulders lean in) — wants Theo's say on where ribs go.
+- ⏳ Gusset plates: whittle-agent building plate mode (`frame.gusset(node, m1, m2, thickness, plates)` →
+  sweep → plasma DXF); the riser's two corners carry ~5,700–7,800 lb·in on a bump; the X's middle 235.
+  Flag: 2 in shank vs 2.5 in riser faces are ¼ in apart — spacer bar or a 2 in riser.
+
+See `specs/caliper-make-loop-spec.md` for M6 (scorecard, the shop, moves, loop runner, build package).
 
 ## Milestone M5 — whole machines from one prompt (after M4)
 

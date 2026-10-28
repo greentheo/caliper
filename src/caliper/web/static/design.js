@@ -768,17 +768,26 @@ function cutplanView(p) {
           · <a href="${url(`${g.key}/assembly.svg`)}" target="_blank">which piece is which</a>
           · <a href="${url(`${g.key}/assembly.txt`)}" target="_blank">seam list</a></div>
         ${g.worst_edge_error > 0.5 ? `<div class="muted small">Curved pieces don't lie perfectly flat: an edge is out by up to ${len(g.worst_edge_error, 1)}.</div>` : ''}
+        ${(g.bevels || []).length ? `<div class="small" style="margin-top:4px">Bevels (each edge at half the angle the pieces meet at):
+          ${g.bevels.map((b) => `${esc(b.a)}/${esc(b.b)} ${b.bevel_max - b.bevel_min >= 1 ? `${b.bevel_min.toFixed(0)}–${b.bevel_max.toFixed(0)}°` : `${b.bevel_max.toFixed(0)}°`}`).join(' · ')}</div>` : ''}
         ${(g.missing || []).length ? `<div class="small" style="color:var(--bad)">✗ ${g.missing.length} piece(s) didn't fit a sheet: ${g.missing.map((m) => esc(m.label)).join(', ')}</div>` : ''}
       </div>`;
   }).join('') : '';
+  const endText = (e) => e.butts ? `${e.miter_deg >= 0.5 ? `mitre ${e.miter_deg.toFixed(0)}°` : 'square'} to the ${esc(e.butts)}`
+    : e.carries ? `square, ${len(e.extend_mm, 2)} past the joint` : 'square';
+  const tubes = run && (run.tubes || []).length ? `<table class="st" style="margin-top:10px"><tr><th style="text-align:left">tube</th><th>cut to</th><th style="text-align:left">ends</th></tr>
+      ${run.tubes.map((g) => `<tr><td colspan="3" style="text-align:left"><b>${esc(g.label)}</b> <span class="muted">${g.count} × ${+(g.stock_len_mm / IN / 12).toFixed(1)} ft</span></td></tr>
+        ${g.cuts.map((t) => `<tr><td style="text-align:left">${esc(t.name)}</td><td>${len(t.length_mm, 2)}</td>
+          <td style="text-align:left" class="small">${t.ends.map(endText).join(' · ')}</td></tr>`).join('')}`).join('')}</table>` : '';
   const sticks = run && run.sticks.length ? `<table class="st" style="margin-top:10px"><tr><th style="text-align:left">cut</th><th>length</th><th style="text-align:left">piece</th></tr>
       ${run.sticks.map((g) => `<tr><td colspan="3" style="text-align:left"><b>${esc(g.label)}</b> <span class="muted">${g.count} × ${+(g.stock_len_mm / IN / 12).toFixed(1)} ft</span></td></tr>
         ${g.cuts.map((c) => `<tr><td></td><td>${len(c.length_mm, 1)}</td><td style="text-align:left">${esc(c.name)}</td></tr>`).join('')}`).join('')}</table>
-      <div class="small"><a href="${url('cutlist.txt')}" target="_blank">cut list as text</a></div>` : '';
+` : '';
   const stale = run && run.version !== p.version
     ? `<div class="small" style="color:var(--bad)">Made for v${run.version}; the part is v${p.version} now — make it again.</div>` : '';
   return `<h5 style="margin:14px 0 4px">Cut plan</h5>
-    ${run ? `${stale}${sheets}${sticks}${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`
+    ${run ? `${stale}${sheets}${tubes}${sticks}<div class="small"><a href="${url('cutlist.txt')}" target="_blank">cut list as text</a></div>
+      ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`
       : `<div class="muted small">Flatten every panel onto the sheets it's cut from — score lines where it bends — and list every
          stick to cut. Uses unfold-to-sheets.</div>`}
     <div class="actions"><button id="cpGo">${run ? 'Make it again' : 'Make the cut plan'}</button></div><div id="cpProgress"></div>`;

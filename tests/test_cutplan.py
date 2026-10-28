@@ -68,3 +68,31 @@ def test_a_part_with_nothing_to_cut_is_refused(tmp_path):
     if cutplan.available() is None:
         with pytest.raises(ValueError, match="nothing to cut"):
             cutplan.run(s, "box")
+
+
+def test_tubes_are_cut_to_the_faces_they_butt_and_mitred_to_lie_flat():
+    import math
+    two = {"outer": 50.8, "wall": 3.175}
+    one = {"outer": 25.4, "wall": 1.5875}
+    big = {"outer": 63.5, "wall": 3.175}
+    arm_end = (-600 + 500 * math.cos(math.radians(60)), 500 * math.sin(math.radians(60)), 0)
+    members = [
+        {"name": "riser", "group": "riser", "a": (0, 0, -200), "b": (0, 0, 0), **big},
+        {"name": "spine_0", "group": "spine", "a": (0, 0, 0), "b": (-600, 0, 0), **two},
+        {"name": "spine_1", "group": "spine", "a": (-600, 0, 0), "b": (-1000, 0, 0), **two},
+        {"name": "stub", "group": "spine", "a": (-600, 0, 0), "b": (-600, 0, 12.7), **two},
+        {"name": "arm", "group": "x", "a": (-600, 0, 12.7), "b": (arm_end[0], arm_end[1], 12.7), **one},
+    ]
+    cuts = {t["name"]: t for t in cutplan.tube_cuts(members)}
+    assert set(cuts) == {"riser", "spine", "arm"}                   # the stub is inside the joint, not a cut
+    spine = cuts["spine"]
+    assert spine["centreline_mm"] == pytest.approx(1000)
+    assert spine["length_mm"] == pytest.approx(1000 - 63.5 / 2, abs=0.1)     # set back to the riser's face
+    arm = cuts["arm"]
+    (inner,) = [e for e in arm["ends"] if e.get("butts")]
+    assert inner["butts"] == "spine" and inner["angle_deg"] == pytest.approx(60, abs=0.5)
+    assert inner["miter_deg"] == pytest.approx(30, abs=0.5)
+    assert arm["length_mm"] == pytest.approx(500 - 25.4 / math.sin(math.radians(60)), abs=0.5)
+    # the riser is the biggest tube at its top: it carries on to close the corner over the spine
+    top = next(e for e in cuts["riser"]["ends"] if e.get("carries"))
+    assert top["extend_mm"] == pytest.approx(25.4) and cuts["riser"]["length_mm"] == pytest.approx(200 + 25.4, abs=0.1)

@@ -118,6 +118,81 @@ def stick_cuts(rows: list[dict]) -> list[dict]:
     return out
 
 
+def _seg_dist(p, a, b) -> float:
+    ab = [b[i] - a[i] for i in range(3)]
+    L2 = sum(v * v for v in ab) or 1.0
+    t = max(0.0, min(1.0, sum((p[i] - a[i]) * ab[i] for i in range(3)) / L2))
+    return math.dist(p, [a[i] + t * ab[i] for i in range(3)])
+
+
+def tube_cuts(members: list[dict]) -> list[dict]:
+    """A frame's tubes as the shop cuts them: one length per straight run (as ``from_members`` joins them),
+    cut to the faces it butts against, and how each end is cut.
+
+    At each end of a run: if a **bigger** tube meets it there, the end butts that tube's side — set back
+    to its face (half its width, divided by the sine of the angle between them) and mitred to lie flat on
+    it (a vertical stub inside a joint stands for the tube it joins). If only smaller tubes meet it, this
+    one carries on past the joint by half their width, so the corner is closed. Otherwise the end is cut
+    square on the centreline.
+    """
+    tubes = [m for m in members if "outer" in m]
+    runs = C.from_members(tubes)
+
+    def is_stub(m):
+        return math.dist(m["a"], m["b"]) < float(m["outer"])
+
+    def axis(m):
+        d = [m["b"][i] - m["a"][i] for i in range(3)]
+        n = math.sqrt(sum(v * v for v in d)) or 1.0
+        return [v / n for v in d]
+
+    out = []
+    for r in runs:
+        mine = [m for m in tubes if _seg_dist(m["a"], r["a"], r["b"]) <= 1.0 and _seg_dist(m["b"], r["a"], r["b"]) <= 1.0
+                and m.get("group") == r.get("group") and abs(float(m["outer"]) - r["outer"]) < 0.01]
+        u = axis(r)
+        length = math.dist(r["a"], r["b"])
+        ends, cut = [], length
+        for end, p in (("a", r["a"]), ("b", r["b"])):
+            near = [m for m in tubes if m not in mine
+                    and (math.dist(m["a"], p) <= 1.0 or math.dist(m["b"], p) <= 1.0 or _seg_dist(p, m["a"], m["b"]) <= 1.0)]
+            hosts = []
+            for m in near:
+                if is_stub(m):          # through the stub to the tube it stands on
+                    q = m["b"] if math.dist(m["a"], p) <= 1.0 else m["a"]
+                    hosts += [h for h in tubes if h is not m and h not in mine and not is_stub(h)
+                              and (math.dist(h["a"], q) <= 1.0 or math.dist(h["b"], q) <= 1.0 or _seg_dist(q, h["a"], h["b"]) <= 1.0)]
+                else:
+                    hosts.append(m)
+            big = max(hosts, key=lambda h: float(h["outer"]), default=None)
+            if big is not None and float(big["outer"]) > r["outer"] + 0.01:
+                alpha = math.degrees(math.acos(min(1.0, abs(sum(a * b for a, b in zip(u, axis(big)))))))
+                alpha = max(alpha, 10.0)
+                back = float(big["outer"]) / 2.0 / math.sin(math.radians(alpha))
+                cut -= back
+                ends.append({"end": end, "butts": big.get("group") or big.get("name"), "into": C.tube_label(float(big["outer"]), float(big["wall"])),
+                             "angle_deg": round(alpha, 1), "miter_deg": round(90.0 - alpha, 1), "setback_mm": round(back, 1)})
+            elif hosts:
+                over = max(float(h["outer"]) for h in hosts) / 2.0
+                cut += over
+                ends.append({"end": end, "carries": sorted({h.get("name") for h in hosts}), "extend_mm": round(over, 1),
+                             "miter_deg": 0.0})
+            else:
+                ends.append({"end": end, "free": True, "miter_deg": 0.0})
+        out.append({"name": r["name"], "group": r.get("group"), "label": C.tube_label(r["outer"], r["wall"]),
+                    "centreline_mm": round(length, 1), "length_mm": round(cut, 1), "ends": ends})
+    return out
+
+
+def _end_text(e: dict) -> str:
+    if e.get("butts"):
+        cut = "square" if e["miter_deg"] < 0.5 else f"mitred {e['miter_deg']:.0f}°"
+        return f"{cut}, butts the side of the {e['into']} ({e['butts']})"
+    if e.get("carries"):
+        return f"square, runs {e['extend_mm'] / M.IN:.2f} in past the joint to close the corner"
+    return "square"
+
+
 def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
         timeout: float = 180.0) -> dict:
     """Make the cut plan for one part, file it with the design, and return its record."""
@@ -137,11 +212,27 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
             groups.setdefault((it["material"], round(float(it["thickness"]), 3)), []).append(it)
     record = {"id": rid, "part": part_id, "version": store.design.part(part_id).version,
               "created": time.time(), "build": d.get("build") or {},
-              "unfolder": unfold_dir(), "sheets": [], "sticks": stick_cuts(C.takeoff(items)), "notes": [
-                  "Panels are cut to the outside surface; joints are butt joints, as construction() lays "
-                  "them out.",
-                  "Score lines: on foam, cut a V-groove on the INSIDE face (the unmarked side) and fold it "
-                  "closed; mountain/valley as marked, the marked side is the outside of the box."]}
+              "unfolder": unfold_dir(), "sheets": [],
+              "sticks": stick_cuts(C.takeoff([it for it in items if not (it.get("kind") == "stick"
+                                                                          and it.get("material") == "steel")])),
+              "tubes": [], "notes": []}
+    if groups:
+        record["notes"].append("Panels are cut to the outside surface; joints are butt joints, as "
+                               "construction() lays them out.")
+    if any((M.sheet(m).get("cut") or {}).get("fold_deg", 0) > 0 for m, _ in groups):
+        record["notes"].append("Score lines: on foam, cut a V-groove on the INSIDE face (the unmarked side) "
+                               "and fold it closed; mountain/valley as marked, the marked side is the outside.")
+    if d.get("members"):
+        tubes = tube_cuts(d["members"])
+        by: dict[str, list] = {}
+        for t in tubes:
+            by.setdefault(t["label"], []).append(t)
+        stock_len = M.STICKS["steel"]["stock_len"]
+        record["tubes"] = [{"label": lab, "stock_len_mm": stock_len,
+                            "count": C.pack_sticks([t["length_mm"] for t in ts], stock_len),
+                            "cuts": sorted(ts, key=lambda t: -t["length_mm"])} for lab, ts in by.items()]
+        record["notes"].append("Tube lengths are cut to the faces they butt against (from the centrelines in "
+                               "members()); check them against the first tube before cutting the rest.")
     for (material, thickness), its in sorted(groups.items()):
         stock, cut = _stock(material)
         mat = _material(material, thickness, cut)
@@ -152,6 +243,7 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
         record["sheets"].append({"key": key, "material": material, "thickness_mm": thickness,
                                  "label": mat["name"], "stock": stock["name"],
                                  "panels": [it["name"] for it in its], **summary})
+        record["sheets"][-1]["bevels"] = bevels(record["sheets"][-1])
         if summary.get("missing"):
             record["notes"].append(f"{mat['name']}: {len(summary['missing'])} piece(s) didn't fit a sheet — "
                                    + "; ".join(f"{m['label']}: {m['why']}" for m in summary["missing"]))
@@ -170,6 +262,13 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
 def cutlist_text(record: dict) -> str:
     """The sticks as a shop cut list, inches first."""
     lines = [f"CUT LIST — {record['part']} ({record['id']})", ""]
+    for g in record.get("tubes") or []:
+        lines.append(f"{g['label']}: {g['count']} x {g['stock_len_mm'] / 304.8:g} ft")
+        for t in g["cuts"]:
+            lines.append(f"    {t['length_mm'] / M.IN:6.2f} in  ({t['length_mm']:.0f} mm)  {t['name']}")
+            for e in t["ends"]:
+                lines.append(f"        end {e['end']}: {_end_text(e)}")
+        lines.append("")
     for g in record["sticks"]:
         lines.append(f"{g['label']}: {g['count']} x {g['stock_len_mm'] / 304.8:g} ft")
         for c in g["cuts"]:
@@ -178,7 +277,25 @@ def cutlist_text(record: dict) -> str:
     for s in record["sheets"]:
         lines.append(f"{s['label']}: {s['sheets']} sheet(s) of {s['stock']}, {s['utilisation'] * 100:.0f}% used — "
                      f"{', '.join(s['panels'])}")
+        bev = bevels(s)
+        if bev:
+            lines.append("    bevels — where two pieces meet at an angle, cut each edge at half of it:")
+            for b in bev:
+                rng = (f"{b['bevel_min']:.0f}–{b['bevel_max']:.0f}°" if b["bevel_max"] - b["bevel_min"] >= 1
+                       else f"{b['bevel_max']:.0f}°")
+                lines.append(f"      {b['a']} / {b['b']}: {b['length_mm'] / M.IN:.0f} in of edge, bevel {rng}")
     return "\n".join(lines) + "\n"
+
+
+def bevels(sheet: dict, at_least: float = 2.0) -> list[dict]:
+    """The joints in a thick board worth bevelling: the pieces meet at more than ``at_least`` degrees, so
+    each edge is cut at half the angle to close the joint (a square edge leaves a V for filler)."""
+    if not sheet.get("joints") or sheet.get("thickness_mm", 0) < 10:
+        return []
+    out = [{"a": j["a"], "b": j["b"], "length_mm": j["length"], "bevel_min": j["angle_min"] / 2.0,
+            "bevel_max": j["angle_max"] / 2.0, "bevel_mean": j["angle_mean"] / 2.0}
+           for j in sheet["joints"] if j["angle_max"] >= at_least]
+    return sorted(out, key=lambda b: (b["a"], b["b"]))
 
 
 def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:

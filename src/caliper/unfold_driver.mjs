@@ -33,7 +33,7 @@ const minScore = job.min_score_deg ?? 0;
 let scored = 0, bent = 0;
 for (const p of result.pieces) {
   const keep = p.flat.folds.filter((f) => Math.abs(f.angleDeg ?? 0) >= minScore);
-  scored += keep.length;
+  scored += keep.filter((f) => Math.abs(f.angleDeg ?? 0) >= 0.5).length;   // what gets drawn
   bent += p.flat.folds.length - keep.length;
   p.flat.folds = keep;
 }
@@ -58,7 +58,21 @@ const pieces = result.pieces.map((p) => {
     size: [Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)],
   };
 });
-console.log(JSON.stringify({
+// Joints between pieces: every seam between the same two pieces together — its length and the angle the
+// pieces meet at, for bevelling a thick board's edges (half the angle on each).
+const pairs = new Map();
+for (const seam of result.seams.seams.values()) {
+  const [i, j] = [...seam.pieces].sort((a, b) => a - b);
+  const key = `${i}:${j}`;
+  const g = pairs.get(key) || { a: result.pieces[i].label, b: result.pieces[j].label, length: 0, sum: 0, max: 0, min: 180 };
+  const ang = Math.abs(seam.foldDeg ?? 0);
+  g.length += seam.length; g.sum += ang * seam.length; g.max = Math.max(g.max, ang); g.min = Math.min(g.min, ang);
+  pairs.set(key, g);
+}
+const joints = [...pairs.values()].map((g) => ({
+  a: g.a, b: g.b, length: g.length, angle_mean: g.length ? g.sum / g.length : 0, angle_max: g.max, angle_min: g.min,
+}));
+console.log(JSON.stringify({ joints,
   segment: prepared.segmentMethod, patches: prepared.patches.length,
   cuts: prepared.seamEdgeCount, folds: prepared.foldEdgeCount, scored, bent_unscored: bent,
   min_score_deg: minScore,
