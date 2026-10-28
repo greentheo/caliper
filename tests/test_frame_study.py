@@ -1,5 +1,7 @@
 """CALI-40 — sizing a tube frame with whittle's FrameStudy, from the tubes a part declares."""
 
+import os
+
 import pytest
 
 from caliper import aero, frame_study as fs
@@ -237,3 +239,61 @@ def test_walls_carry_what_stands_on_them_and_are_fastened_to_the_frame(store):
     assert "walls" not in rec["catalogs"] and all("walls" not in st["design"] for st in rec["stations"])
     tubes = fs.study(store, "frame", from_design=True, payload_lb=0, min_safety=2.0, walls=False)
     assert not tubes["walls"] and "walls" not in tubes["drawn"]
+
+
+# --- CALI-46: gusset plates ------------------------------------------------------------------
+CORNERED = '''PARAMS = {"w": 50.8}
+
+GUSSETS = {"jog": ("riser", "shank")}
+
+
+def members(params):
+    t = {"outer": 50.8, "wall": 3.175}
+    return [
+        {"name": "shank", "group": "shank", "a": (150, 0, 0), "b": (0, 0, 0), **t, "size_params": ["w", "w"]},
+        {"name": "riser", "group": "riser", "a": (0, 0, 0), "b": (0, 0, 250), **t},
+        {"name": "rail", "group": "rail", "a": (0, 0, 250), "b": (-800, 0, 250), **t, "carries": True},
+    ]
+
+
+def supports(params):
+    return [{"at": (150, 0, 0), "fix": "all"}]
+
+
+def construction(params, build=None):
+    out = []
+    for name, pl in (globals().get("PLATES") or {}).items():
+        out.append({"name": f"gusset_{name}", "kind": "lump", "mass": pl["mass_kg"] * pl["count"],
+                    "at": tuple(pl["placement"]["origin"])})
+    return out
+
+
+def build(params):
+    import cadquery as cq
+    return cq.Workplane("XY").box(50, 50, 50)
+'''
+
+
+def test_gusset_plates_are_sized_written_into_the_frame_and_weighed(tmp_path):
+    from whittle import FrameStudy
+    if not hasattr(FrameStudy, "gusset"):
+        pytest.skip("whittle has no plate mode here")
+    s = DesignStore.create("a corner", base=str(tmp_path / "designs"))
+    s.write_part("frame", CORNERED, intent="a shank, a riser and a rail")
+    s.write_part("cargo", CARGO.replace("(-650, 0, 100)", "(-600, 0, 300)"), intent="100 lb at the end of the rail")
+    assert fs.read_gussets(CORNERED) == {"jog": ("riser", "shank")}
+    rec = fs.gussets(s, "frame", thickness=4.7625, payload_lb=0, min_safety=2.0, resolution=30)
+    (j,) = rec["joints"].values()
+    assert j["members"] == ["riser", "shank"] and j["stations"]
+    pick = j["stations"][j["pick"]]
+    assert pick["safety"] >= 2.0 or pick["safety"] == max(st["safety"] for st in j["stations"])
+    assert os.path.exists(os.path.join(fs.gussets_dir(s), rec["id"], "jog", "station_00.dxf"))
+    from caliper import construction as C
+    before = C.report(s, "frame")["mass_kg"]
+    got = fs.adopt_gussets(s, rec["id"])
+    script = s.read_script("frame")
+    assert "PLATES = {" in script and got["version"] == 2
+    assert aero.shape_signature(script) == aero.shape_signature(CORNERED)
+    assert C.report(s, "frame")["mass_kg"] == pytest.approx(before + 2 * pick["mass_kg"], abs=0.01)
+    assert fs.adopt_gussets(s, rec["id"])["version"] == 3            # adopting again replaces PLATES, once
+    assert s.read_script("frame").count("PLATES = {") == 1

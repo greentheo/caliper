@@ -184,6 +184,28 @@ def tube_cuts(members: list[dict]) -> list[dict]:
     return out
 
 
+def _plates(plates: dict, out: str) -> list[dict]:
+    """Each plate as plasma files (DXF R12 in mm, SVG), drawn by whittle's Cut from the outline and holes."""
+    import numpy as np
+    from whittle.plate import Cut
+
+    os.makedirs(out, exist_ok=True)
+    rows = []
+    for name, pl in plates.items():
+        cut = Cut(outline=np.asarray(pl["outline"], dtype=float),
+                  holes=[np.asarray(h, dtype=float) for h in pl.get("holes") or []], thickness=float(pl["thickness"]))
+        for ext, text in (("dxf", cut.dxf()), ("svg", cut.svg())):
+            with open(os.path.join(out, f"{name}.{ext}"), "w") as f:
+                f.write(text)
+        lo, hi = cut.outline.min(axis=0), cut.outline.max(axis=0)
+        rows.append({"name": name, "count": pl["count"], "thickness_mm": pl["thickness"],
+                     "label": f"{M.nominal(pl['thickness'])} steel plate", "mass_kg": pl["mass_kg"],
+                     "safety": pl["safety"], "relief": pl["relief"], "members": pl["members"],
+                     "size_mm": [round(float(hi[0] - lo[0]), 1), round(float(hi[1] - lo[1]), 1)],
+                     "notes": pl.get("notes") or [], "files": [f"plates/{name}.dxf", f"plates/{name}.svg"]})
+    return rows
+
+
 def _end_text(e: dict) -> str:
     if e.get("butts"):
         cut = "square" if e["miter_deg"] < 0.5 else f"mitred {e['miter_deg']:.0f}°"
@@ -222,6 +244,8 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
     if any((M.sheet(m).get("cut") or {}).get("fold_deg", 0) > 0 for m, _ in groups):
         record["notes"].append("Score lines: on foam, cut a V-groove on the INSIDE face (the unmarked side) "
                                "and fold it closed; mountain/valley as marked, the marked side is the outside.")
+    if d.get("plates"):                    # gusset plates sized by whittle's plate mode, with their holes
+        record["plates"] = _plates(d["plates"], os.path.join(root, "plates"))
     if d.get("members"):
         tubes = tube_cuts(d["members"])
         by: dict[str, list] = {}
@@ -262,6 +286,15 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
 def cutlist_text(record: dict) -> str:
     """The sticks as a shop cut list, inches first."""
     lines = [f"CUT LIST — {record['part']} ({record['id']})", ""]
+    for pl in record.get("plates") or []:
+        w, h = pl["size_mm"]
+        lines.append(f"{pl['label']}, plasma: {pl['count']} x {pl['name']}  ({w / M.IN:.1f} x {h / M.IN:.1f} in, "
+                     f"{pl['mass_kg']:.2f} kg each, {pl['safety']}x; takes {pl['relief']:.0%} off the "
+                     f"{' / '.join(pl['members'])} weld)  plates/{pl['name']}.dxf")
+        for n in pl["notes"]:
+            lines.append(f"    - {n}")
+    if record.get("plates"):
+        lines.append("")
     for g in record.get("tubes") or []:
         lines.append(f"{g['label']}: {g['count']} x {g['stock_len_mm'] / 304.8:g} ft")
         for t in g["cuts"]:

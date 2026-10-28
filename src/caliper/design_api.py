@@ -96,6 +96,19 @@ class FrameRequest(BaseModel):
     build: dict[str, dict] = {}         # what-if construction of the carried parts
 
 
+class GussetRequest(BaseModel):
+    part: str
+    thickness: float = 3.175            # 1/8 in
+    plates: int = 2                     # cheek plates, one each side
+    min_safety: float = 3.5
+    payload_lb: float = 100.0
+    walls: bool = True
+
+
+class GussetPick(BaseModel):
+    picks: dict[str, int] = {}          # joint -> station; the lightest that holds if left out
+
+
 class PartSettings(BaseModel):
     role: Optional[str] = None        # "fixed" = a reference (e.g. the car) — drawn as context
 
@@ -142,6 +155,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             # a part that declares its tubes is a frame: it gets sized, not shaped for drag
             "framed": "def members(" in script and "def supports(" in script,
             "layouts": frame_study.read_layouts(script) if "LAYOUTS" in script else {},
+            "gussets": list(frame_study.read_gussets(script)) if "GUSSETS" in script else [],
             # a part that says what it's built from (or a frame) can be weighed (CALI-41)
             "built": construction.declares(script),
             # what it has to hold (keeps()) — a drag study keeps it clear (CALI-42)
@@ -179,6 +193,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "aero_runs": aero.list_runs(store),
         "frame_runs": frame_study.list_runs(store),
         "cutplans": cutplan.list_runs(store),
+        "gusset_runs": frame_study.list_gussets(store),
         "cutplan_unavailable": cutplan.available(),
         "aero_available": _aero_available(),
     }
@@ -434,6 +449,46 @@ def router():
         headers = {} if media.startswith(("image/", "text/", "application/pdf")) else {
             "Content-Disposition": f'attachment; filename="{rid}-{path.replace("/", "-")}"'}
         return Response(data, media_type=media, headers=headers)
+
+    # -- gusset plates (CALI-46): whittle's plate mode at the joints a frame names ---------------------
+    @r.post("/api/designs/{slug}/gussets")
+    def gussets_run(slug: str, req: GussetRequest):
+        store = load(slug)
+        if store.design.part(req.part) is None:
+            raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
+
+        def work(j):
+            return frame_study.gussets(DesignStore.load(slug), req.part, thickness=req.thickness,
+                                       plates=req.plates, min_safety=req.min_safety, payload_lb=req.payload_lb,
+                                       walls=req.walls, emit=lambda k, t="", **d: j.emit(k, t, **d))
+
+        job = RUNNER.submit("gussets", work, label=f"gussets for {req.part}", lock=f"frame:{slug}")
+        return {"job_id": job.id}
+
+    @r.get("/api/designs/{slug}/gussets/{rid}/{joint}/{name}")
+    def gussets_file(slug: str, rid: str, joint: str, name: str):
+        store = load(slug)
+        if frame_study.load_gussets(store, rid) is None or "/" in joint or ".." in joint:
+            raise HTTPException(status_code=404, detail="no such study")
+        path = os.path.join(frame_study.gussets_dir(store), rid, joint, os.path.basename(name))
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=404, detail="no such file")
+        with open(path, "rb") as f:
+            data = f.read()
+        return Response(data, media_type="image/svg+xml" if name.endswith(".svg") else "application/dxf")
+
+    @r.post("/api/designs/{slug}/gussets/{rid}/adopt")
+    def gussets_adopt(slug: str, rid: str, req: GussetPick):
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                got = frame_study.adopt_gussets(store, rid, req.picks or None)
+            except FileNotFoundError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+            except (KeyError, ValueError) as e:
+                raise HTTPException(status_code=409, detail=str(e))
+            store.append_log({"kind": "gussets", "action": "adopted", "run": rid})
+            return {**got, "design": design_state(DesignStore.load(slug))}
 
     @r.get("/api/designs/{slug}/frame-study/{rid}/stations/{index}.stl")
     def frame_station(slug: str, rid: str, index: int):

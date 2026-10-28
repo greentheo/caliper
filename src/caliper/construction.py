@@ -71,6 +71,8 @@ if callable(globals().get('shell')):
 if callable(globals().get('keeps')):
     _k = keeps
     _out['keeps'] = _k({{}}, _b) if len(_inspect.signature(_k).parameters) > 1 else _k({{}})
+if isinstance(globals().get('PLATES'), dict):
+    _out['plates'] = PLATES
 if callable(globals().get('members')):
     _out['members'] = members({{}})
 if callable(globals().get('supports')):

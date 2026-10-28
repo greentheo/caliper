@@ -188,7 +188,7 @@ def shape_signature(script: str) -> str:
 #: study's numbers meaning what they meant. (``keeps()`` isn't here: a study's designs were kept clear of
 #: the boxes it had, so new ones mean running it again.)
 _NOT_SHAPE_FUNCS = ("construction", "members", "supports")
-_NOT_SHAPE_DICTS = ("BUILD", RANGES_NAME, "LAYOUTS")
+_NOT_SHAPE_DICTS = ("BUILD", RANGES_NAME, "LAYOUTS", "GUSSETS", "PLATES")
 
 
 def _geometry_only(script: str) -> str:

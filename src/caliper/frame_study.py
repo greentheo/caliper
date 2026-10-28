@@ -211,7 +211,8 @@ def build_spec(fd: dict, *, load_lb: float = 100.0, factor: float = 2.5,
         at = node_of(s["at"])
         if not any(at in (m["a"], m["b"]) for m in members):
             raise ValueError(f"support at {s['at']} isn't on any member")
-        supports.append({"node": at, "fix": list(s.get("fix", "all"))})
+        fix = s.get("fix", "all")
+        supports.append({"node": at, "fix": fix if isinstance(fix, str) else list(fix)})
 
     cases = {"standing": {"factor": 1.0, "self_weight": True},
              "driving": {"factor": float(factor), "self_weight": True}}
@@ -563,3 +564,161 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
                                extra={"frame_run": rid, "station": int(index), "design": st["design"],
                                       "mass_lb": st["mass_lb"], "safety": st["safety"]})
     return {"version": version, "design": st["design"]}
+
+
+# ---------------------------------------------------------------------------
+# Gusset plates (CALI-46): whittle's plate mode at the joints a frame names
+# ---------------------------------------------------------------------------
+def read_gussets(script: str) -> dict[str, tuple[str, str]]:
+    """A frame's joints that take gusset plates — ``GUSSETS = {"jog_low": ("riser", "shank_out")}`` — the
+    two members meeting there, the first one the plate's u runs along."""
+    import ast
+
+    try:
+        tree = ast.parse(script)
+    except SyntaxError:
+        return {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "GUSSETS"):
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError:
+                return {}
+            return {str(k): (str(v[0]), str(v[1])) for k, v in value.items() if len(v) == 2}
+    return {}
+
+
+def gussets_dir(store: DesignStore) -> str:
+    return os.path.join(store.root, "gussets")
+
+
+def gussets(store: DesignStore, part_id: str, *, thickness: float = 4.7625, plates: int = 2,
+            min_safety: float = 3.5, payload_lb: float = 100.0, walls: bool = True,
+            build: Optional[dict] = None, emit: Optional[Callable] = None, resolution: int = 80) -> dict:
+    """Size cheek plates at each joint the frame names (``GUSSETS``), loaded from the frame carrying the
+    design as built. Each joint gets whittle's slider from a solid plate to the lightest that still holds,
+    every station cleaned for plasma; the record names the lightest that keeps ``min_safety``."""
+    from whittle import FrameStudy
+
+    from . import construction
+
+    emit = emit or (lambda *a, **k: None)
+    joints = read_gussets(store.read_script(part_id))
+    if not joints:
+        raise ValueError(f"'{part_id}' doesn't name any joints for gussets — give it GUSSETS = "
+                         f"{{'name': ('member_a', 'member_b')}}")
+    fd = frame_def(store, part_id)
+    carried = construction.design_loads(store, skip=(part_id,), payload_lb=payload_lb, walls=walls, build=build)
+    if not carried["points"]:
+        raise ValueError("no other part says what it's built from — nothing for the plates to carry")
+    built = build_spec(fd, points=carried["points"], walls=carried["shell"])
+    fs = FrameStudy.from_dict(built["spec"])
+    ix = {n: i for i, n in enumerate(built["names"][:built["steel"]])}
+    rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
+    out_dir = os.path.join(gussets_dir(store), rid)
+    record = {"id": rid, "part": part_id, "created": time.time(), "thickness": thickness, "plates": plates,
+              "min_safety": min_safety, "payload_lb": payload_lb, "walls": walls, "joints": {}}
+    for name, (m1, m2) in joints.items():
+        if m1 not in ix or m2 not in ix:
+            raise ValueError(f"GUSSETS['{name}'] names {m1!r}/{m2!r}, which aren't both members")
+        shared = set(built["ends"][ix[m1]]) & set(built["ends"][ix[m2]])
+        if not shared:
+            raise ValueError(f"{m1} and {m2} don't meet — no joint for '{name}'")
+        emit("plate", f"sizing the plates at {name} ({m1} / {m2})")
+        plate = fs.gusset(shared.pop(), ix[m1], ix[m2], thickness=thickness, plates=plates,
+                          resolution=resolution)
+        sweep = plate.sweep(remove_up_to=0.5, stations=6, min_safety=min_safety)
+        os.makedirs(os.path.join(out_dir, name), exist_ok=True)
+        rows = []
+        for i, st in enumerate(sweep):
+            m = st.metrics
+            cut = st.design
+            for ext, text in (("svg", cut.svg()), ("dxf", cut.dxf())):
+                with open(os.path.join(out_dir, name, f"station_{i:02d}.{ext}"), "w") as f:
+                    f.write(text)
+            weld = m.get("weld_moment_nmm")
+            rows.append({"index": i, "removed": round(float(st.removed), 3), "mass_kg": round(float(m["mass_kg"]), 3),
+                         "safety": round(float(m["safety_factor"]), 2), "stress_mpa": round(float(m["peak_stress_mpa"]), 1),
+                         "deflection_mm": round(float(m["deflection_mm"]), 3), "holes": int(m.get("holes", 0)),
+                         "relief": round(float(m["plate_share"]), 3),
+                         "weld_lbin": None if weld is None else [round(float(w) / LBIN) for w in
+                                                                 (weld if hasattr(weld, "__len__") else [weld])],
+                         "note": getattr(st, "note", "") or "",
+                         "outline": [[round(float(u), 2), round(float(v), 2)] for u, v in cut.outline],
+                         "holes_uv": [[[round(float(u), 2), round(float(v), 2)] for u, v in h] for h in cut.holes]})
+        ok = [r for r in rows if r["safety"] >= min_safety]
+        pick = min(ok, key=lambda r: r["mass_kg"]) if ok else max(rows, key=lambda r: r["safety"])
+        pl = plate.placement
+        record["joints"][name] = {
+            "members": [m1, m2], "stations": rows, "pick": pick["index"], "notes": list(plate.notes),
+            "offset_mm": round(float(plate.offset), 2),
+            "placement": {k: [round(float(v), 3) for v in getattr(pl, k)] for k in ("origin", "u", "v", "normal")}}
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "run.json"), "w") as f:
+        json.dump(record, f, indent=2)
+    store.append_history(part_id, {"kind": "gussets", "action": "sized", "run": rid,
+                                   "joints": list(record["joints"])})
+    emit("done", ", ".join(f"{n}: {j['stations'][j['pick']]['mass_kg']} kg × {plates}, "
+                           f"{j['stations'][j['pick']]['safety']}x" for n, j in record["joints"].items()), run=rid)
+    return record
+
+
+def load_gussets(store: DesignStore, rid: str) -> Optional[dict]:
+    if not rid or "/" in rid or ".." in rid:
+        return None
+    path = os.path.join(gussets_dir(store), rid, "run.json")
+    if not os.path.exists(path):
+        return None
+    with open(path) as f:
+        return json.load(f)
+
+
+def list_gussets(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
+    root = gussets_dir(store)
+    if not os.path.isdir(root):
+        return []
+    out = []
+    for rid in sorted(os.listdir(root), reverse=True):
+        rec = load_gussets(store, rid)
+        if rec and (part_id is None or rec.get("part") == part_id):
+            out.append(rec)
+    return out
+
+
+def adopt_gussets(store: DesignStore, rid: str, picks: Optional[dict] = None) -> dict:
+    """Write the chosen plates into the frame's script as ``PLATES`` — data its ``construction()`` weighs
+    and the cut plan draws (outline and holes in plate coordinates, where the plate goes, how many)."""
+    import ast
+
+    rec = load_gussets(store, rid)
+    if rec is None:
+        raise FileNotFoundError(f"no gusset study {rid!r}")
+    pid = rec["part"]
+    plates = {}
+    for name, j in rec["joints"].items():
+        st = j["stations"][int((picks or {}).get(name, j["pick"]))]
+        plates[name] = {"members": j["members"], "thickness": rec["thickness"], "count": rec["plates"],
+                        "mass_kg": st["mass_kg"], "safety": st["safety"], "relief": st["relief"],
+                        "offset": j["offset_mm"], "placement": j["placement"],
+                        "outline": st["outline"], "holes": st["holes_uv"], "notes": j["notes"]}
+    script = store.read_script(pid)
+    block = "PLATES = " + json.dumps(plates, indent=4).replace("true", "True").replace("false", "False") \
+        .replace("null", "None") + "\n"
+    tree = ast.parse(script)
+    lines = script.splitlines(keepends=True)
+    old = next((n for n in tree.body if isinstance(n, ast.Assign) and len(n.targets) == 1
+                and isinstance(n.targets[0], ast.Name) and n.targets[0].id == "PLATES"), None)
+    if old is not None:
+        script = "".join(lines[:old.lineno - 1]) + block + "".join(lines[old.end_lineno:])
+    else:
+        at = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "construction"), None)
+        cut = (at.lineno - 1) if at is not None else len(lines)
+        script = ("".join(lines[:cut]) + "# Gusset plates, as sized by whittle's plate mode (Caliper writes this).\n"
+                  + block + "\n\n" + "".join(lines[cut:]))
+    pretty = ", ".join(f"{n} {p['count']} × {p['mass_kg']} kg ({p['safety']}x)" for n, p in plates.items())
+    version = store.write_part(pid, script, action="frame", feedback=f"gusset plates: {pretty}",
+                               extra={"gusset_run": rid, "plates": {n: {k: p[k] for k in ("mass_kg", "safety", "relief")}
+                                                                    for n, p in plates.items()}})
+    return {"version": version, "plates": {n: {k: p[k] for k in ("count", "mass_kg", "safety", "relief")}
+                                           for n, p in plates.items()}}

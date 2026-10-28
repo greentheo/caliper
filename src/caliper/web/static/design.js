@@ -779,6 +779,13 @@ function cutplanView(p) {
       ${run.tubes.map((g) => `<tr><td colspan="3" style="text-align:left"><b>${esc(g.label)}</b> <span class="muted">${g.count} × ${+(g.stock_len_mm / IN / 12).toFixed(1)} ft</span></td></tr>
         ${g.cuts.map((t) => `<tr><td style="text-align:left">${esc(t.name)}</td><td>${len(t.length_mm, 2)}</td>
           <td style="text-align:left" class="small">${t.ends.map(endText).join(' · ')}</td></tr>`).join('')}`).join('')}</table>` : '';
+  const plates = run && (run.plates || []).length ? `<div style="margin-top:10px"><b>Gusset plates</b> <span class="muted small">plasma, DXF in mm</span>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">${run.plates.map((pl) => `<div class="small">
+        <a href="${url(`plates/${pl.name}.svg`)}" target="_blank"><img src="${url(`plates/${pl.name}.svg`)}" alt="${esc(pl.name)}"
+          style="width:100%;max-height:140px;object-fit:contain;background:#fff;border-radius:4px;display:block"></a>
+        <b>${pl.count} × ${esc(pl.name)}</b> · ${esc(pl.label)} · ${len(pl.size_mm[0], 1)} × ${len(pl.size_mm[1], 1)} · ${pl.safety}x
+        · takes ${pct(pl.relief)} off the ${esc(pl.members.join('/'))} weld · <a href="${url(`plates/${pl.name}.dxf`)}">DXF</a></div>`).join('')}</div>
+      ${[...new Set(run.plates.flatMap((pl) => pl.notes))].map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}</div>` : '';
   const sticks = run && run.sticks.length ? `<table class="st" style="margin-top:10px"><tr><th style="text-align:left">cut</th><th>length</th><th style="text-align:left">piece</th></tr>
       ${run.sticks.map((g) => `<tr><td colspan="3" style="text-align:left"><b>${esc(g.label)}</b> <span class="muted">${g.count} × ${+(g.stock_len_mm / IN / 12).toFixed(1)} ft</span></td></tr>
         ${g.cuts.map((c) => `<tr><td></td><td>${len(c.length_mm, 1)}</td><td style="text-align:left">${esc(c.name)}</td></tr>`).join('')}`).join('')}</table>
@@ -786,7 +793,7 @@ function cutplanView(p) {
   const stale = run && run.version !== p.version
     ? `<div class="small" style="color:var(--bad)">Made for v${run.version}; the part is v${p.version} now — make it again.</div>` : '';
   return `<h5 style="margin:14px 0 4px">Cut plan</h5>
-    ${run ? `${stale}${sheets}${tubes}${sticks}<div class="small"><a href="${url('cutlist.txt')}" target="_blank">cut list as text</a></div>
+    ${run ? `${stale}${sheets}${plates}${tubes}${sticks}<div class="small"><a href="${url('cutlist.txt')}" target="_blank">cut list as text</a></div>
       ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`
       : `<div class="muted small">Flatten every panel onto the sheets it's cut from — score lines where it bends — and list every
          stick to cut. Uses unfold-to-sheets.</div>`}
@@ -950,7 +957,55 @@ function frameView(p) {
     </div>
     <div class="actions"><button class="primary" id="fGo">Size it</button></div>
     <div id="fProgress"></div>
-    ${runs.length ? frameResults(p, runs[pick], runs) : ''}`;
+    ${runs.length ? frameResults(p, runs[pick], runs) : ''}
+    ${(p.gussets || []).length ? gussetView(p) : ''}`;
+}
+
+// gusset plates (CALI-46): whittle's plate mode at the joints the frame names (GUSSETS) — a slider from a
+// solid plate to the lightest that still holds, each cleaned for plasma; "Use these" writes PLATES.
+function gussetView(p) {
+  const run = (S.design.gusset_runs || []).find((r) => r.part === p.id);
+  const file = (joint, i, ext) => `/api/designs/${S.slug}/gussets/${run.id}/${joint}/station_${String(i).padStart(2, '0')}.${ext}`;
+  const t = run ? run.thickness : 3.175;
+  return `<h5 style="margin:14px 0 4px">Gusset plates</h5>
+    <div class="muted small">Cheek plates at ${p.gussets.map(esc).join(', ')}, carrying the frame's own corner loads; each design is cleaned for a plasma table.</div>
+    <div class="form"><span>plate</span><select id="gThick">${[[3.175, '1/8 in'], [4.7625, '3/16 in'], [6.35, '1/4 in']].map(([v, l]) =>
+      `<option value="${v}" ${Math.abs(v - t) < 0.01 ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <div class="actions"><button id="gGo">Size the gussets</button>${run ? ' <button class="primary" id="gUse">Use these plates</button>' : ''}</div>
+    <div id="gProgress"></div>
+    ${run ? Object.entries(run.joints).map(([name, j]) => `<div style="margin-top:8px"><b>${esc(name)}</b>
+        <span class="muted small">${esc(j.members.join(' / '))} · ${run.plates} plates of ${(run.thickness / IN).toFixed(3).replace(/0+$/, '')} in</span>
+        <div style="display:grid;grid-template-columns:110px 1fr;gap:8px;align-items:start">
+          <a href="${file(name, j.pick, 'svg')}" target="_blank"><img src="${file(name, j.pick, 'svg')}" style="width:110px;background:#fff;border-radius:4px"></a>
+          <table class="st"><tr><th>#</th><th>holes</th><th>kg each</th><th>safety</th><th>weld relief</th></tr>
+            ${j.stations.map((st) => `<tr class="${st.index === j.pick ? 'on' : ''}"><td>${st.index}</td><td>${pct(st.removed)}</td><td>${st.mass_kg}</td>
+              <td>${st.safety}x</td><td>${pct(st.relief)}</td></tr>`).join('')}</table></div>
+        ${j.notes.map((n) => `<div class="muted small">• ${esc(n)}</div>`).join('')}</div>`).join('') : ''}`;
+}
+
+function wireGussets(p) {
+  const go = $('gGo');
+  if (go) go.onclick = async () => {
+    const prog = $('gProgress');
+    go.disabled = true;
+    prog.innerHTML = '<div class="small muted" id="gMsg">sizing…</div>';
+    try {
+      const { job_id } = await api('POST', `/api/designs/${S.slug}/gussets`, {
+        part: p.id, thickness: +$('gThick').value, payload_lb: $('fLoad') ? (+$('fLoad').value || 0) : 100,
+        walls: $('fWalls') ? $('fWalls').checked : true });
+      await follow(job_id, (ev) => { const m = $('gMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
+      await refresh();
+    } catch (e) { prog.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`; go.disabled = false; }
+  };
+  const use = $('gUse');
+  if (use) use.onclick = async () => {
+    const run = (S.design.gusset_runs || []).find((r) => r.part === p.id);
+    use.disabled = true;
+    try {
+      const got = await api('POST', `/api/designs/${S.slug}/gussets/${run.id}/adopt`, { picks: {} });
+      S.design = got.design; await refresh();
+    } catch (e) { $('gProgress').innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`; use.disabled = false; }
+  };
 }
 
 function frameLabel(r) {
@@ -1003,6 +1058,7 @@ function frameResults(p, run, runs) {
 function wireFrame(p) {
   const go = $('fGo');
   if (go) go.onclick = () => runFrame(p);
+  wireGussets(p);
   const from = $('fFrom');
   if (from) from.onchange = () => { $('fLoadLbl').textContent = from.value === 'design' ? 'payload on the floor' : 'box + gear'; };
   const sel = $('fRun');

@@ -679,9 +679,15 @@ posts; file paths can't leave the plan; full suite green.
   mitre each side).
 - ⏳ Inside-face offsets for thick foam at corners; **the 2x2 skeleton** placed where the shell needs it
   (the corner posts are short now the shoulders lean in) — wants Theo's say on where ribs go.
-- ⏳ Gusset plates: whittle-agent building plate mode (`frame.gusset(node, m1, m2, thickness, plates)` →
-  sweep → plasma DXF); the riser's two corners carry ~5,700–7,800 lb·in on a bump; the X's middle 235.
-  Flag: 2 in shank vs 2.5 in riser faces are ¼ in apart — spacer bar or a 2 in riser.
+- ✅ **Gusset plates**: a frame names its joints (`GUSSETS = {"jog_low": ("riser", "shank_out")}`);
+  `frame_study.gussets()` runs whittle's plate mode (built by the whittle-agent for this: cheek plates, a
+  slider from solid to the lightest that holds, each cleaned for plasma, with how much they take off the
+  weld) on the frame carrying the design as built; `adopt_gussets()` writes the chosen plates into the
+  script as `PLATES` (outline + holes + where they go), which `construction()` weighs and the cut plan
+  draws as plasma DXF/SVG. Page: Size the frame → *Gusset plates* (size, compare, use). Theo's frame: 1/8 in
+  plates, 2 per corner — jog_low 0.74 kg each, 6.5×, takes 84% off the riser/shank weld; jog_high 0.71 kg,
+  4.3×, 82% off; the X's middle plate dropped (235 lb·in). Frame 36.2 lb with plates.
+  Flag: 2 in shank vs 2.5 in riser faces are ¼ in apart — spacer bar or a 2 in riser (Theo's call).
 
 See `specs/caliper-make-loop-spec.md` for M6 (scorecard, the shop, moves, loop runner, build package).
 
