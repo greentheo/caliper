@@ -722,3 +722,16 @@ def adopt_gussets(store: DesignStore, rid: str, picks: Optional[dict] = None) ->
                                                                     for n, p in plates.items()}})
     return {"version": version, "plates": {n: {k: p[k] for k in ("count", "mass_kg", "safety", "relief")}
                                            for n, p in plates.items()}}
+
+
+def analyse(store: DesignStore, part_id: str, *, payload_lb: float = 0.0, factor: float = 2.5,
+            walls: bool = True) -> dict:
+    """The frame as it stands, carrying the design as built (no sweep) — for the scorecard."""
+    from whittle import FrameStudy
+
+    from . import construction
+
+    fd = frame_def(store, part_id)
+    carried = construction.design_loads(store, skip=(part_id,), payload_lb=payload_lb, walls=walls)
+    built = build_spec(fd, factor=factor, points=carried["points"] or None, walls=carried["shell"])
+    return {**_summary(FrameStudy.from_dict(built["spec"]).analyze(), built), "factor": factor}

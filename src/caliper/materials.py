@@ -122,3 +122,22 @@ def nominal(thickness_mm: float) -> str:
     g = gcd(rest, 16)
     frac = f"{rest // g}/{16 // g}"
     return f"{whole} {frac} in" if whole else f"{frac} in"
+
+
+#: What stock costs (CALI-47), USD — rough 2026 retail guesses for a cost the scorecard can compare between
+#: designs, NOT quotes. Correct them for your suppliers; every cost the scorecard shows says it rests on these.
+PRICES = {
+    "basis": "rough retail guesses (big-box / local metal supplier), 2026 — edit materials.PRICES",
+    # a whole sheet, by material and thickness (mm); plate is bought by weight
+    "sheet": {("plywood", 9.525): 38.0, ("plywood", 12.7): 46.0, ("plywood", 6.35): 30.0,
+              ("xps", 25.4): 42.0, ("xps", 50.8): 70.0, ("eps", 25.4): 22.0},
+    "sheet_per_m2": {"plywood": 13.0, "xps": 14.0, "eps": 7.5},     # any other thickness, per 25.4 mm
+    "steel_plate_per_kg": 3.3,                                        # ~$1.50/lb, small pieces
+    # a whole stick of lumber; steel tube by weight
+    "lumber": {"2x2": 4.5, "1x2": 3.0, "2x3": 5.0, "2x4": 6.0},
+    "steel_tube_per_kg": 4.2,                                         # ~$1.90/lb
+    # coverings, by what goes into them
+    "canvas_per_yd": 7.0, "glass_cloth_per_yd": 9.0, "epoxy_per_gal": 110.0, "glue_per_gal": 30.0,
+    "paint_per_gal": 45.0,
+    "hardware_allowance": 25.0,                                       # a lump of glue, screws and hinges
+}

@@ -552,6 +552,7 @@ function designView(d) {
     : '<span class="badge bad">checks failing</span>') : '';
   return `<h2>${esc(d.name)} ${status}</h2>
     <div class="muted small">${esc(d.prompt)}</div>
+    <h4>Scorecard</h4><div id="scoreBox">${scoreView(d)}</div>
     <h4>Requirements</h4>
     ${d.requirements.length ? '<ul class="list">' + d.requirements.map((r) => `<li>${esc(r.question)}
       <div><b>${esc(r.answer)}</b>${r.source === 'assumed' ? ' <span class="badge">assumed</span>' : ''}</div></li>`).join('') + '</ul>'
@@ -569,6 +570,55 @@ function designView(d) {
     ${d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : ''}
     <h4>Design checks</h4>
     ${checks(rep)}`;
+}
+
+// ------------------------------------------------------------- the scorecard (CALI-47)
+// One card for the design as it stands: every check (pass/fail, margin) and every objective (value, change
+// since the last card) across design, optimization, making and cost — each with how far to trust it.
+const TRUST = { measured: 'measured', model: 'a model (on the safe side)', rough: 'rough', guess: 'a guess' };
+function scoreView(d) {
+  const card = (d.scorecards || [])[0];
+  const stale = card && d.parts.some((p) => card.versions && card.versions[p.id] !== undefined && card.versions[p.id] !== p.version);
+  const num = (v, u) => {
+    if (v == null) return '—';
+    const n = typeof v === 'number' ? (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : `${+v.toFixed(2)}`) : esc(String(v));
+    return u === '$' ? `$${n}` : `${n}${u ? ' ' + esc(u) : ''}`;
+  };
+  const tag = (t) => t ? `<span class="badge" title="how far to trust it">${esc(TRUST[t] || t)}</span>` : '';
+  const goals = d.has_goals ? '' : '<div class="muted small">No <code>scorecard.yaml</code> yet: only the design\'s own rules are checked. Tell me what it must do and I\'ll write it.</div>';
+  if (!card) return `${goals}<div class="actions"><button id="scGo">Score it</button></div><div id="scProgress"></div>`;
+  const delta = (o) => {
+    if (o.change == null || Math.abs(o.change) < 1e-9) return '';
+    const better = o.direction === 'max' ? o.change > 0 : o.change < 0;
+    return ` <span class="small" style="color:var(${better ? '--ok' : '--bad'})">${o.change > 0 ? '+' : ''}${num(o.change)}</span>`;
+  };
+  return `<div class="small">${card.summary.pass} pass · <b style="color:var(--bad)">${card.summary.fail} fail</b>${card.summary.unknown ? ` · ${card.summary.unknown} unknown` : ''}
+      <span class="muted">· scored ${new Date(card.created * 1000).toLocaleString()}</span>
+      ${stale ? '<span class="badge bad">a part has changed since</span>' : ''}</div>
+    <ul class="list small" style="margin-top:6px">${card.checks.map((c) => `<li>${c.status === 'pass' ? '✓' : c.status === 'fail' ? '<span style="color:var(--bad)">✗</span>' : '?'}
+      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${tag(c.trust)}</li>`).join('')}</ul>
+    <table class="st" style="margin-top:6px">${card.objectives.map((o) => `<tr><td style="text-align:left">${esc(o.label)}</td>
+      <td>${num(o.value, o.unit)}${delta(o)}</td><td>${tag(o.trust)}</td></tr>`).join('')}</table>
+    ${card.cost ? `<details class="small" style="margin-top:6px"><summary>Stock: $${Math.round(card.cost.usd)} · offcut $${Math.round(card.cost.waste_usd)}</summary>
+      <table class="st">${card.cost.lines.map((l) => `<tr><td style="text-align:left">${esc(l.part)}</td><td style="text-align:left">${esc(l.item)}</td>
+        <td>$${l.usd.toFixed(0)}</td><td class="muted">${l.waste_usd ? `$${l.waste_usd.toFixed(0)} offcut` : ''}</td></tr>`).join('')}</table>
+      <div class="muted">${esc(card.cost.basis)}</div></details>` : ''}
+    ${goals}<div class="actions"><button id="scGo">${stale ? 'Score it again' : 'Score it'}</button></div><div id="scProgress"></div>`;
+}
+
+function wireScore() {
+  const go = $('scGo');
+  if (!go) return;
+  go.onclick = async () => {
+    const prog = $('scProgress');
+    go.disabled = true;
+    prog.innerHTML = '<div class="small muted" id="scMsg">scoring…</div>';
+    try {
+      const { job_id } = await api('POST', `/api/designs/${S.slug}/scorecard`);
+      await follow(job_id, (ev) => { const m = $('scMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
+      await refresh();
+    } catch (e) { prog.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`; go.disabled = false; }
+  };
 }
 
 function historyItem(h) {
@@ -627,7 +677,7 @@ function partView(p) {
 function wireInspector(p) {
   document.querySelectorAll('#inspector [data-part]').forEach((a) => { a.onclick = () => setScope(a.dataset.part); });
   showMarks();
-  if (!p) { wireBalance(); return; }
+  if (!p) { wireBalance(); wireScore(); return; }
   wireBuilt(p);
   const role = $('roleRef');
   if (role) role.onchange = async () => {

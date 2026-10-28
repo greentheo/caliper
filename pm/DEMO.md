@@ -42,6 +42,8 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **Scorecard (CALI-47).** One card per design: checks and objectives across design, strength/mass/drag,
+  making, and cost & waste — each number with how far to trust it, and what changed since last time.
 - 🆕 **Cut plan (CALI-45).** Any part that says what it's built from gets a cut plan: its panels unfolded
   and nested onto real sheets by Theo's unfold-to-sheets (SVG + DXF per sheet, score lines where a panel
   bends, seam tokens, a printable PDF), and its sticks cut-listed.
@@ -535,6 +537,13 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-28 · The scorecard (CALI-47)
+**Try it:** open the camper with nothing selected — **Scorecard** is at the top: every check (✓/✗, the
+number, how far to trust it) and every objective, with the stock bill (*Stock: $446 · offcut $…* opens the
+lines). *Score it* re-scores the design as it stands (~10 s): try a what-if in a part's **Built from** and
+*Use these*, then score again — the objectives show what changed. The one ✗ is the hitch against an
+*assumed* Class II rating; the goals live in `designs/a-cargo-box-on-the-trailer/scorecard.yaml`.
 
 ### 2026-10-28 · Gusset plates (CALI-46)
 **Try it:** click **frame** → **Size the frame** → scroll to *Gusset plates*: the riser's two corners, each a

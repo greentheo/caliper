@@ -459,6 +459,34 @@ def study(store: DesignStore, part_id: str, bounds: dict, *, obstacles=(),
     return record
 
 
+def drag_now(store: DesignStore, part_id: str, *, obstacles=(), speed_kmh: float = 105.0,
+             resolution: int = 20, flow=(-1.0, 0.0, 0.0)) -> float:
+    """The part's drag as it stands, in N — scored the way a study scores it (same welding, same edge
+    splitting, the same shelter), so it compares with a study's stations. For the scorecard."""
+    import numpy as np
+    from whittle import ParametricStudy
+
+    from .sandbox import BuildWorker
+
+    script = store.read_script(part_id)
+    start = read_params(script)
+    if not start:
+        raise ValueError(f"'{part_id}' has no {PARAMS_NAME} to build it from")
+    meshes = []
+    for oid in obstacles:
+        if oid != part_id and store.design.part(oid) is not None:
+            g = store.part_geometry(oid).require_mesh()
+            meshes.append(_mesh(g.vertices, g.faces))
+    key = next(iter(start))
+    with BuildWorker(script, timeout=60) as worker:
+        study = ParametricStudy(lambda p: worker.build(p), {key: (start[key], start[key])}, start=start,
+                                flow=tuple(flow), speed_kmh=float(speed_kmh), obstacles=meshes,
+                                resolution=int(resolution))
+        report = study.score()
+    v = float(speed_kmh) / 3.6
+    return float(report.drag_area) * 1e-6 * 0.5 * 1.225 * v * v
+
+
 def limit_notes(bounds: dict, start: dict, best: dict) -> list[str]:
     """Name the parameter that stopped the search, not just "the bounds ran out".
 

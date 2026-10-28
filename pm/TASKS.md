@@ -687,9 +687,35 @@ posts; file paths can't leave the plan; full suite green.
   draws as plasma DXF/SVG. Page: Size the frame → *Gusset plates* (size, compare, use). Theo's frame: 1/8 in
   plates, 2 per corner — jog_low 0.74 kg each, 6.5×, takes 84% off the riser/shank weld; jog_high 0.71 kg,
   4.3×, 82% off; the X's middle plate dropped (235 lb·in). Frame 36.2 lb with plates.
-  Flag: 2 in shank vs 2.5 in riser faces are ¼ in apart — spacer bar or a 2 in riser (Theo's call).
+  Theo: **2 in riser** (2x2x3/16, faces flush, no spacers) — frame v21–22: 30.2 lb of tube, 3.56×; plates
+  0.69 kg (6.0×, 86% off the weld) and 0.65 kg (3.8×, 80%); frame 36.0 lb.
 
 See `specs/caliper-make-loop-spec.md` for M6 (scorecard, the shop, moves, loop runner, build package).
+
+## Milestone M6 — the design ⇄ optimize ⇄ make loop
+
+### CALI-47 — The scorecard · P0 · M6 · ✅ done (v1)
+Every requirement as a measured check or an objective, with how far to trust it (measured / model / rough /
+guess), across the quadfecta: design, optimization, manufacturability, cost & waste. `scorecard.py`
+computes, for the design as it stands: the assembly's rules and every part's keeps (checks without being
+listed); weight & hitch moment (`balance`, with the goals' payload); the frame analysed fresh
+(`frame_study.analyse`: safety, sag, steel, weakest wall, fixings) and its plates; drag scored fresh
+(`aero.drag_now`, the way a study scores, so it compares); the cut plans (sheets, missing pieces — flagged
+when stale); **cost and waste** from each part's BOM and cut plan at `materials.PRICES` (rough, editable;
+tube and plate by weight, sheets whole, offcut priced from the nesting). Goals live in
+`designs/<slug>/scorecard.yaml` (settings, checks with op/limit/assumed, objectives with a direction);
+each card is filed with the part versions it scored and shows changes since the last. Page: *Scorecard* at
+the top of the design; *Score it* (≈10 s on the camper). API `POST /api/designs/{slug}/scorecard`.
+The camper: 6 pass, 1 fail — the hitch at 3,108 lb·in vs an **assumed** Class II 2,450 (Theo to set the real
+rating); drag 48.4 lbf, 134 lb with 50 lb aboard, steel 30.2 lb, stock ≈ $446, offcut 23% (mostly XPS).
+**Next on it:** the user's constraints in their own words → goals (Claude writes scorecard.yaml from chat);
+constraint discovery before optimizing (the mattress lesson); budgets (default 10 min); the shop (CALI-48).
+
+### CALI-52 — The skeleton: a box inside the box, roof beams for snow · P1 · M6 · 📋 next
+Theo: posts where the shell is largely flat — a box inside the box where the front and back panels meet the
+floor and roof — and cross beams under the roof for a mild snow load; 1x1 ribs only if needed. The first
+job for the loop: the skeleton as structural options (posts, rails, N roof beams, their size, an inside
+skin on the roof) checked under snow + driving against weight and cost — exhaustive over a handful.
 
 ## Milestone M5 — whole machines from one prompt (after M4)
 

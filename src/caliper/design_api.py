@@ -16,7 +16,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import aero, chat, clarify, construction, cutplan, frame_study, promote
+from . import aero, chat, clarify, construction, cutplan, frame_study, promote, scorecard
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -194,6 +194,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "frame_runs": frame_study.list_runs(store),
         "cutplans": cutplan.list_runs(store),
         "gusset_runs": frame_study.list_gussets(store),
+        "scorecards": scorecard.list_cards(store, 2),
+        "has_goals": os.path.exists(scorecard.goals_path(store)),
         "cutplan_unavailable": cutplan.available(),
         "aero_available": _aero_available(),
     }
@@ -449,6 +451,17 @@ def router():
         headers = {} if media.startswith(("image/", "text/", "application/pdf")) else {
             "Content-Disposition": f'attachment; filename="{rid}-{path.replace("/", "-")}"'}
         return Response(data, media_type=media, headers=headers)
+
+    # -- the scorecard (CALI-47): every requirement measured, every objective tracked -----------------
+    @r.post("/api/designs/{slug}/scorecard")
+    def scorecard_run(slug: str):
+        load(slug)
+
+        def work(j):
+            return scorecard.compute(DesignStore.load(slug), emit=lambda k, t="", **d: j.emit(k, t, **d))
+
+        job = RUNNER.submit("scorecard", work, label="score the design", lock=f"score:{slug}")
+        return {"job_id": job.id}
 
     # -- gusset plates (CALI-46): whittle's plate mode at the joints a frame names ---------------------
     @r.post("/api/designs/{slug}/gussets")

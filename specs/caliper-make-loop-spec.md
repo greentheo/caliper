@@ -1,6 +1,6 @@
 # Caliper — the design ⇄ optimize ⇄ make loop (M6)
 
-**Status:** draft for Theo to redline · 2026-10-28 · follows `caliper-conversational-spec.md` (M4)
+**Status:** draft, Theo's first redlines in (§5, §7) · 2026-10-28 · follows `caliper-conversational-spec.md` (M4)
 
 ## Why
 
@@ -20,12 +20,19 @@ the only record of why. M6 makes that loop Caliper's own job, with Theo in it at
 
 ## The pieces
 
+### 0. The quadfecta
+What the loop balances, all at once: **design** (it is what the spec says), **optimization** (strength,
+mass, aerodynamics), **manufacturability** (this shop can make it from this stock), and **cost and waste**
+(what the stock costs, and how much of it ends up as offcut). The scorecard carries all four.
+
 ### 1. The scorecard (first)
 Every requirement compiles to something measured, at the design level:
 
 - **checks** — must hold: `mattress fits`, `bumper_clearance >= 2 in`, `frame safety >= 3.3x`,
   `every piece fits a machine`;
-- **objectives** — to push on, with a direction and a weight: drag, steel lb, hitch lb·in, sheets, cost;
+- **objectives** — to push on, with a direction and a weight: drag, steel lb, hitch lb·in, **cost** (stock
+  bought, at prices the user can correct), **waste** (bought minus used — offcut area and length, and its
+  cost);
 - **trust** — each number says how good its model is (whittle drag ±30%; PMF stiffness a guess; FEA as
   conservative). A number is never shown without it.
 
@@ -68,17 +75,30 @@ Given the scorecard, Claude proposes the next move, runs it, measures, keeps or 
 front wall: −17 lb steel, safety 3.3 → 3.57"). The journal *is* the design's history; the PM log stops
 being the only record.
 
-### 5. Gates — where Theo is in the loop
-1. **Requirements + shop** — confirmed up front (the clarify round, extended).
-2. **Trade-offs** — when the scorecard has a real choice (layout, skin, how much volume to give for drag),
-   a small frontier with a recommendation; Theo picks.
-3. **Release to cut** — nothing goes to a machine until the build package for that exact revision is
-   reviewed: sheets per machine, cut list, shopping list, assembly order, the scorecard at release.
+### 5. Gates are constraints — the user's, and the ones Caliper finds
+Theo's redline: gates are hard to prespecify. Rather than fixed stopping points, **the user states their
+gates as constraints, in their own words** — "don't take more than 15% of the volume", "no wall thinner
+than 1/8 in", "it has to hold a twin mattress", "stop and show me before you change the shape much" — and
+Caliper compiles each into a check, an optimizer bound, or a pause. whittle's minimum wall is the model:
+a constraint the optimizer can't cross, not a meeting.
 
-Never silent: relaxing or retiring a requirement is always a proposal (as `hatch_clearance` was).
-Everything between gates runs without asking.
+**Finding the crucial constraints is part of the job.** On the camper the one Theo didn't think of first was
+that the base had to take a twin mattress. That kind of constraint is discovered, and then it's iteration.
+So before spending compute, Caliper asks what the design must hold, fit, clear, or be made with — from the
+domain ("a camper: who sleeps in it? what goes in it?"), and from what a first rough pass reveals. Ideally
+that happens before optimization; sometimes it only shows up after, and then it's a new check and a re-run,
+recorded as such.
 
-### 6. The build package
+Never silent: relaxing or retiring a requirement is always a proposal (as `hatch_clearance` was), and
+release to cut is always the user's.
+
+### 6. Budgets
+The loop's unattended time defaults to **10 minutes**, and the user can set it ("I'll check back in an
+hour"). Caliper plans back from the limit: a rough first pass spends little (coarse drag, quick sizing);
+once the design and constraints are dialed in, longer runs (a 40-minute drag study, a full plate sweep) are
+worth it. Every run says what it spent.
+
+### 7. The build package
 A released, versioned bundle per revision: per-machine files, cut list with end cuts and bevels, BOM and
 shopping list, assembly drawing and order, and the scorecard as released.
 
@@ -94,9 +114,14 @@ shopping list, assembly drawing and order, and the scorecard as released.
 - **Housekeeping before CALI-50:** commit/pin whittle's frame-study work; merge `cali-31-design-ui` /
   `cali-39-parametric-aero`; pin unfold-to-sheets by commit.
 
-## Open questions for Theo
+## Theo's answers (2026-10-28)
 
-- Which gates, exactly — are three right? (e.g. a gate before any shape change bigger than X%?)
-- Budgets: how long may the loop run unattended (a drag study is ~40 min)?
-- Cost as an objective — worth adding stock prices?
-- The large printer: printed parts in the camper (nose caps? brackets?) as a test case for the printer path.
+- **Gates:** user-specified, in colloquial terms, as constraints on the optimize side; Caliper works to find
+  the crucial ones early (§5).
+- **Budgets:** default 10 minutes unattended, user-set, planned backwards from the limit (§6).
+- **Cost:** yes — and minimizing material waste with it (§0, §1).
+- **The large printer:** printed parts in the camper (nose caps, brackets) as the printer path's test case.
+- **First job for the loop runner:** the camper's 2x2 skeleton — a "box inside the box" where the front and
+  back panels meet the floor and roof (posts only where the shell is flat), cross beams under the roof for a
+  mild snow load, 1x1 ribs only if needed — searched over count, size and an inside skin, against weight and
+  cost, under snow and driving.
