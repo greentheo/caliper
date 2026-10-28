@@ -228,6 +228,13 @@ function paint() {
     m.material.emissive.setHex(sel ? 0x1f6feb : 0x000000);
     m.material.emissiveIntensity = sel ? 0.55 : 0;
     m.visible = !(S.station && S.station.part === pid);
+    // while previewing one part's design, fade the rest — the box would otherwise hide the frame
+    const fade = !!S.station && S.station.part !== pid;
+    const transparent = fade || base.transparent;
+    if (m.material.transparent !== transparent) m.material.needsUpdate = true;   // recompiles the shader
+    m.material.transparent = transparent;
+    m.material.opacity = fade ? Math.min(0.18, base.opacity) : base.opacity;
+    m.material.depthWrite = !transparent;
   }
 }
 
@@ -354,6 +361,10 @@ function renderThread() {
     } else if (e.kind === 'assertion') {
       html.push(`<div class="note">${e.action === 'promoted'
         ? `🔒 locked in <code>${esc(e.id)}</code>` : `left <code>${esc(e.id)}</code> as a one-off`}</div>`);
+    } else if (e.kind === 'frame' && e.action === 'studied') {
+      html.push(`<div class="note">whittle sized <b>${esc(e.part)}</b>'s tubes — results in the inspector</div>`);
+    } else if (e.kind === 'frame' && e.action === 'adopted') {
+      html.push(`<div class="note">used design ${e.station}'s tubes as v${e.version} — ${esc(Object.entries(e.design || {}).map(([g, k]) => `${g} ${k}`).join(', '))}</div>`);
     } else if (e.kind === 'aero' && e.action === 'studied') {
       html.push(`<div class="note">whittle searched <b>${esc(e.part)}</b>'s shape — results in the inspector</div>`);
     } else if (e.kind === 'aero' && e.action === 'adopted') {
@@ -558,7 +569,8 @@ function designView(d) {
 
 function historyItem(h) {
   if (h.kind === 'revision') {
-    const what = h.action === 'aero' ? `shaped for drag — station ${h.station}`
+    const what = h.action === 'frame' ? `tubes sized — design ${h.station} (${h.mass_lb} lb, ${h.safety}x)`
+      : h.action === 'aero' ? `shaped for drag — station ${h.station}`
       : h.action === 'whittle' ? `from whittle${h.station != null ? ' — station ' + h.station : ''}`
       : h.action === 'restore' ? `rolled back to v${h.restored_from}` : h.action;
     return `<li class="hist"><span class="v">v${h.version}</span>${esc(what)}
@@ -569,6 +581,7 @@ function historyItem(h) {
     return `<li class="hist">${h.action === 'promoted' ? '🔒 locked in' : 'declined'} <code>${esc(h.expr || h.id)}</code></li>`;
   }
   if (h.kind === 'whittle') return `<li class="hist">studied in whittle (${esc(h.study)}, ${h.stations} stations)</li>`;
+  if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
   if (h.kind === 'setting') return `<li class="hist">marked ${h.role === 'fixed' ? 'as a reference' : 'as a design part'}</li>`;
   return '';
@@ -594,10 +607,11 @@ function partView(p) {
     ${p.rules.length || designRules.length ? '<ul class="list">' +
       [...p.rules, ...designRules].map((r) => `<li class="rule">🔒 <b>${esc(r.id)}</b> <code>${esc(r.expr)}</code></li>`).join('') + '</ul>'
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
-    <h4>Shape it for drag <span class="badge">numbers back</span></h4>
+    ${p.framed ? `<h4>Size the frame <span class="badge">tubes back</span></h4>
+    <div id="frameBox">${frameView(p)}</div>` : `<h4>Shape it for drag <span class="badge">numbers back</span></h4>
     <div id="aeroBox">${aeroView(p)}</div>
     <h4>whittle carving <span class="badge">mesh back</span></h4>
-    <div id="whittleBox">${whittleView(p)}</div>
+    <div id="whittleBox">${whittleView(p)}</div>`}
     <h4>History</h4>
     <ul class="list">${p.history.slice().reverse().map(historyItem).join('')}</ul>
     <details id="adv"><summary>Advanced — script &amp; spec</summary><div id="advBody" class="small muted">loading…</div></details>`;
@@ -623,6 +637,72 @@ function wireInspector(p) {
   };
   wireWhittle(p);
   wireAero(p);
+  wireFrame(p);
+}
+
+// --------------------------------------------------------------------- size the frame (CALI-40)
+// whittle's FrameStudy treats each tube the part declares as a beam: stress, sag, what the hitch holds,
+// and a slider from the frame as drawn to the lightest tubes that pass. Sizes come back into PARAMS.
+function frameRuns(pid) { return (S.design.frame_runs || []).filter((r) => r.part === pid); }
+
+function frameView(p) {
+  if (!S.design.aero_available) return '<div class="empty">whittle isn\'t installed in Caliper\'s environment.</div>';
+  const runs = frameRuns(p.id);
+  return `<div class="form">
+      <span>box + gear</span><span><input type="number" id="fLoad" value="100" min="0" step="10"> lb, on the rails</span>
+      <span>bumps</span><span>×<input type="number" id="fFactor" value="2.5" min="1" max="5" step="0.5"> when driving</span>
+      <span>least safety</span><span><input type="number" id="fSafety" value="3.5" min="1" max="10" step="0.5"> ×</span>
+    </div>
+    <div class="actions"><button class="primary" id="fGo">Size it</button></div>
+    <div id="fProgress"></div>
+    ${runs.length ? frameResults(p, runs[0]) : ''}`;
+}
+
+function frameResults(p, run) {
+  const d = run.drawn, on = S.station && S.station.run === run.id ? S.station.index : -1;
+  const groups = Object.keys(run.stations[0].design);
+  const stand = (st) => st.receiver.standing, drive = (st) => st.receiver.driving;
+  return `<div class="card" style="margin-top:12px">
+      <b>As drawn</b>: ${d.mass_lb} lb of steel · weakest member <b>${d.safety}x</b> (${esc(d.governing.member)}, ${esc(d.governing.case)}) ·
+      sags ${len(d.deflection_mm, 2)} at ×${run.factor}<br>
+      <b>Your hitch holds</b>: ${stand(d).force_lb} lb and <b>${Number(stand(d).moment_lbin).toLocaleString()} lb·in</b> standing still,
+      ${Number(drive(d).moment_lbin).toLocaleString()} lb·in on a ×${run.factor} bump.
+      <div class="muted small" style="margin-top:4px">Compare with your hitch's rating: tongue weight × the distance from the pin to
+        the ball — e.g. 350 lb × ~7″ ≈ 2,450 lb·in for a typical Class II.</div></div>
+    <div class="tw"><table class="st"><tr><th>#</th><th>steel lb</th><th>weakest</th><th>sag</th><th>hitch lb·in</th>
+      ${groups.map((g) => `<th>${esc(g)}</th>`).join('')}</tr>
+      ${run.stations.map((st) => `<tr class="pick ${st.index === on ? 'on' : ''}" data-fst="${st.index}"><td>${st.index}</td>
+        <td>${st.mass_lb}</td><td>${st.safety}x</td><td>${len(st.deflection_mm, 2)}</td>
+        <td>${Number(stand(st).moment_lbin).toLocaleString()}</td>
+        ${groups.map((g) => `<td>${esc(st.design[g])}</td>`).join('')}</tr>`).join('')}</table></div>
+    <div class="muted small" style="margin-top:6px">Click a row to see that frame in place. Sizes are inches (2x2x1/8 = 2″ square, ⅛″ wall).</div>
+    ${[...(d.notes || []), ...(run.note ? run.note.split('\n') : [])].filter(Boolean)
+      .map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`;
+}
+
+function wireFrame(p) {
+  const go = $('fGo');
+  if (go) go.onclick = () => runFrame(p);
+  document.querySelectorAll('#inspector tr[data-fst]').forEach((tr) => {
+    tr.onclick = () => showStation(p.id, frameRuns(p.id)[0], +tr.dataset.fst);
+  });
+}
+
+async function runFrame(p) {
+  const prog = $('fProgress'), go = $('fGo');
+  go.disabled = true;
+  prog.innerHTML = '<div class="small muted" id="fMsg">sizing…</div>';
+  try {
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/frame-study`, {
+      part: p.id, load_lb: +$('fLoad').value || 100, factor: +$('fFactor').value || 2.5,
+      min_safety: +$('fSafety').value || 3.5,
+    });
+    await follow(job_id, (ev) => { const m = $('fMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
+    await refresh();
+  } catch (e) {
+    prog.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`;
+    go.disabled = false;
+  }
 }
 
 // ------------------------------------------------------------- shape it for drag (CALI-39)
@@ -850,10 +930,11 @@ async function runWhittle(p) {
 }
 
 // show a station in place of its part, with the part's current shape as a ghost around it
+const STUDY_PATH = { parametric: 'aero', frame: 'frame-study' };
 async function showStation(pid, run, index) {
-  const parametric = run.kind === 'parametric';
+  const parametric = run.kind === 'parametric', framed = run.kind === 'frame';
   try {
-    const r = await fetch(`/api/designs/${S.slug}/${parametric ? 'aero' : 'whittle'}/${run.id}/stations/${index}.stl`);
+    const r = await fetch(`/api/designs/${S.slug}/${STUDY_PATH[run.kind] || 'whittle'}/${run.id}/stations/${index}.stl`);
     if (!r.ok) throw new Error(`station ${index}: HTTP ${r.status}`);
     const geom = loader.parse(await r.arrayBuffer());
     geom.computeVertexNormals();
@@ -871,12 +952,15 @@ async function showStation(pid, run, index) {
     const bar = $('stationBar');
     bar.hidden = false;
     const removed = parametric ? st.removed : st.removed_part;
-    bar.innerHTML = `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume
-      ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>
-      <button class="primary" id="adoptBtn">${parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>
+    const what = framed
+      ? `<span>design <b>${index}</b> · ${st.mass_lb} lb of steel · weakest ${st.safety}x · sags ${len(st.deflection_mm, 2)}</span>`
+      : `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume
+      ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>`;
+    bar.innerHTML = `${what}
+      <button class="primary" id="adoptBtn">${framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };
-    $('adoptBtn').onclick = () => adoptStation(pid, run.id, index, parametric);
+    $('adoptBtn').onclick = () => adoptStation(pid, run.id, index, run.kind);
     paint(); renderInspector();
   } catch (e) { showErr(e.message); }
 }
@@ -886,10 +970,10 @@ function clearStation(keepBar) {
   if (!keepBar) $('stationBar').hidden = true;
   if (S.design) paint();
 }
-async function adoptStation(pid, wid, index, parametric) {
+async function adoptStation(pid, wid, index, kind) {
   $('adoptBtn').disabled = true;
   try {
-    await api('POST', `/api/designs/${S.slug}/${parametric ? 'aero' : 'whittle'}/${wid}/adopt`, { station: index });
+    await api('POST', `/api/designs/${S.slug}/${STUDY_PATH[kind] || 'whittle'}/${wid}/adopt`, { station: index });
     clearStation();
     await refresh();
   } catch (e) { showErr(e.message); $('adoptBtn').disabled = false; }

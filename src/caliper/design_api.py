@@ -16,7 +16,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import aero, chat, clarify, promote
+from . import aero, chat, clarify, frame_study, promote
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -83,6 +83,14 @@ def _aero_available() -> bool:
         return False
 
 
+class FrameRequest(BaseModel):
+    part: str
+    load_lb: float = 100.0              # the box + what's in it, spread along the rails
+    factor: float = 2.5                 # driving: bumps
+    min_safety: float = 3.5
+    on_groups: list[str] = ["rails"]
+
+
 class PartSettings(BaseModel):
     role: Optional[str] = None        # "fixed" = a reference (e.g. the car) — drawn as context
 
@@ -112,9 +120,12 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     for p in d.parts:
         spec = store.read_spec(p.id) if store.is_scripted(p.id) or os.path.exists(
             store.spec_path(p.id)) else None
-        params = aero.read_params(store.read_script(p.id)) if store.is_scripted(p.id) else None
+        script = store.read_script(p.id) if store.is_scripted(p.id) else ""
+        params = aero.read_params(script) if script else None
         parts.append({
             "params": params,
+            # a part that declares its tubes is a frame: it gets sized, not shaped for drag
+            "framed": "def members(" in script and "def supports(" in script,
             "suggest": {k: aero.suggest(k, v) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
@@ -145,6 +156,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "log": store.log(),
         "whittle_runs": [_run_summary(r) for r in wb.list_runs(store)],
         "aero_runs": aero.list_runs(store),
+        "frame_runs": frame_study.list_runs(store),
         "aero_available": _aero_available(),
     }
 
@@ -343,6 +355,51 @@ def router():
             store.append_log({"kind": "whittle", "action": "adopted", "run": wid,
                               "station": req.station, "version": got["version"],
                               **({"grew_mm": got["grew_mm"]} if got["grew_mm"] else {})})
+            return {**got, "design": design_state(store)}
+
+    # -- frame sizing (CALI-40): whittle's FrameStudy on the tubes a part declares --------------------
+    @r.post("/api/designs/{slug}/frame-study")
+    def frame_run(slug: str, req: FrameRequest):
+        store = load(slug)
+        if store.design.part(req.part) is None:
+            raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
+        if not _aero_available():
+            raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
+
+        def work(j):
+            s = DesignStore.load(slug)
+            return frame_study.study(s, req.part, load_lb=req.load_lb, factor=req.factor,
+                                     min_safety=req.min_safety, on_groups=tuple(req.on_groups),
+                                     emit=lambda k, t="", **d: j.emit(k, t, **d))
+
+        job = RUNNER.submit("frame", work, label=f"size {req.part}", lock=f"frame:{slug}")
+        return {"job_id": job.id}
+
+    @r.get("/api/designs/{slug}/frame-study/{rid}/stations/{index}.stl")
+    def frame_station(slug: str, rid: str, index: int):
+        store = load(slug)
+        try:
+            path = frame_study.station_path(store, rid, index)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="bad run id")
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="no such design")
+        with open(path, "rb") as f:
+            return Response(f.read(), media_type="model/stl")
+
+    @r.post("/api/designs/{slug}/frame-study/{rid}/adopt")
+    def frame_adopt(slug: str, rid: str, req: Adopt):
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                got = frame_study.adopt(store, rid, req.station)
+            except FileNotFoundError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+            except (KeyError, ValueError) as e:
+                raise HTTPException(status_code=409, detail=str(e))
+            store.append_log({"kind": "frame", "action": "adopted", "run": rid,
+                              "station": req.station, "version": got["version"],
+                              "design": got["design"]})
             return {**got, "design": design_state(store)}
 
     # -- parametric drag search (CALI-39): whittle searches PARAMS, numbers come back ---------------
