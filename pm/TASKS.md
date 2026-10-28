@@ -711,7 +711,7 @@ rating); drag 48.4 lbf, 134 lb with 50 lb aboard, steel 30.2 lb, stock ≈ $446,
 **Next on it:** the user's constraints in their own words → goals (Claude writes scorecard.yaml from chat);
 constraint discovery before optimizing (the mattress lesson); budgets (default 10 min); the shop (CALI-48).
 
-### CALI-52 — The skeleton: a box inside the box, roof beams for snow · P1 · M6 · ✅ done (v1)
+### CALI-52 — The skeleton: a box inside the box, roof beams for snow · P1 · M6 · ✅ done (v1, `787beac`)
 - **Done:** the box's skeleton is construction choices (`frame_posts`, `roof_beams`, `roof_beam`,
   `roof_beam_dir`, `skin_in`; named options via `BUILD_OPTIONS`): front and back frames (bottom rail, two
   posts where the end panel is flat, top rail under the roof's edge) and roof beams front-to-back (stepping

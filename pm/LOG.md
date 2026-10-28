@@ -25,7 +25,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   would do it for < 1 lb (Caliper can't model a patch yet). 138.7 lb with 50 lb aboard, $439, 20% offcut.
 - **Shape fingerprint** now ignores comments/layout; `shell`, `roof`, `BUILD_OPTIONS` not shape.
 - Tests: `test_snow.py` (5). Full suite green.
-- Commit: _(pending)_
+- Commit: `787beac`
 
 ### 2026-10-28 · CALI-46 wrap + CALI-47 · 2 in riser, and the scorecard
 - **Theo:** go with the 2 in riser, then start the scorecard. Skeleton: posts where the shell is flat — a box
