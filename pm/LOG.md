@@ -29,7 +29,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   these*, made-of table, *To buy*. Design → **Weight & balance** with a payload. Red dot = CoG, green = hitch.
   Verified in the browser (¼ in floor what-if → 48.9 lb, hitch 4,481 lb·in; reset).
 - Tests: `test_construction.py` (18) + 3 API tests. Full suite green.
-- Commit: _(this commit)_
+- Commit: `42f5fee`
 
 ### 2026-10-27 · CALI-40 · Size the frame — and three bugs a tube frame shook out
 - **Why:** with the camper shell shaped, Theo turned to the 2 in steel underframe: "how can we whittle that

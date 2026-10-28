@@ -568,7 +568,7 @@ A part declares `members(params)` + `supports(params)`; whittle's FrameStudy (wh
 tubes go back into PARAMS. Inspector: **Size the frame**. Next: plate mode for the gussets at the jog, fed by
 the frame's end forces (`CaseResult.end_forces`); legs + the parked/sleeping case.
 
-### CALI-41 — What a part is built from: weight, centre of gravity, bill of materials · P1 · M5 · ✅ done
+### CALI-41 — What a part is built from: weight, centre of gravity, bill of materials · P1 · M5 · ✅ done (`42f5fee`)
 A part's shape says nothing about its weight. A part now declares how it's built: a module-level `BUILD`
 dict of choices (kept apart from PARAMS — they change weight, not shape) and `construction(params, build)`
 returning pieces — **sheet** (flat `outline` or bent `facets`, thickness, `covers`), **stick** (lumber by
