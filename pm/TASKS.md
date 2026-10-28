@@ -743,7 +743,7 @@ floor and roof — and cross beams under the roof for a mild snow load; 1x1 ribs
 job for the loop: the skeleton as structural options (posts, rails, N roof beams, their size, an inside
 skin on the roof) checked under snow + driving against weight and cost — exhaustive over a handful.
 
-### CALI-53 — Parked: on the jacks with someone inside, and the floor under a knee · P1 · M6 · ✅ done (v1)
+### CALI-53 — Parked: on the jacks with someone inside, and the floor under a knee · P1 · M6 · ✅ done (v1, `e302a20`)
 A frame says where it stands when parked (`jacks(params)`: points that only push). `parked.run()` solves
 the frame on the hitch + jacks with the box's walls carrying load: lying down (person + gear spread on the
 floor, ×1.5 for moving about) and kneeling (two knees, tried at nine spots across the floor). A jack that

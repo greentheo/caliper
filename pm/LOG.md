@@ -16,7 +16,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   260 lb with 100 lb knees; 285 lb with front jacks too. Theo: no front jacks; the 350 rating is
   conservative (likely 2x) — check at 420 lb (+20%), driving and parked. Scorecard **11/11 pass**.
 - Tests: `test_parked.py` (2). Full suite green.
-- Commit: _(pending)_
+- Commit: `e302a20`
 
 ### 2026-10-28 · CALI-52 (part 2) · Three beams, a glass patch, and the skeleton on screen
 - **Theo:** the local patch — yes; jacks under the corners of the X; three beams (2.7×); "let me know when I
