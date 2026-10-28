@@ -35,7 +35,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   pieces would read better; that's on unfold-to-sheets' side); the posts are short now that the shoulders
   lean in — the skeleton wants placing where the shell needs it; tube end cuts (copes at the spine) not yet.
 - Tests: `test_cutplan.py` (4; the unfolder ones skip where node/unfold-to-sheets aren't). Full suite green.
-- Commit: _(pending)_
+- Commit: `8fe590a`
 
 ### 2026-10-28 · CALI-44 · The box moves in, carries itself, and could be fiberglass
 - **Theo's calls:** drag design 2; X-only frame; 50 lb aboard; count the walls' strength and stiffness;

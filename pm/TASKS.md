@@ -643,7 +643,7 @@ the fold-down rear seat, so the hatch needn't open: a few inches' clearance.
 **Acceptance:** wall section/shear/wrinkling tested; walls fastened, carrying via-wall loads, fixing force =
 the load; fiberglass BOM; full suite green.
 
-### CALI-45 — The cut plan: panels unfolded onto sheets (unfold-to-sheets), sticks cut-listed · P1 · M5 · ✅ done
+### CALI-45 — The cut plan: panels unfolded onto sheets (unfold-to-sheets), sticks cut-listed · P1 · M5 · ✅ done (`8fe590a`)
 Theo: "I will like to see what the cut plan looks like for sure" — and pointed at his own
 `game-dev/unfold-to-sheets` (unfold a mesh, nest onto stock, score lines, DXF), thinking of 1 in foam that
 folds at scored lines and spray foam + a rasp where it's too curvy.
