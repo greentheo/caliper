@@ -737,6 +737,8 @@ function builtResults(p, c) {
         <div class="muted">cuts: ${cutsText(g.cuts)}</div></li>`).join('')}
       ${bom.coverings.map((g) => `<li><b>${esc(g.label)}</b> <span class="muted">${g.area_ft2} ft²</span>
         <div class="muted">${[g.canvas_yd != null ? `${g.canvas_yd} yd of ${g.canvas_roll_in}″ canvas` : '',
+          g.cloth_yd != null ? `${g.cloth_yd} yd of ${g.cloth_roll_in}″ glass cloth (${g.layers} layer${g.layers > 1 ? 's' : ''})` : '',
+          g.epoxy_gal != null ? `${g.epoxy_gal} gal epoxy` : '',
           g.glue_gal != null ? `${g.glue_gal} gal glue` : '',
           g.paint_gal != null ? `${g.paint_gal} gal paint (${g.coats} coats)` : ''].filter(Boolean).join(' · ')}</div></li>`).join('')}
       ${bom.lumps.map((g) => `<li><b>${esc(g.name)}</b> <span class="muted">${lbs(g.mass_kg * 2.20462)}</span></li>`).join('')}
@@ -875,6 +877,8 @@ function frameView(p) {
         <option value="flat">a flat load on the rails</option></select>
       <span id="fLoadLbl">${built ? 'payload on the floor' : 'box + gear'}</span>
       <span><input type="number" id="fLoad" value="100" min="0" step="10"> lb</span>
+      ${S.design.parts.some((x) => x.shell) ? `<span>walls</span><label><input type="checkbox" id="fWalls" checked>
+        the box's walls carry load too</label>` : ''}
       ${layouts.length ? `<span>layout</span><select id="fLayout"><option value="">as drawn</option>
         ${layouts.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select>` : ''}
       <span>bumps</span><span>×<input type="number" id="fFactor" value="2.5" min="1" max="5" step="0.5"> when driving</span>
@@ -887,6 +891,8 @@ function frameView(p) {
 
 function frameLabel(r) {
   const what = r.carrying ? `${r.carrying.parts.map((x) => `${x.part} ${lbs(x.mass_lb)}`).join(' + ')}`
+    + (r.walls ? ' · walls count' : '')
+    + Object.entries(r.build || {}).map(([pid, b]) => ` · ${pid} ${Object.values(b).join(', ')}`).join('')
     : `${lbs(r.load_lb)} on ${(r.on_groups || []).join(', ')}`;
   return `${r.layout || (Object.keys(r.params || {}).length ? JSON.stringify(r.params) : 'as drawn')} · ${what}`;
 }
@@ -910,6 +916,10 @@ function frameResults(p, run, runs) {
       ${Number(drive(d).moment_lbin).toLocaleString()} lb·in on a ×${run.factor} bump.
       ${best.safety < run.min_safety ? `<div class="small" style="margin-top:4px;color:var(--bad)">No tubes in the catalog reach ${run.min_safety}x:
         the best is ${best.safety}x, held back by <b>${esc(best.governing.member)}</b> — that's the load and how far back it sits, not the layout.</div>` : ''}
+      ${best.walls ? (() => { const w = best.walls.reduce((a, b) => (b.safety < a.safety ? b : a));
+        return `<div class="small" style="margin-top:4px">The box's walls carry it to where it's fastened
+          (${(c.fastened || []).length} fixings): weakest wall <b>${esc(w.name)}</b> ${w.safety}x
+          (skin ${w.skin_safety}x, foam ${w.foam_safety}x)${best.fixing ? ` · a fixing carries up to <b>${lbs(best.fixing.force_lb)}</b> on a bump` : ''}.</div>`; })() : ''}
       ${joint(best) ? `<div class="small" style="margin-top:4px">Hardest-worked joint (design ${best.index}, on a bump): where ${esc(joint(best).members.join(', '))} meet —
         ${Number(joint(best).bending_lbin).toLocaleString()} lb·in of bending from ${esc(joint(best).worst_member)}: what a gusset there has to carry.</div>` : ''}
       <div class="muted small" style="margin-top:4px">Compare with your hitch's rating: tongue weight × the distance from the pin to
@@ -949,6 +959,7 @@ async function runFrame(p) {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/frame-study`, {
       part: p.id, factor: +$('fFactor').value || 2.5, min_safety: +$('fSafety').value || 3.5,
       from_design: design, payload_lb: +$('fLoad').value || 0, load_lb: +$('fLoad').value || 100,
+      walls: $('fWalls') ? $('fWalls').checked : true,
       params: layout ? p.layouts[layout] : {},
     });
     await follow(job_id, (ev) => { const m = $('fMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });

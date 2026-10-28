@@ -194,3 +194,46 @@ def test_the_hardest_joint_counts_welded_ends_not_a_tube_running_through(tmp_pat
     assert joint["worst_member"] in ("arm_l", "arm_r")           # not the spine passing through
     # 5 kg at 450 mm out on each arm, x2.5 on a bump, plus the arm's own weight
     assert joint["bending_lbin"] == pytest.approx(2.5 * 5 * 2.20462 * 450 / 25.4, rel=0.1)
+
+
+# --- CALI-44: walls that carry load ----------------------------------------------------------
+def test_a_sandwich_wall_is_a_deep_beam_in_its_skins_material():
+    w = {"name": "w", "depth": 1000.0, "skins": ["fiberglass"], "core": "xps", "core_t": 25.4}
+    section, material, check = fs.wall_section(w, 1500.0)
+    from caliper import materials as M
+    sk, core = M.SKINS["fiberglass"], M.SHEETS["xps"]["mech"]
+    t_eq = sk["t"] + 25.4 * core["E"] / sk["E"]
+    assert section["iy"] == pytest.approx(t_eq * 1000.0 ** 3 / 12)
+    # its shear stiffness is the layers' G·t, whatever material it's written in
+    assert material["shear_modulus"] * section["shear_z"] == pytest.approx(1000.0 * (sk["t"] * sk["G"] + 25.4 * core["G"]))
+    # a thin glass skin on foam wrinkles well before it breaks
+    assert material["strength"] < sk["strength"] / 3
+    assert section["mass_area"] == 0.0 and check["core_t"] == 25.4
+
+
+SHELLED = CARGO.replace('''def construction(params, build=None):''', '''def shell(params, build=None):
+    """a wall across the rail's far end, in two halves that meet over it"""
+    w = {"depth": 300.0, "skins": ["pmf"], "core": "xps", "core_t": 25.4}
+    return [dict(w, name="wall_a", a=(-1000, -500, 0), b=(-1000, 0, 0)),
+            dict(w, name="wall_b", a=(-1000, 0, 0), b=(-1000, 500, 0))]
+
+
+def construction(params, build=None):''')
+
+
+def test_walls_carry_what_stands_on_them_and_are_fastened_to_the_frame(store):
+    store.write_part("cargo", SHELLED.replace('"at": (-650, 0, 100)}]', '"at": (-1000, 400, 100)}]'), intent="cargo with a wall")
+    from caliper import construction as C
+    loads = C.design_loads(store, skip=("frame",), walls=True)
+    assert [w["name"] for w in loads["shell"]] == ["wall_a", "wall_b"]
+    assert all(via == "walls" for _, _, via in loads["points"])          # a lump, not a floor: via the wall
+    rec = fs.study(store, "frame", from_design=True, payload_lb=0, min_safety=2.0)
+    assert rec["walls"] and [w["name"] for w in rec["carrying"]["walls"]] == ["wall_a", "wall_b"]
+    assert rec["carrying"]["fastened"] == [[-1000.0, 0.0, 0.0]]          # its middle sits on the rail's end
+    d = rec["drawn"]
+    assert all(w["skin_safety"] > 0 and w["foam_safety"] > 0 for w in d["walls"])
+    assert d["fixing"]["force_lb"] == pytest.approx(100 * 2.5, rel=0.05)    # all of it, on a bump
+    # the walls are what the box is built from: the sweep sizes only the tubes, the drawing shows only steel
+    assert "walls" not in rec["catalogs"] and all("walls" not in st["design"] for st in rec["stations"])
+    tubes = fs.study(store, "frame", from_design=True, payload_lb=0, min_safety=2.0, walls=False)
+    assert not tubes["walls"] and "walls" not in tubes["drawn"]

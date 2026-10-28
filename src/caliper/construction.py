@@ -65,6 +65,9 @@ if callable(globals().get('construction')):
     _f = construction
     _out['construction'] = _f({{}}, _b) if len(_inspect.signature(_f).parameters) > 1 else _f({{}})
     _out['build'] = {{**(globals().get('BUILD') or {{}}), **_b}}
+if callable(globals().get('shell')):
+    _w = shell
+    _out['shell'] = _w({{}}, _b) if len(_inspect.signature(_w).parameters) > 1 else _w({{}})
 if callable(globals().get('keeps')):
     _k = keeps
     _out['keeps'] = _k({{}}, _b) if len(_inspect.signature(_k).parameters) > 1 else _k({{}})
@@ -82,8 +85,8 @@ def declares(script: str) -> bool:
 
 def declared(store: DesignStore, part_id: str, build: Optional[dict] = None,
              timeout: float = 60.0) -> dict:
-    """``construction`` / ``keeps`` / ``members`` / ``supports`` from the part's script, and the BUILD
-    choices used.
+    """``construction`` / ``shell`` / ``keeps`` / ``members`` / ``supports`` from the part's script, and
+    the BUILD choices used.
 
     Empty if the part is a mesh or declares none of them. ``build`` overrides BUILD for a what-if.
     """
@@ -431,6 +434,13 @@ def bom(rows: list[dict]) -> dict:
     for g in coverings.values():
         cv, ft2 = M.covering(g["material"]), g["area_mm2"] / FT2
         g["area_ft2"] = round(ft2, 1)
+        if "cloth_roll_mm" in cv:               # glass cloth, wet out with epoxy
+            roll_ft = cv["cloth_roll_mm"] / (12 * M.IN)
+            g["cloth_yd"] = round(ft2 * cv["layers"] * (1 + cv["overlap"]) / roll_ft / 3.0, 1)
+            g["cloth_roll_in"] = round(cv["cloth_roll_mm"] / M.IN)
+            g["layers"] = cv["layers"]
+            resin_kg = g["area_mm2"] * 1e-6 * cv["layers"] * cv["cloth_kg_m2"] * cv["resin_ratio"]
+            g["epoxy_gal"] = round(resin_kg / cv["epoxy_kg_per_gal"], 2)
         if "canvas_roll_mm" in cv:
             roll_ft = cv["canvas_roll_mm"] / (12 * M.IN)
             g["canvas_yd"] = round(ft2 * (1 + cv["overlap"]) / roll_ft / 3.0, 1)
@@ -599,21 +609,34 @@ def load_points(items: list[dict], step: float = 100.0) -> list[tuple[tuple, flo
 
 
 def design_loads(store: DesignStore, *, skip=(), payload_lb: float = 0.0, step: float = 100.0,
-                 build: Optional[dict] = None) -> dict:
+                 build: Optional[dict] = None, walls: bool = False) -> dict:
     """The design's parts as built, as weight spread where it is — plus a payload spread over the
     floor (every sheet in group ``floor``, on its top face). ``skip`` leaves parts out: a frame being
-    sized carries its own weight already."""
+    sized carries its own weight already.
+
+    ``walls``: a part that declares ``shell()`` (its walls as beams) carries itself — its walls and roof
+    come down through those walls (``via`` "walls"); its floor, and the payload, go to whatever is
+    nearest, tube or wall. ``points`` are ``(xyz, kg, via)``; the walls come back as ``shell``.
+    """
     build = build or {}
-    points, parts, floors = [], [], []
+    points, parts, floors, shell = [], [], [], []
     for p in store.design.parts:
         if p.id in skip:
             continue
-        items = _items(declared(store, p.id, build.get(p.id)))
+        d = declared(store, p.id, build.get(p.id))
+        items = _items(d)
         if not items:
             continue
-        pts = load_points(items, step)
-        points.extend(pts)
-        parts.append({"part": p.id, "mass_kg": round(sum(m for _, m in pts), 2)})
+        own = walls and bool(d.get("shell"))
+        if own:
+            shell.extend(dict(w, part=p.id) for w in d["shell"])
+        mass = 0.0
+        for it in items:
+            via = "walls" if own and not (it.get("kind") == "sheet" and it.get("group") == "floor") else None
+            for pt, kg in load_points([it], step):
+                points.append((pt, kg, via))
+                mass += kg
+        parts.append({"part": p.id, "mass_kg": round(mass, 2), "walls": own})
         floors.extend(it for it in items if it.get("kind") == "sheet" and it.get("group") == "floor")
     notes = []
     if payload_lb:
@@ -628,11 +651,11 @@ def design_loads(store: DesignStore, *, skip=(), payload_lb: float = 0.0, step: 
                                "facets": [[(x, y, z + t) for x, y, z in poly] for poly in polys]})
             spread = load_points(on_top, step)
             total, kg = sum(m for _, m in spread), payload_lb / M.LB_KG
-            points.extend((p, m * kg / total) for p, m in spread)
+            points.extend((p, m * kg / total, None) for p, m in spread)
             parts.append({"part": "payload", "mass_kg": round(kg, 2)})
-    mass = sum(m for _, m in points)
-    cog = [sum(m * p[k] for p, m in points) / mass for k in range(3)] if mass else [0.0, 0.0, 0.0]
-    return {"points": points, "parts": parts, "mass_kg": mass, "cog": cog, "notes": notes}
+    mass = sum(m for _, m, _ in points)
+    cog = [sum(m * p[k] for p, m, _ in points) / mass for k in range(3)] if mass else [0.0, 0.0, 0.0]
+    return {"points": points, "parts": parts, "mass_kg": mass, "cog": cog, "notes": notes, "shell": shell}
 
 
 # ---------------------------------------------------------------------------

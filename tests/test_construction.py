@@ -294,3 +294,13 @@ def test_the_design_loads_carry_a_payload_on_top_of_the_floor(store):
     payload = d["points"][-1]
     assert payload[0][2] == pytest.approx(12.7)                     # on the 1/2 in floor, not in it
     assert C.design_loads(store, skip=("crate",))["points"] == []
+
+
+def test_fiberglass_is_bought_as_cloth_and_epoxy(store):
+    r = C.report(store, "crate", {"skin": "fiberglass_2"})
+    (fg,) = [g for g in r["bom"]["coverings"] if g["material"] == "fiberglass_2"]
+    assert fg["layers"] == 2 and fg["cloth_roll_in"] == 50
+    assert fg["cloth_yd"] == pytest.approx(24 * 2 * 1.1 / (50 / 12) / 3, abs=0.1)
+    m2 = 24 * 0.092903
+    assert fg["epoxy_gal"] == pytest.approx(m2 * 2 * 0.203 / 4.2, abs=0.01)
+    assert C.report(store, "crate", {"skin": "fiberglass"})["mass_lb"] < r["mass_lb"]

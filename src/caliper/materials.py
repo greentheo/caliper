@@ -14,11 +14,18 @@ LB_KG = 2.20462262
 #: Sheet goods: density (kg/m³) and the stock sheet (mm).
 SHEETS = {
     "xps": {"name": "XPS foam board", "density": 24.0, "stock": (4 * 12 * IN, 8 * 12 * IN),
-            "basis": "~1.5 lb/ft³ (Foamular 250-class); 1 in board ≈ 0.13 lb/ft²"},
+            "basis": "~1.5 lb/ft³ (Foamular 250-class); 1 in board ≈ 0.13 lb/ft²",
+            # a sandwich core: stiff enough to hold the skins apart and carry shear between them
+            "mech": {"E": 10.0, "G": 4.0, "strength": 0.4, "shear_strength": 0.2,
+                     "basis": "Foamular 250: compressive modulus ~1,500 psi; shear ~30 psi (rough)"}},
     "eps": {"name": "EPS foam board", "density": 16.0, "stock": (4 * 12 * IN, 8 * 12 * IN),
-            "basis": "~1 lb/ft³"},
+            "basis": "~1 lb/ft³",
+            "mech": {"E": 4.0, "G": 2.0, "strength": 0.2, "shear_strength": 0.1,
+                     "basis": "1 lb/ft³ EPS (rough)"}},
     "plywood": {"name": "softwood plywood", "density": 560.0, "stock": (4 * 12 * IN, 8 * 12 * IN),
-                "basis": "~35 lb/ft³: a 4x8 sheet of 3/8 in ≈ 35 lb, 1/2 in ≈ 47 lb"},
+                "basis": "~35 lb/ft³: a 4x8 sheet of 3/8 in ≈ 35 lb, 1/2 in ≈ 47 lb",
+                "mech": {"E": 8000.0, "G": 500.0, "strength": 30.0, "shear_strength": 2.0,
+                         "basis": "softwood ply along its face grain (rough; across it, about half)"}},
     # plate for gussets and brackets, plasma-cut from a sheet
     "steel": {"name": "steel plate", "density": 7850.0, "stock": (4 * 12 * IN, 8 * 12 * IN),
               "basis": "~490 lb/ft³: 3/16 in plate ≈ 7.7 lb/ft², 1/8 in ≈ 5.1 lb/ft²"},
@@ -45,6 +52,30 @@ COVERINGS = {
     "paint": {"name": "exterior paint (sealer)", "areal": 0.24,
               "basis": "2-3 coats of exterior latex ≈ 0.05 lb/ft² dried",
               "paint_ft2_per_gal_coat": 350.0, "coats": 3},
+    # glass cloth wet out with epoxy (about its own weight of resin), painted over against UV
+    "fiberglass": {"name": "fiberglass (1 layer 6 oz cloth + epoxy)", "areal": 0.57,
+                   "basis": "6 oz/yd² E-glass (0.20 kg/m²) + as much epoxy + 2 coats of paint ≈ 0.12 lb/ft²",
+                   "cloth_roll_mm": 50 * IN, "overlap": 0.10, "layers": 1, "cloth_kg_m2": 0.203,
+                   "resin_ratio": 1.0, "epoxy_kg_per_gal": 4.2,
+                   "paint_ft2_per_gal_coat": 350.0, "coats": 2},
+    "fiberglass_2": {"name": "fiberglass (2 layers 6 oz cloth + epoxy)", "areal": 0.97,
+                     "basis": "two layers of the above ≈ 0.20 lb/ft²",
+                     "cloth_roll_mm": 50 * IN, "overlap": 0.10, "layers": 2, "cloth_kg_m2": 0.203,
+                     "resin_ratio": 1.0, "epoxy_kg_per_gal": 4.2,
+                     "paint_ft2_per_gal_coat": 350.0, "coats": 2},
+}
+
+#: How a covering works as a structural skin (CALI-44): thickness (mm), stiffness E and G (MPa) and the
+#: stress it fails at (MPa). PMF has no published data — those are deliberately cautious guesses.
+SKINS = {
+    "pmf": {"t": 0.8, "E": 1000.0, "G": 350.0, "strength": 12.0,
+            "basis": "10 oz duck tears at ~100 N/cm → ~12 MPa over ~0.8 mm with its glue; stiffness a "
+                     "cautious guess (no published data)"},
+    "fiberglass": {"t": 0.25, "E": 15000.0, "G": 3000.0, "strength": 200.0,
+                   "basis": "woven E-glass, hand laid in epoxy: ~15 GPa, ~200 MPa (0/90 in-plane)"},
+    "fiberglass_2": {"t": 0.5, "E": 15000.0, "G": 3000.0, "strength": 200.0,
+                     "basis": "two layers of the above"},
+    "paint": None,
 }
 
 

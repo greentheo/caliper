@@ -624,7 +624,26 @@ where it meets a 2 in main beam in the middle.
 **Acceptance:** loads preserve total and moment; members stay whole; layouts named in the record; tests in
 `test_frame_study.py` (3) + `test_construction.py` (2).
 
-Next: CALI-44 cut plan + CNC DXF (panels flattened from their outlines; post and tube cut lists; gusset
+### CALI-44 — The box carries itself: walls as structure, fiberglass skins · P1 · M5 · ✅ done
+Theo (2026-10-28): use drag design 2 and the X-only frame with 50 lb aboard; count the strength and stiffness
+the walls give; fiberglass as an alternative to PMF; and move the box in close — the trunk is reached from
+the fold-down rear seat, so the hatch needn't open: a few inches' clearance.
+- **A part says how its walls carry load:** `shell(params, build)` → deep-beam walls (`a`, `b`, `depth`,
+  `skins`, `core`, `core_t`). `frame_study.wall_section()` transforms each sandwich to its skin's material
+  (strength = the skin's, or its wrinkling stress on the foam if lower — Hoff & Mautner), with the layers'
+  G·t as its shear stiffness. whittle (the whittle-agent added **per-member material** and **Timoshenko
+  shear** for this) solves walls and tubes together; Caliper checks the foam's shear itself (all the wall's
+  shear in the foam — cautious). Walls fasten to frame joints within 60 mm; what stands on the walls (walls,
+  roof, posts) comes down through them, the floor and payload go to the nearest tube or wall. Report: each
+  wall's skin/foam safety, the force at the box's fixings. The sweep sizes tubes only; drawings are steel.
+- **Fiberglass:** `COVERINGS["fiberglass"]` (1 layer 6 oz + epoxy + paint, 0.57 kg/m²) and `fiberglass_2`;
+  bought as cloth yd + epoxy gal. `SKINS` holds each covering's structural numbers (PMF's are cautious
+  guesses — no published data). Plywood/foam get `mech` numbers.
+- **Frames weigh as cut** already; a frame study can try other BUILD choices of the parts it carries (`build=`).
+**Acceptance:** wall section/shear/wrinkling tested; walls fastened, carrying via-wall loads, fixing force =
+the load; fiberglass BOM; full suite green.
+
+Next: CALI-45 cut plan + CNC DXF (panels flattened from their outlines; post and tube cut lists; gusset
 plates for plasma); then plate mode for the gussets (whittle-agent), legs + the parked/sleeping case.
 
 ## Milestone M5 — whole machines from one prompt (after M4)

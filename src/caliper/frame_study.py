@@ -122,22 +122,35 @@ def section_key(outer_mm: float, wall_mm: float) -> str:
 
 
 def build_spec(fd: dict, *, load_lb: float = 100.0, factor: float = 2.5,
-               on_groups=("rails",), points=None, bin_mm: float = BIN_MM) -> dict:
+               on_groups=("rails",), points=None, bin_mm: float = BIN_MM, walls=None) -> dict:
     """whittle's ``FrameStudy.from_dict`` input, plus what Caliper needs to read the answer.
 
     Without ``points``, ``load_lb`` is spread evenly along the members of ``on_groups`` (CALI-40). With
-    ``points`` — ``(xyz, kg)`` pairs, the weight of what the frame carries where it is (CALI-43) — each
-    lands on the nearest member that carries the floor (those a part marks ``"carries": True``, else
-    those in ``on_groups``) as a point load where it meets it, so a tube bends where the load sits.
-    Loads within ``bin_mm`` of each other along a member are combined at their balance point (force and
-    moment kept). Members stay whole: whittle checks buckling over a member's own length.
+    ``points`` — ``(xyz, kg)`` or ``(xyz, kg, via)``, the weight of what the frame carries where it is
+    (CALI-43) — each lands on the nearest member that carries the floor (those a part marks
+    ``"carries": True``, else those in ``on_groups``) as a point load where it meets it, so a tube
+    bends where the load sits. Loads within ``bin_mm`` of each other along a member are combined at
+    their balance point (force and moment kept). Members stay whole: whittle checks buckling over a
+    member's own length.
+
+    ``walls`` (CALI-44): a part's ``shell()`` beams, added as members of their own material (group
+    "walls"), fastened to the frame where their ends come within :data:`SNAP_MM` of a joint. They carry
+    the floor too; a point that comes ``via`` "walls" lands on a wall only.
     """
     nodes: list[list[float]] = []
 
+    def nearest(xyz, within: float, among) -> Optional[int]:
+        best, at = None, within ** 2
+        for i in among:
+            d = sum((a - b) ** 2 for a, b in zip(nodes[i], xyz))
+            if d <= at:
+                best, at = i, d
+        return best
+
     def node_of(xyz) -> int:
-        for i, n in enumerate(nodes):
-            if sum((a - b) ** 2 for a, b in zip(n, xyz)) <= MERGE_MM ** 2:
-                return i
+        found = nearest(xyz, MERGE_MM, range(len(nodes)))
+        if found is not None:
+            return found
         nodes.append([float(v) for v in xyz])
         return len(nodes) - 1
 
@@ -146,13 +159,34 @@ def build_spec(fd: dict, *, load_lb: float = 100.0, factor: float = 2.5,
     if not any(carries):
         raise ValueError(f"no members in {list(on_groups)} to carry the load")
 
-    members, loaded = [], []
+    members, loaded, names, groups, outers = [], [], [], [], []
     for i, m in enumerate(fd["members"]):
         members.append({"a": node_of(m["a"]), "b": node_of(m["b"]),
                         "section": section_key(m["outer"], m["wall"]), "group": m["group"]})
+        names.append(m["name"]); groups.append(m["group"]); outers.append(float(m["outer"]))
         plan = math.hypot(m["b"][0] - m["a"][0], m["b"][1] - m["a"][1])
         if carries[i] and (points is None or plan > 1.0):     # a vertical stub can't hold up a floor
             loaded.append(i)
+    steel = len(members)
+    joints = sorted({n for m in members for n in (m["a"], m["b"])})
+    wall_ix, fastened, checks = [], set(), []
+    for w in walls or []:
+        ends = []
+        for xyz in (w["a"], w["b"]):
+            n = nearest(xyz, SNAP_MM, [j for j in joints if j not in ends])   # not both ends to one joint
+            if n is None:
+                n = node_of(xyz)
+            else:
+                fastened.add(n)
+            ends.append(n)
+        if ends[0] == ends[1]:
+            raise ValueError(f"{w['name']} is too short to be a wall beam")
+        section, material, check = wall_section(w, math.dist(w["a"], w["b"]))
+        checks.append(check)
+        wall_ix.append(len(members))
+        members.append({"a": ends[0], "b": ends[1], "section": section, "material": material,
+                        "group": "walls"})
+        names.append(w["name"]); groups.append("walls"); outers.append(float(w["depth"]))
 
     supports = []
     for s in fd["supports"]:
@@ -170,17 +204,21 @@ def build_spec(fd: dict, *, load_lb: float = 100.0, factor: float = 2.5,
     else:
         import numpy as np
 
-        xyz = np.array([p for p, _ in points], dtype=np.float64)
-        kg = np.array([m for _, m in points], dtype=np.float64)
-        pa = np.array([nodes[members[i]["a"]][:2] for i in loaded])
-        pb = np.array([nodes[members[i]["b"]][:2] for i in loaded])
+        xyz = np.array([p[0] for p in points], dtype=np.float64)
+        kg = np.array([p[1] for p in points], dtype=np.float64)
+        via_walls = np.array([len(p) > 2 and p[2] == "walls" for p in points]) if wall_ix else \
+            np.zeros(len(points), dtype=bool)
+        targets = loaded + wall_ix
+        pa = np.array([nodes[members[i]["a"]][:2] for i in targets])
+        pb = np.array([nodes[members[i]["b"]][:2] for i in targets])
         span = pb - pa
         t = np.clip(((xyz[:, None, :2] - pa[None]) * span[None]).sum(-1) / (span ** 2).sum(-1)[None], 0, 1)
         gap = np.linalg.norm(xyz[:, None, :2] - (pa[None] + t[..., None] * span[None]), axis=-1)
+        gap[np.ix_(via_walls, np.arange(len(loaded)))] = np.inf     # through the walls: walls only
         near = gap.argmin(axis=1)
         tt = t[np.arange(len(xyz)), near]
         loads, lands, total = [], np.zeros(3), 0.0
-        for k, i in enumerate(loaded):
+        for k, i in enumerate(targets):
             on = near == k
             if not on.any():
                 continue
@@ -196,14 +234,68 @@ def build_spec(fd: dict, *, load_lb: float = 100.0, factor: float = 2.5,
                           for c in cases]
                 lands += mass * (a + at * (b - a))
                 total += mass
+        floor = ~via_walls
+        reach = gap[floor].min(axis=1).max() if floor.any() else 0.0
+        on_walls = float(kg[np.isin(near, np.arange(len(loaded), len(targets)))].sum())
         applied = {"mass_kg": float(kg.sum()), "cog": ((kg[:, None] * xyz).sum(0) / kg.sum()).tolist(),
-                   "lands": (lands / total).tolist(), "reach_mm": float(gap.min(axis=1).max())}
+                   "lands": (lands / total).tolist(), "reach_mm": float(reach), "on_walls_kg": on_walls}
     return {"spec": {"material": "steel", "nodes": nodes, "members": members, "supports": supports,
                      "cases": cases, "loads": loads},
-            "mouth": nodes[supports[0]["node"]], "names": [m["name"] for m in fd["members"]],
-            "groups": [m["group"] for m in fd["members"]], "applied": applied,
-            "ends": [(m["a"], m["b"]) for m in members], "outers": [float(m["outer"]) for m in fd["members"]],
+            "mouth": nodes[supports[0]["node"]], "names": names, "groups": groups, "applied": applied,
+            "ends": [(m["a"], m["b"]) for m in members], "outers": outers, "steel": steel,
+            "walls": [{"name": names[i], "depth_in": round(outers[i] / 25.4, 1), "skins": c["skins"],
+                       "core": c["core"]} for i, c in zip(wall_ix, checks)],
+            "wall_checks": checks,
+            "fastened": [nodes[n] for n in sorted(fastened)], "fastened_ix": sorted(fastened),
             "size_params": {m["group"]: m.get("size_params") for m in fd["members"]}}
+
+
+# ---------------------------------------------------------------------------
+# Walls that carry load: a part's shell() as beams (CALI-44)
+# ---------------------------------------------------------------------------
+#: A wall beam's end this close to a frame joint is fastened there (the frame's corners sit a little in
+#: from the box's).
+SNAP_MM = 60.0
+
+
+def wall_section(wall: dict, length: float) -> tuple[dict, dict, dict]:
+    """A sandwich wall acting as a deep beam in its own plane: a whittle section, its material, and
+    what Caliper checks itself (the foam's shear).
+
+    The wall is a foam core with skins (``M.SKINS``), ``depth`` tall. Everything is transformed to the
+    first skin's material, so whittle's stress is the skin's and its strength the skin's — or the
+    stress it wrinkles at in compression, if lower: the skins carry the bending. Caliper checks the
+    foam's shear itself (whittle reads a skin-equivalent shear). Shear spreads over the layers by their stiffness (G·t), and whittle bends the wall with
+    that shear stiffness too (span/depth is ~1–3 and the core is soft, so it matters). The floor holds a
+    wall's bottom edge straight sideways and the box holds its walls square, so sideways bending and
+    twisting are taken as stiff as the in-plane bending.
+    """
+    from . import materials as M
+
+    core = M.sheet(wall["core"])["mech"]
+    layers = [(float(wall["core_t"]), core["E"], core["G"], core["strength"])]
+    for name in wall.get("skins") or []:
+        sk = M.SKINS.get(name)
+        if sk:
+            layers.append((sk["t"], sk["E"], sk["G"], sk["strength"]))
+    _, e_ref, g_ref, strength = layers[1] if len(layers) > 1 else layers[0]
+    if len(layers) > 1:
+        # a thin skin on soft foam wrinkles in compression before it breaks (Hoff & Mautner)
+        strength = min(strength, 0.5 * (e_ref * core["E"] * core["G"]) ** (1.0 / 3.0))
+    h = float(wall["depth"])
+    t_eq = sum(t * e / e_ref for t, e, _, _ in layers)
+    gt = sum(t * g for t, _, g, _ in layers)                     # in-plane shear stiffness per height
+    iy = t_eq * h ** 3 / 12.0
+    shear = h * gt / g_ref                                       # so that G·A_s is the wall's
+    section = {"name": f"{wall.get('name', 'wall')} ({h / 25.4:.0f} in deep)",
+               "width": t_eq, "height": h, "area": t_eq * h, "mass_area": 0.0,
+               "iy": iy, "iz": iy, "j": iy, "sy": iy / (h / 2.0), "sz": iy / (h / 2.0),
+               "wt": iy / (h / 2.0), "shear_y": shear, "shear_z": shear}
+    material = {"youngs_modulus": e_ref, "shear_modulus": g_ref, "strength": strength, "density": 0.0}
+    check = {"depth": h, "core_t": float(wall["core_t"]), "core_shear": core["shear_strength"],
+             "skin_strength": strength,
+             "skins": " + ".join(wall.get("skins") or []) or "no skin", "core": wall["core"]}
+    return section, material, check
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +315,33 @@ def _summary(result, built: dict) -> dict:
         out["receiver"][name] = {"force_lb": round(abs(float(force[2])) / LB, 1),
                                  "moment_lbin": round(abs(float(moment[1])) / LBIN, 0)}
     out["joints"] = _joints(result, built)
+    walls = []
+    first = built.get("steel", len(built["names"]))
+    for k in range(first, len(built["names"])):
+        ck = built["wall_checks"][k - first]
+        skin = min((float(c.safety[k]), name) for name, c in result.cases.items())
+        # the foam's shear, taking all the wall's shear in the foam (a skin's own share is a guess for PMF)
+        v = max(float(abs(c.end_forces[k, i])) for c in result.cases.values() for i in (1, 2, 7, 8))
+        tau = v / (ck["depth"] * ck["core_t"])
+        foam = ck["core_shear"] / tau if tau > 0 else float("inf")
+        walls.append({"name": built["names"][k], "skin_safety": round(skin[0], 2),
+                      "foam_safety": round(min(foam, 999.0), 2), "safety": round(min(skin[0], foam), 2),
+                      "case": skin[1]})
+    if walls:
+        out["walls"] = walls
+        # what the box's fixings to the frame carry: the walls' shear where they're fastened
+        fixed = {}
+        for k in range(first, len(built["names"])):
+            for end, cols in ((0, (1, 2)), (1, (7, 8))):
+                n = built["ends"][k][end]
+                if n in built.get("fastened_ix", ()):
+                    for name, c in result.cases.items():
+                        v = float(math.hypot(*(c.end_forces[k, i] for i in cols)))
+                        fixed[(n, name)] = fixed.get((n, name), 0.0) + v
+        if fixed:
+            (n, case), v = max(fixed.items(), key=lambda kv: kv[1])
+            out["fixing"] = {"force_lb": round(v / LB, 1), "case": case,
+                             "at": [round(x, 1) for x in built["spec"]["nodes"][n]]}
     return out
 
 
@@ -237,7 +356,7 @@ def _joints(result, built: dict, case: str = "driving", top: int = 3) -> list[di
     nodes = np.asarray(built["spec"]["nodes"], dtype=np.float64)
     sections = [m["section"] for m in built["spec"]["members"]]
     meet: dict[int, list[int]] = {}
-    for k, (a, b) in enumerate(built["ends"]):
+    for k, (a, b) in enumerate(built["ends"][:built.get("steel", len(built["ends"]))]):   # welds: steel
         meet.setdefault(a, []).append(k)
         meet.setdefault(b, []).append(k)
 
@@ -281,12 +400,14 @@ def runs_dir(store: DesignStore) -> str:
 def study(store: DesignStore, part_id: str, *, load_lb: float = 100.0, factor: float = 2.5,
           min_safety: float = 3.5, on_groups=("rails",), catalogs: Optional[dict] = None,
           emit: Optional[Callable] = None, from_design: bool = False, payload_lb: float = 100.0,
-          params: Optional[dict] = None) -> dict:
+          params: Optional[dict] = None, walls: bool = True, build: Optional[dict] = None) -> dict:
     """Analyse the frame as drawn, then sweep for the lightest tubes that keep ``min_safety``.
 
     ``from_design``: carry the design's other parts as they're built (their ``construction()``), each
     piece's weight where it is, plus ``payload_lb`` spread over the floor — instead of ``load_lb``
     spread along ``on_groups``. ``params`` overrides the frame's PARAMS for a what-if layout.
+    ``walls``: a part that declares ``shell()`` carries load with its walls too (CALI-44). ``build``
+    tries other construction choices for the parts it carries (``{part: {BUILD entry: value}}``).
     """
     from whittle import TUBES, FrameStudy, io, tube_size
 
@@ -296,13 +417,17 @@ def study(store: DesignStore, part_id: str, *, load_lb: float = 100.0, factor: f
     fd = frame_def(store, part_id, params=params)
     loads, carried = None, None
     if from_design:
-        carried = construction.design_loads(store, skip=(part_id,), payload_lb=payload_lb)
+        carried = construction.design_loads(store, skip=(part_id,), payload_lb=payload_lb, walls=walls,
+                                            build=build)
         if not carried["points"]:
             raise ValueError("no other part says what it's built from — nothing for the frame to carry")
         loads = carried["points"]
         load_lb = carried["mass_kg"] * KG_LB
-    built = build_spec(fd, load_lb=load_lb, factor=factor, on_groups=on_groups, points=loads)
+    built = build_spec(fd, load_lb=load_lb, factor=factor, on_groups=on_groups, points=loads,
+                       walls=carried["shell"] if carried else None)
     fs = FrameStudy.from_dict(built["spec"])
+    steel_only = FrameStudy.from_dict({**built["spec"], "members": built["spec"]["members"][:built["steel"]],
+                                       "loads": []}) if built["walls"] else fs
     what = (", ".join(f"{p['part']} {p['mass_kg'] * KG_LB:.0f} lb" for p in carried["parts"]) + " where they sit"
             if carried else f"{load_lb:g} lb on {', '.join(on_groups)}")
     emit("planned", f"{len(fd['members'])} members, {len(built['spec']['nodes'])} joints — "
@@ -315,7 +440,7 @@ def study(store: DesignStore, part_id: str, *, load_lb: float = 100.0, factor: f
         # a group can be any catalog tube — except one whose outside has to fit something (the
         # shank in the receiver): it keeps its outer size and only its wall may change
         catalogs = {}
-        for g in sorted(set(built["groups"])):
+        for g in sorted(set(built["groups"]) - {"walls"}):       # the walls are what they're built from
             current = next(m for m in fd["members"] if m["group"] == g)
             if g == "shank":
                 catalogs[g] = [k for k in TUBES if abs(tube_size(k)[0] - current["outer"]) < 0.05]
@@ -332,7 +457,7 @@ def study(store: DesignStore, part_id: str, *, load_lb: float = 100.0, factor: f
         row = {"index": i, "design": dict(st.design), **_summary(st.analysis, built)}
         stations.append(row)
         with open(os.path.join(out_dir, f"station_{i:02d}.stl"), "wb") as f:
-            f.write(io.stl_bytes(fs.mesh(st.analysis.sections)))
+            f.write(io.stl_bytes(steel_only.mesh(st.analysis.sections[:built["steel"]])))
     carrying = None
     if carried:
         ap = built["applied"]
@@ -341,9 +466,12 @@ def study(store: DesignStore, part_id: str, *, load_lb: float = 100.0, factor: f
                     "cog": [round(v, 1) for v in ap["cog"]],
                     # the floor carries each bit sideways to the nearest tube: how far that moves it
                     "shift_in": round((ap["cog"][0] - ap["lands"][0]) / 25.4, 2),
-                    "reach_in": round(ap["reach_mm"] / 25.4, 1), "notes": carried["notes"]}
+                    "reach_in": round(ap["reach_mm"] / 25.4, 1), "notes": carried["notes"],
+                    "walls": built["walls"], "on_walls_lb": round(ap["on_walls_kg"] * KG_LB, 1),
+                    "fastened": [[round(v, 1) for v in n] for n in built["fastened"]]}
     record = {
         "id": rid, "part": part_id, "kind": "frame", "created": time.time(), "params": params or {},
+        "build": build or {}, "walls": bool(carried and carried["shell"]),
         "layout": layout_name(store.read_script(part_id), params),
         "carrying": carrying,
         "load_lb": round(load_lb, 1), "factor": factor, "min_safety": min_safety, "on_groups": list(on_groups),

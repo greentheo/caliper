@@ -92,6 +92,8 @@ class FrameRequest(BaseModel):
     from_design: bool = False           # carry the other parts as built (+ payload_lb on the floor) instead
     payload_lb: float = 100.0
     params: dict = {}                   # a what-if layout (one of the frame's LAYOUTS)
+    walls: bool = True                  # a carried part's shell() walls carry load too
+    build: dict[str, dict] = {}         # what-if construction of the carried parts
 
 
 class PartSettings(BaseModel):
@@ -144,6 +146,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "built": construction.declares(script),
             # what it has to hold (keeps()) — a drag study keeps it clear (CALI-42)
             "keeps": "def keeps(" in script,
+            "shell": "def shell(" in script,      # its walls can carry load in a frame study (CALI-44)
             "suggest": {k: aero.suggest(k, v, ranges) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
@@ -389,7 +392,8 @@ def router():
             return frame_study.study(s, req.part, load_lb=req.load_lb, factor=req.factor,
                                      min_safety=req.min_safety, on_groups=tuple(req.on_groups),
                                      from_design=req.from_design, payload_lb=req.payload_lb,
-                                     params=req.params or None,
+                                     params=req.params or None, walls=req.walls,
+                                     build=req.build or None,
                                      emit=lambda k, t="", **d: j.emit(k, t, **d))
 
         job = RUNNER.submit("frame", work, label=f"size {req.part}", lock=f"frame:{slug}")
