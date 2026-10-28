@@ -119,7 +119,8 @@ make refine-llm SOURCE=runs/run_0000 INSTRUCTION="round the outer corners and li
 **What's new:** instead of whittle carving a mesh, whittle searches the **numbers** in the part's script,
 and the one you pick is written back into it. Built with the whittle-agent session.
 
-**Needs** whittle installed into Caliper's environment (already done on Theo's machine):
+**Needs** whittle at `a1248d1` or later (its `physics-and-slider` branch — `ParametricStudy` and
+obstacles) installed into Caliper's environment (already done on Theo's machine):
 
 ```bash
 /opt/anaconda3/envs/caliper/bin/python -m pip install -e ~/githubrepo/whittle

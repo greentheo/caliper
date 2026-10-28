@@ -542,7 +542,7 @@ Python env — so a design part can be studied and a station brought back.
 the part makes whittle carve nothing (one lattice spans everything). Needs obstacle bodies in whittle's
 drag model. Coordinated with the whittle-agent session.
 
-### CALI-39 — Parametric aero loop  · P1 · M5 · ✅ done (`abb1d59`) — on branch `cali-39-parametric-aero`; needs whittle's `physics-and-slider` committed before merging
+### CALI-39 — Parametric aero loop  · P1 · M5 · ✅ done (`abb1d59`) — on branch `cali-39-parametric-aero`; needs whittle at `a1248d1` (its `physics-and-slider`, committed 2026-10-27, not yet on whittle's main)
 Return a **parametric** part, not a mesh. **Agreed split with the whittle-agent session (2026-10-27):**
 whittle drives — its new `ParametricStudy(build, bounds, start=, flow=, speed_kmh=, obstacles=[car])`
 searches the parameters against its drag model and returns the same volume-vs-drag slider, with
