@@ -46,7 +46,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - **whittle sweep note:** with glass walls the sweep stopped at 3.45× ("nothing reaches 3.5×") though a
   heavier shank was in its list — the exhaustive search found 46.5 lb at 3.53×. Told the whittle-agent.
 - Tests: `test_frame_study.py` +2, `test_construction.py` +1. Full suite green.
-- Commit: _(pending)_
+- Commit: `45ddc9f`
 
 ### 2026-10-28 · CALI-42 + CALI-43 · Room for the mattress, curvier sides, and an X frame that carries the box as built
 - **Why:** Theo: widen the box so a twin fits inside the 1 in walls (~77 in) — now wider than the Leaf, the

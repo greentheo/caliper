@@ -624,7 +624,7 @@ where it meets a 2 in main beam in the middle.
 **Acceptance:** loads preserve total and moment; members stay whole; layouts named in the record; tests in
 `test_frame_study.py` (3) + `test_construction.py` (2).
 
-### CALI-44 — The box carries itself: walls as structure, fiberglass skins · P1 · M5 · ✅ done
+### CALI-44 — The box carries itself: walls as structure, fiberglass skins · P1 · M5 · ✅ done (`45ddc9f`)
 Theo (2026-10-28): use drag design 2 and the X-only frame with 50 lb aboard; count the strength and stiffness
 the walls give; fiberglass as an alternative to PMF; and move the box in close — the trunk is reached from
 the fold-down rear seat, so the hatch needn't open: a few inches' clearance.
