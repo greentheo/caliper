@@ -42,6 +42,13 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **Room for the mattress (CALI-42).** A part can say what it has to hold (`keeps()` — the twin
+  mattress, a pale slab under **Built from**) and how far a drag study may take each number (`RANGES`, ticked
+  for you). The search keeps the outside out of the slab, and every design it returns is re-checked.
+- 🆕 **The frame carries the box as built (CALI-43).** **Size the frame** → *carries: the design as built*
+  puts every panel, post and payload pound where it sits onto the nearest tube; pick a **layout** (the X
+  frame has four) and compare runs; the panel names what holds the safety back and the hardest-worked joint
+  (what a gusset there carries).
 - 🆕 **What it's built from (CALI-41).** Select a part that says what it's built from (the camper box) →
   **Built from**: its weight, where its centre of gravity sits (red dot), what it's made of, and **what to
   buy**. Change the floor to ¼ in, drop the posts, add paint inside — the weight and the hitch moment update;
@@ -522,6 +529,17 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-28 · Room for a mattress, curvier sides, and an X frame (CALI-42/43)
+**Try it:** open *A cargo box on the trailer…* → click **cargo_box**. It's 77 × 40 × 41 in now (75 × 38 inside
+the 1 in walls); **Built from** says *✓ holds the mattress* and the pale slab at its base is that space.
+Scroll to **Shape it for drag**: the eight ticked numbers and their ranges are the part's own. The last search
+(behind leaf_rear, 65 mph, 2,738 builds, 40 min): **design 2 gives up 9% of the volume and saves 22 lbf ≈
+4.4 kWh/100 mi**, design 3 24 lbf ≈ 4.7 — click a row to see it in place (round front above the mattress, sides
+leaning in, a tapered tail, the slab untouched). *Use these numbers* saves one. Then click **frame** in the
+parts list → **Size the frame**: six runs in the picker, one per layout (and two with the X held to 1 in tube),
+all carrying the box as built + 100 lb on the floor. None reaches 3.5× — the panel says why (the shank in the
+receiver). Try *payload 50* on *X only* → about 3.2×.
 
 ### 2026-10-27 · What it's built from — weight, balance, a shopping list (CALI-41)
 **Try it:** open *A cargo box on the trailer…* → click **cargo_box** → scroll to **Built from**. 56.1 lb with a

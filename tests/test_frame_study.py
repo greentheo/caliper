@@ -120,3 +120,77 @@ def test_run_ids_cannot_escape_the_design(store):
     assert fs.load_run(store, "../../x") is None
     with pytest.raises(ValueError):
         fs.station_path(store, "../x", 0)
+
+
+# --- CALI-43: carrying what the design is built from -----------------------------------------
+CARGO = '''PARAMS = {"w": 100.0}
+
+
+def build(params):
+    import cadquery as cq
+    return cq.Workplane("XY").box(100, 100, 100).translate((-650, 0, 100))
+
+
+def construction(params, build=None):
+    return [{"name": "cargo", "kind": "lump", "mass": 100 / 2.20462262, "at": (-650, 0, 100)}]
+'''
+
+LAYOUT = FRAME.replace('''def members(params):''', '''LAYOUTS = {"short": {"rail_w": 25.4}, "as is": {"rail_w": 50.8}}
+
+
+def members(params):''')
+
+
+def test_points_land_on_the_member_that_carries_them_and_keep_their_moment(store):
+    fd = fs.frame_def(store, "frame")
+    fd["members"][2]["carries"] = True                      # only the rail
+    built = fs.build_spec(fd, points=[((-650.0, 40.0, 100.0), 10.0), ((-1000.0, 0.0, 0.0), 5.0)])
+    spec = built["spec"]
+    standing = [ld for ld in spec["loads"] if ld["case"] == "standing"]
+    assert {ld["member"] for ld in standing} == {2}
+    # the rail runs from x=-300 to x=-1000: the loads sit at 350/700 and the far end
+    assert sorted(ld["at"] for ld in standing) == pytest.approx([0.5, 1.0])
+    assert sum(ld["force"][2] for ld in standing) == pytest.approx(-15.0 * fs.GRAVITY)
+    assert built["applied"]["lands"][0] == pytest.approx((10 * -650 + 5 * -1000) / 15)
+    assert built["applied"]["reach_mm"] == pytest.approx(40, abs=1)           # the 40 mm sideways hop
+    # members stay whole (whittle checks buckling over a member's own length): 3 members, 4 ends
+    assert len(spec["members"]) == 3 and len(spec["nodes"]) == 4
+
+
+def test_a_frame_carries_the_design_as_built(store):
+    store.write_part("cargo", CARGO, intent="100 lb of cargo")
+    rec = fs.study(store, "frame", from_design=True, payload_lb=0, min_safety=2.0)
+    assert rec["carrying"]["mass_lb"] == pytest.approx(100, abs=0.1)
+    assert rec["carrying"]["shift_in"] == pytest.approx(0, abs=0.05)
+    flat = fs.study(store, "frame", load_lb=100, min_safety=2.0)
+    # the same 100 lb whose centre is 650 mm out: the same moment on the hitch, give or take the cuts
+    assert rec["drawn"]["receiver"]["standing"]["moment_lbin"] == pytest.approx(
+        flat["drawn"]["receiver"]["standing"]["moment_lbin"], rel=0.01)
+
+
+def test_a_frame_names_its_layouts_and_a_study_records_which_it_ran(tmp_path):
+    s = DesignStore.create("layouts", base=str(tmp_path / "designs"))
+    s.write_part("frame", LAYOUT, intent="a shank and a rail")
+    assert fs.read_layouts(LAYOUT) == {"short": {"rail_w": 25.4}, "as is": {"rail_w": 50.8}}
+    assert fs.layout_name(LAYOUT, None) == "as is"
+    rec = fs.study(s, "frame", load_lb=50, min_safety=2.0, params={"rail_w": 25.4})
+    assert rec["layout"] == "short" and rec["params"] == {"rail_w": 25.4}
+    assert rec["drawn"]["mass_lb"] < fs.study(s, "frame", load_lb=50, min_safety=2.0)["drawn"]["mass_lb"]
+    assert aero.shape_signature(LAYOUT) == aero.shape_signature(FRAME)
+
+
+def test_the_hardest_joint_counts_welded_ends_not_a_tube_running_through(tmp_path):
+    from whittle import FrameStudy
+    # a 2 in spine out to x=-1000 with 1 in arms either side at x=-600: the arms are welded to it
+    fd = {"members": [
+        {"name": "shank", "group": "shank", "a": (150, 0, 0), "b": (0, 0, 0), "outer": 50.8, "wall": 6.35},
+        {"name": "spine_a", "group": "spine", "a": (0, 0, 0), "b": (-600, 0, 0), "outer": 50.8, "wall": 3.175},
+        {"name": "spine_b", "group": "spine", "a": (-600, 0, 0), "b": (-1000, 0, 0), "outer": 50.8, "wall": 3.175},
+        {"name": "arm_l", "group": "x", "a": (-600, 0, 0), "b": (-600, 500, 0), "outer": 25.4, "wall": 2.108, "carries": True},
+        {"name": "arm_r", "group": "x", "a": (-600, 0, 0), "b": (-600, -500, 0), "outer": 25.4, "wall": 2.108, "carries": True}],
+        "supports": [{"at": (0, 0, 0), "fix": ["ux", "uy", "uz", "rx"]}, {"at": (150, 0, 0), "fix": ["uy", "uz"]}]}
+    built = fs.build_spec(fd, points=[((-600, 450, 0), 5.0), ((-600, -450, 0), 5.0)])
+    (joint,) = fs._joints(FrameStudy.from_dict(built["spec"]).analyze(), built)
+    assert joint["worst_member"] in ("arm_l", "arm_r")           # not the spine passing through
+    # 5 kg at 450 mm out on each arm, x2.5 on a bump, plus the arm's own weight
+    assert joint["bending_lbin"] == pytest.approx(2.5 * 5 * 2.20462 * 450 / 25.4, rel=0.1)

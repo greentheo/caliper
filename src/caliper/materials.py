@@ -19,6 +19,9 @@ SHEETS = {
             "basis": "~1 lb/ft³"},
     "plywood": {"name": "softwood plywood", "density": 560.0, "stock": (4 * 12 * IN, 8 * 12 * IN),
                 "basis": "~35 lb/ft³: a 4x8 sheet of 3/8 in ≈ 35 lb, 1/2 in ≈ 47 lb"},
+    # plate for gussets and brackets, plasma-cut from a sheet
+    "steel": {"name": "steel plate", "density": 7850.0, "stock": (4 * 12 * IN, 8 * 12 * IN),
+              "basis": "~490 lb/ft³: 3/16 in plate ≈ 7.7 lb/ft², 1/8 in ≈ 5.1 lb/ft²"},
 }
 
 #: Sticks: density (kg/m³), stock length (mm), and nominal sizes -> actual section (mm).

@@ -65,6 +65,9 @@ if callable(globals().get('construction')):
     _f = construction
     _out['construction'] = _f({{}}, _b) if len(_inspect.signature(_f).parameters) > 1 else _f({{}})
     _out['build'] = {{**(globals().get('BUILD') or {{}}), **_b}}
+if callable(globals().get('keeps')):
+    _k = keeps
+    _out['keeps'] = _k({{}}, _b) if len(_inspect.signature(_k).parameters) > 1 else _k({{}})
 if callable(globals().get('members')):
     _out['members'] = members({{}})
 if callable(globals().get('supports')):
@@ -79,14 +82,15 @@ def declares(script: str) -> bool:
 
 def declared(store: DesignStore, part_id: str, build: Optional[dict] = None,
              timeout: float = 60.0) -> dict:
-    """``construction`` / ``members`` / ``supports`` from the part's script, and the BUILD choices used.
+    """``construction`` / ``keeps`` / ``members`` / ``supports`` from the part's script, and the BUILD
+    choices used.
 
     Empty if the part is a mesh or declares none of them. ``build`` overrides BUILD for a what-if.
     """
     if not store.is_scripted(part_id):
         return {}
     script = store.read_script(part_id)
-    if not declares(script):
+    if not declares(script) and "def keeps(" not in script:
         return {}
     probe = script + _PROBE.format(build=json.dumps(build or {}))
     try:
@@ -103,10 +107,55 @@ def declared(store: DesignStore, part_id: str, build: Optional[dict] = None,
 
 
 def from_members(members: list[dict]) -> list[dict]:
-    """A tube frame's members as steel sticks, so a frame weighs in like anything else."""
-    return [{"name": m.get("name", f"member {i}"), "kind": "stick", "material": "steel",
-             "outer": m["outer"], "wall": m["wall"], "a": m["a"], "b": m["b"]}
-            for i, m in enumerate(members)]
+    """A tube frame's members as steel sticks, so a frame weighs in like anything else — as it's cut.
+
+    A frame analysis splits a tube wherever something joins it; the shop cuts one length. So members of
+    the same group and tube that meet end to end in a straight line become one stick — unless a bigger
+    tube meets them there (it's in the way: they're cut and welded to its sides) — and a member shorter
+    than its own tube's width (a stub joining two centrelines inside a joint) is left out.
+    """
+    def biggest_at(p):
+        return max([float(m["outer"]) for m in members
+                    if math.dist(m["a"], p) <= 1.0 or math.dist(m["b"], p) <= 1.0] or [0.0])
+
+    runs = [{"name": m.get("name", f"member {i}"), "group": m.get("group"), "outer": float(m["outer"]),
+             "wall": float(m["wall"]), "a": tuple(map(float, m["a"])), "b": tuple(map(float, m["b"])), "n": 1}
+            for i, m in enumerate(members) if math.dist(m["a"], m["b"]) >= float(m["outer"])]
+
+    def joined(r, q):
+        if (r["group"], r["outer"], r["wall"]) != (q["group"], q["outer"], q["wall"]):
+            return None
+        for ra, rb in ((r["a"], r["b"]), (r["b"], r["a"])):
+            for qa, qb in ((q["a"], q["b"]), (q["b"], q["a"])):
+                if math.dist(rb, qa) <= 1.0:
+                    u, v = _unit(_sub(rb, ra)), _unit(_sub(qb, qa))
+                    if _dot(u, v) > 0.9999 and biggest_at(rb) <= r["outer"] + 0.01:   # straight on through
+                        return ra, qb
+        return None
+
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(runs)):
+            for j in range(i + 1, len(runs)):
+                ends = joined(runs[i], runs[j])
+                if ends:
+                    runs[i].update(a=ends[0], b=ends[1], n=runs[i]["n"] + runs[j]["n"])
+                    del runs[j]
+                    merged = True
+                    break
+            if merged:
+                break
+    return [{"name": r["group"] if r["n"] > 1 and r["group"] else r["name"], "kind": "stick", "material": "steel",
+             "outer": r["outer"], "wall": r["wall"], "a": r["a"], "b": r["b"], "group": r["group"]} for r in runs]
+
+
+def _items(d: dict) -> Optional[list[dict]]:
+    """What a part is built from: its ``construction()`` pieces, plus its tubes if it's a frame (a
+    frame's ``construction()`` lists what else it's made of — plates, hardware)."""
+    if d.get("construction") is None and not d.get("members"):
+        return None
+    return list(d.get("construction") or []) + (from_members(d["members"]) if d.get("members") else [])
 
 
 # ---------------------------------------------------------------------------
@@ -500,6 +549,93 @@ def choices(build: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Where the weight is — spread over each piece, for loading a frame with it (CALI-43)
+# ---------------------------------------------------------------------------
+def _triangle_points(a, b, c, step: float):
+    """Points spread evenly over a triangle, each standing for an equal share of its area."""
+    n = max(1, math.ceil(max(math.dist(a, b), math.dist(b, c), math.dist(a, c)) / step))
+    out = []
+    for i in range(n):
+        for j in range(n - i):
+            for di, dj in ((1 / 3, 1 / 3),) + (((2 / 3, 2 / 3),) if i + j < n - 1 else ()):
+                u, v = (i + di) / n, (j + dj) / n
+                out.append(tuple(a[k] + u * (b[k] - a[k]) + v * (c[k] - a[k]) for k in range(3)))
+    return out
+
+
+def load_points(items: list[dict], step: float = 100.0) -> list[tuple[tuple, float]]:
+    """``(point, kg)`` pairs spread over everything a part is built from, about ``step`` mm apart.
+
+    A sheet's weight (and its coverings') is spread over its area, a stick's along its length; a lump
+    sits where it is. They add up to the part's weight and balance at its centre of gravity — but a
+    frame carrying them feels each piece where it is, not all of it at the centre of gravity.
+    """
+    out = []
+    for item in items:
+        rows = piece(item)
+        mass = sum(r["mass_kg"] for r in rows)
+        kind = item.get("kind")
+        if kind == "sheet":
+            polys = [item["outline"]] if item.get("outline") else list(item.get("facets") or [])
+            parts = []
+            for poly in polys:
+                normal = polygon(poly)[2]
+                for k in range(1, len(poly) - 1):
+                    tri = [tuple(float(v) for v in poly[i]) for i in (0, k, k + 1)]
+                    signed = _dot(_cross(_sub(tri[1], tri[0]), _sub(tri[2], tri[0])), normal) / 2
+                    if abs(signed) > 1e-9:
+                        parts.append((signed, _triangle_points(*tri, step)))
+            total = sum(a for a, _ in parts)
+            for a, pts in parts:
+                out.extend((p, mass * a / total / len(pts)) for p in pts)
+        elif kind == "stick":
+            a, b = [tuple(float(v) for v in item[k]) for k in ("a", "b")]
+            n = max(1, math.ceil(math.dist(a, b) / step))
+            out.extend((tuple(a[k] + (i + 0.5) / n * (b[k] - a[k]) for k in range(3)), mass / n)
+                       for i in range(n))
+        else:
+            out.extend((tuple(float(v) for v in r["at"]), r["mass_kg"]) for r in rows)
+    return out
+
+
+def design_loads(store: DesignStore, *, skip=(), payload_lb: float = 0.0, step: float = 100.0,
+                 build: Optional[dict] = None) -> dict:
+    """The design's parts as built, as weight spread where it is — plus a payload spread over the
+    floor (every sheet in group ``floor``, on its top face). ``skip`` leaves parts out: a frame being
+    sized carries its own weight already."""
+    build = build or {}
+    points, parts, floors = [], [], []
+    for p in store.design.parts:
+        if p.id in skip:
+            continue
+        items = _items(declared(store, p.id, build.get(p.id)))
+        if not items:
+            continue
+        pts = load_points(items, step)
+        points.extend(pts)
+        parts.append({"part": p.id, "mass_kg": round(sum(m for _, m in pts), 2)})
+        floors.extend(it for it in items if it.get("kind") == "sheet" and it.get("group") == "floor")
+    notes = []
+    if payload_lb:
+        if not floors:
+            notes.append("No part has a floor (a sheet in group 'floor') — the payload isn't placed.")
+        else:
+            on_top = []
+            for f in floors:
+                t = float(f["thickness"])
+                polys = [f["outline"]] if f.get("outline") else f["facets"]
+                on_top.append({"kind": "sheet", "material": f["material"], "thickness": t,
+                               "facets": [[(x, y, z + t) for x, y, z in poly] for poly in polys]})
+            spread = load_points(on_top, step)
+            total, kg = sum(m for _, m in spread), payload_lb / M.LB_KG
+            points.extend((p, m * kg / total) for p, m in spread)
+            parts.append({"part": "payload", "mass_kg": round(kg, 2)})
+    mass = sum(m for _, m in points)
+    cog = [sum(m * p[k] for p, m in points) / mass for k in range(3)] if mass else [0.0, 0.0, 0.0]
+    return {"points": points, "parts": parts, "mass_kg": mass, "cog": cog, "notes": notes}
+
+
+# ---------------------------------------------------------------------------
 # Reports
 # ---------------------------------------------------------------------------
 def _round3(v):
@@ -509,11 +645,10 @@ def _round3(v):
 def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> dict:
     """One part: weight, centre of gravity, what it's made of, and what to buy."""
     d = declared(store, part_id, build)
-    if d.get("construction") is not None:
-        items, source = d["construction"], "construction"
-    elif d.get("members"):
-        items, source = from_members(d["members"]), "members"
-    else:
+    items = _items(d)
+    source = ("construction + members" if d.get("construction") is not None else "members") \
+        if d.get("members") else "construction"
+    if items is None:
         raise ValueError(f"'{part_id}' doesn't say what it's built from — give its script a "
                          f"construction(params, build) (or members() for a tube frame)")
     rows = takeoff(items)
@@ -521,16 +656,26 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
     saved = read_build(store.read_script(part_id)) or {}
     used = d.get("build") or {}
     notes = []
-    if source == "members":
-        notes.append("Weighed from its tubes' centrelines, joint to joint — within a few percent; "
-                     "cut lengths come with the cut plan.")
+    if d.get("members"):
+        notes.append("Tubes weighed along their centrelines, joint to joint, one length where a tube runs "
+                     "straight through — within a few percent; exact cuts (mitres, copes) come with the cut plan.")
     bom_ = bom(rows)
     for g in bom_["sheets"]:
         if g["joined"]:
             notes.append(f"{', '.join(g['joined'])}: bigger than a {g['label']} sheet — joined from pieces.")
         if g["bent"]:
             notes.append(f"{', '.join(g['bent'])}: bent panels — weighed by their area; sheet count is rough.")
-    return {"part": part_id, "source": source, "build": used, "saved": saved,
+    keeps = []
+    if d.get("keeps"):                     # what it has to hold: does it still, with these choices?
+        from .aero import keep_check
+
+        g = store.part_geometry(part_id).require_mesh()
+        keeps = keep_check(g.vertices, g.faces, d["keeps"])
+        for k in keeps:
+            if not k["clear"]:
+                notes.append(f"The {k['name']} doesn't fit: the outside cuts {k['depth_mm']:.0f} mm "
+                             f"({k['depth_mm'] / M.IN:.1f} in) into the space it needs.")
+    return {"part": part_id, "source": source, "build": used, "saved": saved, "keeps": keeps,
             "changed": {k: v for k, v in used.items() if k in saved and saved[k] != v},
             "choices": choices(used),
             "mass_kg": round(mass, 2), "mass_lb": round(mass * M.LB_KG, 1), "cog": _round3(cog),
@@ -549,9 +694,7 @@ def balance(store: DesignStore, build: Optional[dict] = None, payload_lb: float 
     parts, rows_all, hitch, floor_at = [], [], None, None
     for p in store.design.parts:
         d = declared(store, p.id, build.get(p.id))
-        items = d.get("construction")
-        if items is None and d.get("members"):
-            items = from_members(d["members"])
+        items = _items(d)
         if items:
             rows = takeoff(items)
             mass, cog = totals(rows)

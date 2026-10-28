@@ -229,3 +229,75 @@ def test_numbers_from_the_same_script_can_be_swapped_freely(tunable):
     aero.adopt(tunable, rec["id"], 1)
     aero.adopt(tunable, rec["id"], 0)
     assert aero.read_params(tunable.read_script("box"))["tail_len"] == 0
+
+
+# --- CALI-42: a part's own ranges, and what it has to hold --------------------------------------
+RANGED = SCRIPT + '''
+
+# how far a study may take each number
+RANGES = {
+    "tail_len": (0.0, 90.0),
+    "tail_drop": (0, 30 + 20),
+    "label": "not a range",
+}
+'''
+
+
+def test_a_part_can_give_its_own_search_ranges():
+    r = aero.read_ranges(RANGED)
+    assert r == {"tail_len": (0.0, 90.0), "tail_drop": (0.0, 50.0)}
+    assert aero.suggest("tail_len", 0.0, r) == {"search": True, "bounds": [0.0, 90.0], "from": "part"}
+    # a range that leaves out where the part is now is widened to take it in
+    assert aero.suggest("tail_drop", 70.0, r)["bounds"] == [0.0, 70.0]
+    assert aero.suggest("width", 200.0, r)["search"] is False                 # not in RANGES: a guess
+    assert aero.suggest("tail_curve", 1.0, r)["search"] is False              # ...even if it sounds like shape
+    assert aero.suggest("tail_curve", 1.0)["search"] is True
+    assert aero.read_ranges(SCRIPT) == {}
+
+
+def test_ranges_dont_change_the_shape_but_keeps_do():
+    sig = aero.shape_signature(SCRIPT)
+    assert aero.shape_signature(RANGED) == sig
+    kept = SCRIPT + '\n\ndef keeps(params):\n    return [{"name": "cargo", "lo": (0, 0, 0), "hi": (1, 1, 1)}]\n'
+    assert aero.shape_signature(kept) != sig
+
+
+def _cube(n=100.0):
+    v = [(x, y, z) for x in (0, n) for y in (0, n) for z in (0, n)]
+    f = [(0, 1, 3), (0, 3, 2), (4, 6, 7), (4, 7, 5), (0, 4, 5), (0, 5, 1),
+         (2, 3, 7), (2, 7, 6), (0, 2, 6), (0, 6, 4), (1, 5, 7), (1, 7, 3)]
+    return v, f
+
+
+def test_a_surface_that_crosses_a_keep_is_measured_by_how_deep():
+    v, f = _cube()
+    inside, across, touching = aero.keep_check(v, f, [
+        {"name": "inside", "lo": (10, 10, 10), "hi": (90, 90, 90)},
+        {"name": "across", "lo": (50, 10, 10), "hi": (150, 90, 90)},       # the x=100 face runs through it
+        {"name": "touching", "lo": (0, 0, 0), "hi": (100, 100, 50)},       # sits on the faces
+    ])
+    assert inside["clear"] and inside["depth_mm"] == 0
+    assert not across["clear"] and across["depth_mm"] == pytest.approx(40, abs=2)
+    assert touching["clear"]
+
+
+KEPT = SCRIPT + '''
+
+def keeps(params):
+    """the top-back corner holds something tall"""
+    return [{"name": "crate", "note": "a crate at the back", "lo": (-120, -50, 0), "hi": (-70, 50, 90)}]
+'''
+
+
+def test_a_study_keeps_what_the_part_has_to_hold(tmp_path):
+    pytest.importorskip("cadquery")
+    pytest.importorskip("whittle")
+    store = DesignStore.create("a box that holds a crate", base=str(tmp_path / "designs"))
+    store.write_part("box", KEPT, intent="a box with a crate at the back")
+    rec = _quick(store)
+    assert [k["name"] for k in rec["keeps"]] == ["crate"]
+    assert any(n.startswith("Kept clear: crate (a crate at the back)") for n in rec["notes"])
+    # whatever the search found, a station that cuts in is owned up to
+    last = rec["stations"][-1]["design"]
+    if last["tail_drop"] > 12:
+        assert any(n.startswith("Not quite clear") for n in rec["notes"])

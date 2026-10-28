@@ -346,7 +346,9 @@ radius or chamfer of 0 must mean "none" (skip the fillet), and every value in PA
 they are the part as it stands.
 If the script also has members()/supports() (its tubes, for a frame study) or BUILD and construction()
 (what it's built from, for its weight and bill of materials), keep them, and keep them describing the
-same part as build() — move a panel or a tube in one, move it in the others."""
+same part as build() — move a panel or a tube in one, move it in the others. Keep its RANGES (how far a
+drag study may take each number), keeps() (boxes it must hold clear — a mattress, the cargo) and LAYOUTS
+(a frame's what-if layouts) too, and keep them true to the new shape."""
 
 
 def _emit(events: list[Event], on_event, kind: str, text: str, **data) -> None:

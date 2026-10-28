@@ -19,7 +19,7 @@ const S = {
   station: null,       // {run, index} when previewing a whittle station in the viewport
   whittle: { ok: false },
   runIndex: {},        // part id -> which whittle run the inspector shows
-  aeroRun: {},         // part id -> which parametric study the inspector shows
+  aeroRun: {}, frameRun: {},         // part id -> which parametric study the inspector shows
   built: {},           // part id -> {version, tried, report, balance}: what it's built from (CALI-41)
   balance: null,       // {key, data}: the whole design's weight and what the hitch carries
   payload: 0,          // lb of gear or people on the floor, for the balance
@@ -714,6 +714,10 @@ function builtResults(p, c) {
   return `<div class="card">
       <b style="font-size:1.3em">${lbs(r.mass_lb)}</b> ${changed ? '<span class="badge">trying — not saved</span>' : ''}
       <div class="small">centre of gravity ${cogText(p, r.cog)} <span class="muted">(the red dot)</span></div>
+      ${(r.keeps || []).map((k) => `<div class="small" style="margin-top:4px">${k.clear
+        ? `✓ holds the <b>${esc(k.name)}</b>`
+        : `<span style="color:var(--bad)">✗ the <b>${esc(k.name)}</b> doesn't fit — the outside cuts ${len(k.depth_mm, 1)} into it</span>`}
+        <span class="muted">(${esc(k.note || '')}${k.note ? '; ' : ''}the pale slab)</span></div>`).join('')}
       ${b && b.moment_lbin != null ? `<div class="small" style="margin-top:4px">With the rest of the design the hitch carries
         <b>${lbs(b.force_lb)}</b> and <b>${lbin(b.moment_lbin)}</b>${mine ? ` — this part ${lbin(mine.moment_lbin)} of it, ${len(mine.arm_in * IN, 1)} behind the hitch` : ''}.</div>` : ''}
     </div>
@@ -842,6 +846,15 @@ function showMarks() {
   };
   if (cog) dot(cog, 0xff4d3d);
   if (b && b.hitch && (!S.scope || cog)) dot(b.hitch, 0x3fb950);
+  // what the part has to hold (keeps(): the mattress) — a pale slab if it fits, red if the outside cuts in
+  for (const k of (S.scope && c && c.report && c.report.keeps) || []) {
+    const lo = new THREE.Vector3(...k.lo), hi = new THREE.Vector3(...k.hi);
+    const geom = new THREE.BoxGeometry(...hi.clone().sub(lo).toArray()), color = k.clear ? 0xd8ecff : 0xff4d3d;
+    const at = lo.clone().add(hi).multiplyScalar(0.5);
+    const fill = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthTest: false, depthWrite: false }));
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom), new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true }));
+    for (const m of [fill, edges]) { m.position.copy(at); m.renderOrder = 9; marks.add(m); }
+  }
 }
 
 // --------------------------------------------------------------------- size the frame (CALI-40)
@@ -852,25 +865,53 @@ function frameRuns(pid) { return (S.design.frame_runs || []).filter((r) => r.par
 function frameView(p) {
   if (!S.design.aero_available) return '<div class="empty">whittle isn\'t installed in Caliper\'s environment.</div>';
   const runs = frameRuns(p.id);
+  // what it carries: the other parts as they're built (each piece where it sits), or a flat load (CALI-43)
+  const built = S.design.parts.some((x) => x.id !== p.id && x.built && !x.framed);
+  const layouts = Object.keys(p.layouts || {});
+  const pick = Math.min(S.frameRun[p.id] || 0, Math.max(runs.length - 1, 0));
   return `<div class="form">
-      <span>box + gear</span><span><input type="number" id="fLoad" value="100" min="0" step="10"> lb, on the rails</span>
+      <span>carries</span><select id="fFrom">
+        ${built ? '<option value="design" selected>the design as built, where it sits</option>' : ''}
+        <option value="flat">a flat load on the rails</option></select>
+      <span id="fLoadLbl">${built ? 'payload on the floor' : 'box + gear'}</span>
+      <span><input type="number" id="fLoad" value="100" min="0" step="10"> lb</span>
+      ${layouts.length ? `<span>layout</span><select id="fLayout"><option value="">as drawn</option>
+        ${layouts.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select>` : ''}
       <span>bumps</span><span>×<input type="number" id="fFactor" value="2.5" min="1" max="5" step="0.5"> when driving</span>
       <span>least safety</span><span><input type="number" id="fSafety" value="3.5" min="1" max="10" step="0.5"> ×</span>
     </div>
     <div class="actions"><button class="primary" id="fGo">Size it</button></div>
     <div id="fProgress"></div>
-    ${runs.length ? frameResults(p, runs[0]) : ''}`;
+    ${runs.length ? frameResults(p, runs[pick], runs) : ''}`;
 }
 
-function frameResults(p, run) {
+function frameLabel(r) {
+  const what = r.carrying ? `${r.carrying.parts.map((x) => `${x.part} ${lbs(x.mass_lb)}`).join(' + ')}`
+    : `${lbs(r.load_lb)} on ${(r.on_groups || []).join(', ')}`;
+  return `${r.layout || (Object.keys(r.params || {}).length ? JSON.stringify(r.params) : 'as drawn')} · ${what}`;
+}
+
+function frameResults(p, run, runs) {
   const d = run.drawn, on = S.station && S.station.run === run.id ? S.station.index : -1;
   const groups = Object.keys(run.stations[0].design);
   const stand = (st) => st.receiver.standing, drive = (st) => st.receiver.driving;
-  return `<div class="card" style="margin-top:12px">
+  const c = run.carrying;
+  const joint = (st) => (st.joints || [])[0];
+  const best = run.stations.reduce((x, y) => (y.safety > x.safety ? y : x));
+  return `<div class="small" style="margin-top:12px">${runs.length > 1 ? `<select id="fRun">${runs.map((r, k) =>
+      `<option value="${k}" ${r.id === run.id ? 'selected' : ''}>${esc(frameLabel(r))}</option>`).join('')}</select>`
+      : `<b>Last sizing</b> · ${esc(frameLabel(run))}`}</div>
+    <div class="card" style="margin-top:8px">
+      ${c ? `<div class="small" style="margin-bottom:6px">Carrying <b>${lbs(c.mass_lb)}</b> — ${c.parts.map((x) => `${esc(x.part)} ${lbs(x.mass_lb)}`).join(', ')} —
+        each piece where it sits; the floor takes it sideways to the nearest tube (up to ${len(c.reach_in * IN, 1)} away).</div>` : ''}
       <b>As drawn</b>: ${d.mass_lb} lb of steel · weakest member <b>${d.safety}x</b> (${esc(d.governing.member)}, ${esc(d.governing.case)}) ·
       sags ${len(d.deflection_mm, 2)} at ×${run.factor}<br>
       <b>Your hitch holds</b>: ${stand(d).force_lb} lb and <b>${Number(stand(d).moment_lbin).toLocaleString()} lb·in</b> standing still,
       ${Number(drive(d).moment_lbin).toLocaleString()} lb·in on a ×${run.factor} bump.
+      ${best.safety < run.min_safety ? `<div class="small" style="margin-top:4px;color:var(--bad)">No tubes in the catalog reach ${run.min_safety}x:
+        the best is ${best.safety}x, held back by <b>${esc(best.governing.member)}</b> — that's the load and how far back it sits, not the layout.</div>` : ''}
+      ${joint(best) ? `<div class="small" style="margin-top:4px">Hardest-worked joint (design ${best.index}, on a bump): where ${esc(joint(best).members.join(', '))} meet —
+        ${Number(joint(best).bending_lbin).toLocaleString()} lb·in of bending from ${esc(joint(best).worst_member)}: what a gusset there has to carry.</div>` : ''}
       <div class="muted small" style="margin-top:4px">Compare with your hitch's rating: tongue weight × the distance from the pin to
         the ball — e.g. 350 lb × ~7″ ≈ 2,450 lb·in for a typical Class II.</div></div>
     <div class="tw"><table class="st"><tr><th>#</th><th>steel lb</th><th>weakest</th><th>sag</th><th>hitch lb·in</th>
@@ -879,16 +920,22 @@ function frameResults(p, run) {
         <td>${st.mass_lb}</td><td>${st.safety}x</td><td>${len(st.deflection_mm, 2)}</td>
         <td>${Number(stand(st).moment_lbin).toLocaleString()}</td>
         ${groups.map((g) => `<td>${esc(st.design[g])}</td>`).join('')}</tr>`).join('')}</table></div>
-    <div class="muted small" style="margin-top:6px">Click a row to see that frame in place. Sizes are inches (2x2x1/8 = 2″ square, ⅛″ wall).</div>
-    ${[...(d.notes || []), ...(run.note ? run.note.split('\n') : [])].filter(Boolean)
+    <div class="muted small" style="margin-top:6px">Click a row to see that frame in place. Sizes are inches (2x2x1/8 = 2″ square, ⅛″ wall).
+      The plywood and the foam walls bonded to it stiffen the platform too; the study leaves them out, so it's on the safe side.</div>
+    ${[...(d.notes || []), ...(run.note ? run.note.split('\n') : []), ...((c && c.notes) || [])].filter(Boolean)
       .map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`;
 }
 
 function wireFrame(p) {
   const go = $('fGo');
   if (go) go.onclick = () => runFrame(p);
+  const from = $('fFrom');
+  if (from) from.onchange = () => { $('fLoadLbl').textContent = from.value === 'design' ? 'payload on the floor' : 'box + gear'; };
+  const sel = $('fRun');
+  if (sel) sel.onchange = () => { S.frameRun[p.id] = +sel.value; clearStation(); renderInspector(); };
   document.querySelectorAll('#inspector tr[data-fst]').forEach((tr) => {
-    tr.onclick = () => showStation(p.id, frameRuns(p.id)[0], +tr.dataset.fst);
+    const runs = frameRuns(p.id);
+    tr.onclick = () => showStation(p.id, runs[Math.min(S.frameRun[p.id] || 0, runs.length - 1)], +tr.dataset.fst);
   });
 }
 
@@ -896,12 +943,16 @@ async function runFrame(p) {
   const prog = $('fProgress'), go = $('fGo');
   go.disabled = true;
   prog.innerHTML = '<div class="small muted" id="fMsg">sizing…</div>';
+  const design = $('fFrom') && $('fFrom').value === 'design';
+  const layout = $('fLayout') ? $('fLayout').value : '';
   try {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/frame-study`, {
-      part: p.id, load_lb: +$('fLoad').value || 100, factor: +$('fFactor').value || 2.5,
-      min_safety: +$('fSafety').value || 3.5,
+      part: p.id, factor: +$('fFactor').value || 2.5, min_safety: +$('fSafety').value || 3.5,
+      from_design: design, payload_lb: +$('fLoad').value || 0, load_lb: +$('fLoad').value || 100,
+      params: layout ? p.layouts[layout] : {},
     });
     await follow(job_id, (ev) => { const m = $('fMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
+    S.frameRun[p.id] = 0;
     await refresh();
   } catch (e) {
     prog.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`;
@@ -940,8 +991,11 @@ function aeroView(p) {
       <td><input type="number" class="aHi" data-k="${esc(k)}" value="${sg.bounds[1]}" step="any" style="width:70px"></td></tr>`;
   }).join('');
   const runs = aeroRuns(p.id);
+  const own = Object.values(p.suggest || {}).some((sg) => sg.from === 'part');
   return `<div class="tw"><table class="st"><tr><th>search</th><th>now</th><th>from</th><th>to</th></tr>${rows}</table></div>
-    <div class="muted small" style="margin:4px 0 8px">Values in mm (or degrees). The current value must sit inside its range.</div>
+    <div class="muted small" style="margin:4px 0 8px">Values in mm (or degrees). The current value must sit inside its range.
+      ${own ? 'Ticked ranges are the part’s own (its <code>RANGES</code>).' : ''}
+      ${p.keeps ? 'What it has to hold (its <code>keeps()</code> — the pale slab when you open <b>Built from</b>) is kept clear whatever the search tries.' : ''}</div>
     <div class="form">
       ${behind.length ? `<span>rides behind</span><span>${behind.map((b) => `<label><input type="checkbox" class="aObs" value="${esc(b.id)}" checked> ${esc(b.id)}</label>`).join(' ')}</span>` : ''}
       <span>${mph ? 'speed (mph)' : 'speed (km/h)'}</span><input type="number" id="aSpeed" value="${mph ? 65 : 105}" min="5" max="200">

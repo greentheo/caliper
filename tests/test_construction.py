@@ -1,5 +1,7 @@
 """CALI-41 — what a part is built from: its weight, centre of gravity, and bill of materials."""
 
+import math
+
 import pytest
 
 from caliper import aero, construction as C, materials as M
@@ -51,10 +53,6 @@ def construction(params, build=None):
                           "a": (x, y, 0), "b": (x, y, h)})
     items.append({"name": "hardware", "kind": "lump", "mass": b["hardware"], "at": (-d / 2, 0, h / 2)})
     return items
-
-
-def members(params):
-    return [{"name": "shank", "group": "shank", "a": (300, 0, 0), "b": (0, 0, 0), "outer": 50.8, "wall": 3.175}]
 
 
 def supports(params):
@@ -184,6 +182,27 @@ def test_a_frame_is_weighed_from_its_tubes():
     assert C.tube_label(50.8, 25.4) == "2x2 solid steel bar"
 
 
+def test_a_frames_tubes_are_weighed_as_cut_with_its_other_pieces(tmp_path):
+    shank = {"group": "shank", "outer": 50.8, "wall": 3.175}
+    sticks = C.from_members([
+        {"name": "in_receiver", "a": (300, 0, 0), "b": (100, 0, 0), **shank},
+        {"name": "out", "a": (100, 0, 0), "b": (-200, 0, 0), **shank},          # straight on: one length
+        {"name": "riser", "a": (-200, 0, 0), "b": (-200, 0, 400), **shank},      # turns: its own piece
+        {"name": "stub", "a": (-200, 0, 400), "b": (-200, 0, 412.7), **shank},   # inside a joint: no cut
+    ])
+    assert [(s["name"], round(math.dist(s["a"], s["b"]))) for s in sticks] == [("shank", 500), ("riser", 400)]
+    s = DesignStore.create("a frame with a plate", base=str(tmp_path / "designs"))
+    s.write_part("frame", BOX.replace("def supports(params):", """def members(params):
+    return [{"name": "shank", "group": "shank", "a": (300, 0, 0), "b": (0, 0, 0), "outer": 50.8, "wall": 3.175}]
+
+
+def supports(params):"""), intent="a crate on a shank")
+    r = C.report(s, "frame")
+    shank_lb = 300 * C.tube_area(50.8, 3.175) * 1e-9 * M.STICKS["steel"]["density"] * M.LB_KG
+    assert r["source"] == "construction + members"
+    assert r["mass_lb"] == pytest.approx(_expected_lb() + shank_lb, rel=0.005)
+
+
 def test_the_balance_takes_the_moment_about_the_first_support(store):
     b = C.balance(store)
     (crate,) = b["parts"]
@@ -231,3 +250,47 @@ def test_a_construction_that_raises_reports_why(store):
 def test_writing_an_entry_build_doesnt_have_is_refused():
     with pytest.raises(KeyError, match="'glitter'"):
         C.write_build(BOX, {"glitter": 1})
+
+
+# --- CALI-42: what it has to hold --------------------------------------------------------------
+KEPT = BOX + '''
+
+def keeps(params, build=None):
+    b = {**BUILD, **(build or {})}
+    # cargo inside the walls, as tall as forty floors are thick (so a what-if can make it not fit)
+    return [{"name": "cargo", "note": "a test load", "lo": (-580, -580, 10), "hi": (-30, 580, 10 + 40 * b["floor_t"])}]
+'''
+
+
+def test_a_part_reports_whether_what_it_holds_still_fits(tmp_path):
+    pytest.importorskip("cadquery")
+    s = DesignStore.create("a kept crate", base=str(tmp_path / "designs"))
+    s.write_part("crate", KEPT, intent="a crate that holds cargo")
+    (cargo,) = C.report(s, "crate")["keeps"]
+    assert cargo["name"] == "cargo" and cargo["clear"]
+    r = C.report(s, "crate", {"floor_t": 19.05})                  # 10 + 762 mm: through the 610 mm top
+    (cargo,) = r["keeps"]
+    assert not cargo["clear"] and cargo["depth_mm"] == pytest.approx(772 - 609.6, abs=3)
+    assert any("cargo doesn't fit" in n for n in r["notes"])
+
+
+# --- CALI-43: where the weight is ------------------------------------------------------------
+def test_weight_spread_over_the_pieces_adds_up_and_balances_where_the_part_does(store):
+    items = C.declared(store, "crate")["construction"]
+    pts = C.load_points(items, step=50.0)
+    mass, cog = C.totals(C.takeoff(items))
+    assert sum(m for _, m in pts) == pytest.approx(mass, rel=1e-9)
+    for k in range(3):
+        assert sum(m * p[k] for p, m in pts) / mass == pytest.approx(cog[k], abs=0.5)
+    # a sheet's points lie on it: every floor point is at z=0, inside the floor
+    floor = [p for p, _ in C.load_points([items[0]], 50.0)]
+    assert all(p[2] == pytest.approx(0) and -609.6 <= p[0] <= 0 and abs(p[1]) <= 609.6 for p in floor)
+
+
+def test_the_design_loads_carry_a_payload_on_top_of_the_floor(store):
+    d = C.design_loads(store, payload_lb=100)
+    assert [p["part"] for p in d["parts"]] == ["crate", "payload"]
+    assert d["mass_kg"] * M.LB_KG == pytest.approx(_expected_lb() + 100, rel=0.005)
+    payload = d["points"][-1]
+    assert payload[0][2] == pytest.approx(12.7)                     # on the 1/2 in floor, not in it
+    assert C.design_loads(store, skip=("crate",))["points"] == []

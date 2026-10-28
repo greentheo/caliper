@@ -141,6 +141,32 @@ def write_params(script: str, values: dict[str, float]) -> str:
     return data.decode()
 
 
+RANGES_NAME = "RANGES"
+
+
+def read_ranges(script: str) -> dict[str, tuple[float, float]]:
+    """The part's own ranges for its PARAMS — ``RANGES = {"tumble": (0, 300)}`` — the numbers a drag
+    study should search and how far. The author knows that a wall can't drop below the mattress; a
+    guess from the name doesn't. Entries that aren't a pair of numbers are skipped."""
+    try:
+        tree = ast.parse(script)
+    except SyntaxError:
+        return {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and node.targets[0].id == RANGES_NAME
+                and isinstance(node.value, ast.Dict)):
+            out = {}
+            for k, v in zip(node.value.keys, node.value.values):
+                if (isinstance(k, ast.Constant) and isinstance(k.value, str)
+                        and isinstance(v, (ast.Tuple, ast.List)) and len(v.elts) == 2):
+                    lo, hi = (_number(e) for e in v.elts)
+                    if lo is not None and hi is not None:
+                        out[k.value] = (min(lo, hi), max(lo, hi))
+            return out
+    return {}
+
+
 def shape_signature(script: str) -> str:
     """A fingerprint of the script's geometry code, ignoring the numbers in PARAMS.
 
@@ -157,11 +183,12 @@ def shape_signature(script: str) -> str:
     return hashlib.sha1(blank.encode()).hexdigest()[:12]
 
 
-#: Module-level declarations that describe a part without shaping it: what it's built from (CALI-41)
-#: and the tubes a frame study reads (CALI-40). Changing them leaves a drag study's numbers meaning
-#: what they meant.
+#: Module-level declarations that describe a part without shaping it: what it's built from (CALI-41),
+#: the tubes a frame study reads (CALI-40) and the ranges a study searches. Changing them leaves a drag
+#: study's numbers meaning what they meant. (``keeps()`` isn't here: a study's designs were kept clear of
+#: the boxes it had, so new ones mean running it again.)
 _NOT_SHAPE_FUNCS = ("construction", "members", "supports")
-_NOT_SHAPE_DICTS = ("BUILD",)
+_NOT_SHAPE_DICTS = ("BUILD", RANGES_NAME, "LAYOUTS")
 
 
 def _geometry_only(script: str) -> str:
@@ -195,8 +222,15 @@ _ANGLE = re.compile(r"(deg|angle)")
 _SHAPE = re.compile(r"(tail|drop|pinch|taper|nose|boat|chamfer)")
 
 
-def suggest(name: str, value: float) -> dict:
-    """A starting guess at whether to search a parameter, and over what range. The UI lets you edit it."""
+def suggest(name: str, value: float, ranges: Optional[dict] = None) -> dict:
+    """Whether to search a parameter, and over what range: the part's own ``RANGES`` if it gives one,
+    else a starting guess from the name. The UI lets you edit it."""
+    if ranges:
+        if name in ranges:
+            lo, hi = ranges[name]
+            return {"search": True, "bounds": [min(lo, value), max(hi, value)], "from": "part"}
+        # a part that gives its own ranges has said which numbers to search: not this one
+        return {**suggest(name, value), "search": False}
     if _RADIUS.search(name):
         return {"search": True, "bounds": [max(0.0, min(value, 5.0)), max(150.0, 4 * value)]}
     if _ANGLE.search(name):
@@ -227,6 +261,34 @@ def _bounds_of(vertices):
 
     v = np.asarray(vertices)
     return v.min(axis=0), v.max(axis=0)
+
+
+def keep_check(vertices, faces, keeps: list[dict], step: float = 20.0) -> list[dict]:
+    """How far a surface cuts into each box it has to keep clear of (``keeps()``) — 0 when it's clear.
+
+    The surface is sampled every ``step`` mm, since a big flat face has vertices only at its corners; a
+    point inside counts by how far it is from the box's nearest face. Touching a face is clear.
+    """
+    import numpy as np
+
+    tri = np.asarray(vertices, dtype=np.float64)[np.asarray(faces, dtype=np.int64)]
+    tlo, thi = tri.min(axis=1), tri.max(axis=1)
+    out = []
+    for k in keeps:
+        lo, hi = np.minimum(k["lo"], k["hi"]).astype(float), np.maximum(k["lo"], k["hi"]).astype(float)
+        depth = 0.0
+        for a, b, c in tri[np.all((thi > lo) & (tlo < hi), axis=1)]:
+            n = max(1, int(np.ceil(max(np.linalg.norm(b - a), np.linalg.norm(c - a),
+                                       np.linalg.norm(c - b)) / step)))
+            i, j = np.mgrid[0:n + 1, 0:n + 1]
+            m = (i + j) <= n
+            pts = a + np.outer(i[m] / n, b - a) + np.outer(j[m] / n, c - a)
+            depth = max(depth, float(np.minimum(pts - lo, hi - pts).min(axis=1).max()))
+        depth = max(depth, 0.0)
+        out.append({"name": k.get("name") or "keep", "note": k.get("note") or "",
+                    "lo": lo.tolist(), "hi": hi.tolist(), "depth_mm": round(depth, 1),
+                    "clear": depth <= 0.5})
+    return out
 
 
 def study(store: DesignStore, part_id: str, bounds: dict, *, obstacles=(),
@@ -276,6 +338,13 @@ def study(store: DesignStore, part_id: str, bounds: dict, *, obstacles=(),
     else:
         notes.append("Free air: nothing upstream is modelled.")
 
+    # what the part has to hold (keeps(): a mattress, the cargo) stays clear whatever the search tries
+    keeps = []
+    if "def keeps(" in script:
+        from . import construction
+
+        keeps = construction.declared(store, part_id).get("keeps") or []
+
     t0 = time.time()
     emit("building", f"starting a build worker for '{part_id}'")
     with BuildWorker(script, timeout=build_timeout) as worker:
@@ -290,7 +359,7 @@ def study(store: DesignStore, part_id: str, bounds: dict, *, obstacles=(),
 
         # does PARAMS, unchanged, reproduce the part as it stands? (a script whose defaults drifted
         # from what's on screen would optimise something else)
-        v0, _ = worker.build(start)
+        v0, f0 = worker.build(start)
         lo0, hi0 = _bounds_of(v0)
         cur = store.part_geometry(part_id).require_mesh().bounds
         drift = float(np.max(np.abs(np.concatenate([lo0 - cur[0], hi0 - cur[1]]))))
@@ -308,6 +377,18 @@ def study(store: DesignStore, part_id: str, bounds: dict, *, obstacles=(),
                 raise ValueError(f"an inset of {inset:g} mm leaves no interior to protect")
             sweep_study.keep((tuple(klo.tolist()), tuple(khi.tolist())))
             notes.append(f"The interior {inset:g} mm in from every side is kept whole (the cargo).")
+
+        for k in keeps:                                    # touching a face of the box is clear
+            klo = np.minimum(k["lo"], k["hi"]) + 0.5
+            khi = np.maximum(k["lo"], k["hi"]) - 0.5
+            sweep_study.keep((tuple(klo.tolist()), tuple(khi.tolist())))
+        if keeps:
+            notes.append("Kept clear: " + "; ".join(
+                k["name"] + (f" ({k['note']})" if k.get("note") else "") for k in keeps) + ".")
+            for k in keep_check(v0, f0, keeps):
+                if not k["clear"]:
+                    notes.append(f"As it stands it cuts {k['depth_mm']:.0f} mm into the {k['name']} — "
+                                 f"the search pushes it out.")
 
         planned = 6 * len(clean) * (max(5, round(30 * effort)) + 1) * (int(stations) - 1)
         emit("planned", f"searching {len(clean)} number(s): up to ~{planned} builds",
@@ -336,8 +417,12 @@ def study(store: DesignStore, part_id: str, bounds: dict, *, obstacles=(),
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     out = os.path.join(runs_dir(store), rid)
     os.makedirs(out, exist_ok=True)
-    rows, base = [], None
+    rows, base, cut = [], None, []
     for i, st in enumerate(sweep):
+        if keeps:
+            worst = max(keep_check(st.mesh.vertices, st.mesh.faces, keeps), key=lambda k: k["depth_mm"])
+            if not worst["clear"]:
+                cut.append(f"design {i} cuts {worst['depth_mm']:.0f} mm into the {worst['name']}")
         with open(os.path.join(out, f"station_{i:02d}.stl"), "wb") as f:
             f.write(io.stl_bytes(st.mesh))
         force = st.metrics.get("force_n")
@@ -353,13 +438,15 @@ def study(store: DesignStore, part_id: str, bounds: dict, *, obstacles=(),
         })
     if rows:
         notes.extend(limit_notes(clean, start, rows[-1]["design"]))
+    if cut:
+        notes.append("Not quite clear: " + "; ".join(cut) + " — narrow the range that lets it.")
 
     record = {
         "id": rid, "part": part_id, "kind": "parametric", "created": time.time(),
         "bounds": {k: list(v) for k, v in clean.items()}, "start": start,
         "obstacles": [o for o in obstacles if o != part_id], "speed_kmh": float(speed_kmh),
         "notes": notes, "stations": rows, "builds": count["n"], "seconds": round(time.time() - t0),
-        "searched": list(clean),
+        "searched": list(clean), "keeps": keeps,
         "script_sig": shape_signature(script),
     }
     with open(os.path.join(out, "run.json"), "w") as f:

@@ -582,6 +582,51 @@ red dot = CoG, green = hitch. `shape_signature` ignores BUILD/construction/membe
 Next: CALI-42 re-size the frame from the box's real weight at its real CoG (1 in tube options);
 CALI-43 cut plan + CNC DXF (panels flattened from their outlines — `flatten()` is the start).
 
+### CALI-42 — Room for the mattress: what a part has to hold, and its own search ranges · P1 · M5 · ✅ done
+Theo (2026-10-28): widen the box to ~77 in so a twin fits inside the 1 in walls, and now that it's wider than
+the Leaf, let the drag study pull the sides in — "make sure they can vary while essentially keeping the
+mattress + 6 in width at the base". Read as: the bottom 6 in above the floor (the mattress) keeps the full
+width; above it the sides may lean and round in.
+- **A part says what it has to hold:** `keeps(params, build=None)` → named boxes (`lo`, `hi`, `note`). A drag
+  study passes them to whittle's `ParametricStudy.keep()` (shrunk 0.5 mm: touching a face is clear) and
+  re-checks every station with Caliper's own surface sampler (`aero.keep_check`, every 20 mm — whittle's
+  KeepOut averages over vertices, so a small cut-in can slip through its slack); a station that cuts in is
+  named in the notes. The **Built from** report says whether each keep still fits with the BUILD choices
+  tried (2 in walls → the mattress doesn't fit), and the viewport draws it (blue clear, red cut).
+- **A part gives its own search ranges:** `RANGES = {"wall_h": (170, 610), ...}` — the drag panel ticks and
+  fills them (the author knows the wall can't drop below the mattress; a guess from the name doesn't).
+- `shape_signature` ignores RANGES (and LAYOUTS); `keeps()` stays in it (a study kept clear of the boxes it
+  had). The authoring prompt keeps RANGES / keeps() / LAYOUTS true when it revises a part.
+- **The box (v6):** 77 × 40 × 41 in, floor flat and full size; full-width base to `wall_h`, then `tumble` +
+  `shoulder` (straight → round), a rounded `nose_*` and a `tail_*` taper, all lofted from one section
+  function that `construction()` cuts into panels too. 58.9 lb plain.
+**Acceptance:** keeps/RANGES read and used; keep_check measures depth; report flags a keep that no longer
+fits; tests in `test_aero.py` (5) + `test_construction.py` (1).
+
+### CALI-43 — The frame carries the box as built; an X under the floor · P1 · M5 · ✅ done
+Theo: 1 in tube instead of 2 in, and an X under the floor that leans on the plywood's stiffness, a gusset
+where it meets a 2 in main beam in the middle.
+- **Weight where it is:** `construction.load_points()` spreads every piece's weight over its area/length
+  (~100 mm apart — adds up to the part's weight and balances at its CoG); `design_loads()` gathers the
+  design's parts + a payload spread on top of the floor. `frame_study.study(from_design=True)` lands each
+  bit on the nearest member that carries the floor (`"carries": True` in members()) as a **point load**
+  where it meets it (whittle's `point()`, added by the whittle-agent for this; loads within 50 mm combined
+  at their balance point), so a tube bends where the load sits. Members stay whole — a first cut split them
+  into 150 mm pieces, which the whittle-agent caught would check buckling over 150 mm instead of the
+  member's length. The record says what was carried and how far the floor had to reach to a tube.
+- **Layouts:** a frame names what-if layouts (`LAYOUTS = {name: PARAMS overrides}`); a study runs one
+  (`params=`), records which, and using a station writes the layout with its sizes. The panel: *carries*
+  (design as built / flat load), payload, layout, a run picker, and the hardest-worked joint (bending into
+  the weld from `end_forces` — what a gusset there carries).
+- **Frame v12:** 2 in spine (tops flush with the floor), 1 in X from its middle to the floor's corners,
+  1 in front/back edges, 3/16 gusset plate under the X's middle (slotted for the spine); four layouts.
+  Steel plate is in `materials.py` for gussets.
+**Acceptance:** loads preserve total and moment; members stay whole; layouts named in the record; tests in
+`test_frame_study.py` (3) + `test_construction.py` (2).
+
+Next: CALI-44 cut plan + CNC DXF (panels flattened from their outlines; post and tube cut lists; gusset
+plates for plasma); then plate mode for the gussets (whittle-agent), legs + the parked/sleeping case.
+
 ## Milestone M5 — whole machines from one prompt (after M4)
 
 ### CALI-35 — Decomposition planner  · P0 · M5 · 🧊 backlog

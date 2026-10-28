@@ -89,6 +89,9 @@ class FrameRequest(BaseModel):
     factor: float = 2.5                 # driving: bumps
     min_safety: float = 3.5
     on_groups: list[str] = ["rails"]
+    from_design: bool = False           # carry the other parts as built (+ payload_lb on the floor) instead
+    payload_lb: float = 100.0
+    params: dict = {}                   # a what-if layout (one of the frame's LAYOUTS)
 
 
 class PartSettings(BaseModel):
@@ -131,13 +134,17 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             store.spec_path(p.id)) else None
         script = store.read_script(p.id) if store.is_scripted(p.id) else ""
         params = aero.read_params(script) if script else None
+        ranges = aero.read_ranges(script) if script else {}
         parts.append({
             "params": params,
             # a part that declares its tubes is a frame: it gets sized, not shaped for drag
             "framed": "def members(" in script and "def supports(" in script,
+            "layouts": frame_study.read_layouts(script) if "LAYOUTS" in script else {},
             # a part that says what it's built from (or a frame) can be weighed (CALI-41)
             "built": construction.declares(script),
-            "suggest": {k: aero.suggest(k, v) for k, v in (params or {}).items()},
+            # what it has to hold (keeps()) — a drag study keeps it clear (CALI-42)
+            "keeps": "def keeps(" in script,
+            "suggest": {k: aero.suggest(k, v, ranges) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
             "stl_url": f"/api/designs/{slug}/parts/{p.id}.stl?v={p.version}",
@@ -381,6 +388,8 @@ def router():
             s = DesignStore.load(slug)
             return frame_study.study(s, req.part, load_lb=req.load_lb, factor=req.factor,
                                      min_safety=req.min_safety, on_groups=tuple(req.on_groups),
+                                     from_design=req.from_design, payload_lb=req.payload_lb,
+                                     params=req.params or None,
                                      emit=lambda k, t="", **d: j.emit(k, t, **d))
 
         job = RUNNER.submit("frame", work, label=f"size {req.part}", lock=f"frame:{slug}")

@@ -23,6 +23,7 @@ vibration cracks at weld toes, which neither a frame model nor a voxel model see
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -37,19 +38,26 @@ MERGE_MM = 1.0
 LB = 4.4482216152605          # newtons per pound-force
 LBIN = LB * 25.4               # newton-millimetres per pound-inch
 KG_LB = 2.20462262
+GRAVITY = 9.80665              # m/s², so kg -> N
+#: Point loads closer than this along a member are combined at their balance point.
+BIN_MM = 50.0
 
 
 # ---------------------------------------------------------------------------
 # Reading the structure a part declares
 # ---------------------------------------------------------------------------
-def frame_def(store: DesignStore, part_id: str, timeout: float = 60.0) -> dict:
-    """``{"members": [...], "supports": [...]}`` from the part's script, run in its own process."""
+def frame_def(store: DesignStore, part_id: str, timeout: float = 60.0,
+              params: Optional[dict] = None) -> dict:
+    """``{"members": [...], "supports": [...]}`` from the part's script, run in its own process.
+    ``params`` overrides its PARAMS — a what-if layout, say."""
     if not store.is_scripted(part_id):
         raise ValueError(f"'{part_id}' is a mesh right now — roll it back to its script first")
     script = store.read_script(part_id)
+    over = json.dumps(params or {})
     probe = (script + "\n\nimport json as _json\n"
-             "_m = members({}) if 'members' in globals() else None\n"
-             "_s = supports({}) if 'supports' in globals() else []\n"
+             f"_p = _json.loads({over!r})\n"
+             "_m = members(_p) if 'members' in globals() else None\n"
+             "_s = supports(_p) if 'supports' in globals() else []\n"
              "print('@@FRAME@@' + _json.dumps({'members': _m, 'supports': _s}, default=list))\n")
     try:
         out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
@@ -70,6 +78,38 @@ def frame_def(store: DesignStore, part_id: str, timeout: float = 60.0) -> dict:
     return data
 
 
+def read_layouts(script: str) -> dict[str, dict]:
+    """A frame's named what-if layouts — ``LAYOUTS = {"X only": {"edges": 0}}`` — PARAMS overrides
+    that change which tubes there are, not their sizes. A frame study runs one at a time."""
+    import ast
+
+    try:
+        tree = ast.parse(script)
+    except SyntaxError:
+        return {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "LAYOUTS"):
+            try:
+                value = ast.literal_eval(node.value)
+            except ValueError:
+                return {}
+            return {str(k): dict(v) for k, v in value.items() if isinstance(v, dict)} \
+                if isinstance(value, dict) else {}
+    return {}
+
+
+def layout_name(script: str, params: Optional[dict]) -> Optional[str]:
+    """Which of the frame's LAYOUTS these PARAMS (over the script's own) are, if any."""
+    from .aero import read_params
+
+    full = {**(read_params(script) or {}), **(params or {})}
+    for name, values in read_layouts(script).items():
+        if all(full.get(k) == v for k, v in values.items()):
+            return name
+    return None
+
+
 def section_key(outer_mm: float, wall_mm: float) -> str:
     """The whittle catalog name for a square tube, e.g. (50.8, 3.175) -> "2x2x1/8"."""
     from whittle import TUBES, tube_size
@@ -82,8 +122,16 @@ def section_key(outer_mm: float, wall_mm: float) -> str:
 
 
 def build_spec(fd: dict, *, load_lb: float = 100.0, factor: float = 2.5,
-               on_groups=("rails",)) -> dict:
-    """whittle's ``FrameStudy.from_dict`` input, plus what Caliper needs to read the answer."""
+               on_groups=("rails",), points=None, bin_mm: float = BIN_MM) -> dict:
+    """whittle's ``FrameStudy.from_dict`` input, plus what Caliper needs to read the answer.
+
+    Without ``points``, ``load_lb`` is spread evenly along the members of ``on_groups`` (CALI-40). With
+    ``points`` — ``(xyz, kg)`` pairs, the weight of what the frame carries where it is (CALI-43) — each
+    lands on the nearest member that carries the floor (those a part marks ``"carries": True``, else
+    those in ``on_groups``) as a point load where it meets it, so a tube bends where the load sits.
+    Loads within ``bin_mm`` of each other along a member are combined at their balance point (force and
+    moment kept). Members stay whole: whittle checks buckling over a member's own length.
+    """
     nodes: list[list[float]] = []
 
     def node_of(xyz) -> int:
@@ -93,30 +141,68 @@ def build_spec(fd: dict, *, load_lb: float = 100.0, factor: float = 2.5,
         nodes.append([float(v) for v in xyz])
         return len(nodes) - 1
 
+    marked = any(m.get("carries") for m in fd["members"])
+    carries = [bool(m.get("carries")) if marked else m["group"] in on_groups for m in fd["members"]]
+    if not any(carries):
+        raise ValueError(f"no members in {list(on_groups)} to carry the load")
+
     members, loaded = [], []
     for i, m in enumerate(fd["members"]):
         members.append({"a": node_of(m["a"]), "b": node_of(m["b"]),
                         "section": section_key(m["outer"], m["wall"]), "group": m["group"]})
-        if m["group"] in on_groups:
+        plan = math.hypot(m["b"][0] - m["a"][0], m["b"][1] - m["a"][1])
+        if carries[i] and (points is None or plan > 1.0):     # a vertical stub can't hold up a floor
             loaded.append(i)
-    if not loaded:
-        raise ValueError(f"no members in {list(on_groups)} to carry the load")
 
     supports = []
     for s in fd["supports"]:
         at = node_of(s["at"])
-        if at >= len(nodes) - 0 and not any(at in (m["a"], m["b"]) for m in members):
+        if not any(at in (m["a"], m["b"]) for m in members):
             raise ValueError(f"support at {s['at']} isn't on any member")
         supports.append({"node": at, "fix": list(s.get("fix", "all"))})
 
-    each = -load_lb * LB / len(loaded)
     cases = {"standing": {"factor": 1.0, "self_weight": True},
              "driving": {"factor": float(factor), "self_weight": True}}
-    loads = [{"case": c, "member": i, "total": [0.0, 0.0, each]} for c in cases for i in loaded]
+    applied = None
+    if points is None:
+        each = -load_lb * LB / len(loaded)
+        loads = [{"case": c, "member": i, "total": [0.0, 0.0, each]} for c in cases for i in loaded]
+    else:
+        import numpy as np
+
+        xyz = np.array([p for p, _ in points], dtype=np.float64)
+        kg = np.array([m for _, m in points], dtype=np.float64)
+        pa = np.array([nodes[members[i]["a"]][:2] for i in loaded])
+        pb = np.array([nodes[members[i]["b"]][:2] for i in loaded])
+        span = pb - pa
+        t = np.clip(((xyz[:, None, :2] - pa[None]) * span[None]).sum(-1) / (span ** 2).sum(-1)[None], 0, 1)
+        gap = np.linalg.norm(xyz[:, None, :2] - (pa[None] + t[..., None] * span[None]), axis=-1)
+        near = gap.argmin(axis=1)
+        tt = t[np.arange(len(xyz)), near]
+        loads, lands, total = [], np.zeros(3), 0.0
+        for k, i in enumerate(loaded):
+            on = near == k
+            if not on.any():
+                continue
+            a, b = np.array(nodes[members[i]["a"]]), np.array(nodes[members[i]["b"]])
+            n_bins = max(1, math.ceil(float(np.linalg.norm(b - a)) / bin_mm))
+            which = np.minimum((tt[on] * n_bins).astype(int), n_bins - 1)
+            w, s_ = kg[on], tt[on]
+            for j in np.unique(which):
+                sel = which == j
+                mass = float(w[sel].sum())
+                at = float((w[sel] * s_[sel]).sum() / mass)
+                loads += [{"case": c, "member": i, "at": at, "force": [0.0, 0.0, -mass * GRAVITY]}
+                          for c in cases]
+                lands += mass * (a + at * (b - a))
+                total += mass
+        applied = {"mass_kg": float(kg.sum()), "cog": ((kg[:, None] * xyz).sum(0) / kg.sum()).tolist(),
+                   "lands": (lands / total).tolist(), "reach_mm": float(gap.min(axis=1).max())}
     return {"spec": {"material": "steel", "nodes": nodes, "members": members, "supports": supports,
                      "cases": cases, "loads": loads},
             "mouth": nodes[supports[0]["node"]], "names": [m["name"] for m in fd["members"]],
-            "groups": [m["group"] for m in fd["members"]],
+            "groups": [m["group"] for m in fd["members"]], "applied": applied,
+            "ends": [(m["a"], m["b"]) for m in members], "outers": [float(m["outer"]) for m in fd["members"]],
             "size_params": {m["group"]: m.get("size_params") for m in fd["members"]}}
 
 
@@ -136,7 +222,56 @@ def _summary(result, built: dict) -> dict:
         force, moment = case.resultant(about=mouth)
         out["receiver"][name] = {"force_lb": round(abs(float(force[2])) / LB, 1),
                                  "moment_lbin": round(abs(float(moment[1])) / LBIN, 0)}
+    out["joints"] = _joints(result, built)
     return out
+
+
+def _joints(result, built: dict, case: str = "driving", top: int = 3) -> list[dict]:
+    """The hardest-worked joints where three or more tubes meet: the bending each welded tube end puts
+    into the joint, worst first — what a gusset there has to carry. A tube that runs straight through
+    (two collinear ends of the same tube, nothing bigger in the way) is one piece, not a weld, so its
+    bending doesn't count."""
+    import numpy as np
+
+    c = result.cases.get(case) or next(iter(result.cases.values()))
+    nodes = np.asarray(built["spec"]["nodes"], dtype=np.float64)
+    sections = [m["section"] for m in built["spec"]["members"]]
+    meet: dict[int, list[int]] = {}
+    for k, (a, b) in enumerate(built["ends"]):
+        meet.setdefault(a, []).append(k)
+        meet.setdefault(b, []).append(k)
+
+    def away(k, n):                     # unit vector from node n along member k
+        a, b = built["ends"][k]
+        v = nodes[b if n == a else a] - nodes[n]
+        return v / np.linalg.norm(v)
+
+    out = []
+    for n, ks in meet.items():
+        if len(ks) < 3:
+            continue
+        # a bigger tube meeting them here is in the way: they're cut and welded to its sides
+        through, biggest = set(), max(built["outers"][k] for k in ks)
+        for i, k in enumerate(ks):
+            for q in ks[i + 1:]:
+                if (sections[k] == sections[q] and built["outers"][k] >= biggest - 0.01
+                        and float(np.dot(away(k, n), away(q, n))) < -0.9999):
+                    through.update((k, q))
+        worst = {"bending": 0.0, "torsion": 0.0, "member": None}
+        for k in ks:
+            if k in through:
+                continue
+            a, _ = built["ends"][k]
+            f = c.end_forces[k, 3:6] if n == a else c.end_forces[k, 9:12]
+            bend = float(np.hypot(f[1], f[2]))
+            if bend > worst["bending"]:
+                worst = {"bending": bend, "torsion": abs(float(f[0])), "member": built["names"][k]}
+        if worst["member"] is None:
+            continue
+        out.append({"members": sorted({built["names"][k] for k in ks}), "at": [round(v, 1) for v in nodes[n]],
+                    "case": case, "worst_member": worst["member"],
+                    "bending_lbin": round(worst["bending"] / LBIN), "torsion_lbin": round(worst["torsion"] / LBIN)})
+    return sorted(out, key=lambda j: -j["bending_lbin"])[:top]
 
 
 def runs_dir(store: DesignStore) -> str:
@@ -145,16 +280,33 @@ def runs_dir(store: DesignStore) -> str:
 
 def study(store: DesignStore, part_id: str, *, load_lb: float = 100.0, factor: float = 2.5,
           min_safety: float = 3.5, on_groups=("rails",), catalogs: Optional[dict] = None,
-          emit: Optional[Callable] = None) -> dict:
-    """Analyse the frame as drawn, then sweep for the lightest tubes that keep ``min_safety``."""
+          emit: Optional[Callable] = None, from_design: bool = False, payload_lb: float = 100.0,
+          params: Optional[dict] = None) -> dict:
+    """Analyse the frame as drawn, then sweep for the lightest tubes that keep ``min_safety``.
+
+    ``from_design``: carry the design's other parts as they're built (their ``construction()``), each
+    piece's weight where it is, plus ``payload_lb`` spread over the floor — instead of ``load_lb``
+    spread along ``on_groups``. ``params`` overrides the frame's PARAMS for a what-if layout.
+    """
     from whittle import TUBES, FrameStudy, io, tube_size
 
+    from . import construction
+
     emit = emit or (lambda *a, **k: None)
-    fd = frame_def(store, part_id)
-    built = build_spec(fd, load_lb=load_lb, factor=factor, on_groups=on_groups)
+    fd = frame_def(store, part_id, params=params)
+    loads, carried = None, None
+    if from_design:
+        carried = construction.design_loads(store, skip=(part_id,), payload_lb=payload_lb)
+        if not carried["points"]:
+            raise ValueError("no other part says what it's built from — nothing for the frame to carry")
+        loads = carried["points"]
+        load_lb = carried["mass_kg"] * KG_LB
+    built = build_spec(fd, load_lb=load_lb, factor=factor, on_groups=on_groups, points=loads)
     fs = FrameStudy.from_dict(built["spec"])
+    what = (", ".join(f"{p['part']} {p['mass_kg'] * KG_LB:.0f} lb" for p in carried["parts"]) + " where they sit"
+            if carried else f"{load_lb:g} lb on {', '.join(on_groups)}")
     emit("planned", f"{len(fd['members'])} members, {len(built['spec']['nodes'])} joints — "
-                    f"{load_lb:g} lb on {', '.join(on_groups)}, ×{factor:g} driving")
+                    f"{what}, ×{factor:g} driving")
 
     drawn = _summary(fs.analyze(), built)
     emit("analysed", f"as drawn: {drawn['mass_lb']} lb of steel, safety {drawn['safety']}x")
@@ -181,9 +333,20 @@ def study(store: DesignStore, part_id: str, *, load_lb: float = 100.0, factor: f
         stations.append(row)
         with open(os.path.join(out_dir, f"station_{i:02d}.stl"), "wb") as f:
             f.write(io.stl_bytes(fs.mesh(st.analysis.sections)))
+    carrying = None
+    if carried:
+        ap = built["applied"]
+        carrying = {"parts": [{"part": p["part"], "mass_lb": round(p["mass_kg"] * KG_LB, 1)} for p in carried["parts"]],
+                    "payload_lb": payload_lb, "mass_lb": round(ap["mass_kg"] * KG_LB, 1),
+                    "cog": [round(v, 1) for v in ap["cog"]],
+                    # the floor carries each bit sideways to the nearest tube: how far that moves it
+                    "shift_in": round((ap["cog"][0] - ap["lands"][0]) / 25.4, 2),
+                    "reach_in": round(ap["reach_mm"] / 25.4, 1), "notes": carried["notes"]}
     record = {
-        "id": rid, "part": part_id, "kind": "frame", "created": time.time(),
-        "load_lb": load_lb, "factor": factor, "min_safety": min_safety, "on_groups": list(on_groups),
+        "id": rid, "part": part_id, "kind": "frame", "created": time.time(), "params": params or {},
+        "layout": layout_name(store.read_script(part_id), params),
+        "carrying": carrying,
+        "load_lb": round(load_lb, 1), "factor": factor, "min_safety": min_safety, "on_groups": list(on_groups),
         "drawn": drawn, "stations": stations, "note": getattr(sweep, "note", "") or "",
         "size_params": built["size_params"], "catalogs": catalogs,
         "members": [{"name": n, "group": g} for n, g in zip(built["names"], built["groups"])],
@@ -246,6 +409,7 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
             raise ValueError(f"'{pid}' doesn't say which PARAMS size its {group}")
         outer, wall = tube_size(key)
         values[names[0]], values[names[1]] = round(outer, 3), round(min(wall, outer / 2.0), 3)
+    values.update(rec.get("params") or {})      # a what-if layout comes with its sizes
     script = write_params(store.read_script(pid), values)
     pretty = ", ".join(f"{g} {k}" for g, k in st["design"].items())
     version = store.write_part(pid, script, action="frame",
