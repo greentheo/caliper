@@ -31,6 +31,7 @@ shelter only — never scored, never moved.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import re
@@ -138,6 +139,21 @@ def write_params(script: str, values: dict[str, float]) -> str:
         start, end = offsets[l0 - 1] + c0, offsets[l1 - 1] + c1
         data = data[:start] + _format(values[name]).encode() + data[end:]
     return data.decode()
+
+
+def shape_signature(script: str) -> str:
+    """A fingerprint of the script's geometry code, ignoring the numbers in PARAMS.
+
+    Two scripts that differ only in PARAMS values build the same *kind* of shape, so a study's numbers
+    apply to either. If the code changed (a part rebuilt with a new parametrisation), the same names can
+    mean something else — "pinch" once narrowed the whole side, now only the panels above the walls.
+    """
+    params = read_params(script) or {}
+    try:
+        blank = write_params(script, {k: 0 for k in params}) if params else script
+    except (KeyError, SyntaxError):
+        blank = script
+    return hashlib.sha1(blank.encode()).hexdigest()[:12]
 
 
 _RADIUS = re.compile(r"(^|_)(r|radius|round|fillet)(_|$)")
@@ -310,6 +326,7 @@ def study(store: DesignStore, part_id: str, bounds: dict, *, obstacles=(),
         "obstacles": [o for o in obstacles if o != part_id], "speed_kmh": float(speed_kmh),
         "notes": notes, "stations": rows, "builds": count["n"], "seconds": round(time.time() - t0),
         "searched": list(clean),
+        "script_sig": shape_signature(script),
     }
     with open(os.path.join(out, "run.json"), "w") as f:
         json.dump(record, f, indent=2)
@@ -381,6 +398,13 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     pid = rec["part"]
     if not store.is_scripted(pid):
         raise ValueError(f"'{pid}' is a mesh right now — roll it back to its script first")
+    # The study's numbers only mean what they meant if the script is still the same kind of shape.
+    current = store.read_script(pid)
+    stale = (rec["script_sig"] != shape_signature(current)) if rec.get("script_sig") \
+        else set(rec.get("start", {})) != set(read_params(current) or {})
+    if stale:
+        raise ValueError(f"this study was run on an earlier version of '{pid}' — its script has been "
+                         f"rebuilt since, so these numbers may not mean the same thing. Run it again.")
     # 0.1 mm is finer than foam board can hold; more digits would only be noise in the script
     chosen = {k: round(float(st["design"][k]), 1) for k in rec["searched"]}
     before = store.part_geometry(pid).require_mesh().bounds

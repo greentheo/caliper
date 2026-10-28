@@ -203,3 +203,29 @@ def test_params_written_inside_build_with_inch_arithmetic_are_still_found():
 
 def test_a_division_by_zero_is_not_a_number():
     assert aero.read_params('PARAMS = {"a": 1 / 0, "b": 2.0}\n') == {"b": 2.0}
+
+
+def test_the_signature_ignores_numbers_but_not_code():
+    a = aero.shape_signature(SCRIPT)
+    assert a == aero.shape_signature(aero.write_params(SCRIPT, {"tail_len": 77, "width": 300}))
+    assert a != aero.shape_signature(SCRIPT.replace("0.8 * D", "0.7 * D"))
+
+
+def test_numbers_from_a_study_of_an_older_script_are_refused(tunable):
+    """Seen while comparing shapes: a run from the box's previous parametrisation was still listed."""
+    pytest.importorskip("cadquery")
+    pytest.importorskip("whittle")
+    rec = _quick(tunable)
+    tunable.write_part("box", SCRIPT.replace("0.8 * D", "0.7 * D"), action="refine")   # code changed
+    with pytest.raises(ValueError, match="earlier version"):
+        aero.adopt(tunable, rec["id"], 1)
+
+
+def test_numbers_from_the_same_script_can_be_swapped_freely(tunable):
+    """Adopting writes only numbers, so trying station 1 then station 0 must both work."""
+    pytest.importorskip("cadquery")
+    pytest.importorskip("whittle")
+    rec = _quick(tunable)
+    aero.adopt(tunable, rec["id"], 1)
+    aero.adopt(tunable, rec["id"], 0)
+    assert aero.read_params(tunable.read_script("box"))["tail_len"] == 0

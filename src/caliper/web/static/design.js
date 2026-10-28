@@ -19,6 +19,7 @@ const S = {
   station: null,       // {run, index} when previewing a whittle station in the viewport
   whittle: { ok: false },
   runIndex: {},        // part id -> which whittle run the inspector shows
+  aeroRun: {},         // part id -> which parametric study the inspector shows
 };
 
 // ------------------------------------------------------------------------------------------ api
@@ -339,6 +340,8 @@ function renderThread() {
   for (const e of d.log) {
     if (e.kind === 'created') {
       html.push(`<div class="note">Started <b>${esc(d.name)}</b> — ${esc(e.prompt)}</div>`);
+    } else if (e.kind === 'clarify' && e.action === 'updated') {
+      html.push(`<div class="note">Requirement changed — ${esc(e.question || '')} → <b>${esc(e.answer || '')}</b></div>`);
     } else if (e.kind === 'clarify' && e.action !== 'asked') {
       html.push(`<div class="note">Requirements recorded — ${e.answered || 0} answered, ` +
         `${e.assumed || 0} assumed. Tell me which part to build first.</div>`);
@@ -661,14 +664,24 @@ function aeroView(p) {
     </div>
     <div class="actions"><button class="primary" id="aGo">Shape it</button></div>
     <div id="aProgress"></div>
-    ${runs.length ? aeroResults(p, runs[0]) : ''}`;
+    ${runs.length ? aeroResults(p, runs[Math.min(S.aeroRun[p.id] || 0, runs.length - 1)], runs) : ''}`;
 }
 
-function aeroResults(p, run) {
+// what a run varied, in words: comparing "straight panels" with "curve free" is the point of a re-run
+function aeroLabel(r) {
+  const held = Object.entries(r.start || {}).filter(([k]) => /curve/.test(k) && !r.searched.includes(k));
+  const shape = r.searched.some((k) => /curve/.test(k)) ? 'curve free'
+    : held.length ? `curve held at ${held.map(([, v]) => +v).join('/')}` : 'searched';
+  return `${shape} · ${r.searched.length} numbers · ${r.builds} builds`;
+}
+
+function aeroResults(p, run, runs) {
   const on = S.station && S.station.run === run.id ? S.station.index : -1;
   const saved = (s) => s.derived ? fixed(inches() ? s.derived.saved_lbf : s.derived.saved_n, 1) : '—';
-  return `<div class="small" style="margin-top:12px"><b>Last search</b> · ${run.builds} builds in ${run.seconds}s
-      ${run.obstacles && run.obstacles.length ? ' · behind ' + esc(run.obstacles.join(', ')) : ' · free air'}</div>
+  return `<div class="small" style="margin-top:12px">
+      ${runs.length > 1 ? `<select id="aRun">${runs.map((r, k) => `<option value="${k}" ${r.id === run.id ? 'selected' : ''}>
+        ${esc(aeroLabel(r))}</option>`).join('')}</select>` : `<b>Last search</b> · ${esc(aeroLabel(run))}`}
+      · ${run.seconds}s${run.obstacles && run.obstacles.length ? ' · behind ' + esc(run.obstacles.join(', ')) : ' · free air'}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th>volume</th><th>drag</th><th>${inches() ? 'saved lbf' : 'saved N'}</th><th>kWh/100mi</th>
       ${run.searched.map((k) => `<th>${esc(k)}</th>`).join('')}</tr>
       ${run.stations.map((s) => `<tr class="pick ${s.index === on ? 'on' : ''}" data-ast="${s.index}"><td>${s.index}</td>
@@ -685,8 +698,11 @@ function wireAero(p) {
   if (tun) tun.onclick = () => send(MAKE_TUNABLE, p.id);
   const go = $('aGo');
   if (go) go.onclick = () => runAero(p);
+  const sel = $('aRun');
+  if (sel) sel.onchange = () => { S.aeroRun[p.id] = +sel.value; clearStation(); renderInspector(); };
   document.querySelectorAll('#inspector tr[data-ast]').forEach((tr) => {
-    tr.onclick = () => showStation(p.id, aeroRuns(p.id)[0], +tr.dataset.ast);
+    const runs = aeroRuns(p.id);
+    tr.onclick = () => showStation(p.id, runs[Math.min(S.aeroRun[p.id] || 0, runs.length - 1)], +tr.dataset.ast);
   });
 }
 
@@ -710,6 +726,7 @@ async function runAero(p) {
   prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="aMsg">starting…</div>';
   try {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/aero`, body);
+    S.aeroRun[p.id] = 0;
     await follow(job_id, (ev) => {
       const msg = $('aMsg'), bar = prog.querySelector('.bar > i');
       if (ev.text && msg && ev.kind !== 'started' && ev.kind !== 'finished') msg.textContent = ev.text;
