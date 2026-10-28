@@ -65,6 +65,11 @@ if callable(globals().get('construction')):
     _f = construction
     _out['construction'] = _f({{}}, _b) if len(_inspect.signature(_f).parameters) > 1 else _f({{}})
     _out['build'] = {{**(globals().get('BUILD') or {{}}), **_b}}
+if isinstance(globals().get('BUILD_OPTIONS'), dict):
+    _out['build_options'] = BUILD_OPTIONS
+if callable(globals().get('roof')):
+    _r = roof
+    _out['roof'] = _r({{}}, _b) if len(_inspect.signature(_r).parameters) > 1 else _r({{}})
 if callable(globals().get('shell')):
     _w = shell
     _out['shell'] = _w({{}}, _b) if len(_inspect.signature(_w).parameters) > 1 else _w({{}})
@@ -533,14 +538,18 @@ def write_build(script: str, values: dict) -> str:
     return data.decode()
 
 
-_STICK_WORDS = ("post", "stud", "stick", "rail", "frame")
+_STICK_WORDS = ("post", "stud", "stick", "rail", "frame", "beam")
 
 
-def choices(build: dict) -> dict:
-    """What each BUILD entry could be, for the page's pickers."""
+def choices(build: dict, options: Optional[dict] = None) -> dict:
+    """What each BUILD entry could be, for the page's pickers. ``options`` is the part's own
+    ``BUILD_OPTIONS`` — named choices for entries Caliper can't guess ("fore-aft" or "across")."""
     sizes = list(M.STICKS["lumber"]["sizes"])
     out = {}
     for k, v in build.items():
+        if options and k in options:
+            out[k] = {"kind": "choice", "options": list(options[k])}
+            continue
         if isinstance(v, bool) or v is None:
             continue
         if isinstance(v, str):
@@ -702,7 +711,7 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
                              f"({k['depth_mm'] / M.IN:.1f} in) into the space it needs.")
     return {"part": part_id, "source": source, "build": used, "saved": saved, "keeps": keeps,
             "changed": {k: v for k, v in used.items() if k in saved and saved[k] != v},
-            "choices": choices(used),
+            "choices": choices(used, d.get("build_options")),
             "mass_kg": round(mass, 2), "mass_lb": round(mass * M.LB_KG, 1), "cog": _round3(cog),
             "materials": by_material(rows), "bom": bom_, "notes": notes,
             "pieces": [{"name": r["name"], "label": r["label"], "mass_lb": round(r["mass_kg"] * M.LB_KG, 2)}

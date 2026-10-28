@@ -180,6 +180,10 @@ def shape_signature(script: str) -> str:
         blank = write_params(script, {k: 0 for k in params}) if params else script
     except (KeyError, SyntaxError):
         blank = script
+    try:                                   # comments and layout aren't shape either
+        blank = ast.unparse(ast.parse(blank))
+    except SyntaxError:
+        pass
     return hashlib.sha1(blank.encode()).hexdigest()[:12]
 
 
@@ -187,8 +191,8 @@ def shape_signature(script: str) -> str:
 #: the tubes a frame study reads (CALI-40) and the ranges a study searches. Changing them leaves a drag
 #: study's numbers meaning what they meant. (``keeps()`` isn't here: a study's designs were kept clear of
 #: the boxes it had, so new ones mean running it again.)
-_NOT_SHAPE_FUNCS = ("construction", "members", "supports")
-_NOT_SHAPE_DICTS = ("BUILD", RANGES_NAME, "LAYOUTS", "GUSSETS", "PLATES")
+_NOT_SHAPE_FUNCS = ("construction", "members", "supports", "shell", "roof")
+_NOT_SHAPE_DICTS = ("BUILD", "BUILD_OPTIONS", RANGES_NAME, "LAYOUTS", "GUSSETS", "PLATES")
 
 
 def _geometry_only(script: str) -> str:

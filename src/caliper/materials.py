@@ -16,8 +16,9 @@ SHEETS = {
     "xps": {"name": "XPS foam board", "density": 24.0, "stock": (4 * 12 * IN, 8 * 12 * IN),
             "basis": "~1.5 lb/ft³ (Foamular 250-class); 1 in board ≈ 0.13 lb/ft²",
             # a sandwich core: stiff enough to hold the skins apart and carry shear between them
-            "mech": {"E": 10.0, "G": 4.0, "strength": 0.4, "shear_strength": 0.2,
-                     "basis": "Foamular 250: compressive modulus ~1,500 psi; shear ~30 psi (rough)"},
+            "mech": {"E": 10.0, "G": 4.0, "strength": 0.4, "shear_strength": 0.2, "compression": 0.17,
+                     "basis": "Foamular 250: compressive modulus ~1,500 psi, 25 psi compressive strength; "
+                              "shear ~30 psi (rough)"},
             # cutting it (CALI-45): scored on the inside, 1 in board bends ~45° at a V-groove
             "cut": {"kerf": 3.175, "margin": 6.35, "grain": False, "fold_deg": 45.0, "score_min_deg": 5.0,
                     "note": "1 in XPS: cut with a knife or hot wire; a V-groove scored on the inside lets it "
@@ -46,6 +47,9 @@ SHEETS = {
 STICKS = {
     "lumber": {"name": "SPF lumber", "density": 420.0, "stock_len": 8 * 12 * IN,
                "basis": "~26 lb/ft³ (spruce-pine-fir); a 2x2 ≈ 0.41 lb/ft",
+               # construction-grade sticks with knots: break at ~2,900 psi in bending, E ~1.3 Msi
+               "mech": {"E": 9000.0, "strength": 20.0,
+                        "basis": "SPF #2-ish: modulus of rupture ~20 MPa with knots (clear wood ~35), E ~9 GPa"},
                "sizes": {"2x2": (1.5 * IN, 1.5 * IN), "1x2": (0.75 * IN, 1.5 * IN),
                          "2x3": (1.5 * IN, 2.5 * IN), "2x4": (1.5 * IN, 3.5 * IN)}},
     # square tube is sized by its outside and wall, not by name (construction.tube_area)

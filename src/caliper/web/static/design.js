@@ -603,6 +603,7 @@ function scoreView(d) {
       <table class="st">${card.cost.lines.map((l) => `<tr><td style="text-align:left">${esc(l.part)}</td><td style="text-align:left">${esc(l.item)}</td>
         <td>$${l.usd.toFixed(0)}</td><td class="muted">${l.waste_usd ? `$${l.waste_usd.toFixed(0)} offcut` : ''}</td></tr>`).join('')}</table>
       <div class="muted">${esc(card.cost.basis)}</div></details>` : ''}
+    ${(card.notes || []).map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}
     ${goals}<div class="actions"><button id="scGo">${stale ? 'Score it again' : 'Score it'}</button></div><div id="scProgress"></div>`;
 }
 

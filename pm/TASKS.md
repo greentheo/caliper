@@ -711,7 +711,23 @@ rating); drag 48.4 lbf, 134 lb with 50 lb aboard, steel 30.2 lb, stock ≈ $446,
 **Next on it:** the user's constraints in their own words → goals (Claude writes scorecard.yaml from chat);
 constraint discovery before optimizing (the mattress lesson); budgets (default 10 min); the shop (CALI-48).
 
-### CALI-52 — The skeleton: a box inside the box, roof beams for snow · P1 · M6 · 📋 next
+### CALI-52 — The skeleton: a box inside the box, roof beams for snow · P1 · M6 · ✅ done (v1)
+- **Done:** the box's skeleton is construction choices (`frame_posts`, `roof_beams`, `roof_beam`,
+  `roof_beam_dir`, `skin_in`; named options via `BUILD_OPTIONS`): front and back frames (bottom rail, two
+  posts where the end panel is flat, top rail under the roof's edge) and roof beams front-to-back (stepping
+  down at the tail) or across. The box says how its roof is built (`roof()`); `snow.py` checks it under a
+  snow load by napkin mechanics (roof panel as a sandwich strip — skin wrinkling, foam crush/tension/shear;
+  beams and rails as simply supported sticks) and `snow.search()` tries every combination, weighed and
+  priced. Theo's camper at 20 lb/ft², ≥ 2×: 64 combinations, 15 hold; lightest: **1x2 frames + two 2x2
+  beams across, no inside skin — 57.1 lb, $379, 2.01×** (adopted, box v13); an inside skin of glass adds
+  ~9 lb and $117 for nothing (the beams govern). Scorecard: `snow.safety` (settings `snow_psf`).
+- Also: the shape fingerprint ignores comments and layout (`ast.unparse`), and `shell()`, `roof()` and
+  `BUILD_OPTIONS` aren't shape; the drag study's fingerprint re-derived on the method (same script).
+
+Theo's hitch call (2026-10-28): 350 lb tongue rating (Class III option 800); keep dynamic loads < ~3.5×; the
+moment limit set aside (he'll test the spine); 2x2x1/8 for tang, riser and spine (frame v23–24: 25.8 lb of
+tube, yields at ~5× standing). Scorecard: tongue ≤ 350 ✓, frame survives 3.5× ✓, walls 3.37× ✗ (front
+wall's corner pieces — a local second layer of glass fixes it for < 1 lb; everywhere: +6 lb, 4.4×).
 Theo: posts where the shell is largely flat — a box inside the box where the front and back panels meet the
 floor and roof — and cross beams under the roof for a mild snow load; 1x1 ribs only if needed. The first
 job for the loop: the skeleton as structural options (posts, rails, N roof beams, their size, an inside

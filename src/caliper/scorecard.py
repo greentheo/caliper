@@ -45,7 +45,7 @@ def read_goals(store: DesignStore) -> dict:
     with open(path) as f:
         data = yaml.safe_load(f) or {}
     return {"settings": data.get("settings") or {}, "checks": data.get("checks") or [],
-            "objectives": data.get("objectives") or []}
+            "objectives": data.get("objectives") or [], "notes": data.get("notes") or []}
 
 
 def cards_dir(store: DesignStore) -> str:
@@ -192,6 +192,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                         "measured", "cut plan")
     b = C.balance(store, payload_lb=payload)
     _metric(metrics, "weight.total_lb", b["mass_lb"], "lb", f"everything, with {payload:g} lb aboard", "model", "balance")
+    _metric(metrics, "hitch.tongue_lb", b["mass_lb"], "lb", "on the hitch's tongue, standing still", "model", "balance")
     if b.get("moment_lbin") is not None:
         _metric(metrics, "hitch.moment_lbin", b["moment_lbin"], "lb·in", "the hitch carries, standing still",
                 "model", "balance")
@@ -206,6 +207,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         a = frame_study.analyse(store, p.id, payload_lb=payload, walls=bool(settings.get("walls", True)))
         _metric(metrics, "frame.safety", a["safety"], "×", f"{p.id}'s weakest member on a ×{a['factor']:g} bump "
                 f"({a['governing']['member']})", "model", "frame study")
+        _metric(metrics, "frame.yield_x", round(a["safety"] * a["factor"], 2), "×",
+                f"{p.id} yields at this many times its standing load", "model", "frame study")
         _metric(metrics, "frame.sag_in", a["deflection_in"], "in", f"{p.id} sags on a bump", "model", "frame study")
         _metric(metrics, "frame.steel_lb", a["mass_lb"], "lb", f"{p.id}'s tubes", "model", "frame study")
         if a.get("walls"):
@@ -223,6 +226,20 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             _metric(metrics, "frame.weld_relief", min(x["relief"] for x in plates.values()), "",
                     "least of a corner weld's moment the plates take", "model", "plate mode")
         break
+
+    # optimization: snow on any roof a part describes
+    psf = float(settings.get("snow_psf", 0) or 0)
+    if psf:
+        from . import snow
+
+        for pid in reports:
+            roof = C.declared(store, pid).get("roof")
+            if roof:
+                sc = snow.check(roof, psf)
+                _metric(metrics, "snow.safety", sc["safety"], "×", f"{pid}'s roof under {psf:g} lb/ft² of snow "
+                        f"({sc['governing']})", "rough", "snow check", note="napkin mechanics, on the safe side")
+                _metric(metrics, "snow.sag_in", round(sc["sag_mm"] / M.IN, 2), "in", "the roof sags under it",
+                        "rough", "snow check")
 
     # optimization: drag, if the goals say how to score it
     drag = settings.get("drag")
@@ -273,6 +290,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                            "was": was, "change": (round(value - was, 3) if isinstance(value, (int, float))
                                                   and isinstance(was, (int, float)) else None)})
     card = {"created": time.time(), "versions": versions, "settings": settings, "checks": checks,
+            "notes": g.get("notes") or [],
             "objectives": objectives, "metrics": metrics, "cost": cw,
             "summary": {"pass": sum(c["status"] == "pass" for c in checks),
                         "fail": sum(c["status"] == "fail" for c in checks),
