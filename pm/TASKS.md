@@ -694,7 +694,7 @@ See `specs/caliper-make-loop-spec.md` for M6 (scorecard, the shop, moves, loop r
 
 ## Milestone M6 — the design ⇄ optimize ⇄ make loop
 
-### CALI-47 — The scorecard · P0 · M6 · ✅ done (v1)
+### CALI-47 — The scorecard · P0 · M6 · ✅ done (v1, `9fe2542`)
 Every requirement as a measured check or an objective, with how far to trust it (measured / model / rough /
 guess), across the quadfecta: design, optimization, manufacturability, cost & waste. `scorecard.py`
 computes, for the design as it stands: the assembly's rules and every part's keeps (checks without being

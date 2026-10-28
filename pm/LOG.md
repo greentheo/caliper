@@ -21,7 +21,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   *assumed*, every piece fits; objectives drag/weight/hitch/steel/cost/waste/sheets). First card: 6 pass, 1
   fail (hitch), drag 48.4 lbf, 134 lb, $446, offcut 23%. ~11 s.
 - Tests: `test_scorecard.py` (4). Full suite green.
-- Commit: _(pending)_
+- Commit: `9fe2542`
 
 ### 2026-10-28 · CALI-46 (part 2) · Gusset plates — whittle plate mode, into the design and the cut plan
 - **whittle-agent shipped plate mode** (whittle `plate-mode`, uncommitted): `frame.gusset(node, m1, m2,
