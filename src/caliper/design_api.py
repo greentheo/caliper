@@ -16,7 +16,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import aero, chat, clarify, frame_study, promote
+from . import aero, chat, clarify, construction, frame_study, promote
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -95,6 +95,15 @@ class PartSettings(BaseModel):
     role: Optional[str] = None        # "fixed" = a reference (e.g. the car) — drawn as context
 
 
+class BuildChoices(BaseModel):
+    build: dict = {}                  # BUILD entries to try (or, on /use, to write into the script)
+
+
+class BalanceRequest(BaseModel):
+    build: dict[str, dict] = {}       # {part: BUILD overrides} — what-ifs, not saved
+    payload_lb: float = 0.0           # gear or people, on the floor
+
+
 def _lock(slug: str) -> str:
     return f"design:{slug}"
 
@@ -126,6 +135,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "params": params,
             # a part that declares its tubes is a frame: it gets sized, not shaped for drag
             "framed": "def members(" in script and "def supports(" in script,
+            # a part that says what it's built from (or a frame) can be weighed (CALI-41)
+            "built": construction.declares(script),
             "suggest": {k: aero.suggest(k, v) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
@@ -401,6 +412,45 @@ def router():
                               "station": req.station, "version": got["version"],
                               "design": got["design"]})
             return {**got, "design": design_state(store)}
+
+    # -- what it's built from (CALI-41): weight, centre of gravity, bill of materials ---------------
+    def _built(store: DesignStore, pid: str, build: Optional[dict] = None) -> dict:
+        if store.design.part(pid) is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+        try:
+            return construction.report(store, pid, build)
+        except (KeyError, ValueError) as e:
+            raise HTTPException(status_code=409, detail=str(e))
+
+    @r.get("/api/designs/{slug}/parts/{pid}/construction")
+    def part_construction(slug: str, pid: str):
+        return _built(load(slug), pid)
+
+    @r.post("/api/designs/{slug}/parts/{pid}/construction")
+    def part_construction_whatif(slug: str, pid: str, req: BuildChoices):
+        return _built(load(slug), pid, req.build)
+
+    @r.post("/api/designs/{slug}/parts/{pid}/construction/use")
+    def part_construction_use(slug: str, pid: str, req: BuildChoices):
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None:
+                raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+            try:
+                got = construction.adopt(store, pid, req.build)
+            except (KeyError, ValueError) as e:
+                raise HTTPException(status_code=409, detail=str(e))
+            if got["changed"]:
+                store.append_log({"kind": "build", "action": "adopted", "part": pid,
+                                  "version": got["version"], "build": got["changed"]})
+            return {**got, "report": construction.report(store, pid), "design": design_state(store)}
+
+    @r.post("/api/designs/{slug}/balance")
+    def design_balance(slug: str, req: BalanceRequest):
+        try:
+            return construction.balance(load(slug), req.build, req.payload_lb)
+        except (KeyError, ValueError) as e:
+            raise HTTPException(status_code=409, detail=str(e))
 
     # -- parametric drag search (CALI-39): whittle searches PARAMS, numbers come back ---------------
     @r.post("/api/designs/{slug}/aero")

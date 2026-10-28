@@ -20,6 +20,9 @@ const S = {
   whittle: { ok: false },
   runIndex: {},        // part id -> which whittle run the inspector shows
   aeroRun: {},         // part id -> which parametric study the inspector shows
+  built: {},           // part id -> {version, tried, report, balance}: what it's built from (CALI-41)
+  balance: null,       // {key, data}: the whole design's weight and what the hitch carries
+  payload: 0,          // lb of gear or people on the floor, for the balance
 };
 
 // ------------------------------------------------------------------------------------------ api
@@ -563,6 +566,7 @@ function designView(d) {
     : '<div class="empty">None yet — say what to build first.</div>'}
     ${Object.keys(d.part_errors || {}).length ? '<h4>Won\'t build</h4><ul class="list">' +
       Object.entries(d.part_errors).map(([k, v]) => `<li><b>${esc(k)}</b> <span class="muted small">${esc(v)}</span></li>`).join('') + '</ul>' : ''}
+    ${d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : ''}
     <h4>Design checks</h4>
     ${checks(rep)}`;
 }
@@ -572,6 +576,7 @@ function historyItem(h) {
     const what = h.action === 'frame' ? `tubes sized — design ${h.station} (${h.mass_lb} lb, ${h.safety}x)`
       : h.action === 'aero' ? `shaped for drag — station ${h.station}`
       : h.action === 'whittle' ? `from whittle${h.station != null ? ' — station ' + h.station : ''}`
+      : h.action === 'build' ? 'construction changed'
       : h.action === 'restore' ? `rolled back to v${h.restored_from}` : h.action;
     return `<li class="hist"><span class="v">v${h.version}</span>${esc(what)}
       ${h.feedback && h.action !== 'author' ? `<div>“${esc(h.feedback)}”</div>` : ''}
@@ -607,6 +612,8 @@ function partView(p) {
     ${p.rules.length || designRules.length ? '<ul class="list">' +
       [...p.rules, ...designRules].map((r) => `<li class="rule">🔒 <b>${esc(r.id)}</b> <code>${esc(r.expr)}</code></li>`).join('') + '</ul>'
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
+    ${p.built ? `<h4>Built from <span class="badge">weight &amp; shopping list</span></h4>
+    <div id="buildBox">${buildView(p)}</div>` : ''}
     ${p.framed ? `<h4>Size the frame <span class="badge">tubes back</span></h4>
     <div id="frameBox">${frameView(p)}</div>` : `<h4>Shape it for drag <span class="badge">numbers back</span></h4>
     <div id="aeroBox">${aeroView(p)}</div>
@@ -619,7 +626,9 @@ function partView(p) {
 
 function wireInspector(p) {
   document.querySelectorAll('#inspector [data-part]').forEach((a) => { a.onclick = () => setScope(a.dataset.part); });
-  if (!p) return;
+  showMarks();
+  if (!p) { wireBalance(); return; }
+  wireBuilt(p);
   const role = $('roleRef');
   if (role) role.onchange = async () => {
     S.design = await api('PATCH', `/api/designs/${S.slug}/parts/${p.id}`, { role: role.checked ? 'fixed' : 'movable' });
@@ -638,6 +647,201 @@ function wireInspector(p) {
   wireWhittle(p);
   wireAero(p);
   wireFrame(p);
+}
+
+// ------------------------------------------------------------- what it's built from (CALI-41)
+// A part that declares construction() (or a frame's members()) is weighed piece by piece: its weight,
+// where its centre of gravity sits, and what to buy. The pickers try other choices without saving;
+// "Use these" writes them into the part's BUILD dict — its shape doesn't change.
+const lbs = (v) => (v == null ? '—' : `${Number(v).toLocaleString(undefined, { maximumFractionDigits: 1 })} lb`);
+const lbin = (v) => (v == null ? '—' : `${Number(v).toLocaleString()} lb·in`);
+const sheetFt = (mm) => `${+(mm[1] / IN / 12).toFixed(1)}×${+(mm[0] / IN / 12).toFixed(1)} ft`;
+const HITCH_NOTE = 'Compare with your hitch\'s rating: tongue weight × the distance from the pin to the ball — ' +
+  'e.g. 350 lb × ~7″ ≈ 2,450 lb·in for a typical Class II.';
+
+function triedFor() {      // every part's what-ifs, so the balance shows them too
+  const out = {};
+  for (const [pid, c] of Object.entries(S.built)) if (c.tried && Object.keys(c.tried).length) out[pid] = c.tried;
+  return out;
+}
+
+function buildView(p) {
+  const c = S.built[p.id];
+  if (!c || c.version !== p.version) { loadBuilt(p, c && c.version === p.version ? c.tried : {}); return '<div class="small muted">weighing…</div>'; }
+  if (c.loading) return '<div class="small muted">weighing…</div>';
+  if (c.error) return `<div class="small" style="color:var(--bad)">⚠ ${esc(c.error)}</div>`;
+  return builtResults(p, c);
+}
+
+async function loadBuilt(p, tried) {
+  S.built[p.id] = { version: p.version, tried: tried || {}, loading: true };
+  try {
+    const [report, balance] = await Promise.all([
+      api('POST', `/api/designs/${S.slug}/parts/${p.id}/construction`, { build: tried || {} }),
+      api('POST', `/api/designs/${S.slug}/balance`, { build: { ...triedFor(), [p.id]: tried || {} }, payload_lb: S.payload }),
+    ]);
+    S.built[p.id] = { version: p.version, tried: tried || {}, report, balance };
+  } catch (e) { S.built[p.id] = { version: p.version, tried: tried || {}, error: e.message }; }
+  S.balance = null;                       // the design's balance changes with any part's what-if
+  const box = $('buildBox');
+  if (box && S.scope === p.id) { box.innerHTML = buildView(p); wireBuilt(p); showMarks(); }
+}
+
+function picker(k, ch, v) {
+  if (ch.kind === 'number') return `<input type="number" data-bk="${esc(k)}" step="any" value="${v}">`;
+  const label = (o) => (ch.labels && ch.labels[String(o)]) || o;
+  return `<select data-bk="${esc(k)}" data-num="${typeof v === 'number' ? 1 : ''}">${ch.options.map((o) =>
+    `<option value="${esc(o)}" ${String(o) === String(v) || (typeof v === 'number' && Math.abs(o - v) < 1e-6) ? 'selected' : ''}>${esc(label(o))}</option>`).join('')}</select>`;
+}
+
+function cogText(p, cog) {
+  if (!p.bbox) return '';
+  const back = p.bbox.max[0] - cog[0], up = cog[2] - p.bbox.min[2];
+  const side = Math.abs(cog[1]) < 5 ? 'centred side to side' : `${len(Math.abs(cog[1]), 1)} to the ${cog[1] > 0 ? 'left' : 'right'}`;
+  return `${len(back, 1)} behind its front, ${len(up, 1)} above its bottom, ${side}`;
+}
+
+function cutsText(cuts) {
+  const n = new Map();
+  for (const c of cuts) { const k = len(c.length_mm, 1); n.set(k, (n.get(k) || 0) + 1); }
+  return [...n].map(([k, v]) => `${v} @ ${k}`).join(', ');
+}
+
+function builtResults(p, c) {
+  const r = c.report, b = c.balance, changed = Object.keys(r.changed || {}).length;
+  const mine = b && (b.parts || []).find((x) => x.part === p.id);
+  const bom = r.bom;
+  return `<div class="card">
+      <b style="font-size:1.3em">${lbs(r.mass_lb)}</b> ${changed ? '<span class="badge">trying — not saved</span>' : ''}
+      <div class="small">centre of gravity ${cogText(p, r.cog)} <span class="muted">(the red dot)</span></div>
+      ${b && b.moment_lbin != null ? `<div class="small" style="margin-top:4px">With the rest of the design the hitch carries
+        <b>${lbs(b.force_lb)}</b> and <b>${lbin(b.moment_lbin)}</b>${mine ? ` — this part ${lbin(mine.moment_lbin)} of it, ${len(mine.arm_in * IN, 1)} behind the hitch` : ''}.</div>` : ''}
+    </div>
+    ${Object.keys(r.choices || {}).length ? `<div class="form" style="margin-top:10px">
+      ${Object.entries(r.choices).map(([k, ch]) => `<span>${esc(k.replace(/_/g, ' '))}</span><span>${picker(k, ch, r.build[k])}</span>`).join('')}
+    </div>
+    <div class="actions">${changed ? '<button class="primary" id="bUse">Use these</button> <button class="ghost" id="bReset">Back to saved</button>'
+      : '<span class="small muted">Change a choice to see what it weighs — nothing is saved until you say so.</span>'}</div>` : ''}
+    <table class="st"><tr><th style="text-align:left">made of</th><th>lb</th><th>share</th></tr>
+      ${r.materials.map((m) => `<tr><td style="text-align:left">${esc(m.label)}</td><td>${m.mass_lb}</td>
+        <td>${pct(m.mass_kg / r.mass_kg)}</td></tr>`).join('')}</table>
+    <h5 style="margin:12px 0 4px">To buy</h5>
+    <ul class="list small">
+      ${bom.sheets.map((g) => `<li><b>${g.count} × ${esc(g.label)}</b> <span class="muted">${sheetFt(g.stock_mm)} sheets · ${g.area_ft2} ft² of panels</span>
+        <div class="muted">${g.panels.map((x) => `${esc(x.name)} ${len(x.size_mm[0], 1)} × ${len(x.size_mm[1], 1)}${x.flat ? '' : ' (bent)'}`).join(' · ')}</div></li>`).join('')}
+      ${bom.sticks.map((g) => `<li><b>${g.count} × ${esc(g.label)}</b> <span class="muted">${+(g.stock_len_mm / IN / 12).toFixed(1)} ft lengths</span>
+        <div class="muted">cuts: ${cutsText(g.cuts)}</div></li>`).join('')}
+      ${bom.coverings.map((g) => `<li><b>${esc(g.label)}</b> <span class="muted">${g.area_ft2} ft²</span>
+        <div class="muted">${[g.canvas_yd != null ? `${g.canvas_yd} yd of ${g.canvas_roll_in}″ canvas` : '',
+          g.glue_gal != null ? `${g.glue_gal} gal glue` : '',
+          g.paint_gal != null ? `${g.paint_gal} gal paint (${g.coats} coats)` : ''].filter(Boolean).join(' · ')}</div></li>`).join('')}
+      ${bom.lumps.map((g) => `<li><b>${esc(g.name)}</b> <span class="muted">${lbs(g.mass_kg * 2.20462)}</span></li>`).join('')}
+    </ul>
+    ${(r.notes || []).map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}
+    <div class="muted small" style="margin-top:4px">Counts are a shopping estimate (panels packed on whole sheets, cuts on
+      whole sticks), not a cut plan. Densities: <code>materials.py</code>.</div>`;
+}
+
+function wireBuilt(p) {
+  const c = S.built[p.id];
+  if (!c || !c.report) return;
+  document.querySelectorAll('#buildBox [data-bk]').forEach((el) => {
+    el.onchange = () => {
+      const tried = {};
+      document.querySelectorAll('#buildBox [data-bk]').forEach((e) => {
+        const k = e.dataset.bk;
+        const v = e.tagName === 'INPUT' || e.dataset.num ? +e.value : e.value;
+        if (String(v) !== String(c.report.saved[k])) tried[k] = v;
+      });
+      loadBuilt(p, tried);
+    };
+  });
+  const use = $('bUse');
+  if (use) use.onclick = async () => {
+    use.disabled = true;
+    try {
+      const got = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/construction/use`, { build: c.tried });
+      S.design = got.design;
+      S.built[p.id] = { version: got.version, tried: {}, report: got.report, balance: c.balance };
+      S.balance = null;
+      render();
+      loadBuilt(S.design.parts.find((x) => x.id === p.id), {});
+    } catch (e) { showErr(e.message); use.disabled = false; }
+  };
+  const reset = $('bReset');
+  if (reset) reset.onclick = () => loadBuilt(p, {});
+}
+
+function balanceKey() {
+  return JSON.stringify([S.design.parts.map((p) => `${p.id}:${p.version}`), S.payload, triedFor()]);
+}
+
+function balanceView() {
+  const key = balanceKey();
+  if (!S.balance || S.balance.key !== key) { loadBalance(key); return '<div class="small muted">weighing…</div>'; }
+  if (S.balance.loading) return '<div class="small muted">weighing…</div>';
+  if (S.balance.error) return `<div class="small" style="color:var(--bad)">⚠ ${esc(S.balance.error)}</div>`;
+  const b = S.balance.data, tried = Object.keys(triedFor()).length;
+  return `<div class="card"><b style="font-size:1.3em">${lbs(b.mass_lb)}</b> ${tried ? '<span class="badge">with what-ifs</span>' : ''}
+      ${b.moment_lbin != null ? `<div class="small">The hitch carries <b>${lbs(b.force_lb)}</b> with its centre of gravity
+        ${len(b.arm_in * IN, 1)} behind it: <b>${lbin(b.moment_lbin)}</b> standing still.</div>` : ''}
+      <div class="muted small" style="margin-top:4px">${HITCH_NOTE}</div></div>
+    <div class="form" style="margin-top:8px"><span>payload</span>
+      <span><input type="number" id="payload" value="${S.payload}" min="0" step="10"> lb on the floor</span></div>
+    <table class="st"><tr><th style="text-align:left">part</th><th>lb</th><th>behind hitch</th><th>lb·in</th></tr>
+      ${b.parts.map((x) => `<tr><td style="text-align:left">${x.part === 'payload' ? 'payload' : `<span class="partlink" data-part="${esc(x.part)}">${esc(x.part)}</span>`}</td>
+        <td>${x.mass_lb}</td><td>${x.arm_in != null ? len(x.arm_in * IN, 1) : '—'}</td>
+        <td>${x.moment_lbin != null ? Number(x.moment_lbin).toLocaleString() : '—'}</td></tr>`).join('')}</table>
+    ${(b.notes || []).map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}
+    <div class="muted small" style="margin-top:4px">Red dot: the centre of gravity. Green: the hitch point.</div>`;
+}
+
+async function loadBalance(key) {
+  S.balance = { key, loading: true };
+  try {
+    const data = await api('POST', `/api/designs/${S.slug}/balance`, { build: triedFor(), payload_lb: S.payload });
+    S.balance = { key, data };
+  } catch (e) { S.balance = { key, error: e.message }; }
+  const box = $('balanceBox');
+  if (box && !S.scope) {
+    box.innerHTML = balanceView();
+    wireBalance();
+    box.querySelectorAll('[data-part]').forEach((a) => { a.onclick = () => setScope(a.dataset.part); });
+    showMarks();
+  }
+}
+
+function wireBalance() {
+  const pl = $('payload');
+  if (pl) pl.onchange = () => {
+    S.payload = Math.max(0, +pl.value || 0);
+    const box = $('balanceBox');
+    box.innerHTML = balanceView();
+  };
+}
+
+// the centre of gravity (red) and hitch point (green), drawn through everything
+const marks = new THREE.Group();
+marks.renderOrder = 10;
+scene.add(marks);
+function showMarks() {
+  for (const m of [...marks.children]) { marks.remove(m); m.geometry && m.geometry.dispose(); }
+  const c = S.scope && S.built[S.scope];
+  const b = S.scope ? (c && c.balance) : (S.balance && S.balance.data);
+  const cog = S.scope ? (c && c.report && c.report.cog) : (b && b.mass_kg ? b.cog : null);
+  const size = Math.max(contentBox().getSize(new THREE.Vector3()).length() / 160, 8);
+  const dot = (at, color) => {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(size, 20, 14),
+      new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true }));
+    m.position.set(...at); m.renderOrder = 10;
+    marks.add(m);
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...at), new THREE.Vector3(at[0], at[1], 0)]),
+      new THREE.LineDashedMaterial({ color, dashSize: size, gapSize: size * 0.7, depthTest: false, transparent: true }));
+    line.computeLineDistances(); line.renderOrder = 10;
+    marks.add(line);
+  };
+  if (cog) dot(cog, 0xff4d3d);
+  if (b && b.hitch && (!S.scope || cog)) dot(b.hitch, 0x3fb950);
 }
 
 // --------------------------------------------------------------------- size the frame (CALI-40)

@@ -343,7 +343,10 @@ dict of every key dimension and shape choice, as plain numbers in mm; build() me
         ...   # use p["..."] everywhere; never repeat those numbers inline
 Write each value as a finished number (1879.6, not 74 * 25.4); put the inch value in a comment. A
 radius or chamfer of 0 must mean "none" (skip the fillet), and every value in PARAMS must build —
-they are the part as it stands."""
+they are the part as it stands.
+If the script also has members()/supports() (its tubes, for a frame study) or BUILD and construction()
+(what it's built from, for its weight and bill of materials), keep them, and keep them describing the
+same part as build() — move a panel or a tube in one, move it in the others."""
 
 
 def _emit(events: list[Event], on_event, kind: str, text: str, **data) -> None:

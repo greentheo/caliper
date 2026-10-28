@@ -568,6 +568,20 @@ A part declares `members(params)` + `supports(params)`; whittle's FrameStudy (wh
 tubes go back into PARAMS. Inspector: **Size the frame**. Next: plate mode for the gussets at the jog, fed by
 the frame's end forces (`CaseResult.end_forces`); legs + the parked/sleeping case.
 
+### CALI-41 — What a part is built from: weight, centre of gravity, bill of materials · P1 · M5 · ✅ done
+A part's shape says nothing about its weight. A part now declares how it's built: a module-level `BUILD`
+dict of choices (kept apart from PARAMS — they change weight, not shape) and `construction(params, build)`
+returning pieces — **sheet** (flat `outline` or bent `facets`, thickness, `covers`), **stick** (lumber by
+nominal size, steel tube by outer/wall), **lump** (mass at a point) — against `materials.py` (densities with
+their basis, stock sizes, PMF/paint rates). `construction.py`: take-off → weight + CoG; BOM (sheets
+shelf-packed on stock, cuts packed on sticks, canvas yd / glue / paint gal); what-ifs; `BUILD` written back
+by AST position. `balance()` adds every weighed part (frames from `members()`, tubes with rounded corners at
+nominal wall ≈ catalog lb/ft) and takes the moment about the first support (the receiver mouth), with an
+optional payload on the floor. Inspector: **Built from** (pickers, *Use these*) and **Weight & balance**;
+red dot = CoG, green = hitch. `shape_signature` ignores BUILD/construction/members/supports.
+Next: CALI-42 re-size the frame from the box's real weight at its real CoG (1 in tube options);
+CALI-43 cut plan + CNC DXF (panels flattened from their outlines — `flatten()` is the start).
+
 ## Milestone M5 — whole machines from one prompt (after M4)
 
 ### CALI-35 — Decomposition planner  · P0 · M5 · 🧊 backlog

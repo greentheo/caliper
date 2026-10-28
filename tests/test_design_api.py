@@ -269,3 +269,41 @@ def test_a_study_on_an_unknown_part_is_a_404(client, tunable):
 
 def test_adopting_from_a_missing_study_is_a_404(client, tunable):
     assert client.post("/api/designs/tunable/aero/nope/adopt", json={"station": 0}).status_code == 404
+
+
+# --- what it's built from (CALI-41) -----------------------------------------
+@pytest.fixture
+def crate(client, tmp_path):
+    from .test_construction import BOX
+
+    s = DesignStore.create("a crate", base=str(tmp_path / "designs"), slug="crate")
+    s.write_part("crate", BOX, intent="an open crate")
+    return s
+
+
+def test_a_built_part_is_weighed_tried_and_its_choices_written_back(client, crate):
+    pytest.importorskip("cadquery")
+    assert client.get("/api/designs/crate").json()["parts"][0]["built"]
+    saved = client.get("/api/designs/crate/parts/crate/construction").json()
+    tried = client.post("/api/designs/crate/parts/crate/construction",
+                        json={"build": {"floor_t": 6.35}}).json()
+    assert tried["mass_lb"] < saved["mass_lb"] and tried["changed"] == {"floor_t": 6.35}
+    assert client.get("/api/designs/crate").json()["parts"][0]["version"] == 1      # nothing saved
+
+    used = client.post("/api/designs/crate/parts/crate/construction/use",
+                       json={"build": {"floor_t": 6.35}}).json()
+    assert used["version"] == 2 and used["report"]["mass_lb"] == pytest.approx(tried["mass_lb"])
+    assert used["design"]["log"][-1]["kind"] == "build"
+
+
+def test_the_design_balance_includes_a_payload(client, crate):
+    b = client.post("/api/designs/crate/balance", json={"payload_lb": 50}).json()
+    assert b["hitch"] == [100.0, 0.0, 0.0] and b["parts"][-1]["part"] == "payload"
+    assert b["moment_lbin"] > 0
+
+
+def test_bad_build_choices_are_a_409(client, crate):
+    r = client.post("/api/designs/crate/parts/crate/construction", json={"build": {"walls": "balsa"}})
+    assert r.status_code == 409 and "balsa" in r.json()["detail"]
+    r = client.post("/api/designs/crate/parts/crate/construction/use", json={"build": {"glitter": 1}})
+    assert r.status_code == 409

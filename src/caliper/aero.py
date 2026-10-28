@@ -148,12 +148,46 @@ def shape_signature(script: str) -> str:
     apply to either. If the code changed (a part rebuilt with a new parametrisation), the same names can
     mean something else — "pinch" once narrowed the whole side, now only the panels above the walls.
     """
+    script = _geometry_only(script)
     params = read_params(script) or {}
     try:
         blank = write_params(script, {k: 0 for k in params}) if params else script
     except (KeyError, SyntaxError):
         blank = script
     return hashlib.sha1(blank.encode()).hexdigest()[:12]
+
+
+#: Module-level declarations that describe a part without shaping it: what it's built from (CALI-41)
+#: and the tubes a frame study reads (CALI-40). Changing them leaves a drag study's numbers meaning
+#: what they meant.
+_NOT_SHAPE_FUNCS = ("construction", "members", "supports")
+_NOT_SHAPE_DICTS = ("BUILD",)
+
+
+def _geometry_only(script: str) -> str:
+    """The script without its non-shape declarations (and the comments just above them), and without
+    trailing blank lines — so appending a ``construction()`` to a script leaves its signature alone."""
+    try:
+        tree = ast.parse(script)
+    except SyntaxError:
+        return script
+    drop = []
+    for node in tree.body:
+        named = (isinstance(node, ast.FunctionDef) and node.name in _NOT_SHAPE_FUNCS) or (
+            isinstance(node, ast.Assign) and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name) and node.targets[0].id in _NOT_SHAPE_DICTS)
+        if named:
+            first = min([node.lineno] + [d.lineno for d in getattr(node, "decorator_list", [])])
+            drop.append((first, node.end_lineno))
+    lines = script.splitlines(keepends=True)
+    gone = set()
+    for first, last in drop:
+        gone.update(range(first - 1, last))
+        i = first - 2
+        while i >= 0 and (not lines[i].strip() or lines[i].startswith("#")):     # its own comments
+            gone.add(i)
+            i -= 1
+    return "".join(line for i, line in enumerate(lines) if i not in gone).rstrip() + "\n"
 
 
 _RADIUS = re.compile(r"(^|_)(r|radius|round|fillet)(_|$)")

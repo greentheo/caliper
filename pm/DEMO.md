@@ -42,6 +42,12 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **What it's built from (CALI-41).** Select a part that says what it's built from (the camper box) →
+  **Built from**: its weight, where its centre of gravity sits (red dot), what it's made of, and **what to
+  buy**. Change the floor to ¼ in, drop the posts, add paint inside — the weight and the hitch moment update;
+  nothing saves until **Use these**. With nothing selected, **Weight & balance** shows the whole design and
+  what the hitch carries (add a payload).
+
 - 🆕 **Shape it for drag — numbers back (CALI-39).** Select a part → **Shape it for drag**: whittle searches
   the numbers in its script (tail length, top drop, side pinch, edge radius…) against its drag model, with
   the car as a real obstacle. Pick a design from the slider → **Use these numbers** → they're written into
@@ -516,6 +522,13 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-27 · What it's built from — weight, balance, a shopping list (CALI-41)
+**Try it:** open *A cargo box on the trailer…* → click **cargo_box** → scroll to **Built from**. 56.1 lb with a
+⅜ in floor; the red dot is its centre of gravity. Set *floor t* to ¼ in → 48.9 lb and the hitch moment drops
+from 4,774 to 4,481 lb·in; **Back to saved** undoes it. **To buy**: 1 sheet of ⅜ ply, 4 sheets of 1 in XPS,
+two 8 ft 2x2s (4 @ 39.6″), 5.9 yd of 60″ canvas. Click away from the parts → **Weight & balance**: the 2 in
+frame is 72 lb of the 128 — put 150 lb of payload on the floor to see a loaded trip.
 
 ### 2026-06-13 · Hardening from real use (CALI-27)
 **Fixed** (from Theo's reports): the **partial-machine bug** — one failed/slow part used to abort the
