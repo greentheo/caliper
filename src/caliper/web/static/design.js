@@ -477,6 +477,8 @@ $('msg').addEventListener('keydown', (e) => {
 
 // a brand-new design: the first message is the root prompt, then the clarify round
 function startNew() {
+  // remember where we were: the button sits beside the design picker and is easy to hit by mistake
+  const was = S.slug ? { slug: S.slug, name: S.design ? S.design.name : S.slug } : null;
   S.slug = null; S.design = null; S.scope = null;
   for (const m of meshes.values()) scene.remove(m);
   meshes.clear(); clearStation();
@@ -488,9 +490,11 @@ function startNew() {
     <p class="muted small">Describe the whole thing — sizes, what it attaches to, what it carries.
       I'll ask a few questions, then we build it part by part.</p>
     <textarea id="newPrompt" rows="5" placeholder="e.g. a cargo box on my car's trailer hitch, 74″ wide…"></textarea>
-    <div class="actions"><button class="primary" id="newGo">Start</button></div></div>`;
+    <div class="actions"><button class="primary" id="newGo">Start</button>
+      ${was ? `<button id="newBack" class="ghost">← back to ${esc(was.name)}</button>` : ''}</div></div>`;
   $('msg').placeholder = 'Or type it here…';
   $('newGo').onclick = () => createDesign($('newPrompt').value);
+  if (was) $('newBack').onclick = () => { $('designPick').value = was.slug; openDesign(was.slug); };
   $('newPrompt').focus();
 }
 async function createDesign(prompt) {
