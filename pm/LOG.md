@@ -23,7 +23,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   plate dropped (v18). Frame 36.2 lb (29.8 tube + 6.4 plate); design 133.7 lb, **3,109 lb·in** standing.
 - Open for Theo: the ¼ in spacer (shank and spine faces sit ¼ in inside the riser's) or a 2 in riser.
 - Tests: `test_frame_study.py` +1 (skips without plate mode). Full suite green.
-- Commit: _(pending)_
+- Commit: `6e64f16`
 
 ### 2026-10-28 · CALI-46 (part) + M6 spec · Tube end cuts, foam bevels, and the make loop
 - **Theo:** proceed; and the bigger question — design, optimization and manufacture as one iterative
