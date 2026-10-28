@@ -54,7 +54,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   100. Joint at the X's middle ~2,700 lb·in per arm on a bump (gusset input, plate mode waits for Theo).
   The plywood + bonded foam walls stiffen the platform too; the study leaves them out (safe side).
 - Tests: `test_aero.py` +5, `test_construction.py` +5, `test_frame_study.py` +4. Full suite green.
-- Commit: _(pending)_
+- Commit: `d9876cd`
 
 ### 2026-10-27 · CALI-41 · What it's built from — weight, balance and a shopping list
 - **Why:** the frame study showed the hitch carries ~6,400 lb·in standing still, dominated by weight far

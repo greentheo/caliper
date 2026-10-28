@@ -582,7 +582,7 @@ red dot = CoG, green = hitch. `shape_signature` ignores BUILD/construction/membe
 Next: CALI-42 re-size the frame from the box's real weight at its real CoG (1 in tube options);
 CALI-43 cut plan + CNC DXF (panels flattened from their outlines — `flatten()` is the start).
 
-### CALI-42 — Room for the mattress: what a part has to hold, and its own search ranges · P1 · M5 · ✅ done
+### CALI-42 — Room for the mattress: what a part has to hold, and its own search ranges · P1 · M5 · ✅ done (`d9876cd`)
 Theo (2026-10-28): widen the box to ~77 in so a twin fits inside the 1 in walls, and now that it's wider than
 the Leaf, let the drag study pull the sides in — "make sure they can vary while essentially keeping the
 mattress + 6 in width at the base". Read as: the bottom 6 in above the floor (the mattress) keeps the full
@@ -603,7 +603,7 @@ width; above it the sides may lean and round in.
 **Acceptance:** keeps/RANGES read and used; keep_check measures depth; report flags a keep that no longer
 fits; tests in `test_aero.py` (5) + `test_construction.py` (1).
 
-### CALI-43 — The frame carries the box as built; an X under the floor · P1 · M5 · ✅ done
+### CALI-43 — The frame carries the box as built; an X under the floor · P1 · M5 · ✅ done (`d9876cd`)
 Theo: 1 in tube instead of 2 in, and an X under the floor that leans on the plywood's stiffness, a gusset
 where it meets a 2 in main beam in the middle.
 - **Weight where it is:** `construction.load_points()` spreads every piece's weight over its area/length
