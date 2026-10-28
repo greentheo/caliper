@@ -39,7 +39,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - **The Caliper server was SIGKILLed once** (exit 137, no traceback, RSS ~0.5 GB before and after) — external,
   most likely macOS memory pressure; not reproduced.
 - **Tests:** +14 (`test_frame_study` 9, `test_measure` 3, `test_authoring` 2). 62 passed across the touched files.
-- Commit: `pending`
+- Commit: `117960e`
 
 ---
 

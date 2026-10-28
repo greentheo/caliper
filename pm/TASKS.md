@@ -562,7 +562,7 @@ the inspector. Live: 4 tail params behind the car → **11 lbf ≈ 2.2 kWh/100 m
 returned as numbers in the script (envelope exact — no inflation). As built the params are mm-based
 (`tail_len`, `tail_drop`, `tail_pinch`, `tail_edge_r`) rather than the angles first proposed.
 
-### CALI-40 — Size a tube frame (whittle FrameStudy)  · P1 · M5 · ✅ done (`pending`)
+### CALI-40 — Size a tube frame (whittle FrameStudy)  · P1 · M5 · ✅ done (`117960e`)
 A part declares `members(params)` + `supports(params)`; whittle's FrameStudy (whittle-agent, branch
 `frame-study`) analyses it under `standing` and `driving` cases and sweeps tube sizes per group; the chosen
 tubes go back into PARAMS. Inspector: **Size the frame**. Next: plate mode for the gussets at the jog, fed by
