@@ -418,6 +418,17 @@ def router():
         job = RUNNER.submit("frame", work, label=f"size {req.part}", lock=f"frame:{slug}")
         return {"job_id": job.id}
 
+    # -- how it's built, in 3D (CALI-52) -----------------------------------------------------------
+    @r.get("/api/designs/{slug}/parts/{pid}/pieces")
+    def part_pieces(slug: str, pid: str):
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+        try:
+            return construction.pieces3d(store, pid)
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+
     # -- cut plan (CALI-45): panels unfolded and nested by unfold-to-sheets, sticks cut-listed ----------
     @r.post("/api/designs/{slug}/parts/{pid}/cutplan")
     def cutplan_run(slug: str, pid: str):

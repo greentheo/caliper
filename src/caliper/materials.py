@@ -78,6 +78,11 @@ COVERINGS = {
                      "cloth_roll_mm": 50 * IN, "overlap": 0.10, "layers": 2, "cloth_kg_m2": 0.203,
                      "resin_ratio": 1.0, "epoxy_kg_per_gal": 4.2,
                      "paint_ft2_per_gal_coat": 350.0, "coats": 2},
+    # a local extra layer where a wall works hardest — under the paint, so no paint of its own (CALI-52)
+    "glass_patch": {"name": "fiberglass patch (1 more layer 6 oz + epoxy)", "areal": 0.41,
+                    "basis": "one more layer of 6 oz cloth wet out, under the outside layer's paint",
+                    "cloth_roll_mm": 50 * IN, "overlap": 0.10, "layers": 1, "cloth_kg_m2": 0.203,
+                    "resin_ratio": 1.0, "epoxy_kg_per_gal": 4.2},
 }
 
 #: How a covering works as a structural skin (CALI-44): thickness (mm), stiffness E and G (MPa) and the
@@ -90,6 +95,8 @@ SKINS = {
                    "basis": "woven E-glass, hand laid in epoxy: ~15 GPa, ~200 MPa (0/90 in-plane)"},
     "fiberglass_2": {"t": 0.5, "E": 15000.0, "G": 3000.0, "strength": 200.0,
                      "basis": "two layers of the above"},
+    "glass_patch": {"t": 0.25, "E": 15000.0, "G": 3000.0, "strength": 200.0,
+                    "basis": "one more layer of woven E-glass, where it's patched"},
     "paint": None,
 }
 

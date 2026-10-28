@@ -42,6 +42,8 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **How it's built, in 3D (CALI-52).** Any part that says what it's built from can show its pieces in the
+  viewport — panels, skeleton, tubes, plates — in layers you switch on and off.
 - 🆕 **Scorecard (CALI-47).** One card per design: checks and objectives across design, strength/mass/drag,
   making, and cost & waste — each number with how far to trust it, and what changed since last time.
 - 🆕 **Cut plan (CALI-45).** Any part that says what it's built from gets a cut plan: its panels unfolded
@@ -537,6 +539,13 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-28 · See how it's built (CALI-52)
+**Try it:** click **cargo_box** → **Built from** → *Show how it's built*. The box turns into its pieces: pink
+foam panels, the shell bands, the tan floor, teal glass patches on the front corners, and the 1x2 frames with
+three 2x2 roof beams. The panel at the top left of the viewport switches each layer off — untick *end & side
+panels* and *shell* to see the skeleton on its own. Do the same on **frame**: the tubes and the brass gusset
+plates at the riser's corners. *the solid, faint* brings back the outline; × puts a part back to its solid.
 
 ### 2026-10-28 · The skeleton, searched under snow (CALI-52)
 **Try it:** click **cargo_box** → **Built from**: the new choices — *frame posts* (the box inside the box),

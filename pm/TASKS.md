@@ -724,6 +724,16 @@ constraint discovery before optimizing (the mattress lesson); budgets (default 1
 - Also: the shape fingerprint ignores comments and layout (`ast.unparse`), and `shell()`, `roof()` and
   `BUILD_OPTIONS` aren't shape; the drag study's fingerprint re-derived on the method (same script).
 
+- **Theo's picks (2026-10-28, box v14):** three 2x2 beams across (2.7× under snow); a local glass patch
+  over the front wall's corners (`corner_patch`, a stand-alone `covering` item in construction; the front
+  corner wall beams carry it as one more skin) — walls 3.37× → 4.98×, +0.5 lb. Box 59.7 lb; scorecard
+  **8/8 pass**.
+- **How it's built, in 3D:** `construction.pieces3d()` + `GET /api/designs/{slug}/parts/{pid}/pieces` —
+  sheets as their outside faces, sticks and tubes as boxes on their centrelines, gusset plates extruded
+  where they go (both cheeks), grouped into layers (floor, end & side panels, shell, glass patches,
+  skeleton, frame tubes, gusset plates). Built from → *Show how it's built*; a layer panel over the
+  viewport switches each off; the solid stays as a faint ghost you can still click.
+
 Theo's hitch call (2026-10-28): 350 lb tongue rating (Class III option 800); keep dynamic loads < ~3.5×; the
 moment limit set aside (he'll test the spine); 2x2x1/8 for tang, riser and spine (frame v23–24: 25.8 lb of
 tube, yields at ~5× standing). Scorecard: tongue ≤ 350 ✓, frame survives 3.5× ✓, walls 3.37× ✗ (front

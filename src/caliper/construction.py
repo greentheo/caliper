@@ -318,10 +318,18 @@ def piece(item: dict) -> list[dict]:
         return [{"name": name, "kind": "stick", "material": item.get("material", "lumber"),
                  "label": label, "length_mm": length, "mass_kg": length * section * 1e-9 * mat["density"],
                  "at": [(a[k] + b[k]) / 2 for k in range(3)], "group": item.get("group")}]
+    if kind == "covering":                 # a covering on its own: a patch over part of something
+        cv = M.covering(item["material"])
+        polys = [item["outline"]] if item.get("outline") else list(item.get("facets") or [])
+        area = sum(polygon(p)[0] for p in polys)
+        parts = [polygon(p) for p in polys]
+        at = tuple(sum(a * c[k] for a, c, _ in parts) / area for k in range(3)) if area else (0.0, 0.0, 0.0)
+        return [{"name": name, "kind": "covering", "material": item["material"], "label": cv["name"],
+                 "area_mm2": area, "mass_kg": area * 1e-6 * cv["areal"], "at": list(at)}]
     if kind == "lump":
         return [{"name": name, "kind": "lump", "label": item.get("label") or name,
                  "mass_kg": float(item["mass"]), "at": [float(v) for v in item["at"]]}]
-    raise ValueError(f"{name!r}: kind must be sheet, stick or lump, not {kind!r}")
+    raise ValueError(f"{name!r}: kind must be sheet, stick, covering or lump, not {kind!r}")
 
 
 def _bbox2d(pts):
@@ -782,3 +790,65 @@ def adopt(store: DesignStore, part_id: str, values: dict) -> dict:
     version = store.write_part(part_id, script, action="build", feedback=f"built from: {pretty}",
                                extra={"build": changed})
     return {"version": version, "build": read_build(script), "changed": changed}
+
+
+# ---------------------------------------------------------------------------
+# How it's built, in 3D (CALI-52): every piece where it sits, by layer, for the viewport
+# ---------------------------------------------------------------------------
+LAYERS = {
+    "floor": {"label": "floor", "color": "#c8a46e"},
+    "panels": {"label": "end & side panels", "color": "#f2a7bb"},
+    "shell": {"label": "shell (bands & roof)", "color": "#f6c4d1"},
+    "patches": {"label": "glass patches", "color": "#7fd1c4"},
+    "skeleton": {"label": "skeleton (lumber)", "color": "#b5835a"},
+    "tubes": {"label": "frame tubes", "color": "#aab6c3"},
+    "gussets": {"label": "gusset plates", "color": "#e0a526"},
+}
+
+
+def _layer(item: dict) -> str:
+    if item.get("layer"):
+        return item["layer"]
+    name, kind = item.get("name") or "", item.get("kind")
+    if kind == "covering":
+        return "patches"
+    if kind == "stick":
+        return "tubes" if item.get("material") == "steel" or "outer" in item else "skeleton"
+    if item.get("group") == "floor":
+        return "floor"
+    if name.startswith(("band_", "roof", "shoulder", "tail")):
+        return "shell"
+    return "panels"
+
+
+def pieces3d(store: DesignStore, part_id: str) -> dict:
+    """The part as it's built: sheets as triangles (their outside faces), sticks and tubes as boxes along
+    their centrelines, gusset plates as outlines with holes and where they go — grouped into layers."""
+    d = declared(store, part_id)
+    items = _items(d) or []
+    out = []
+    for it in items:
+        kind, layer = it.get("kind"), _layer(it)
+        if kind in ("sheet", "covering"):
+            polys = [it["outline"]] if it.get("outline") else list(it.get("facets") or [])
+            tris = []
+            for poly in polys:
+                for k in range(1, len(poly) - 1):
+                    for q in (poly[0], poly[k], poly[k + 1]):
+                        tris.extend(round(float(v), 2) for v in q)
+            out.append({"name": it.get("name"), "layer": layer, "kind": "sheet", "tris": tris,
+                        "thickness": float(it.get("thickness") or 0.0)})
+        elif kind == "stick":
+            if "size" in it:
+                w, h = M.STICKS[it.get("material", "lumber")]["sizes"][it["size"]]
+            else:
+                w = h = float(it["outer"])
+            out.append({"name": it.get("name"), "layer": layer, "kind": "stick",
+                        "a": [float(v) for v in it["a"]], "b": [float(v) for v in it["b"]], "w": w, "h": h})
+    for name, pl in (d.get("plates") or {}).items():
+        out.append({"name": f"gusset {name}", "layer": "gussets", "kind": "plate", "outline": pl["outline"],
+                    "holes": pl.get("holes") or [], "placement": pl["placement"], "offset": pl["offset"],
+                    "count": pl["count"], "thickness": pl["thickness"]})
+    used = sorted({p["layer"] for p in out}, key=lambda k: list(LAYERS).index(k) if k in LAYERS else 99)
+    return {"part": part_id, "layers": [{"id": k, **LAYERS.get(k, {"label": k, "color": "#9aa4ad"})} for k in used],
+            "pieces": out}

@@ -304,3 +304,25 @@ def test_fiberglass_is_bought_as_cloth_and_epoxy(store):
     m2 = 24 * 0.092903
     assert fg["epoxy_gal"] == pytest.approx(m2 * 2 * 0.203 / 4.2, abs=0.01)
     assert C.report(store, "crate", {"skin": "fiberglass"})["mass_lb"] < r["mass_lb"]
+
+
+# --- CALI-52: how it's built, in 3D; a patch on part of a panel ---------------------------------------
+def test_a_part_shows_how_its_built_in_layers(store):
+    d = C.pieces3d(store, "crate")
+    assert [L["id"] for L in d["layers"]] == ["floor", "panels", "skeleton"]
+    sheets = [p for p in d["pieces"] if p["kind"] == "sheet"]
+    assert len(sheets) == 5 and all(len(p["tris"]) % 9 == 0 and p["tris"] for p in sheets)
+    posts = [p for p in d["pieces"] if p["kind"] == "stick"]
+    assert len(posts) == 2 and posts[0]["w"] == pytest.approx(1.5 * IN)
+
+
+def test_a_patch_is_a_covering_on_its_own(tmp_path):
+    s = DesignStore.create("patched", base=str(tmp_path / "designs"))
+    s.write_part("crate", BOX.replace('''    items.append({"name": "hardware",''', '''    items.append({"name": "patch", "kind": "covering", "material": "glass_patch",
+                  "outline": [(0, -100, 0), (0, 100, 0), (0, 100, 500), (0, -100, 500)]})
+    items.append({"name": "hardware",'''), intent="a crate with a patch")
+    r = C.report(s, "crate")
+    (patch,) = [g for g in r["bom"]["coverings"] if g["material"] == "glass_patch"]
+    assert patch["area_ft2"] == pytest.approx(200 * 500 / 92903, abs=0.05) and patch["cloth_yd"] > 0
+    assert r["mass_lb"] == pytest.approx(_expected_lb() + 0.1 * M.COVERINGS["glass_patch"]["areal"] * M.LB_KG, rel=0.005)
+    assert "patches" in [L["id"] for L in C.pieces3d(s, "crate")["layers"]]

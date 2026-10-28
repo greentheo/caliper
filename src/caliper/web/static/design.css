@@ -141,3 +141,9 @@ table.st tr.on td { background: #2a2416; }
 .bar > i { display: block; height: 100%; background: var(--amber); width: 0; transition: width .4s; }
 details > summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 14px; }
 .empty { color: var(--muted); font-size: 13px; }
+
+/* how it's built (CALI-52): the layer switches over the viewport */
+.layers { position: absolute; top: 10px; left: 10px; z-index: 6; background: rgba(12, 15, 19, 0.88);
+  border: 1px solid #2a323c; border-radius: 6px; padding: 8px 10px; max-width: 240px; }
+.layers label { display: block; margin-top: 3px; cursor: pointer; }
+.layers a { color: var(--muted); text-decoration: none; margin-left: 4px; }

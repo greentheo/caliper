@@ -205,7 +205,100 @@ async function syncParts(design, refit) {
   const failed = results.filter((x) => x.status === 'rejected');
   if (failed.length) showErr(failed.map((f) => f.reason.message).join(' · '));
   paint();
+  refreshBuilt3d(design);
   if (refit || (loads.length && meshes.size === loads.length)) frame();
+}
+
+// ------------------------------------------------------------- how it's built, in 3D (CALI-52)
+// A part shown as built: every panel, stick, tube and plate where it sits, in layers you can switch off.
+const built3d = new Map();       // part id -> {group, layers: Map(layer -> THREE.Group), data, version}
+const hiddenLayers = new Set();  // layers switched off, across parts
+
+function pieceMesh(pc, color) {
+  const c = new THREE.Color(color);
+  if (pc.kind === 'sheet') {
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(pc.tris, 3));
+    geom.computeVertexNormals();
+    const g = new THREE.Group();
+    g.add(new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: c, side: THREE.DoubleSide, transparent: true,
+      opacity: 0.55, roughness: 0.85, depthWrite: false })));
+    g.add(new THREE.LineSegments(new THREE.EdgesGeometry(geom, 25), new THREE.LineBasicMaterial({ color: c.clone().multiplyScalar(0.55) })));
+    return g;
+  }
+  if (pc.kind === 'stick') {
+    const a = new THREE.Vector3(...pc.a), b = new THREE.Vector3(...pc.b), d = b.clone().sub(a);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(d.length(), pc.w, pc.h),
+      new THREE.MeshStandardMaterial({ color: c, roughness: 0.7, metalness: pc.layer === 'tubes' ? 0.45 : 0 }));
+    m.position.copy(a.clone().add(b).multiplyScalar(0.5));
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), d.normalize());
+    return m;
+  }
+  if (pc.kind === 'plate') {
+    const shape = new THREE.Shape(pc.outline.map(([u, v]) => new THREE.Vector2(u, v)));
+    for (const h of pc.holes) shape.holes.push(new THREE.Path(h.map(([u, v]) => new THREE.Vector2(u, v))));
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: pc.thickness, bevelEnabled: false });
+    const P = pc.placement, n = new THREE.Vector3(...P.normal);
+    const basis = new THREE.Matrix4().makeBasis(new THREE.Vector3(...P.u), new THREE.Vector3(...P.v), n);
+    const g = new THREE.Group();
+    for (const side of pc.count > 1 ? [1, -1] : [1]) {           // a cheek plate each side of the tubes
+      const m = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: c, metalness: 0.55, roughness: 0.45, side: THREE.DoubleSide }));
+      m.matrixAutoUpdate = false;
+      m.matrix.copy(basis).setPosition(new THREE.Vector3(...P.origin).add(n.clone().multiplyScalar(side * pc.offset - pc.thickness / 2)));
+      g.add(m);
+    }
+    return g;
+  }
+  return null;
+}
+
+async function showBuilt3d(pid, on) {
+  const had = built3d.get(pid);
+  if (had) { scene.remove(had.group); built3d.delete(pid); }
+  if (on) {
+    const data = await api('GET', `/api/designs/${S.slug}/parts/${pid}/pieces`);
+    const group = new THREE.Group(), layers = new Map();
+    const colour = Object.fromEntries(data.layers.map((L) => [L.id, L.color]));
+    for (const L of data.layers) { const g = new THREE.Group(); layers.set(L.id, g); group.add(g); }
+    for (const pc of data.pieces) { const m = pieceMesh(pc, colour[pc.layer]); if (m) layers.get(pc.layer).add(m); }
+    const part = S.design.parts.find((x) => x.id === pid);
+    scene.add(group);
+    built3d.set(pid, { group, layers, data, version: part && part.version });
+  }
+  applyLayers(); renderLayers(); paint();
+}
+
+function applyLayers() {
+  for (const b of built3d.values()) for (const [id, g] of b.layers) g.visible = !hiddenLayers.has(id);
+}
+
+function renderLayers() {
+  const box = $('layers');
+  if (!box) return;
+  if (!built3d.size) { box.hidden = true; box.innerHTML = ''; return; }
+  const seen = new Map();
+  for (const b of built3d.values()) for (const L of b.data.layers) seen.set(L.id, L);
+  box.hidden = false;
+  box.innerHTML = `<div class="small"><b>How it's built</b></div>
+    ${[...built3d.keys()].map((pid) => `<div class="small muted">${esc(pid)} <a href="#" data-unbuild="${esc(pid)}" title="back to the solid">×</a></div>`).join('')}
+    ${[...seen.values()].map((L) => `<label class="small"><input type="checkbox" data-layer="${esc(L.id)}" ${hiddenLayers.has(L.id) ? '' : 'checked'}>
+      <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${L.color}"></span> ${esc(L.label)}</label>`).join('')}
+    <label class="small"><input type="checkbox" id="layerSolid" ${S.showSolid ? 'checked' : ''}> the solid, faint</label>`;
+  box.querySelectorAll('[data-layer]').forEach((cb) => {
+    cb.onchange = () => { if (cb.checked) hiddenLayers.delete(cb.dataset.layer); else hiddenLayers.add(cb.dataset.layer); applyLayers(); };
+  });
+  box.querySelectorAll('[data-unbuild]').forEach((a) => { a.onclick = (e) => { e.preventDefault(); showBuilt3d(a.dataset.unbuild, false).then(() => renderInspector()); }; });
+  const solid = $('layerSolid');
+  if (solid) solid.onchange = () => { S.showSolid = solid.checked; paint(); };
+}
+
+// a part that changed since it was shown as built is shown again, as it is now
+function refreshBuilt3d(design) {
+  for (const [pid, b] of built3d) {
+    const p = design.parts.find((x) => x.id === pid);
+    if (!p) showBuilt3d(pid, false);
+    else if (p.version !== b.version) showBuilt3d(pid, true);
+  }
 }
 
 // colour by what's true: selected, colliding, reference, whittled
@@ -233,10 +326,11 @@ function paint() {
     m.visible = !(S.station && S.station.part === pid);
     // while previewing one part's design, fade the rest — the box would otherwise hide the frame
     const fade = !!S.station && S.station.part !== pid;
-    const transparent = fade || base.transparent;
+    const ghost = built3d.has(pid);            // shown as built: the solid is a faint ghost you can still click
+    const transparent = fade || ghost || base.transparent;
     if (m.material.transparent !== transparent) m.material.needsUpdate = true;   // recompiles the shader
     m.material.transparent = transparent;
-    m.material.opacity = fade ? Math.min(0.18, base.opacity) : base.opacity;
+    m.material.opacity = ghost ? (S.showSolid ? 0.25 : 0.04) : fade ? Math.min(0.18, base.opacity) : base.opacity;
     m.material.depthWrite = !transparent;
   }
 }
@@ -763,6 +857,7 @@ function builtResults(p, c) {
   const mine = b && (b.parts || []).find((x) => x.part === p.id);
   const bom = r.bom;
   return `<div class="card">
+      <button class="ghost" id="b3d" style="float:right">${built3d.has(p.id) ? 'Back to the solid' : 'Show how it\'s built'}</button>
       <b style="font-size:1.3em">${lbs(r.mass_lb)}</b> ${changed ? '<span class="badge">trying — not saved</span>' : ''}
       <div class="small">centre of gravity ${cogText(p, r.cog)} <span class="muted">(the red dot)</span></div>
       ${(r.keeps || []).map((k) => `<div class="small" style="margin-top:4px">${k.clear
@@ -873,6 +968,12 @@ function wireBuilt(p) {
   const c = S.built[p.id];
   if (!c || !c.report) return;
   wireCutplan(p);
+  const b3 = $('b3d');
+  if (b3) b3.onclick = async () => {
+    b3.disabled = true;
+    try { await showBuilt3d(p.id, !built3d.has(p.id)); } catch (e) { showErr(e.message); }
+    b3.disabled = false; b3.textContent = built3d.has(p.id) ? 'Back to the solid' : "Show how it's built";
+  };
   document.querySelectorAll('#buildBox [data-bk]').forEach((el) => {
     el.onchange = () => {
       const tried = {};
