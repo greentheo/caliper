@@ -26,10 +26,11 @@ sanity check.
 ## Status
 
 Early, and moving fast. It works end to end on its author's own projects (a cargo box towed behind an
-electric car, from aero shaping to the build book). The biggest gap: the designer in the chat doesn't yet
-write the inputs the studies and cut plans read, so a design started from scratch gets a measured shape
-but no frame study or cut plan ([#1](https://github.com/greentheo/caliper/issues/1)). The road to an
-installable app is the [V1 milestone](https://github.com/greentheo/caliper/milestone/1).
+electric car, from aero shaping to the build book). A design started from scratch in the chat now gets
+what it's built from, its bill of materials and its cut plan (a plywood step stool goes from one sentence
+to a nested sheet). The biggest gap is the studies: a part the designer writes doesn't yet get a load
+study of its own ([#1](https://github.com/greentheo/caliper/issues/1)). The road to an installable app is
+the [V1 milestone](https://github.com/greentheo/caliper/milestone/1).
 
 ## Install
 
@@ -80,6 +81,7 @@ caliper --help                                             # spec, refine, fit, 
 src/caliper/
   spec.py, measure.py, evaluate.py      what a part must be, measured, graded
   authoring.py, sandbox.py              Claude writes and revises the CadQuery; it runs in a worker process
+  part_scripts.md, consistency.py       what a part script declares, and the check that it matches the solid
   assembly.py, insert.py, fit.py        parts, mates and fits; a part authored to fit between two others
   design.py, chat.py, clarify.py        a design (prompt, requirements, parts, history) and the conversation
   promote.py                            feedback becomes a rule the design keeps
