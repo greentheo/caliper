@@ -26,6 +26,21 @@ def test_panels_go_to_the_unfolder_one_group_each():
     assert [ln for ln in text.splitlines() if ln.startswith("f ")] == ["f 1 2 3 4", "f 5 6 7", "f 8 9 10"]
 
 
+def test_the_unfolder_is_found_where_make_tools_puts_it(tmp_path, monkeypatch):
+    vendor, beside = tmp_path / "vendor" / "unfold-to-sheets", tmp_path / "unfold-to-sheets"
+    monkeypatch.setattr(cutplan, "UNFOLD_PLACES", (str(vendor), str(beside)))
+    monkeypatch.delenv("CALIPER_UNFOLD_DIR", raising=False)
+    assert cutplan.unfold_dir() == str(vendor)              # nowhere yet: the message names vendor/
+    (beside / "js").mkdir(parents=True)
+    (beside / "js" / "pipeline.js").write_text("")
+    assert cutplan.unfold_dir() == str(beside)              # a checkout beside the repo
+    (vendor / "js").mkdir(parents=True)
+    (vendor / "js" / "pipeline.js").write_text("")
+    assert cutplan.unfold_dir() == str(vendor)              # vendor/ first
+    monkeypatch.setenv("CALIPER_UNFOLD_DIR", "~/somewhere")
+    assert cutplan.unfold_dir() == os.path.expanduser("~/somewhere")     # the variable wins
+
+
 needs_unfolder = pytest.mark.skipif(cutplan.available() is not None,
                                     reason=f"no cut plans here: {cutplan.available()}")
 

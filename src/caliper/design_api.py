@@ -623,7 +623,7 @@ def router():
             raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
         if not _aero_available():
             raise HTTPException(status_code=503, detail="whittle with ParametricStudy isn't installed "
-                                "in Caliper's environment (pip install -e ~/githubrepo/whittle)")
+                                "in Caliper's environment (run `make tools`)")
         bounds = {k: (float(v[0]), float(v[1])) for k, v in req.bounds.items() if len(v) == 2}
 
         def work(j):

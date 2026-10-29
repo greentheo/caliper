@@ -27,6 +27,9 @@ examples/*.inserted.yaml
 !examples/*.stl            # keep checked-in demo references (e.g. the fit obstacle)
 !examples/**/*.stl
 
+# the optional tools `make tools` fetches (unfold-to-sheets)
+vendor/
+
 # OS / editor
 .DS_Store
 .idea/

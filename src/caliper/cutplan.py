@@ -1,7 +1,7 @@
 """CALI-45 — a cut plan: the panels a part is built from, flattened and nested onto the sheets they're cut
 from, with score lines where a panel folds; and the cut list for its sticks.
 
-The flattening and nesting is Theo's **unfold-to-sheets** (``game-dev/unfold-to-sheets``): it unfolds a
+The flattening and nesting is **unfold-to-sheets** (github.com/greentheo/unfold-to-sheets): it unfolds a
 mesh into flat pieces, marks folds as mountain/valley score lines, nests the pieces onto real stock, and
 writes each sheet as SVG and DXF (layers: cut, score-valley, score-mountain, seam, label) with an assembly
 drawing, a seam list and a printable PDF. Caliper's side is to say what the pieces are:
@@ -36,9 +36,21 @@ from .design import DesignStore
 DRIVER = os.path.join(os.path.dirname(__file__), "unfold_driver.mjs")
 
 
+#: Where ``make tools`` clones unfold-to-sheets, and where a checkout beside this repo would be.
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+UNFOLD_PLACES = (os.path.join(REPO, "vendor", "unfold-to-sheets"),
+                 os.path.join(os.path.dirname(REPO), "unfold-to-sheets"))
+
+
 def unfold_dir() -> str:
-    return os.environ.get("CALIPER_UNFOLD_DIR",
-                          os.path.expanduser("~/githubrepo/game-dev/unfold-to-sheets"))
+    """Where unfold-to-sheets is: ``$CALIPER_UNFOLD_DIR``, else the first of :data:`UNFOLD_PLACES` that
+    has it (``vendor/`` first), else ``vendor/`` — so the message for a missing one says where it goes."""
+    if os.environ.get("CALIPER_UNFOLD_DIR"):
+        return os.path.expanduser(os.environ["CALIPER_UNFOLD_DIR"])
+    for place in UNFOLD_PLACES:
+        if os.path.exists(os.path.join(place, "js", "pipeline.js")):
+            return place
+    return UNFOLD_PLACES[0]
 
 
 def available() -> Optional[str]:
@@ -46,7 +58,7 @@ def available() -> Optional[str]:
     if not shutil.which("node"):
         return "node isn't installed (unfold-to-sheets runs on node)"
     if not os.path.exists(os.path.join(unfold_dir(), "js", "pipeline.js")):
-        return f"unfold-to-sheets isn't at {unfold_dir()} (set CALIPER_UNFOLD_DIR)"
+        return f"unfold-to-sheets isn't at {unfold_dir()} (run `make tools`, or set CALIPER_UNFOLD_DIR)"
     return None
 
 

@@ -1,4 +1,4 @@
-// CALI-45 — run Theo's unfold-to-sheets (game-dev/unfold-to-sheets) on one material's panels.
+// CALI-45 — run unfold-to-sheets (github.com/greentheo/unfold-to-sheets) on one material's panels.
 //
 // Caliper writes the panels of a part as an OBJ with one group per panel — the seams are authored, so
 // unfold-to-sheets segments by group rather than guessing — and hands this driver the stock and the
