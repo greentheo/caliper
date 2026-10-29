@@ -94,9 +94,12 @@ def run_script(
 
         from .measure import Geometry
 
-        wp = cq.importers.importStep(step_path)
-        geom = Geometry.from_cadquery(wp)
-        geom.require_mesh()  # surface tessellation errors here, not later in sensing
+        from .occt import OCCT
+
+        with OCCT:
+            wp = cq.importers.importStep(step_path)
+            geom = Geometry.from_cadquery(wp)
+            geom.require_mesh()  # surface tessellation errors here, not later in sensing
     except Exception as e:  # noqa: BLE001
         import traceback as _tb
 

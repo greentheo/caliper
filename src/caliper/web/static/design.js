@@ -647,6 +647,7 @@ function designView(d) {
   return `<h2>${esc(d.name)} ${status}</h2>
     <div class="muted small">${esc(d.prompt)}</div>
     <h4>Scorecard</h4><div id="scoreBox">${scoreView(d)}</div>
+    <h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>
     <h4>Requirements</h4>
     ${d.requirements.length ? '<ul class="list">' + d.requirements.map((r) => `<li>${esc(r.question)}
       <div><b>${esc(r.answer)}</b>${r.source === 'assumed' ? ' <span class="badge">assumed</span>' : ''}</div></li>`).join('') + '</ul>'
@@ -716,6 +717,51 @@ function wireScore() {
   };
 }
 
+// ------------------------------------------------------------- the build package (CALI-51)
+// A released, versioned bundle for the shop: the build book (printable, with the assembly order), cut files
+// by machine, cut lists, shopping list and the scorecard as released.
+function releaseView(d) {
+  const rel = (d.releases || [])[0];
+  const go = `<div class="actions"><button id="relGo">${rel ? 'Make a new build package' : 'Make the build package'}</button></div><div id="relProgress"></div>`;
+  if (!rel) {
+    return `<div class="muted small">One printable bundle for this exact version: every sheet and plate as DXF and PDF,
+      the cut lists with their end cuts, what to buy, and the assembly order step by step.</div>${go}`;
+  }
+  const base = `/api/designs/${S.slug}/releases/${rel.id}/files`;
+  const stale = d.parts.some((p) => rel.versions[p.id] !== undefined && rel.versions[p.id] !== p.version);
+  const vers = Object.entries(rel.versions).map(([k, v]) => `${esc(k)} v${v}`).join(', ');
+  return `<div class="small"><b>Release ${esc(rel.id)}</b>
+      ${rel.ready ? '<span class="badge ok">ready to cut</span>' : '<span class="badge bad">not ready — a check fails</span>'}
+      ${stale ? '<span class="badge bad">a part has changed since</span>' : ''}
+      <div class="muted">${new Date(rel.created * 1000).toLocaleString()} · ${vers}</div>
+      <div>${rel.steps.length} assembly steps · ${rel.sheets} sheets · ~$${Math.round(rel.shopping_usd)} to buy</div></div>
+    <a href="${base}/index.html" target="_blank" rel="noopener"><img src="${base}/assembly/finished.png" alt="the finished build"
+      style="width:100%;margin-top:6px;border:1px solid var(--line);border-radius:6px;background:#fff"></a>
+    <div class="actions" style="flex-wrap:wrap">
+      <a class="btn" href="${base}/index.html" target="_blank" rel="noopener">Open the build book</a>
+      ${rel.pdf ? `<a class="btn" href="${base}/build-book.pdf" target="_blank" rel="noopener">PDF</a>` : ''}
+      <a class="btn" href="${base}/${esc(rel.zip)}">Download all (.zip)</a></div>
+    ${rel.pdf_note ? `<div class="muted small">${esc(rel.pdf_note)}</div>` : ''}
+    <details class="small"><summary>Assembly order</summary><ol style="margin:4px 0 0 18px;padding:0">
+      ${rel.steps.map((s) => `<li><a href="${base}/${esc(s.img)}" target="_blank" rel="noopener">${esc(s.title)}</a></li>`).join('')}</ol></details>
+    ${go}`;
+}
+
+function wireRelease() {
+  const go = $('relGo');
+  if (!go) return;
+  go.onclick = async () => {
+    const prog = $('relProgress');
+    go.disabled = true;
+    prog.innerHTML = '<div class="small muted" id="relMsg">bringing the cut plans and scorecard up to date…</div>';
+    try {
+      const { job_id } = await api('POST', `/api/designs/${S.slug}/release`);
+      await follow(job_id, (ev) => { const m = $('relMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
+      await refresh();
+    } catch (e) { prog.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`; go.disabled = false; }
+  };
+}
+
 function historyItem(h) {
   if (h.kind === 'revision') {
     const what = h.action === 'frame' ? `tubes sized — design ${h.station} (${h.mass_lb} lb, ${h.safety}x)`
@@ -772,7 +818,7 @@ function partView(p) {
 function wireInspector(p) {
   document.querySelectorAll('#inspector [data-part]').forEach((a) => { a.onclick = () => setScope(a.dataset.part); });
   showMarks();
-  if (!p) { wireBalance(); wireScore(); return; }
+  if (!p) { wireBalance(); wireScore(); wireRelease(); return; }
   wireBuilt(p);
   const role = $('roleRef');
   if (role) role.onchange = async () => {

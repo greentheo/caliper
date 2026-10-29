@@ -758,6 +758,27 @@ front corner), walls ≥ 2.45×, a jack carries ≤ 288 lb, floor on the mattres
 jacks (the back ones are a bit overkill already); the 350 lb rating is conservative — check against 420 lb
 (+20%). Scorecard **11/11 pass**.
 
+### CALI-51 — Build package: release a revision to the shop · P1 · M6 · ✅ done (v1)
+`release.make()` releases the design as it stands into `designs/<slug>/releases/<NNN>/`, bringing every
+part's cut plan and the scorecard up to date first (a part changed since → a new cut plan; any part, the
+goals or a new cut plan changed since the last card → re-scored). In the folder: **the build book**
+(`index.html`, printed to `build-book.pdf` by a headless Chrome with a throwaway profile when there is one):
+the cover with the scorecard verdict and the headline numbers, *before you cut* notes, the shopping list (by
+where it's bought, rounded up to what's sold — tube by the foot, plate as one piece the gussets nest on,
+sheets from the nesting, cloth/epoxy/paint to sold sizes, jacks rated 1.5× the most one carries), the cut
+lists in sixteenths with tube end cuts, plates and nested sheets with bevels, the **assembly order** — the
+part that holds the others up first, then each part in its build stages (tubes, gussets, jacks, floor,
+skeleton, panels, shell, patches), its skin, the parts brought together, the finish — each step drawn
+(depth-buffered PNG: what's already on, pale; this step's pieces, in colour; the box lowered onto the frame
+with arrows), and the scorecard as released. Beside it: `plasma/` (plate DXF + SVG), `router/` (every nested
+sheet DXF + SVG, the 1:1 pattern PDF and seam list), `cutlist.txt`, `shopping.txt/.csv`, `scorecard.json`,
+`source/` (part scripts at the released versions + the design's files) and a zip of the lot. A release made
+while a check fails says so on its cover. Design page: **Build package** under the scorecard.
+Found on the way: mirrored panels were written to the unfolder wound inside out (half the shell's seams
+128 mountain / 128 valley, the right roof bevel 50–71° against the left's 19–40°) — panels now face out
+from the part's middle (233 / 23, bevels symmetric); and two page loads at once crashed the server inside
+OCCT — in-process B-rep work now goes through one lock (`occt.OCCT`).
+
 ## Milestone M5 — whole machines from one prompt (after M4)
 
 ### CALI-35 — Decomposition planner  · P0 · M5 · 🧊 backlog

@@ -54,13 +54,30 @@ def runs_dir(store: DesignStore) -> str:
     return os.path.join(store.root, "cutplans")
 
 
-def panels_obj(items: list[dict], title: str) -> str:
+def _outward(poly: list, centre) -> list:
+    """The polygon wound so its normal points away from ``centre`` — the part's middle. A mirrored panel
+    comes out wound the other way round, and the unfolder reads the angle at a seam (and which way a score
+    line folds) from the faces' normals, so every face has to face out."""
+    n = [0.0, 0.0, 0.0]
+    for i, a in enumerate(poly):
+        b = poly[(i + 1) % len(poly)]
+        n[0] += (a[1] - b[1]) * (a[2] + b[2])
+        n[1] += (a[2] - b[2]) * (a[0] + b[0])
+        n[2] += (a[0] - b[0]) * (a[1] + b[1])
+    mid = [sum(q[k] for q in poly) / len(poly) for k in range(3)]
+    return list(reversed(poly)) if sum(n[k] * (mid[k] - centre[k]) for k in range(3)) < 0 else list(poly)
+
+
+def panels_obj(items: list[dict], title: str, centre=None) -> str:
     """Sheet items as an OBJ: one group per panel, in mm. Faces are written as the polygons they are
-    (unfold-to-sheets fans them into triangles; the panels here are convex)."""
+    (unfold-to-sheets fans them into triangles; the panels here are convex), facing away from ``centre``
+    when it's given (the outside surface outward)."""
     lines = [f"# {title} — written by Caliper for unfold-to-sheets", "# units: mm"]
     n = 0
     for it in items:
         polys = [it["outline"]] if it.get("outline") else list(it.get("facets") or [])
+        if centre is not None:
+            polys = [_outward(poly, centre) for poly in polys]
         lines.append(f"g {it['name']}")
         for poly in polys:
             for x, y, z in poly:
@@ -257,12 +274,15 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
                             "cuts": sorted(ts, key=lambda t: -t["length_mm"])} for lab, ts in by.items()]
         record["notes"].append("Tube lengths are cut to the faces they butt against (from the centrelines in "
                                "members()); check them against the first tube before cutting the rest.")
+    pts = [q for its in groups.values() for it in its
+           for poly in ([it["outline"]] if it.get("outline") else it.get("facets") or []) for q in poly]
+    centre = [sum(q[k] for q in pts) / len(pts) for k in range(3)] if pts else None
     for (material, thickness), its in sorted(groups.items()):
         stock, cut = _stock(material)
         mat = _material(material, thickness, cut)
         key = f"{material}-{M.nominal(thickness).replace(' ', '').replace('/', '_')}"
         emit("unfolding", f"{len(its)} {mat['name']} panel(s)")
-        summary = _unfold(panels_obj(its, f"{part_id}: {mat['name']}"), os.path.join(root, key),
+        summary = _unfold(panels_obj(its, f"{part_id}: {mat['name']}", centre), os.path.join(root, key),
                           f"{part_id} {mat['name']}", stock, mat, timeout, cut.get("score_min_deg", 0.0))
         record["sheets"].append({"key": key, "material": material, "thickness_mm": thickness,
                                  "label": mat["name"], "stock": stock["name"],

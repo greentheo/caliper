@@ -26,10 +26,10 @@ _Last updated: 2026-10-28 (**M4 complete** in the browser + whittle bridge (CALI
 - ✅ CALI-47 — Scorecard v1: checks + objectives + trust, cost & waste at editable prices; *Score it* on the design page · P0 · M6 · _2026-10-28_
 - ✅ CALI-52 — The skeleton: box inside the box + roof beams, searched under 20 lb/ft² snow → 1x2 frames + two 2x2 beams across (57 lb box) · P1 · M6 · _2026-10-28_
 - ✅ CALI-53 — Parked on the jacks with someone inside; the floor under a knee · P1 · M6 · _2026-10-28 · frame 2.24×, jacks ≤ 288 lb, floor 3.3× on the mattress; hitch 356 lb kneeling at the very front, under Theo's 420 lb (rating + 20%) — scorecard 11/11_
+- ✅ CALI-51 — Build package: a released bundle per revision — the build book (HTML + PDF) with the assembly order drawn step by step, plasma/router files, cut lists, shopping list, scorecard as released · P1 · M6 · _2026-10-28 · camper release 001: 11 steps, 5 sheets, ~$566; fixed mirrored panels written inside out (bevels, mountain/valley) and a server crash on concurrent page loads_
 - CALI-48 — The shop: machines + stock as a design input; manufacturability checks; per-machine cut plans · P0 · M6
 - CALI-49 — Moves: one interface over design / optimize / make tools · P1 · M6
 - CALI-50 — The loop runner: propose → run → measure → keep/revert, budgets, journal, gates · P1 · M6
-- CALI-51 — Build package: release a revision to the shop · P1 · M6
 
 ## 🧊 Parked — engine breadth (pre-M4 backlog)
 - CALI-24 — Optimizer-in-the-author-loop: let CALI-19b tune the authored part's continuous params (not just LLM revision) for coupled inserts · P2 · assembly-spine

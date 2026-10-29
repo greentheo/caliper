@@ -110,7 +110,8 @@ shopping list, assembly drawing and order, and the scorecard as released.
 - **CALI-49 — Moves** · P1 · M6 — one interface over design/optimize/make tools; layouts and BUILD
   what-ifs as options.
 - **CALI-50 — The loop runner** · P1 · M6 — propose → run → measure → keep/revert, budgets, journal, gates.
-- **CALI-51 — Build package** · P1 · M6 — release a revision to the shop.
+- **CALI-51 — Build package** · P1 · M6 — release a revision to the shop. ✅ v1 2026-10-28 (`release.py`):
+  routes by material until CALI-48 knows the machines (steel plate → `plasma/`, sheet goods → `router/`).
 - **Housekeeping before CALI-50:** commit/pin whittle's frame-study work; merge `cali-31-design-ui` /
   `cali-39-parametric-aero`; pin unfold-to-sheets by commit.
 

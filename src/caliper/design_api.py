@@ -16,7 +16,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import aero, chat, clarify, construction, cutplan, frame_study, promote, scorecard
+from . import aero, chat, clarify, construction, cutplan, frame_study, promote, release, scorecard
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -195,6 +195,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "cutplans": cutplan.list_runs(store),
         "gusset_runs": frame_study.list_gussets(store),
         "scorecards": scorecard.list_cards(store, 2),
+        "releases": release.list_releases(store),
         "has_goals": os.path.exists(scorecard.goals_path(store)),
         "cutplan_unavailable": cutplan.available(),
         "aero_available": _aero_available(),
@@ -461,6 +462,40 @@ def router():
         media = types.get(os.path.splitext(full)[1].lower(), "application/octet-stream")
         headers = {} if media.startswith(("image/", "text/", "application/pdf")) else {
             "Content-Disposition": f'attachment; filename="{rid}-{path.replace("/", "-")}"'}
+        return Response(data, media_type=media, headers=headers)
+
+    # -- the build package (CALI-51): a released, versioned bundle for the shop ---------------------
+    @r.post("/api/designs/{slug}/release")
+    def release_run(slug: str):
+        load(slug)
+        why = cutplan.available()
+        if why:
+            raise HTTPException(status_code=503, detail=why)
+
+        def work(j):
+            return release.make(DesignStore.load(slug), emit=lambda k, t="", **d: j.emit(k, t, **d))
+
+        job = RUNNER.submit("release", work, label="build package", lock=_lock(slug))
+        return {"job_id": job.id}
+
+    @r.get("/api/designs/{slug}/releases/{rid}/files/{path:path}")
+    def release_file(slug: str, rid: str, path: str):
+        store = load(slug)
+        if release.load_release(store, rid) is None:
+            raise HTTPException(status_code=404, detail="no such release")
+        try:
+            full = release.file_path(store, rid, path)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="no such file")
+        types = {".html": "text/html; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
+                 ".dxf": "application/dxf", ".pdf": "application/pdf", ".txt": "text/plain; charset=utf-8",
+                 ".csv": "text/csv; charset=utf-8", ".json": "application/json", ".py": "text/plain; charset=utf-8",
+                 ".yaml": "text/plain; charset=utf-8", ".zip": "application/zip"}
+        with open(full, "rb") as f:
+            data = f.read()
+        media = types.get(os.path.splitext(full)[1].lower(), "application/octet-stream")
+        inline = media.startswith(("image/", "text/", "application/pdf", "application/json"))
+        headers = {} if inline else {"Content-Disposition": f'attachment; filename="{os.path.basename(full)}"'}
         return Response(data, media_type=media, headers=headers)
 
     # -- the scorecard (CALI-47): every requirement measured, every objective tracked -----------------

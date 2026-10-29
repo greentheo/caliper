@@ -96,3 +96,23 @@ def test_tubes_are_cut_to_the_faces_they_butt_and_mitred_to_lie_flat():
     # the riser is the biggest tube at its top: it carries on to close the corner over the spine
     top = next(e for e in cuts["riser"]["ends"] if e.get("carries"))
     assert top["extend_mm"] == pytest.approx(25.4) and cuts["riser"]["length_mm"] == pytest.approx(200 + 25.4, abs=0.1)
+
+
+def test_every_face_is_written_facing_out():
+    # a mirrored pair: the right panel is the left one with y flipped, so it comes wound the other way
+    left = [(0, 100, 0), (100, 100, 0), (100, 100, 50), (0, 100, 50)]
+    right = [(x, -y, z) for x, y, z in left]
+    text = cutplan.panels_obj([{"name": "left", "outline": left}, {"name": "right", "outline": right}], "t",
+                              centre=(50, 0, 25))
+    vs = [tuple(map(float, ln.split()[1:])) for ln in text.splitlines() if ln.startswith("v ")]
+
+    def normal(p):
+        n = [0.0, 0.0, 0.0]
+        for i, a in enumerate(p):
+            b = p[(i + 1) % len(p)]
+            n[0] += (a[1] - b[1]) * (a[2] + b[2])
+            n[1] += (a[2] - b[2]) * (a[0] + b[0])
+            n[2] += (a[0] - b[0]) * (a[1] + b[1])
+        return n
+
+    assert normal(vs[:4])[1] > 0 and normal(vs[4:])[1] < 0       # each facing away from the middle

@@ -151,4 +151,5 @@ PRICES = {
     "canvas_per_yd": 7.0, "glass_cloth_per_yd": 9.0, "epoxy_per_gal": 110.0, "glue_per_gal": 30.0,
     "paint_per_gal": 45.0,
     "hardware_allowance": 25.0,                                       # a lump of glue, screws and hinges
+    "jack_each": 35.0,                                                # a trailer stabilizer jack
 }

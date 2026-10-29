@@ -183,7 +183,10 @@ def _context(store: DesignStore, level: str, part: Optional[str]) -> dict:
     from . import evaluate as ev
     from .assembly import build_context, load_parts
 
-    parts = load_parts(store.assembly, base_dir=store.root)
+    from .occt import OCCT
+
+    with OCCT:
+        parts = load_parts(store.assembly, base_dir=store.root)
     if level == "design":
         return build_context(store.assembly, parts)
     if not part or part not in parts:

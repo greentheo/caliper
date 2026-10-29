@@ -41,6 +41,7 @@ import yaml
 from pydantic import Field
 
 from .assembly import Assembly, Part
+from .occt import OCCT
 from .spec import Spec, _Base
 
 DESIGNS_DIR_ENV = "CALIPER_DESIGNS"
@@ -534,9 +535,10 @@ class DesignStore:
         if part is None:
             raise KeyError(f"unknown part {part_id!r}")
         path = _resolve_source(part.source, self.root)
-        if path.endswith(".py"):
-            return _build_py_part(path, part.position, part.rotation)
-        return Geometry.from_stl_posed(path, part.position, part.rotation)
+        with OCCT:
+            if path.endswith(".py"):
+                return _build_py_part(path, part.position, part.rotation)
+            return Geometry.from_stl_posed(path, part.position, part.rotation)
 
     def part_stl(self, part_id: str) -> bytes:
         """The part as a binary STL, in design (world) coordinates."""
@@ -556,10 +558,11 @@ class DesignStore:
         """
         from .assembly import evaluate_assembly, load_parts_tolerant
 
-        if not tolerant:
-            return evaluate_assembly(self.assembly, base_dir=self.root)
-        geoms, errors = load_parts_tolerant(self.assembly, base_dir=self.root)
-        return evaluate_assembly(self.assembly, base_dir=self.root, parts=geoms), errors
+        with OCCT:
+            if not tolerant:
+                return evaluate_assembly(self.assembly, base_dir=self.root)
+            geoms, errors = load_parts_tolerant(self.assembly, base_dir=self.root)
+            return evaluate_assembly(self.assembly, base_dir=self.root, parts=geoms), errors
 
     # --- prompt context ----------------------------------------------------
     def prompt_context(self, part_id: Optional[str] = None, history_limit: int = 8) -> str:
