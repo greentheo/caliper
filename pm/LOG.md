@@ -28,7 +28,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   a 19 × 18 in piece of 1/8 plate, 1 ply + 4 XPS, 5 1x2 + 3 2x2, 8 yd cloth, ½ gal epoxy, 3 qt paint, two
   jacks rated 500 lb+.
 - Tests: `test_release.py` (8), `test_cutplan.py` +1. Full suite green (447 passed).
-- Commit: _pending_
+- Commit: `3170a12`
 
 ### 2026-10-28 · CALI-53 · Parked on the jacks
 - **Theo:** proceed (200 lb + 50 lb of gear, 150 lb a knee, jacks under the X's back corners).

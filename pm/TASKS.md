@@ -758,7 +758,7 @@ front corner), walls ≥ 2.45×, a jack carries ≤ 288 lb, floor on the mattres
 jacks (the back ones are a bit overkill already); the 350 lb rating is conservative — check against 420 lb
 (+20%). Scorecard **11/11 pass**.
 
-### CALI-51 — Build package: release a revision to the shop · P1 · M6 · ✅ done (v1)
+### CALI-51 — Build package: release a revision to the shop · P1 · M6 · ✅ done (v1, `3170a12`)
 `release.make()` releases the design as it stands into `designs/<slug>/releases/<NNN>/`, bringing every
 part's cut plan and the scorecard up to date first (a part changed since → a new cut plan; any part, the
 goals or a new cut plan changed since the last card → re-scored). In the folder: **the build book**
