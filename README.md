@@ -21,10 +21,15 @@ Insert, refining authored parts) need `ANTHROPIC_API_KEY` in a gitignored `.env`
 
 ## Status
 
-The single-part loop **and** the assembly spine are complete: intent → spec → LLM-authored CadQuery →
-measured → revised → fitted → **inserted into multi-part assemblies with measured fits and bolt-hole
-alignment** (see the corner-leg machine: `caliper assemble examples/machine.yaml`). See the board:
-[`pm/BOARD.md`](pm/BOARD.md).
+The home page is a **design session**: a 3D viewport and a conversation. Under it: LLM-authored CadQuery,
+measured and revised until it passes; multi-part assemblies with measured fits; studies through
+[whittle](https://github.com/greentheo/whittle) (drag, tube frames, gusset plates); what a part is built
+from (weight, balance, bill of materials); cut plans through
+[unfold-to-sheets](https://github.com/greentheo/unfold-to-sheets); a scorecard; and a build package per
+release (the build book, plasma and router files, cut and shopping lists).
+
+Open work is in [GitHub issues](https://github.com/greentheo/caliper/issues); the road to an installable app is the
+[V1 milestone](https://github.com/greentheo/caliper/milestone/1).
 
 ## Quickstart
 
@@ -69,7 +74,7 @@ src/caliper/        # the library — the loop is the product
   server.py + web/  # CALI-9/21b  the webapp (three.js viewer, assemblies, insert UI)
 tests/              # regression guard (pytest) against known parts
 examples/           # demo specs, assemblies, and the corner-leg machine (machine.yaml)
-pm/                 # lightweight .md project management (board + tasks + log)
+pm/                 # work log, demo log, and the board's history (open work: GitHub issues)
 specs/              # design spec
 TESTING.md          # ← the hands-on walkthrough of everything
 ```
@@ -77,9 +82,16 @@ TESTING.md          # ← the hands-on walkthrough of everything
 ## Working conventions
 
 We run this like an engineering shop: specs → backlog → in-progress → done, with a work log.
-- **Board:** [`pm/BOARD.md`](pm/BOARD.md) — kanban of every task.
-- **Tasks:** [`pm/TASKS.md`](pm/TASKS.md) — the "issues" with acceptance criteria.
+- **Issues:** [GitHub issues](https://github.com/greentheo/caliper/issues) — open work with acceptance criteria. Titles keep the
+  `CALI-N` id; commits name both (`CALI-48 (#4): …`).
+- **History:** [`pm/BOARD.md`](pm/BOARD.md) and [`pm/TASKS.md`](pm/TASKS.md) — the board and task cards
+  for M0–M6, frozen on 2026-10-29 when the tracker moved to GitHub.
 - **Log:** [`pm/LOG.md`](pm/LOG.md) — append-only record of what shipped, when, with commit hashes.
 - **Demo & testing:** [`pm/DEMO.md`](pm/DEMO.md) — **start here to try the build**: current
   capabilities + the exact commands to run each shipped feature. Updated after every task.
 - **Loop/review:** [`nightshift/`](nightshift/) — `make loop` to run an iteration, `make review` for the regression+review guard.
+
+## License
+
+Caliper is licensed under the [Apache License 2.0](LICENSE). Its optional tools carry their own licences:
+whittle (MIT) and unfold-to-sheets (Apache-2.0).

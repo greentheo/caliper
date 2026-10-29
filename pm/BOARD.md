@@ -1,5 +1,12 @@
 # Caliper board
 
+> **Moved to GitHub issues (2026-10-29).** Open work lives at <https://github.com/greentheo/caliper/issues>; titles keep their `CALI-N` id.
+> This board is frozen as the record of M0–M6. Where each open card went:
+> - **V1 — on the Mac App Store:** CALI-54 [#1](https://github.com/greentheo/caliper/issues/1) · CALI-55 [#2](https://github.com/greentheo/caliper/issues/2) · CALI-35 [#3](https://github.com/greentheo/caliper/issues/3) · CALI-48 [#4](https://github.com/greentheo/caliper/issues/4) · CALI-60 [#5](https://github.com/greentheo/caliper/issues/5) · CALI-57 [#6](https://github.com/greentheo/caliper/issues/6) · CALI-58 [#7](https://github.com/greentheo/caliper/issues/7) · CALI-59 [#8](https://github.com/greentheo/caliper/issues/8) · CALI-64 [#9](https://github.com/greentheo/caliper/issues/9) · CALI-61 [#10](https://github.com/greentheo/caliper/issues/10) · CALI-62 [#11](https://github.com/greentheo/caliper/issues/11) · CALI-63 [#12](https://github.com/greentheo/caliper/issues/12) · CALI-65 [#13](https://github.com/greentheo/caliper/issues/13)
+> - **M6:** CALI-46 [#14](https://github.com/greentheo/caliper/issues/14) · CALI-49 [#15](https://github.com/greentheo/caliper/issues/15) · CALI-50 [#16](https://github.com/greentheo/caliper/issues/16)
+> - **M5:** CALI-36 [#17](https://github.com/greentheo/caliper/issues/17) · CALI-37 [#18](https://github.com/greentheo/caliper/issues/18)
+> - **Parked / blocked:** CALI-24 [#19](https://github.com/greentheo/caliper/issues/19) · CALI-11 [#20](https://github.com/greentheo/caliper/issues/20) · CALI-12 [#21](https://github.com/greentheo/caliper/issues/21) · CALI-13 [#22](https://github.com/greentheo/caliper/issues/22) · CALI-18 [#23](https://github.com/greentheo/caliper/issues/23) · CALI-14 [#24](https://github.com/greentheo/caliper/issues/24)
+
 Kanban of every task. One line per card: `CALI-N — title · priority · milestone`.
 Full acceptance criteria in [`TASKS.md`](TASKS.md). Move cards between sections as state changes.
 
@@ -13,34 +20,33 @@ _Last updated: 2026-10-28 (**M4 complete** in the browser + whittle bridge (CALI
 - _(all shipped — CALI-28…33 + CALI-38, see Done)_
 
 ## 🚀 M5 — whole machines from one prompt (after M4)
-- CALI-35 — Decomposition planner: prompt → assembly skeleton (parts + interfaces + asserts), reviewed before authoring · P0 · M5
-- CALI-36 — Nested sub-assemblies (descend into a part that is itself a design) · P1 · M5
-- CALI-37 — Feature-level selection (per-face export + face-id round-trip) · P2 · M5
+- CALI-35 — Decomposition planner: prompt → assembly skeleton (parts + interfaces + asserts), reviewed before authoring · P0 · M5 · [#3](https://github.com/greentheo/caliper/issues/3)
+- CALI-36 — Nested sub-assemblies (descend into a part that is itself a design) · P1 · M5 · [#17](https://github.com/greentheo/caliper/issues/17)
+- CALI-37 — Feature-level selection (per-face export + face-id round-trip) · P2 · M5 · [#18](https://github.com/greentheo/caliper/issues/18)
 
 ## 🧭 M6 — the design ⇄ optimize ⇄ make loop (draft: [`specs/caliper-make-loop-spec.md`](../specs/caliper-make-loop-spec.md))
 > Theo (2026-10-28): design, optimization and *how it gets made* as one iterative cycle — his shop (CNC
 > plasma, CNC router, small 3D printer, a large printer later) as constraints, him in the loop at a few gates,
 > Caliper doing the rest.
 
-- CALI-46 — Joinery in the cut plan: tube end cuts (true lengths, mitres/copes), foam band bevels, skeleton placement · P1 · M5
+- CALI-46 — Joinery in the cut plan: tube end cuts (true lengths, mitres/copes), foam band bevels, skeleton placement · P1 · M5 · [#14](https://github.com/greentheo/caliper/issues/14)
 - ✅ CALI-47 — Scorecard v1: checks + objectives + trust, cost & waste at editable prices; *Score it* on the design page · P0 · M6 · _2026-10-28_
 - ✅ CALI-52 — The skeleton: box inside the box + roof beams, searched under 20 lb/ft² snow → 1x2 frames + two 2x2 beams across (57 lb box) · P1 · M6 · _2026-10-28_
 - ✅ CALI-53 — Parked on the jacks with someone inside; the floor under a knee · P1 · M6 · _2026-10-28 · frame 2.24×, jacks ≤ 288 lb, floor 3.3× on the mattress; hitch 356 lb kneeling at the very front, under Theo's 420 lb (rating + 20%) — scorecard 11/11_
 - ✅ CALI-51 — Build package: a released bundle per revision — the build book (HTML + PDF) with the assembly order drawn step by step, plasma/router files, cut lists, shopping list, scorecard as released · P1 · M6 · _2026-10-28 · camper release 001: 11 steps, 5 sheets, ~$566; fixed mirrored panels written inside out (bevels, mountain/valley) and a server crash on concurrent page loads_
-- CALI-48 — The shop: machines + stock as a design input; manufacturability checks; per-machine cut plans · P0 · M6
-- CALI-49 — Moves: one interface over design / optimize / make tools · P1 · M6
-- CALI-50 — The loop runner: propose → run → measure → keep/revert, budgets, journal, gates · P1 · M6
+- CALI-48 — The shop: machines + stock as a design input; manufacturability checks; per-machine cut plans · P0 · M6 · [#4](https://github.com/greentheo/caliper/issues/4)
+- CALI-49 — Moves: one interface over design / optimize / make tools · P1 · M6 · [#15](https://github.com/greentheo/caliper/issues/15)
+- CALI-50 — The loop runner: propose → run → measure → keep/revert, budgets, journal, gates · P1 · M6 · [#16](https://github.com/greentheo/caliper/issues/16)
 
 ## 🧊 Parked — engine breadth (pre-M4 backlog)
-- CALI-24 — Optimizer-in-the-author-loop: let CALI-19b tune the authored part's continuous params (not just LLM revision) for coupled inserts · P2 · assembly-spine
-- CALI-12 — Threaded holes done right (tapped/insert vs clearance; the machine uses tap-diameter today) · P2 · generator
-- CALI-18 — `largest_through_bore` counts a tube's OUTER wall as a bore (both are cylinders); distinguish interior bores · P2 · measure (found authoring a grommet)
-- CALI-11 — Variable bend angle (e.g. 45°) · P2 · generator
-- CALI-12 — Threaded / tapped / insert holes · P2 · generator
-- CALI-13 — Primitive & geometry library + multi-part assemblies · P2 · epic (story for later)
+- CALI-24 — Optimizer-in-the-author-loop: let CALI-19b tune the authored part's continuous params (not just LLM revision) for coupled inserts · P2 · assembly-spine · [#19](https://github.com/greentheo/caliper/issues/19)
+- CALI-12 — Threaded holes done right (tapped/insert vs clearance; the machine uses tap-diameter today) · P2 · generator · [#21](https://github.com/greentheo/caliper/issues/21)
+- CALI-18 — `largest_through_bore` counts a tube's OUTER wall as a bore (both are cylinders); distinguish interior bores · P2 · measure (found authoring a grommet) · [#23](https://github.com/greentheo/caliper/issues/23)
+- CALI-11 — Variable bend angle (e.g. 45°) · P2 · generator · [#20](https://github.com/greentheo/caliper/issues/20)
+- CALI-13 — Primitive & geometry library + multi-part assemblies · P2 · epic (story for later) · [#22](https://github.com/greentheo/caliper/issues/22)
 
 ## ⏸ Blocked / waiting
-- CALI-14 — SpaceMouse via NL-Proxy (driver coexistence) · P2 · M2 · _phase 1 shipped; phase 2 blocked on Theo's on-screen API telemetry_
+- CALI-14 — SpaceMouse via NL-Proxy (driver coexistence) · P2 · M2 · _phase 1 shipped; phase 2 blocked on Theo's on-screen API telemetry_ · [#24](https://github.com/greentheo/caliper/issues/24)
 
 ## 🔨 In Progress
 - _(none)_

@@ -1,35 +1,39 @@
 # Caliper project management (lightweight, .md-based)
 
-A deliberately small substitute for Linear. Three artifacts, plain Markdown, version-controlled with the code so task state and the diff that satisfied it live together.
+Open work is tracked in **[GitHub issues](https://github.com/greentheo/caliper/issues)** (since 2026-10-29). The Markdown files here keep
+what doesn't fit an issue tracker: the work log and the demo log, version-controlled with the code.
+`BOARD.md` and `TASKS.md` are frozen as the record of M0–M6; `BOARD.md` maps each card that was still open
+to its issue.
 
 ## The artifacts
 
 | File | Role | Analogy |
 |---|---|---|
-| [`BOARD.md`](BOARD.md) | Kanban: every task as a one-line card under **Backlog / In Progress / Done**. | Linear board |
-| [`TASKS.md`](TASKS.md) | The "issues" — full acceptance criteria, notes, and dependencies per task id. | Linear issue detail |
+| [GitHub issues](https://github.com/greentheo/caliper/issues) | Open work: one issue per task, acceptance criteria in the body, milestones and labels for priority and area. | The board |
+| [`BOARD.md`](BOARD.md), [`TASKS.md`](TASKS.md) | Frozen 2026-10-29: the board and task cards for M0–M6. | Archive |
 | [`LOG.md`](LOG.md) | Append-only, dated record of what shipped, with commit hashes and measurements. | Standup / changelog |
 | [`DEMO.md`](DEMO.md) | Demo & testing log — current capabilities + the exact commands to try each shipped thing. | Release notes / "how to try it" |
 
 ## Conventions
 
-- **Task ids** are `CALI-N`, matching the design spec's seed backlog (§11).
-- A task lives in exactly one BOARD column at a time. Moving it = cut the line, paste under the new heading.
-- **Definition of done:** acceptance criteria in `TASKS.md` met, tests green (`pytest`), a `LOG.md`
+- **Task ids** are `CALI-N` and stay in the issue title (`CALI-48 · The shop: …`); the next new id is the
+  highest one in use plus one.
+- **Definition of done:** the issue's acceptance criteria met, tests green (`pytest`, and CI on the PR), a `LOG.md`
   entry written with the commit hash, **and `DEMO.md` updated** — refresh "current capabilities" and
   add a demo-log entry with the exact command(s) the human can run to try the new work.
-- Every meaningful change is a local git commit referencing the task: `CALI-3: evaluator parses assert exprs`.
-- When you pick up work: move the card to **In Progress**, set yourself as owner, then code.
-- When you finish: move to **Done** with the date, append a `LOG.md` entry, update `DEMO.md`
-  (capabilities + how-to-try), then commit.
+- Every meaningful change is a commit naming the task and its issue: `CALI-48 (#4): plasma bed check`.
+  A PR that finishes one says `Closes #4`.
+- When you pick up work: assign yourself the issue, then code.
+- When you finish: append a `LOG.md` entry, update `DEMO.md` (capabilities + how-to-try), commit, and
+  close the issue (or let the PR close it).
 
 ## Workflow loop (how a task flows)
 
 ```
-pick from Backlog ──► move to In Progress ──► code + tests ──► pytest green
-       ▲                                                                │
-       │                                                                ▼
- next task ◄── append LOG.md + update DEMO.md + commit ◄── move to Done ◄── review (nightshift/)
+pick an issue ──► assign it ──► code + tests ──► pytest green ──► PR, CI green
+      ▲                                                                   │
+      │                                                                   ▼
+ next issue ◄── append LOG.md + update DEMO.md ◄── merge (Closes #N) ◄── review (nightshift/)
 ```
 
 The `nightshift/` scaffolding automates the right edge of that loop: run the iteration, run the

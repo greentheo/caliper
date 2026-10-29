@@ -1,5 +1,8 @@
 # Caliper tasks (the "issues")
 
+> **Frozen 2026-10-29.** Open tasks moved to GitHub issues (<https://github.com/greentheo/caliper/issues>); [`BOARD.md`](BOARD.md) maps each
+> card to its issue. The cards below stay as the record of what was asked and how it was done.
+
 Acceptance criteria per task. Ids match the design spec §11 and milestones M0–M3 (§8).
 Live status is on [`BOARD.md`](BOARD.md); each issue below is stamped ✅ done (with commit) or 🧊 backlog
 for the record.
