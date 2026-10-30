@@ -464,8 +464,13 @@ def _say_stage(pid: str, layer: str, pcs: list[dict], plan: dict, ctx: dict) -> 
             do.append(f"Cut the {', '.join(n.replace('_', ' ') for n in names if n in g['panels'])} from "
                       f"{g['label']} — {_router(pid, g)}/ (or by hand from the 1:1 pattern.pdf).")
             files.append(f"{_router(pid, g)}/")
-        do.append("Glue them to the floor's edge and the skeleton with foam-safe adhesive; they're cut to the "
-                  "outside surface, so trim the inside corners to suit as they go on.")
+        if all(p.get("material") in ("plywood", "lumber") for p in pcs):
+            # wood: glued and screwed where they meet (CALI-79: the stool was told to use foam-safe adhesive)
+            do.append("Glue and screw them together where they meet, a screw every 6 in along each joint (pilot "
+                      "holes first); they're cut to the outside surface, so check each corner square as it goes on.")
+        else:
+            do.append("Glue them to the floor's edge and the skeleton with foam-safe adhesive; they're cut to the "
+                      "outside surface, so trim the inside corners to suit as they go on.")
     elif layer == "shell":
         title = "The shell: bands and roof"
         n_bent = sum(1 for p in pcs if len(p["polys"]) > 1)
