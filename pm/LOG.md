@@ -5,6 +5,43 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 
 ---
 
+### 2026-10-30 · Decision · V1 as a hosted web app with a native wrapper, not the App Store (CALI-58, #7)
+- **Theo:** "for app store, I'm thinking that no it's probably not going to work, and honestly, trying to make it work
+  is going to add a lot of complexity. What we might be better off doing is creating this as a web app and service
+  (Railway?) and then doing a wrapper around it. Obviously needs to be more than just a wrapper to a webservice, so
+  we can add a few distinguishing features, but ultimately no code will need to be run on the user side. This of
+  course, is going to present a compute bandwidth problem since FEA can be compute intense. perhaps that would be
+  something we can keep local... dunno"
+- What it changes: generated code runs on the server, so the real sandbox (CALI-66, #26) becomes multi-tenant
+  isolation; accounts, storage and the API key move server-side; error reports (CALI-59) can go to the service with
+  the person's say-so instead of a GitHub issue. Open: where the FEA runs (a worker pool, or the wrapper's own
+  fixed, signed code on the person's machine) and what the wrapper does that the web page can't.
+- Not started: needs a spec (`specs/`), then #6 and #7 rewritten to match.
+
+### 2026-10-30 · CALI-79 (#47) · A build book a kid can follow: pictures first, one step a page
+- Showcase 1 (#10) asks for a build book a kid can read, pictures first. The shop's book had two steps for the
+  stool ("End and side panels", "Finish"), and its panel step said to "glue them to the floor's edge and the
+  skeleton with foam-safe adhesive": the camper's words, for a plywood stool.
+- **`kidbook.py`:** `kids.html` in the build package, for a build that's all wood (sheets or sticks, glued and
+  screwed; a welded frame stays in the shop's book):
+  - **Get your things:** the shopping list in a kid's words, plus the tools, as boxes to tick.
+  - **Draw the pieces:** each pattern's thumbnail and its name, and the full-size PDF.
+  - **Cut them out**, with a grown-up: for a picture or a hole, "drill a hole just inside the line first".
+  - **Sand the edges.**
+  - **One page a piece**, in the order they go together: the lowest standing piece first, then each one that
+    meets what's there (the joints the shopping list counts screws for), lowest and biggest first. Every page has
+    the same view, what's on in pale and the new piece in colour, and "Put glue on the edges where the left side
+    panel touches the front panel… put in 2 screws." The pages' screws add up to the shopping list's.
+  - **Paint it**, if it's painted.
+  - **Test it:** gently, with a grown-up holding it; how many times over it should hold; what that promises.
+  - The view looks at the side with the picture (and the front with it); the cover is the stool with its T-rex.
+- **Drawings show holes:** `release.pieces` gives a flat panel its holes, so the shop's book draws the T-rex and the
+  lightening windows too. *How do I make it?* links **The kids' build book** beside the build book.
+- Tests: `test_kidbook.py` (a wooden build gets one and a welded frame doesn't; the pages in order with the top
+  last, a kid's words, the start-hole line, the promise, a drawing per piece, the screws adding up; the drawings
+  show a panel's holes and look at the picture).
+- Commits: `14d939d`, `96584bf` (the shop book's wood panels). PR #52. **Full suite on this branch, the stack's top: 530 passed.**
+
 ### 2026-10-30 · CALI-80 (#48) · Record the test: predicted against measured
 - Showcase 1 (#10): "Dad stands on it, then sandbags go on until it breaks. Record the predicted vs measured here."
   Also the first real point for calibration (#42).
@@ -24,6 +61,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Tests: `test_trials.py` (the prediction from the load to where it breaks, as a range, and what to measure with;
   none without a check on this version; steps kept and compared, the card's line, where it broke, an older
   version's test reads as stale; the API).
+- Commit: `b957193`. PR #51.
 
 ### 2026-10-30 · CALI-78 (#46) · A picture on it: a T-rex cut out of the side, and it still holds Dad
 - Showcase 1 (#10): "a stool to reach the sink, with a T-rex on it". The kid's ask is the hook; the engineering
@@ -58,6 +96,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   out and the eye dropped; panels nobody stands on, upright as seen from outside; a T-rex on the side cut and still
   holding, on the rebuilt part; lightening leaves it alone and adopting keeps it; too weak shrinks it, hopeless
   changes nothing; the chat routes it and leaves parts alone; a drawing from the pad cut through the API).
+- Commit: `c2ecdc0`. PR #50. **Full suite: 523 passed.**
 
 ### 2026-10-30 · CALI-76 (#44), CALI-77 (#45), CALI-68 (#28) · Three leftovers: fast cards, holes on the CNC sheet, measuring error
 - **Theo:** "Please do the seven PR merge stack. Then Showcase 1 and the three leftovers." The stack (#25, #30, #33,
@@ -87,6 +126,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   panel's triangles: the panel less the hole, facing out, eight boundary edges; the stool's left wall with a 2 in
   hole cut on its sheet), `test_promote.py` (18.98 holds a 3/4 in wall rule, 15.88 doesn't; only measured sizes
   get the allowance; a drafted rule says so), the old exact-text expectations updated.
+- Commits: `916745e` (#44), `f3ccee0` (the pin), `2db111e` (#45), `7622e00` (#28). PR #49.
 
 ### 2026-10-30 · CALI-59 (#8) · First run: one sentence in, four answers out
 - **Theo:** "let's go #8". Spec step 5: first run lands on the four questions.
