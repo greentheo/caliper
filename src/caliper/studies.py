@@ -8,12 +8,42 @@ for each part, every study Caliper has, whether it can run on that part, and if 
 
 Runs that don't record the version they saw get it from the part's history: the last revision before
 the run.
+
+Not every study fits every design (CALI-67): drag matters to something that moves through air, and a
+bathroom stool shouldn't be offered a drag study at 65 mph. :func:`in_air` decides that once, from what
+the design says, and the panels and this menu both follow it.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+import re
 from typing import Optional
+
+#: What says a design moves through air, or air moves past it: a vehicle, a road speed, wind.
+AIR_WORDS = re.compile(r"\b(cars?|trucks?|vans?|vehicles?|trailers?|hitch\w*|tow(?:s|ed|ing)?|roof ?racks?|"
+                       r"cargo box|drag|aero\w*|airflow|fairings?|wind(?:s|y)?|wind turbine|mph|km/?h|"
+                       r"highway|bikes?|bicycles?|boats?|drones?|kites?)\b", re.I)
+
+
+def in_air(design, parts: list[dict], has_runs: bool = False) -> dict:
+    """``{"yes": bool, "why": str}``: does anything say this design moves through air?
+
+    Its prompt, its requirements and its parts' descriptions are read for a vehicle, a road speed or wind;
+    a reference part (the car) means something rides behind it; and a design that already has drag studies
+    keeps them."""
+    text = " ".join([design.prompt or ""] + [f"{r.question} {r.answer}" for r in design.requirements]
+                    + [p.get("intent") or "" for p in parts])
+    m = AIR_WORDS.search(text)
+    if m:
+        return {"yes": True, "why": f"it says “{m.group(0)}”"}
+    ref = next((p["id"] for p in parts if p.get("role") == "fixed"), None)
+    if ref:
+        return {"yes": True, "why": f"it rides behind {ref}"}
+    if has_runs:
+        return {"yes": True, "why": "it has drag studies already"}
+    return {"yes": False, "why": "nothing in the design says it moves through air (a vehicle, a road speed, "
+                                 "wind); say so and the drag studies appear"}
 
 #: Every kind of study, in the order the menu offers them: the question it answers, and its label.
 KINDS = {
@@ -107,9 +137,9 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     return "", None
 
 
-def index(store, runs: dict[str, list[dict]], parts: list[dict]) -> dict:
+def index(store, runs: dict[str, list[dict]], parts: list[dict], air: Optional[dict] = None) -> dict:
     """``{"runs": [...], "menu": {part: [...]}}`` from the runs ``design_state`` already loaded (by kind)
-    and its part summaries."""
+    and its part summaries; ``air`` is :func:`in_air`'s answer (drag studies need it)."""
     current = {p["id"]: p["version"] for p in parts}
     history = {p["id"]: store.history(p["id"]) for p in parts}
     rows = []
@@ -130,10 +160,10 @@ def index(store, runs: dict[str, list[dict]], parts: list[dict]) -> dict:
     rows.sort(key=lambda x: x["created"] or 0, reverse=True)
     whole = [{"kind": k, "label": KINDS[k][0], "what": KINDS[k][1], "ready": bool(parts), "why": "no parts yet"}
              for k in ("scorecard", "release")]
-    return {"runs": rows, "menu": {p["id"]: menu(p) for p in parts}, "design": whole}
+    return {"runs": rows, "menu": {p["id"]: menu(p, air) for p in parts}, "design": whole}
 
 
-def menu(p: dict) -> list[dict]:
+def menu(p: dict, air: Optional[dict] = None) -> list[dict]:
     """Every study, for one part: can it run here, and if not, why not (what to say or do to get it)."""
     mesh = not p.get("scripted")
     roll = "it's a mesh right now: say “roll it back” to get its script back"
@@ -141,6 +171,8 @@ def menu(p: dict) -> list[dict]:
         return [{"kind": k, "label": label, "what": what, "ready": False,
                  "why": "it's a reference (context, like the car), not something you build"}
                 for k, (label, what) in KINDS.items() if k not in ("scorecard", "release")]
+
+    airborne, grounded = (air is None or air["yes"]), (air or {}).get("why", "")
 
     def item(kind, ready, why=""):
         label, what = KINDS[kind]
@@ -155,10 +187,11 @@ def menu(p: dict) -> list[dict]:
         item("frame", p.get("framed"), roll if mesh else "it isn't a welded tube frame (members() and supports())"),
         item("gussets", p.get("framed") and p.get("gussets"),
              "its frame names no joints for plates (GUSSETS)" if p.get("framed") else "it isn't a tube frame"),
-        item("aero", not mesh and p.get("params") and not p.get("framed"),
-             roll if mesh else "a frame is sized, not shaped" if p.get("framed")
-             else "its script keeps no dimensions in PARAMS"),
-        item("whittle", not p.get("framed"), "a frame is sized, not shaped"),
+        item("aero", airborne and not mesh and p.get("params") and not p.get("framed"),
+             "a frame is sized, not shaped" if p.get("framed") else grounded if not airborne
+             else roll if mesh else "its script keeps no dimensions in PARAMS"),
+        item("whittle", airborne and not p.get("framed"),
+             "a frame is sized, not shaped" if p.get("framed") else grounded),
         item("cutplan", p.get("built"), roll if mesh else "it doesn't say what it's built from (construction())"),
     ]
     return out

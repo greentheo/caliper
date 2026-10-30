@@ -405,8 +405,9 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
 
     _emit(events, on_event, "built", f"{part_id} built in {res.rounds} round(s)", part=part_id)
     report_dict = res.report.to_dict() if res.report is not None else None
+    described = redescribe(entry.intent, message, res.script, use_llm=use_llm, client=client)
     version = store.write_part(part_id, res.script, feedback=message, action="refine",
-                               report=report_dict)
+                               report=report_dict, intent=described)
     _emit(events, on_event, "wrote", f"{part_id} → v{version}", part=part_id, version=version)
 
     after, part_errors = _measure_design(store)
@@ -462,6 +463,39 @@ def _offer_promotion(store: DesignStore, part_id: str, feedback: str, *, use_llm
         return None, (f"_You phrased that as a rule, but I can't make it one: {why}. "
                       f"It's applied as a one-off change — a later revision could undo it._")
     return None, ""
+
+
+#: CALI-69: a part's description is what the router and every later revision read as what the part *is*,
+#: so a revision that changes that (two steps -> one platform) must change the description too.
+_DESCRIBE_SYSTEM = """You keep the one-line description of a part in a CAD design. The people working on it read
+it, and so does the next revision, as what the part is. You get the description as it was, the change just
+made, and the part's script as it is now. Reply with the description of the part as the script now builds
+it: one sentence, what it is, its main pieces and what it's made of, and what it's for. If the old
+description is still true, reply with it unchanged. Never keep anything the script no longer builds.
+Reply with the sentence only."""
+_REVISED = re.compile(r"\s*\(revised: .*\)$", re.S)
+
+
+def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = True, client=None,
+               model: Optional[str] = None) -> str:
+    """The part's description after a revision: re-described from the new script by Claude, or offline, the
+    old one with the latest change said after it (never silently out of date)."""
+    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+        try:
+            if client is None:
+                from anthropic import Anthropic  # lazy; may be absent
+
+                client = Anthropic()
+            msg = client.messages.create(
+                model=model or DEFAULT_MODEL, max_tokens=200, system=_DESCRIBE_SYSTEM,
+                messages=[{"role": "user", "content": f"description as it was: {old or '(none)'}\n\n"
+                                                      f"the change just made: {change}\n\nthe script now:\n{script}"}])
+            text = " ".join("".join(b.text for b in msg.content if getattr(b, "type", None) == "text").split())
+            if text:
+                return text.strip().strip('"')
+        except Exception:  # noqa: BLE001 — the revision landed; a stale-marked description beats none
+            pass
+    return f"{_REVISED.sub('', old or '').strip()} (revised: {change.strip()})".strip()
 
 
 def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, client=None,

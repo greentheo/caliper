@@ -772,8 +772,6 @@ def balance(store: DesignStore, build: Optional[dict] = None, payload_lb: float 
         arm = (hitch[0] - cog[0]) / M.IN
         out.update({"arm_in": round(arm, 1), "moment_lbin": round(mass * M.LB_KG * arm),
                     "force_lb": round(mass * M.LB_KG, 1)})
-    else:
-        notes.append("No part declares supports() — no hitch point to take the moment about.")
     return out
 
 

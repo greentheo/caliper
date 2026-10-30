@@ -188,6 +188,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "gussets": frame_study.list_gussets(store), "aero": aero.list_runs(store),
             "whittle": wb.list_runs(store), "cutplan": cutplan.list_runs(store),
             "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
+    air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
         "display_units": d.display_units,
@@ -208,7 +209,9 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "gusset_runs": runs["gussets"],
         "scorecards": runs["scorecard"][:2],
         "releases": runs["release"],
-        "studies": studies.index(store, runs, parts),
+        # does it move through air? drag studies only when it does (CALI-67)
+        "in_air": air,
+        "studies": studies.index(store, runs, parts, air),
         "has_goals": os.path.exists(scorecard.goals_path(store)),
         "cutplan_unavailable": cutplan.available(),
         "aero_available": _aero_available(),
