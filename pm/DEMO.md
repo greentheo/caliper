@@ -544,6 +544,16 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-10-30 · A stool gets a stool's panels; a part says what it is now (CALI-67 #27, CALI-69 #29)
+1. `make serve`, open the stool, click it: **Size, Rules, Will it hold?, Built from, History** — no drag
+   study, no carving. With nothing selected, **Weight & balance** is the weight and the red dot, no hitch.
+   **Studies** says why there's no drag study, and that saying it moves through air brings them back.
+2. Open the cargo box: the hitch moment and both drag studies are still there.
+3. On the stool, **Will it hold? → Show the stress**: blue to red, no red dot in the way, and the bar
+   says the colours are the FEA's while the verdict is the plate check's.
+4. Ask the stool for any change (say, "make it 10 in tall"): its description under the part name is
+   rewritten from the new script — one platform, five panels — instead of "two-step".
+
 ### 2026-10-29 · Will it hold Dad? And every study on one page (CALI-54 #1, CALI-70 #31)
 1. `make serve`, open **A step stool so my 6-year-old…**, click the stool, and say *"It has to hold me too:
    200 lb, stepping up onto the top."* It comes back as a revision (v3) with what it must hold, and the reply
