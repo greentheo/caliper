@@ -30,7 +30,8 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   riser, spine and 4 more: steel tube…" until a welder and a saw are in the shop).
 - Tests: `test_answers.py` (4: a five-panel box has 8 joints and its screws and glue; the four cards read top
   line first with no internal names; a strength check becomes a verdict and an older one says so; the design
-  card says what isn't done).
+  card says what isn't done). **Full suite: 496 passed.**
+- Commit: `99ca894` (with the rest of CALI-48), PR #37.
 
 ### 2026-10-30 · CALI-48 (#4), the rest · Your shop: what makes each piece, and printed parts fitted to the printer
 - **Theo:** "let's finish #4 and then step 1 of spec".
@@ -58,6 +59,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   (6: the default shop and saving yours; routing for hand tools and for machines, including too-big and
   too-thick; the stool by jigsaw; a printed bar split and pinned, weighed as printed; split pieces fit and
   lose only the pin holes; the scorecard's shop check). `test_scorecard.py` counts the new check.
+- Commit: `99ca894` (with CALI-72), PR #37.
 
 ### 2026-10-30 · CALI-48 (#4), first slice · Patterns for hand tools: measure and mark, print and tape, project and trace
 - **Theo:** "a cut plan with a jig saw is important. CNC is great, but most people operate with hand tools.
