@@ -248,3 +248,14 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
   border: 1px dashed var(--line); border-radius: 8px; touch-action: none; cursor: crosshair; margin-top: 4px; }
 #pictureDlg input[type=text] { flex: 1; padding: 6px 8px; background: var(--bg); color: var(--ink);
   border: 1px solid var(--line); border-radius: 8px; }
+
+/* test it (CALI-80) */
+.trial-chart { width: 100%; max-width: 320px; display: block; margin: 6px 0; }
+.trial-chart .band { fill: rgba(78, 161, 255, .22); stroke: var(--accent); stroke-width: .8; }
+.trial-chart .axis { stroke: var(--line); }
+.trial-chart .brk { stroke: var(--bad); stroke-dasharray: 3 3; }
+.trial-chart circle.ok { fill: var(--ok); } .trial-chart circle.bad { fill: var(--bad); }
+.trial-chart text { fill: var(--muted); font-size: 9px; }
+.trial-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; font-size: 12px; }
+.trial-add input[type=number] { width: 70px; background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 6px; padding: 3px 5px; }

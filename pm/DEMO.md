@@ -42,6 +42,8 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **Test it (CALI-80, #48).** What the strength check predicts at each load (a sag range, and where it breaks),
+  what to measure it with, and what the real one did; the card says how it went.
 - 🆕 **A picture on it (CALI-78, #46).** "Put a T-rex on the side": drawn (or drawn by you on the pad), cut out of
   a panel nobody stands on, smooth enough for a jigsaw, and checked that it still holds; on the patterns and the
   cut sheet.
@@ -559,6 +561,14 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-30 · Test it: predicted against measured (CALI-80 #48)
+1. Click the stool → **Will it work? → the numbers → Test it**. It says where to put the load, what to measure
+   the sag with (a dial indicator: under Dad the top should sag only 0.003–0.005 in), and that it should break at
+   about 1,240 lb. The chart is the predicted band, with a red line where it should break.
+2. Record a step: **load** 200, **sag** 0.004, **Record**. The point lands on the chart and *Will it work?* reads
+   "Tested: it held 200 lb, sagging 0.004 in (we predicted …)". Tick **it broke** on the last one.
+3. Offline: `python -m pytest tests/test_trials.py`.
 
 ### 2026-10-30 · A T-rex cut out of the side, and it still holds Dad (CALI-78 #46)
 1. Open the step stool (the sample is fine) and say **"put a T-rex on the side"**. The reply ticks through drawing,
