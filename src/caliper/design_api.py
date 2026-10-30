@@ -16,8 +16,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import (aero, chat, clarify, construction, cutplan, frame_study, goals, lighten, load_study,
-               promote, release, scorecard, studies)
+from . import (aero, answers, chat, clarify, construction, cutplan, frame_study, goals, lighten,
+               load_study, making, patterns, promote, release, scorecard, shop, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -100,6 +100,11 @@ class FrameRequest(BaseModel):
 class LoadRequest(BaseModel):
     part: str
     min_safety: float = load_study.MIN_SAFETY     # at each load times its factor
+
+
+class Shop(BaseModel):
+    hand: list[str] = []
+    machines: list[dict] = []
 
 
 class GoalDecision(BaseModel):
@@ -189,7 +194,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             part_errors = {"<design>": f"{type(e).__name__}: {e}"}
     proposal = promote.pending(store)
     runs = {"load": load_study.list_runs(store), "lighten": lighten.list_runs(store),
-            "frame": frame_study.list_runs(store),
+            "frame": frame_study.list_runs(store), "patterns": patterns.list_runs(store),
             "gussets": frame_study.list_gussets(store), "aero": aero.list_runs(store),
             "whittle": wb.list_runs(store), "cutplan": cutplan.list_runs(store),
             "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
@@ -211,6 +216,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "frame_runs": runs["frame"],
         "load_runs": runs["load"],
         "lighten_runs": runs["lighten"],
+        "pattern_runs": runs["patterns"],
         "cutplans": runs["cutplan"],
         "gusset_runs": runs["gussets"],
         "scorecards": runs["scorecard"][:2],
@@ -450,6 +456,60 @@ def router():
 
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
         return {"job_id": job.id}
+
+    # -- the four questions (spec step 1): each answered in a line anyone can read --------------------------
+    @r.get("/api/designs/{slug}/answers")
+    def design_answers(slug: str, part: Optional[str] = None):
+        store = load(slug)
+        if part and store.design.part(part) is None:
+            raise HTTPException(status_code=404, detail=f"no part {part!r}")
+        return {"part": part, "cards": answers.answers(store, design_state(store), part)}
+
+    # -- your shop (CALI-48): what you have, and how each part gets made with it --------------------------
+    @r.get("/api/shop")
+    def get_shop():
+        return {"shop": shop.read(), "hand": shop.HAND, "machines": list(shop.MACHINES)}
+
+    @r.put("/api/shop")
+    def put_shop(req: Shop):
+        return {"shop": shop.write(req.model_dump()), "hand": shop.HAND, "machines": list(shop.MACHINES)}
+
+    @r.get("/api/designs/{slug}/parts/{pid}/making")
+    def part_making(slug: str, pid: str):
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+        try:
+            return making.plan(store, pid)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+
+    # -- patterns for hand tools (CALI-48): measure and mark, print and tape, project and trace ------------
+    @r.post("/api/designs/{slug}/parts/{pid}/patterns")
+    def make_patterns(slug: str, pid: str):
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None:
+                raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+            try:
+                rec = patterns.make(store, pid)
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
+            return {"run": rec, "design": design_state(store)}
+
+    @r.get("/api/designs/{slug}/patterns/{rid}/{name}")
+    def pattern_file(slug: str, rid: str, name: str):
+        store = load(slug)
+        try:
+            path = patterns.file_path(store, rid, name)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="bad path")
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="no such file")
+        kind = {".pdf": "application/pdf", ".svg": "image/svg+xml", ".png": "image/png",
+                ".html": "text/html"}.get(os.path.splitext(name)[1], "application/octet-stream")
+        with open(path, "rb") as f:
+            return Response(f.read(), media_type=kind)
 
     # -- what it's held to (CALI-55): keep or drop a check the conversation proposed -------------------
     @r.post("/api/designs/{slug}/goals/{check_id}")

@@ -168,3 +168,6 @@ def test_the_book_keeps_where_it_should_break_with_room_for_where_it_did(store):
     assert rec["strength"]["crate"][0]["breaks_lb"] == 1240
     book = open(os.path.join(R.releases_dir(store), rec["id"], "index.html")).read()
     assert "Will it hold?" in book and "about 1,240 lb" in book and "______ lb" in book
+    # and the patterns for hand tools go with it (CALI-48)
+    assert any(f.startswith("hand/crate/") and f.endswith("print-full-size.pdf") for f in rec["files"])
+    assert "hand/" in book

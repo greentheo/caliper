@@ -61,6 +61,10 @@ def construction(params, build=None):
 - **stick**: a straight length from `a` to `b` along its centreline. Lumber by nominal `size`, or
   steel tube by `outer` (the square tube's outside width) and `wall`, with `"material": "steel"`.
 - **covering**: a covering on its own, over an `outline` or `facets`, such as a patch.
+- **printed**: the whole solid `build()` makes is 3D printed: `{"name": "blade", "kind": "printed",
+  "material": "petg"}` (optional `"infill": 0.2`). Caliper weighs it from the solid (walls plus infill),
+  fits it to the shop's printer (splitting it with pin holes if it's too big), and costs the filament.
+  Give the solid as it prints: no separate pieces for a printed part.
 - **lump**: anything else, by `mass` (kg) at a point `at`: hardware, glue, a battery.
 
 The pieces are the part. After every revision Caliper builds the part and checks that what

@@ -53,6 +53,7 @@ KINDS = {
     "gussets": ("Gusset plates", "Plates for the frame's hardest-worked joints, cut for a plasma table"),
     "aero": ("Drag shape search", "The numbers in its script that cut drag, within their ranges"),
     "whittle": ("whittle carving", "Carve the outside for drag (or lighten it under load) as a mesh"),
+    "patterns": ("Patterns for hand tools", "Every flat piece to measure and mark, print full size, or project"),
     "cutplan": ("Cut plan", "Every sheet laid out flat for the saw, router or plasma table"),
     "scorecard": ("Scorecard", "Every check and objective of the design as it stands"),
     "release": ("Build package", "The build book, cut files and shopping list for this exact version"),
@@ -127,6 +128,9 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         saved = (best.get("derived") or {}).get("saved_kwh_per_100mi")
         return (f"{r.get('kind')} · {len(st)} stations, up to {most:.0%} removed"
                 + (f" · best saves {saved:g} kWh/100 mi" if saved else "")), None
+    if kind == "patterns":
+        return (f"{len(r.get('pieces') or [])} piece(s), {r.get('pages', 0)} full-size page(s)"
+                + (f", {sum(p.get('holes', 0) for p in r['pieces'])} hole(s)" if any(p.get('holes') for p in r.get('pieces') or []) else "")), None
     if kind == "cutplan":
         sheets = r.get("sheets") or []
         n = sum(s.get("sheets", 0) for s in sheets)
@@ -202,6 +206,9 @@ def menu(p: dict, air: Optional[dict] = None) -> list[dict]:
              else roll if mesh else "its script keeps no dimensions in PARAMS"),
         item("whittle", airborne and not p.get("framed"),
              "a frame is sized, not shaped" if p.get("framed") else grounded),
+        item("patterns", p.get("built") and not p.get("framed"),
+             roll if mesh else "a frame's tubes are on its cut list" if p.get("framed")
+             else "it doesn't say what it's built from (construction())"),
         item("cutplan", p.get("built"), roll if mesh else "it doesn't say what it's built from (construction())"),
     ]
     return out

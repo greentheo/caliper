@@ -21,6 +21,8 @@ const S = {
   runIndex: {},        // part id -> which whittle run the inspector shows
   aeroRun: {}, frameRun: {},         // part id -> which parametric study the inspector shows
   loadRun: {},         // part id -> which strength check the inspector shows (CALI-54)
+  making: {},          // part id -> {key, data}: how it's made in your shop (CALI-48)
+  shop: null, shopOpen: false, shopKey: 0,
   studies: false,      // the studies page is open (CALI-70)
   built: {},           // part id -> {version, tried, report, balance}: what it's built from (CALI-41)
   balance: null,       // {key, data}: the whole design's weight and what the hitch carries
@@ -646,10 +648,7 @@ function designView(d) {
   const rep = d.report;
   const status = rep ? (rep.all_pass ? '<span class="badge ok">all checks pass</span>'
     : '<span class="badge bad">checks failing</span>') : '';
-  return `<h2>${esc(d.name)} ${status}</h2>
-    <div class="muted small">${esc(d.prompt)}</div>
-    <h4>Scorecard</h4><div id="scoreBox">${scoreView(d)}</div>
-    <h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>
+  const what = `<div class="muted small">${esc(d.prompt)}</div>
     <h4>Requirements</h4>
     ${d.requirements.length ? '<ul class="list">' + d.requirements.map((r) => `<li>${esc(r.question)}
       <div><b>${esc(r.answer)}</b>${r.source === 'assumed' ? ' <span class="badge">assumed</span>' : ''}</div></li>`).join('') + '</ul>'
@@ -663,10 +662,83 @@ function designView(d) {
       ${p.bbox ? `<div class="small">${sizeText(p.bbox.size)}</div>` : ''}</li>`).join('') + '</ul>'
     : '<div class="empty">None yet — say what to build first.</div>'}
     ${Object.keys(d.part_errors || {}).length ? '<h4>Won\'t build</h4><ul class="list">' +
-      Object.entries(d.part_errors).map(([k, v]) => `<li><b>${esc(k)}</b> <span class="muted small">${esc(v)}</span></li>`).join('') + '</ul>' : ''}
-    ${d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : ''}
+      Object.entries(d.part_errors).map(([k, v]) => `<li><b>${esc(k)}</b> <span class="muted small">${esc(v)}</span></li>`).join('') + '</ul>' : ''}`;
+  const work = `<h4>Scorecard</h4><div id="scoreBox">${scoreView(d)}</div>
     <h4>Design checks</h4>
     ${checks(rep)}`;
+  const buy = d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : '';
+  const make = `<h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>`;
+  return `<h2>${esc(d.name)} ${status}</h2>
+    ${cardsView({ what, work, buy, make })}`;
+}
+
+// ------------------------------------------------------------- the four questions (spec step 1)
+// What is it? Will it work? What do I buy? How do I make it? Each card's top lines are the answer, written on
+// the server (answers.py) from what's already measured, so anyone can read them; "the numbers" under each is
+// today's panels for that question, and once someone opens it, it stays open for them.
+const QUESTIONS = [['what', 'What is it?'], ['work', 'Will it work?'], ['buy', 'What do I buy?'], ['make', 'How do I make it?']];
+const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' };
+const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox' };
+function numbersOpen(k) { try { return localStorage.getItem(`caliper.numbers.${k}`) === '1'; } catch (e) { return false; } }
+function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${k}`, on ? '1' : '0'); } catch (e) { /* private window */ } }
+
+function answersKey() {               // what the answers depend on: a change to any of it asks again
+  const d = S.design;
+  return JSON.stringify([S.slug, S.scope, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
+    (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
+    (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey]);
+}
+function qlines(c) {
+  if (!c) return '<div class="qline muted"><span class="spin"></span>answering…</div>';
+  if (!c.lines.length) return `<div class="qline muted">${esc(c.hint || 'Nothing to say yet.')}</div>`;
+  return c.lines.map((ln, i) => `<div class="qline q-${ln.status}${i === 0 ? ' top' : ''}${GOTO[ln.study || ln.action] ? ' go' : ''}"
+    ${GOTO[ln.study || ln.action] ? `data-goto="${GOTO[ln.study || ln.action]}"` : ''}>${esc(ln.text)}</div>`).join('');
+}
+function cardsView(groups) {
+  const a = S.answers && S.answers.key === answersKey() && S.answers.cards ? S.answers : null;
+  if (!a && !(S.answers && S.answers.key === answersKey() && S.answers.loading)) setTimeout(loadAnswers, 0);
+  return QUESTIONS.map(([k, q]) => {
+    const c = a ? a.cards.find((x) => x.key === k) : null;
+    return `<section class="qcard q-${c ? c.status : 'info'}" data-card="${k}">
+      <div class="qhead"><span class="qmark">${c ? QMARK[c.status] : '·'}</span><h3>${q}</h3></div>
+      <div class="qlines" id="q-${k}">${qlines(c)}</div>
+      <details class="numbers" data-card="${k}" ${numbersOpen(k) ? 'open' : ''}><summary>the numbers</summary>
+        ${groups[k] || '<div class="empty">Nothing here yet.</div>'}</details>
+    </section>`;
+  }).join('');
+}
+async function loadAnswers() {
+  if (!S.design) return;
+  const key = answersKey();
+  if (S.answers && S.answers.key === key && (S.answers.loading || S.answers.cards)) return;
+  S.answers = { key, loading: true };
+  try {
+    const got = await api('GET', `/api/designs/${S.slug}/answers${S.scope ? `?part=${encodeURIComponent(S.scope)}` : ''}`);
+    if (!S.answers || S.answers.key !== key) return;              // it moved on while we asked
+    S.answers = { key, cards: got.cards };
+  } catch (e) { S.answers = { key, cards: [], error: e.message }; }
+  // fill the cards in place: redrawing the inspector would wipe a half-filled form
+  for (const c of S.answers.cards) {
+    const card = document.querySelector(`#inspector .qcard[data-card="${c.key}"]`);
+    if (!card) continue;
+    card.className = `qcard q-${c.status}`;
+    card.querySelector('.qmark').textContent = QMARK[c.status];
+    card.querySelector('.qlines').innerHTML = qlines(c);
+  }
+  wireCards();
+}
+function wireCards() {
+  document.querySelectorAll('#inspector details.numbers').forEach((dt) => { dt.ontoggle = () => keepNumbersOpen(dt.dataset.card, dt.open); });
+  document.querySelectorAll('#inspector .qline[data-goto]').forEach((ln) => { ln.onclick = () => goTo(ln.dataset.goto); });
+}
+function goTo(id) {                   // open the card's numbers and bring that panel into view
+  const box = $(id);
+  if (!box) return;
+  const dt = box.closest('details.numbers');
+  if (dt && !dt.open) dt.open = true;
+  (box.previousElementSibling || box).scrollIntoView({ behavior: 'smooth', block: 'start' });
+  box.classList.add('flash');
+  setTimeout(() => box.classList.remove('flash'), 1600);
 }
 
 // ------------------------------------------------------------- the scorecard (CALI-47)
@@ -810,6 +882,7 @@ function historyItem(h) {
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
   if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${h.holds ? 'holds' : 'doesn\'t hold'}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  if (h.kind === 'patterns' && h.action === 'made') return `<li class="hist">patterns for hand tools (${h.pieces} pieces)</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
   if (h.kind === 'setting') return `<li class="hist">marked ${h.role === 'fixed' ? 'as a reference' : 'as a design part'}</li>`;
@@ -822,9 +895,7 @@ function partView(p) {
   const designRules = d.rules.filter(mine);
   const origin = p.origin === 'whittled' ? '<span class="badge whittled">whittled mesh</span>'
     : p.scripted ? '<span class="badge">parametric</span>' : '<span class="badge">imported</span>';
-  return `<h2>${esc(p.id)} ${origin}</h2>
-    <div class="muted small">${esc(p.intent)} · v${p.version}</div>
-    <h4>Size</h4>
+  const what = `<h4>Size</h4>
     ${p.bbox ? `<div class="kv">
       <span class="k">width</span><span>${len(p.bbox.size[1])}</span>
       <span class="k">depth</span><span>${len(p.bbox.size[0])}</span>
@@ -836,26 +907,34 @@ function partView(p) {
     ${p.rules.length || designRules.length ? '<ul class="list">' +
       [...p.rules, ...designRules].map((r) => `<li class="rule">🔒 <b>${esc(r.id)}</b> <code>${esc(r.expr)}</code></li>`).join('') + '</ul>'
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
-    ${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
+    <h4>History</h4>
+    <ul class="list">${p.history.slice().reverse().map(historyItem).join('')}</ul>
+    <details id="adv"><summary>Advanced — script &amp; spec</summary><div id="advBody" class="small muted">loading…</div></details>`;
+  const work = `${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
     <div id="loadBox">${loadView(p)}</div>` : ''}
-    ${p.built ? `<h4>Built from <span class="badge">weight &amp; shopping list</span></h4>
-    <div id="buildBox">${buildView(p)}</div>` : ''}
     ${p.framed ? `<h4>Size the frame <span class="badge">tubes back</span></h4>
     <div id="frameBox">${frameView(p)}</div>` : ''}
     ${!p.framed && (S.design.in_air.yes || aeroRuns(p.id).length || runsFor(p.id).length) ? `<h4>Shape it for drag <span class="badge">numbers back</span></h4>
     <div id="aeroBox">${aeroView(p)}</div>
     <h4>whittle carving <span class="badge">mesh back</span></h4>
-    <div id="whittleBox">${whittleView(p)}</div>` : ''}
-    <h4>History</h4>
-    <ul class="list">${p.history.slice().reverse().map(historyItem).join('')}</ul>
-    <details id="adv"><summary>Advanced — script &amp; spec</summary><div id="advBody" class="small muted">loading…</div></details>`;
+    <div id="whittleBox">${whittleView(p)}</div>` : ''}`;
+  const buy = p.built ? `<h4>Built from <span class="badge">weight &amp; shopping list</span></h4>
+    <div id="buildBox">${buildView(p)}</div>` : '';
+  const make = p.built ? `<div id="makingBox">${makingView(p)}</div>
+    <div id="patternBox">${patternView(p)}</div>
+    <div id="cutplanBox">${cutplanView(p)}</div>` : '';
+  return `<h2>${esc(p.id)} ${origin}</h2>
+    <div class="muted small">v${p.version}</div>
+    ${cardsView({ what, work, buy, make })}`;
 }
 
 function wireInspector(p) {
   document.querySelectorAll('#inspector [data-part]').forEach((a) => { a.onclick = () => setScope(a.dataset.part); });
   showMarks();
+  wireCards();
   if (!p) { wireBalance(); wireScore(); wireRelease(); return; }
   wireBuilt(p);
+  wireCutplan(p);
   const role = $('roleRef');
   if (role) role.onchange = async () => {
     S.design = await api('PATCH', `/api/designs/${S.slug}/parts/${p.id}`, { role: role.checked ? 'fixed' : 'movable' });
@@ -971,11 +1050,135 @@ function builtResults(p, c) {
           g.glue_gal != null ? `${g.glue_gal} gal glue` : '',
           g.paint_gal != null ? `${g.paint_gal} gal paint (${g.coats} coats)` : ''].filter(Boolean).join(' · ')}</div></li>`).join('')}
       ${bom.lumps.map((g) => `<li><b>${esc(g.name)}</b> <span class="muted">${lbs(g.mass_kg * 2.20462)}</span></li>`).join('')}
+      ${bom.fasteners ? `<li><b>${bom.fasteners.screws} × ${esc(bom.fasteners.screw)}</b> and <b>${esc(bom.fasteners.glue)}</b>
+        <div class="muted small">${esc(bom.fasteners.basis)}</div></li>` : ''}
+      ${(bom.printed || []).map((g) => `<li><b>${esc(g.label)}</b>: ${esc(g.name)} <span class="muted">${g.filament_g} g of filament
+        (${g.volume_cm3} cm³ at ${Math.round(g.infill * 100)}% infill)</span></li>`).join('')}
     </ul>
     ${(r.notes || []).map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}
     <div class="muted small" style="margin-top:4px">Counts are a shopping estimate (panels packed on whole sheets, cuts on
       whole sticks); the cut plan below nests the real shapes. Densities: <code>materials.py</code>.</div>
-    <div id="cutplanBox">${cutplanView(p)}</div>`;
+`;
+}
+
+// made in your shop (CALI-48): what cuts each piece, printed parts fitted to the printer, and what's missing
+function makingView(p) {
+  const key = `${p.id}:${p.version}:${S.shopKey || 0}`;
+  const m = S.making[p.id];
+  if (!m || m.key !== key) { loadMaking(p, key); return '<h5 style="margin:14px 0 4px">Made in your shop</h5><div class="small muted">planning…</div>'; }
+  if (m.error) return `<h5 style="margin:14px 0 4px">Made in your shop</h5><div class="small" style="color:var(--bad)">⚠ ${esc(m.error)}</div>`;
+  const d = m.data;
+  const notes = (how) => d.pieces.filter((x) => x.how === how && x.why).map((x) => esc(x.why));
+  return `<h5 style="margin:14px 0 4px">Made in your shop ${d.ok ? '<span class="badge ok">all of it</span>' : '<span class="badge bad">not all of it</span>'}</h5>
+    ${d.shop_default ? '<div class="muted small">Planned for hand tools: a jigsaw, a drill, a circular saw. <a href="#" class="openShop">Say what\'s in your shop</a>.</div>' : ''}
+    <ul class="list small">${Object.entries(d.by_how).map(([how, names]) => `<li><b>${esc(how)}</b>: ${names.map(esc).join(', ')}
+      ${[...new Set(notes(how))].map((n) => `<div class="muted">${n}</div>`).join('')}</li>`).join('')}
+      ${d.printed.map((x) => `<li><b>printer</b>: ${esc(x.name)} in ${esc(x.material.toUpperCase())}, ${x.pieces} piece${x.pieces === 1 ? '' : 's'}${x.pinned
+        ? ' pinned together' : ''} · about <b>${x.hours} h</b>, ${x.filament_g.toLocaleString()} g, $${x.usd.toFixed(2)}
+        <div class="muted">${esc(x.from)}</div></li>`).join('')}
+      ${d.missing.map((x) => `<li style="color:var(--bad)">✗ <b>${esc(x.name)}</b>: ${esc(x.why)}</li>`).join('')}</ul>`;
+}
+async function loadMaking(p, key) {
+  S.making[p.id] = { key, loading: true };
+  try { S.making[p.id] = { key, data: await api('GET', `/api/designs/${S.slug}/parts/${p.id}/making`) }; }
+  catch (e) { S.making[p.id] = { key, error: e.message }; }
+  const box = $('makingBox');
+  if (box && S.scope === p.id) { box.innerHTML = makingView(p); wireMaking(); }
+}
+function wireMaking() {
+  document.querySelectorAll('#inspector .openShop').forEach((a) => { a.onclick = (e) => { e.preventDefault(); openShop(); }; });
+}
+
+// your shop (CALI-48): what you have to make things with — every design plans its making with it
+async function openShop() {
+  S.shopOpen = true;
+  try { S.shop = await api('GET', '/api/shop'); } catch (e) { showErr(e.message); return; }
+  renderShop();
+}
+function renderShop() {
+  const el = $('shopPage');
+  el.hidden = !S.shopOpen;
+  $('shopBtn').classList.toggle('on', !!S.shopOpen);
+  if (!S.shopOpen || !S.shop) return;
+  const sh = S.shop.shop, have = new Set(sh.hand || []);
+  const mach = (k) => (sh.machines || []).find((m) => m.kind === k) || null;
+  const r = mach('router'), pl = mach('plasma'), pr = mach('printer');
+  const num = (id, v, step) => `<input type="number" id="${id}" value="${v}" min="0" step="${step || 1}">`;
+  el.innerHTML = `<div class="studies-head"><h2>Your shop <span class="muted small">what Caliper plans the making with, for every design</span></h2>
+      <button class="x" id="shopClose" title="close (Esc)">×</button></div>
+    <h4>Hand tools</h4>
+    <div class="shop-tools">${Object.entries(S.shop.hand).map(([k, what]) => `<label><input type="checkbox" class="shopHand" value="${esc(k)}"
+      ${have.has(k) ? 'checked' : ''}><span><b>${esc(k)}</b><br><span class="muted">${esc(what)}</span></span></label>`).join('')}</div>
+    <h4>Machines</h4>
+    <div class="shop-machine"><label><input type="checkbox" id="mRouter" ${r ? 'checked' : ''}> <b>CNC router</b></label>
+      <span class="small muted"> bed ${num('mRouterW', r ? r.bed_in[0] : 48)} × ${num('mRouterH', r ? r.bed_in[1] : 96)} in · cuts plywood and foam</span></div>
+    <div class="shop-machine"><label><input type="checkbox" id="mPlasma" ${pl ? 'checked' : ''}> <b>Plasma table</b></label>
+      <span class="small muted"> bed ${num('mPlasmaW', pl ? pl.bed_in[0] : 48)} × ${num('mPlasmaH', pl ? pl.bed_in[1] : 48)} in ·
+        plate up to ${num('mPlasmaT', pl ? pl.plate_max_in : 0.375, 0.0625)} in</span></div>
+    <div class="shop-machine"><label><input type="checkbox" id="mPrinter" ${pr ? 'checked' : ''}> <b>3D printer</b></label>
+      <span class="small muted"> build volume ${num('mPrX', pr ? pr.volume_mm[0] : 256)} × ${num('mPrY', pr ? pr.volume_mm[1] : 256)} ×
+        ${num('mPrZ', pr ? pr.volume_mm[2] : 256)} mm ·
+        <label><input type="checkbox" class="mPrMat" value="pla" ${!pr || (pr.materials || []).includes('pla') ? 'checked' : ''}> PLA</label>
+        <label><input type="checkbox" class="mPrMat" value="petg" ${!pr || (pr.materials || []).includes('petg') ? 'checked' : ''}> PETG</label></span></div>
+    <div class="actions"><button class="primary" id="shopSave">Save</button> <span class="small muted" id="shopMsg">${sh.default
+      ? 'Nothing saved yet: Caliper assumes a jigsaw, a drill and a circular saw.' : ''}</span></div>`;
+  $('shopClose').onclick = () => { S.shopOpen = false; renderShop(); };
+  $('shopSave').onclick = saveShop;
+}
+async function saveShop() {
+  const n = (id) => +$(id).value || 0;
+  const machines = [];
+  if ($('mRouter').checked) machines.push({ kind: 'router', bed_in: [n('mRouterW'), n('mRouterH')], materials: ['plywood', 'xps', 'eps'] });
+  if ($('mPlasma').checked) machines.push({ kind: 'plasma', bed_in: [n('mPlasmaW'), n('mPlasmaH')], plate_max_in: n('mPlasmaT'), materials: ['steel'] });
+  if ($('mPrinter').checked) machines.push({ kind: 'printer', volume_mm: [n('mPrX'), n('mPrY'), n('mPrZ')],
+    materials: [...document.querySelectorAll('.mPrMat:checked')].map((c) => c.value) });
+  const hand = [...document.querySelectorAll('.shopHand:checked')].map((c) => c.value);
+  try {
+    S.shop = await api('PUT', '/api/shop', { hand, machines });
+    S.shopKey = (S.shopKey || 0) + 1;            // every part's making plan is re-read with the new shop
+    S.shopOpen = false; renderShop(); renderInspector();
+  } catch (e) { $('shopMsg').textContent = '⚠ ' + e.message; }
+}
+$('shopBtn').onclick = () => (S.shopOpen ? (S.shopOpen = false, renderShop()) : openShop());
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.shopOpen) { S.shopOpen = false; renderShop(); } });
+
+// patterns for hand tools (CALI-48): most people have a jigsaw, not a CNC router — so every flat piece, holes and
+// all, to measure and mark, to print full size and tape, or to project and trace
+function patternView(p) {
+  const run = (S.design.pattern_runs || []).find((r) => r.part === p.id);
+  const url = (name) => `/api/designs/${S.slug}/patterns/${run.id}/${name}`;
+  const stale = run && run.version !== p.version;
+  return `<h5 style="margin:14px 0 4px">Patterns for hand tools <span class="badge">jigsaw, saw, drill</span></h5>
+    ${run ? `<div class="small">${stale ? '<span class="badge bad">the part has changed since</span> ' : ''}
+        <a href="${url('measure-and-mark.pdf')}" target="_blank" rel="noopener"><b>Measure and mark</b></a>: each piece
+        dimensioned from its square edges, on a 1 in grid ·
+        <a href="${url('print-full-size.pdf')}" target="_blank" rel="noopener"><b>Print full size</b></a> (${run.pages} letter pages:
+        print at 100% and tape) · <b>Project and trace</b>: ${run.pieces.map((x) => `<a href="${url(x.project)}" target="_blank"
+          rel="noopener">${esc(x.name)}</a>`).join(', ')}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">${run.pieces.map((x) => `<a href="${url('index.html')}"
+        target="_blank" rel="noopener" title="${esc(x.name)}"><img src="${url(x.thumb)}" alt="${esc(x.name)}"
+        style="width:100%;background:#fff;border-radius:4px;display:block"></a>`).join('')}</div>` : `<div class="muted small">For a
+      jigsaw and a tape measure: each piece dimensioned to mark out, at full size to print and tape, or to project
+      and trace. Holes included.</div>`}
+    <div class="actions"><button id="patGo">${run ? 'Make them again' : 'Make the patterns'}</button></div>
+    <div id="patProgress"></div>`;
+}
+
+function wirePatterns(p) {
+  const go = $('patGo');
+  if (!go) return;
+  go.onclick = async () => {
+    go.disabled = true;
+    $('patProgress').innerHTML = '<div class="small muted">drawing every piece…</div>';
+    try {
+      const got = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/patterns`);
+      S.design = got.design;
+      render();
+    } catch (e) {
+      $('patProgress').innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`;
+      go.disabled = false;
+    }
+  };
 }
 
 // --------------------------------------------------------------------- cut plan (CALI-45)
@@ -1030,6 +1233,8 @@ function cutplanView(p) {
 }
 
 function wireCutplan(p) {
+  wirePatterns(p);
+  wireMaking();
   const go = $('cpGo');
   if (!go) return;
   go.onclick = async () => {
@@ -1840,7 +2045,7 @@ async function adoptStation(pid, wid, index, kind) {
 // way to open it where it lives. And per part, every study Caliper has: which can run on it now, and what the
 // others are missing (what to say or do to get them).
 const STUDY_BOX = { load: 'loadBox', lighten: 'loadBox', frame: 'frameBox', gussets: 'frameBox', aero: 'aeroBox', whittle: 'whittleBox',
-  cutplan: 'buildBox', scorecard: 'scoreBox', release: 'relBox' };
+  cutplan: 'buildBox', patterns: 'buildBox', scorecard: 'scoreBox', release: 'relBox' };
 const studyFilter = { kind: '', part: '' };
 
 function studiesView(d) {
@@ -1915,12 +2120,7 @@ function openStudy(kind, pid, runId) {
   }
   clearStation();
   setScope(pid || null);
-  const box = $(STUDY_BOX[kind]);
-  if (box) {
-    (box.previousElementSibling || box).scrollIntoView({ behavior: 'smooth', block: 'start' });
-    box.classList.add('flash');
-    setTimeout(() => box.classList.remove('flash'), 1600);
-  }
+  goTo(STUDY_BOX[kind]);
   // a strength check opens on the stress picture of its weakest load
   const run = kind === 'load' && runId ? loadRuns(pid).find((r) => r.id === runId) : null;
   if (run) {

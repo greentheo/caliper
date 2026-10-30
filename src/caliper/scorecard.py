@@ -131,6 +131,17 @@ def cost_and_waste(store: DesignStore, reports: dict, cutplans: dict) -> dict:
             lines.append({"part": pid, "item": f"{g['label']} ({g['area_ft2']} ft²)", "usd": round(cost, 2),
                           "waste_usd": 0.0, "waste_pct": 0.0, "from": "by area"})
             bought_usd += cost
+        fx = r["bom"].get("fasteners")
+        if fx:
+            cost = fx["screws"] * P["screw_each"] + P["wood_glue_8oz"] * max(1, round(fx["glue_ml"] / 236 + 0.49))
+            lines.append({"part": pid, "item": f"{fx['screws']} × {fx['screw']} and {fx['glue']}", "usd": round(cost, 2),
+                          "waste_usd": 0.0, "waste_pct": 0.0, "from": "by joint length"})
+            bought_usd += cost
+        for g in r["bom"].get("printed") or []:               # filament by weight (CALI-48)
+            cost = g["filament_g"] / 1000 * M.printed(g["material"])["usd_per_kg"]
+            lines.append({"part": pid, "item": f"{g['filament_g']:.0f} g of {g['label']} filament", "usd": round(cost, 2),
+                          "waste_usd": 0.0, "waste_pct": 0.0, "from": "by weight"})
+            bought_usd += cost
         for row in r["pieces_raw"]:
             if row["kind"] != "lump":
                 continue
@@ -299,6 +310,27 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
     _metric(metrics, "cost.usd", cw["usd"], "$", "stock to buy", "guess", "materials.PRICES", note=cw["basis"])
     _metric(metrics, "waste.usd", cw["waste_usd"], "$", "of it left as offcut", "guess", "cut plan + prices")
     _metric(metrics, "waste.pct", round(cw["waste_pct"] * 100, 1), "%", "offcut, by cost", "measured", "cut plan")
+
+    # can your shop make it (CALI-48): every piece routed to a tool or machine you have; printing costed
+    from . import making
+
+    missing, hours, grams = [], 0.0, 0.0
+    for pid in reports:
+        try:
+            mk = making.plan(store, pid)
+        except Exception:  # noqa: BLE001 — unknown is said by the check, not a crash
+            continue
+        missing += [f"{pid}: {m['name']} ({m['why']})" for m in mk["missing"]]
+        hours += sum(x["hours"] for x in mk["printed"])
+        grams += sum(x["filament_g"] for x in mk["printed"])
+    if reports:
+        checks.append({"id": "make:shop", "label": "your shop can make every piece", "kind": "make", "auto": True,
+                       "status": "pass" if not missing else "fail", "value": len(missing), "margin": -len(missing),
+                       "trust": "measured", "note": "; ".join(missing[:6])})
+        _metric(metrics, "make.not_in_shop", len(missing), "pieces", "pieces your shop can't make", "measured", "shop")
+    if grams:
+        _metric(metrics, "print.hours", round(hours, 1), "h", "printing time, every printed piece", "model", "slicer")
+        _metric(metrics, "print.filament_g", round(grams), "g", "filament, every printed piece", "model", "slicer")
 
     # will it hold (CALI-54): each part's own loads(), from its strength check on this version (run if missing)
     from . import load_study

@@ -5,6 +5,89 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 
 ---
 
+### 2026-10-30 · CALI-72 (#38) · The four questions, step 1: four cards, one line each, the numbers underneath
+- Step 1 of `specs/caliper-four-questions-spec.md`. **`answers.py`** writes each card's lines on the server
+  from what's already measured (no card runs a study to draw itself): *What is it?* (the description's first
+  sentence, size, what it's cut from), *Will it work?* (each strength case as "Holds an adult stepping up, 3.1
+  times over", "older version: check again", frames, rules; the scorecard for the whole design), *What do I
+  buy?* (the shopping list in a line with its cost, the weight: "easy for a kid to carry" under 10 lb), *How
+  do I make it?* (by tool from your shop, printed parts with hours, what your shop can't make grouped by why,
+  patterns ready). A card with nothing yet says what to tell Caliper. Endpoint `/api/designs/{slug}/answers`.
+- **The panel** is four cards, coloured by their worst line; "▸ the numbers" under each holds today's panels
+  for that question (part: Size/Rules/History/Advanced; Will it hold?/frame/drag; Built from; Made in your
+  shop/patterns/cut plan. Design: prompt/requirements/parts; scorecard/checks; weight & balance; build
+  package), nothing removed, and stays open once opened (localStorage). A line from a study is a link to it;
+  the Studies page opens the card a study lives in. Answers fill in place, so a half-filled form survives.
+- **Glue and screws** join the shopping list (`fasteners.py`): joints found from the pieces (an edge against
+  another's face or edge, each pair once), #8 screws a screw every 6 in (at least 2 a joint, ~1.6× the
+  thickness long), glue ~1/2 ml an inch. The stool: 8 joints, 85 in, 18 × #8 × 1 1/4 in screws and an 8 oz
+  bottle. In Built from, the scorecard's cost and the release's shopping list.
+- Live, the stool's cards: "A two-step stool made from 3/4 in plywood…" (its description is stale until the
+  next revision, #29's fix) · "16 × 10 in, 9 in tall, from 3/4 in softwood plywood" · ✓ "Holds 200 lb adult
+  stepping up, 3.1 times over." · "1 sheet of 3/4 in softwood plywood, 18 screws and wood glue, exterior paint:
+  about $39." · "It weighs 8.9 lb, easy for a kid to carry." · ✓ "With your jigsaw: 5 pieces." · "Patterns
+  ready: 15 pages…". The cargo box and its frame read right too (the frame: "Your shop can't make shank,
+  riser, spine and 4 more: steel tube…" until a welder and a saw are in the shop).
+- Tests: `test_answers.py` (4: a five-panel box has 8 joints and its screws and glue; the four cards read top
+  line first with no internal names; a strength check becomes a verdict and an older one says so; the design
+  card says what isn't done). **Full suite: 496 passed.**
+- Commit: `99ca894` (with the rest of CALI-48), PR #37.
+
+### 2026-10-30 · CALI-48 (#4), the rest · Your shop: what makes each piece, and printed parts fitted to the printer
+- **Theo:** "let's finish #4 and then step 1 of spec".
+- **`shop.py`:** your shop as data, saved once (`~/.caliper/shop.yaml`, or `$CALIPER_SHOP`) and used by every
+  design: hand tools from a catalogue (jigsaw, drill, circular saw, hot wire, knife, chop saw, hacksaw,
+  welder, angle grinder…) and machines (CNC router with its bed, plasma table with its bed and thickest
+  plate, 3D printer with its volume and materials). Nothing saved means a hand-tool shop: jigsaw, drill,
+  circular saw. `route()` sends each piece to what makes it: the router if it fits the bed, a jigsaw (up to
+  1 1/2 in, curves and holes, with a starter hole), a circular saw (straight, no holes), a hot wire or knife
+  for foam, the plasma table within its plate thickness, a chop saw and a welder for tube, the printer for a
+  printed part — or says what's missing ("thicker than your plasma table cuts: a fab shop can cut it").
+  Foam's fold limit was already enforced: the cut plan makes any fold sharper than `fold_deg` a cut.
+- **Printed parts:** a part can declare `{"kind": "printed", "material": "petg"}`; it's weighed from its solid
+  (1.2 mm walls + 20% infill) and costed by the kilo (PLA, PETG in the materials table). **`printing.py`**
+  fits it to the printer: turned if that's enough, else split across its longest side with three 3 mm pin
+  holes, 10 mm deep each side, across every cut (a 400 mm bar on a 256 mm bed: two watertight halves). Time
+  and filament come from **PrusaSlicer's command line** where it's installed (0.2 s a piece: 6.6 h, 170 g,
+  $3.73 for each half of that bar in PETG), else walls + infill at rough speeds, marked rough.
+- **`making.py`:** per part, every piece routed and printed parts fitted and costed. The part panel's *Made in
+  your shop* says it in a line per tool ("jigsaw: left side panel, …"), printed parts with hours, grams and
+  dollars, and anything your shop can't make in red. A **Shop** page edits the shop. The scorecard checks
+  "your shop can make every piece" and reports print hours and filament; the build package files printed
+  pieces under `printer/<part>/` and the book gets a *Made in your shop* page.
+- Tests run against an empty shop and no slicer (`conftest.py`), whatever this machine has. `test_shop.py`
+  (6: the default shop and saving yours; routing for hand tools and for machines, including too-big and
+  too-thick; the stool by jigsaw; a printed bar split and pinned, weighed as printed; split pieces fit and
+  lose only the pin holes; the scorecard's shop check). `test_scorecard.py` counts the new check.
+- Commit: `99ca894` (with CALI-72), PR #37.
+
+### 2026-10-30 · CALI-48 (#4), first slice · Patterns for hand tools: measure and mark, print and tape, project and trace
+- **Theo:** "a cut plan with a jig saw is important. CNC is great, but most people operate with hand tools.
+  We need plans that can be laid out by ruler and pencil, or maybe projected with a projector and traced or
+  printed or something like that."
+- **`patterns.py`:** every flat sheet piece of a part (holes and all), in its own plane with its longest edge
+  along the bottom and its corner at (0, 0), three ways:
+  - **Measure and mark** (`measure-and-mark.pdf`): a landscape page per piece on a 1 in grid, numbered from
+    the bottom-left corner, overall dimension lines, the corners of anything that isn't a plain rectangle,
+    and each hole's position and size from the two square edges ("H1: 1 1/2 in from the left, 1 1/2 in up;
+    11 7/16 in wide, 6 in tall… drill a 3/8 in hole inside the line to start the jigsaw").
+  - **Print and tape** (`print-full-size.pdf`): full size on letter pages, portrait or landscape (whichever is
+    fewer), 1/2 in overlaps shaded grey, the 1 in grid to line pages up, a label on each ("page A2 (2 of 2) ·
+    overlaps …"), a 3 in ruler in every top margin to check it printed at 100%, and a map page per piece.
+  - **Project and trace** (`project-<piece>.svg`): full size in real inches, white on black, with a 4 in
+    calibration square to zoom the projector to.
+  Pages are Pillow rasters at 150 dpi saved as PDF with their resolution, so they print at true size with no
+  PDF library (every page is 612 × 792 pt). A 1/4 in border pushed a 14 1/2 in panel onto a third, nearly
+  empty page; it's 1/10 in now: the stool is 10 printed pages, two a piece.
+- **In the app:** *Patterns for hand tools* comes before the CNC cut plan under *Built from*, with links and
+  thumbnails; it's on the Studies page. **The build package** gets `hand/<part>/` with all three.
+- Live on the stool (v3): 5 pieces, 15 pages with the maps.
+- **Not yet in #4:** the shop itself (machines and stock as a design input), the printer, routing by machine.
+- Tests: `test_patterns.py` (3: pieces lie flat, long edge down, holes in place; every printed page is
+  8.5 × 11 in and the PDFs, SVG and history are right; nothing flat, no patterns) and `hand/` in the release.
+  **Full suite (over #2 and #4): 486 passed.**
+- Commit: `92248f0`, PR #37 (stacked on #36).
+
 ### 2026-10-30 · CALI-55 (#2) · What the design is held to, written from the conversation
 - **`goals.py`:** after the clarify round (in the background, off the request) and after any chat turn that
   sounds like a requirement (an obligation, a load, or a number with a unit), Claude rewrites the design's
@@ -29,6 +112,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   assumed and proposed checks, an unknown metric dropped, keep and drop and both standing after a redraft;
   a proposed check shown but not counted, the strength metric from the part's run; a requirement-ish turn
   updates the checks and a question doesn't). `test_scorecard.py`'s summary gains `proposed`.
+- Commit: `e94ea70`, PR #36 (stacked on #35).
 
 ### 2026-10-30 · CALI-71 (#32) · Lighten the walls where the wood isn't working, in cuts a jigsaw can make
 - **Theo:** "proceed to 32, 2 and 4", after the interface spec (`specs/caliper-four-questions-spec.md`, PR #34).
@@ -54,7 +138,8 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   for where it did (#10's sandbag test).
 - Tests: `test_lighten.py` (4: holes cut, weighed and consistent; merge; the walls lighten, the top doesn't,
   every hole keeps its rim; adopting cuts them and a second study starts from them) and the book's
-  breaking load in `test_release.py`.
+  breaking load in `test_release.py`. **Full suite: 478 passed.**
+- Commit: `e431f44`, PR #35 (stacked on #33).
 
 ### 2026-10-30 · CALI-67 (#27), CALI-69 (#29) · Panels that fit the design, and a description that keeps up
 - **Theo,** walking through the strength check: the rough edges I'd listed were his feedback ("the whole
