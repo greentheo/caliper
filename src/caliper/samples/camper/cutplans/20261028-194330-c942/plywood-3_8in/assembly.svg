@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="680" viewBox="0 0 640 680">
+<title>cargo_box 3/8 in softwood plywood — which piece is which</title>
+<rect width="640" height="680" fill="#ffffff"/>
+<g transform="translate(0 0)">
+  <rect width="320" height="340" fill="#ffffff" stroke="#e3e6ec"/>
+  <text x="12" y="18" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#5a6472">front</text>
+  <g shape-rendering="crispEdges"><path d="M18.00 249.30 L302.00 68.70 L18.00 68.70 Z" fill="#2a425c"/><path d="M18.00 249.30 L302.00 249.30 L302.00 68.70 Z" fill="#2a425c"/></g>
+  <text x="112.7" y="128.9" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#0b0d10" stroke="#ffffff" stroke-width="2.4" paint-order="stroke">P1</text>
+</g>
+<g transform="translate(320 0)">
+  <rect width="320" height="340" fill="#ffffff" stroke="#e3e6ec"/>
+  <text x="12" y="18" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#5a6472">right</text>
+  <g shape-rendering="crispEdges"><path d="M263.71 191.00 L302.00 150.43 L56.29 127.00 Z" fill="#2a425c"/><path d="M263.71 191.00 L56.29 127.00 L18.00 167.57 Z" fill="#2a425c"/></g>
+  <text x="207.3" y="156.1" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#0b0d10" stroke="#ffffff" stroke-width="2.4" paint-order="stroke">P1</text>
+</g>
+<g transform="translate(0 340)">
+  <rect width="320" height="340" fill="#ffffff" stroke="#e3e6ec"/>
+  <text x="12" y="18" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#5a6472">back</text>
+  <g shape-rendering="crispEdges"><path d="M302.00 68.70 L18.00 68.70 L18.00 249.30 Z" fill="#2a425c"/><path d="M302.00 68.70 L18.00 249.30 L302.00 249.30 Z" fill="#2a425c"/></g>
+  <text x="112.7" y="128.9" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#0b0d10" stroke="#ffffff" stroke-width="2.4" paint-order="stroke">P1</text>
+</g>
+<g transform="translate(320 340)">
+  <rect width="320" height="340" fill="#ffffff" stroke="#e3e6ec"/>
+  <text x="12" y="18" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#5a6472">top</text>
+  <g shape-rendering="crispEdges"><path d="M86.63 290.47 L233.37 27.53 L86.63 18.00 Z" fill="#2a425c"/><path d="M86.63 290.47 L233.37 300.00 L233.37 27.53 Z" fill="#2a425c"/></g>
+  <text x="135.5" y="112.0" text-anchor="middle" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#0b0d10" stroke="#ffffff" stroke-width="2.4" paint-order="stroke">P1</text>
+</g>
+</svg>

@@ -26,6 +26,9 @@ examples/*.inserted.yaml
 !tests/fixtures/**/*.stl   # keep checked-in test fixtures
 !examples/*.stl            # keep checked-in demo references (e.g. the fit obstacle)
 !examples/**/*.stl
+# the sample designs ship whole (CALI-59)
+!src/caliper/samples/**/*.stl
+!src/caliper/samples/**/*.png
 
 # the optional tools `make tools` fetches (unfold-to-sheets)
 vendor/

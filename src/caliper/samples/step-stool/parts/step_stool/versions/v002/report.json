@@ -1,0 +1,55 @@
+{
+  "all_pass": true,
+  "results": [
+    {
+      "id": "one_body",
+      "expr": "body_count == 1",
+      "status": "pass",
+      "passed": true,
+      "actual": 1,
+      "margin": -0.0,
+      "detail": "",
+      "symbol": "\u2713"
+    },
+    {
+      "id": "watertight",
+      "expr": "is_watertight",
+      "status": "pass",
+      "passed": true,
+      "actual": true,
+      "margin": null,
+      "detail": "",
+      "symbol": "\u2713"
+    },
+    {
+      "id": "construction_inside",
+      "expr": "every piece construction() lists lies in the solid build() makes",
+      "status": "pass",
+      "passed": true,
+      "actual": 1.0,
+      "margin": 0.0,
+      "detail": "",
+      "symbol": "\u2713"
+    },
+    {
+      "id": "construction_covers",
+      "expr": "the pieces cover the solid's surface (\u2265 98%)",
+      "status": "pass",
+      "passed": true,
+      "actual": 1.0,
+      "margin": 0.02,
+      "detail": "",
+      "symbol": "\u2713"
+    },
+    {
+      "id": "construction_volume",
+      "expr": "no more material than the solid holds (\u2264 1.25\u00d7 its volume)",
+      "status": "pass",
+      "passed": true,
+      "actual": 1.0,
+      "margin": 0.25,
+      "detail": "",
+      "symbol": "\u2713"
+    }
+  ]
+}

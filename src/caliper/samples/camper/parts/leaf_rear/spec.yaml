@@ -1,0 +1,11 @@
+part: leaf_rear
+intent: 'Reference solid representing the back of the Nissan Leaf: a side-profile
+  polygon extruded across the car''s full 70.5 in width, with (x,z) corners at (0,12),(0,26),(3,30),(28,60),(60,60),(60,12)
+  in inches, car drives +X, x=0 is rear bumper face, y=0 centreline, z=0 ground.'
+parameters: {}
+references: []
+assert:
+- id: one_body
+  expr: body_count == 1
+- id: watertight
+  expr: is_watertight

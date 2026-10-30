@@ -1,0 +1,11 @@
+part: frame
+intent: "Weld-up trailer hitch frame: a 2-in square steel shank (z 8\u201310, centred\
+  \ y=0, x 9 to -57) plus a ladder on top (z 10\u201312) with two rails at y=\xB1\
+  30 and front/back cross members, all unioned into one solid."
+parameters: {}
+references: []
+assert:
+- id: one_body
+  expr: body_count == 1
+- id: watertight
+  expr: is_watertight

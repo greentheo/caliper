@@ -1,0 +1,145 @@
+{
+  "id": "20261030-091143-d732",
+  "part": "step_stool",
+  "kind": "load",
+  "created": 1793373109.303884,
+  "version": 3,
+  "seconds": 6.4,
+  "material": {
+    "key": "plywood",
+    "name": "softwood plywood",
+    "E": 8000.0,
+    "strength": 30.0,
+    "density": 0.56,
+    "basis": "softwood ply along its face grain (rough; across it, about half)",
+    "across": 0.5
+  },
+  "spacing_mm": 4.76,
+  "voxels": 65040,
+  "min_safety": 2.0,
+  "held": [
+    {
+      "name": "the floor",
+      "lo": [
+        -1.0,
+        -1.0,
+        -1.0
+      ],
+      "hi": [
+        407.4,
+        255.0,
+        2.8575
+      ],
+      "default": true
+    }
+  ],
+  "cases": [
+    {
+      "name": "200 lb adult stepping up",
+      "lb": 200.0,
+      "factor": 2.0,
+      "force_n": [
+        0.0,
+        0.0,
+        -889.6
+      ],
+      "lo": [
+        153.2,
+        77.0,
+        226.6
+      ],
+      "hi": [
+        253.2,
+        177.0,
+        228.6
+      ],
+      "fea": {
+        "supported": true,
+        "peak_mpa": 2.75,
+        "robust_mpa": 1.89,
+        "safety": 10.91,
+        "deflection_mm": 0.152,
+        "at": [
+          205.6,
+          15.1,
+          207.2
+        ],
+        "in": "front panel"
+      },
+      "plate": {
+        "piece": "top tread",
+        "a_mm": 368.3,
+        "b_mm": 215.9,
+        "edges": 4,
+        "edges_held": 4,
+        "footprint_mm": [
+          100.0,
+          100.0
+        ],
+        "done": true,
+        "thickness_mm": 19.05,
+        "stress_mpa": 4.82,
+        "safety": 6.22,
+        "safety_across": 3.11,
+        "deflection_mm": 0.261,
+        "by_thickness": [
+          {
+            "thickness_mm": 6.35,
+            "label": "1/4 in",
+            "safety": 0.69,
+            "safety_across": 0.35,
+            "deflection_mm": 7.058
+          },
+          {
+            "thickness_mm": 9.525,
+            "label": "3/8 in",
+            "safety": 1.56,
+            "safety_across": 0.78,
+            "deflection_mm": 2.091
+          },
+          {
+            "thickness_mm": 12.7,
+            "label": "1/2 in",
+            "safety": 2.76,
+            "safety_across": 1.38,
+            "deflection_mm": 0.882
+          },
+          {
+            "thickness_mm": 15.875,
+            "label": "5/8 in",
+            "safety": 4.32,
+            "safety_across": 2.16,
+            "deflection_mm": 0.452
+          },
+          {
+            "thickness_mm": 19.05,
+            "label": "3/4 in",
+            "safety": 6.22,
+            "safety_across": 3.11,
+            "deflection_mm": 0.261
+          },
+          {
+            "thickness_mm": 25.4,
+            "label": "1 in",
+            "safety": 11.06,
+            "safety_across": 5.53,
+            "deflection_mm": 0.11
+          }
+        ]
+      },
+      "safety": 3.11,
+      "governs": "plate",
+      "holds": true,
+      "breaks_lb": 1240.0,
+      "heat": "case_00.json"
+    }
+  ],
+  "notes": [
+    "softwood plywood: E 8000 MPa, strength 30 MPa \u2014 softwood ply along its face grain (rough; across it, about half).",
+    "The FEA takes the joints as solid wood and its panel edges come out partly clamped, so it reads stiffer than glued-and-screwed; the plate check frees the edges, the safe side. Neither checks the glue or the screws.",
+    "\u201cBreaks at\u201d is the load, placed the same way, at which the governing check reaches the material's strength: a prediction to test, not a rating.",
+    "Held by the floor: everything at its underside, as if it stands on a flat floor."
+  ],
+  "safety": 3.11,
+  "holds": true
+}

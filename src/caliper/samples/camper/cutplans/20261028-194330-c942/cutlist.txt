@@ -1,0 +1,36 @@
+CUT LIST — cargo_box (20261028-194330-c942)
+
+1x2 SPF lumber: 5 x 8 ft
+      75.0 in  (1905 mm)  rail_front_bottom
+      75.0 in  (1905 mm)  rail_back_bottom
+      58.2 in  (1479 mm)  rail_front_top
+      54.2 in  (1376 mm)  rail_back_top
+      36.6 in  (930 mm)  post_front_left
+      36.6 in  (930 mm)  post_front_right
+      30.8 in  (782 mm)  post_back_left
+      30.8 in  (782 mm)  post_back_right
+
+2x2 SPF lumber: 3 x 8 ft
+      69.8 in  (1772 mm)  beam_1
+      66.7 in  (1695 mm)  beam_2
+      60.4 in  (1535 mm)  beam_3
+
+3/8 in softwood plywood: 1 sheet(s) of softwood plywood 8 x 4 ft, 67% used — floor
+1 in XPS foam board: 4 sheet(s) of XPS foam board 8 x 4 ft, 59% used — front, back, side_left, side_right, band_left_1, band_right_1, band_left_2, band_right_2, band_left_3, band_right_3, band_left_4, band_right_4, band_left_5, band_right_5, band_left_6, band_right_6, band_left_7, band_right_7, band_left_8, band_right_8, roof
+    bevels — where two pieces meet at an angle, cut each edge at half of it:
+      band_left_1 / band_left_2: 40 in of edge, bevel 0–3°
+      band_left_2 / band_left_3: 40 in of edge, bevel 0–3°
+      band_left_3 / band_left_4: 41 in of edge, bevel 0–3°
+      band_left_4 / band_left_5: 42 in of edge, bevel 0–3°
+      band_left_5 / band_left_6: 43 in of edge, bevel 0–4°
+      band_left_6 / band_left_7: 45 in of edge, bevel 0–6°
+      band_left_7 / band_left_8: 47 in of edge, bevel 2–10°
+      band_left_8 / roof: 48 in of edge, bevel 19–40°
+      band_right_1 / band_right_2: 40 in of edge, bevel 0–3°
+      band_right_2 / band_right_3: 40 in of edge, bevel 0–3°
+      band_right_3 / band_right_4: 41 in of edge, bevel 0–3°
+      band_right_4 / band_right_5: 42 in of edge, bevel 0–3°
+      band_right_5 / band_right_6: 43 in of edge, bevel 0–3°
+      band_right_6 / band_right_7: 45 in of edge, bevel 0–4°
+      band_right_7 / band_right_8: 47 in of edge, bevel 2–8°
+      band_right_8 / roof: 48 in of edge, bevel 17–41°

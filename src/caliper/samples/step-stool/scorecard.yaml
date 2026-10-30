@@ -1,0 +1,21 @@
+# What this design is held to, written from the conversation (CALI-55). Each check says where it
+# came from: stated (the person said it), assumed, proposed (not binding until kept), confirmed.
+written_by: caliper
+checks:
+- id: strength_adult
+  label: holds Dad (200 lb), 2 times over
+  metric: strength.safety
+  op: '>='
+  limit: 2.0
+  source: assumed
+  quote: It has to hold me too (200 lb).
+  why: Safety factor of 2 is the standard minimum for a person standing on a platform.
+objectives:
+- id: obj_weight
+  label: as light as practical
+  metric: weight.total_lb
+  direction: min
+- id: obj_cost
+  label: minimize material cost
+  metric: cost.usd
+  direction: min

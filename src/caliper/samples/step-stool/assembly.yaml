@@ -1,0 +1,17 @@
+name: a-step-stool-so-my-6
+intent: A step stool so my 6-year-old can reach the bathroom sink. Made from 3/4 in
+  plywood, glued and screwed. It has to hold me too (200 lb).
+parts:
+- id: step_stool
+  source: parts/step_stool/part.py
+  role: movable
+  position:
+  - 0.0
+  - 0.0
+  - 0.0
+  rotation:
+  - 0.0
+  - 0.0
+  - 0.0
+mates: []
+assert: []

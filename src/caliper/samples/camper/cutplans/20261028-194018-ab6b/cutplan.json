@@ -1,0 +1,237 @@
+{
+  "id": "20261028-194018-ab6b",
+  "part": "frame",
+  "version": 26,
+  "created": 1793238018.113584,
+  "build": {},
+  "unfolder": "~/githubrepo/game-dev/unfold-to-sheets",
+  "sheets": [],
+  "sticks": [],
+  "tubes": [
+    {
+      "label": "2x2x1/8 steel tube",
+      "stock_len_mm": 6096.0,
+      "count": 1,
+      "cuts": [
+        {
+          "name": "spine",
+          "group": "spine",
+          "label": "2x2x1/8 steel tube",
+          "centreline_mm": 965.2,
+          "length_mm": 990.6,
+          "ends": [
+            {
+              "end": "a",
+              "carries": [
+                "riser"
+              ],
+              "extend_mm": 25.4,
+              "miter_deg": 0.0
+            },
+            {
+              "end": "b",
+              "free": true,
+              "miter_deg": 0.0
+            }
+          ]
+        },
+        {
+          "name": "shank",
+          "group": "shank",
+          "label": "2x2x1/8 steel tube",
+          "centreline_mm": 330.2,
+          "length_mm": 355.6,
+          "ends": [
+            {
+              "end": "a",
+              "free": true,
+              "miter_deg": 0.0
+            },
+            {
+              "end": "b",
+              "carries": [
+                "riser"
+              ],
+              "extend_mm": 25.4,
+              "miter_deg": 0.0
+            }
+          ]
+        },
+        {
+          "name": "riser",
+          "group": "riser",
+          "label": "2x2x1/8 steel tube",
+          "centreline_mm": 203.2,
+          "length_mm": 254.0,
+          "ends": [
+            {
+              "end": "a",
+              "carries": [
+                "shank_out"
+              ],
+              "extend_mm": 25.4,
+              "miter_deg": 0.0
+            },
+            {
+              "end": "b",
+              "carries": [
+                "spine_0"
+              ],
+              "extend_mm": 25.4,
+              "miter_deg": 0.0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "label": "1x1x1/16 steel tube",
+      "stock_len_mm": 6096.0,
+      "count": 1,
+      "cuts": [
+        {
+          "name": "x_front_left",
+          "group": "x",
+          "label": "1x1x1/16 steel tube",
+          "centreline_mm": 1067.8,
+          "length_mm": 1039.3,
+          "ends": [
+            {
+              "end": "a",
+              "butts": "spine",
+              "into": "2x2x1/8 steel tube",
+              "angle_deg": 63.1,
+              "miter_deg": 26.9,
+              "setback_mm": 28.5
+            },
+            {
+              "end": "b",
+              "free": true,
+              "miter_deg": 0.0
+            }
+          ]
+        },
+        {
+          "name": "x_front_right",
+          "group": "x",
+          "label": "1x1x1/16 steel tube",
+          "centreline_mm": 1067.8,
+          "length_mm": 1039.3,
+          "ends": [
+            {
+              "end": "a",
+              "butts": "spine",
+              "into": "2x2x1/8 steel tube",
+              "angle_deg": 63.1,
+              "miter_deg": 26.9,
+              "setback_mm": 28.5
+            },
+            {
+              "end": "b",
+              "free": true,
+              "miter_deg": 0.0
+            }
+          ]
+        },
+        {
+          "name": "x_back_left",
+          "group": "x",
+          "label": "1x1x1/16 steel tube",
+          "centreline_mm": 1067.8,
+          "length_mm": 1039.3,
+          "ends": [
+            {
+              "end": "a",
+              "butts": "spine",
+              "into": "2x2x1/8 steel tube",
+              "angle_deg": 63.1,
+              "miter_deg": 26.9,
+              "setback_mm": 28.5
+            },
+            {
+              "end": "b",
+              "free": true,
+              "miter_deg": 0.0
+            }
+          ]
+        },
+        {
+          "name": "x_back_right",
+          "group": "x",
+          "label": "1x1x1/16 steel tube",
+          "centreline_mm": 1067.8,
+          "length_mm": 1039.3,
+          "ends": [
+            {
+              "end": "a",
+              "butts": "spine",
+              "into": "2x2x1/8 steel tube",
+              "angle_deg": 63.1,
+              "miter_deg": 26.9,
+              "setback_mm": 28.5
+            },
+            {
+              "end": "b",
+              "free": true,
+              "miter_deg": 0.0
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Tube lengths are cut to the faces they butt against (from the centrelines in members()); check them against the first tube before cutting the rest."
+  ],
+  "plates": [
+    {
+      "name": "jog_low",
+      "count": 2,
+      "thickness_mm": 3.175,
+      "label": "1/8 in steel plate",
+      "mass_kg": 0.691,
+      "safety": 5.94,
+      "relief": 0.896,
+      "members": [
+        "riser",
+        "shank_out"
+      ],
+      "size_mm": [
+        228.6,
+        203.2
+      ],
+      "notes": [
+        "the plates run 100% of the way along riser: if the joint at its other end has plates too, cut each side as one plate over both",
+        "the plates run 100% of the way along shank: if the joint at its other end has plates too, cut each side as one plate over both"
+      ],
+      "files": [
+        "plates/jog_low.dxf",
+        "plates/jog_low.svg"
+      ]
+    },
+    {
+      "name": "jog_high",
+      "count": 2,
+      "thickness_mm": 3.175,
+      "label": "1/8 in steel plate",
+      "mass_kg": 0.645,
+      "safety": 3.77,
+      "relief": 0.82,
+      "members": [
+        "riser",
+        "spine_0"
+      ],
+      "size_mm": [
+        228.6,
+        228.6
+      ],
+      "notes": [
+        "the plates run 100% of the way along riser: if the joint at its other end has plates too, cut each side as one plate over both"
+      ],
+      "files": [
+        "plates/jog_high.dxf",
+        "plates/jog_high.svg"
+      ]
+    }
+  ]
+}

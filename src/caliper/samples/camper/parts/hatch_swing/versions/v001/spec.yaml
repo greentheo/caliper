@@ -1,0 +1,11 @@
+part: hatch_swing
+intent: 'Reference block for hatch sweep zone: x from -14 to 0 in (behind bumper),
+  y from -24 to +24 in (48 in wide, centred), z from 26 to 60 in, shown as a transparent
+  envelope'
+parameters: {}
+references: []
+assert:
+- id: one_body
+  expr: body_count == 1
+- id: watertight
+  expr: is_watertight

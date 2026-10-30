@@ -1,0 +1,48 @@
+name: a-cargo-box-on-the-trailer
+intent: 'A cargo box on the trailer hitch behind my Nissan Leaf. The box is 74 in
+  wide, 41 in high and 39 in deep, with its front face 18 in behind the rear bumper.
+  It sits on a frame of 2 in square steel tube whose shank slides into the hitch receiver.
+  The receiver is a Class II hitch, about 9 in off the ground and 3 in forward of
+  the rear bumper (the bumper sticks out 3 in behind it). The Leaf is about 70.5 in
+  wide with its roof about 60 in off the ground, and its back is a teardrop / hatchback
+  shape. The hatch must still open: its swing reaches about 14 in behind the bumper
+  at its furthest. The box is XPS foam covered in poor man''s fiberglass, with a door
+  and a roof fan. I want to shape it for less drag.'
+parts:
+- id: leaf_rear
+  source: parts/leaf_rear/part.py
+  role: fixed
+  position:
+  - 0.0
+  - 0.0
+  - 0.0
+  rotation:
+  - 0.0
+  - 0.0
+  - 0.0
+- id: frame
+  source: parts/frame/part.py
+  role: movable
+  position:
+  - 0.0
+  - 0.0
+  - 0.0
+  rotation:
+  - 0.0
+  - 0.0
+  - 0.0
+- id: cargo_box
+  source: parts/cargo_box/part.py
+  role: movable
+  position:
+  - 0.0
+  - 0.0
+  - 0.0
+  rotation:
+  - 0.0
+  - 0.0
+  - 0.0
+mates: []
+assert:
+- id: bumper_clearance
+  expr: min_clearance(cargo_box, leaf_rear) >= 50.8

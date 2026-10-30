@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Caliper</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="/design.css?v=12" />
+  <link rel="stylesheet" href="/design.css?v=14" />
   <script>
     // surface load/runtime errors on the page itself, not just devtools (CALI-27): a failed module
     // import would otherwise leave every button silently dead.
@@ -13,7 +13,12 @@
     function showErr(msg) {
       __err.push(msg);
       const b = document.getElementById('errbar');
-      if (b) { b.hidden = false; b.textContent = '⚠ ' + msg; }
+      if (b) {
+        b.hidden = false; b.textContent = '⚠ ' + msg + ' ';
+        // CALI-59: a report the person reads first, and sends themselves if they want to
+        const r = document.createElement('button'); r.className = 'linkish'; r.dataset.report = '';
+        r.textContent = 'Report it…'; b.append(r);
+      }
     }
     addEventListener('error', (e) => {
       if (/ResizeObserver loop/.test(e.message || '')) return;   // benign canvas-resize noise
@@ -58,6 +63,7 @@
         </div>
         <div class="composer-row">
           <textarea id="msg" rows="2" placeholder="Click a part to talk about it, or describe a change…"></textarea>
+          <button type="button" class="mic ghost" data-mic="msg" title="talk instead of typing">🎤</button>
           <button id="send" class="primary" type="submit">Send</button>
         </div>
       </form>
@@ -79,6 +85,6 @@
     <section id="shopPage" class="studies-page" hidden></section>
   </main>
 
-  <script type="module" src="/design.js?v=37"></script>
+  <script type="module" src="/design.js?v=39"></script>
 </body>
 </html>

@@ -1,0 +1,8 @@
+# cargo_box: 3/8 in softwood plywood — written by Caliper for unfold-to-sheets
+# units: mm
+g floor
+v -76.200 -977.900 457.200
+v -1092.200 -977.900 457.200
+v -1092.200 977.900 457.200
+v -76.200 977.900 457.200
+f 1 2 3 4
