@@ -157,3 +157,22 @@ details > summary { cursor: pointer; color: var(--muted); font-size: 12px; margi
 .flash { animation: flash 1.6s ease-out; border-radius: 8px; }
 @keyframes flash { from { box-shadow: 0 0 0 2px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
 
+/* the studies page (CALI-70): over the viewport and the inspector, the chat stays */
+.session { position: relative; }
+.studies-page { position: absolute; top: 0; bottom: 0; left: 360px; right: 0; z-index: 8; overflow-y: auto;
+  background: var(--bg); border-left: 1px solid var(--line); padding: 14px 22px 40px; }
+.studies-head { display: flex; align-items: center; justify-content: space-between; }
+.studies-head h2 { margin: 0; font-size: 18px; display: flex; gap: 10px; align-items: baseline; }
+.studies-page h4 { margin: 18px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+.menu { display: grid; gap: 10px; }
+.menu-part { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.menu-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 8px; }
+.menu-item { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; padding: 8px 10px; }
+.menu-item.off { opacity: .6; border-style: dashed; }
+.menu-item .n { color: var(--muted); font-weight: 400; }
+.filters { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+table.studies-table { font-size: 13px; }
+table.studies-table td { vertical-align: top; text-align: left; }
+table.studies-table th { text-align: left; }
+table.studies-table td.when { white-space: nowrap; color: var(--muted); }
+#studiesBtn.on { border-color: var(--accent); color: var(--accent); }

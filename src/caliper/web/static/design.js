@@ -21,6 +21,7 @@ const S = {
   runIndex: {},        // part id -> which whittle run the inspector shows
   aeroRun: {}, frameRun: {},         // part id -> which parametric study the inspector shows
   loadRun: {},         // part id -> which strength check the inspector shows (CALI-54)
+  studies: false,      // the studies page is open (CALI-70)
   built: {},           // part id -> {version, tried, report, balance}: what it's built from (CALI-41)
   balance: null,       // {key, data}: the whole design's weight and what the hitch carries
   payload: 0,          // lb of gear or people on the floor, for the balance
@@ -401,7 +402,7 @@ async function refresh() {
 }
 
 function render() {
-  renderUnits(); renderThread(); renderInspector(); renderScope(); paint();
+  renderUnits(); renderThread(); renderInspector(); renderScope(); paint(); renderStudies();
   $('viewHint').textContent = S.design && S.design.parts.length
     ? (S.scope ? '' : 'click a part to talk about it')
     : '';
@@ -1730,6 +1731,100 @@ async function adoptStation(pid, wid, index, kind) {
     clearStation();
     await refresh();
   } catch (e) { showErr(e.message); $('adoptBtn').disabled = false; }
+}
+
+// ------------------------------------------------------------- the studies page (CALI-70)
+// Every study the design has, newest first: the part and the version it ran on, the line it came to, and a
+// way to open it where it lives. And per part, every study Caliper has: which can run on it now, and what the
+// others are missing (what to say or do to get them).
+const STUDY_BOX = { load: 'loadBox', frame: 'frameBox', gussets: 'frameBox', aero: 'aeroBox', whittle: 'whittleBox',
+  cutplan: 'buildBox', scorecard: 'scoreBox', release: 'relBox' };
+const studyFilter = { kind: '', part: '' };
+
+function studiesView(d) {
+  const st = d.studies || { runs: [], menu: {}, design: [] };
+  const rows = st.runs.filter((r) => (!studyFilter.kind || r.kind === studyFilter.kind)
+    && (!studyFilter.part || (studyFilter.part === '*' ? !r.part : r.part === studyFilter.part)));
+  const kinds = [...new Map(st.runs.map((r) => [r.kind, r.label])).entries()];
+  const parts = d.parts.filter((p) => p.role !== 'fixed');
+  const when = (t) => (t ? new Date(t * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
+  const count = (pid, kind) => st.runs.filter((r) => r.part === pid && r.kind === kind).length;
+  const item = (m, pid) => `<button class="menu-item ${m.ready ? '' : 'off'}" data-go-kind="${m.kind}" data-go-part="${esc(pid || '')}"
+      title="${esc(m.ready ? m.what : `Not yet: ${m.why}`)}">
+      <b>${esc(m.label)}${pid && count(pid, m.kind) ? ` <span class="n">· ${count(pid, m.kind)} run${count(pid, m.kind) === 1 ? '' : 's'}</span>` : ''}</b>
+      <span class="small muted">${esc(m.ready ? m.what : `Not yet: ${m.why}`)}</span></button>`;
+  return `<div class="studies-head"><h2>Studies <span class="muted small">${esc(d.name)}</span></h2>
+      <button class="x" id="studiesClose" title="back to the design (Esc)">×</button></div>
+    <h4>Run a study</h4>
+    <div class="menu">${parts.map((p) => `<div class="menu-part">
+        <div><span class="partlink" data-go-part="${esc(p.id)}">${esc(p.id)}</span> <span class="muted small">v${p.version} · ${esc(p.intent || '')}</span></div>
+        <div class="menu-items">${(st.menu[p.id] || []).map((m) => item(m, p.id)).join('')}</div></div>`).join('')}
+      <div class="menu-part"><div><b>The whole design</b></div>
+        <div class="menu-items">${(st.design || []).map((m) => item(m, '')).join('')}</div></div></div>
+    <h4>Every run <span class="muted">· ${st.runs.length}</span></h4>
+    ${st.runs.length ? `<div class="filters"><select id="sfKind"><option value="">every kind</option>
+        ${kinds.map(([k, l]) => `<option value="${k}" ${studyFilter.kind === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+      <select id="sfPart"><option value="">every part</option>
+        ${parts.map((p) => `<option value="${esc(p.id)}" ${studyFilter.part === p.id ? 'selected' : ''}>${esc(p.id)}</option>`).join('')}
+        <option value="*" ${studyFilter.part === '*' ? 'selected' : ''}>the whole design</option></select>
+      <span class="muted small">${rows.length} shown</span></div>
+    <table class="st studies-table"><tr><th>when</th><th>study</th><th>on</th><th>what it came to</th><th></th></tr>
+      ${rows.map((r) => `<tr class="pick" data-go-kind="${r.kind}" data-go-part="${esc(r.part || '')}" data-go-run="${esc(r.id || '')}">
+        <td class="when">${when(r.created)}</td><td>${esc(r.label)}</td>
+        <td>${r.part ? `${esc(r.part)} <span class="muted">v${r.version ?? '?'}</span>` : '<span class="muted">the design</span>'}
+          ${r.stale ? ' <span class="badge bad" title="it has changed since this ran">changed since</span>' : ''}</td>
+        <td style="color:${r.ok === true ? 'var(--ok)' : r.ok === false ? 'var(--bad)' : 'inherit'}">${esc(r.headline)}</td>
+        <td><button>Open</button></td></tr>`).join('')}</table>`
+    : '<div class="empty">No studies yet. Pick one above.</div>'}`;
+}
+
+function renderStudies() {
+  const el = $('studies');
+  el.hidden = !S.studies || !S.design;
+  $('studiesBtn').classList.toggle('on', !!S.studies);
+  if (el.hidden) return;
+  el.innerHTML = studiesView(S.design);
+  $('studiesClose').onclick = () => { S.studies = false; renderStudies(); };
+  const kind = $('sfKind'), part = $('sfPart');
+  if (kind) kind.onchange = () => { studyFilter.kind = kind.value; renderStudies(); };
+  if (part) part.onchange = () => { studyFilter.part = part.value; renderStudies(); };
+  el.querySelectorAll('[data-go-kind], [data-go-part]').forEach((n) => {
+    n.onclick = (e) => {
+      e.stopPropagation();
+      openStudy(n.dataset.goKind || '', n.dataset.goPart || '', n.dataset.goRun || '');
+    };
+  });
+}
+$('studiesBtn').onclick = () => { S.studies = !S.studies; renderStudies(); };
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && S.studies) { S.studies = false; renderStudies(); }
+});
+
+// open a study where it lives: the part's (or the design's) panel, that run picked, scrolled into view
+function openStudy(kind, pid, runId) {
+  S.studies = false;
+  renderStudies();
+  const pick = (list, key) => { const k = list.findIndex((r) => r.id === runId); if (k >= 0) S[key][pid] = k; };
+  if (pid && runId) {
+    if (kind === 'load') pick(loadRuns(pid), 'loadRun');
+    if (kind === 'frame') pick(frameRuns(pid), 'frameRun');
+    if (kind === 'aero') pick(aeroRuns(pid), 'aeroRun');
+    if (kind === 'whittle') pick(runsFor(pid), 'runIndex');
+  }
+  clearStation();
+  setScope(pid || null);
+  const box = $(STUDY_BOX[kind]);
+  if (box) {
+    (box.previousElementSibling || box).scrollIntoView({ behavior: 'smooth', block: 'start' });
+    box.classList.add('flash');
+    setTimeout(() => box.classList.remove('flash'), 1600);
+  }
+  // a strength check opens on the stress picture of its weakest load
+  const run = kind === 'load' && runId ? loadRuns(pid).find((r) => r.id === runId) : null;
+  if (run) {
+    const worst = run.cases.reduce((a, c, i) => (c.heat && (a < 0 || (c.safety ?? 1e9) < (run.cases[a].safety ?? 1e9)) ? i : a), -1);
+    if (worst >= 0) showHeat(pid, run, worst);
+  }
 }
 
 // ------------------------------------------------------------------------------------ boot

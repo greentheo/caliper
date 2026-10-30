@@ -17,7 +17,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from . import (aero, chat, clarify, construction, cutplan, frame_study, load_study, promote, release,
-               scorecard)
+               scorecard, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -208,6 +208,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "gusset_runs": runs["gussets"],
         "scorecards": runs["scorecard"][:2],
         "releases": runs["release"],
+        "studies": studies.index(store, runs, parts),
         "has_goals": os.path.exists(scorecard.goals_path(store)),
         "cutplan_unavailable": cutplan.available(),
         "aero_available": _aero_available(),
