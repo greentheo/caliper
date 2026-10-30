@@ -233,7 +233,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
 
 def _goals_summary(store: DesignStore) -> dict:
     data = goals.read(store)
-    return {"ours": goals.ours(data), "checks": data.get("checks") or [], "objectives": data.get("objectives") or []}
+    checks = [c for c in data.get("checks") or [] if isinstance(c, dict) and c.get("metric") and "limit" in c]
+    return {"ours": goals.ours(data), "checks": checks, "objectives": data.get("objectives") or []}
 
 
 def _run_summary(rec: dict) -> dict:
@@ -463,6 +464,15 @@ def router():
         store = load(slug)
         if part and store.design.part(part) is None:
             raise HTTPException(status_code=404, detail=f"no part {part!r}")
+        if not goals.read(store) and (store.design.requirements or store.design.prompt) and store.design.parts \
+                and not RUNNER.busy(f"goals:{slug}"):
+            # what it's held to, from what was said, for a design from before the conversation wrote it (step 2)
+            def checks(j):
+                with RUNNER.locked(_lock(slug)):
+                    s = DesignStore.load(slug)
+                    return None if goals.read(s) else goals.update(s, "(the design's goal and requirements)")
+
+            RUNNER.submit("goals", checks, label=f"checks · {slug}", lock=f"goals:{slug}")
         return {"part": part, "cards": answers.answers(store, design_state(store), part)}
 
     # -- your shop (CALI-48): what you have, and how each part gets made with it --------------------------
@@ -561,6 +571,8 @@ def router():
                 got = lighten.adopt(store, rid, req.station)
             except FileNotFoundError as e:
                 raise HTTPException(status_code=404, detail=str(e))
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
             store.append_log({"kind": "lighten", "action": "adopted", "run": rid, "station": req.station,
                               "version": got["version"]})
             return {**got, "design": design_state(store)}

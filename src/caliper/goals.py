@@ -169,7 +169,7 @@ def offline(store: DesignStore, said: str, data: dict) -> dict:
     text = " ".join([store.design.prompt or "", said or ""])
     m = _HOLD.search(text)
     if m and not any(c.get("metric") == "strength.safety" for c in checks):
-        checks.append({"id": "holds", "label": f"holds {m.group(1)} lb, at 2x (the 2x is assumed)",
+        checks.append({"id": "holds", "label": f"holds {m.group(1)} lb, 2 times over",
                        "metric": "strength.safety", "op": ">=", "limit": 2.0, "source": "assumed",
                        "quote": m.group(0)})
     return {"checks": checks, "objectives": list(data.get("objectives") or [])}

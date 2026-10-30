@@ -155,6 +155,12 @@ def measure_page(pc: dict):
         lines.append("Corners: " + "; ".join(f"({inches(x)}, {inches(y)})" for x, y in pc["outline"]))
     for n, h in enumerate(pc["holes"], 1):
         lo, hi = h.min(axis=0), h.max(axis=0)
+        c = h.mean(axis=0)
+        r = np.linalg.norm(h - c, axis=1)
+        if len(h) >= 12 and r.std() < 0.02 * r.mean():            # round: a hole saw, from its centre
+            lines.append(f"H{n}: a {inches(2 * r.mean())} hole saw, centred {inches(c[0])} from the left and "
+                         f"{inches(c[1])} up.")
+            continue
         lines.append(f"H{n}: {inches(lo[0])} from the left, {inches(lo[1])} up; {inches(hi[0] - lo[0])} wide, "
                      f"{inches(hi[1] - lo[1])} tall. Draw the grid there and copy its curve square by square, or "
                      f"trace it from the full-size pages. Drill a 3/8 in hole inside the line to start the jigsaw.")
