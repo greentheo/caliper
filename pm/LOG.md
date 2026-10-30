@@ -32,7 +32,8 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Tests: `test_answers.py` (the declarations are read once until the script changes), `test_cutplan.py` (a holed
   panel's triangles: the panel less the hole, facing out, eight boundary edges; the stool's left wall with a 2 in
   hole cut on its sheet), `test_promote.py` (18.98 holds a 3/4 in wall rule, 15.88 doesn't; only measured sizes
-  get the allowance; a drafted rule says so), the old exact-text expectations updated.
+  get the allowance; a drafted rule says so), the old exact-text expectations updated. **Full suite: 515 passed**
+  (with unfold-to-sheets at `8fc66c9`).
 
 ### 2026-10-30 · CALI-59 (#8) · First run: one sentence in, four answers out
 - **Theo:** "let's go #8". Spec step 5: first run lands on the four questions.
@@ -76,7 +77,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   checks' safety, its patterns, the reply; a failed build adds nothing; no strength check without whittle; through
   the API: answering builds it and a second build is refused; plain-words routing and the explain prompt),
   `test_samples.py`, `test_errors.py`; `test_answers.py` updated for a one-part design; the build book's title is
-  the design's short name now. **Full suite: 517 passed** (422, then the 95 after `test_release.py`).
+  the design's short name now. **Full suite: 509 passed** (in two runs: up to `test_release.py`, then from it).
 - Commit: `73f6499`, PR into `main` (the seven-PR stack #25 → #41 merged into `main` first, in order).
 
 ### 2026-10-30 · CALI-73 (#39), CALI-74 (#40) · Lighter until the safety runs out; the four questions, steps 2–4
