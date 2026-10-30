@@ -1,5 +1,8 @@
 # Caliper tasks (the "issues")
 
+> **Frozen 2026-10-29.** Open tasks moved to GitHub issues (<https://github.com/greentheo/caliper/issues>); [`BOARD.md`](BOARD.md) maps each
+> card to its issue. The cards below stay as the record of what was asked and how it was done.
+
 Acceptance criteria per task. Ids match the design spec §11 and milestones M0–M3 (§8).
 Live status is on [`BOARD.md`](BOARD.md); each issue below is stamped ✅ done (with commit) or 🧊 backlog
 for the record.
@@ -492,7 +495,7 @@ The idea that makes the history worth keeping: measurable feedback becomes a per
   a proposal that doesn't hold now states that **the edit missed the ask**; and **conflict detection**
   names a rule the new one contradicts, retiring it on accept.
 
-### CALI-31 — Streaming (job + SSE)  · P1 · M4 · 🧊 backlog
+### CALI-31 — Streaming (job + SSE)  · P1 · M4 · ✅ done (`4fe957a`)
 Authoring is many LLM round-trips over tens of seconds; the server is synchronous POST today, so the chat
 would sit dead and read as broken.
 **Acceptance:**
@@ -502,7 +505,7 @@ would sit dead and read as broken.
 - Errors surface the real exception line (the CALI-27 discipline), never boilerplate.
 - Tests: job lifecycle, event ordering, error event carries the traceback tail.
 
-### CALI-32 — Front end: viewport + chat  · P1 · M4 · 🧊 backlog
+### CALI-32 — Front end: viewport + chat  · P1 · M4 · ✅ done (`4fe957a`)
 The reskin, once the machinery above is real.
 **Acceptance:**
 - Default page = 3D viewport + chat column. **Three surfaces only**: viewport, chat, Advanced drawer.
@@ -512,7 +515,7 @@ The reskin, once the machinery above is real.
 - Keeps working: picking, collision shading, ⤢ fit, STL download, the error bar.
 - Verified in-browser (Preview MCP, `caliper-web`), not just unit-tested.
 
-### CALI-33 — Clarify round → stored requirements  · P1 · M4 · 🧊 backlog
+### CALI-33 — Clarify round → stored requirements  · P1 · M4 · ✅ done (`4fe957a`)
 Ask once, never re-ask.
 **Acceptance:**
 - A new design runs a **bounded** round of questions that actually change geometry (profile, drive, rail,
@@ -520,6 +523,264 @@ Ask once, never re-ask.
 - Answers stored as the requirements block in `design.yaml` and injected as permanent prompt context.
 - Skippable: the user can say "just build it" and Caliper proceeds on stated assumptions.
 - Tests: questions stored, requirements reach the author prompt, skip path works.
+
+### CALI-38 — whittle bridge (aero / load studies)  · P1 · M4 · ✅ done (`4fe957a`)
+Theo's sibling project **whittle** (`~/githubrepo/whittle`) evolves a part under physics and returns a
+slider of stations. Caliper drives its local server over its JSON API — no whittle changes, no shared
+Python env — so a design part can be studied and a station brought back.
+**Acceptance (met):**
+- Send a part (world coords, mm) with the setup Caliper knows pre-filled: flow, mirror, flat bottom,
+  speed, budget, interior keep box; `flow` and `dual` (carve + lighten, held from underneath, cargo).
+- **Carve where the air is:** `carve="tail"` lets whittle reshape only the downstream end, for a part
+  riding behind something (the hitch box behind the car).
+- Progress streams; every station is filed under `designs/<slug>/whittle/<run>/` with the run record.
+- **Removal measured, not reported:** station volume vs the part as built (whittle's stations are voxel
+  remeshes, ~½ voxel larger). Flow stations report force saved and **kWh / 100 mi**.
+- **Bring a station back** as the part's current revision (a mesh; the script survives underneath, and
+  "roll it back" returns to it). Caliper reports every side the shape grew past where the part was.
+- Chat refuses to revise a whittled mesh's stale script (it would silently discard the carving).
+- Tested against an in-process fake whittle (incl. one that inflates stations like the real one);
+  verified live against Theo's running whittle.
+**Not done, by design — needs whittle:** sheltering by the car. Uploading a frozen stand-in alongside
+the part makes whittle carve nothing (one lattice spans everything). Needs obstacle bodies in whittle's
+drag model. Coordinated with the whittle-agent session.
+
+### CALI-39 — Parametric aero loop  · P1 · M5 · ✅ done (`abb1d59`) — on branch `cali-39-parametric-aero`; needs whittle at `a1248d1` (its `physics-and-slider`, committed 2026-10-27, not yet on whittle's main)
+Return a **parametric** part, not a mesh. **Agreed split with the whittle-agent session (2026-10-27):**
+whittle drives — its new `ParametricStudy(build, bounds, start=, flow=, speed_kmh=, obstacles=[car])`
+searches the parameters against its drag model and returns the same volume-vs-drag slider, with
+`sweep.at(x).design` → a params dict. Caliper supplies `build(params) -> (vertices, triangles)` straight
+from CadQuery's `tessellate(0.5, 0.2)` (whittle welds + splits long edges), **in-process**
+(`pip install -e ~/githubrepo/whittle` into the caliper env — dry-run clean: adds scikit-image only, no
+numpy/scipy change). Scoring exact geometry removes the remesh inflation entirely. whittle is also adding
+`obstacles=` (the car shelters, isn't scored or moved) — fixes the shelter problem for FlowStudy too.
+**Caliper side:** a warm build worker (the sandbox's cold start is 1–2 s; ~5k builds per sweep), writing
+the chosen design back as a new **parametric** revision of the part, and "Shape it for drag" in the UI.
+Hitch-box params: `tail_len` 0–500 mm, `top_taper_deg` 0–20, `side_taper_deg` 0–15, `tail_edge_r` 5–100 mm,
+optional `nose_top_r` 5–150 mm; flat bottom (sits on the frame).
+**Shipped (2026-10-27):** `aero.py` (PARAMS read/rewrite by AST position, `study`, `adopt`),
+`sandbox.BuildWorker` + `_build_worker.py` (warm sandboxed builds, ~0.13 s vs 1–2 s cold), the
+PARAMS convention in every authoring prompt, `/api/designs/{slug}/aero*`, and "Shape it for drag" in
+the inspector. Live: 4 tail params behind the car → **11 lbf ≈ 2.2 kWh/100 mi** at 7% of the volume,
+returned as numbers in the script (envelope exact — no inflation). As built the params are mm-based
+(`tail_len`, `tail_drop`, `tail_pinch`, `tail_edge_r`) rather than the angles first proposed.
+
+### CALI-40 — Size a tube frame (whittle FrameStudy)  · P1 · M5 · ✅ done (`117960e`)
+A part declares `members(params)` + `supports(params)`; whittle's FrameStudy (whittle-agent, branch
+`frame-study`) analyses it under `standing` and `driving` cases and sweeps tube sizes per group; the chosen
+tubes go back into PARAMS. Inspector: **Size the frame**. Next: plate mode for the gussets at the jog, fed by
+the frame's end forces (`CaseResult.end_forces`); legs + the parked/sleeping case.
+
+### CALI-41 — What a part is built from: weight, centre of gravity, bill of materials · P1 · M5 · ✅ done (`42f5fee`)
+A part's shape says nothing about its weight. A part now declares how it's built: a module-level `BUILD`
+dict of choices (kept apart from PARAMS — they change weight, not shape) and `construction(params, build)`
+returning pieces — **sheet** (flat `outline` or bent `facets`, thickness, `covers`), **stick** (lumber by
+nominal size, steel tube by outer/wall), **lump** (mass at a point) — against `materials.py` (densities with
+their basis, stock sizes, PMF/paint rates). `construction.py`: take-off → weight + CoG; BOM (sheets
+shelf-packed on stock, cuts packed on sticks, canvas yd / glue / paint gal); what-ifs; `BUILD` written back
+by AST position. `balance()` adds every weighed part (frames from `members()`, tubes with rounded corners at
+nominal wall ≈ catalog lb/ft) and takes the moment about the first support (the receiver mouth), with an
+optional payload on the floor. Inspector: **Built from** (pickers, *Use these*) and **Weight & balance**;
+red dot = CoG, green = hitch. `shape_signature` ignores BUILD/construction/members/supports.
+Next: CALI-42 re-size the frame from the box's real weight at its real CoG (1 in tube options);
+CALI-43 cut plan + CNC DXF (panels flattened from their outlines — `flatten()` is the start).
+
+### CALI-42 — Room for the mattress: what a part has to hold, and its own search ranges · P1 · M5 · ✅ done (`d9876cd`)
+Theo (2026-10-28): widen the box to ~77 in so a twin fits inside the 1 in walls, and now that it's wider than
+the Leaf, let the drag study pull the sides in — "make sure they can vary while essentially keeping the
+mattress + 6 in width at the base". Read as: the bottom 6 in above the floor (the mattress) keeps the full
+width; above it the sides may lean and round in.
+- **A part says what it has to hold:** `keeps(params, build=None)` → named boxes (`lo`, `hi`, `note`). A drag
+  study passes them to whittle's `ParametricStudy.keep()` (shrunk 0.5 mm: touching a face is clear) and
+  re-checks every station with Caliper's own surface sampler (`aero.keep_check`, every 20 mm — whittle's
+  KeepOut averages over vertices, so a small cut-in can slip through its slack); a station that cuts in is
+  named in the notes. The **Built from** report says whether each keep still fits with the BUILD choices
+  tried (2 in walls → the mattress doesn't fit), and the viewport draws it (blue clear, red cut).
+- **A part gives its own search ranges:** `RANGES = {"wall_h": (170, 610), ...}` — the drag panel ticks and
+  fills them (the author knows the wall can't drop below the mattress; a guess from the name doesn't).
+- `shape_signature` ignores RANGES (and LAYOUTS); `keeps()` stays in it (a study kept clear of the boxes it
+  had). The authoring prompt keeps RANGES / keeps() / LAYOUTS true when it revises a part.
+- **The box (v6):** 77 × 40 × 41 in, floor flat and full size; full-width base to `wall_h`, then `tumble` +
+  `shoulder` (straight → round), a rounded `nose_*` and a `tail_*` taper, all lofted from one section
+  function that `construction()` cuts into panels too. 58.9 lb plain.
+**Acceptance:** keeps/RANGES read and used; keep_check measures depth; report flags a keep that no longer
+fits; tests in `test_aero.py` (5) + `test_construction.py` (1).
+
+### CALI-43 — The frame carries the box as built; an X under the floor · P1 · M5 · ✅ done (`d9876cd`)
+Theo: 1 in tube instead of 2 in, and an X under the floor that leans on the plywood's stiffness, a gusset
+where it meets a 2 in main beam in the middle.
+- **Weight where it is:** `construction.load_points()` spreads every piece's weight over its area/length
+  (~100 mm apart — adds up to the part's weight and balances at its CoG); `design_loads()` gathers the
+  design's parts + a payload spread on top of the floor. `frame_study.study(from_design=True)` lands each
+  bit on the nearest member that carries the floor (`"carries": True` in members()) as a **point load**
+  where it meets it (whittle's `point()`, added by the whittle-agent for this; loads within 50 mm combined
+  at their balance point), so a tube bends where the load sits. Members stay whole — a first cut split them
+  into 150 mm pieces, which the whittle-agent caught would check buckling over 150 mm instead of the
+  member's length. The record says what was carried and how far the floor had to reach to a tube.
+- **Layouts:** a frame names what-if layouts (`LAYOUTS = {name: PARAMS overrides}`); a study runs one
+  (`params=`), records which, and using a station writes the layout with its sizes. The panel: *carries*
+  (design as built / flat load), payload, layout, a run picker, and the hardest-worked joint (bending into
+  the weld from `end_forces` — what a gusset there carries).
+- **Frame v12:** 2 in spine (tops flush with the floor), 1 in X from its middle to the floor's corners,
+  1 in front/back edges, 3/16 gusset plate under the X's middle (slotted for the spine); four layouts.
+  Steel plate is in `materials.py` for gussets.
+**Acceptance:** loads preserve total and moment; members stay whole; layouts named in the record; tests in
+`test_frame_study.py` (3) + `test_construction.py` (2).
+
+### CALI-44 — The box carries itself: walls as structure, fiberglass skins · P1 · M5 · ✅ done (`45ddc9f`)
+Theo (2026-10-28): use drag design 2 and the X-only frame with 50 lb aboard; count the strength and stiffness
+the walls give; fiberglass as an alternative to PMF; and move the box in close — the trunk is reached from
+the fold-down rear seat, so the hatch needn't open: a few inches' clearance.
+- **A part says how its walls carry load:** `shell(params, build)` → deep-beam walls (`a`, `b`, `depth`,
+  `skins`, `core`, `core_t`). `frame_study.wall_section()` transforms each sandwich to its skin's material
+  (strength = the skin's, or its wrinkling stress on the foam if lower — Hoff & Mautner), with the layers'
+  G·t as its shear stiffness. whittle (the whittle-agent added **per-member material** and **Timoshenko
+  shear** for this) solves walls and tubes together; Caliper checks the foam's shear itself (all the wall's
+  shear in the foam — cautious). Walls fasten to frame joints within 60 mm; what stands on the walls (walls,
+  roof, posts) comes down through them, the floor and payload go to the nearest tube or wall. Report: each
+  wall's skin/foam safety, the force at the box's fixings. The sweep sizes tubes only; drawings are steel.
+- **Fiberglass:** `COVERINGS["fiberglass"]` (1 layer 6 oz + epoxy + paint, 0.57 kg/m²) and `fiberglass_2`;
+  bought as cloth yd + epoxy gal. `SKINS` holds each covering's structural numbers (PMF's are cautious
+  guesses — no published data). Plywood/foam get `mech` numbers.
+- **Frames weigh as cut** already; a frame study can try other BUILD choices of the parts it carries (`build=`).
+**Acceptance:** wall section/shear/wrinkling tested; walls fastened, carrying via-wall loads, fixing force =
+the load; fiberglass BOM; full suite green.
+
+### CALI-45 — The cut plan: panels unfolded onto sheets (unfold-to-sheets), sticks cut-listed · P1 · M5 · ✅ done (`8fe590a`)
+Theo: "I will like to see what the cut plan looks like for sure" — and pointed at his own
+`game-dev/unfold-to-sheets` (unfold a mesh, nest onto stock, score lines, DXF), thinking of 1 in foam that
+folds at scored lines and spray foam + a rasp where it's too curvy.
+- **Integration, no change to that repo:** `cutplan.py` writes a part's `construction()` sheets as one OBJ
+  per material, **one group per panel** (authored seams → segment by group), and `unfold_driver.mjs` runs
+  its pipeline with stock/material *objects* from `materials.SHEETS[...]["cut"]` (XPS: foldable to 45° at a
+  V-groove, butt joints; ply and steel plate: no folds). Folds under the material's `score_min_deg` (5° on
+  1 in foam) are left off the drawings — the tool scores anything over 0.5°, right for card. Per material:
+  sheets as SVG + DXF (layers cut / score-mountain / score-valley / seam / label), assembly drawing, seam
+  list, PDF; Caliper adds the stick cut list. Filed under `designs/<slug>/cutplans/<id>/`.
+- **The shoulders are strip-built now** (box v11): bands front to back, one per facet of the shoulder curve
+  — each bends one way and lays flat. One big shoulder had ~330 score lines in a crosshatch (doubly curved
+  nose and tail); bands: 21 pieces on 4 sheets of XPS at 59% (was 5 at 47%), edges exact, 118 score lines
+  (nose and tail only).
+- **Page:** Built from → *Cut plan* — sheets as pictures (click for full size), DXF per sheet, PDF, which
+  piece is which, seam list, the stick cut list; says when the part has changed since.
+- Also this round (Theo's calls): the box's skin is **fiberglass** (box v10, 47.5 lb); the frame's shank is
+  **2x2x5/16** (3.3× is fine) and the box is **fastened to the spine** — the riser moved under the box's
+  front wall (x −4 in) and the spine runs to the back, so the walls are fixed at the middle of the front and
+  back too (`build_spec` splits a wall wherever a frame joint sits under it). That lets the X drop to
+  **1x1x1/16**: frame v17 = 33.0 lb, 3.57×, sag 0.31 in; hitch 3,147 lb·in standing with 50 lb aboard.
+**Acceptance:** OBJ groups per panel; a crate's plan nests both materials, writes the files, cut-lists its
+posts; file paths can't leave the plan; full suite green.
+
+### CALI-46 — Joinery in the cut plan: tube end cuts, foam bevels · P1 · M5 · 🔨 in progress
+- ✅ **Tube end cuts** (`cutplan.tube_cuts`): one length per straight run; an end that meets a bigger tube is
+  set back to its face (half its width ÷ sin of the angle) and mitred to lie flat on it (a stub inside a joint
+  stands for the tube it joins); an end that only smaller tubes meet runs on by half their width to close
+  the corner. Theo's frame: shank 11.75 in, riser 10.00 in, spine 36.75 in, X 4 @ 40.92 in mitred 27° to
+  the spine. In the cut list and the page.
+- ✅ **Foam bevels**: unfold-to-sheets' seams grouped by the pair of pieces they join, with the angle they
+  meet at; each edge bevelled at half of it (band seams 0–6°, the top band to the roof a corner ~25–35°
+  mitre each side).
+- ⏳ Inside-face offsets for thick foam at corners; **the 2x2 skeleton** placed where the shell needs it
+  (the corner posts are short now the shoulders lean in) — wants Theo's say on where ribs go.
+- ✅ **Gusset plates**: a frame names its joints (`GUSSETS = {"jog_low": ("riser", "shank_out")}`);
+  `frame_study.gussets()` runs whittle's plate mode (built by the whittle-agent for this: cheek plates, a
+  slider from solid to the lightest that holds, each cleaned for plasma, with how much they take off the
+  weld) on the frame carrying the design as built; `adopt_gussets()` writes the chosen plates into the
+  script as `PLATES` (outline + holes + where they go), which `construction()` weighs and the cut plan
+  draws as plasma DXF/SVG. Page: Size the frame → *Gusset plates* (size, compare, use). Theo's frame: 1/8 in
+  plates, 2 per corner — jog_low 0.74 kg each, 6.5×, takes 84% off the riser/shank weld; jog_high 0.71 kg,
+  4.3×, 82% off; the X's middle plate dropped (235 lb·in). Frame 36.2 lb with plates.
+  Theo: **2 in riser** (2x2x3/16, faces flush, no spacers) — frame v21–22: 30.2 lb of tube, 3.56×; plates
+  0.69 kg (6.0×, 86% off the weld) and 0.65 kg (3.8×, 80%); frame 36.0 lb.
+
+See `specs/caliper-make-loop-spec.md` for M6 (scorecard, the shop, moves, loop runner, build package).
+
+## Milestone M6 — the design ⇄ optimize ⇄ make loop
+
+### CALI-47 — The scorecard · P0 · M6 · ✅ done (v1, `9fe2542`)
+Every requirement as a measured check or an objective, with how far to trust it (measured / model / rough /
+guess), across the quadfecta: design, optimization, manufacturability, cost & waste. `scorecard.py`
+computes, for the design as it stands: the assembly's rules and every part's keeps (checks without being
+listed); weight & hitch moment (`balance`, with the goals' payload); the frame analysed fresh
+(`frame_study.analyse`: safety, sag, steel, weakest wall, fixings) and its plates; drag scored fresh
+(`aero.drag_now`, the way a study scores, so it compares); the cut plans (sheets, missing pieces — flagged
+when stale); **cost and waste** from each part's BOM and cut plan at `materials.PRICES` (rough, editable;
+tube and plate by weight, sheets whole, offcut priced from the nesting). Goals live in
+`designs/<slug>/scorecard.yaml` (settings, checks with op/limit/assumed, objectives with a direction);
+each card is filed with the part versions it scored and shows changes since the last. Page: *Scorecard* at
+the top of the design; *Score it* (≈10 s on the camper). API `POST /api/designs/{slug}/scorecard`.
+The camper: 6 pass, 1 fail — the hitch at 3,108 lb·in vs an **assumed** Class II 2,450 (Theo to set the real
+rating); drag 48.4 lbf, 134 lb with 50 lb aboard, steel 30.2 lb, stock ≈ $446, offcut 23% (mostly XPS).
+**Next on it:** the user's constraints in their own words → goals (Claude writes scorecard.yaml from chat);
+constraint discovery before optimizing (the mattress lesson); budgets (default 10 min); the shop (CALI-48).
+
+### CALI-52 — The skeleton: a box inside the box, roof beams for snow · P1 · M6 · ✅ done (v1, `787beac`)
+- **Done:** the box's skeleton is construction choices (`frame_posts`, `roof_beams`, `roof_beam`,
+  `roof_beam_dir`, `skin_in`; named options via `BUILD_OPTIONS`): front and back frames (bottom rail, two
+  posts where the end panel is flat, top rail under the roof's edge) and roof beams front-to-back (stepping
+  down at the tail) or across. The box says how its roof is built (`roof()`); `snow.py` checks it under a
+  snow load by napkin mechanics (roof panel as a sandwich strip — skin wrinkling, foam crush/tension/shear;
+  beams and rails as simply supported sticks) and `snow.search()` tries every combination, weighed and
+  priced. Theo's camper at 20 lb/ft², ≥ 2×: 64 combinations, 15 hold; lightest: **1x2 frames + two 2x2
+  beams across, no inside skin — 57.1 lb, $379, 2.01×** (adopted, box v13); an inside skin of glass adds
+  ~9 lb and $117 for nothing (the beams govern). Scorecard: `snow.safety` (settings `snow_psf`).
+- Also: the shape fingerprint ignores comments and layout (`ast.unparse`), and `shell()`, `roof()` and
+  `BUILD_OPTIONS` aren't shape; the drag study's fingerprint re-derived on the method (same script).
+
+- **Theo's picks (2026-10-28, box v14):** three 2x2 beams across (2.7× under snow); a local glass patch
+  over the front wall's corners (`corner_patch`, a stand-alone `covering` item in construction; the front
+  corner wall beams carry it as one more skin) — walls 3.37× → 4.98×, +0.5 lb. Box 59.7 lb; scorecard
+  **8/8 pass**.
+- **How it's built, in 3D:** `construction.pieces3d()` + `GET /api/designs/{slug}/parts/{pid}/pieces` —
+  sheets as their outside faces, sticks and tubes as boxes on their centrelines, gusset plates extruded
+  where they go (both cheeks), grouped into layers (floor, end & side panels, shell, glass patches,
+  skeleton, frame tubes, gusset plates). Built from → *Show how it's built*; a layer panel over the
+  viewport switches each off; the solid stays as a faint ghost you can still click.
+
+Theo's hitch call (2026-10-28): 350 lb tongue rating (Class III option 800); keep dynamic loads < ~3.5×; the
+moment limit set aside (he'll test the spine); 2x2x1/8 for tang, riser and spine (frame v23–24: 25.8 lb of
+tube, yields at ~5× standing). Scorecard: tongue ≤ 350 ✓, frame survives 3.5× ✓, walls 3.37× ✗ (front
+wall's corner pieces — a local second layer of glass fixes it for < 1 lb; everywhere: +6 lb, 4.4×).
+Theo: posts where the shell is largely flat — a box inside the box where the front and back panels meet the
+floor and roof — and cross beams under the roof for a mild snow load; 1x1 ribs only if needed. The first
+job for the loop: the skeleton as structural options (posts, rails, N roof beams, their size, an inside
+skin on the roof) checked under snow + driving against weight and cost — exhaustive over a handful.
+
+### CALI-53 — Parked: on the jacks with someone inside, and the floor under a knee · P1 · M6 · ✅ done (v1, `e302a20`)
+A frame says where it stands when parked (`jacks(params)`: points that only push). `parked.run()` solves
+the frame on the hitch + jacks with the box's walls carrying load: lying down (person + gear spread on the
+floor, ×1.5 for moving about) and kneeling (two knees, tried at nine spots across the floor). A jack that
+would have to pull lifts off and the case is solved again. Reports: weakest member and wall, what each jack
+and the hitch carry, and the floor under a knee (`floor_knee`: a plywood strip over the floor's widest clear
+gap to a tube or wall, the knee spread ~10 in on the mattress or ~3 in bare). Scorecard settings `parked`,
+metrics `parked.*` and `floor.*`.
+Theo's camper (jacks under the X's back corners; 200 lb + 50 lb; 150 lb a knee): frame 2.24× (kneeling at a
+front corner), walls ≥ 2.45×, a jack carries ≤ 288 lb, floor on the mattress 3.3× (clear span 22.6 in), bare
+⅜ ply 1.84×. **The hitch carries up to 356 lb** kneeling at the front middle (rating 350) — 260 lb with
+100 lb knees (no bounce), 285 lb with a pair of jacks under the X's front corners too. **Theo:** no front
+jacks (the back ones are a bit overkill already); the 350 lb rating is conservative — check against 420 lb
+(+20%). Scorecard **11/11 pass**.
+
+### CALI-51 — Build package: release a revision to the shop · P1 · M6 · ✅ done (v1, `3170a12`)
+`release.make()` releases the design as it stands into `designs/<slug>/releases/<NNN>/`, bringing every
+part's cut plan and the scorecard up to date first (a part changed since → a new cut plan; any part, the
+goals or a new cut plan changed since the last card → re-scored). In the folder: **the build book**
+(`index.html`, printed to `build-book.pdf` by a headless Chrome with a throwaway profile when there is one):
+the cover with the scorecard verdict and the headline numbers, *before you cut* notes, the shopping list (by
+where it's bought, rounded up to what's sold — tube by the foot, plate as one piece the gussets nest on,
+sheets from the nesting, cloth/epoxy/paint to sold sizes, jacks rated 1.5× the most one carries), the cut
+lists in sixteenths with tube end cuts, plates and nested sheets with bevels, the **assembly order** — the
+part that holds the others up first, then each part in its build stages (tubes, gussets, jacks, floor,
+skeleton, panels, shell, patches), its skin, the parts brought together, the finish — each step drawn
+(depth-buffered PNG: what's already on, pale; this step's pieces, in colour; the box lowered onto the frame
+with arrows), and the scorecard as released. Beside it: `plasma/` (plate DXF + SVG), `router/` (every nested
+sheet DXF + SVG, the 1:1 pattern PDF and seam list), `cutlist.txt`, `shopping.txt/.csv`, `scorecard.json`,
+`source/` (part scripts at the released versions + the design's files) and a zip of the lot. A release made
+while a check fails says so on its cover. Design page: **Build package** under the scorecard.
+Found on the way: mirrored panels were written to the unfolder wound inside out (half the shell's seams
+128 mountain / 128 valley, the right roof bevel 50–71° against the left's 19–40°) — panels now face out
+from the part's middle (233 / 23, bevels symmetric); and two page loads at once crashed the server inside
+OCCT — in-process B-rep work now goes through one lock (`occt.OCCT`).
 
 ## Milestone M5 — whole machines from one prompt (after M4)
 

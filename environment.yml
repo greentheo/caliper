@@ -27,3 +27,4 @@ dependencies:
       - anthropic       # Claude API: intake + decide
       - fastapi         # M2 webapp backend
       - uvicorn         # ASGI server for M2
+      - httpx           # FastAPI TestClient (server tests)

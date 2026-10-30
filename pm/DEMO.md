@@ -42,6 +42,42 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **How it's built, in 3D (CALI-52).** Any part that says what it's built from can show its pieces in the
+  viewport — panels, skeleton, tubes, plates — in layers you switch on and off.
+- 🆕 **Scorecard (CALI-47).** One card per design: checks and objectives across design, strength/mass/drag,
+  making, and cost & waste — each number with how far to trust it, and what changed since last time.
+- 🆕 **Cut plan (CALI-45).** Any part that says what it's built from gets a cut plan: its panels unfolded
+  and nested onto real sheets by Theo's unfold-to-sheets (SVG + DXF per sheet, score lines where a panel
+  bends, seam tokens, a printable PDF), and its sticks cut-listed.
+- 🆕 **Walls that carry load (CALI-44).** A part can say how its walls work as structure (`shell()` —
+  foam sandwiches as deep beams); the frame study solves them with the tubes and says how strong each wall
+  is and what its fixings carry. Fiberglass skins are a construction choice (cloth + epoxy in the shopping list).
+- 🆕 **Room for the mattress (CALI-42).** A part can say what it has to hold (`keeps()` — the twin
+  mattress, a pale slab under **Built from**) and how far a drag study may take each number (`RANGES`, ticked
+  for you). The search keeps the outside out of the slab, and every design it returns is re-checked.
+- 🆕 **The frame carries the box as built (CALI-43).** **Size the frame** → *carries: the design as built*
+  puts every panel, post and payload pound where it sits onto the nearest tube; pick a **layout** (the X
+  frame has four) and compare runs; the panel names what holds the safety back and the hardest-worked joint
+  (what a gusset there carries).
+- 🆕 **What it's built from (CALI-41).** Select a part that says what it's built from (the camper box) →
+  **Built from**: its weight, where its centre of gravity sits (red dot), what it's made of, and **what to
+  buy**. Change the floor to ¼ in, drop the posts, add paint inside — the weight and the hitch moment update;
+  nothing saves until **Use these**. With nothing selected, **Weight & balance** shows the whole design and
+  what the hitch carries (add a payload).
+
+- 🆕 **Shape it for drag — numbers back (CALI-39).** Select a part → **Shape it for drag**: whittle searches
+  the numbers in its script (tail length, top drop, side pinch, edge radius…) against its drag model, with
+  the car as a real obstacle. Pick a design from the slider → **Use these numbers** → they're written into
+  the script. The part stays parametric — no mesh, no remesh inflation.
+
+- 🆕 **The design session, in the browser (CALI-31/32/33).** `make serve` → **http://127.0.0.1:8000** now
+  opens a **viewport + a conversation**: describe what you're building, answer a few questions, then
+  **click any part and talk about it**. The inspector shows its size (inches or mm), the rules locked in
+  on it, and its history. Long turns stream their progress. The old control panel lives at `/classic`.
+- 🆕 **whittle bridge (CALI-38).** With whittle running (`python -m whittle.gui` in `~/githubrepo/whittle`),
+  select a part → **Send to whittle** → a slider of shapes with the drag they save, in **kWh per 100 mi** →
+  click one to see it in place → **Bring this back**. "Roll it back" returns to the parametric part.
+
 - 🆕 **Feedback becomes a test (CALI-30, M4).** Say *"it must clear the rail by at least 2mm"* and
   Caliper doesn't just make the change — it drafts the **assertion** that locks it in
   (`min_clearance(carriage, rail) >= 2.0`), **validates that it actually measures**, and offers it. Say
@@ -98,6 +134,98 @@ make run-llm    INTENT="a sturdy 80mm bracket for 3030 with countersunk M6 holes
 make refine-llm SOURCE=runs/run_0000 INSTRUCTION="round the outer corners and lighten it"
 # equivalently:  make refine LLM=1 SOURCE=... INSTRUCTION=...
 ```
+
+---
+
+## 🆕 CALI-39 — shape it for drag, and keep it parametric
+
+**What's new:** instead of whittle carving a mesh, whittle searches the **numbers** in the part's script,
+and the one you pick is written back into it. Built with the whittle-agent session.
+
+**Needs** whittle at `a1248d1` or later (its `physics-and-slider` branch — `ParametricStudy` and
+obstacles) installed into Caliper's environment (already done on Theo's machine):
+
+```bash
+/opt/anaconda3/envs/caliper/bin/python -m pip install -e ~/githubrepo/whittle
+```
+
+**Try it (hitch box):**
+1. Select the box. Under **Shape it for drag**, its `PARAMS` are listed. If it says the script has none,
+   click **Make it tunable** — the chat restructures it and adds `tail_len`, `tail_drop`, `tail_pinch`,
+   `tail_edge_r`, all 0 (the shape doesn't change).
+2. Leave the tail numbers ticked (suggested ranges are filled in; widen `tail_len` to ~700), make sure the
+   Leaf block is ticked under **rides behind**, 65 mph, 15%, *normal* → **Shape it**. ~3 minutes; it shows
+   build count and time left.
+3. Click a row to see that design in place. **Use these numbers for box** writes them into its script.
+
+**What it found, live:** a ~16° boat tail — the last 500 mm tapers, the top falls 146 mm, each side draws
+in 140 mm — about **11 lbf less than the square box ≈ 2.2 kWh per 100 mi** at 65 mph (estimated; treat as
+±30%), giving up 7% of the box's volume. The box's outside is still exactly 39 × 74 × 41 in at the front,
+floor at 18 in.
+
+**Things worth knowing:** act on the **savings**, not the totals — behind the car the model scores the
+box alone, so it misses the box partly filling the car's wake; what the box really costs the car is
+likely lower, and the savings, if anything, conservative. `tail_len` hit its 500 mm limit (the page now
+names a pinned parameter), so a longer taper may help — then the volume you allow becomes the limit.
+Flat-panel tapers should settle around 12–18°: the model's flow starts tearing off near 20°. Building
+candidates uses a warm worker, ~0.1–0.3 s each. Every new part is now written with its dimensions in `PARAMS`, so
+it can be shaped this way without the restructure step.
+
+---
+
+## 🆕 CALI-31/32/33/38 — design in the browser, study it in whittle
+
+**What's new:** the design session is the home page, and a part can go to **whittle** for an aero or
+load study and come back. Built for Theo's hitch cargo box behind the Leaf.
+
+**Start both tools:**
+
+```bash
+make serve
+```
+
+```bash
+cd ~/githubrepo/whittle && .venv/bin/python -m whittle.gui --no-browser
+```
+
+Open **http://127.0.0.1:8000**. The dot top-right goes green when whittle is reachable.
+
+**Walkthrough — the hitch box:**
+1. **+ New design** → describe it, e.g. *"a cargo box on the trailer hitch behind my Nissan Leaf: 74 in
+   wide, 41 in high, 39 in deep, 18 in behind the car, on a 2 in square steel tube frame that slides into
+   the receiver; foam covered in poor man's fiberglass, with a door and a roof fan."* Because you wrote
+   inches, it shows inches (the model is always mm).
+2. **Answer the questions** (receiver height, hatch clearance, …) or **Just build it** — blanks become
+   *assumed* requirements, labelled as such, and every part is built against them.
+3. **Build parts by talking:** *"build a block standing in for the rear of the Leaf: 70.5 in wide, from
+   6 in to 61.4 in off the ground, its rear face at x = 0, extending forward 60 in"* → then *"now the box"* →
+   then *"the frame"*. Coordinates: the car drives **+X**, **Z up**, ground at z = 0, y = 0 on the centreline.
+4. Click the Leaf block → tick **treat as a reference** (it turns translucent grey).
+5. Click the box → in the inspector **whittle** panel: study *airflow*, carve **the tail only** (the default
+   once something is a reference), 65 mph, 20% → **Send to whittle**. ~2–3 minutes, progress streams.
+6. Read the table — the **saved lbf** and **kWh/100mi** columns are the ones to act on. Click a row to see
+   that shape in place (the original box as a blue ghost). **Bring this back as box** to adopt it; if it
+   grew anywhere, the chat says so. **"roll it back"** in chat returns to the parametric box.
+
+**What it found, live, for that box (tail only, 65 mph):** about **8 lbf saved ≈ 1.7 kWh per 100 mi**
+from tapering the rear ~8% of the box, after which more carving stops helping. Free air claims far more
+(~107 lbf) but gets it by rounding the *front* — which, behind the car, sits in its wake.
+
+**Things worth knowing:**
+- whittle's drag model **ranks** shapes well; absolute numbers are good to perhaps 30%, and it can't
+  model the car's wake yet. That's why the tail-only study exists.
+- whittle rebuilds parts on a voxel grid, so its shapes come back slightly bigger (~1 in at this size).
+  "removed" is measured against **your** part, so station 0 may read negative; bringing one back reports
+  the growth.
+- A whittled part is a **mesh** — chat won't revise it (that would throw the carving away); roll back first.
+- `designs/<slug>/whittle/<run>/` holds every station STL and the run record.
+
+**What this does NOT do yet:**
+- **Shelter behind the car** — needs whittle to accept obstacle bodies (raised with the whittle-agent).
+- **A parametric shape back** (CALI-39) — today a station returns as a mesh; the parametric loop
+  (Caliper's parameters, whittle's drag score, Caliper's optimizer) is next.
+- The **frame's** strength is not a whittle job — 2 in steel tube walls are far finer than its voxels.
+  That's beam math (moment at the receiver), and Caliper can assert it.
 
 ---
 
@@ -411,6 +539,99 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-29 · Open source: issues, licence, CI, install for a stranger (CALI-60, #5)
+**Try it:**
+- Open work: https://github.com/greentheo/caliper/issues (V1 is milestone 1). Each title starts with its
+  CALI id. `pm/BOARD.md` is history now, with a map from old cards to issues.
+- CI: every PR runs the suite on GitHub (PR #25's first run: 447 passed, none skipped).
+- `make tools` installs the optional tools at pinned commits (whittle into the env, unfold-to-sheets into
+  `vendor/`). On your machine it says both are your own checkouts and leaves them alone (`vendor/` is a link
+  to `~/githubrepo/game-dev/unfold-to-sheets`).
+- The README's Install section is the stranger's path: clone, micromamba, `make install`, `make tools`,
+  `.env`, `make test`. CONTRIBUTING.md covers issues, commits, what "done" means, and the optional tools.
+
+### 2026-10-28 · The build package (CALI-51)
+**Try it:** open the camper with nothing selected → **Build package** (under the scorecard) → *Open the build
+book*. One printable page: the cover (ready to cut, 11/11, the headline numbers), what to watch before you
+cut, the shopping list with checkboxes, the cut lists (tubes with their end cuts, the 1x2s and 2x2s, the
+gusset plates, every nested sheet), the eleven assembly steps — each drawn, the new pieces in colour on the
+pale ones already there — and the scorecard as released. *PDF* is the same book; *Download all (.zip)* has
+the plasma DXFs, the router DXFs + 1:1 pattern PDFs, the cut list, shopping list and the scripts as
+released. *Make a new build package* after any change releases 002 (it re-runs a stale cut plan and
+re-scores first).
+
+### 2026-10-28 · Parked on the jacks (CALI-53)
+**Try it:** *Score it* on the design — the scorecard now has the parked case: the frame on the hitch and two
+jacks under the X's back corners with someone kneeling anywhere (2.24×), the floor under a knee on the
+mattress (3.3×), the most a jack carries (288 lb), and the hitch at 356 lb with someone kneeling at the very front —
+under Theo's 420 lb (the 350 lb rating + 20%). All 11 checks pass. The settings (person, gear, knee) are in `scorecard.yaml` under `parked`.
+
+### 2026-10-28 · See how it's built (CALI-52)
+**Try it:** click **cargo_box** → **Built from** → *Show how it's built*. The box turns into its pieces: pink
+foam panels, the shell bands, the tan floor, teal glass patches on the front corners, and the 1x2 frames with
+three 2x2 roof beams. The panel at the top left of the viewport switches each layer off — untick *end & side
+panels* and *shell* to see the skeleton on its own. Do the same on **frame**: the tubes and the brass gusset
+plates at the riser's corners. *the solid, faint* brings back the outline; × puts a part back to its solid.
+
+### 2026-10-28 · The skeleton, searched under snow (CALI-52)
+**Try it:** click **cargo_box** → **Built from**: the new choices — *frame posts* (the box inside the box),
+*roof beams* (how many), *roof beam*, *roof beam dir* (front to back or across), *skin in*. It's set to the
+search's answer: 1x2 frames and two 2x2 beams across. Try *roof beams 0* and score the design: the
+scorecard's snow check fails (the foam cracks underneath); put them back. The cut plan lists the 1x2 frame
+pieces and the beams. With nothing selected, the **Scorecard** shows Theo's constraints in his words:
+tongue weight, surviving 3.5×, snow at 2×.
+
+### 2026-10-28 · The scorecard (CALI-47)
+**Try it:** open the camper with nothing selected — **Scorecard** is at the top: every check (✓/✗, the
+number, how far to trust it) and every objective, with the stock bill (*Stock: $446 · offcut $…* opens the
+lines). *Score it* re-scores the design as it stands (~10 s): try a what-if in a part's **Built from** and
+*Use these*, then score again — the objectives show what changed. The one ✗ is the hitch against an
+*assumed* Class II rating; the goals live in `designs/a-cargo-box-on-the-trailer/scorecard.yaml`.
+
+### 2026-10-28 · Gusset plates (CALI-46)
+**Try it:** click **frame** → **Size the frame** → scroll to *Gusset plates*: the riser's two corners, each a
+slider from a solid plate to the lightest that holds (1/8 in shown; pick 3/16 or 1/4 and *Size the gussets*
+to compare). The highlighted row is the one in use — each takes 82–84% of the bending off its corner weld.
+**Built from → Cut plan** draws them for the plasma table (DXF in mm) alongside the tube cut list (shank
+11.75 in, riser 10 in, spine 36.75 in, X 4 @ 40.92 in mitred 27°).
+
+### 2026-10-28 · The cut plan (CALI-45)
+**Try it:** click **cargo_box** → scroll to **Built from → Cut plan**. 1 sheet of ⅜ ply and **4 sheets of 1 in
+XPS** — click a sheet to open it full size: the front panel with the shoulder bands nested round it, dash-dot
+(mountain) and dashed (valley) score lines at the nose and tail ends of the bands, a seam token on both sides
+of every joint. *sheet N DXF* goes to CAM; *printable PDF* has a scale bar; *which piece is which* draws them
+on the box. The 2x2 post cuts are listed underneath. Click **frame** → its cut plan has the tube cut list
+(13 in shank, 8 in riser, 38 in spine, four 42 in X arms) and the two gusset halves. *Make it again* after a
+change; the panel says when the plan is out of date. Needs node and `game-dev/unfold-to-sheets` (or
+`CALIPER_UNFOLD_DIR`).
+
+### 2026-10-28 · The box moves in and carries itself (CALI-44)
+**Try it:** the camper is now drag design 2, 3 in behind the bumper (the hatch rule is gone; *bumper_clearance*
+passes at 3.0 in). Click **cargo_box** → **Built from** → set *skin out* to *fiberglass*: 52.3 → 47.5 lb, and
+*To buy* turns into glass cloth + epoxy. Click away → **Weight & balance** with 50 lb: **3,428 lb·in** on the
+receiver (it was ~8,000 at 18 in with 100 lb). Click **frame** → **Size the frame**: the three newest runs carry
+the box as built with 50 lb — *walls count* (PMF), *walls count · fiberglass*, and tubes only; each says how
+strong the walls are and what a fixing carries. The frame you see is design 6 of the PMF run: 50.5 lb, 4.5×.
+Untick *the box's walls carry load too* to compare.
+
+### 2026-10-28 · Room for a mattress, curvier sides, and an X frame (CALI-42/43)
+**Try it:** open *A cargo box on the trailer…* → click **cargo_box**. It's 77 × 40 × 41 in now (75 × 38 inside
+the 1 in walls); **Built from** says *✓ holds the mattress* and the pale slab at its base is that space.
+Scroll to **Shape it for drag**: the eight ticked numbers and their ranges are the part's own. The last search
+(behind leaf_rear, 65 mph, 2,738 builds, 40 min): **design 2 gives up 9% of the volume and saves 22 lbf ≈
+4.4 kWh/100 mi**, design 3 24 lbf ≈ 4.7 — click a row to see it in place (round front above the mattress, sides
+leaning in, a tapered tail, the slab untouched). *Use these numbers* saves one. Then click **frame** in the
+parts list → **Size the frame**: six runs in the picker, one per layout (and two with the X held to 1 in tube),
+all carrying the box as built + 100 lb on the floor. None reaches 3.5× — the panel says why (the shank in the
+receiver). Try *payload 50* on *X only* → about 3.2×.
+
+### 2026-10-27 · What it's built from — weight, balance, a shopping list (CALI-41)
+**Try it:** open *A cargo box on the trailer…* → click **cargo_box** → scroll to **Built from**. 56.1 lb with a
+⅜ in floor; the red dot is its centre of gravity. Set *floor t* to ¼ in → 48.9 lb and the hitch moment drops
+from 4,774 to 4,481 lb·in; **Back to saved** undoes it. **To buy**: 1 sheet of ⅜ ply, 4 sheets of 1 in XPS,
+two 8 ft 2x2s (4 @ 39.6″), 5.9 yd of 60″ canvas. Click away from the parts → **Weight & balance**: the 2 in
+frame is 72 lb of the 128 — put 150 lb of payload on the floor to see a loaded trip.
 
 ### 2026-06-13 · Hardening from real use (CALI-27)
 **Fixed** (from Theo's reports): the **partial-machine bug** — one failed/slow part used to abort the

@@ -3,21 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Caliper — jam in 3D space</title>
+  <title>Caliper</title>
   <link rel="icon" href="data:," />
-  <link rel="stylesheet" href="/style.css?v=7" />
+  <link rel="stylesheet" href="/design.css?v=7" />
   <script>
-    // surface load/runtime errors on the page itself (not just devtools), since a failed module
-    // import would otherwise just silently leave the buttons dead.
+    // surface load/runtime errors on the page itself, not just devtools (CALI-27): a failed module
+    // import would otherwise leave every button silently dead.
     window.__err = [];
     function showErr(msg) {
       __err.push(msg);
       const b = document.getElementById('errbar');
-      if (b) { b.style.display = 'block'; b.textContent = '⚠ ' + msg; }
+      if (b) { b.hidden = false; b.textContent = '⚠ ' + msg; }
     }
     addEventListener('error', (e) => {
-      // benign browser noise from ResizeObserver + a resizing canvas — not a real error
-      if (/ResizeObserver loop/.test(e.message || '')) return;
+      if (/ResizeObserver loop/.test(e.message || '')) return;   // benign canvas-resize noise
       showErr((e.message || e.type) + ' @' + (e.filename || '').split('/').pop() + ':' + (e.lineno || ''));
     });
     addEventListener('unhandledrejection', (e) => showErr('promise: ' + (e.reason && e.reason.message || e.reason)));
@@ -33,154 +32,49 @@
   </script>
 </head>
 <body>
-  <header>
+  <header class="top">
     <h1>Caliper</h1>
-    <span class="tag">measurement is the source of truth</span>
-    <span id="health" class="health">…</span>
+    <select id="designPick" title="your designs"></select>
+    <button id="newBtn" class="ghost">+ New design</button>
+    <span class="spacer"></span>
+    <div class="seg" id="unitSeg" title="how numbers are shown (the model is always mm)">
+      <button data-u="in">in</button><button data-u="mm">mm</button>
+    </div>
+    <span id="whittleDot" class="dot" title="whittle">whittle</span>
+    <a class="ghostlink" href="/classic" title="the old control panel">classic</a>
   </header>
-  <div id="errbar" class="errbar" style="display:none"></div>
+  <div id="errbar" class="errbar" hidden></div>
 
-  <main>
-    <!-- LEFT: controls + spec + report -->
-    <section class="panel left">
-      <details class="recentbox" open>
-        <summary>Recent parts <span id="recentCount" class="muted"></span></summary>
-        <div id="recent" class="recent"></div>
-      </details>
-
-      <details class="asmbox" id="asmbox">
-        <summary>Assemblies <span id="asmCount" class="muted"></span> <span class="badge">insert</span></summary>
-        <div id="asmList" class="recent"></div>
-        <div id="insertPanel" class="insert" style="display:none">
-          <p class="muted small">Click <b>two parts</b> in the viewer to pick the interfaces, then insert a
-            part that mates both at a fit.</p>
-          <div class="picks">
-            <span class="muted small">interfaces:</span>
-            <span id="pickA" class="pick empty">— pick 1 —</span>
-            <span id="pickB" class="pick empty">— pick 2 —</span>
-            <button id="pickClear" class="ghost small" title="clear selection">✕</button>
-          </div>
-          <label class="field">
-            <span>what to insert</span>
-            <input id="insIntent" type="text" value="a cross-bar"
-                   placeholder='e.g. "a support bracket"' />
-          </label>
-          <div class="row">
-            <label class="num">id <input id="insId" type="text" value="insert" size="8" /></label>
-            <label class="num">fit
-              <select id="insFit">
-                <option value="press">press</option>
-                <option value="snug">snug</option>
-                <option value="slip" selected>slip</option>
-                <option value="free">free</option>
-                <option value="running">running</option>
-              </select></label>
-            <button id="insertBtn" class="primary" disabled>Insert ▶</button>
-          </div>
-          <span id="insHint" class="muted small"></span>
+  <main class="session">
+    <section class="chat">
+      <div id="thread" class="thread"></div>
+      <form id="composer" class="composer" autocomplete="off">
+        <div id="scopeRow" class="scope-row" hidden>
+          <span class="muted small">talking about</span>
+          <span id="scopeChip" class="chip"></span>
+          <button type="button" id="scopeClear" class="x" title="back to the whole design">×</button>
         </div>
-      </details>
-
-      <details class="helpbox">
-        <summary>❓ How this works</summary>
-        <ol class="help small">
-          <li><b>Build one part</b> — describe it below, hit <b>Build it ▶</b>. Tick <b>✦ author any part</b>
-            to have Claude write the CAD (any shape, not just brackets — needs your API key).</li>
-          <li><b>Refine it</b> — plain-English tweaks. Offline mode only knows bracket phrasings
-            (holes / spacing / wall / ribs); tick <b>use Claude</b> for free-form edits.</li>
-          <li><b>Fit it</b> — import a reference STL, drag it into place, pick a fit class, hit Fit.</li>
-          <li><b>Assemblies</b> — machines are <i>collections</i> of parts. Load one above, click two parts
-            in the 3D view, and <b>Insert ▶</b> authors a new part that mates both.</li>
-        </ol>
-        <p class="muted small">LLM actions (✦ author, Insert, refining an authored part) need
-          <code>ANTHROPIC_API_KEY</code> in <code>.env</code>. Everything else runs offline.</p>
-      </details>
-
-      <label class="field">
-        <span>Intent — describe <b>one part</b> <span class="muted">(a whole machine = an assembly, see above)</span></span>
-        <textarea id="intent" rows="3" placeholder="a 60 mm corner bracket for 2020 extrusion with four M5 holes"></textarea>
-      </label>
-      <div class="row">
-        <label class="chk" title="draft the spec with Claude instead of the offline pattern-matcher"><input type="checkbox" id="useLLM" /> use Claude (LLM)</label>
-        <label class="chk" title="Claude writes the CadQuery itself — any part, not just brackets. Needs ANTHROPIC_API_KEY."><input type="checkbox" id="authorMode" /> ✦ author any part</label>
-        <button id="runBtn" class="primary">Build it ▶</button>
-      </div>
-
-      <label class="field">
-        <span>Refine the current part</span>
-        <input id="refine" type="text" title="offline knows bracket phrasings (holes/spacing/wall/ribs); tick 'use Claude' for free-form edits; authored parts always use Claude" placeholder='e.g. "make the holes 8mm", "bigger spacing", "add a rib"' />
-      </label>
-      <div class="row">
-        <button id="refineBtn" disabled>Refine ↻</button>
-        <span id="status" class="status"></span>
-      </div>
-
-      <details class="fitbox">
-        <summary>Fit to a reference (M3)</summary>
-        <div class="fit">
-          <p class="muted small">Import an STL, drag/rotate it into place against the part, then Fit —
-            Caliper resizes the part to clear it.</p>
-          <input type="file" id="refFile" accept=".stl,model/stl" />
-          <div class="row">
-            <label class="num">fit
-              <select id="fitClass" title="a fit class targets a clearance band the optimizer tunes into">
-                <option value="">— clearance / none —</option>
-                <option value="press">press (interference)</option>
-                <option value="snug">snug</option>
-                <option value="slip">slip</option>
-                <option value="free">free</option>
-                <option value="running">running</option>
-              </select></label>
-          </div>
-          <div class="row" id="clearRow">
-            <label class="chk"><input type="checkbox" id="fitNoOverlap" checked /> no collision</label>
-            <label class="num">clearance
-              <input type="number" id="fitClear" value="2" step="0.5" min="0" /> mm</label>
-          </div>
-          <div class="row">
-            <button id="fitBtn" disabled>Fit ▶</button>
-            <span id="fitHint" class="muted small">add an STL, place it, then Fit</span>
-          </div>
+        <div class="composer-row">
+          <textarea id="msg" rows="2" placeholder="Click a part to talk about it, or describe a change…"></textarea>
+          <button id="send" class="primary" type="submit">Send</button>
         </div>
-      </details>
-
-      <div id="report" class="report"></div>
-
-      <details class="specbox">
-        <summary>Spec (YAML)</summary>
-        <pre id="spec"></pre>
-      </details>
-
-      <details class="specbox" id="scriptbox" style="display:none">
-        <summary>Authored script (part.py)</summary>
-        <pre id="scriptpre"></pre>
-      </details>
+      </form>
     </section>
 
-    <!-- RIGHT: 3D viewer -->
-    <section class="panel right">
+    <section class="view">
       <div id="viewer"></div>
-      <div class="viewer-bar">
-        <button id="fitView" title="recenter / fit to view (F)">⤢ fit</button>
-        <span id="gizmo" class="gizmo" style="display:none">
-          <button id="gMove" class="gactive" title="move reference (W)">⤢ move</button>
-          <button id="gRot" title="rotate reference (E)">⟳ rotate</button>
-          <button id="gClear" title="remove reference">✕</button>
-          <span class="spacer-sm"></span>
-        </span>
-        <select id="smMode" title="how to talk to the SpaceMouse">
-          <option value="webhid">WebHID (quit 3DxWare)</option>
-          <option value="driver">Driver / NL-Proxy (beta)</option>
-        </select>
-        <button id="spaceBtn" title="3Dconnexion SpaceMouse">🖱️ Connect SpaceMouse</button>
-        <span id="spaceStatus" class="space-status"></span>
-        <span class="spacer"></span>
-        <a id="download" class="download" href="#" download style="display:none">⬇ STL</a>
+      <div id="tip" class="tip" hidden></div>
+      <div id="stationBar" class="station-bar" hidden></div>
+      <div id="layers" class="layers" hidden></div>
+      <div class="viewbar">
+        <button id="fitView" class="ghost" title="fit everything in view (F)">⤢ fit</button>
+        <span id="viewHint" class="muted small"></span>
       </div>
-      <div id="axes" class="axes"></div>
     </section>
+
+    <aside id="inspector" class="inspector"></aside>
   </main>
 
-  <script type="module" src="/app.js?v=15"></script>
+  <script type="module" src="/design.js?v=26"></script>
 </body>
 </html>

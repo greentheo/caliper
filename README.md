@@ -1,85 +1,105 @@
 # Caliper
 
-> Spec-driven, **measurement-grounded** generation of manufacturable 3D parts.
-> Natural language in → executable spec → generated mesh → measured against the spec → iterate until it passes.
+> Say what you want to make. Caliper designs it, tests it, plans the build and prices it, and re-runs all
+> of it when you change anything.
 
-Caliper is "test-driven development for physical parts." Instead of emitting CAD blind and eyeballing a render, every generated part is **measured exactly** (bounding box, wall thickness, hole inventory, mass, interference, watertightness) and graded against assertions in a spec. Numbers are ground truth; the render is only a sanity check.
+Caliper is test-driven development for physical things. Claude writes the geometry as a CadQuery script;
+Caliper measures every part exactly (size, walls, holes, mass, interference, watertightness) and grades it
+against what you asked for, revising until it passes. The numbers are the ground truth; the render is a
+sanity check.
 
-See [`specs/caliper-design-spec.md`](specs/caliper-design-spec.md) for the full design.
+## What it does
 
-## ▶ Run it (the two commands that matter)
-
-```bash
-make serve     # the webapp →  http://127.0.0.1:8000   (local only; Ctrl-C to stop)
-make test      # the regression guard (pytest)
-```
-
-The webapp is **not hosted anywhere** — it runs on your machine when `make serve` is running, at
-**http://127.0.0.1:8000**. Hard-refresh (⌘⇧R) after an update. LLM features (✦ author any part,
-Insert, refining authored parts) need `ANTHROPIC_API_KEY` in a gitignored `.env` at the repo root.
-**New here? [`TESTING.md`](TESTING.md) is the full hands-on walkthrough.**
+- **Design.** The home page is a 3D viewport and a conversation. Ask for something and Caliper asks a few
+  questions, writes the part, measures it and revises it. Click a part to talk about just that part.
+  Feedback you give can become a rule the design keeps from then on.
+- **Test.** Studies through [whittle](https://github.com/greentheo/whittle): drag (a shape searched for
+  less drag, even sheltered behind a car), tube frames sized for their load cases, and gusset plates
+  lightened where the load doesn't go.
+- **Plan the build.** What it's built from (weight, centre of gravity, bill of materials), and cut plans
+  through [unfold-to-sheets](https://github.com/greentheo/unfold-to-sheets): panels flattened and nested
+  onto real sheets, folds scored, written as DXF, SVG and PDF, plus tube end cuts.
+- **Price it.** A scorecard of checks and objectives, with cost and waste at prices you can edit.
+- **Release it.** A build package per revision: a build book (HTML and PDF) with the assembly drawn step
+  by step, plasma and router files, cut lists and a shopping list.
 
 ## Status
 
-The single-part loop **and** the assembly spine are complete: intent → spec → LLM-authored CadQuery →
-measured → revised → fitted → **inserted into multi-part assemblies with measured fits and bolt-hole
-alignment** (see the corner-leg machine: `caliper assemble examples/machine.yaml`). See the board:
-[`pm/BOARD.md`](pm/BOARD.md).
+Early, and moving fast. It works end to end on its author's own projects (a cargo box towed behind an
+electric car, from aero shaping to the build book). The biggest gap: the designer in the chat doesn't yet
+write the inputs the studies and cut plans read, so a design started from scratch gets a measured shape
+but no frame study or cut plan ([#1](https://github.com/greentheo/caliper/issues/1)). The road to an
+installable app is the [V1 milestone](https://github.com/greentheo/caliper/milestone/1).
 
-## Quickstart
+## Install
+
+You need macOS or Linux, git, and [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html)
+(or conda). Cut plans also need [node](https://nodejs.org) 20 or later. The designer needs an
+[Anthropic API key](https://console.anthropic.com/settings/keys); the offline paths need none.
 
 ```bash
-# 1. Create the environment (CadQuery/OCCT via conda-forge).
-#    micromamba is STRONGLY recommended here — Anaconda's classic solver took 55+ min and stalled
-#    on cadquery; micromamba solves the same env in seconds.
-micromamba create -p /opt/anaconda3/envs/caliper -c conda-forge -y python=3.11 cadquery
-/opt/anaconda3/envs/caliper/bin/python -m pip install -r requirements-pip.txt
-#    (declarative equivalent, if your solver can handle it: `conda env create -f environment.yml`)
-
-# 2. Install the package into the env (makes the `caliper` command available)
-make install
-
-# 3. Run the regression guard, and try the loop — both auto-resolve the env (no activation needed).
-make test
-make run INTENT="a 60 mm corner bracket for 2020 extrusion with four M5 holes"
-
-# 4. Or jam in 3D space — the webapp (3D viewer, refine loop, STL download, SpaceMouse):
-make serve            # → http://127.0.0.1:8000
+git clone https://github.com/greentheo/caliper.git
+cd caliper
+micromamba create -n caliper -c conda-forge -y python=3.11 cadquery
+micromamba activate caliper
+pip install -r requirements-pip.txt
+make install            # Caliper itself, editable, with the `caliper` command
+make tools              # optional: whittle (studies) and unfold-to-sheets (cut plans), pinned
+cp .env.example .env    # then set ANTHROPIC_API_KEY
+make test               # the suite, about 10 minutes
 ```
 
-> No need to activate anything for `make` targets — they resolve `/opt/anaconda3/envs/caliper`
-> directly (override with `CALIPER_PY=/path/to/python`). To activate for ad-hoc use, `conda` works
-> on a path: `conda activate /opt/anaconda3/envs/caliper` (micromamba was only a throwaway build tool).
+CadQuery's geometry kernel (OpenCascade) is a native build that conda-forge ships, which is why the
+environment starts there. micromamba solves it in seconds; Anaconda's classic solver can take an hour.
+`make` uses the activated environment's Python (or set `CALIPER_PY=/path/to/python`).
 
-> Note: in this machine's sandbox the `conda`/`micromamba` shell functions may be blocked; call the
-> binary directly (e.g. `/tmp/bin/micromamba …`). The canonical env lives at
-> `/opt/anaconda3/envs/caliper`, which `make test` resolves automatically.
+## Run it
 
-## Layout
-
-```
-src/caliper/        # the library — the loop is the product
-  spec.py           # CALI-1  typed spec schema (params, refs, assertions, machine)
-  measure.py        # CALI-2  measurement API (bbox, walls, holes, interference, hole alignment…)
-  evaluate.py       # CALI-3  evaluator: assertion exprs → {pass, actual, margin}
-  decide.py         # CALI-7/19b  optimizer routing (1-D snug + multi-param joint tuning)
-  authoring.py      # CALI-16/17/22  LLM writes/revises the CadQuery (gen, refit, refine)
-  assembly.py       # CALI-20/23  N parts + named mates + assembly assertions; .py part sources
-  insert.py         # CALI-21  author a part that mates two named interfaces
-  server.py + web/  # CALI-9/21b  the webapp (three.js viewer, assemblies, insert UI)
-tests/              # regression guard (pytest) against known parts
-examples/           # demo specs, assemblies, and the corner-leg machine (machine.yaml)
-pm/                 # lightweight .md project management (board + tasks + log)
-specs/              # design spec
-TESTING.md          # ← the hands-on walkthrough of everything
+```bash
+make serve              # → http://127.0.0.1:8000
 ```
 
-## Working conventions
+It runs on your machine only; nothing is hosted. Start a design from the home page; the older control
+panel is at `/classic`. The command line drives the same engine:
 
-We run this like an engineering shop: specs → backlog → in-progress → done, with a work log.
-- **Board:** [`pm/BOARD.md`](pm/BOARD.md) — kanban of every task.
-- **Tasks:** [`pm/TASKS.md`](pm/TASKS.md) — the "issues" with acceptance criteria.
-- **Log:** [`pm/LOG.md`](pm/LOG.md) — append-only record of what shipped, when, with commit hashes.
-- **Demo & testing:** [`pm/DEMO.md`](pm/DEMO.md) — **start here to try the build**: current
-  capabilities + the exact commands to run each shipped feature. Updated after every task.
-- **Loop/review:** [`nightshift/`](nightshift/) — `make loop` to run an iteration, `make review` for the regression+review guard.
+```bash
+caliper gen "a phone stand for a 7 mm thick phone"        # Claude writes a part, measured until it passes
+caliper run "a 60 mm corner bracket with four M5 holes" --no-llm   # the offline bracket generator
+caliper assemble examples/machine.yaml                     # measure a multi-part assembly
+caliper --help                                             # spec, refine, fit, insert, design, chat, serve
+```
+
+[`TESTING.md`](TESTING.md) walks through the command line and the classic panel step by step.
+
+> **Caliper runs the Python that Claude writes**, on your machine, in a separate process with a timeout.
+> That stops runaway or buggy scripts; it is not a security sandbox. Only open designs from people you trust.
+
+## How it fits together
+
+```
+src/caliper/
+  spec.py, measure.py, evaluate.py      what a part must be, measured, graded
+  authoring.py, sandbox.py              Claude writes and revises the CadQuery; it runs in a worker process
+  assembly.py, insert.py, fit.py        parts, mates and fits; a part authored to fit between two others
+  design.py, chat.py, clarify.py        a design (prompt, requirements, parts, history) and the conversation
+  promote.py                            feedback becomes a rule the design keeps
+  design_api.py, jobs.py, web/          the design session in the browser (FastAPI, three.js, streamed jobs)
+  aero.py, frame_study.py, parked.py, snow.py   studies, through whittle
+  construction.py, materials.py         what a part is built from: weight, balance, bill of materials
+  cutplan.py                            cut plans (through unfold-to-sheets) and tube end cuts
+  scorecard.py, release.py              the scorecard and the build package
+tests/                                  the suite (pytest)
+examples/                               specs, assemblies and the corner-leg machine
+specs/                                  design specs
+pm/                                     the work log and demo log, and the board's history
+```
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). Open work is in [GitHub issues](https://github.com/greentheo/caliper/issues);
+issue titles keep a `CALI-N` id, and commits name both (`CALI-48 (#4): …`).
+
+## License
+
+Caliper is licensed under the [Apache License 2.0](LICENSE). Its optional tools carry their own licences:
+whittle (MIT) and unfold-to-sheets (Apache-2.0).

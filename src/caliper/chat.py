@@ -322,8 +322,33 @@ def _working_spec(store: DesignStore, part_id: str, intent: str) -> Spec:
     context = store.prompt_context(part_id)
     frame = ("\n\nBuild this part in the DESIGN'S WORLD COORDINATES (the other parts are already placed "
              "there); the assembly applies no extra transform." if len(store.design.parts) > 1 else "")
-    spec.intent = f"{spec.intent or intent}\n\n--- design context ---\n{context}{frame}"
+    spec.intent = f"{spec.intent or intent}\n\n--- design context ---\n{context}{frame}{TUNABLE}"
     return spec
+
+
+#: CALI-39: every design part keeps its key dimensions in a module-level PARAMS dict, so a search
+#: (whittle's ParametricStudy) can vary them and write the chosen numbers straight back into the script.
+TUNABLE = """
+
+SCRIPT SHAPE (required): the FIRST statement of the file — at module level, OUTSIDE build() — is a
+dict of every key dimension and shape choice, as plain numbers in mm; build() merges overrides:
+    PARAMS = {
+        "width": 1879.6,   # 74 in
+        "height": 1041.4,  # 41 in
+        ...
+    }
+
+    def build(params):
+        p = {**PARAMS, **(params or {})}
+        ...   # use p["..."] everywhere; never repeat those numbers inline
+Write each value as a finished number (1879.6, not 74 * 25.4); put the inch value in a comment. A
+radius or chamfer of 0 must mean "none" (skip the fillet), and every value in PARAMS must build —
+they are the part as it stands.
+If the script also has members()/supports() (its tubes, for a frame study) or BUILD and construction()
+(what it's built from, for its weight and bill of materials), keep them, and keep them describing the
+same part as build() — move a panel or a tube in one, move it in the others. Keep its RANGES (how far a
+drag study may take each number), keeps() (boxes it must hold clear — a mattress, the cargo) and LAYOUTS
+(a frame's what-if layouts) too, and keep them true to the new shape."""
 
 
 def _emit(events: list[Event], on_event, kind: str, text: str, **data) -> None:
@@ -351,11 +376,18 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
         return TurnResult(action="error", ok=False, part=part_id, events=events,
                           error=f"unknown part {part_id!r}",
                           reply=f"There's no part called '{part_id}' in this design.")
-    if entry.origin == "imported" or not os.path.exists(store.script_path(part_id)):
+    if not store.is_scripted(part_id):
+        # Revising the part.py underneath a whittled mesh would silently throw the carving away —
+        # so say what the part currently is, and how to get back to something revisable.
+        if entry.origin == "whittled":
+            reply = (f"'{part_id}' is currently whittle's carved shape (v{entry.version}) — a mesh, "
+                     f"with no script behind it to revise. Say **roll it back** to return to the "
+                     f"parametric version, then ask for the change there.")
+        else:
+            reply = (f"'{part_id}' is imported geometry — there's no script behind it to revise. "
+                     f"Re-author it as a new part if you want it to change.")
         return TurnResult(action="error", ok=False, part=part_id, events=events,
-                          error=f"{part_id} has no script to revise",
-                          reply=(f"'{part_id}' is imported geometry — there's no script behind it to "
-                                 f"revise. Re-author it as a new part if you want it to change."))
+                          error=f"{part_id} has no script to revise", reply=reply)
 
     before, _ = _measure_design(store)
     spec = _working_spec(store, part_id, entry.intent)
@@ -645,6 +677,8 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
                       else _decline(store, parked, events, on_event))
             store.append_log({"kind": "message", "text": message, "scope": scope,
                               "action": result.action, "part": result.part, "routed_by": "pending"})
+            store.append_log({"kind": "reply", "action": result.action, "part": result.part,
+                              "ok": result.ok, "reply": result.reply})
             _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)
             return result
 
@@ -670,8 +704,10 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         result = answer(store, message, scope=scope or intent.part, note=intent.note, events=events)
 
     _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)
+    # the reply TEXT is logged too, so a reloaded page can redraw the conversation as it was
     store.append_log({"kind": "reply", "action": result.action, "part": result.part,
                       "version": result.version, "ok": result.ok,
-                      "broke": result.broke, "fixed": result.fixed,
+                      "broke": result.broke, "fixed": result.fixed, "reply": result.reply,
+                      **({"proposal": result.proposal.to_dict()} if result.proposal else {}),
                       **({"error": result.error} if result.error else {})})
     return result

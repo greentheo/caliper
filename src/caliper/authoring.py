@@ -21,6 +21,8 @@ from . import sandbox
 from .spec import Spec
 
 DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
+#: Long enough for a multi-member part plus helper functions; the old 2000 cut a tube frame off mid-line.
+AUTHOR_MAX_TOKENS = 8000
 
 # author(spec, feedback, prior_script) -> python source for `build(params)`
 Author = Callable[[Spec, Optional[str], Optional[str]], str]
@@ -92,11 +94,19 @@ def author_script(
         )
 
     msg = client.messages.create(
-        model=model, max_tokens=2000, system=_SYSTEM,
+        model=model, max_tokens=AUTHOR_MAX_TOKENS, system=_SYSTEM,
         messages=[{"role": "user", "content": ask}],
     )
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
-    return extract_code(text)
+    code = extract_code(text)
+    if getattr(msg, "stop_reason", None) == "max_tokens":
+        # A reply cut off mid-script would otherwise come back as a baffling SyntaxError (seen live: a
+        # seven-tube frame plus members() overran the old 2000-token cap on every attempt). Fail the build
+        # with the real reason, so the next round's feedback says what to fix.
+        code += ("\n\nraise RuntimeError('this script was cut off: the reply hit the length limit "
+                 "before it finished. Write it more compactly: loops and small helpers instead of "
+                 "repeating near-identical blocks.')\n")
+    return code
 
 
 @dataclass
