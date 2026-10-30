@@ -67,3 +67,29 @@ def test_the_menu_says_why_a_study_cant_run_yet():
 
     car = {"id": "car", "role": "fixed", "scripted": False}
     assert all(not m["ready"] and "reference" in m["why"] for m in studies.menu(car))
+
+
+class _Design:
+    def __init__(self, prompt, requirements=()):
+        self.prompt = prompt
+        self.requirements = [type("R", (), {"question": q, "answer": a})() for q, a in requirements]
+
+
+def test_drag_studies_are_offered_only_to_what_moves_through_air():
+    """CALI-67: a bathroom stool isn't asked about 65 mph; a cargo box on a hitch is."""
+    stool = _Design("A step stool so my 6-year-old can reach the bathroom sink, from 3/4 in plywood",
+                    [("Where will it live?", "next to the towel rack, by the window")])
+    air = studies.in_air(stool, [{"id": "step_stool", "intent": "a plywood step stool"}])
+    assert not air["yes"] and "moves through air" in air["why"]
+    part = {"id": "step_stool", "scripted": True, "built": True, "params": {"w": 1}}
+    menu = {m["kind"]: m for m in studies.menu(part, air)}
+    assert not menu["aero"]["ready"] and not menu["whittle"]["ready"]
+    assert menu["aero"]["why"] == air["why"] and menu["cutplan"]["ready"]
+
+    box = _Design("a cargo box on my car's trailer hitch, 74 in wide")
+    assert studies.in_air(box, [])["yes"]
+    turbine = _Design("a vertical-axis wind turbine for the garden")
+    assert studies.in_air(turbine, [])["yes"]
+    behind = studies.in_air(_Design("a box"), [{"id": "car", "role": "fixed"}])
+    assert behind == {"yes": True, "why": "it rides behind car"}
+    assert studies.in_air(_Design("a box"), [], has_runs=True)["yes"]

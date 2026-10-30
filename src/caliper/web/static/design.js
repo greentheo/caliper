@@ -599,7 +599,7 @@ function startNew() {
     <h3>What are you building?</h3>
     <p class="muted small">Describe the whole thing — sizes, what it attaches to, what it carries.
       I'll ask a few questions, then we build it part by part.</p>
-    <textarea id="newPrompt" rows="5" placeholder="e.g. a cargo box on my car's trailer hitch, 74″ wide…"></textarea>
+    <textarea id="newPrompt" rows="5" placeholder="e.g. a step stool so my kid can reach the sink, from 3/4 in plywood…"></textarea>
     <div class="actions"><button class="primary" id="newGo">Start</button>
       ${was ? `<button id="newBack" class="ghost">← back to ${esc(was.name)}</button>` : ''}</div></div>`;
   $('msg').placeholder = 'Or type it here…';
@@ -807,15 +807,16 @@ function partView(p) {
     ${p.rules.length || designRules.length ? '<ul class="list">' +
       [...p.rules, ...designRules].map((r) => `<li class="rule">🔒 <b>${esc(r.id)}</b> <code>${esc(r.expr)}</code></li>`).join('') + '</ul>'
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
-    ${p.built ? `<h4>Built from <span class="badge">weight &amp; shopping list</span></h4>
-    <div id="buildBox">${buildView(p)}</div>` : ''}
     ${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
     <div id="loadBox">${loadView(p)}</div>` : ''}
+    ${p.built ? `<h4>Built from <span class="badge">weight &amp; shopping list</span></h4>
+    <div id="buildBox">${buildView(p)}</div>` : ''}
     ${p.framed ? `<h4>Size the frame <span class="badge">tubes back</span></h4>
-    <div id="frameBox">${frameView(p)}</div>` : `<h4>Shape it for drag <span class="badge">numbers back</span></h4>
+    <div id="frameBox">${frameView(p)}</div>` : ''}
+    ${!p.framed && (S.design.in_air.yes || aeroRuns(p.id).length || runsFor(p.id).length) ? `<h4>Shape it for drag <span class="badge">numbers back</span></h4>
     <div id="aeroBox">${aeroView(p)}</div>
     <h4>whittle carving <span class="badge">mesh back</span></h4>
-    <div id="whittleBox">${whittleView(p)}</div>`}
+    <div id="whittleBox">${whittleView(p)}</div>` : ''}
     <h4>History</h4>
     <ul class="list">${p.history.slice().reverse().map(historyItem).join('')}</ul>
     <details id="adv"><summary>Advanced — script &amp; spec</summary><div id="advBody" class="small muted">loading…</div></details>`;
@@ -1064,18 +1065,19 @@ function balanceView() {
   if (S.balance.loading) return '<div class="small muted">weighing…</div>';
   if (S.balance.error) return `<div class="small" style="color:var(--bad)">⚠ ${esc(S.balance.error)}</div>`;
   const b = S.balance.data, tried = Object.keys(triedFor()).length;
+  const hitch = b.moment_lbin != null;           // only when a part declares where it's held (a hitch)
+  const part = (x) => (x.part === 'payload' ? 'payload' : `<span class="partlink" data-part="${esc(x.part)}">${esc(x.part)}</span>`);
   return `<div class="card"><b style="font-size:1.3em">${lbs(b.mass_lb)}</b> ${tried ? '<span class="badge">with what-ifs</span>' : ''}
-      ${b.moment_lbin != null ? `<div class="small">The hitch carries <b>${lbs(b.force_lb)}</b> with its centre of gravity
-        ${len(b.arm_in * IN, 1)} behind it: <b>${lbin(b.moment_lbin)}</b> standing still.</div>` : ''}
-      <div class="muted small" style="margin-top:4px">${HITCH_NOTE}</div></div>
-    <div class="form" style="margin-top:8px"><span>payload</span>
-      <span><input type="number" id="payload" value="${S.payload}" min="0" step="10"> lb on the floor</span></div>
-    <table class="st"><tr><th style="text-align:left">part</th><th>lb</th><th>behind hitch</th><th>lb·in</th></tr>
-      ${b.parts.map((x) => `<tr><td style="text-align:left">${x.part === 'payload' ? 'payload' : `<span class="partlink" data-part="${esc(x.part)}">${esc(x.part)}</span>`}</td>
-        <td>${x.mass_lb}</td><td>${x.arm_in != null ? len(x.arm_in * IN, 1) : '—'}</td>
-        <td>${x.moment_lbin != null ? Number(x.moment_lbin).toLocaleString() : '—'}</td></tr>`).join('')}</table>
+      ${hitch ? `<div class="small">The hitch carries <b>${lbs(b.force_lb)}</b> with its centre of gravity
+        ${len(b.arm_in * IN, 1)} behind it: <b>${lbin(b.moment_lbin)}</b> standing still.</div>
+      <div class="muted small" style="margin-top:4px">${HITCH_NOTE}</div>` : ''}</div>
+    ${hitch ? `<div class="form" style="margin-top:8px"><span>payload</span>
+      <span><input type="number" id="payload" value="${S.payload}" min="0" step="10"> lb on the floor</span></div>` : ''}
+    ${b.parts.length > 1 || hitch ? `<table class="st"><tr><th style="text-align:left">part</th><th>lb</th>${hitch ? '<th>behind hitch</th><th>lb·in</th>' : ''}</tr>
+      ${b.parts.map((x) => `<tr><td style="text-align:left">${part(x)}</td><td>${x.mass_lb}</td>${hitch
+        ? `<td>${x.arm_in != null ? len(x.arm_in * IN, 1) : '—'}</td><td>${x.moment_lbin != null ? Number(x.moment_lbin).toLocaleString() : '—'}</td>` : ''}</tr>`).join('')}</table>` : ''}
     ${(b.notes || []).map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}
-    <div class="muted small" style="margin-top:4px">Red dot: the centre of gravity. Green: the hitch point.</div>`;
+    <div class="muted small" style="margin-top:4px">Red dot: the centre of gravity.${hitch ? ' Green: the hitch point.' : ''}</div>`;
 }
 
 async function loadBalance(key) {
@@ -1108,6 +1110,7 @@ marks.renderOrder = 10;
 scene.add(marks);
 function showMarks() {
   for (const m of [...marks.children]) { marks.remove(m); m.geometry && m.geometry.dispose(); }
+  if (S.station && S.station.kind === 'load') return;     // the stress picture has the floor to itself
   const c = S.scope && S.built[S.scope];
   const b = S.scope ? (c && c.balance) : (S.balance && S.balance.data);
   const cog = S.scope ? (c && c.report && c.report.cog) : (b && b.mass_kg ? b.cog : null);
@@ -1248,8 +1251,9 @@ async function runLoad(p) {
   }
 }
 
-// stress, low to high: blue, teal, green, amber, red
-const HEAT = [[0, 0x2b4c9b], [0.3, 0x2a9d8f], [0.55, 0x8ac926], [0.78, 0xf4a261], [1, 0xe63946]];
+// stress, low to high: blue, cyan, green, yellow, red — bright, so a part that's barely working reads as blue,
+// not as fog
+const HEAT = [[0, 0x4a7fe0], [0.25, 0x35c4dc], [0.5, 0x5fd35f], [0.75, 0xf2c94c], [1, 0xe5383b]];
 function heatColor(t, out) {
   t = Math.max(0, Math.min(1, t));
   let k = 1;
@@ -1287,11 +1291,18 @@ async function showHeat(pid, run, index) {
     scene.add(stationMesh);
     S.station = { part: pid, run: run.id, index, kind: 'load' };
     const grad = HEAT.map(([t, hex]) => `#${hex.toString(16).padStart(6, '0')} ${t * 100}%`).join(', ');
+    // two numbers are on screen: the picture is the FEA's, the verdict may be the plate check's — say which is which
+    const pl = c.plate && c.plate.done ? c.plate : null, f = c.fea || {};
+    const decided = c.governs === 'plate' && pl
+      ? `the plate check on the ${esc(pl.piece)}: ${fixed(pl.stress_mpa, 1)} MPa, with the grain the wrong way`
+      : `the FEA's peak: ${fixed(f.peak_mpa, 1)} MPa in the ${esc(f.in || 'part')}`;
     const bar = $('stationBar');
     bar.hidden = false;
-    bar.innerHTML = `<span><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} · the FEA's stress
-        <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span> 0–${fixed(top, 1)} MPa
-        <span class="muted">(${esc(run.material.name)} breaks near ${run.material.strength} MPa)</span> · safety <b>${sx(c.safety)}</b></span>
+    bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →
+        <b style="color:var(${c.holds ? '--ok' : '--bad'})">${c.holds ? 'holds' : 'doesn\'t hold'}, ${sx(c.safety)}</b>
+        ${c.breaks_lb ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
+      <div class="small muted" style="margin-top:2px">Colours: whittle's FEA <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span>
+        0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${run.material.strength}). Decided by ${decided}.</div></div>
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };
     paint(); renderInspector();

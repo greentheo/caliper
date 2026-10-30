@@ -176,3 +176,5 @@ table.studies-table td { vertical-align: top; text-align: left; }
 table.studies-table th { text-align: left; }
 table.studies-table td.when { white-space: nowrap; color: var(--muted); }
 #studiesBtn.on { border-color: var(--accent); color: var(--accent); }
+/* centred by left:50%, an absolute box would shrink to half the view: size it to its text instead */
+.station-bar { width: max-content; max-width: min(760px, calc(100% - 40px)); }
