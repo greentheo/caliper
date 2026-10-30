@@ -81,6 +81,11 @@ class JobRunner:
         self._pool.submit(self._run, job, fn, key_lock)
         return job
 
+    def busy(self, lock: str) -> bool:
+        """Is a job with this lock queued or running? (So a background job isn't queued twice.)"""
+        with self._mu:
+            return any(j.lock == lock and j.status in ("queued", "running") for j in self._jobs.values())
+
     def get(self, job_id: str) -> Optional[Job]:
         with self._mu:
             return self._jobs.get(job_id)

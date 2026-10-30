@@ -97,11 +97,13 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         return (("holds" if r.get("holds") else "doesn't hold") + f" — weakest {what}"
                 + (f" (needs {r.get('min_safety', 2):g}x)" if not r.get("holds") else ""), bool(r.get("holds")))
     if kind == "lighten":
-        best = max((x for x in r.get("stations", []) if x.get("holds")), key=lambda x: x["removed"], default=None)
-        if best is None or not best["removed"]:
+        st = r.get("stations", [])
+        best = max((x for x in st if x.get("holds")), key=lambda x: x["saved_lb"], default=None)
+        if best is None or not best["saved_lb"]:
             return "nothing lighter holds", False
-        return (f"up to {best['removed']:.0%} out of the walls ({best['saved_lb']:g} lb lighter), "
-                f"still {round(best['safety'], 1):g}x"), True
+        out = next((x for x in st if not x.get("holds")), None)
+        return (f"up to {best['saved_lb']:g} lb lighter" + (f" in {best['label']} sheet (an estimate)" if best.get("estimate") else "")
+                + f", still {round(best['safety'], 1):g}x" + (f"; runs out at step {out['index']}" if out else "")), True
     if kind == "frame":
         ok = [s for s in r.get("stations", []) if s.get("safety", 0) >= r.get("min_safety", 0)]
         if not ok:

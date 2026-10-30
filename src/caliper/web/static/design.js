@@ -424,6 +424,7 @@ $('unitSeg').onclick = async (e) => {
 
 function setScope(pid) {
   S.scope = pid;
+  S.focus = null;
   if (S.station && S.station.part !== pid) clearStation();
   render();
   if (pid) $('msg').focus();
@@ -692,15 +693,42 @@ function qlines(c) {
   if (!c) return '<div class="qline muted"><span class="spin"></span>answering…</div>';
   if (!c.lines.length) return `<div class="qline muted">${esc(c.hint || 'Nothing to say yet.')}</div>`;
   return c.lines.map((ln, i) => `<div class="qline q-${ln.status}${i === 0 ? ' top' : ''}${GOTO[ln.study || ln.action] ? ' go' : ''}"
-    ${GOTO[ln.study || ln.action] ? `data-goto="${GOTO[ln.study || ln.action]}"` : ''}>${esc(ln.text)}</div>`).join('');
+    ${GOTO[ln.study || ln.action] ? `data-goto="${GOTO[ln.study || ln.action]}"` : ''}>${esc(ln.text)}</div>
+    ${(ln.links || []).length ? `<div class="qlinks">${ln.links.map((l) => `<a class="btn" href="${esc(l.url)}" target="_blank"
+      rel="noopener">${esc(l.label)}</a>`).join('')}</div>` : ''}`).join('');
+}
+
+// the viewport follows the question (spec step 4): the stress for "will it work", the pieces for "what do I buy"
+// and "how do I make it", the part itself for "what is it"
+async function focusCard(k) {
+  S.focus = k;
+  document.querySelectorAll('#inspector .qcard').forEach((c) => c.classList.toggle('focus', c.dataset.card === k));
+  const pid = S.scope;
+  if (!pid) return;
+  const p = S.design.parts.find((x) => x.id === pid);
+  if (!p) return;
+  if (S.station) clearStation();
+  if (k === 'work') {
+    const run = loadRuns(pid)[0];
+    if (built3d.has(pid)) await showBuilt3d(pid, false);
+    if (run && run.version === p.version) {
+      const worst = run.cases.reduce((a, c, i) => (c.heat && (a < 0 || (c.safety ?? 1e9) < (run.cases[a].safety ?? 1e9)) ? i : a), -1);
+      if (worst >= 0) showHeat(pid, run, worst);
+    }
+  } else if ((k === 'buy' || k === 'make') && p.built) {
+    if (!built3d.has(pid)) await showBuilt3d(pid, true);
+  } else if (built3d.has(pid)) {
+    await showBuilt3d(pid, false);
+  }
+  renderLayers && renderLayers();
 }
 function cardsView(groups) {
   const a = S.answers && S.answers.key === answersKey() && S.answers.cards ? S.answers : null;
   if (!a && !(S.answers && S.answers.key === answersKey() && S.answers.loading)) setTimeout(loadAnswers, 0);
   return QUESTIONS.map(([k, q]) => {
     const c = a ? a.cards.find((x) => x.key === k) : null;
-    return `<section class="qcard q-${c ? c.status : 'info'}" data-card="${k}">
-      <div class="qhead"><span class="qmark">${c ? QMARK[c.status] : '·'}</span><h3>${q}</h3></div>
+    return `<section class="qcard q-${c ? c.status : 'info'}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
+      <div class="qhead" title="${S.scope ? 'show this in 3D' : ''}"><span class="qmark">${c ? QMARK[c.status] : '·'}</span><h3>${q}</h3></div>
       <div class="qlines" id="q-${k}">${qlines(c)}</div>
       <details class="numbers" data-card="${k}" ${numbersOpen(k) ? 'open' : ''}><summary>the numbers</summary>
         ${groups[k] || '<div class="empty">Nothing here yet.</div>'}</details>
@@ -729,6 +757,7 @@ async function loadAnswers() {
 }
 function wireCards() {
   document.querySelectorAll('#inspector details.numbers').forEach((dt) => { dt.ontoggle = () => keepNumbersOpen(dt.dataset.card, dt.open); });
+  document.querySelectorAll('#inspector .qcard .qhead').forEach((h) => { h.onclick = () => focusCard(h.parentElement.dataset.card); });
   document.querySelectorAll('#inspector .qline[data-goto]').forEach((ln) => { ln.onclick = () => goTo(ln.dataset.goto); });
 }
 function goTo(id) {                   // open the card's numbers and bring that panel into view
@@ -1403,20 +1432,28 @@ function lightenRuns(pid) { return (S.design.lighten_runs || []).filter((r) => r
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
   const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
-  const best = run && run.stations.filter((x) => x.holds).reduce((a, x) => (!a || x.removed > a.removed ? x : a), null);
+  const best = run && run.stations.filter((x) => x.holds).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
+  const out = run && run.stations.find((x) => !x.holds);
+  const what = (x) => x.phase === 'thinner' ? `in ${esc(x.label)} sheet <span class="badge">estimate</span>`
+    : x.phase === 'top' ? `${pct(x.removed)} of the walls + ${x.top_holes} hole${x.top_holes === 1 ? '' : 's'} in the top`
+    : x.index ? `${pct(x.removed)} of the walls` : 'as it is';
   return `<h5 style="margin:14px 0 4px">Make it lighter</h5>
-    <div class="muted small">Holes where the wood isn't working, cut all the way through so a jigsaw can make them,
-      with a solid rim where it's glued and screwed. Every step is checked again with its holes in.</div>
-    <div class="actions"><button id="lightGo">${run ? 'Lighten it again' : 'Lighten the panels'}</button></div>
+    <div class="muted small">Down until the safety runs out: holes in the walls where the wood isn't working (a jigsaw cuts
+      them, a solid rim where it's glued and screwed), then hole-saw holes in the panel you stand on, one at a time,
+      then thinner sheet. Every step is checked again.</div>
+    <div class="actions"><button id="lightGo">${run ? 'Lighten it again' : 'Lighten it'}</button></div>
     <div id="lightProgress"></div>
-    ${run ? `<div class="small" style="margin-top:6px">${best && best.removed
-      ? `It can lose <b>${pct(best.removed)}</b> of its walls (<b>${lbs(best.saved_lb)}</b>) and still hold ${sx(best.safety)}.`
-      : 'Nothing lighter still holds.'}${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
-    <div class="tw"><table class="st"><tr><th>#</th><th>out of the walls</th><th>lighter</th><th>holes</th><th>safety</th></tr>
-      ${run.stations.map((x) => `<tr class="pick ${x.index === on ? 'on' : ''}" data-lst="${x.index}"><td>${x.index}</td>
-        <td>${pct(x.removed)}</td><td>${lbs(x.saved_lb)}</td><td>${x.holes}</td>
-        <td style="color:var(${x.holds ? '--ok' : '--bad'})">${sx(x.safety)}</td></tr>`).join('')}</table></div>
-    <div class="muted small" style="margin-top:4px">Click a step to see it; <b>Cut these holes</b> makes it the part.</div>
+    ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
+      ? `The lightest that holds: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety)}.`
+      : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety)}).` : ''}
+      ${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
+    <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
+      ${run.stations.map((x) => `<tr class="${x.estimate ? '' : 'pick'} ${x.index === on ? 'on' : ''}" ${x.estimate ? '' : `data-lst="${x.index}"`}>
+        <td>${x.index}</td><td style="text-align:left">${what(x)}</td><td>${lbs(x.saved_lb)}</td>
+        <td style="color:var(${x.holds ? '--ok' : '--bad'})">${sx(x.safety)}</td>
+        <td>${x.estimate && x.holds ? `<button class="ghost" data-use-t="Make it from ${esc(x.label)} ${esc((run.material || 'plywood').toLowerCase())}">Use</button>` : ''}</td></tr>`).join('')}</table></div>
+    <div class="muted small" style="margin-top:4px">Click a step to see it; <b>Cut these holes</b> makes it the part. An estimate's
+      <b>Use</b> asks for that sheet, and the strength check runs on the real thing.</div>
     ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}` : ''}`;
 }
 
@@ -1510,7 +1547,7 @@ async function runLighten(p) {
     clearStation();
     await refresh();
     const run = lightenRuns(p.id)[0];
-    const best = run && run.stations.filter((x) => x.holds).reduce((a, x) => (!a || x.removed > a.removed ? x : a), null);
+    const best = run && run.stations.filter((x) => x.holds && !x.estimate).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
     if (best && best.index) showStation(p.id, run, best.index);
   } catch (e) {
     prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
@@ -2010,7 +2047,7 @@ async function showStation(pid, run, index) {
     bar.hidden = false;
     const removed = parametric ? st.removed : st.removed_part;
     const what = lightened
-      ? `<span>step <b>${index}</b> · ${pct(st.removed)} out of the walls · ${lbs(st.saved_lb)} lighter ·
+      ? `<span>step <b>${index}</b> · ${pct(st.removed)} out of the walls${st.top_holes ? ` and ${st.top_holes} hole${st.top_holes === 1 ? '' : 's'} in the top` : ''} · ${lbs(st.saved_lb)} lighter ·
         <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
       : framed
       ? `<span>design <b>${index}</b> · ${st.mass_lb} lb of steel · weakest ${st.safety}x · sags ${len(st.deflection_mm, 2)}</span>`
@@ -2037,6 +2074,11 @@ async function adoptStation(pid, wid, index, kind) {
     await api('POST', `/api/designs/${S.slug}/${STUDY_PATH[kind] || 'whittle'}/${wid}/adopt`, { station: index });
     clearStation();
     await refresh();
+    // holes cut in: check its strength again on the part as rebuilt — that's the number to go by
+    if (kind === 'lighten') {
+      const p = S.design.parts.find((x) => x.id === pid);
+      if (p && $('lGo')) runLoad(p);
+    }
   } catch (e) { showErr(e.message); $('adoptBtn').disabled = false; }
 }
 

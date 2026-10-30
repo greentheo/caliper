@@ -203,3 +203,7 @@ table.studies-table td.when { white-space: nowrap; color: var(--muted); }
 .qline.go { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 details.numbers { margin: 6px 0 0 22px; }
 details.numbers > summary { margin-top: 2px; }
+.qcard.focus { box-shadow: 0 0 0 1px var(--accent); }
+.qcard .qhead { cursor: pointer; }
+.qlinks { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 2px; }
+.qlinks .btn { font-size: 12px; padding: 2px 8px; }

@@ -54,13 +54,32 @@ def stool(tmp_path, monkeypatch):
     return store
 
 
-def test_the_walls_lighten_and_the_top_stays_solid(stool):
+def test_it_goes_down_until_the_safety_runs_out(stool):
+    """The walls first, then hole-saw holes in the top one at a time, then thinner sheet as an estimate:
+    every step lighter than the last, until one doesn't hold."""
     rec = lighten.study(stool, "stool", steps=(0.5, 1.0))
-    assert sorted(p["name"] for p in rec["panels"]) == ["back", "front", "left", "right"]   # not the top
+    walls = sorted(p["name"] for p in rec["panels"] if not p["stood_on"])
+    assert walls == ["back", "front", "left", "right"] and [p["name"] for p in rec["panels"] if p["stood_on"]] == ["top"]
     first, *rest = rec["stations"]
-    assert first["removed"] == 0 and first["holes"] == 0
-    assert rest and rest[-1]["removed"] > 0.2 and rest[-1]["saved_lb"] > 0
-    assert [s["removed"] for s in rec["stations"]] == sorted(s["removed"] for s in rec["stations"])
+    assert first["removed"] == 0 and first["holes"] == 0 and first["phase"] == "walls"
+    real = [s for s in rec["stations"] if not s.get("estimate")]
+    assert [s["saved_lb"] for s in real] == sorted(s["saved_lb"] for s in real)
+    phases = [s["phase"] for s in rec["stations"]]
+    assert phases.index("walls") < phases.index("top")                     # the walls before the top
+    assert all(s["phase"] == "walls" or s["removed"] >= max(x["removed"] for x in real if x["phase"] == "walls") - 1e-9
+               for s in real)
+    # the top, while solid, is judged by the plate check; with holes, by the FEA calibrated against it
+    assert first["cases"][0]["governs"] == "plate"
+    holed = [s for s in real if s["phase"] == "top"]
+    assert holed and holed[0]["cases"][0]["governs"] == "fea-calibrated" and holed[0]["top_holes"] == 1
+    assert holed[0]["safety"] <= first["safety"] + 1e-9
+    # it stops at the first that doesn't hold, or when there's nothing left to try
+    assert all(s["holds"] for s in real[:-1])
+    # thinner sheet: estimates, never adopted as they stand
+    est = [s for s in rec["stations"] if s.get("estimate")]
+    assert est and all(s["phase"] == "thinner" and s["thickness_mm"] < 19.05 for s in est)
+    with pytest.raises(ValueError, match="estimate"):
+        lighten.adopt(stool, rec["id"], est[0]["index"])
     # every hole keeps its rim: no corner nearer the panel's edge than the rim
     walls = {p["name"]: p for p in C.declared(stool, "stool")["construction"]}
     for st in rec["stations"]:
@@ -72,13 +91,17 @@ def test_the_walls_lighten_and_the_top_stays_solid(stool):
                 flat = [i for i in range(3) if hi[i] - lo[i] > 1]
                 gap = np.minimum(pts[:, flat] - lo[flat], hi[flat] - pts[:, flat]).min()
                 assert gap >= lighten.RIM_MM - 1.0
-    # the top is still judged by the plate check at every station
-    assert all(c["governs"] in ("plate", "fea") for s in rec["stations"] for c in s["cases"])
+    # holes in the top are round, from a hole saw
+    for s_ in holed:
+        for poly in s_["panels"]["top"]:
+            pts = np.asarray(poly)
+            r = np.linalg.norm(pts - pts.mean(axis=0), axis=1)
+            assert r.mean() * 2 == pytest.approx(lighten.HOLE_SAW_MM, rel=0.02)
 
 
 def test_using_a_station_cuts_its_holes_into_the_part(stool):
     rec = lighten.study(stool, "stool", steps=(1.0,))
-    st = rec["stations"][-1]
+    st = max((s for s in rec["stations"] if s["holds"] and not s.get("estimate")), key=lambda s: s["saved_lb"])
     assert st["holds"] and st["holes"]
     before = C.report(stool, "stool")["mass_lb"]
     got = lighten.adopt(stool, rec["id"], st["index"])
