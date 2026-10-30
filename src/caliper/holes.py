@@ -36,17 +36,46 @@ def area(poly) -> float:
     return 0.5 * (nx * nx + ny * ny + nz * nz) ** 0.5
 
 
+def read(script: str) -> list:
+    """The ``HOLES`` a script carries (none if it has none)."""
+    import ast
+
+    for node in ast.parse(script).body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and getattr(node.targets[0], "id", None) == NAME:
+            return list(ast.literal_eval(node.value))
+    return []
+
+
+def write(script: str, holes: list) -> str:
+    """The script with its ``HOLES`` set to ``holes``: replaced where it is, or added at the end."""
+    import ast
+    import json
+
+    block = f"{NAME} = " + json.dumps(holes, indent=4) + "\n"
+    lines = script.splitlines(keepends=True)
+    old = next((n for n in ast.parse(script).body if isinstance(n, ast.Assign) and len(n.targets) == 1
+                and getattr(n.targets[0], "id", None) == NAME), None)
+    if old is not None:
+        return "".join(lines[:old.lineno - 1]) + block + "".join(lines[old.end_lineno:])
+    return (script.rstrip("\n") + "\n\n\n# Holes cut all the way through: lightening, and pictures (Caliper writes "
+            "this and cuts them after build()).\n" + block)
+
+
 def merge(construction, holes):
     """The pieces with each named piece's ``holes`` (polygons) added; the rest as they were."""
     if not holes or not construction:
         return construction
-    by = {}
+    by, pictures = {}, {}
     for h in holes:
         by.setdefault(h.get("piece"), []).extend(h.get("polygons") or [])
+        if h.get("picture"):                     # a picture cut out (CALI-78): lightening leaves it alone
+            pictures.setdefault(h.get("piece"), []).extend(h.get("polygons") or [])
     out = []
     for item in construction:
         if isinstance(item, dict) and item.get("name") in by:
             item = {**item, "holes": [*(item.get("holes") or []), *by[item["name"]]]}
+            if item["name"] in pictures:
+                item["pictures"] = pictures[item["name"]]
         out.append(item)
     return out
 

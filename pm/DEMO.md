@@ -42,6 +42,9 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **A picture on it (CALI-78, #46).** "Put a T-rex on the side": drawn (or drawn by you on the pad), cut out of
+  a panel nobody stands on, smooth enough for a jigsaw, and checked that it still holds; on the patterns and the
+  cut sheet.
 - 🆕 **First run (CALI-59, #8).** One sentence, a few questions you can leave blank, **Build it**: Caliper builds
   it, checks it holds, draws the patterns and scores it, then answers the four questions. Or open the stool or
   the camper as a sample. Talk instead of typing; ask it to say it simpler; report what breaks if you want to.
@@ -556,6 +559,17 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-30 · A T-rex cut out of the side, and it still holds Dad (CALI-78 #46)
+1. Open the step stool (the sample is fine) and say **"put a T-rex on the side"**. The reply ticks through drawing,
+   fitting, checking, cutting and checking again, then: "✓ I cut a T-rex 5.2 × 5 in out of the left side panel. It
+   still holds, 3.11 times over (it needs 2)." Turn the view to see it through the wall.
+2. Or **🦖 Put a picture on it** under *What is it?*: type (or 🎤) "a cat" or "a rocket" for Claude to draw, or draw
+   it on the pad yourself, pick a panel, **Cut it out**.
+3. **How do I make it? → Make the patterns**: the side panel's page has the T-rex to trace, with where to drill the
+   start hole for the jigsaw. The cut plan's sheet cuts it too.
+4. Lighten it afterwards: the T-rex stays as it is, with wood round it.
+5. Offline: `python -m pytest tests/test_pictures.py`.
 
 ### 2026-10-30 · Fast cards, holes on the CNC sheet, measuring error (CALI-76 #44, CALI-77 #45, CALI-68 #28)
 1. Click the stool: its four cards come up in about a second (they took 6–11 s).

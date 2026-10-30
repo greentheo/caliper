@@ -679,6 +679,7 @@ const STEP_TEXT = {
   classified: (e) => (e.action === 'answer' ? 'reading the design'
     : e.action === 'author' ? `building a new part: ${e.part}`
       : e.action === 'refine' ? `revising ${e.part}`
+        : e.action === 'picture' ? `putting a picture on ${e.part}`
         : e.action === 'revert' ? `rolling ${e.part} back` : e.text),
 };
 
@@ -909,11 +910,83 @@ function cardsView(groups) {
     return `<section class="qcard q-${c ? c.status : 'info'}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
       <div class="qhead" title="${S.scope ? 'show this in 3D' : ''}"><span class="qmark">${c ? QMARK[c.status] : '·'}</span><h3>${q}</h3></div>
       <div class="qlines" id="q-${k}">${qlines(c)}</div>
+      ${k === 'what' && picturePart() ? '<div class="qlinks"><button class="btn" data-picture="1">🦖 Put a picture on it</button></div>' : ''}
       <details class="numbers" data-card="${k}" ${numbersOpen(k) ? 'open' : ''}><summary>the numbers</summary>
         ${groups[k] || '<div class="empty">Nothing here yet.</div>'}</details>
     </section>`;
   }).join('');
 }
+// ------------------------------------------------------------------- a picture on it (CALI-78)
+// Say what it is or draw it; it's cut out of a panel nobody stands on, smooth enough for a jigsaw, and the
+// strength check says whether it still holds (it's made smaller until it does).
+function picturePart() {
+  const d = S.design;
+  if (!d) return null;
+  if (S.scope) { const p = d.parts.find((x) => x.id === S.scope); return p && p.built ? p : null; }
+  const parts = d.parts.filter((p) => p.role !== 'fixed');
+  return parts.length === 1 && parts[0].built ? parts[0] : null;
+}
+document.addEventListener('click', (e) => { if (e.target.dataset && e.target.dataset.picture) openPicture(); });
+async function openPicture() {
+  const p = picturePart();
+  if (!p) return;
+  let dlg = $('pictureDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'pictureDlg'; dlg.className = 'report'; document.body.append(dlg); }
+  dlg.innerHTML = `<h3>Put a picture on it</h3>
+    <p class="small muted">Say what it is, or draw it. I cut it out of a panel nobody stands on, as big as fits and
+      smooth enough for a jigsaw, then check it still holds.</p>
+    <div class="say"><input id="picSubject" type="text" placeholder="a T-rex">${micButton('picSubject')}</div>
+    <div class="muted small" style="margin-top:8px">or draw it, all the way round:</div>
+    <canvas id="picPad" class="pad" width="320" height="220"></canvas>
+    <div class="actions" style="margin-top:4px"><button class="ghost small" id="picClear">Clear</button>
+      <label class="small muted">on the <select id="picWhere"><option value="">front</option></select></label></div>
+    <div class="actions"><button class="primary" id="picGo">Cut it out</button>
+      <button class="ghost" id="picClose">Not now</button></div>`;
+  wireMics(dlg);
+  const pad = $('picPad'), ctx = pad.getContext('2d');
+  let pts = [], down = false;
+  const at = (e) => { const r = pad.getBoundingClientRect(); return [(e.clientX - r.left) * pad.width / r.width, (e.clientY - r.top) * pad.height / r.height]; };
+  const paint = () => {
+    ctx.clearRect(0, 0, pad.width, pad.height);
+    if (pts.length < 2) return;
+    ctx.beginPath(); ctx.moveTo(...pts[0]); pts.forEach((q) => ctx.lineTo(...q));
+    if (!down) { ctx.closePath(); ctx.fillStyle = 'rgba(78,161,255,.18)'; ctx.fill(); }
+    ctx.strokeStyle = '#4ea1ff'; ctx.lineWidth = 3; ctx.lineJoin = ctx.lineCap = 'round'; ctx.stroke();
+  };
+  pad.onpointerdown = (e) => {
+    down = true; pts = [at(e)];
+    try { pad.setPointerCapture(e.pointerId); } catch (err) { /* a pen or finger the page didn't start */ }
+    paint();
+  };
+  pad.onpointermove = (e) => { if (down) { pts.push(at(e)); paint(); } };
+  pad.onpointerup = () => { down = false; paint(); };
+  $('picClear').onclick = () => { pts = []; paint(); };
+  $('picClose').onclick = () => dlg.close();
+  try {
+    const got = await api('GET', `/api/designs/${S.slug}/parts/${encodeURIComponent(p.id)}/picture`);
+    $('picWhere').innerHTML = got.panels.map((x) => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join('');
+    const front = got.panels.find((x) => /front/i.test(x.name));
+    if (front) $('picWhere').value = front.name;
+  } catch (e) { /* the server picks */ }
+  $('picGo').onclick = async () => {
+    const subject = $('picSubject').value.trim(), where = $('picWhere').value;
+    if (!subject && pts.length < 8) { $('picSubject').focus(); return; }
+    dlg.close();
+    const text = pts.length >= 8 ? `(drew ${subject || 'a picture'} to cut out)` : `put ${subject} on the ${where || 'front'}`;
+    S.busy = true; $('send').disabled = true;
+    const live = liveTurn(text, p.id);
+    try {
+      const { job_id } = await api('POST', `/api/designs/${S.slug}/parts/${encodeURIComponent(p.id)}/picture`,
+        { subject: subject || 'picture', where, points: pts.length >= 8 ? pts.map(([x, y]) => [Math.round(x), Math.round(y)]) : [] });
+      await follow(job_id, (ev) => live.step(ev));
+      S.busy = false;
+      await refresh();
+    } catch (e) { live.fail(e.message, e.errorId); }
+    finally { S.busy = false; $('send').disabled = false; }
+  };
+  dlg.showModal();
+}
+
 async function loadAnswers() {
   if (!S.design) return;
   const key = answersKey();
