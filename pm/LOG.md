@@ -30,6 +30,8 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Tests: `test_studies.py` (+1: the stool isn't in air even with a towel rack by the window; a cargo box,
   a wind turbine, something behind a car and a design with drag runs are), `test_chat.py` (+2: Claude's
   new description lands and the conversation reads it; offline it says what changed, latest only).
+  **Full suite: 473 passed.**
+- Commits: `cf163fa` (#29), `e29472c` (#27), on PR #33 (stacked on #30).
 
 ### 2026-10-29 · CALI-54 (#1), CALI-70 (#31) · Will it hold? And one page for every study
 - **Theo:** "please launch and I'll take a look at the results! And I think we need a page in the app, or a
