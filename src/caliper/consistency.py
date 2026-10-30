@@ -12,6 +12,7 @@ every build is checked against its declarations, as measurements that fail a rou
 - ``construction_covers``: the pieces cover the solid's surface. Nothing in the shape is left out of
   the bill of materials, and no panel in the shape is thicker than the sheet it's listed as.
 - ``construction_volume``: no more material than the solid holds (a wrong thickness, a piece twice).
+- ``loads_land``: every load in ``loads()`` says how much and where, and where is on the part.
 
 A part that declares nothing gets none of these: there is nothing to disagree with.
 """
@@ -131,12 +132,13 @@ def shapes(declared: dict) -> list[dict]:
             polys = [item["outline"]] if item.get("outline") else list(item["facets"])
             t = float(item["thickness"])
             out.append({"name": name, "kind": "sheet", "polys": [np.asarray(p, float) for p in polys],
-                        "thickness": t, "volume": sum(C.polygon(p)[0] for p in polys) * t})
+                        "thickness": t, "volume": sum(C.polygon(p)[0] for p in polys) * t,
+                        "material": item.get("material")})
         elif item.get("kind") == "stick":
             half, diag, area = _section(item)
             a, b = (np.asarray(item[k], float) for k in ("a", "b"))
             out.append({"name": name, "kind": "stick", "a": a, "b": b, "half": half, "reach": diag,
-                        "volume": float(np.linalg.norm(b - a)) * area})
+                        "volume": float(np.linalg.norm(b - a)) * area, "material": item.get("material", "lumber")})
     return out
 
 
@@ -239,12 +241,37 @@ def _volume(mesh, pieces: list[dict]) -> Optional[AssertionResult]:
                               + ", ".join(f"{pc['name']} {pc['volume'] / 1e6:.2f} L" for pc in heavy) + ")"))
 
 
+def _loads(mesh, items, tol: float) -> AssertionResult:
+    """Every load says how much and where, and where is on the part: a load in thin air is a box in the
+    wrong place, and the strength study would find nothing to push on."""
+    from .load_study import parse_loads
+
+    try:
+        loads = parse_loads(items)
+    except (ValueError, TypeError) as e:
+        return AssertionResult(id="loads_land", expr="every load in loads() says how much and where",
+                               status="fail", passed=False, actual=None,
+                               detail=f"{e} (see the loads() format)")
+    g = np.linspace(0.0, 1.0, 5)
+    cube = np.stack(np.meshgrid(g, g, g, indexing="ij"), -1).reshape(-1, 3)
+    missed = []
+    for ld in loads:
+        lo, hi = np.asarray(ld["lo"]) - tol, np.asarray(ld["hi"]) + tol
+        gap = -float(_signed(mesh, lo + (hi - lo) * cube).max()) + tol      # from the box as declared
+        if gap > 2 * tol:
+            missed.append(f"'{ld['name']}' acts on {_xyz(ld['lo'])}..{_xyz(ld['hi'])}, {gap:.0f} mm from the part")
+    ok = not missed
+    return AssertionResult(id="loads_land", expr="every load in loads() pushes on the part",
+                           status="pass" if ok else "fail", passed=ok, actual=len(loads) - len(missed),
+                           detail="" if ok else "; ".join(missed) + " — put its box on the face it pushes on")
+
+
 def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
     """The declarations measured against the built solid: [] when the part declares nothing."""
     if not declared:
         return []
     if declared.get("error"):
-        return [AssertionResult(id="construction_reads", expr="construction() and members() run",
+        return [AssertionResult(id="construction_reads", expr="its declarations (construction(), members(), loads()) run",
                                 status="error", passed=False, actual=None, detail=declared["error"])]
     try:
         pieces = shapes(declared)
@@ -254,10 +281,15 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
                                 status="fail", passed=False, actual=None,
                                 detail=f"{what} (see the materials table and the piece formats)")]
     mesh = getattr(geometry, "mesh", None)
-    if not pieces or mesh is None:
+    if mesh is None:
         return []
     tol = tolerance(mesh)
-    _sides(mesh, pieces)
-    out = [_inside(mesh, pieces, tol), _covers(mesh, pieces, tol)]
-    vol = _volume(mesh, pieces)
-    return out + ([vol] if vol else [])
+    out = []
+    if pieces:
+        _sides(mesh, pieces)
+        out += [_inside(mesh, pieces, tol), _covers(mesh, pieces, tol)]
+        vol = _volume(mesh, pieces)
+        out += [vol] if vol else []
+    if declared.get("loads") is not None:
+        out.append(_loads(mesh, declared["loads"], tol))
+    return out

@@ -111,6 +111,32 @@ def keeps(params, build=None):
     return [{"name": "mattress", "note": "a queen, 60 x 80 in", "lo": (x, y, z), "hi": (x, y, z)}]
 ```
 
+## What it must hold: loads(params, build=None) and held(params, build=None)
+
+When the requirements say what it carries (a person standing on it, books on a shelf, a load it
+lifts), declare it, and Caliper checks the part holds it (whittle's FEA, and a plate check for a
+panel pushed on face-on):
+
+```python
+def loads(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    cx, cy, top = p["width"] / 2, p["depth"] / 2, p["height"]
+    return [{"name": "an adult stepping up", "lb": 200, "factor": 2.0,
+             "lo": (cx - 50, cy - 50, top - 2), "hi": (cx + 50, cy + 50, top)}]
+```
+
+Each load is `name`; how much, as `lb` or `kg` (straight down) or `force` (`(fx, fy, fz)` in newtons);
+`factor`, what it's multiplied by for the check (2 for someone stepping or jumping onto it, 1 for
+a load that just sits there); and `lo`/`hi`, the corners of the box it pushes on, which must sit on
+the part's surface (a box 2 mm deep on the face). Put a person's weight where it's hardest to carry:
+one foot (about 4 x 4 in) in the middle of the widest span. List more than one when they're
+different situations (standing on the top, sitting on the edge); each is checked on its own. Like
+the pieces, the loads are checked after every revision: a load whose box doesn't touch the part fails
+the round.
+
+`held()` says where the part is held, as boxes of the same form (`name`, `lo`, `hi`). Leave it out for a
+part that stands on the floor: Caliper holds it at its underside.
+
 ## How far a search may go: RANGES
 
 ```python
@@ -129,4 +155,4 @@ frame study, `shell(params, build=None)`, a list of
 ## Keep them together
 
 When you change `build()`, change the declarations with it. Move a panel or a tube in one and you
-move it in the others; keep RANGES, keeps() and LAYOUTS true to the new shape.
+move it in the others; keep RANGES, keeps(), loads() and LAYOUTS true to the new shape.

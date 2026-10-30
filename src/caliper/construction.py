@@ -78,6 +78,10 @@ if callable(globals().get('keeps')):
     _out['keeps'] = _k({{}}, _b) if len(_inspect.signature(_k).parameters) > 1 else _k({{}})
 if isinstance(globals().get('PLATES'), dict):
     _out['plates'] = PLATES
+for _name in ('loads', 'held'):
+    if callable(globals().get(_name)):
+        _decl = globals()[_name]
+        _out[_name] = _decl({{}}, _b) if len(_inspect.signature(_decl).parameters) > 1 else _decl({{}})
 if callable(globals().get('members')):
     _out['members'] = members({{}})
 if callable(globals().get('supports')):
@@ -92,15 +96,15 @@ def declares(script: str) -> bool:
 
 def declared(store: DesignStore, part_id: str, build: Optional[dict] = None,
              timeout: float = 60.0) -> dict:
-    """``construction`` / ``shell`` / ``keeps`` / ``members`` / ``supports`` from the part's script, and
-    the BUILD choices used.
+    """``construction`` / ``shell`` / ``keeps`` / ``loads`` / ``held`` / ``members`` / ``supports`` from the
+    part's script, and the BUILD choices used.
 
     Empty if the part is a mesh or declares none of them. ``build`` overrides BUILD for a what-if.
     """
     if not store.is_scripted(part_id):
         return {}
     script = store.read_script(part_id)
-    if not declares(script) and "def keeps(" not in script:
+    if not declares(script) and "def keeps(" not in script and "def loads(" not in script:
         return {}
     probe = script + _PROBE.format(build=json.dumps(build or {}))
     try:

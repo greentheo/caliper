@@ -8,9 +8,9 @@ hole/face probes keep working). All outcomes — success, a build exception, a b
 written to ``status.json`` as ``{ok, error, traceback}`` so the parent never has to scrape stdout
 (OCCT is chatty). This runs in a separate process so a runaway/buggy script can be killed on timeout.
 
-A part that also declares what it's built from (``construction()``, ``members()``) has those read here
-too, from the same run, into ``status["declared"]`` — so the parent can check them against the solid
-(CALI-54) without running the script a second time.
+A part that also declares what it's built from (``construction()``, ``members()``) or what it must hold
+(``loads()``) has those read here too, from the same run, into ``status["declared"]`` — so the parent can
+check them against the solid (CALI-54) without running the script a second time.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import sys
 import traceback
 
 #: What a part may declare beyond its shape, and checked against it (caliper.consistency).
-DECLARED = ("construction", "members")
+DECLARED = ("construction", "members", "loads")
 
 
 def _declared(ns: dict, params: dict) -> dict:

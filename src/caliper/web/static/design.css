@@ -150,3 +150,10 @@ details > summary { cursor: pointer; color: var(--muted); font-size: 12px; margi
   border: 1px solid #2a323c; border-radius: 6px; padding: 8px 10px; max-width: 240px; }
 .layers label { display: block; margin-top: 3px; cursor: pointer; }
 .layers a { color: var(--muted); text-decoration: none; margin-left: 4px; }
+
+/* will it hold (CALI-54) */
+.heatbar { display: inline-block; width: 90px; height: 9px; border-radius: 3px; vertical-align: middle; margin: 0 4px; }
+.loadcase.on { border-color: var(--accent); }
+.flash { animation: flash 1.6s ease-out; border-radius: 8px; }
+@keyframes flash { from { box-shadow: 0 0 0 2px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
+
