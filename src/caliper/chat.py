@@ -58,6 +58,8 @@ _REVERT = re.compile(r"\b(roll(\s+\w+)?\s*back|revert|undo|go\s+back|put\s+it\s+
 #: Feedback phrased as an obligation is a *rule*, not a one-off tweak — worth saying so even
 #: when Caliper can't turn it into a number (CALI-30).
 _OBLIGATION = re.compile(r"\b(must|always|never|needs? to|has to|should (?:never|always|not)?)\b")
+#: CALI-54: feedback about what a part carries — a strength requirement, which goes into its loads().
+_CARRIES = re.compile(r"\b(hold|holds|carry|carries|support|supports|bear|weight|load|loads|lb|lbs|kg|pounds)\b")
 
 
 # ---------------------------------------------------------------------------
@@ -202,10 +204,13 @@ _CLASSIFY_SYSTEM = """You route a message in a CAD design conversation. Reply wi
 {"action": "refine" | "author" | "revert" | "answer", "part": "<existing part id, a new snake_case id, or null>",
  "intent": "<for author: a one-line description of the part to build; else empty>"}
 
-- "refine": change an EXISTING part. `part` must be one of the design's part ids.
-- "author": build a NEW part. `part` is a new snake_case identifier; `intent` describes it.
+- "refine": change an EXISTING part: its shape, or what its script says about it (what it's built
+  from, what it must hold or carry, what it must keep clear). `part` must be one of the design's part
+  ids. A new requirement on a part ("it has to hold me, 200 lb", "make it from 1/2 in ply") is a refine.
+- "author": build a NEW part. `part` is a new snake_case identifier; `intent` describes it, as the
+  design's requirements have it: never a choice they don't make or one that contradicts them.
 - "revert": undo the last change to a part ("roll it back", "undo that"). `part` is that part.
-- "answer": the user asked a question or said something that changes no geometry.
+- "answer": the user asked a question, or said something that changes nothing about any part.
 If the message is ambiguous about WHICH part, use "answer" — do not guess."""
 
 
@@ -219,9 +224,14 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
         client = Anthropic()
 
     parts = "\n".join(f"  - {p.id}: {p.intent or '(no stated intent)'}" for p in store.design.parts)
+    # CALI-54: the router writes a new part's intent, and the author follows the intent — so without the
+    # requirements here it made up a "two-step stool" after the user had settled on a single platform.
+    reqs = "\n".join(f"  - {r.question} -> {r.answer}" + ("" if r.source == "answered" else " [assumed]")
+                     for r in store.design.requirements)
     ask = (
         f"design goal: {store.design.prompt}\n\n"
-        f"existing parts:\n{parts or '  (none yet)'}\n\n"
+        + (f"requirements (settled; a new part's intent follows them):\n{reqs}\n\n" if reqs else "")
+        + f"existing parts:\n{parts or '  (none yet)'}\n\n"
         + (f"the user has SELECTED the part '{scope}' — a request to change something almost certainly "
            f"means that part\n\n" if scope else "")
         + f"message: {message}"
@@ -326,29 +336,17 @@ def _working_spec(store: DesignStore, part_id: str, intent: str) -> Spec:
     return spec
 
 
-#: CALI-39: every design part keeps its key dimensions in a module-level PARAMS dict, so a search
-#: (whittle's ParametricStudy) can vary them and write the chosen numbers straight back into the script.
+#: CALI-39 / CALI-54: the script's shape and its declarations are in the part-script reference, which the
+#: generator's system prompt carries (:func:`caliper.authoring.system_prompt`); a revision is reminded to
+#: keep both, because a change to build() that leaves construction() behind fails the round.
 TUNABLE = """
 
-SCRIPT SHAPE (required): the FIRST statement of the file — at module level, OUTSIDE build() — is a
-dict of every key dimension and shape choice, as plain numbers in mm; build() merges overrides:
-    PARAMS = {
-        "width": 1879.6,   # 74 in
-        "height": 1041.4,  # 41 in
-        ...
-    }
-
-    def build(params):
-        p = {**PARAMS, **(params or {})}
-        ...   # use p["..."] everywhere; never repeat those numbers inline
-Write each value as a finished number (1879.6, not 74 * 25.4); put the inch value in a comment. A
-radius or chamfer of 0 must mean "none" (skip the fillet), and every value in PARAMS must build —
-they are the part as it stands.
-If the script also has members()/supports() (its tubes, for a frame study) or BUILD and construction()
-(what it's built from, for its weight and bill of materials), keep them, and keep them describing the
-same part as build() — move a panel or a tube in one, move it in the others. Keep its RANGES (how far a
-drag study may take each number), keeps() (boxes it must hold clear — a mattress, the cargo) and LAYOUTS
-(a frame's what-if layouts) too, and keep them true to the new shape."""
+Keep the script in the shape the part-script reference gives (PARAMS first, build() merging overrides).
+If it declares what it's built from (BUILD and construction(), members() and supports()), what it must
+hold (loads()) or keeps(), RANGES and LAYOUTS, keep every one of them, describing the same part as
+build(): move a panel or a tube in one and move it in the others. A part made from sheet goods, lumber
+or tube that doesn't declare construction() yet should get one, and one whose requirements say what it
+must carry should get loads()."""
 
 
 def _emit(events: list[Event], on_event, kind: str, text: str, **data) -> None:
@@ -453,7 +451,13 @@ def _offer_promotion(store: DesignStore, part_id: str, feedback: str, *, use_llm
               part=part_id, assertion=got.proposal.id, holds_now=got.proposal.holds_now)
         return got.proposal, got.proposal.describe()
 
-    if _OBLIGATION.search((feedback or "").lower()):
+    fb = (feedback or "").lower()
+    if _OBLIGATION.search(fb) and _CARRIES.search(fb) and store.is_scripted(part_id) \
+            and "def loads(" in store.read_script(part_id):
+        return None, ("_That's a strength requirement, which a rule on the shape can't measure, so it's in "
+                      "the part's `loads()` now: **Check it holds** (under *Will it hold?*) puts it through "
+                      "whittle's FEA and a plate check._")
+    if _OBLIGATION.search(fb):
         why = got.reason or "it isn't something Caliper can measure"
         return None, (f"_You phrased that as a rule, but I can't make it one: {why}. "
                       f"It's applied as a one-off change — a later revision could undo it._")

@@ -34,6 +34,7 @@ class RunResult:
     step_path: Optional[str] = None
     error: str = ""
     traceback: str = ""
+    declared: Optional[dict] = None   # construction() / members() from the same run (CALI-54)
 
     @property
     def feedback(self) -> str:
@@ -105,7 +106,7 @@ def run_script(
 
         return RunResult(ok=False, error=f"could not import the authored STEP: {e}",
                          traceback=_tb.format_exc())
-    return RunResult(ok=True, geometry=geom, step_path=step_path)
+    return RunResult(ok=True, geometry=geom, step_path=step_path, declared=status.get("declared") or None)
 
 
 # ---------------------------------------------------------------------------

@@ -16,7 +16,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import aero, chat, clarify, construction, cutplan, frame_study, promote, release, scorecard
+from . import (aero, chat, clarify, construction, cutplan, frame_study, load_study, promote, release,
+               scorecard, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -96,6 +97,11 @@ class FrameRequest(BaseModel):
     build: dict[str, dict] = {}         # what-if construction of the carried parts
 
 
+class LoadRequest(BaseModel):
+    part: str
+    min_safety: float = load_study.MIN_SAFETY     # at each load times its factor
+
+
 class GussetRequest(BaseModel):
     part: str
     thickness: float = 3.175            # 1/8 in
@@ -161,6 +167,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             # what it has to hold (keeps()) — a drag study keeps it clear (CALI-42)
             "keeps": "def keeps(" in script,
             "shell": "def shell(" in script,      # its walls can carry load in a frame study (CALI-44)
+            "loads": "def loads(" in script,      # what it must hold: a strength study (CALI-54)
             "suggest": {k: aero.suggest(k, v, ranges) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
@@ -177,6 +184,10 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         except Exception as e:  # noqa: BLE001
             part_errors = {"<design>": f"{type(e).__name__}: {e}"}
     proposal = promote.pending(store)
+    runs = {"load": load_study.list_runs(store), "frame": frame_study.list_runs(store),
+            "gussets": frame_study.list_gussets(store), "aero": aero.list_runs(store),
+            "whittle": wb.list_runs(store), "cutplan": cutplan.list_runs(store),
+            "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
         "display_units": d.display_units,
@@ -189,13 +200,15 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "proposal": proposal.to_dict() if proposal else None,
         "clarify": [q.to_dict() for q in clarify.pending(store)],
         "log": store.log(),
-        "whittle_runs": [_run_summary(r) for r in wb.list_runs(store)],
-        "aero_runs": aero.list_runs(store),
-        "frame_runs": frame_study.list_runs(store),
-        "cutplans": cutplan.list_runs(store),
-        "gusset_runs": frame_study.list_gussets(store),
-        "scorecards": scorecard.list_cards(store, 2),
-        "releases": release.list_releases(store),
+        "whittle_runs": [_run_summary(r) for r in runs["whittle"]],
+        "aero_runs": runs["aero"],
+        "frame_runs": runs["frame"],
+        "load_runs": runs["load"],
+        "cutplans": runs["cutplan"],
+        "gusset_runs": runs["gussets"],
+        "scorecards": runs["scorecard"][:2],
+        "releases": runs["release"],
+        "studies": studies.index(store, runs, parts),
         "has_goals": os.path.exists(scorecard.goals_path(store)),
         "cutplan_unavailable": cutplan.available(),
         "aero_available": _aero_available(),
@@ -397,6 +410,36 @@ def router():
                               "station": req.station, "version": got["version"],
                               **({"grew_mm": got["grew_mm"]} if got["grew_mm"] else {})})
             return {**got, "design": design_state(store)}
+
+    # -- strength (CALI-54): the part's own loads() through whittle's FEA and a plate check -----------
+    @r.post("/api/designs/{slug}/load-study")
+    def load_run(slug: str, req: LoadRequest):
+        store = load(slug)
+        if store.design.part(req.part) is None:
+            raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
+
+        if not _aero_available():
+            raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
+
+        def work(j):
+            s = DesignStore.load(slug)
+            return load_study.study(s, req.part, min_safety=req.min_safety,
+                                    emit=lambda k, t="", **d: j.emit(k, t, **d))
+
+        job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
+        return {"job_id": job.id}
+
+    @r.get("/api/designs/{slug}/load-study/{rid}/cases/{index}.json")
+    def load_heat(slug: str, rid: str, index: int):
+        store = load(slug)
+        try:
+            path = load_study.heat_path(store, rid, index)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="bad run id")
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="no such case")
+        with open(path, "rb") as f:
+            return Response(f.read(), media_type="application/json")
 
     # -- frame sizing (CALI-40): whittle's FrameStudy on the tubes a part declares --------------------
     @r.post("/api/designs/{slug}/frame-study")

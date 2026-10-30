@@ -52,11 +52,16 @@ symlink at `vendor/unfold-to-sheets`. `make tools` leaves both alone.
 
 A design's parts are CadQuery scripts with their key numbers in a module-level `PARAMS` dict and a
 `build(params)` that merges overrides, so studies can search them and write the numbers back. A part can
-also declare what the studies and cut plans read: `members()` and `supports()` for a frame,
-`BUILD` and `construction()` for what it's built from, `shell()`, `keeps()`, `jacks()` and others. These
-are documented as part of [#1](https://github.com/greentheo/caliper/issues/1); until then, the scripts in
-`tests/test_construction.py`, `test_frame_study.py`, `test_parked.py` and `test_snow.py` are the working
-examples.
+also declare what the studies, the bill of materials and the cut plan read: `BUILD` and `construction()`
+for what it's built from, `loads()` for what it must carry, `members()` and `supports()` for a tube frame,
+`keeps()`, `RANGES` and others.
+All of them are documented in [`src/caliper/part_scripts.md`](src/caliper/part_scripts.md). The designer's
+prompt includes that file word for word, so a change to it changes what Claude is told; keep it accurate.
+
+Every time the designer builds a part, [`consistency.py`](src/caliper/consistency.py) checks what it
+declares against the solid it built: every piece lies in the solid, the pieces cover its surface, they
+hold no more material than it does, and every load pushes on the part. The working examples are the stool in `tests/test_consistency.py`
+and the scripts in `tests/test_construction.py`, `test_frame_study.py`, `test_parked.py` and `test_snow.py`.
 
 ## Generated code
 

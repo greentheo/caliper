@@ -20,6 +20,8 @@ const S = {
   whittle: { ok: false },
   runIndex: {},        // part id -> which whittle run the inspector shows
   aeroRun: {}, frameRun: {},         // part id -> which parametric study the inspector shows
+  loadRun: {},         // part id -> which strength check the inspector shows (CALI-54)
+  studies: false,      // the studies page is open (CALI-70)
   built: {},           // part id -> {version, tried, report, balance}: what it's built from (CALI-41)
   balance: null,       // {key, data}: the whole design's weight and what the hitch carries
   payload: 0,          // lb of gear or people on the floor, for the balance
@@ -400,7 +402,7 @@ async function refresh() {
 }
 
 function render() {
-  renderUnits(); renderThread(); renderInspector(); renderScope(); paint();
+  renderUnits(); renderThread(); renderInspector(); renderScope(); paint(); renderStudies();
   $('viewHint').textContent = S.design && S.design.parts.length
     ? (S.scope ? '' : 'click a part to talk about it')
     : '';
@@ -778,6 +780,8 @@ function historyItem(h) {
   }
   if (h.kind === 'whittle') return `<li class="hist">studied in whittle (${esc(h.study)}, ${h.stations} stations)</li>`;
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
+  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${h.holds ? 'holds' : 'doesn\'t hold'}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
   if (h.kind === 'setting') return `<li class="hist">marked ${h.role === 'fixed' ? 'as a reference' : 'as a design part'}</li>`;
   return '';
@@ -805,6 +809,8 @@ function partView(p) {
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
     ${p.built ? `<h4>Built from <span class="badge">weight &amp; shopping list</span></h4>
     <div id="buildBox">${buildView(p)}</div>` : ''}
+    ${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
+    <div id="loadBox">${loadView(p)}</div>` : ''}
     ${p.framed ? `<h4>Size the frame <span class="badge">tubes back</span></h4>
     <div id="frameBox">${frameView(p)}</div>` : `<h4>Shape it for drag <span class="badge">numbers back</span></h4>
     <div id="aeroBox">${aeroView(p)}</div>
@@ -838,6 +844,7 @@ function wireInspector(p) {
   wireWhittle(p);
   wireAero(p);
   wireFrame(p);
+  wireLoad(p);
 }
 
 // ------------------------------------------------------------- what it's built from (CALI-41)
@@ -1131,6 +1138,166 @@ function showMarks() {
 // --------------------------------------------------------------------- size the frame (CALI-40)
 // whittle's FrameStudy treats each tube the part declares as a beam: stress, sag, what the hitch holds,
 // and a slider from the frame as drawn to the lightest tubes that pass. Sizes come back into PARAMS.
+// ------------------------------------------------------------- will it hold? (CALI-54)
+// The part's own loads() — an adult stepping up, a shelf of books — through whittle's voxel FEA and, for a
+// panel pushed on face-on, a plate check; the verdict is the worse of the two. Each load has a stress picture.
+function loadRuns(pid) { return (S.design.load_runs || []).filter((r) => r.part === pid); }
+
+function loadView(p) {
+  if (!S.design.aero_available) return '<div class="empty">whittle isn\'t installed in Caliper\'s environment.</div>';
+  if (!p.loads) {
+    return `<div class="empty">It doesn't say what it must carry yet. Tell me, like “it has to hold me, 200 lb,
+      stepping onto the top”, and I'll add its <code>loads()</code>.</div>
+      <div class="actions"><button id="lAsk">Say what it must hold</button></div>`;
+  }
+  const runs = loadRuns(p.id);
+  const pick = Math.min(S.loadRun[p.id] || 0, Math.max(runs.length - 1, 0));
+  return `<div class="form">
+      <span>least safety</span><span><input type="number" id="lSafety" value="${runs[0] ? runs[0].min_safety : 2}" min="1" max="10" step="0.5">
+        × at each load times its factor</span></div>
+    <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button></div>
+    <div id="lProgress"></div>
+    ${runs.length ? loadResults(p, runs[pick], runs) : ''}`;
+}
+
+const sx = (v) => (v == null ? '—' : `${+Number(v).toFixed(1)}x`);
+function loadCase(p, run, c, i) {
+  const on = S.station && S.station.run === run.id && S.station.index === i;
+  const pl = c.plate, f = c.fea || {};
+  const holds = c.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>';
+  const plate = !pl ? '' : pl.done
+    ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
+        edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
+        ${sx(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`
+    : `<div class="muted small" style="margin-top:4px">No plate check for ${esc(pl.piece)}: ${esc(pl.why)}.</div>`;
+  const fea = f.supported === false ? `<div class="small" style="color:var(--bad)">${esc(c.why)}</div>`
+    : `<div class="small" style="margin-top:4px"><b>whittle FEA</b> — works hardest in ${esc(f.in || 'the part')}
+        (${fixed(f.peak_mpa, 1)} MPa → ${sx(f.safety)}) · gives ${len(f.deflection_mm, 3)}</div>`;
+  const by = pl && pl.done && pl.by_thickness ? (() => {
+    const ok = pl.by_thickness.filter((b) => b.safety_across >= run.min_safety);
+    const thin = ok.length ? ok[0] : null;
+    return `<details class="small" style="margin-top:4px"><summary>Other thicknesses (plate check)${thin
+      ? ` — the thinnest that holds: <b>${esc(thin.label)}</b>` : ''}</summary>
+      <table class="st"><tr><th style="text-align:left">${esc(run.material.name)}</th><th>grain wrong way</th><th>grain right</th><th>sags</th></tr>
+      ${pl.by_thickness.map((b) => `<tr${Math.abs(b.thickness_mm - pl.thickness_mm) < 0.01 ? ' class="on"' : ''}>
+        <td style="text-align:left">${esc(b.label)}</td>
+        <td style="color:var(${b.safety_across >= run.min_safety ? '--ok' : '--bad'})">${sx(b.safety_across)}</td>
+        <td>${sx(b.safety)}</td><td>${len(b.deflection_mm, 3)}</td></tr>`).join('')}</table></details>`;
+  })() : '';
+  return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
+      <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
+      <div class="small" style="margin-top:2px">Safety <b>${sx(c.safety)}</b>
+        <span class="muted">(by ${c.governs === 'plate' ? 'the plate check, with the grain the wrong way' : 'the FEA'}; it needs ${run.min_safety}x)</span>
+        ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>
+      ${plate}${fea}${by}
+      ${c.heat ? `<div class="actions"><button data-heat="${i}" class="${on ? 'primary' : ''}">${on ? 'Showing the stress' : 'Show the stress'}</button></div>` : ''}
+    </div>`;
+}
+
+function loadResults(p, run, runs) {
+  const stale = run.version !== p.version;
+  return `<div class="small" style="margin-top:12px">${runs.length > 1 ? `<select id="lRun">${runs.map((r, k) =>
+      `<option value="${k}" ${r.id === run.id ? 'selected' : ''}>${esc(new Date(r.created * 1000).toLocaleString())} · v${r.version}
+        · ${r.holds ? 'holds' : 'doesn\'t hold'}</option>`).join('')}</select>`
+      : `<b>Last check</b> · v${run.version} · ${new Date(run.created * 1000).toLocaleString()}`}
+      ${run.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>'}
+      ${stale ? '<span class="badge bad">the part has changed since</span>' : ''}</div>
+    ${run.cases.map((c, i) => loadCase(p, run, c, i)).join('')}
+    <div class="muted small" style="margin-top:6px">In ${esc(run.material.name)}, voxels of ${len(run.spacing_mm, 1)}
+      (${run.voxels.toLocaleString()} of them), held at ${run.held.map((h) => esc(h.name)).join(', ')} · ${run.seconds}s</div>
+    ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`;
+}
+
+function wireLoad(p) {
+  const ask = $('lAsk');
+  if (ask) ask.onclick = () => { $('msg').value = 'It has to hold '; $('msg').focus(); };
+  const go = $('lGo');
+  if (go) go.onclick = () => runLoad(p);
+  const sel = $('lRun');
+  if (sel) sel.onchange = () => { S.loadRun[p.id] = +sel.value; clearStation(); renderInspector(); };
+  document.querySelectorAll('#loadBox [data-heat]').forEach((b) => {
+    b.onclick = () => {
+      const runs = loadRuns(p.id), run = runs[Math.min(S.loadRun[p.id] || 0, runs.length - 1)];
+      showHeat(p.id, run, +b.dataset.heat);
+    };
+  });
+}
+
+async function runLoad(p) {
+  const prog = $('lProgress'), go = $('lGo');
+  go.disabled = true;
+  prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="lMsg">starting…</div>';
+  try {
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`, { part: p.id, min_safety: +$('lSafety').value || 2 });
+    await follow(job_id, (ev) => {
+      const msg = $('lMsg'), bar = prog.querySelector('.bar > i');
+      if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
+      if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
+    });
+    S.loadRun[p.id] = 0;
+    clearStation();
+    await refresh();
+    const run = loadRuns(p.id)[0];
+    if (run) {
+      const worst = run.cases.reduce((a, c, i) => (c.heat && (a < 0 || (c.safety ?? 1e9) < (run.cases[a].safety ?? 1e9)) ? i : a), -1);
+      if (worst >= 0) showHeat(p.id, run, worst);
+    }
+  } catch (e) {
+    prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    go.disabled = false;
+  }
+}
+
+// stress, low to high: blue, teal, green, amber, red
+const HEAT = [[0, 0x2b4c9b], [0.3, 0x2a9d8f], [0.55, 0x8ac926], [0.78, 0xf4a261], [1, 0xe63946]];
+function heatColor(t, out) {
+  t = Math.max(0, Math.min(1, t));
+  let k = 1;
+  while (k < HEAT.length - 1 && HEAT[k][0] < t) k++;
+  const [t0, c0] = HEAT[k - 1], [t1, c1] = HEAT[k];
+  return out.setHex(c0).lerp(new THREE.Color(c1), (t - t0) / ((t1 - t0) || 1));
+}
+const b64 = (s, T) => { const bin = atob(s), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new T(u.buffer); };
+
+async function showHeat(pid, run, index) {
+  try {
+    const c = run.cases[index];
+    const h = await api('GET', `/api/designs/${S.slug}/load-study/${run.id}/cases/${index}.json`);
+    const pos = b64(h.positions, Float32Array), idx = b64(h.index, Uint32Array), heat = b64(h.heat, Float32Array);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geom.setIndex(new THREE.BufferAttribute(idx, 1));
+    const col = new Float32Array(heat.length * 3), tmp = new THREE.Color(), top = h.max || 1;
+    for (let i = 0; i < heat.length; i++) { heatColor(heat[i] / top, tmp); col[3 * i] = tmp.r; col[3 * i + 1] = tmp.g; col[3 * i + 2] = tmp.b; }
+    geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    geom.computeVertexNormals();
+    clearStation(true);
+    stationMesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0 }));
+    // where it's pushed: the load's box, and an arrow in the direction it pushes
+    const lo = new THREE.Vector3(...c.lo), hi = new THREE.Vector3(...c.hi);
+    const size = hi.clone().sub(lo), mid = lo.clone().add(hi).multiplyScalar(0.5);
+    const reach = Math.max(size.x, size.y, size.z, 40);
+    const pad = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(Math.max(size.x, 2), Math.max(size.y, 2), Math.max(size.z, 2))),
+      new THREE.LineBasicMaterial({ color: 0xffffff }));
+    pad.position.copy(mid);
+    stationMesh.add(pad);
+    const dir = new THREE.Vector3(...c.force_n).normalize();
+    const len3 = reach * 1.6;
+    stationMesh.add(new THREE.ArrowHelper(dir, mid.clone().sub(dir.clone().multiplyScalar(len3)), len3, 0xffffff, len3 * 0.3, len3 * 0.15));
+    scene.add(stationMesh);
+    S.station = { part: pid, run: run.id, index, kind: 'load' };
+    const grad = HEAT.map(([t, hex]) => `#${hex.toString(16).padStart(6, '0')} ${t * 100}%`).join(', ');
+    const bar = $('stationBar');
+    bar.hidden = false;
+    bar.innerHTML = `<span><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} · the FEA's stress
+        <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span> 0–${fixed(top, 1)} MPa
+        <span class="muted">(${esc(run.material.name)} breaks near ${run.material.strength} MPa)</span> · safety <b>${sx(c.safety)}</b></span>
+      <button id="stationClose" class="ghost">×</button>`;
+    $('stationClose').onclick = () => { clearStation(); renderInspector(); };
+    paint(); renderInspector();
+  } catch (e) { showErr(e.message); }
+}
+
 function frameRuns(pid) { return (S.design.frame_runs || []).filter((r) => r.part === pid); }
 
 function frameView(p) {
@@ -1566,6 +1733,100 @@ async function adoptStation(pid, wid, index, kind) {
   } catch (e) { showErr(e.message); $('adoptBtn').disabled = false; }
 }
 
+// ------------------------------------------------------------- the studies page (CALI-70)
+// Every study the design has, newest first: the part and the version it ran on, the line it came to, and a
+// way to open it where it lives. And per part, every study Caliper has: which can run on it now, and what the
+// others are missing (what to say or do to get them).
+const STUDY_BOX = { load: 'loadBox', frame: 'frameBox', gussets: 'frameBox', aero: 'aeroBox', whittle: 'whittleBox',
+  cutplan: 'buildBox', scorecard: 'scoreBox', release: 'relBox' };
+const studyFilter = { kind: '', part: '' };
+
+function studiesView(d) {
+  const st = d.studies || { runs: [], menu: {}, design: [] };
+  const rows = st.runs.filter((r) => (!studyFilter.kind || r.kind === studyFilter.kind)
+    && (!studyFilter.part || (studyFilter.part === '*' ? !r.part : r.part === studyFilter.part)));
+  const kinds = [...new Map(st.runs.map((r) => [r.kind, r.label])).entries()];
+  const parts = d.parts.filter((p) => p.role !== 'fixed');
+  const when = (t) => (t ? new Date(t * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—');
+  const count = (pid, kind) => st.runs.filter((r) => r.part === pid && r.kind === kind).length;
+  const item = (m, pid) => `<button class="menu-item ${m.ready ? '' : 'off'}" data-go-kind="${m.kind}" data-go-part="${esc(pid || '')}"
+      title="${esc(m.ready ? m.what : `Not yet: ${m.why}`)}">
+      <b>${esc(m.label)}${pid && count(pid, m.kind) ? ` <span class="n">· ${count(pid, m.kind)} run${count(pid, m.kind) === 1 ? '' : 's'}</span>` : ''}</b>
+      <span class="small muted">${esc(m.ready ? m.what : `Not yet: ${m.why}`)}</span></button>`;
+  return `<div class="studies-head"><h2>Studies <span class="muted small">${esc(d.name)}</span></h2>
+      <button class="x" id="studiesClose" title="back to the design (Esc)">×</button></div>
+    <h4>Run a study</h4>
+    <div class="menu">${parts.map((p) => `<div class="menu-part">
+        <div><span class="partlink" data-go-part="${esc(p.id)}">${esc(p.id)}</span> <span class="muted small">v${p.version} · ${esc(p.intent || '')}</span></div>
+        <div class="menu-items">${(st.menu[p.id] || []).map((m) => item(m, p.id)).join('')}</div></div>`).join('')}
+      <div class="menu-part"><div><b>The whole design</b></div>
+        <div class="menu-items">${(st.design || []).map((m) => item(m, '')).join('')}</div></div></div>
+    <h4>Every run <span class="muted">· ${st.runs.length}</span></h4>
+    ${st.runs.length ? `<div class="filters"><select id="sfKind"><option value="">every kind</option>
+        ${kinds.map(([k, l]) => `<option value="${k}" ${studyFilter.kind === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+      <select id="sfPart"><option value="">every part</option>
+        ${parts.map((p) => `<option value="${esc(p.id)}" ${studyFilter.part === p.id ? 'selected' : ''}>${esc(p.id)}</option>`).join('')}
+        <option value="*" ${studyFilter.part === '*' ? 'selected' : ''}>the whole design</option></select>
+      <span class="muted small">${rows.length} shown</span></div>
+    <table class="st studies-table"><tr><th>when</th><th>study</th><th>on</th><th>what it came to</th><th></th></tr>
+      ${rows.map((r) => `<tr class="pick" data-go-kind="${r.kind}" data-go-part="${esc(r.part || '')}" data-go-run="${esc(r.id || '')}">
+        <td class="when">${when(r.created)}</td><td>${esc(r.label)}</td>
+        <td>${r.part ? `${esc(r.part)} <span class="muted">v${r.version ?? '?'}</span>` : '<span class="muted">the design</span>'}
+          ${r.stale ? ' <span class="badge bad" title="it has changed since this ran">changed since</span>' : ''}</td>
+        <td style="color:${r.ok === true ? 'var(--ok)' : r.ok === false ? 'var(--bad)' : 'inherit'}">${esc(r.headline)}</td>
+        <td><button>Open</button></td></tr>`).join('')}</table>`
+    : '<div class="empty">No studies yet. Pick one above.</div>'}`;
+}
+
+function renderStudies() {
+  const el = $('studies');
+  el.hidden = !S.studies || !S.design;
+  $('studiesBtn').classList.toggle('on', !!S.studies);
+  if (el.hidden) return;
+  el.innerHTML = studiesView(S.design);
+  $('studiesClose').onclick = () => { S.studies = false; renderStudies(); };
+  const kind = $('sfKind'), part = $('sfPart');
+  if (kind) kind.onchange = () => { studyFilter.kind = kind.value; renderStudies(); };
+  if (part) part.onchange = () => { studyFilter.part = part.value; renderStudies(); };
+  el.querySelectorAll('[data-go-kind], [data-go-part]').forEach((n) => {
+    n.onclick = (e) => {
+      e.stopPropagation();
+      openStudy(n.dataset.goKind || '', n.dataset.goPart || '', n.dataset.goRun || '');
+    };
+  });
+}
+$('studiesBtn').onclick = () => { S.studies = !S.studies; renderStudies(); };
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && S.studies) { S.studies = false; renderStudies(); }
+});
+
+// open a study where it lives: the part's (or the design's) panel, that run picked, scrolled into view
+function openStudy(kind, pid, runId) {
+  S.studies = false;
+  renderStudies();
+  const pick = (list, key) => { const k = list.findIndex((r) => r.id === runId); if (k >= 0) S[key][pid] = k; };
+  if (pid && runId) {
+    if (kind === 'load') pick(loadRuns(pid), 'loadRun');
+    if (kind === 'frame') pick(frameRuns(pid), 'frameRun');
+    if (kind === 'aero') pick(aeroRuns(pid), 'aeroRun');
+    if (kind === 'whittle') pick(runsFor(pid), 'runIndex');
+  }
+  clearStation();
+  setScope(pid || null);
+  const box = $(STUDY_BOX[kind]);
+  if (box) {
+    (box.previousElementSibling || box).scrollIntoView({ behavior: 'smooth', block: 'start' });
+    box.classList.add('flash');
+    setTimeout(() => box.classList.remove('flash'), 1600);
+  }
+  // a strength check opens on the stress picture of its weakest load
+  const run = kind === 'load' && runId ? loadRuns(pid).find((r) => r.id === runId) : null;
+  if (run) {
+    const worst = run.cases.reduce((a, c, i) => (c.heat && (a < 0 || (c.safety ?? 1e9) < (run.cases[a].safety ?? 1e9)) ? i : a), -1);
+    if (worst >= 0) showHeat(pid, run, worst);
+  }
+}
+
 // ------------------------------------------------------------------------------------ boot
 async function checkWhittle() {
   const was = S.whittle.ok;
@@ -1576,7 +1837,7 @@ async function checkWhittle() {
   dot.className = 'dot ' + (S.whittle.ok ? 'ok' : 'bad');
   dot.title = S.whittle.ok ? `whittle is running at ${S.whittle.url}` : (S.whittle.error || 'whittle is not reachable');
   // redraw only when whittle came up or went down — a periodic redraw would wipe a half-filled form
-  if (was !== S.whittle.ok && S.scope && !document.querySelector('#wProgress .bar, #aProgress .bar')) renderInspector();
+  if (was !== S.whittle.ok && S.scope && !document.querySelector('#wProgress .bar, #aProgress .bar, #lProgress .bar')) renderInspector();
 }
 checkWhittle();
 setInterval(checkWhittle, 15000);

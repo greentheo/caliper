@@ -17,12 +17,13 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from . import sandbox
+from . import consistency, sandbox
 from .spec import Spec
 
 DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
-#: Long enough for a multi-member part plus helper functions; the old 2000 cut a tube frame off mid-line.
-AUTHOR_MAX_TOKENS = 8000
+#: Long enough for a multi-member part plus helper functions; the old 2000 cut a tube frame off mid-line,
+#: and a part now writes its construction() beside build() (CALI-54).
+AUTHOR_MAX_TOKENS = 12000
 
 # author(spec, feedback, prior_script) -> python source for `build(params)`
 Author = Callable[[Spec, Optional[str], Optional[str]], str]
@@ -45,19 +46,34 @@ def extract_code(text: str) -> str:
     return t
 
 
-_SYSTEM = """You are Caliper's generator. Write a SINGLE Python function:
+#: The part-script reference, shared with contributors: what the prompt says is what the docs say (CALI-54).
+REFERENCE = os.path.join(os.path.dirname(__file__), "part_scripts.md")
 
-    def build(params):
-        # params is a dict of the spec's parameters (mm unless noted)
-        ...
-        return solid   # a cadquery Workplane or Solid
+_SYSTEM = """You are Caliper's generator. You write a part script: a Python file whose build(params)
+makes the part as ONE watertight cadquery solid, plus whatever it declares about how it's built.
 
 Rules:
 - `cq` (the cadquery module) is already available; you may also `import cadquery as cq` inside build.
 - Use the values in `params` for dimensions; never hardcode a dimension that's a parameter.
-- Return ONE watertight solid (a Workplane is fine). Model the part the intent describes.
-- Use only the Python standard library and cadquery. No file I/O, no network.
-- Output ONLY the Python code for build(params) — no markdown fences, no prose, no example calls."""
+- Model the part the intent describes. Use only the Python standard library and cadquery. No file I/O,
+  no network.
+- If the part is made from sheet goods, lumber or steel tube, declare what it's built from (BUILD and
+  construction(), or members() and supports() for a welded tube frame), using only the materials listed
+  below. Caliper checks the declarations against the solid every time it builds the part.
+- Output ONLY the Python code of the script — no markdown fences, no prose, no example calls.
+
+The reference for part scripts follows. It is the same document contributors read.
+
+"""
+
+
+def system_prompt() -> str:
+    """The generator's instructions: the rules, the part-script reference, and the materials table."""
+    from . import materials
+
+    with open(REFERENCE) as f:
+        reference = f.read()
+    return f"{_SYSTEM}{reference}\n\n## The materials table\n\n{materials.table()}\n"
 
 
 def author_script(
@@ -94,7 +110,7 @@ def author_script(
         )
 
     msg = client.messages.create(
-        model=model, max_tokens=AUTHOR_MAX_TOKENS, system=_SYSTEM,
+        model=model, max_tokens=AUTHOR_MAX_TOKENS, system=system_prompt(),
         messages=[{"role": "user", "content": ask}],
     )
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
@@ -164,7 +180,8 @@ def _failing_summary(report) -> str:
     for r in report.results:
         if r.status in ("fail", "error"):
             margin = "" if r.margin is None else f" (margin {r.margin:+.3g})"
-            lines.append(f"  - {r.id}: {r.expr}  → actual={r.actual}{margin}  [{r.status}]")
+            detail = f"\n      {r.detail}" if r.detail else ""
+            lines.append(f"  - {r.id}: {r.expr}  → actual={r.actual}{margin}  [{r.status}]{detail}")
     return "\n".join(lines)
 
 
@@ -201,8 +218,9 @@ def improve(
     """Author a part and drive it to green: build errors AND failing measurements both feed back.
 
     The design spec's two-actor loop, for LLM-authored geometry (§2/§5): each round the LLM writes (or
-    revises) the script; we build it sandboxed and measure it; a build error or a failing assertion
-    becomes the feedback for the next revision. Stops on success, an unchanged failure signature
+    revises) the script; we build it sandboxed and measure it, its declarations against its solid too
+    (:mod:`caliper.consistency`); a build error or a failing assertion becomes the feedback for the next
+    revision. Stops on success, an unchanged failure signature
     (oscillation), or the round cap — mirroring the bracket loop's safety rails (CALI-6).
 
     ``seed_script`` + ``seed_feedback`` **prime round 1 with an existing part** so the LLM *edits the
@@ -239,6 +257,8 @@ def improve(
             continue
 
         report = evaluate(spec, run.geometry, machine, references=references)
+        # CALI-54: what the script says it's built from is measured against what it built
+        report.results.extend(consistency.check(run.declared, run.geometry))
         best = (run.geometry, script, report)
         if report.all_pass:
             history.append(("passed", ""))

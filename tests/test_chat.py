@@ -104,6 +104,22 @@ def test_llm_routing_parses_json_and_validates_the_target(gantry):
     assert (got.action, got.part, got.source) == ("refine", "carriage", "llm")
 
 
+def test_the_router_writes_a_new_part_from_the_requirements(gantry):
+    # CALI-54, seen live: told only the goal, the router described "a two-step stool" after the user had
+    # settled on a single platform, and the author built what the router said
+    from caliper.design import Requirement
+
+    gantry.design.requirements = [Requirement(question="One step or two?", answer="single platform",
+                                              source="assumed")]
+    client = _StubClient('{"action": "author", "part": "stool", "intent": "a one-step stool"}')
+    seen = []
+    create = client.create
+    client.create = lambda **kw: seen.append(kw) or create(**kw)
+    chat.llm_classify(gantry, "build the stool", client=client)
+    assert "One step or two? -> single platform [assumed]" in seen[0]["messages"][0]["content"]
+    assert "never a choice they don't make" in seen[0]["system"]
+
+
 def test_llm_routing_to_an_unknown_part_is_rejected(gantry):
     client = _StubClient('{"action": "refine", "part": "flux_capacitor"}')
     with pytest.raises(ValueError):
@@ -345,4 +361,9 @@ def test_the_author_is_told_to_keep_dimensions_in_params(gantry):
         return _box(dx=60, dy=20, y=40)
 
     chat.turn(gantry, "make it 60mm wide", scope="carriage", use_llm=False, author=author, max_rounds=2)
-    assert "PARAMS = {" in seen["intent"] and "p = {**PARAMS, **(params or {})}" in seen["intent"]
+    assert "PARAMS first, build() merging overrides" in seen["intent"]
+    # CALI-54: the shape itself is in the part-script reference, which the generator's prompt carries
+    from caliper import authoring
+
+    prompt = authoring.system_prompt()
+    assert "PARAMS = {" in prompt and "p = {**PARAMS, **(params or {})}" in prompt

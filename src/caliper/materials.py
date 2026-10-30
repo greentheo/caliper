@@ -153,3 +153,26 @@ PRICES = {
     "hardware_allowance": 25.0,                                       # a lump of glue, screws and hinges
     "jack_each": 35.0,                                                # a trailer stabilizer jack
 }
+
+
+def table() -> str:
+    """The materials a part can declare, as the designer's prompt lists them (CALI-54): generated from
+    the tables above, so the prompt can't offer a material Caliper doesn't know."""
+    from .construction import THICKNESSES
+
+    def inches(mm: float) -> str:
+        return f"{mm / IN:g} in"
+
+    lines = ["Sheet materials (\"kind\": \"sheet\", stock sheet; thicknesses sold: "
+             + ", ".join(f"{t:g}" for t in THICKNESSES) + " mm):"]
+    for key, m in SHEETS.items():
+        w, h = m["stock"]
+        lines.append(f"  - {key}: {m['name']}, {inches(w)} x {inches(h)}")
+    lines.append("Stick materials (\"kind\": \"stick\"):")
+    for key, m in STICKS.items():
+        sizes = ", ".join(m["sizes"]) if m["sizes"] else "square tube by outer and wall (mm)"
+        lines.append(f"  - {key}: {m['name']}, {inches(m['stock_len'])} lengths; {sizes}")
+    lines.append("Coverings (a sheet's \"covers\", or \"kind\": \"covering\"):")
+    for key, m in COVERINGS.items():
+        lines.append(f"  - {key}: {m['name']}")
+    return "\n".join(lines)

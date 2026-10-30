@@ -499,3 +499,17 @@ def test_conflicts_survive_the_parking_slot(gantry):
     promote.park(gantry, p)
     assert promote.pending(gantry).conflicts == [("design", "carriage_gap",
                                                   "min_clearance(carriage, rail) >= 3.0")]
+
+
+def test_a_strength_requirement_is_sent_to_the_strength_check_not_refused(gantry):
+    """CALI-54: "it has to hold 200 lb" can't be a rule on the shape, but it isn't lost either: the designer
+    writes it into loads(), and the reply says where it's checked."""
+    pytest.importorskip("cadquery")
+    with_loads = _box(dx=40, dy=20, y=40) + (
+        "\n\ndef loads(params, build=None):\n"
+        "    return [{'name': 'a person', 'lb': 200, 'factor': 2, 'lo': (-5, 35, 3), 'hi': (5, 45, 5)}]\n")
+    res = chat.turn(gantry, "it has to hold me, 200 lb, standing on it", scope="carriage", use_llm=False,
+                    author=_author(with_loads), max_rounds=2)
+    assert res.proposal is None
+    assert "can't make it one" not in res.reply
+    assert "`loads()` now" in res.reply and "Check it holds" in res.reply
