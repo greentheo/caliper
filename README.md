@@ -28,9 +28,9 @@ sanity check.
 Early, and moving fast. It works end to end on its author's own projects (a cargo box towed behind an
 electric car, from aero shaping to the build book). A design started from scratch in the chat now gets
 what it's built from, its bill of materials and its cut plan (a plywood step stool goes from one sentence
-to a nested sheet). The biggest gap is the studies: a part the designer writes doesn't yet get a load
-study of its own ([#1](https://github.com/greentheo/caliper/issues/1)). The road to an installable app is
-the [V1 milestone](https://github.com/greentheo/caliper/milestone/1).
+to a nested sheet), and when it says what the part must carry, a strength check (does the stool hold an
+adult stepping onto it, and by how much). Every study a design has is on one page. The road to an
+installable app is the [V1 milestone](https://github.com/greentheo/caliper/milestone/1).
 
 ## Install
 
@@ -87,6 +87,8 @@ src/caliper/
   promote.py                            feedback becomes a rule the design keeps
   design_api.py, jobs.py, web/          the design session in the browser (FastAPI, three.js, streamed jobs)
   aero.py, frame_study.py, parked.py, snow.py   studies, through whittle
+  load_study.py                         will it hold: a part's loads() through whittle's FEA and a plate check
+  studies.py                            every study of a design in one list, and what each part can run
   construction.py, materials.py         what a part is built from: weight, balance, bill of materials
   cutplan.py                            cut plans (through unfold-to-sheets) and tube end cuts
   scorecard.py, release.py              the scorecard and the build package

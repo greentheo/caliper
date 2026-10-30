@@ -42,6 +42,10 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **Will it hold? (CALI-54, #1).** A part that says what it must carry (`loads()`, written by the designer
+  from "it has to hold me, 200 lb") gets a strength check: whittle's FEA with a stress picture, a plate check
+  for a panel pushed face-on, the verdict, and where it should break.
+- 🆕 **Studies (CALI-70, #31).** One page with every study of the design, and what each part can run next.
 - 🆕 **How it's built, in 3D (CALI-52).** Any part that says what it's built from can show its pieces in the
   viewport — panels, skeleton, tubes, plates — in layers you switch on and off.
 - 🆕 **Scorecard (CALI-47).** One card per design: checks and objectives across design, strength/mass/drag,
@@ -539,6 +543,18 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-29 · Will it hold Dad? And every study on one page (CALI-54 #1, CALI-70 #31)
+1. `make serve`, open **A step stool so my 6-year-old…**, click the stool, and say *"It has to hold me too:
+   200 lb, stepping up onto the top."* It comes back as a revision (v3) with what it must hold, and the reply
+   says it's checked under **Will it hold?**.
+2. In the stool's panel, **Will it hold? → Check it holds** (about 15 s; whittle needs only to be installed,
+   not running). It holds at **3.1x**: the plate check on the top, with the grain the wrong way (6.2x the right
+   way), and where the FEA says it works hardest. The viewport shows the stress, red under the foot, with
+   the load's box and an arrow. **Other thicknesses** says 5/8 in would still hold and 1/2 in wouldn't.
+3. **Studies** (header): what each part can run and why the rest can't yet, and every run so far. **Open** on
+   the strength row goes straight back to the stress picture.
+4. Offline: `python -m pytest tests/test_load_study.py tests/test_studies.py`.
 
 ### 2026-10-29 · The designer writes what it's built from: a stool from one sentence to a cut sheet (CALI-54, #1)
 1. `make serve`, then **+ New design**: *"A step stool so my 6-year-old can reach the bathroom sink. Made
