@@ -39,7 +39,8 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Tests: `test_lighten.py` (it goes down until it runs out: walls before the top, the top judged by the plate check
   solid and the calibrated FEA holed, estimates never adopted as they stand, hole-saw holes round; adopting and
   rechecking agree within 15%), `test_answers.py` (+1: what it's held to — not checked yet, ✓, ✗, proposed; a lone
-  part answers for the design).
+  part answers for the design). **Full suite: 497 passed.**
+- Commit: `7b8b097`, PR into #37's branch.
 
 ### 2026-10-30 · CALI-72 (#38) · The four questions, step 1: four cards, one line each, the numbers underneath
 - Step 1 of `specs/caliper-four-questions-spec.md`. **`answers.py`** writes each card's lines on the server
