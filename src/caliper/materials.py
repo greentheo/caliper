@@ -137,6 +137,25 @@ def nominal(thickness_mm: float) -> str:
 
 #: What stock costs (CALI-47), USD — rough 2026 retail guesses for a cost the scorecard can compare between
 #: designs, NOT quotes. Correct them for your suppliers; every cost the scorecard shows says it rests on these.
+#: Printed plastics (CALI-48): density (kg/m³) and what a 1 kg spool costs. A printed part is mostly air:
+#: its walls, top and bottom are solid and the rest is infill.
+PRINTS = {
+    "pla": {"name": "PLA (printed)", "density": 1240.0, "usd_per_kg": 20.0,
+            "basis": "1.24 g/cm³; ~$20 a 1 kg spool"},
+    "petg": {"name": "PETG (printed)", "density": 1270.0, "usd_per_kg": 22.0,
+             "basis": "1.27 g/cm³; ~$22 a 1 kg spool; tougher outdoors than PLA"},
+}
+#: A printed part's solid walls (two 0.45 mm perimeters, a little more top and bottom) and default infill.
+PRINT_SHELL_MM = 1.2
+PRINT_INFILL = 0.2
+
+
+def printed(material: str) -> dict:
+    if material not in PRINTS:
+        raise ValueError(f"unknown printed material {material!r} — known: {', '.join(PRINTS)}")
+    return PRINTS[material]
+
+
 PRICES = {
     "basis": "rough retail guesses (big-box / local metal supplier), 2026 — edit materials.PRICES",
     # a whole sheet, by material and thickness (mm); plate is bought by weight
@@ -151,6 +170,7 @@ PRICES = {
     "canvas_per_yd": 7.0, "glass_cloth_per_yd": 9.0, "epoxy_per_gal": 110.0, "glue_per_gal": 30.0,
     "paint_per_gal": 45.0,
     "hardware_allowance": 25.0,                                       # a lump of glue, screws and hinges
+    "screw_each": 0.10, "wood_glue_8oz": 5.0,                         # #8 wood screws by the 100; a bottle
     "jack_each": 35.0,                                                # a trailer stabilizer jack
 }
 
@@ -172,6 +192,9 @@ def table() -> str:
     for key, m in STICKS.items():
         sizes = ", ".join(m["sizes"]) if m["sizes"] else "square tube by outer and wall (mm)"
         lines.append(f"  - {key}: {m['name']}, {inches(m['stock_len'])} lengths; {sizes}")
+    lines.append("Printed (\"kind\": \"printed\": the whole solid build() makes is 3D printed):")
+    for key, m in PRINTS.items():
+        lines.append(f"  - {key}: {m['name']}")
     lines.append("Coverings (a sheet's \"covers\", or \"kind\": \"covering\"):")
     for key, m in COVERINGS.items():
         lines.append(f"  - {key}: {m['name']}")

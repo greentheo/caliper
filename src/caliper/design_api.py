@@ -16,8 +16,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import (aero, chat, clarify, construction, cutplan, frame_study, goals, lighten, load_study,
-               patterns, promote, release, scorecard, studies)
+from . import (aero, answers, chat, clarify, construction, cutplan, frame_study, goals, lighten,
+               load_study, making, patterns, promote, release, scorecard, shop, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -100,6 +100,11 @@ class FrameRequest(BaseModel):
 class LoadRequest(BaseModel):
     part: str
     min_safety: float = load_study.MIN_SAFETY     # at each load times its factor
+
+
+class Shop(BaseModel):
+    hand: list[str] = []
+    machines: list[dict] = []
 
 
 class GoalDecision(BaseModel):
@@ -451,6 +456,33 @@ def router():
 
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
         return {"job_id": job.id}
+
+    # -- the four questions (spec step 1): each answered in a line anyone can read --------------------------
+    @r.get("/api/designs/{slug}/answers")
+    def design_answers(slug: str, part: Optional[str] = None):
+        store = load(slug)
+        if part and store.design.part(part) is None:
+            raise HTTPException(status_code=404, detail=f"no part {part!r}")
+        return {"part": part, "cards": answers.answers(store, design_state(store), part)}
+
+    # -- your shop (CALI-48): what you have, and how each part gets made with it --------------------------
+    @r.get("/api/shop")
+    def get_shop():
+        return {"shop": shop.read(), "hand": shop.HAND, "machines": list(shop.MACHINES)}
+
+    @r.put("/api/shop")
+    def put_shop(req: Shop):
+        return {"shop": shop.write(req.model_dump()), "hand": shop.HAND, "machines": list(shop.MACHINES)}
+
+    @r.get("/api/designs/{slug}/parts/{pid}/making")
+    def part_making(slug: str, pid: str):
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+        try:
+            return making.plan(store, pid)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
 
     # -- patterns for hand tools (CALI-48): measure and mark, print and tape, project and trace ------------
     @r.post("/api/designs/{slug}/parts/{pid}/patterns")

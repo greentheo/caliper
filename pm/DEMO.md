@@ -45,6 +45,10 @@ Newest demos first.
 - 🆕 **Will it hold? (CALI-54, #1).** A part that says what it must carry (`loads()`, written by the designer
   from "it has to hold me, 200 lb") gets a strength check: whittle's FEA with a stress picture, a plate check
   for a panel pushed face-on, the verdict, and where it should break.
+- 🆕 **Four questions (CALI-72, #38).** What is it? Will it work? What do I buy? How do I make it? — a line each
+  anyone can read, the engineer's numbers one click under it. Glue and screws are on the shopping list.
+- 🆕 **Your shop (CALI-48, #4).** Tell it your tools and machines; every piece is planned with them, printed
+  parts are split to fit your printer and costed, and anything your shop can't make is said.
 - 🆕 **Patterns for hand tools (CALI-48, #4).** Every flat piece to measure and mark, print full size and tape,
   or project and trace — no CNC needed.
 - 🆕 **The scorecard writes itself (CALI-55, #2).** What you say it must do becomes its checks: stated, assumed,
@@ -549,6 +553,26 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-30 · Four questions, answered in a line (CALI-72 #38)
+1. `make serve`, open the stool. The right side is four cards: **What is it? · Will it work? · What do I buy?
+   · How do I make it?**, each answered in a line or two, coloured by how it stands.
+2. Click the stool: "Holds 200 lb adult stepping up, 3.1 times over." · "1 sheet of 3/4 in plywood, 18 screws
+   and wood glue, exterior paint: about $39." · "With your jigsaw: 5 pieces."
+3. Click a dotted line (the strength one) to open its numbers at the study; **▸ the numbers** under any card is
+   the panel you had before, and stays open once you open it.
+4. Offline: `python -m pytest tests/test_answers.py`.
+
+### 2026-10-30 · Your shop, and what makes each piece (CALI-48 #4)
+1. **Shop** (header): tick your hand tools, add a router, plasma table or printer with their sizes, **Save**.
+   Until you do, Caliper plans for a jigsaw, a drill and a circular saw.
+2. Click the stool: **Built from → Made in your shop** says "jigsaw: left side panel, …". Add a router that's
+   big enough and it says "router" instead.
+3. A printed part (`{"kind": "printed", "material": "petg"}` in its construction): with a printer in your shop
+   it's split to fit with pin holes, and costed in hours, grams and dollars (PrusaSlicer if it's installed).
+4. **Score it**: "your shop can make every piece". **Make the build package**: a *Made in your shop* page and
+   `printer/` with the STLs.
+5. Offline: `python -m pytest tests/test_shop.py`.
 
 ### 2026-10-30 · Patterns for a jigsaw: measure and mark, print and tape, project and trace (CALI-48 #4)
 1. Open the stool, click it, **Built from → Patterns for hand tools → Make the patterns** (a second or two).

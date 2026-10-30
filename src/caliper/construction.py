@@ -337,10 +337,19 @@ def piece(item: dict) -> list[dict]:
         at = tuple(sum(a * c[k] for a, c, _ in parts) / area for k in range(3)) if area else (0.0, 0.0, 0.0)
         return [{"name": name, "kind": "covering", "material": item["material"], "label": cv["name"],
                  "area_mm2": area, "mass_kg": area * 1e-6 * cv["areal"], "at": list(at)}]
+    if kind == "printed":                  # the part's whole solid, 3D printed (CALI-48)
+        pm = M.printed(item.get("material", "pla"))
+        vol, area = float(item.get("volume_mm3") or 0.0), float(item.get("area_mm2") or 0.0)
+        shell = min(vol, area * M.PRINT_SHELL_MM)
+        infill = float(item.get("infill", M.PRINT_INFILL))
+        plastic = shell + infill * (vol - shell)
+        return [{"name": name, "kind": "printed", "material": item.get("material", "pla"), "label": pm["name"],
+                 "volume_mm3": vol, "infill": infill, "plastic_mm3": plastic,
+                 "mass_kg": plastic * 1e-9 * pm["density"], "at": list(item.get("at") or (0.0, 0.0, 0.0))}]
     if kind == "lump":
         return [{"name": name, "kind": "lump", "label": item.get("label") or name,
                  "mass_kg": float(item["mass"]), "at": [float(v) for v in item["at"]]}]
-    raise ValueError(f"{name!r}: kind must be sheet, stick, covering or lump, not {kind!r}")
+    raise ValueError(f"{name!r}: kind must be sheet, stick, covering, printed or lump, not {kind!r}")
 
 
 def _bbox2d(pts):
@@ -478,8 +487,11 @@ def bom(rows: list[dict]) -> dict:
             g["coats"] = cv["coats"]
 
     lumps = [{"name": r["name"], "mass_kg": round(r["mass_kg"], 2)} for r in rows if r["kind"] == "lump"]
+    printed = [{"name": r["name"], "material": r["material"], "label": r["label"],
+                "volume_cm3": round(r["volume_mm3"] / 1000, 1), "infill": r["infill"],
+                "filament_g": round(r["mass_kg"] * 1000, 1)} for r in rows if r["kind"] == "printed"]
     return {"sheets": list(sheets.values()), "sticks": list(sticks.values()),
-            "coverings": list(coverings.values()), "lumps": lumps}
+            "coverings": list(coverings.values()), "lumps": lumps, "printed": printed}
 
 
 def by_material(rows: list[dict]) -> list[dict]:
@@ -704,6 +716,10 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
     if items is None:
         raise ValueError(f"'{part_id}' doesn't say what it's built from — give its script a "
                          f"construction(params, build) (or members() for a tube frame)")
+    if any(it.get("kind") == "printed" for it in items):
+        g = store.part_geometry(part_id).require_mesh()
+        items = [{**it, "volume_mm3": float(abs(g.volume)), "area_mm2": float(g.area),
+                  "at": [float(v) for v in g.center_mass]} if it.get("kind") == "printed" else it for it in items]
     rows = takeoff(items)
     mass, cog = totals(rows)
     saved = read_build(store.read_script(part_id)) or {}
@@ -713,6 +729,18 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
         notes.append("Tubes weighed along their centrelines, joint to joint, one length where a tube runs "
                      "straight through — within a few percent; exact cuts (mitres, copes) come with the cut plan.")
     bom_ = bom(rows)
+    # what holds the wood together: glue and screws along its joints (the four-questions spec, step 1)
+    if sum(1 for it in items if it.get("kind") in ("sheet", "stick") and it.get("material") in ("plywood", "lumber")) > 1:
+        try:
+            from . import fasteners
+            from .consistency import _sides, shapes, tolerance
+
+            mesh = store.part_geometry(part_id).require_mesh()
+            pcs = shapes(d)
+            _sides(mesh, pcs)
+            bom_["fasteners"] = fasteners.estimate(pcs, tolerance(mesh))
+        except Exception:  # noqa: BLE001 — the shopping list goes without them, not without everything
+            pass
     for g in bom_["sheets"]:
         if g["joined"]:
             notes.append(f"{', '.join(g['joined'])}: bigger than a {g['label']} sheet — joined from pieces.")

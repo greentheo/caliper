@@ -40,7 +40,7 @@ def test_a_card_checks_what_the_goals_say_and_tracks_the_objectives(store):
     (weight, cost) = card["objectives"]
     assert weight["value"] == pytest.approx(card["metrics"]["weight.crate"]["value"] + 20, abs=0.2)
     assert weight["trust"] == "model" and cost["trust"] == "guess"
-    assert card["summary"] == {"pass": 1, "fail": 1, "unknown": 1, "proposed": 0}
+    assert card["summary"] == {"pass": 2, "fail": 1, "unknown": 1, "proposed": 0}   # + your shop can make it
     assert SC.list_cards(store)[0]["created"] == card["created"]
 
 

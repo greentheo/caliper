@@ -651,6 +651,14 @@ def shopping(store: DesignStore, plans: dict, bom: dict, lumps: dict, ctx: dict)
         qty = f"{qt} qt" if qt < 4 else f"{math.ceil(paint)} gal"
         add("lumber yard / home center", "exterior paint", f"{qty} (uses {paint:.2f} gal)",
             (qt / 4 if qt < 4 else math.ceil(paint)) * P["paint_per_gal"], "over the glass, under the floor")
+    screws = sum((b.get("fasteners") or {}).get("screws", 0) for b in bom.values())
+    if screws:
+        kinds = sorted({b["fasteners"]["screw"] for b in bom.values() if b.get("fasteners")})
+        add("hardware", " / ".join(kinds), f"{screws} (a box of {100 if screws > 50 else 50})",
+            max(screws, 50) * P["screw_each"], "the joints, a screw every 6 in")
+        ml = sum((b.get("fasteners") or {}).get("glue_ml", 0) for b in bom.values())
+        add("hardware", "wood glue", "an 8 oz bottle" if ml <= 236 else f"{math.ceil(ml / 236)} × 8 oz bottles",
+            P["wood_glue_8oz"] * max(1, math.ceil(ml / 236)), "every joint, before the screws")
     for pid, ls in lumps.items():
         for row in ls:
             if "plate" in (row.get("label") or ""):
@@ -820,6 +828,26 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                f"<td class='n'><b>${shop['usd']:,.0f}</b></td></tr></table>"
                f"<div class='muted small'>{_e(shop['basis'])}</div>")
     # the cut lists
+    # made in your shop (CALI-48)
+    if rec.get("making"):
+        out.append("<h2 class='page'>Made in your shop</h2>")
+        if any(m.get("shop_default") for m in rec["making"].values()):
+            out.append("<p class='note'>Planned for hand tools (a jigsaw, a drill, a circular saw). Tell Caliper what's "
+                       "in your shop under Shop and it plans with that.</p>")
+        out.append("<table><tr><th>part</th><th>with</th><th>pieces</th></tr>")
+        for pid, m in rec["making"].items():
+            for how, names in m["by_how"].items():
+                out.append(f"<tr><td>{_e(pid)}</td><td>{_e(how)}</td><td>{_e(', '.join(names))}</td></tr>")
+            for x in m["missing"]:
+                out.append(f"<tr><td>{_e(pid)}</td><td class='fail'>not in your shop</td><td>{_e(x['name'])}: {_e(x['why'])}</td></tr>")
+        out.append("</table>")
+        for pid, m in rec["making"].items():
+            for pr in m["printed"]:
+                out.append(f"<p>{_e(pid)}: printed in {_e(pr['material'].upper())}, {pr['pieces']} piece(s)"
+                           + (" pinned together: glue 3 mm filament or 1/8 in dowel pins in the holes across each cut"
+                              if pr["pinned"] else "")
+                           + f"; about {pr['hours']:g} h, {pr['filament_g']:,} g, ${pr['usd']:.2f} "
+                           f"({_e(pr['from'])}). STLs in <code>printer/{_e(pid)}/</code>.</p>")
     out.append("<h2 class='page'>Cut lists</h2>")
     for pid, plan in plans.items():
         for g in plan.get("tubes") or []:
@@ -904,6 +932,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
     out.append("<h2>What's in the package</h2><table>")
     for folder, what in (("hand/", "patterns for hand tools, per part: measure-and-mark.pdf, print-full-size.pdf "
                                    "(letter pages, print at 100%), and a pattern per piece to project and trace"),
+                         ("printer/", "printed parts as STL, split to fit your printer where they had to be"),
                          ("plasma/", "gusset plates — DXF (R12, mm) and SVG, for the plasma table"),
                          ("router/", "every nested sheet — DXF and SVG — with a 1:1 pattern.pdf and seam list per material"),
                          ("assembly/", "the drawings in this book, as PNG"),
@@ -1001,6 +1030,19 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     with open(os.path.join(root, "assembly", "finished.png"), "wb") as f:
         f.write(draw(View(every), [(every, "now")]))
 
+    # how it's made in your shop (CALI-48): what cuts each piece, and printed parts fitted to the printer
+    from . import making
+
+    made = {}
+    for p in store.design.parts:
+        if p.id in versions and store.is_scripted(p.id) and C.declares(store.read_script(p.id)):
+            try:
+                mk = making.plan(store, p.id, out_dir=os.path.join(root, "printer", p.id))
+            except Exception:  # noqa: BLE001 — a part that can't be planned is left to its cut plan
+                continue
+            made[p.id] = {"by_how": mk["by_how"], "missing": [{"name": m["name"], "why": m["why"]} for m in mk["missing"]],
+                          "printed": mk["printed"], "shop_default": mk["shop_default"]}
+
     # patterns for hand tools (CALI-48): every flat piece, for a jigsaw and a tape measure
     from . import patterns
 
@@ -1059,7 +1101,7 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
         if run:
             strength[pid] = [{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")}
                              for c in run["cases"]]
-    rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength,
+    rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength, "making": made,
            "slug": os.path.basename(store.root), "versions": versions,
            "card": {"created": card["created"], "summary": card["summary"]},
            "ready": card["summary"]["fail"] == 0 and card["summary"]["unknown"] == 0,

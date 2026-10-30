@@ -178,3 +178,28 @@ table.studies-table td.when { white-space: nowrap; color: var(--muted); }
 #studiesBtn.on { border-color: var(--accent); color: var(--accent); }
 /* centred by left:50%, an absolute box would shrink to half the view: size it to its text instead */
 .station-bar { width: max-content; max-width: min(760px, calc(100% - 40px)); }
+
+/* your shop (CALI-48) */
+#shopBtn.on { border-color: var(--accent); color: var(--accent); }
+.shop-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 14px; }
+.shop-tools label { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+.shop-machine { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-top: 8px; }
+.shop-machine input[type=number] { width: 70px; }
+
+/* the four questions (spec step 1): a card each, its answer on top, the numbers underneath */
+.qcard { border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 10px; padding: 10px 12px;
+  margin-top: 10px; background: var(--panel2); }
+.qcard.q-ok { border-left-color: var(--ok); }
+.qcard.q-warn { border-left-color: var(--warn); }
+.qcard.q-bad { border-left-color: var(--bad); }
+.qhead { display: flex; gap: 8px; align-items: baseline; }
+.qhead h3 { margin: 0; font-size: 15px; }
+.qmark { width: 14px; text-align: center; font-weight: 700; color: var(--muted); }
+.q-ok > .qhead .qmark { color: var(--ok); } .q-warn > .qhead .qmark { color: var(--warn); } .q-bad > .qhead .qmark { color: var(--bad); }
+.qlines { margin: 4px 0 0 22px; }
+.qline { font-size: 13px; line-height: 1.4; margin-top: 2px; color: #c9d4de; }
+.qline.top { font-size: 15px; color: var(--ink); }
+.qline.q-bad { color: var(--bad); } .qline.q-warn { color: #e3b341; }
+.qline.go { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+details.numbers { margin: 6px 0 0 22px; }
+details.numbers > summary { margin-top: 2px; }
