@@ -1,0 +1,20 @@
+part: cargo_box
+intent: 'Build the cargo box, called box, as a solid block standing in for the foam
+  box: 74 in wide (centred on y = 0), 39 in deep and 41 in high, its front face at
+  x = -18 in (so it runs back to x = -57 in), its flat floor at z = 12 in, resting
+  on top of the ladder. Make it tunable for a drag study: besides width, depth, height,
+  x_front and z_bottom, give PARAMS tail_len, tail_drop, tail_pinch and tail_edge_r,
+  all 0 so it starts as a plain box. tail_len is how much of the back tapers, tail_drop
+  how far the top falls by the very back, tail_pinch how far each side draws in by
+  the very back, tail_edge_r the rounding of the back''s top and side edges (0 = sharp).
+  Build the taper as flat panels (a ruled loft) and keep the bottom flat. It must
+  clear the hatch swing by at least 2 in.'
+parameters: {}
+references: []
+assert:
+- id: one_body
+  expr: body_count == 1
+- id: watertight
+  expr: is_watertight
+- id: max_height_no_overshoot
+  expr: bbox.dz <= 41 * 25.4

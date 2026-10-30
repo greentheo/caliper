@@ -1,0 +1,11 @@
+part: step_stool
+intent: A two-step stool made from 3/4 in plywood, glued and screwed, sized for a
+  6-year-old to reach a bathroom sink and rated to hold 200 lb adult; includes two
+  treads, two side panels, a back brace, and a middle riser
+parameters: {}
+references: []
+assert:
+- id: one_body
+  expr: body_count == 1
+- id: watertight
+  expr: is_watertight

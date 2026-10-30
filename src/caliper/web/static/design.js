@@ -36,12 +36,59 @@ async function api(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!r.ok) {
-    let msg = `HTTP ${r.status}`;
-    try { const j = await r.json(); msg = j.detail || j.error || msg; } catch (e) { /* not JSON */ }
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    let msg = `HTTP ${r.status}`, errorId = '';
+    try { const j = await r.json(); msg = j.detail || j.error || msg; errorId = j.error_id || ''; } catch (e) { /* not JSON */ }
+    const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    if (errorId) { err.errorId = errorId; (window.__errIds = window.__errIds || {})[err.message] = errorId; }   // a crash the server kept (CALI-59)
+    throw err;
   }
   return r.json();
 }
+
+// ------------------------------------------------------------------------- reporting it (CALI-59)
+// What broke is kept on this machine. A report is shown in full first; sending it opens a new GitHub issue
+// in the browser with it filled in, so the person sends it themselves. Nothing is sent on its own.
+async function reportError(errorId, message) {
+  try {
+    // where on the page, never which design: its name is the person's own words
+    const where = S.scope ? "a part's cards" : (S.slug ? 'a design' : 'the welcome');
+    if (!errorId) errorId = (await api('POST', '/api/errors', { where, error: message || 'something broke' })).id;
+    const rep = await api('GET', `/api/errors/report?id=${encodeURIComponent(errorId)}`);
+    let dlg = $('reportDlg');
+    if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'reportDlg'; dlg.className = 'report'; document.body.append(dlg); }
+    dlg.innerHTML = `<h3>Report what broke</h3>
+      <p class="small">Nothing has been sent. This is everything the report holds: what broke, where, and which
+        Caliper and Mac it was. Nothing of your design is in it. Add what you were doing if you like.</p>
+      <textarea id="reportBody" rows="12">${esc(rep.body)}</textarea>
+      <div class="actions"><button class="primary" id="reportSend">Open it as a GitHub issue</button>
+        <button id="reportCopy">Copy</button><button class="ghost" id="reportClose">Not now</button></div>
+      <p class="muted small">Sending opens github.com in your browser with the report filled in; you press
+        Submit there (it needs a GitHub account).</p>`;
+    $('reportClose').onclick = () => dlg.close();
+    $('reportCopy').onclick = async () => {
+      try { await navigator.clipboard.writeText($('reportBody').value); $('reportCopy').textContent = 'Copied'; }
+      catch (e) { $('reportBody').select(); }
+    };
+    $('reportSend').onclick = () => {
+      let body = $('reportBody').value;
+      while (encodeURIComponent(body).length > 6500) body = body.slice(0, Math.floor(body.length * 0.9)) + '…';
+      const url = rep.url.split('&body=')[0] + '&body=' + encodeURIComponent(body);
+      window.open(url, '_blank', 'noopener'); dlg.close();
+    };
+    dlg.showModal();
+  } catch (e) { showErr('couldn\'t make the report: ' + e.message); }
+}
+function reportLink(errorId, message) {
+  const b = document.createElement('button');
+  b.className = 'linkish'; b.textContent = 'Report it…';
+  b.onclick = () => reportError(errorId, message);
+  return b;
+}
+$('errbar').addEventListener('click', (e) => {
+  if (e.target.dataset.report === undefined) return;
+  const last = (window.__err || []).slice(-1)[0] || '';
+  reportError((window.__errIds || {})[last] || '', last);
+});
 
 // Follow a job: Server-Sent Events, de-duplicated by sequence number, falling back to polling if the
 // stream drops (a browser reconnect would otherwise replay events from the start).
@@ -50,7 +97,8 @@ function follow(jobId, onEvent) {
     let seen = -1, done = false, es = null;
     const finish = (p) => {
       if (done) return; done = true; if (es) es.close();
-      p.status === 'done' ? resolve(p.result) : reject(new Error(p.error || 'the job failed'));
+      p.status === 'done' ? resolve(p.result)
+        : reject(Object.assign(new Error(p.error || 'the job failed'), { errorId: p.error_id || '' }));
     };
     const handle = (ev) => {
       if (ev.kind === 'end') return finish(ev);
@@ -388,6 +436,7 @@ $('newBtn').onclick = startNew;
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
+  if (first) S.buildBubble = null;
   location.hash = encodeURIComponent(slug);
   S.design = await api('GET', `/api/designs/${slug}`);
   if (first) { for (const m of meshes.values()) scene.remove(m); meshes.clear(); clearStation(); }
@@ -436,7 +485,7 @@ function renderScope() {
     ? `What should change about ${S.scope}?`
     : (S.design && S.design.parts.length
       ? 'Click a part to talk about it, or ask about the whole design…'
-      : 'Tell me which part to build first…');
+      : 'Tell me more about it, or ask a question…');
 }
 $('scopeClear').onclick = () => setScope(null);
 
@@ -453,7 +502,7 @@ function renderThread() {
       html.push(`<div class="note">Requirement changed — ${esc(e.question || '')} → <b>${esc(e.answer || '')}</b></div>`);
     } else if (e.kind === 'clarify' && e.action !== 'asked') {
       html.push(`<div class="note">Requirements recorded — ${e.answered || 0} answered, ` +
-        `${e.assumed || 0} assumed. Tell me which part to build first.</div>`);
+        `${e.assumed || 0} assumed.</div>`);
     } else if (e.kind === 'message') {
       html.push(`<div class="msg you">${e.scope ? `<div class="scope">on ${esc(e.scope)}</div>` : ''}` +
         `${md(e.text)}</div>`);
@@ -486,6 +535,17 @@ function renderThread() {
     }
   }
   if (d.clarify && d.clarify.length) html.push(clarifyCard(d.clarify));
+  // answered, nothing built, nothing building: one button (CALI-59)
+  const unbuilt = !d.parts.length && !(d.clarify && d.clarify.length) && !d.building && !S.busy;
+  if (unbuilt) {
+    html.push(`<div class="actions"><button class="primary" id="buildFirst">Build it</button>
+      <span class="muted small">or say what to build first</span></div>`);
+  }
+  const lastSaid = [...d.log].reverse().find((e) => e.kind === 'message' || e.kind === 'reply');
+  if (lastSaid && lastSaid.kind === 'reply' && lastSaid.reply && !d.proposal && !S.busy) {
+    html.push(`<div class="actions simpler"><button class="ghost small" data-say="Say that again in simpler words, for a kid.">
+      Say it simpler</button></div>`);
+  }
   if (d.proposal && !S.busy) {
     html.push(`<div class="actions">
       <button class="ok" data-say="yes">Yes, lock it in</button>
@@ -494,34 +554,93 @@ function renderThread() {
   t.innerHTML = html.join('') || '<div class="note">Nothing yet.</div>';
   t.querySelectorAll('[data-say]').forEach((b) => { b.onclick = () => send(b.dataset.say, null); });
   wireClarify();
+  if ($('buildFirst')) {
+    $('buildFirst').onclick = async () => {
+      try { followBuild((await api('POST', `/api/designs/${S.slug}/build`)).job_id); }
+      catch (e) { showErr(e.message); }
+    };
+  }
+  if (S.buildBubble) t.append(S.buildBubble);          // a redraw mid-build keeps its progress
+  if (d.building && S.following !== d.building) followBuild(d.building);
   t.scrollTop = t.scrollHeight;
 }
 
 function clarifyCard(qs) {
   return `<div class="card" id="clarify">
     <h3>A few questions first</h3>
-    <p class="muted small">Asked once, then they're fixed requirements every part is built against.
-      Leave one blank and I'll use the suggestion, marked as an assumption.</p>
+    <p class="muted small">Leave any blank and I'll use the grey suggestion, marked as a guess you can
+      change later. Then I build it, check it and plan how to make it.</p>
     ${qs.map((q) => `<div class="q"><label for="q_${esc(q.id)}">${esc(q.question)}</label>
       ${q.why ? `<div class="why">${esc(q.why)}</div>` : ''}
       <input type="text" id="q_${esc(q.id)}" data-q="${esc(q.id)}" placeholder="${esc(q.default)}"></div>`).join('')}
     <div class="actions">
-      <button class="primary" id="clarifyGo">Use these answers</button>
-      <button id="clarifySkip">Just build it</button>
+      <button class="primary" id="clarifyGo">Build it</button>
     </div></div>`;
 }
 function wireClarify() {
-  const go = $('clarifyGo'), skip = $('clarifySkip');
+  const go = $('clarifyGo');
   if (!go) return;
-  const submit = async (isSkip) => {
+  go.onclick = async () => {
     const answers = {};
     document.querySelectorAll('#clarify [data-q]').forEach((i) => { answers[i.dataset.q] = i.value; });
-    go.disabled = skip.disabled = true;
-    try { S.design = await api('POST', `/api/designs/${S.slug}/clarify`, { answers, skip: isSkip }); render(); }
-    catch (e) { showErr(e.message); go.disabled = skip.disabled = false; }
+    go.disabled = true;
+    // the answers, then the first build (CALI-59): one sentence in, four answers out
+    try { S.design = await api('POST', `/api/designs/${S.slug}/clarify`, { answers, build: true }); render(); }
+    catch (e) { showErr(e.message); go.disabled = false; }
   };
-  go.onclick = () => submit(false);
-  skip.onclick = () => submit(true);
+}
+
+// the first build, said as it goes: what it's held to, the part, its strength, its patterns (CALI-59)
+const BUILD_STEPS = { goals: 'Writing down what it has to do', build: 'Building it',
+  strength: 'Checking it holds what it must', patterns: 'Drawing the patterns to cut it out',
+  score: 'Scoring it against what it has to do' };
+async function followBuild(jobId) {
+  S.following = jobId; S.busy = true; $('send').disabled = true;
+  const t = $('thread');
+  t.querySelectorAll('.actions').forEach((n) => n.remove());
+  const cal = document.createElement('div');
+  cal.className = 'msg cal';
+  cal.innerHTML = `<div class="who">Caliper</div><div class="head"><span class="spin"></span>Starting…</div>
+    <ol class="build-steps">${Object.entries(BUILD_STEPS).map(([k, v]) =>
+      `<li data-step="${k}">${esc(v)}<span class="detail muted small"></span></li>`).join('')}</ol>`;
+  t.append(cal); t.scrollTop = t.scrollHeight;
+  S.buildBubble = cal;
+  const head = cal.querySelector('.head');
+  let at = null;
+  const mark = (k) => {
+    if (!BUILD_STEPS[k]) return;
+    cal.querySelectorAll('li').forEach((li) => {
+      const before = Object.keys(BUILD_STEPS).indexOf(li.dataset.step) < Object.keys(BUILD_STEPS).indexOf(k);
+      li.classList.toggle('done', before || li.classList.contains('done'));
+      li.classList.toggle('now', li.dataset.step === k);
+    });
+    at = k; since = Date.now(); head.innerHTML = `<span class="spin"></span>${esc(BUILD_STEPS[k])}…`;
+  };
+  // a long step (writing the design takes a minute or two) shows it's still going
+  let since = Date.now();
+  const tick = setInterval(() => {
+    if (!at || !cal.isConnected) return;
+    const s = Math.round((Date.now() - since) / 1000);
+    if (s >= 5) head.innerHTML = `<span class="spin"></span>${esc(BUILD_STEPS[at])}… <span class="muted small">${s} s</span>`;
+  }, 1000);
+  try {
+    await follow(jobId, (ev) => {
+      if (ev.kind === 'step') return ev.step === 'done' ? null : mark(ev.step);
+      const li = at && cal.querySelector(`li[data-step="${at}"] .detail`);
+      const said = ev.kind === 'authoring' ? 'writing the design'
+        : ev.kind === 'built' ? 'it builds' : ev.kind === 'strength' ? ev.text
+          : ev.kind === 'error' ? `⚠ ${ev.text}` : '';
+      if (li && said) li.textContent = ` · ${said}`;
+    });
+  } catch (e) {
+    cal.classList.add('bad'); head.innerHTML = `⚠ ${esc(e.message)} `;
+    head.append(reportLink(e.errorId, e.message));
+  } finally {
+    clearInterval(tick);
+    S.busy = false; $('send').disabled = false;
+  }
+  if (!cal.classList.contains('bad')) S.buildBubble = null;      // the reply in the log says it now
+  await refresh();
 }
 
 // a turn in flight: your message, then a reply bubble that narrates as events stream in
@@ -548,9 +667,10 @@ function liveTurn(text, scope) {
       head.innerHTML = `<span class="spin"></span>${esc(label)}`;
       t.scrollTop = t.scrollHeight;
     },
-    fail(msg) {
+    fail(msg, errorId) {
       cal.classList.add('bad');
-      head.innerHTML = `⚠ ${esc(msg)}`;
+      head.innerHTML = `⚠ ${esc(msg)} `;
+      head.append(reportLink(errorId, msg));
     },
   };
 }
@@ -573,7 +693,7 @@ async function send(text, scope) {
     S.busy = false;
     await refresh();
   } catch (e) {
-    live.fail(e.message);
+    live.fail(e.message, e.errorId);
   } finally {
     S.busy = false; $('send').disabled = false;
   }
@@ -588,28 +708,86 @@ $('msg').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
 });
 
-// a brand-new design: the first message is the root prompt, then the clarify round
+// a brand-new design: one sentence, a few questions, then it's built (CALI-59). Or open one of ours.
 function startNew() {
   // remember where we were: the button sits beside the design picker and is easy to hit by mistake
   const was = S.slug ? { slug: S.slug, name: S.design ? S.design.name : S.slug } : null;
-  S.slug = null; S.design = null; S.scope = null;
+  S.slug = null; S.design = null; S.scope = null; S.buildBubble = null;
   for (const m of meshes.values()) scene.remove(m);
   meshes.clear(); clearStation();
   history.replaceState(null, '', location.pathname);
-  $('inspector').innerHTML = '<div class="empty">Your design will show up here.</div>';
+  $('inspector').innerHTML = `<div class="empty">The answers show up here: what it is, whether it works, what to
+    buy and how to make it.</div>`;
   $('scopeRow').hidden = true;
-  $('thread').innerHTML = `<div class="card">
-    <h3>What are you building?</h3>
-    <p class="muted small">Describe the whole thing — sizes, what it attaches to, what it carries.
-      I'll ask a few questions, then we build it part by part.</p>
-    <textarea id="newPrompt" rows="5" placeholder="e.g. a step stool so my kid can reach the sink, from 3/4 in plywood…"></textarea>
+  $('thread').innerHTML = `<div class="card welcome">
+    <h3>What do you want to make?</h3>
+    <p class="muted small">Say it in a sentence: what it is, what it's for, what it's made of. I'll ask a few
+      questions, then build it, check it holds and plan how to make it with your tools.</p>
+    <div class="say"><textarea id="newPrompt" rows="3"
+      placeholder="a step stool so my kid can reach the sink, from 3/4 in plywood"></textarea>
+      ${micButton('newPrompt')}</div>
     <div class="actions"><button class="primary" id="newGo">Start</button>
-      ${was ? `<button id="newBack" class="ghost">← back to ${esc(was.name)}</button>` : ''}</div></div>`;
+      ${was ? `<button id="newBack" class="ghost">← back to ${esc(was.name)}</button>` : ''}</div>
+    <div id="sampleRow" class="samples"></div></div>`;
   $('msg').placeholder = 'Or type it here…';
   $('newGo').onclick = () => createDesign($('newPrompt').value);
+  $('newPrompt').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); createDesign($('newPrompt').value); }
+  });
   if (was) $('newBack').onclick = () => { $('designPick').value = was.slug; openDesign(was.slug); };
+  wireMics($('thread'));
   $('newPrompt').focus();
+  showSamples();
 }
+async function showSamples() {
+  let got;
+  try { got = await api('GET', '/api/samples'); } catch (e) { return; }
+  const row = $('sampleRow');
+  if (!row || !got.samples.length) return;
+  row.innerHTML = `<div class="muted small">Or open one of ours and look around:</div>` + got.samples.map((x) =>
+    `<button class="sample" data-sample="${esc(x.name)}"><b>${esc(x.title)}</b><span>${esc(x.about)}</span></button>`).join('');
+  row.querySelectorAll('[data-sample]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try { await loadDesigns((await api('POST', `/api/samples/${encodeURIComponent(b.dataset.sample)}`)).slug); }
+      catch (e) { showErr(e.message); b.disabled = false; }
+    };
+  });
+}
+
+// ---------------------------------------------------------------------- talking instead of typing (CALI-59)
+// The browser's own speech recognition where it has one. Without it, the Mac's dictation types into any text
+// box, so the button says how to start that.
+const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+let listening = null;
+function micButton(target) {
+  return `<button type="button" class="mic ghost" data-mic="${target}" title="talk instead of typing">🎤</button>`;
+}
+function wireMics(root) {
+  root.querySelectorAll('[data-mic]').forEach((b) => { b.onclick = () => dictate($(b.dataset.mic), b); });
+}
+function micTip(btn, text) {
+  let tip = btn.parentElement.querySelector('.mic-tip');
+  if (!tip) { tip = document.createElement('div'); tip.className = 'mic-tip'; btn.parentElement.append(tip); }
+  tip.textContent = text;
+  clearTimeout(micTip.t); micTip.t = setTimeout(() => tip.remove(), 9000);
+}
+const MAC_DICTATION = 'Press the 🎤 key (or Fn twice) and talk: your Mac types what you say into the box. Press it again when you\'re done.';
+function dictate(box, btn) {
+  if (listening) { listening.stop(); return; }
+  box.focus();
+  if (!Speech) return micTip(btn, MAC_DICTATION);
+  const rec = new Speech();
+  rec.lang = navigator.language || 'en-US'; rec.interimResults = true; rec.continuous = false;
+  const start = box.value ? box.value.replace(/\s*$/, ' ') : '';
+  rec.onresult = (e) => { box.value = start + [...e.results].map((r) => r[0].transcript).join(''); };
+  rec.onerror = (e) => micTip(btn, e.error === 'not-allowed' || e.error === 'service-not-allowed'
+    ? `The browser isn't allowed to listen. ${MAC_DICTATION}` : `I didn't catch that (${e.error}). Try again, or: ${MAC_DICTATION}`);
+  rec.onend = () => { listening = null; btn.classList.remove('on'); };
+  try { rec.start(); listening = rec; btn.classList.add('on'); micTip(btn, 'Listening… press 🎤 again to stop.'); }
+  catch (e) { micTip(btn, MAC_DICTATION); }
+}
+wireMics(document);
 async function createDesign(prompt) {
   if (!prompt.trim()) return;
   S.busy = true;
@@ -695,7 +873,8 @@ function qlines(c) {
   return c.lines.map((ln, i) => `<div class="qline q-${ln.status}${i === 0 ? ' top' : ''}${GOTO[ln.study || ln.action] ? ' go' : ''}"
     ${GOTO[ln.study || ln.action] ? `data-goto="${GOTO[ln.study || ln.action]}"` : ''}>${esc(ln.text)}</div>
     ${(ln.links || []).length ? `<div class="qlinks">${ln.links.map((l) => `<a class="btn" href="${esc(l.url)}" target="_blank"
-      rel="noopener">${esc(l.label)}</a>`).join('')}</div>` : ''}`).join('');
+      rel="noopener">${esc(l.label)}</a>`).join('')}</div>` : ''}`).join('')
+    + (c.promise ? `<div class="qpromise">${esc(c.promise)}</div>` : '');
 }
 
 // the viewport follows the question (spec step 4): the stress for "will it work", the pieces for "what do I buy"

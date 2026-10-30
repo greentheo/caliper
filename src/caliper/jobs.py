@@ -37,6 +37,7 @@ class Job:
         self.events: list[dict] = []
         self.result: Any = None
         self.error = ""
+        self.error_id = ""                # what it's kept as, for a report (CALI-59)
         self.created = time.time()
         self.finished: Optional[float] = None
         self._mu = threading.Lock()
@@ -58,7 +59,8 @@ class Job:
 
     def to_dict(self, after: int = 0) -> dict:
         return {"id": self.id, "kind": self.kind, "label": self.label, "status": self.status,
-                "events": self.since(after), "result": self.result, "error": self.error}
+                "events": self.since(after), "result": self.result, "error": self.error,
+                "error_id": self.error_id}
 
 
 class JobRunner:
@@ -113,6 +115,9 @@ class JobRunner:
                 job.error = f"{type(e).__name__}: {e}"
                 job.status = "error"
                 job.emit("error", job.error, trace=tail[-1] if tail else "")
+                from . import errors
+
+                job.error_id = errors.record(f"{job.kind}: {job.label}", job.error, traceback.format_exc())["id"]
             finally:
                 job.finished = time.time()
 
@@ -143,7 +148,8 @@ def stream(job: Job, after: int = 0, poll: float = 0.2, heartbeat: float = 15.0)
         if fresh:
             quiet = time.time()
         if job.over and not job.since(seq):
-            final = {"kind": "end", "status": job.status, "result": job.result, "error": job.error}
+            final = {"kind": "end", "status": job.status, "result": job.result, "error": job.error,
+                     "error_id": job.error_id}
             yield f"data: {json.dumps(final, default=str)}\n\n"
             return
         if time.time() - quiet > heartbeat:

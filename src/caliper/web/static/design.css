@@ -70,6 +70,13 @@ a.btn:hover { border-color: var(--accent); }
 .msg .scope { font-size: 11px; color: #a8cfff; margin-bottom: 2px; }
 .note { align-self: center; color: var(--muted); font-size: 12px; text-align: center; padding: 0 10px; }
 .steps { margin: 6px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
+/* the first build, step by step (CALI-59) */
+.build-steps { margin: 6px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+.build-steps li { padding: 2px 0 2px 22px; position: relative; }
+.build-steps li::before { content: "○"; position: absolute; left: 4px; }
+.build-steps li.now { color: var(--ink); }
+.build-steps li.now::before { content: "◐"; color: var(--accent); }
+.build-steps li.done::before { content: "✓"; color: var(--ok); }
 .steps li::before { content: "› "; color: var(--accent); }
 .steps li.now { color: var(--ink); }
 .spin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--line);
@@ -207,3 +214,31 @@ details.numbers > summary { margin-top: 2px; }
 .qcard .qhead { cursor: pointer; }
 .qlinks { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 2px; }
 .qlinks .btn { font-size: 12px; padding: 2px 8px; }
+
+/* what a verdict promises and what it doesn't (CALI-59) */
+.qpromise { margin-top: 6px; font-size: 11px; line-height: 1.35; color: var(--muted); }
+
+/* reporting what broke (CALI-59) */
+button.linkish { background: none; border: 0; padding: 0 2px; color: var(--accent); text-decoration: underline;
+  cursor: pointer; font: inherit; }
+dialog.report { max-width: 560px; width: calc(100% - 32px); background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+dialog.report::backdrop { background: rgba(0, 0, 0, .55); }
+dialog.report textarea { width: 100%; box-sizing: border-box; font: 12px/1.4 ui-monospace, Menlo, monospace;
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+
+/* first run (CALI-59): the welcome, the samples, talking instead of typing */
+.card.welcome h3 { font-size: 18px; margin-bottom: 4px; }
+.say { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; }
+.say textarea { flex: 1; }
+.samples { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; }
+button.sample { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 2px;
+  padding: 8px 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; }
+button.sample span { font-size: 12px; color: var(--muted); }
+button.sample:hover { border-color: var(--accent); }
+button.mic { font-size: 16px; padding: 4px 8px; }
+button.mic.on { border-color: var(--bad); box-shadow: 0 0 0 2px rgba(248, 81, 73, .35); }
+.mic-tip { flex-basis: 100%; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.composer-row { flex-wrap: wrap; }
+.actions.simpler { margin-top: 0; }
+button.small { font-size: 12px; padding: 3px 9px; }

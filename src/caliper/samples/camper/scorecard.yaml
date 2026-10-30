@@ -1,0 +1,73 @@
+# What this design is held to — Theo's constraints, in his words, compiled to metrics (CALI-47).
+# The design's own rules (assembly asserts) and every part's keeps() are checked without being listed.
+settings:
+  payload_lb: 50              # "about 50 lb of gear" when driving
+  walls: true                 # the box's walls carry load in the frame analysis
+  snow_psf: 20                # "1 lb/ft² per inch of snow: 20 in, a huge dump — I won't let more pile up"
+  drag: {part: cargo_box, obstacles: [leaf_rear], speed_mph: 65}
+  # parked on the jacks under the X's back corners with Theo inside (< 350 lb in all): lying down, and
+  # kneeling — 150 lb a knee, with a bounce in it
+  parked: {person_lb: 200, gear_lb: 50, knee_lb: 150, factor: 1.5}
+
+checks:
+  - id: tongue
+    label: "under 420 lb on the tongue (Theo: the 350 lb rating is conservative — 20% over it is safe)"
+    metric: hitch.tongue_lb
+    op: "<="
+    limit: 420
+  - id: frame_survives
+    label: "the frame survives 3.5x its standing load (Theo: steer clear of dynamic loads over ~3.5x)"
+    metric: frame.yield_x
+    op: ">="
+    limit: 3.5
+  - id: walls_safety
+    label: "the box's walls hold a bump at 3.5x"
+    metric: frame.walls_safety
+    op: ">="
+    limit: 3.5
+  - id: gussets_safety
+    label: "the gusset plates hold a bump at 3.5x"
+    metric: frame.gussets_safety
+    op: ">="
+    limit: 3.5
+  - id: snow
+    label: "the roof holds 20 lb/ft² of snow at 2x"
+    metric: snow.safety
+    op: ">="
+    limit: 2.0
+  - id: parked_frame
+    label: "parked on the jacks, the frame holds someone kneeling anywhere at 2x"
+    metric: parked.frame_safety
+    op: ">="
+    limit: 2.0
+  - id: parked_hitch
+    label: "parked, the hitch stays under 420 lb (the 350 lb rating + 20%)"
+    metric: parked.hitch_lb
+    op: "<="
+    limit: 420
+  - id: floor_mattress
+    label: "the floor holds a knee on the mattress at 2x"
+    metric: floor.mattress_safety
+    op: ">="
+    limit: 2.0
+  - id: cut_plan_complete
+    label: "every piece fits a sheet"
+    metric: make.missing
+    op: "<="
+    limit: 0
+
+objectives:
+  - {id: drag, label: "drag", metric: drag.lbf, direction: min}
+  - {id: weight, label: "total weight", metric: weight.total_lb, direction: min}
+  - {id: hitch, label: "lever on the hitch (set aside as a check — Theo will test the spine)", metric: hitch.moment_lbin, direction: min}
+  - {id: frame, label: "frame strength on a bump", metric: frame.safety, direction: max}
+  - {id: steel, label: "steel in the frame", metric: frame.steel_lb, direction: min}
+  - {id: cost, label: "stock to buy", metric: cost.usd, direction: min}
+  - {id: waste, label: "offcut", metric: waste.pct, direction: min}
+  - {id: sheets, label: "sheets to cut", metric: make.sheets, direction: min}
+  - {id: floor_bare, label: "floor under a knee on bare plywood", metric: floor.bare_safety, direction: max}
+  - {id: jacks, label: "the most a jack carries, parked", metric: parked.jack_lb, direction: min}
+
+notes:
+  - "The 1/8 in tang: in the receiver the shank is held by bearing at the mouth and at its inner end — roughly 1,300 lbf at the mouth on a 2.5x bump, on a 1/8 in wall. Watch for dents and ovaling there; a 1/4 in wall (or a sleeve) for the 13 in shank adds ~2 lb."
+  - "Under 3.5x on a bump, welded steel can crack at its welds over road miles before it would ever bend — the gusset plates take 82–90% of the moment off the riser's two corner welds."

@@ -60,6 +60,9 @@ _REVERT = re.compile(r"\b(roll(\s+\w+)?\s*back|revert|undo|go\s+back|put\s+it\s+
 _OBLIGATION = re.compile(r"\b(must|always|never|needs? to|has to|should (?:never|always|not)?)\b")
 #: CALI-55: a number with a unit is usually a requirement ("under 10 lb", "16 in wide", "$50").
 _MEASURE = re.compile(r"\d\s*(?:lb|lbs|kg|in|inch|inches|mm|cm|ft|feet|mph|%)\b|\$\s*\d", re.I)
+#: CALI-59: asking for it again in plain words is a question, never a change, even with a part selected.
+_EXPLAIN = re.compile(r"\b(explain|plain (?:words|english)|simpler words|more simply|what does .{0,40}\bmean"
+                      r"|say (?:that|it) again|i don'?t (?:get|understand))\b", re.I)
 #: CALI-54: feedback about what a part carries — a strength requirement, which goes into its loads().
 _CARRIES = re.compile(r"\b(hold|holds|carry|carries|support|supports|bear|weight|load|loads|lb|lbs|kg|pounds)\b")
 
@@ -115,7 +118,7 @@ def _words(message: str) -> list[str]:
 
 def _is_question(message: str) -> bool:
     msg = (message or "").strip()
-    if msg.endswith("?"):
+    if msg.endswith("?") or _EXPLAIN.search(msg):
         return True
     w = _words(msg)
     return bool(w) and w[0] in _QUESTION_LEAD
@@ -212,7 +215,8 @@ _CLASSIFY_SYSTEM = """You route a message in a CAD design conversation. Reply wi
 - "author": build a NEW part. `part` is a new snake_case identifier; `intent` describes it, as the
   design's requirements have it: never a choice they don't make or one that contradicts them.
 - "revert": undo the last change to a part ("roll it back", "undo that"). `part` is that part.
-- "answer": the user asked a question, or said something that changes nothing about any part.
+- "answer": the user asked a question, asked for something to be explained or said more simply, or said
+  something that changes nothing about any part.
 If the message is ambiguous about WHICH part, use "answer" — do not guess."""
 
 
@@ -621,10 +625,76 @@ def revert_part(store: DesignStore, part_id: str, *, events=None, on_event=None)
                       part_errors=part_errors, events=events, reply="\n".join(lines))
 
 
+#: CALI-59: a question answered in plain words, from what's measured. A kid and an engineer ask the same
+#: question; the kid gets the everyday words, and the engineer asks for the numbers.
+_EXPLAIN_SYSTEM = """You answer a question about a design in Caliper, a tool for designing things to build
+and make. The person asking may be a child or an engineer. Answer in plain words: short sentences and
+everyday words, so a curious 6-year-old could follow it read aloud. If they ask for the numbers, the method
+or the detail, give those exactly, still plainly.
+
+- Use only the facts given. If they don't answer the question, say so, and say what to click or tell Caliper
+  to find out.
+- Never use the tool's own words: voxels, stations, construction(), PARAMS, loads(), scripts. Say "the 3D
+  model", "the strength check", "the list of pieces".
+- A safety of 3.1 times means "it could hold about three times that before it breaks".
+- Use the design's units. No headings. At most 120 words."""
+
+
+def _facts(store: DesignStore, scope: Optional[str]) -> str:
+    """What's known, for a plain answer: the four questions' answers (the design's and the selected part's),
+    the strength check behind them, and the last of the conversation."""
+    from . import answers, load_study
+    from .design_api import design_state
+
+    state = design_state(store)
+    out = [f"design: {store.design.name}: {store.design.prompt}", f"units: {store.design.display_units}"]
+    for r in store.design.requirements:
+        out.append(f"requirement: {r.question} -> {r.answer}" + ("" if r.source == "answered" else " (assumed)"))
+    for pid in [None] + [p.id for p in store.design.parts if p.id == scope or len(store.design.parts) == 1]:
+        for c in answers.answers(store, state, pid):
+            for ln in c["lines"]:
+                out.append(f"{pid or 'the design'} · {c['q']} {ln['text']}")
+    for run in load_study.list_runs(store)[:2]:
+        for c in run.get("cases") or []:
+            out.append(f"strength check of {run['part']} v{run['version']}: {c.get('name')} {c.get('lb')} lb x "
+                       f"{c.get('factor')}: safety {c.get('safety')} ({c.get('governs')}), breaks near "
+                       f"{c.get('breaks_lb')} lb; needs {run.get('min_safety')}")
+        out += [f"strength note: {n}" for n in (run.get("notes") or [])[:4]]
+    said = [e for e in store.log() if e.get("kind") in ("message", "reply")][-6:]
+    out += [f"{'they said' if e['kind'] == 'message' else 'Caliper said'}: {(e.get('text') or e.get('reply') or '')[:600]}"
+            for e in said]
+    return "\n".join(out)
+
+
+def explain(store: DesignStore, message: str, scope: Optional[str] = None, client=None,
+            model: Optional[str] = None) -> str:
+    """The question answered in plain words by Claude, from the facts. Raises on any failure (the caller
+    falls back to the facts as they are)."""
+    if client is None:
+        from anthropic import Anthropic  # lazy; may be absent
+
+        client = Anthropic()
+    msg = client.messages.create(
+        model=model or DEFAULT_MODEL, max_tokens=400, system=_EXPLAIN_SYSTEM,
+        messages=[{"role": "user", "content": f"facts:\n{_facts(store, scope)}\n\nquestion: {message}"}])
+    text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text").strip()
+    if not text:
+        raise ValueError("an empty answer")
+    return text
+
+
 def answer(store: DesignStore, message: str, scope: Optional[str] = None,
-           note: str = "", events: Optional[list[Event]] = None) -> TurnResult:
-    """Report the measured state. No geometry moves — so the answer is facts, not an opinion."""
+           note: str = "", events: Optional[list[Event]] = None, *, use_llm: bool = False,
+           client=None) -> TurnResult:
+    """Report the measured state. No geometry moves — so the answer is facts, not an opinion. With Claude
+    (CALI-59), the question itself is answered from those facts, in plain words."""
     events = events if events is not None else []
+    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+        try:
+            return TurnResult(action="answer", ok=True, part=scope, events=events,
+                              reply=explain(store, message, scope, client=client))
+        except Exception:  # noqa: BLE001 — the facts as they are, then
+            pass
     d = store.design
     lines = [f"**{d.name}** — {d.prompt}" if d.prompt else f"**{d.name}**"]
     if d.requirements:
@@ -741,7 +811,8 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
                              client=client, max_rounds=max_rounds, events=events, on_event=on_event,
                              use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
     else:
-        result = answer(store, message, scope=scope or intent.part, note=intent.note, events=events)
+        result = answer(store, message, scope=scope or intent.part, note=intent.note, events=events,
+                        use_llm=use_llm, client=client)
 
     # what it's held to (CALI-55): a turn that says what the design must do updates its scorecard's checks
     if result.ok is not False and (_OBLIGATION.search(message.lower()) or _CARRIES.search(message.lower())

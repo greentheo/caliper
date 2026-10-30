@@ -1,0 +1,258 @@
+{
+  "id": "20261028-105359-56de",
+  "part": "cargo_box",
+  "kind": "parametric",
+  "created": 1793206439.2042618,
+  "bounds": {
+    "wall_h": [
+      170.0,
+      610.0
+    ],
+    "tumble": [
+      0.0,
+      300.0
+    ],
+    "shoulder": [
+      1.0,
+      2.5
+    ],
+    "nose_len": [
+      0.0,
+      400.0
+    ],
+    "nose_pinch": [
+      0.0,
+      300.0
+    ],
+    "tail_len": [
+      0.0,
+      800.0
+    ],
+    "tail_drop": [
+      0.0,
+      400.0
+    ],
+    "tail_pinch": [
+      0.0,
+      300.0
+    ]
+  },
+  "start": {
+    "width": 1955.8,
+    "depth": 1016.0,
+    "height": 1041.4,
+    "x_front": -457.2,
+    "z_bottom": 457.2,
+    "wall_h": 304.8,
+    "tumble": 0.0,
+    "shoulder": 1.0,
+    "nose_len": 0.0,
+    "nose_pinch": 0.0,
+    "tail_len": 0.0,
+    "tail_drop": 0.0,
+    "tail_pinch": 0.0,
+    "tail_curve": 1.0
+  },
+  "obstacles": [
+    "leaf_rear"
+  ],
+  "speed_kmh": 104.60736,
+  "notes": [
+    "whittle's drag model ranks shapes well; its absolute numbers are good to perhaps 30%.",
+    "Sheltered by 'leaf_rear': a face behind its silhouette feels no wind. Read the SAVINGS, not the totals: the model scores this part alone, so it misses the part partly filling the car's wake (which cuts the car's own drag). What the part really costs the vehicle is likely lower than its total here, and the savings, if anything, conservative.",
+    "Kept clear: mattress (a 75 x 38 x 6 in twin on the floor, and the 1 in walls around it).",
+    "wall_h ended at its lower limit (170) \u2014 it wanted to go further.",
+    "nose_pinch ended at its upper limit (300) \u2014 widening it may find more; the volume you allow will then be what limits it."
+  ],
+  "stations": [
+    {
+      "index": 0,
+      "removed": 0.0,
+      "metrics": {
+        "drag": 1.0,
+        "cd": 0.29704526397833275,
+        "cda_m2": 0.6050129179585763,
+        "force_n": 312.88894779887164,
+        "frontal_m2": 2.0367701199999857,
+        "wall_h": 304.8,
+        "tumble": 0.0,
+        "shoulder": 1.0,
+        "nose_len": 0.0,
+        "nose_pinch": 0.0,
+        "tail_len": 0.0,
+        "tail_drop": 0.0,
+        "tail_pinch": 0.0
+      },
+      "design": {
+        "width": 1955.8,
+        "depth": 1016.0,
+        "height": 1041.4,
+        "x_front": -457.2,
+        "z_bottom": 457.2,
+        "wall_h": 304.8,
+        "tumble": 0.0,
+        "shoulder": 1.0,
+        "nose_len": 0.0,
+        "nose_pinch": 0.0,
+        "tail_len": 0.0,
+        "tail_drop": 0.0,
+        "tail_pinch": 0.0,
+        "tail_curve": 1.0
+      },
+      "derived": {
+        "saved_n": 0.0,
+        "saved_lbf": 0.0,
+        "saved_kwh_per_100mi": 0.0
+      }
+    },
+    {
+      "index": 1,
+      "removed": 0.0431,
+      "metrics": {
+        "drag": 0.76143240633853,
+        "cd": 0.23050552876275499,
+        "cda_m2": 0.46067644198709434,
+        "force_n": 238.24378443922555,
+        "frontal_m2": 1.998548340509611,
+        "wall_h": 213.25711101026934,
+        "tumble": 61.6211454606984,
+        "shoulder": 1.3602787621451546,
+        "nose_len": 240.42744340288755,
+        "nose_pinch": 281.21381107849015,
+        "tail_len": 338.854965257744,
+        "tail_drop": 88.77790778119885,
+        "tail_pinch": 64.60991752324742
+      },
+      "design": {
+        "width": 1955.8,
+        "depth": 1016.0,
+        "height": 1041.4,
+        "x_front": -457.2,
+        "z_bottom": 457.2,
+        "wall_h": 213.25711101026934,
+        "tumble": 61.6211454606984,
+        "shoulder": 1.3602787621451546,
+        "nose_len": 240.42744340288755,
+        "nose_pinch": 281.21381107849015,
+        "tail_len": 338.854965257744,
+        "tail_drop": 88.77790778119885,
+        "tail_pinch": 64.60991752324742,
+        "tail_curve": 1.0
+      },
+      "derived": {
+        "saved_n": 74.65,
+        "saved_lbf": 16.78,
+        "saved_kwh_per_100mi": 3.337
+      }
+    },
+    {
+      "index": 2,
+      "removed": 0.0912,
+      "metrics": {
+        "drag": 0.6839203846486582,
+        "cd": 0.2067187993060601,
+        "cda_m2": 0.41378066756763654,
+        "force_n": 213.99112953091824,
+        "frontal_m2": 2.001659592435076,
+        "wall_h": 176.2575915712034,
+        "tumble": 51.82902231356081,
+        "shoulder": 1.42035127470419,
+        "nose_len": 399.6260065586291,
+        "nose_pinch": 297.5845952955982,
+        "tail_len": 662.1473305190455,
+        "tail_drop": 159.35502056095544,
+        "tail_pinch": 228.26684440058858
+      },
+      "design": {
+        "width": 1955.8,
+        "depth": 1016.0,
+        "height": 1041.4,
+        "x_front": -457.2,
+        "z_bottom": 457.2,
+        "wall_h": 176.2575915712034,
+        "tumble": 51.82902231356081,
+        "shoulder": 1.42035127470419,
+        "nose_len": 399.6260065586291,
+        "nose_pinch": 297.5845952955982,
+        "tail_len": 662.1473305190455,
+        "tail_drop": 159.35502056095544,
+        "tail_pinch": 228.26684440058858,
+        "tail_curve": 1.0
+      },
+      "derived": {
+        "saved_n": 98.9,
+        "saved_lbf": 22.23,
+        "saved_kwh_per_100mi": 4.421
+      }
+    },
+    {
+      "index": 3,
+      "removed": 0.1432,
+      "metrics": {
+        "drag": 0.6613340738336958,
+        "cd": 0.20579380305670736,
+        "cda_m2": 0.4001156577555568,
+        "force_n": 206.92412250536637,
+        "frontal_m2": 1.9442551321397332,
+        "wall_h": 170.38713643961242,
+        "tumble": 112.28032860882504,
+        "shoulder": 1.3154024574908503,
+        "nose_len": 394.9445538455966,
+        "nose_pinch": 300.0,
+        "tail_len": 784.4147433424234,
+        "tail_drop": 212.89346414501452,
+        "tail_pinch": 224.67090693840726
+      },
+      "design": {
+        "width": 1955.8,
+        "depth": 1016.0,
+        "height": 1041.4,
+        "x_front": -457.2,
+        "z_bottom": 457.2,
+        "wall_h": 170.38713643961242,
+        "tumble": 112.28032860882504,
+        "shoulder": 1.3154024574908503,
+        "nose_len": 394.9445538455966,
+        "nose_pinch": 300.0,
+        "tail_len": 784.4147433424234,
+        "tail_drop": 212.89346414501452,
+        "tail_pinch": 224.67090693840726,
+        "tail_curve": 1.0
+      },
+      "derived": {
+        "saved_n": 105.96,
+        "saved_lbf": 23.82,
+        "saved_kwh_per_100mi": 4.737
+      }
+    }
+  ],
+  "builds": 2738,
+  "seconds": 2412,
+  "searched": [
+    "wall_h",
+    "tumble",
+    "shoulder",
+    "nose_len",
+    "nose_pinch",
+    "tail_len",
+    "tail_drop",
+    "tail_pinch"
+  ],
+  "keeps": [
+    {
+      "name": "mattress",
+      "note": "a 75 x 38 x 6 in twin on the floor, and the 1 in walls around it",
+      "lo": [
+        -1473.2000000000003,
+        -977.9,
+        457.2
+      ],
+      "hi": [
+        -457.20000000000005,
+        977.9,
+        619.125
+      ]
+    }
+  ],
+  "script_sig": "4d41a56000c3"
+}

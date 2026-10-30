@@ -367,6 +367,25 @@ def _cmd_serve(args) -> int:
     return 0
 
 
+def _cmd_sample(args) -> int:
+    """CALI-59 — the sample designs: list them, open one into your designs, or save one of yours as one."""
+    from . import samples
+
+    if args.action == "list":
+        for x in samples.available():
+            print(f"{x['name']:<14} {x['title']} — {x['about']}")
+        return 0
+    if args.action == "open":
+        store = samples.open_sample(args.name, base=args.base)
+        print(f"opened {args.name} as {store.design.slug} ({store.root})")
+        return 0
+    if not args.slug:
+        print("caliper sample save <name> --slug <your design>")
+        return 2
+    print(f"saved {args.slug} as {samples.save(args.slug, args.name, base=args.base)}")
+    return 0
+
+
 def _cmd_design(args) -> int:
     """CALI-28 — inspect/create the container for a whole design (prompt + parts + history)."""
     from .design import DesignStore
@@ -537,6 +556,13 @@ def main(argv: list[str] | None = None) -> int:
     p_des.add_argument("--slug", default=None, help="for `show`: which design (default: the last argument)")
     p_des.add_argument("--base", default=None, help="designs directory (default: $CALIPER_DESIGNS or designs/)")
     p_des.set_defaults(func=_cmd_design)
+
+    p_smp = sub.add_parser("sample", help="the sample designs: list, open one, or save one of yours (CALI-59)")
+    p_smp.add_argument("action", choices=["list", "open", "save"])
+    p_smp.add_argument("name", nargs="?", default="", help="the sample (step-stool, camper)")
+    p_smp.add_argument("--slug", default=None, help="for `save`: which of your designs")
+    p_smp.add_argument("--base", default=None, help="designs directory (default: $CALIPER_DESIGNS or designs/)")
+    p_smp.set_defaults(func=_cmd_sample)
 
     p_chat = sub.add_parser("chat", help="talk to a design: one turn — route, act, re-measure (CALI-29)")
     p_chat.add_argument("slug", help="which design (see `caliper design list`)")
