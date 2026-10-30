@@ -902,7 +902,9 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
     out.append("</table>")
     # what's in the package
     out.append("<h2>What's in the package</h2><table>")
-    for folder, what in (("plasma/", "gusset plates — DXF (R12, mm) and SVG, for the plasma table"),
+    for folder, what in (("hand/", "patterns for hand tools, per part: measure-and-mark.pdf, print-full-size.pdf "
+                                   "(letter pages, print at 100%), and a pattern per piece to project and trace"),
+                         ("plasma/", "gusset plates — DXF (R12, mm) and SVG, for the plasma table"),
                          ("router/", "every nested sheet — DXF and SVG — with a 1:1 pattern.pdf and seam list per material"),
                          ("assembly/", "the drawings in this book, as PNG"),
                          ("cutlist.txt", "every tube, stick, plate and sheet, inches first"),
@@ -998,6 +1000,16 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
             f.write(png)
     with open(os.path.join(root, "assembly", "finished.png"), "wb") as f:
         f.write(draw(View(every), [(every, "now")]))
+
+    # patterns for hand tools (CALI-48): every flat piece, for a jigsaw and a tape measure
+    from . import patterns
+
+    for p in store.design.parts:
+        if p.id in versions and store.is_scripted(p.id):
+            try:
+                patterns.make(store, p.id, out_dir=os.path.join(root, "hand", p.id))
+            except ValueError:
+                pass                                   # no flat sheet pieces: nothing to trace
 
     # the files, by machine
     emit("filing", "the cut files")

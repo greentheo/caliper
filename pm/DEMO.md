@@ -45,6 +45,10 @@ Newest demos first.
 - 🆕 **Will it hold? (CALI-54, #1).** A part that says what it must carry (`loads()`, written by the designer
   from "it has to hold me, 200 lb") gets a strength check: whittle's FEA with a stress picture, a plate check
   for a panel pushed face-on, the verdict, and where it should break.
+- 🆕 **Patterns for hand tools (CALI-48, #4).** Every flat piece to measure and mark, print full size and tape,
+  or project and trace — no CNC needed.
+- 🆕 **The scorecard writes itself (CALI-55, #2).** What you say it must do becomes its checks: stated, assumed,
+  or proposed for you to keep.
 - 🆕 **Make it lighter (CALI-71, #32).** Holes where the wood isn't working, cut all the way through, rim and
   webs a jigsaw can handle, each step re-checked; adopt one and every later build cuts it.
 - 🆕 **Studies (CALI-70, #31).** One page with every study of the design, and what each part can run next.
@@ -545,6 +549,16 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-30 · Patterns for a jigsaw: measure and mark, print and tape, project and trace (CALI-48 #4)
+1. Open the stool, click it, **Built from → Patterns for hand tools → Make the patterns** (a second or two).
+2. **Measure and mark**: a page a piece, on a 1 in grid, every size from the bottom-left corner.
+3. **Print full size**: print at 100% (check the 3 in ruler in the top margin), trim, overlap the grey strips,
+   tape, trace. The map page says which page goes where.
+4. **Project and trace**: open a piece's pattern full screen on a projector, zoom until the yellow square is
+   4 in on the board, trace.
+5. Lightened walls (#32) come with their holes. The build package has them all under `hand/`.
+6. Offline: `python -m pytest tests/test_patterns.py`.
 
 ### 2026-10-30 · The conversation writes what the design is held to (CALI-55 #2)
 1. **+ New design**, describe something with a load ("…it has to hold me too (200 lb)"), answer the questions.

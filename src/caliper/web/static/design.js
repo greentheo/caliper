@@ -810,6 +810,7 @@ function historyItem(h) {
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
   if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${h.holds ? 'holds' : 'doesn\'t hold'}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  if (h.kind === 'patterns' && h.action === 'made') return `<li class="hist">patterns for hand tools (${h.pieces} pieces)</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
   if (h.kind === 'setting') return `<li class="hist">marked ${h.role === 'fixed' ? 'as a reference' : 'as a design part'}</li>`;
@@ -975,7 +976,47 @@ function builtResults(p, c) {
     ${(r.notes || []).map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}
     <div class="muted small" style="margin-top:4px">Counts are a shopping estimate (panels packed on whole sheets, cuts on
       whole sticks); the cut plan below nests the real shapes. Densities: <code>materials.py</code>.</div>
+    <div id="patternBox">${patternView(p)}</div>
     <div id="cutplanBox">${cutplanView(p)}</div>`;
+}
+
+// patterns for hand tools (CALI-48): most people have a jigsaw, not a CNC router — so every flat piece, holes and
+// all, to measure and mark, to print full size and tape, or to project and trace
+function patternView(p) {
+  const run = (S.design.pattern_runs || []).find((r) => r.part === p.id);
+  const url = (name) => `/api/designs/${S.slug}/patterns/${run.id}/${name}`;
+  const stale = run && run.version !== p.version;
+  return `<h5 style="margin:14px 0 4px">Patterns for hand tools <span class="badge">jigsaw, saw, drill</span></h5>
+    ${run ? `<div class="small">${stale ? '<span class="badge bad">the part has changed since</span> ' : ''}
+        <a href="${url('measure-and-mark.pdf')}" target="_blank" rel="noopener"><b>Measure and mark</b></a>: each piece
+        dimensioned from its square edges, on a 1 in grid ·
+        <a href="${url('print-full-size.pdf')}" target="_blank" rel="noopener"><b>Print full size</b></a> (${run.pages} letter pages:
+        print at 100% and tape) · <b>Project and trace</b>: ${run.pieces.map((x) => `<a href="${url(x.project)}" target="_blank"
+          rel="noopener">${esc(x.name)}</a>`).join(', ')}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">${run.pieces.map((x) => `<a href="${url('index.html')}"
+        target="_blank" rel="noopener" title="${esc(x.name)}"><img src="${url(x.thumb)}" alt="${esc(x.name)}"
+        style="width:100%;background:#fff;border-radius:4px;display:block"></a>`).join('')}</div>` : `<div class="muted small">For a
+      jigsaw and a tape measure: each piece dimensioned to mark out, at full size to print and tape, or to project
+      and trace. Holes included.</div>`}
+    <div class="actions"><button id="patGo">${run ? 'Make them again' : 'Make the patterns'}</button></div>
+    <div id="patProgress"></div>`;
+}
+
+function wirePatterns(p) {
+  const go = $('patGo');
+  if (!go) return;
+  go.onclick = async () => {
+    go.disabled = true;
+    $('patProgress').innerHTML = '<div class="small muted">drawing every piece…</div>';
+    try {
+      const got = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/patterns`);
+      S.design = got.design;
+      render();
+    } catch (e) {
+      $('patProgress').innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`;
+      go.disabled = false;
+    }
+  };
 }
 
 // --------------------------------------------------------------------- cut plan (CALI-45)
@@ -1030,6 +1071,7 @@ function cutplanView(p) {
 }
 
 function wireCutplan(p) {
+  wirePatterns(p);
   const go = $('cpGo');
   if (!go) return;
   go.onclick = async () => {
@@ -1840,7 +1882,7 @@ async function adoptStation(pid, wid, index, kind) {
 // way to open it where it lives. And per part, every study Caliper has: which can run on it now, and what the
 // others are missing (what to say or do to get them).
 const STUDY_BOX = { load: 'loadBox', lighten: 'loadBox', frame: 'frameBox', gussets: 'frameBox', aero: 'aeroBox', whittle: 'whittleBox',
-  cutplan: 'buildBox', scorecard: 'scoreBox', release: 'relBox' };
+  cutplan: 'buildBox', patterns: 'buildBox', scorecard: 'scoreBox', release: 'relBox' };
 const studyFilter = { kind: '', part: '' };
 
 function studiesView(d) {
