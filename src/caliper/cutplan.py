@@ -270,6 +270,10 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
     if groups:
         record["notes"].append("Panels are cut to the outside surface; joints are butt joints, as "
                                "construction() lays them out.")
+    holed = [it["name"] for it in items if it.get("kind") == "sheet" and it.get("holes")]
+    if holed:
+        record["notes"].append(f"Not on these sheets yet: the lightening holes in {', '.join(holed)}. "
+                               f"Cut them from the panels' patterns (How do I make it?), after the outlines.")
     if any((M.sheet(m).get("cut") or {}).get("fold_deg", 0) > 0 for m, _ in groups):
         record["notes"].append("Score lines: on foam, cut a V-groove on the INSIDE face (the unmarked side) "
                                "and fold it closed; mountain/valley as marked, the marked side is the outside.")

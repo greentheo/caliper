@@ -16,8 +16,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import (aero, chat, clarify, construction, cutplan, frame_study, load_study, promote, release,
-               scorecard, studies)
+from . import (aero, chat, clarify, construction, cutplan, frame_study, lighten, load_study, promote,
+               release, scorecard, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -184,7 +184,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         except Exception as e:  # noqa: BLE001
             part_errors = {"<design>": f"{type(e).__name__}: {e}"}
     proposal = promote.pending(store)
-    runs = {"load": load_study.list_runs(store), "frame": frame_study.list_runs(store),
+    runs = {"load": load_study.list_runs(store), "lighten": lighten.list_runs(store),
+            "frame": frame_study.list_runs(store),
             "gussets": frame_study.list_gussets(store), "aero": aero.list_runs(store),
             "whittle": wb.list_runs(store), "cutplan": cutplan.list_runs(store),
             "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
@@ -205,6 +206,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "aero_runs": runs["aero"],
         "frame_runs": runs["frame"],
         "load_runs": runs["load"],
+        "lighten_runs": runs["lighten"],
         "cutplans": runs["cutplan"],
         "gusset_runs": runs["gussets"],
         "scorecards": runs["scorecard"][:2],
@@ -431,6 +433,47 @@ def router():
 
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
         return {"job_id": job.id}
+
+    # -- lighten (CALI-71): through-cuts where the wood isn't working, every station checked in 3D --------
+    @r.post("/api/designs/{slug}/lighten")
+    def lighten_run(slug: str, req: LoadRequest):
+        store = load(slug)
+        if store.design.part(req.part) is None:
+            raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
+        if not _aero_available():
+            raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
+
+        def work(j):
+            s = DesignStore.load(slug)
+            return lighten.study(s, req.part, min_safety=req.min_safety,
+                                 emit=lambda k, t="", **d: j.emit(k, t, **d))
+
+        job = RUNNER.submit("lighten", work, label=f"lighten · {req.part}", lock=f"load:{slug}")
+        return {"job_id": job.id}
+
+    @r.get("/api/designs/{slug}/lighten/{rid}/stations/{index}.stl")
+    def lighten_station(slug: str, rid: str, index: int):
+        store = load(slug)
+        try:
+            path = lighten.station_path(store, rid, index)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="bad run id")
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="no such station")
+        with open(path, "rb") as f:
+            return Response(f.read(), media_type="model/stl")
+
+    @r.post("/api/designs/{slug}/lighten/{rid}/adopt")
+    def lighten_adopt(slug: str, rid: str, req: Adopt):
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                got = lighten.adopt(store, rid, req.station)
+            except FileNotFoundError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+            store.append_log({"kind": "lighten", "action": "adopted", "run": rid, "station": req.station,
+                              "version": got["version"]})
+            return {**got, "design": design_state(store)}
 
     @r.get("/api/designs/{slug}/load-study/{rid}/cases/{index}.json")
     def load_heat(slug: str, rid: str, index: int):

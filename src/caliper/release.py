@@ -873,6 +873,19 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
         out.append(f"<div class='step'><h3><span class='k'>{s['n']}</span>{_e(s['title'])}</h3>"
                    f"<img class='draw' src='{_e(s['img'])}' alt='step {s['n']}'><ol>"
                    + "".join(f"<li>{_e(d)}</li>" for d in s["do"]) + "</ol></div>")
+    # will it hold (CALI-71): every load, its safety, and where it should break — with room for where it did
+    if rec.get("strength"):
+        out.append("<h2 class='page'>Will it hold?</h2><table><tr><th>part</th><th>carrying</th>"
+                   "<th class='n'>safety</th><th class='n'>breaks at (predicted)</th><th class='n'>broke at (measured)</th></tr>")
+        for pid, cases in rec["strength"].items():
+            for c in cases:
+                breaks = f"about {c['breaks_lb']:,.0f} lb" if c.get("breaks_lb") else "—"
+                out.append(f"<tr><td>{_e(pid)}</td><td>{_e(c['name'])}, {c['lb']:g} lb × {c['factor']:g}</td>"
+                           f"<td class='n'>{_num(c.get('safety'))}x</td><td class='n'>{breaks}</td>"
+                           f"<td class='n'>______ lb</td></tr>")
+        out.append("</table><p class='note'>The prediction is for the load placed the same way. To test it, load it "
+                   "there a little at a time and write down where it gave. The glue and screws aren't modelled, "
+                   "so if it's a joint that goes, that's worth knowing too.</p>")
     # the scorecard as released
     out.append("<h2 class='page'>Scorecard, as released</h2><table><tr><th></th><th>check</th><th class='n'>value</th>"
                "<th class='n'>margin</th><th>trust</th></tr>")
@@ -1026,7 +1039,15 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
         notes += [n for n in plan.get("notes") or [] if n not in notes]
     notes.append("Print the pattern PDFs at 100% (no fit-to-page) and put a ruler on the scale bar before cutting "
                  "from them.")
-    rec = {"id": rid, "created": time.time(), "design": store.design.name,
+    from . import load_study
+
+    strength = {}
+    for pid, v in versions.items():
+        run = next((r for r in load_study.list_runs(store, pid) if r.get("version") == v), None)
+        if run:
+            strength[pid] = [{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")}
+                             for c in run["cases"]]
+    rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength,
            "slug": os.path.basename(store.root), "versions": versions,
            "card": {"created": card["created"], "summary": card["summary"]},
            "ready": card["summary"]["fail"] == 0 and card["summary"]["unknown"] == 0,

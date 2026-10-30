@@ -45,6 +45,8 @@ Newest demos first.
 - 🆕 **Will it hold? (CALI-54, #1).** A part that says what it must carry (`loads()`, written by the designer
   from "it has to hold me, 200 lb") gets a strength check: whittle's FEA with a stress picture, a plate check
   for a panel pushed face-on, the verdict, and where it should break.
+- 🆕 **Make it lighter (CALI-71, #32).** Holes where the wood isn't working, cut all the way through, rim and
+  webs a jigsaw can handle, each step re-checked; adopt one and every later build cuts it.
 - 🆕 **Studies (CALI-70, #31).** One page with every study of the design, and what each part can run next.
 - 🆕 **How it's built, in 3D (CALI-52).** Any part that says what it's built from can show its pieces in the
   viewport — panels, skeleton, tubes, plates — in layers you switch on and off.
@@ -543,6 +545,16 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-30 · Make the stool lighter, in holes a jigsaw can cut (CALI-71 #32)
+1. Open the stool, click it, **Will it hold? → Make it lighter → Lighten the panels** (about a minute). The
+   table goes from solid to four rounded windows (49% of the walls, 3.3 lb lighter), each step checked again.
+2. Click a step to see it in place (orange). **Cut these holes in step_stool** makes it the part: its weight
+   drops under **Built from**, and every later revision keeps the holes.
+3. **Other thicknesses → Use** on 5/8 in asks the designer to make it from 5/8 in plywood.
+4. Make the build package: the book has a **Will it hold?** page with the predicted breaking load and a blank
+   for the measured one.
+5. Offline: `python -m pytest tests/test_lighten.py`.
 
 ### 2026-10-30 · A stool gets a stool's panels; a part says what it is now (CALI-67 #27, CALI-69 #29)
 1. `make serve`, open the stool, click it: **Size, Rules, Will it hold?, Built from, History** — no drag

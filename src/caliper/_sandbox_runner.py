@@ -26,6 +26,8 @@ DECLARED = ("construction", "members", "loads")
 
 def _declared(ns: dict, params: dict) -> dict:
     """The part's declarations at these params, or ``{"error": ...}`` if one raises."""
+    from caliper.holes import NAME, merge
+
     out = {}
     for name in DECLARED:
         f = ns.get(name)
@@ -35,6 +37,8 @@ def _declared(ns: dict, params: dict) -> dict:
             out[name] = f(params, None) if len(inspect.signature(f).parameters) > 1 else f(params)
         except Exception as e:  # noqa: BLE001 — a broken declaration is feedback, not a crash
             return {"error": f"{name}() raised {type(e).__name__}: {e}"}
+    if out.get("construction") and isinstance(ns.get(NAME), list):
+        out["construction"] = merge(out["construction"], ns[NAME])
     return out
 
 
@@ -77,6 +81,9 @@ def main() -> int:
         result = builder(params)
         if result is None:
             raise ValueError("build(params) returned None — it must return a cadquery Workplane/Solid")
+        from caliper.holes import NAME, cut
+
+        result = cut(result, ns.get(NAME), cq)        # lightening holes Caliper wrote (CALI-71)
         cq.exporters.export(result, step_path)
         _write({"ok": True, "error": "", "traceback": "", "declared": _declared(ns, params)})
     except Exception as e:  # noqa: BLE001 — build errors are first-class feedback for the author loop

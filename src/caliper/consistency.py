@@ -98,13 +98,18 @@ def segment_distance(points: np.ndarray, a, b) -> np.ndarray:
     return np.linalg.norm(points - (a + t[:, None] * ab), axis=1)
 
 
-def polygon_samples(poly, n: int = GRID) -> np.ndarray:
-    """Points spread over a flat polygon's face: a grid in its plane, kept where it's inside."""
+def polygon_samples(poly, n: int = GRID, holes=()) -> np.ndarray:
+    """Points spread over a flat polygon's face: a grid in its plane, kept where it's inside (and not in
+    one of its ``holes``, polygons on the same face)."""
     o, u, v, _, flat = _frame(np.asarray(poly, float))
     lo, hi = flat.min(axis=0), flat.max(axis=0)
     g = (np.arange(n) + 0.5) / n
     grid = np.stack(np.meshgrid(lo[0] + g * (hi[0] - lo[0]), lo[1] + g * (hi[1] - lo[1])), -1).reshape(-1, 2)
-    keep = grid[_inside2d(grid, flat)]
+    inside = _inside2d(grid, flat)
+    for h in holes:
+        rel = np.asarray(h, float) - o
+        inside &= ~_inside2d(grid, np.stack([rel @ u, rel @ v], axis=1))
+    keep = grid[inside]
     if not len(keep):
         keep = flat
     return o + keep[:, :1] * u + keep[:, 1:] * v
@@ -131,9 +136,11 @@ def shapes(declared: dict) -> list[dict]:
         if item.get("kind") == "sheet":
             polys = [item["outline"]] if item.get("outline") else list(item["facets"])
             t = float(item["thickness"])
+            holes = [np.asarray(h, float) for h in item.get("holes") or []] if item.get("outline") else []
             out.append({"name": name, "kind": "sheet", "polys": [np.asarray(p, float) for p in polys],
-                        "thickness": t, "volume": sum(C.polygon(p)[0] for p in polys) * t,
-                        "material": item.get("material")})
+                        "thickness": t, "holes": holes, "material": item.get("material"),
+                        "volume": (sum(C.polygon(p)[0] for p in polys)
+                                   - sum(C.polygon(h.tolist())[0] for h in holes)) * t})
         elif item.get("kind") == "stick":
             half, diag, area = _section(item)
             a, b = (np.asarray(item[k], float) for k in ("a", "b"))
@@ -164,7 +171,8 @@ def _sides(mesh, pieces: list[dict]) -> None:
             continue
         pc["sides"], pc["mids"] = [], []
         for poly in pc["polys"]:
-            pts, n = polygon_samples(poly), np.asarray(C.polygon(poly.tolist())[2], float)
+            pts = polygon_samples(poly, holes=pc.get("holes") if len(pc["polys"]) == 1 else ())
+            n = np.asarray(C.polygon(poly.tolist())[2], float)
             best = None
             for side in (1.0, -1.0):
                 mid = pts + side * n * pc["thickness"] / 2

@@ -315,16 +315,14 @@ def runs_dir(store: DesignStore) -> str:
     return os.path.join(store.root, "loads")
 
 
-def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
-          emit: Optional[Callable] = None) -> dict:
-    """Every load the part declares, through whittle's FEA and the plate check. Returns the run record."""
-    from scipy import ndimage
+def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None) -> dict:
+    """Everything a strength check of this part needs, set up once: its loads, pieces and material, the
+    voxels, where it's held. Shared by :func:`study` and the lightening study (``lighten.py``)."""
     from whittle import LoadStudy, Material, Mesh
 
     from .consistency import _sides, shapes, tolerance
 
     emit = emit or (lambda *a, **k: None)
-    t0 = time.time()
     declared = C.declared(store, part_id)
     if not declared.get("loads"):
         raise ValueError(f"'{part_id}' doesn't say what it must hold: its script has no loads()")
@@ -353,6 +351,77 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     attach = np.zeros(ls.grid.shape, dtype=bool)
     for h in held:
         attach |= ls.region(box=_grow(h["lo"], h["hi"], grow))
+    boxes = []
+    for load in loads:
+        box = _grow(load["lo"], load["hi"], grow)
+        try:
+            attach |= ls.region(box=box)
+        except ValueError:
+            raise ValueError(f"'{load['name']}' doesn't touch the part — it pushes on thin air")
+        boxes.append(box)
+    return {"declared": declared, "loads": loads, "boxes": boxes, "mesh": mesh, "pieces": pieces,
+            "mat": mat, "tol": tol, "spacing": spacing, "coarse": coarse, "held": held, "ls": ls,
+            "attach": attach}
+
+
+def check_load(ctx: dict, i: int, min_safety: float, solid=None):
+    """One load through the FEA (on ``solid``, the part's voxels unless given) and the plate check.
+    Returns ``(case, result)``; the case is the record's entry for it."""
+    from scipy import ndimage
+
+    ls, load, box, mat = ctx["ls"], ctx["loads"][i], ctx["boxes"][i], ctx["mat"]
+    ls.loads = []
+    ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
+    r = ls.solver().solve(ls.solid if solid is None else solid)
+    case = {"name": load["name"], "lb": load["lb"], "factor": load["factor"],
+            "force_n": [round(v, 1) for v in load["force"]], "lo": load["lo"], "hi": load["hi"]}
+    if not r.supported:
+        case.update({"holds": False, "safety": 0.0, "governs": "fea", "fea": {"supported": False},
+                     "why": "nothing connects where it's pushed to where it's held"})
+        return case, r
+    # judged beside, not at, where loads and supports attach: a voxel model's stress there is the mesh's
+    near = ndimage.binary_dilation(ctx["attach"], iterations=1)
+    judged = r.solid & ~near
+    if judged.sum() < 20:
+        judged = r.solid
+    vm = np.where(judged, r.von_mises, 0.0)
+    hot = np.unravel_index(int(np.argmax(vm)), vm.shape)
+    at = np.asarray(ls.grid.origin) + ls.grid.spacing * np.asarray(hot)
+    peak = float(vm[hot])
+    fea = {"supported": True, "peak_mpa": round(peak, 2), "robust_mpa": round(float(r.peak_stress), 2),
+           "safety": round(mat["strength"] / peak, 2) if peak > 0 else None,
+           "deflection_mm": round(float(r.max_displacement), 3),
+           "at": [round(float(x), 1) for x in at], "in": _nearest_piece(at, ctx["pieces"])}
+    pl = plate_check(ctx["pieces"], load, mat, ctx["tol"])
+    options = [("fea", fea["safety"])]
+    if pl and pl.get("done"):
+        options.append(("plate", pl["safety_across"]))
+    governs, safety = min(((k, s) for k, s in options if s is not None), key=lambda x: x[1],
+                          default=("fea", None))
+    case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
+                 "holds": bool(safety is not None and safety >= min_safety),
+                 # where it's predicted to break, placed the same way: linear to failure, as wood is
+                 # close to; the joints aren't modelled and may go first
+                 "breaks_lb": round(load["lb"] * load["factor"] * safety, -1) if safety else None})
+    return case, r
+
+
+NOTES = [
+    "The FEA takes the joints as solid wood and its panel edges come out partly clamped, so it reads "
+    "stiffer than glued-and-screwed; the plate check frees the edges, the safe side. Neither checks the "
+    "glue or the screws.",
+    "“Breaks at” is the load, placed the same way, at which the governing check reaches the material's "
+    "strength: a prediction to test, not a rating.",
+]
+
+
+def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
+          emit: Optional[Callable] = None) -> dict:
+    """Every load the part declares, through whittle's FEA and the plate check. Returns the run record."""
+    emit = emit or (lambda *a, **k: None)
+    t0 = time.time()
+    ctx = prepare(store, part_id, emit)
+    loads, mat, held = ctx["loads"], ctx["mat"], ctx["held"]
 
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     out_dir = os.path.join(runs_dir(store), rid)
@@ -360,68 +429,25 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     cases = []
     for i, load in enumerate(loads):
         emit("case", f"{load['name']}: {load['lb']:g} lb × {load['factor']:g}", progress=i / len(loads))
-        box = _grow(load["lo"], load["hi"], grow)
-        ls.loads = []
-        try:
-            ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
-        except ValueError:
-            raise ValueError(f"'{load['name']}' doesn't touch the part — it pushes on thin air")
-        r = ls.analyze()
-        case = {"name": load["name"], "lb": load["lb"], "factor": load["factor"],
-                "force_n": [round(v, 1) for v in load["force"]], "lo": load["lo"], "hi": load["hi"]}
-        if not r.supported:
-            case.update({"holds": False, "safety": 0.0, "governs": "fea",
-                         "fea": {"supported": False},
-                         "why": "nothing connects where it's pushed to where it's held"})
-            cases.append(case)
-            continue
-        near = ndimage.binary_dilation(attach | ls.region(box=box), iterations=1)
-        judged = r.solid & ~near
-        if judged.sum() < 20:
-            judged = r.solid
-        vm = np.where(judged, r.von_mises, 0.0)
-        hot = np.unravel_index(int(np.argmax(vm)), vm.shape)
-        at = np.asarray(ls.grid.origin) + ls.grid.spacing * np.asarray(hot)
-        peak = float(vm[hot])
-        fea = {"supported": True, "peak_mpa": round(peak, 2), "robust_mpa": round(float(r.peak_stress), 2),
-               "safety": round(mat["strength"] / peak, 2) if peak > 0 else None,
-               "deflection_mm": round(float(r.max_displacement), 3),
-               "at": [round(float(x), 1) for x in at], "in": _nearest_piece(at, pieces)}
-        pl = plate_check(pieces, load, mat, tol)
-        options = [("fea", fea["safety"])]
-        if pl and pl.get("done"):
-            options.append(("plate", pl["safety_across"]))
-        governs, safety = min(((k, s) for k, s in options if s is not None), key=lambda x: x[1],
-                              default=("fea", None))
-        case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
-                     "holds": bool(safety is not None and safety >= min_safety),
-                     # where it's predicted to break, placed the same way: linear to failure, as wood is
-                     # close to; the joints aren't modelled and may go first
-                     "breaks_lb": round(load["lb"] * load["factor"] * safety, -1) if safety else None})
-        with open(os.path.join(out_dir, f"case_{i:02d}.json"), "w") as f:
-            json.dump(heat_mesh(mesh, ls.grid, r.von_mises, r.solid, 2 * spacing), f)
-        case["heat"] = f"case_{i:02d}.json"
+        case, r = check_load(ctx, i, min_safety)
+        if r.supported:
+            with open(os.path.join(out_dir, f"case_{i:02d}.json"), "w") as f:
+                json.dump(heat_mesh(ctx["mesh"], ctx["ls"].grid, r.von_mises, r.solid, 2 * ctx["spacing"]), f)
+            case["heat"] = f"case_{i:02d}.json"
         cases.append(case)
 
-    notes = [
-        f"{mat['name']}: E {mat['E']:g} MPa, strength {mat['strength']:g} MPa — {mat['basis']}.",
-        "The FEA takes the joints as solid wood and its panel edges come out partly clamped, so it "
-        "reads stiffer than glued-and-screwed; the plate check frees the edges, the safe side. Neither "
-        "checks the glue or the screws.",
-        "“Breaks at” is the load, placed the same way, at which the governing check reaches the "
-        "material's strength: a prediction to test, not a rating.",
-    ]
+    notes = [f"{mat['name']}: E {mat['E']:g} MPa, strength {mat['strength']:g} MPa — {mat['basis']}.", *NOTES]
     if mat.get("note"):
         notes.append(mat["note"])
-    if coarse:
-        notes.append(coarse)
+    if ctx["coarse"]:
+        notes.append(ctx["coarse"])
     if any(h.get("default") for h in held):
         notes.append("Held by the floor: everything at its underside, as if it stands on a flat floor.")
     worst = min((c["safety"] for c in cases if c.get("safety") is not None), default=None)
     record = {
         "id": rid, "part": part_id, "kind": "load", "created": time.time(),
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
-        "material": mat, "spacing_mm": round(spacing, 2), "voxels": int(ls.solid.sum()),
+        "material": mat, "spacing_mm": round(ctx["spacing"], 2), "voxels": int(ctx["ls"].solid.sum()),
         "min_safety": min_safety, "held": held, "cases": cases, "notes": notes,
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),
     }

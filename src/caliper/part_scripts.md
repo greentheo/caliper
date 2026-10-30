@@ -137,6 +137,14 @@ the round.
 `held()` says where the part is held, as boxes of the same form (`name`, `lo`, `hi`). Leave it out for a
 part that stands on the floor: Caliper holds it at its underside.
 
+## Holes Caliper cuts: HOLES
+
+When a lightening study is used, Caliper writes `HOLES` into the script: a list of holes cut all the way
+through named panels, as data (`piece`, `normal`, `depth`, `polygons` on the panel's outline face). Caliper
+cuts them from whatever `build()` returns and adds them to the named pieces, so don't cut them in `build()`
+or list them in `construction()` yourself. Keep `HOLES` as it is. If you change a panel's size or move it,
+say so in your reply: its holes were placed for the panel as it was, and the study should be run again.
+
 ## How far a search may go: RANGES
 
 ```python

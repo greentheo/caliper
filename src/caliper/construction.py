@@ -64,6 +64,10 @@ _out = {{}}
 if callable(globals().get('construction')):
     _f = construction
     _out['construction'] = _f({{}}, _b) if len(_inspect.signature(_f).parameters) > 1 else _f({{}})
+    if isinstance(globals().get('HOLES'), list):
+        from caliper.holes import merge as _merge
+        _out['construction'] = _merge(_out['construction'], HOLES)
+        _out['holes'] = HOLES
     _out['build'] = {{**(globals().get('BUILD') or {{}}), **_b}}
 if isinstance(globals().get('BUILD_OPTIONS'), dict):
     _out['build_options'] = BUILD_OPTIONS
@@ -287,8 +291,11 @@ def piece(item: dict) -> list[dict]:
         if not polys:
             raise ValueError(f"sheet {name!r} has no outline")
         parts = [polygon(p) for p in polys]
-        area = sum(a for a, _, _ in parts)
-        at = tuple(sum(a * c[k] for a, c, _ in parts) / area for k in range(3)) if area else parts[0][1]
+        gone = [polygon(h) for h in item.get("holes") or []]      # lightening cut-outs (CALI-71)
+        outline = sum(a for a, _, _ in parts)
+        area = outline - sum(a for a, _, _ in gone)
+        at = (tuple((sum(a * c[k] for a, c, _ in parts) - sum(a * c[k] for a, c, _ in gone)) / area
+                    for k in range(3)) if area > 0 else parts[0][1])
         flat = len(parts) == 1 or _coplanar(parts)
         if flat:
             n0 = parts[0][2]
@@ -300,7 +307,7 @@ def piece(item: dict) -> list[dict]:
                  "label": f"{M.nominal(t)} {mat['name']}", "area_mm2": area,
                  "mass_kg": area * 1e-6 * t * 1e-3 * mat["density"], "at": list(at),
                  "size_mm": [round(size[0], 1), round(size[1], 1)], "flat": flat,
-                 "group": item.get("group")}]
+                 "group": item.get("group"), **({"holes": len(gone)} if gone else {})}]
         for cover in item.get("covers") or []:
             if not cover or cover == "none":
                 continue
