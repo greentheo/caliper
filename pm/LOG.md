@@ -40,6 +40,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Tests: `test_kidbook.py` (a wooden build gets one and a welded frame doesn't; the pages in order with the top
   last, a kid's words, the start-hole line, the promise, a drawing per piece, the screws adding up; the drawings
   show a panel's holes and look at the picture).
+- Commits: `14d939d`, `96584bf` (the shop book's wood panels). PR #52. **Full suite on this branch, the stack's top: 530 passed.**
 
 ### 2026-10-30 · CALI-80 (#48) · Record the test: predicted against measured
 - Showcase 1 (#10): "Dad stands on it, then sandbags go on until it breaks. Record the predicted vs measured here."
@@ -60,6 +61,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Tests: `test_trials.py` (the prediction from the load to where it breaks, as a range, and what to measure with;
   none without a check on this version; steps kept and compared, the card's line, where it broke, an older
   version's test reads as stale; the API).
+- Commit: `b957193`. PR #51.
 
 ### 2026-10-30 · CALI-78 (#46) · A picture on it: a T-rex cut out of the side, and it still holds Dad
 - Showcase 1 (#10): "a stool to reach the sink, with a T-rex on it". The kid's ask is the hook; the engineering
@@ -94,6 +96,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   out and the eye dropped; panels nobody stands on, upright as seen from outside; a T-rex on the side cut and still
   holding, on the rebuilt part; lightening leaves it alone and adopting keeps it; too weak shrinks it, hopeless
   changes nothing; the chat routes it and leaves parts alone; a drawing from the pad cut through the API).
+- Commit: `c2ecdc0`. PR #50. **Full suite: 523 passed.**
 
 ### 2026-10-30 · CALI-76 (#44), CALI-77 (#45), CALI-68 (#28) · Three leftovers: fast cards, holes on the CNC sheet, measuring error
 - **Theo:** "Please do the seven PR merge stack. Then Showcase 1 and the three leftovers." The stack (#25, #30, #33,
@@ -123,6 +126,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   panel's triangles: the panel less the hole, facing out, eight boundary edges; the stool's left wall with a 2 in
   hole cut on its sheet), `test_promote.py` (18.98 holds a 3/4 in wall rule, 15.88 doesn't; only measured sizes
   get the allowance; a drafted rule says so), the old exact-text expectations updated.
+- Commits: `916745e` (#44), `f3ccee0` (the pin), `2db111e` (#45), `7622e00` (#28). PR #49.
 
 ### 2026-10-30 · CALI-59 (#8) · First run: one sentence in, four answers out
 - **Theo:** "let's go #8". Spec step 5: first run lands on the four questions.
