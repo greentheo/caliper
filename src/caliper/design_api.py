@@ -40,6 +40,12 @@ class ClarifyAnswers(BaseModel):
     build: bool = False               # then build it, check it and plan its making (CALI-59, first run)
 
 
+class PictureRequest(BaseModel):
+    subject: str = ""                 # what to draw ("a T-rex"), or what the drawing is
+    where: str = ""                   # which panel, in words ("the side")
+    points: list[list[float]] = []    # a drawing from the pad, x right and y down
+
+
 class DesignSettings(BaseModel):
     display_units: Optional[str] = None
 
@@ -511,6 +517,43 @@ def router():
                                     emit=lambda k, t="", **d: j.emit(k, t, **d))
 
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
+        return {"job_id": job.id}
+
+    # -- a picture on it (CALI-78): drawn or said, cut out of a panel, checked it still holds -----------------
+    @r.get("/api/designs/{slug}/parts/{pid}/picture")
+    def picture_panels(slug: str, pid: str):
+        from . import pictures
+
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+        try:
+            found = pictures.panels(store, pid)
+        except Exception as e:  # noqa: BLE001 — a part with no panels: say so
+            raise HTTPException(status_code=422, detail=f"no panel to put a picture on: {e}")
+        return {"panels": [{"name": p["name"], "room_in2": round(p["room"].area / 645.16, 1)} for p in found]}
+
+    @r.post("/api/designs/{slug}/parts/{pid}/picture")
+    def picture_run(slug: str, pid: str, req: PictureRequest):
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+        if not req.points and not req.subject.strip():
+            raise HTTPException(status_code=422, detail="say what to draw, or draw it")
+
+        def work(j):
+            s = DesignStore.load(slug)
+            said = (f"(drew {req.subject or 'a picture'} to cut out" if req.points else f"(put {req.subject} on it") \
+                + (f", {req.where})" if req.where else ")")
+            s.append_log({"kind": "message", "text": said, "scope": pid, "action": "picture", "part": pid})
+            res = chat.picture_part(s, pid, req.subject or "picture", req.where, points=req.points or None,
+                                    strength=_aero_available(),
+                                    on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            s.append_log({"kind": "reply", "action": "picture", "part": pid, "version": res.version, "ok": res.ok,
+                          "reply": res.reply})
+            return turn_result(res)
+
+        job = RUNNER.submit("picture", work, label=f"picture · {pid}", lock=_lock(slug))
         return {"job_id": job.id}
 
     # -- the four questions (spec step 1): each answered in a line anyone can read --------------------------
