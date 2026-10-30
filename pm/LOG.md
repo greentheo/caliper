@@ -41,7 +41,8 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Tests: `test_load_study.py` (6: the plate formula against Timoshenko and the hand number; loads parsing;
   a load in thin air fails the round; the stool with an overhanging top gets the FEA and no plate check; a
   box stool gets the plate check, grain both ways, thicknesses, breaking load; no loads, no study),
-  `test_studies.py` (4), and the strength reply in `test_promote.py`.
+  `test_studies.py` (4), and the strength reply in `test_promote.py`. **Full suite: 470 passed.**
+- Commits: `4e7d2a1` (strength), `1e17020` (studies page), `b7a2ef5` (docs), on PR #30.
 
 ### 2026-10-29 · CALI-54 (#1) · The designer writes what a part is built from, and it's checked
 - **Theo:** "go ahead and start on #1 with the stool". First slice: from a plain request, the designer writes
