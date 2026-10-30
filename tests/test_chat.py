@@ -367,3 +367,41 @@ def test_the_author_is_told_to_keep_dimensions_in_params(gantry):
 
     prompt = authoring.system_prompt()
     assert "PARAMS = {" in prompt and "p = {**PARAMS, **(params or {})}" in prompt
+
+
+# --- CALI-69: a revision that changes what the part is changes its description ---------------------
+class _Describer:
+    """A stand-in for Claude that re-describes the part, and records what it was shown."""
+
+    def __init__(self, text):
+        self.text, self.seen = text, []
+        self.messages = self
+
+    def create(self, **kw):
+        self.seen.append(kw)
+        block = type("B", (), {"type": "text", "text": self.text})()
+        return type("M", (), {"content": [block]})()
+
+
+def test_a_revision_re_describes_the_part(gantry):
+    pytest.importorskip("cadquery")
+    claude = _Describer("A single-platform carriage block, 60 mm wide, machined from one billet.")
+    res = chat.refine_part(gantry, "carriage", "make it one block, 60mm wide", use_llm=True, client=claude,
+                           author=_author(_box(dx=60, dy=20, y=40)), max_rounds=2, promote_feedback=False)
+    assert res.ok
+    assert gantry.design.part("carriage").intent == claude.text
+    shown = claude.seen[0]["messages"][0]["content"]
+    assert "the X carriage" in shown and "make it one block" in shown and "def build" in shown
+    # and what the conversation says the part is reads the new one
+    assert claude.text in chat.turn(gantry, "what parts exist?", use_llm=False).reply
+
+
+def test_offline_the_description_says_what_changed_rather_than_going_stale(gantry):
+    pytest.importorskip("cadquery")
+    chat.refine_part(gantry, "carriage", "make it 60mm wide", use_llm=False,
+                     author=_author(_box(dx=60, dy=20, y=40)), max_rounds=2, promote_feedback=False)
+    assert gantry.design.part("carriage").intent == "the X carriage (revised: make it 60mm wide)"
+    chat.refine_part(gantry, "carriage", "make it 70mm wide", use_llm=False,
+                     author=_author(_box(dx=70, dy=20, y=40)), max_rounds=2, promote_feedback=False)
+    # the latest change only: the script is the record, the description just mustn't mislead
+    assert gantry.design.part("carriage").intent == "the X carriage (revised: make it 70mm wide)"
