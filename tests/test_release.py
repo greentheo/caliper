@@ -151,3 +151,20 @@ def test_nothing_to_build_from_is_refused(tmp_path):
     if cutplan.available() is None:
         with pytest.raises(ValueError, match="nothing to cut"):
             R.make(s, pdf=False)
+
+
+@needs_unfolder
+def test_the_book_keeps_where_it_should_break_with_room_for_where_it_did(store):
+    """CALI-71: the strength check's prediction goes to the shop with the release, ready for the break test."""
+    from caliper import load_study
+
+    run = os.path.join(load_study.runs_dir(store), "20261030-000000-test")
+    os.makedirs(run)
+    with open(os.path.join(run, "run.json"), "w") as f:
+        json.dump({"id": "20261030-000000-test", "part": "crate", "version": 1, "created": 1.0,
+                   "cases": [{"name": "Dad standing", "lb": 200, "factor": 2, "safety": 3.11,
+                              "breaks_lb": 1240, "governs": "plate"}]}, f)
+    rec = R.make(store, pdf=False)
+    assert rec["strength"]["crate"][0]["breaks_lb"] == 1240
+    book = open(os.path.join(R.releases_dir(store), rec["id"], "index.html")).read()
+    assert "Will it hold?" in book and "about 1,240 lb" in book and "______ lb" in book

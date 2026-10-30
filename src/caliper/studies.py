@@ -48,6 +48,7 @@ def in_air(design, parts: list[dict], has_runs: bool = False) -> dict:
 #: Every kind of study, in the order the menu offers them: the question it answers, and its label.
 KINDS = {
     "load": ("Strength", "Will it hold what it must carry?"),
+    "lighten": ("Lighten", "Holes where the wood isn't working, cut all the way through, still holding"),
     "frame": ("Frame sizing", "The lightest tubes that still hold, and what the hitch carries"),
     "gussets": ("Gusset plates", "Plates for the frame's hardest-worked joints, cut for a plasma table"),
     "aero": ("Drag shape search", "The numbers in its script that cut drag, within their ranges"),
@@ -94,6 +95,12 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
                 else worst["name"])
         return (("holds" if r.get("holds") else "doesn't hold") + f" — weakest {what}"
                 + (f" (needs {r.get('min_safety', 2):g}x)" if not r.get("holds") else ""), bool(r.get("holds")))
+    if kind == "lighten":
+        best = max((x for x in r.get("stations", []) if x.get("holds")), key=lambda x: x["removed"], default=None)
+        if best is None or not best["removed"]:
+            return "nothing lighter holds", False
+        return (f"up to {best['removed']:.0%} out of the walls ({best['saved_lb']:g} lb lighter), "
+                f"still {round(best['safety'], 1):g}x"), True
     if kind == "frame":
         ok = [s for s in r.get("stations", []) if s.get("safety", 0) >= r.get("min_safety", 0)]
         if not ok:
@@ -184,6 +191,9 @@ def menu(p: dict, air: Optional[dict] = None) -> list[dict]:
              "a frame's strength is its frame sizing" if p.get("framed") else
              "say what it must carry (“it has to hold me, 200 lb, standing on top”) and the designer adds "
              "its loads()" if not p.get("loads") else "it doesn't say what it's built from (construction())"),
+        item("lighten", p.get("loads") and p.get("built") and not p.get("framed"),
+             roll if mesh else "a frame is lightened by sizing its tubes" if p.get("framed")
+             else "check what it must hold first (its loads())"),
         item("frame", p.get("framed"), roll if mesh else "it isn't a welded tube frame (members() and supports())"),
         item("gussets", p.get("framed") and p.get("gussets"),
              "its frame names no joints for plates (GUSSETS)" if p.get("framed") else "it isn't a tube frame"),

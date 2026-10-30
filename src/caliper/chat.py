@@ -343,7 +343,7 @@ TUNABLE = """
 
 Keep the script in the shape the part-script reference gives (PARAMS first, build() merging overrides).
 If it declares what it's built from (BUILD and construction(), members() and supports()), what it must
-hold (loads()) or keeps(), RANGES and LAYOUTS, keep every one of them, describing the same part as
+hold (loads()) or keeps(), RANGES, LAYOUTS and HOLES, keep every one of them, describing the same part as
 build(): move a panel or a tube in one and move it in the others. A part made from sheet goods, lumber
 or tube that doesn't declare construction() yet should get one, and one whose requirements say what it
 must carry should get loads()."""

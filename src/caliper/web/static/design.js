@@ -770,6 +770,7 @@ function historyItem(h) {
       : h.action === 'aero' ? `shaped for drag — station ${h.station}`
       : h.action === 'whittle' ? `from whittle${h.station != null ? ' — station ' + h.station : ''}`
       : h.action === 'build' ? 'construction changed'
+      : h.action === 'lighten' ? `lightened — step ${h.station}`
       : h.action === 'restore' ? `rolled back to v${h.restored_from}` : h.action;
     return `<li class="hist"><span class="v">v${h.version}</span>${esc(what)}
       ${h.feedback && h.action !== 'author' ? `<div>“${esc(h.feedback)}”</div>` : ''}
@@ -780,6 +781,7 @@ function historyItem(h) {
   }
   if (h.kind === 'whittle') return `<li class="hist">studied in whittle (${esc(h.study)}, ${h.stations} stations)</li>`;
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
+  if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
   if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${h.holds ? 'holds' : 'doesn\'t hold'}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
@@ -1160,7 +1162,30 @@ function loadView(p) {
         × at each load times its factor</span></div>
     <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button></div>
     <div id="lProgress"></div>
-    ${runs.length ? loadResults(p, runs[pick], runs) : ''}`;
+    ${runs.length ? loadResults(p, runs[pick], runs) : ''}
+    ${runs.length ? lightenView(p) : ''}`;
+}
+
+// make it lighter (CALI-71): holes where the wood isn't working, through the thickness, each step re-checked
+function lightenRuns(pid) { return (S.design.lighten_runs || []).filter((r) => r.part === pid); }
+function lightenView(p) {
+  const run = lightenRuns(p.id)[0];
+  const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
+  const best = run && run.stations.filter((x) => x.holds).reduce((a, x) => (!a || x.removed > a.removed ? x : a), null);
+  return `<h5 style="margin:14px 0 4px">Make it lighter</h5>
+    <div class="muted small">Holes where the wood isn't working, cut all the way through so a jigsaw can make them,
+      with a solid rim where it's glued and screwed. Every step is checked again with its holes in.</div>
+    <div class="actions"><button id="lightGo">${run ? 'Lighten it again' : 'Lighten the panels'}</button></div>
+    <div id="lightProgress"></div>
+    ${run ? `<div class="small" style="margin-top:6px">${best && best.removed
+      ? `It can lose <b>${pct(best.removed)}</b> of its walls (<b>${lbs(best.saved_lb)}</b>) and still hold ${sx(best.safety)}.`
+      : 'Nothing lighter still holds.'}${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
+    <div class="tw"><table class="st"><tr><th>#</th><th>out of the walls</th><th>lighter</th><th>holes</th><th>safety</th></tr>
+      ${run.stations.map((x) => `<tr class="pick ${x.index === on ? 'on' : ''}" data-lst="${x.index}"><td>${x.index}</td>
+        <td>${pct(x.removed)}</td><td>${lbs(x.saved_lb)}</td><td>${x.holes}</td>
+        <td style="color:var(${x.holds ? '--ok' : '--bad'})">${sx(x.safety)}</td></tr>`).join('')}</table></div>
+    <div class="muted small" style="margin-top:4px">Click a step to see it; <b>Cut these holes</b> makes it the part.</div>
+    ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}` : ''}`;
 }
 
 const sx = (v) => (v == null ? '—' : `${+Number(v).toFixed(1)}x`);
@@ -1181,11 +1206,15 @@ function loadCase(p, run, c, i) {
     const thin = ok.length ? ok[0] : null;
     return `<details class="small" style="margin-top:4px"><summary>Other thicknesses (plate check)${thin
       ? ` — the thinnest that holds: <b>${esc(thin.label)}</b>` : ''}</summary>
-      <table class="st"><tr><th style="text-align:left">${esc(run.material.name)}</th><th>grain wrong way</th><th>grain right</th><th>sags</th></tr>
-      ${pl.by_thickness.map((b) => `<tr${Math.abs(b.thickness_mm - pl.thickness_mm) < 0.01 ? ' class="on"' : ''}>
+      <table class="st"><tr><th style="text-align:left">${esc(run.material.name)}</th><th>grain wrong way</th><th>grain right</th><th>sags</th><th></th></tr>
+      ${pl.by_thickness.map((b) => { const now = Math.abs(b.thickness_mm - pl.thickness_mm) < 0.01;
+        const nowLabel = (pl.by_thickness.find((x) => Math.abs(x.thickness_mm - pl.thickness_mm) < 0.01) || {}).label;
+        return `<tr${now ? ' class="on"' : ''}>
         <td style="text-align:left">${esc(b.label)}</td>
         <td style="color:var(${b.safety_across >= run.min_safety ? '--ok' : '--bad'})">${sx(b.safety_across)}</td>
-        <td>${sx(b.safety)}</td><td>${len(b.deflection_mm, 3)}</td></tr>`).join('')}</table></details>`;
+        <td>${sx(b.safety)}</td><td>${len(b.deflection_mm, 3)}</td>
+        <td>${now ? '<span class="muted">now</span>' : b.safety_across >= run.min_safety
+          ? `<button class="ghost" data-use-t="Make it from ${esc(b.label)} ${esc(run.material.name)} instead of ${esc(nowLabel || 'what it is now')}">Use</button>` : ''}</td></tr>`; }).join('')}</table></details>`;
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
@@ -1218,12 +1247,43 @@ function wireLoad(p) {
   if (go) go.onclick = () => runLoad(p);
   const sel = $('lRun');
   if (sel) sel.onchange = () => { S.loadRun[p.id] = +sel.value; clearStation(); renderInspector(); };
+  const lg = $('lightGo');
+  if (lg) lg.onclick = () => runLighten(p);
+  document.querySelectorAll('#loadBox tr[data-lst]').forEach((tr) => {
+    tr.onclick = () => showStation(p.id, lightenRuns(p.id)[0], +tr.dataset.lst);
+  });
+  document.querySelectorAll('#loadBox [data-use-t]').forEach((b) => {
+    b.onclick = () => send(b.dataset.useT, p.id);
+  });
   document.querySelectorAll('#loadBox [data-heat]').forEach((b) => {
     b.onclick = () => {
       const runs = loadRuns(p.id), run = runs[Math.min(S.loadRun[p.id] || 0, runs.length - 1)];
       showHeat(p.id, run, +b.dataset.heat);
     };
   });
+}
+
+async function runLighten(p) {
+  const prog = $('lightProgress'), go = $('lightGo');
+  go.disabled = true;
+  prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="lightMsg">starting…</div>';
+  try {
+    const runs = loadRuns(p.id);
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/lighten`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2 });
+    await follow(job_id, (ev) => {
+      const msg = $('lightMsg'), bar = prog.querySelector('.bar > i');
+      if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
+      if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
+    });
+    clearStation();
+    await refresh();
+    const run = lightenRuns(p.id)[0];
+    const best = run && run.stations.filter((x) => x.holds).reduce((a, x) => (!a || x.removed > a.removed ? x : a), null);
+    if (best && best.index) showStation(p.id, run, best.index);
+  } catch (e) {
+    prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    go.disabled = false;
+  }
 }
 
 async function runLoad(p) {
@@ -1695,9 +1755,9 @@ async function runWhittle(p) {
 }
 
 // show a station in place of its part, with the part's current shape as a ghost around it
-const STUDY_PATH = { parametric: 'aero', frame: 'frame-study' };
+const STUDY_PATH = { parametric: 'aero', frame: 'frame-study', lighten: 'lighten' };
 async function showStation(pid, run, index) {
-  const parametric = run.kind === 'parametric', framed = run.kind === 'frame';
+  const parametric = run.kind === 'parametric', framed = run.kind === 'frame', lightened = run.kind === 'lighten';
   try {
     const r = await fetch(`/api/designs/${S.slug}/${STUDY_PATH[run.kind] || 'whittle'}/${run.id}/stations/${index}.stl`);
     if (!r.ok) throw new Error(`station ${index}: HTTP ${r.status}`);
@@ -1717,15 +1777,19 @@ async function showStation(pid, run, index) {
     const bar = $('stationBar');
     bar.hidden = false;
     const removed = parametric ? st.removed : st.removed_part;
-    const what = framed
+    const what = lightened
+      ? `<span>step <b>${index}</b> · ${pct(st.removed)} out of the walls · ${lbs(st.saved_lb)} lighter ·
+        <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
+      : framed
       ? `<span>design <b>${index}</b> · ${st.mass_lb} lb of steel · weakest ${st.safety}x · sags ${len(st.deflection_mm, 2)}</span>`
       : `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume
       ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>`;
     bar.innerHTML = `${what}
-      <button class="primary" id="adoptBtn">${framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>
+      ${lightened && !index ? '' : `<button class="primary" id="adoptBtn" ${lightened && !st.holds ? 'disabled' : ''}>${lightened ? 'Cut these holes in '
+        : framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`}
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };
-    $('adoptBtn').onclick = () => adoptStation(pid, run.id, index, run.kind);
+    if ($('adoptBtn')) $('adoptBtn').onclick = () => adoptStation(pid, run.id, index, run.kind);
     paint(); renderInspector();
   } catch (e) { showErr(e.message); }
 }
@@ -1748,7 +1812,7 @@ async function adoptStation(pid, wid, index, kind) {
 // Every study the design has, newest first: the part and the version it ran on, the line it came to, and a
 // way to open it where it lives. And per part, every study Caliper has: which can run on it now, and what the
 // others are missing (what to say or do to get them).
-const STUDY_BOX = { load: 'loadBox', frame: 'frameBox', gussets: 'frameBox', aero: 'aeroBox', whittle: 'whittleBox',
+const STUDY_BOX = { load: 'loadBox', lighten: 'loadBox', frame: 'frameBox', gussets: 'frameBox', aero: 'aeroBox', whittle: 'whittleBox',
   cutplan: 'buildBox', scorecard: 'scoreBox', release: 'relBox' };
 const studyFilter = { kind: '', part: '' };
 
