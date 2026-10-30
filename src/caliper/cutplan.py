@@ -83,7 +83,8 @@ def _outward(poly: list, centre) -> list:
 def panels_obj(items: list[dict], title: str, centre=None) -> str:
     """Sheet items as an OBJ: one group per panel, in mm. Faces are written as the polygons they are
     (unfold-to-sheets fans them into triangles; the panels here are convex), facing away from ``centre``
-    when it's given (the outside surface outward)."""
+    when it's given (the outside surface outward). A flat panel with lightening holes is written as triangles
+    around them (CALI-77): the unfolder reads a piece's inner boundaries as holes and cuts them on its sheet."""
     lines = [f"# {title} — written by Caliper for unfold-to-sheets", "# units: mm"]
     n = 0
     for it in items:
@@ -92,11 +93,47 @@ def panels_obj(items: list[dict], title: str, centre=None) -> str:
             polys = [_outward(poly, centre) for poly in polys]
         lines.append(f"g {it['name']}")
         for poly in polys:
+            if it.get("outline") and it.get("holes"):
+                verts, tris = holed_face(poly, it["holes"])
+                lines += [f"v {x:.3f} {y:.3f} {z:.3f}" for x, y, z in verts]
+                lines += ["f " + " ".join(str(n + k + 1) for k in tri) for tri in tris]
+                n += len(verts)
+                continue
             for x, y, z in poly:
                 lines.append(f"v {x:.3f} {y:.3f} {z:.3f}")
             lines.append("f " + " ".join(str(n + k + 1) for k in range(len(poly))))
             n += len(poly)
     return "\n".join(lines) + "\n"
+
+
+def holed_face(outline: list, holes: list) -> tuple[list, list]:
+    """A flat outline with holes through it, as vertices and triangles wound the way the outline is: in the
+    outline's plane, so the holes (drawn on the same face) come out as the piece's inner boundaries."""
+    import manifold3d
+    import numpy as np
+
+    P = np.asarray(outline, float)
+    o = P[0]
+    n = np.zeros(3)
+    for i in range(len(P)):                                  # Newell: the way the outline is wound
+        a, b = P[i], P[(i + 1) % len(P)]
+        n += [(a[1] - b[1]) * (a[2] + b[2]), (a[2] - b[2]) * (a[0] + b[0]), (a[0] - b[0]) * (a[1] + b[1])]
+    n /= np.linalg.norm(n) or 1.0
+    u = P[1] - P[0]
+    u -= (u @ n) * n
+    u /= np.linalg.norm(u) or 1.0
+    v = np.cross(n, u)
+
+    def flat(poly, ccw):
+        q = (np.asarray(poly, float) - o) @ np.stack([u, v]).T
+        area = 0.5 * float(np.sum(q[:, 0] * np.roll(q[:, 1], -1) - np.roll(q[:, 0], -1) * q[:, 1]))
+        return q if (area > 0) == ccw else q[::-1]
+
+    rings = [flat(P, True)] + [flat(h, False) for h in holes]
+    tris = np.asarray(manifold3d.triangulate(rings), int)
+    flat2 = np.concatenate(rings)
+    verts = [tuple(o + p[0] * u + p[1] * v) for p in flat2]
+    return verts, [tuple(int(k) for k in t) for t in tris]
 
 
 def _stock(material: str) -> tuple[dict, dict]:
@@ -272,8 +309,8 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
                                "construction() lays them out.")
     holed = [it["name"] for it in items if it.get("kind") == "sheet" and it.get("holes")]
     if holed:
-        record["notes"].append(f"Not on these sheets yet: the lightening holes in {', '.join(holed)}. "
-                               f"Cut them from the panels' patterns (How do I make it?), after the outlines.")
+        record["notes"].append(f"Cut the holes in {', '.join(holed)} before their outlines, so the panel is "
+                               f"still held by the sheet while they're cut.")
     if any((M.sheet(m).get("cut") or {}).get("fold_deg", 0) > 0 for m, _ in groups):
         record["notes"].append("Score lines: on foam, cut a V-groove on the INSIDE face (the unmarked side) "
                                "and fold it closed; mountain/valley as marked, the marked side is the outside.")

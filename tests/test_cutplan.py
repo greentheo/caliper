@@ -131,3 +131,54 @@ def test_every_face_is_written_facing_out():
         return n
 
     assert normal(vs[:4])[1] > 0 and normal(vs[4:])[1] < 0       # each facing away from the middle
+
+
+def test_a_holed_panel_is_written_around_its_holes_facing_out():
+    """CALI-77: the unfolder reads a piece's inner boundaries as holes, so the panel goes as triangles round them."""
+    import numpy as np
+
+    from caliper import holes
+
+    face = [(0, 0, 0), (0, 200, 0), (0, 200, 100), (0, 0, 100)]
+    hole = [(0, 50, 30), (0, 90, 30), (0, 90, 70), (0, 50, 70)]
+    text = cutplan.panels_obj([{"name": "left", "outline": face, "holes": [hole]}], "t", centre=(100, 100, 50))
+    vs = np.array([list(map(float, ln.split()[1:])) for ln in text.splitlines() if ln.startswith("v ")])
+    fs = [[int(k) - 1 for k in ln.split()[1:]] for ln in text.splitlines() if ln.startswith("f ")]
+    assert len(vs) == 8 and all(len(f) == 3 for f in fs)
+    area = sum(holes.area([vs[i] for i in f]) for f in fs)
+    assert area == pytest.approx(200 * 100 - 40 * 40)             # the panel less the hole, no more, no less
+    for f in fs:                                                  # every triangle faces away from the middle
+        a, b, c = vs[f]
+        assert np.cross(b - a, c - a)[0] < 0
+    # and an edge used once is a boundary: the outline's four and the hole's four
+    edges: dict = {}
+    for f in fs:
+        for i in range(3):
+            e = tuple(sorted((f[i], f[(i + 1) % 3])))
+            edges[e] = edges.get(e, 0) + 1
+    assert sum(1 for c in edges.values() if c == 1) == 8
+
+
+@needs_unfolder
+def test_the_cut_plan_cuts_the_lightening_holes(tmp_path):
+    from .test_lighten import HOLE
+    from .test_load_study import BOX_STOOL
+
+    s = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    s.write_part("stool", BOX_STOOL + HOLE, intent="a box stool with a hole in its left side")
+    rec = cutplan.run(s, "stool")
+    assert not any("Not on these sheets" in n for n in rec["notes"])
+    assert any("Cut the holes in left" in n for n in rec["notes"])
+    root = os.path.join(cutplan.runs_dir(s), rec["id"], rec["sheets"][0]["key"], "sheets")
+    svg = open(os.path.join(root, "sheet-01.svg")).read()
+    cut = svg.split('<g id="cut"')[1].split("</g>")[0]
+    assert cut.count("<path") == 6                                # five panels and the hole
+    # the hole is 2 in square, wherever the left side landed on the sheet
+    import re
+
+    sizes = []
+    for d in re.findall(r'd="([^"]+)"', cut):
+        pts = [tuple(map(float, p.split())) for p in re.findall(r"[ML]\s*([-\d.]+ [-\d.]+)", d)]
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        sizes.append(sorted([max(xs) - min(xs), max(ys) - min(ys)]))
+    assert [pytest.approx(50.8, abs=0.1)] * 2 in sizes

@@ -37,10 +37,12 @@ not a cut plan — that needs the joinery, and comes next.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import math
 import subprocess
 import sys
+import threading
 from typing import Optional
 
 from . import materials as M
@@ -111,6 +113,11 @@ def declared(store: DesignStore, part_id: str, build: Optional[dict] = None,
     if not declares(script) and "def keeps(" not in script and "def loads(" not in script:
         return {}
     probe = script + _PROBE.format(build=json.dumps(build or {}))
+    key = hashlib.sha256(probe.encode()).hexdigest()
+    with _SEEN_MU:
+        seen = _SEEN.get(key)
+    if seen is not None:
+        return json.loads(seen)                 # a fresh copy: callers may change what they get
     try:
         out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
                              timeout=timeout)
@@ -121,7 +128,20 @@ def declared(store: DesignStore, part_id: str, build: Optional[dict] = None,
         tail = [ln for ln in out.stderr.strip().splitlines() if ln.strip()]
         raise ValueError(f"couldn't read what '{part_id}' is built from: "
                          f"{tail[-1] if tail else 'no output'}")
-    return json.loads(line[len("@@BUILT@@"):])
+    text = line[len("@@BUILT@@"):]
+    with _SEEN_MU:
+        _SEEN[key] = text
+        while len(_SEEN) > _SEEN_MOST:
+            _SEEN.pop(next(iter(_SEEN)))
+    return json.loads(text)
+
+
+#: What a script declares, by the script (and its BUILD what-if) it came from: running it takes a second and a
+#: half in its own process, and one set of four cards asked nine times (CALI-59). The same text declares the same
+#: thing, so a change to the script is a new key.
+_SEEN: dict = {}
+_SEEN_MU = threading.Lock()
+_SEEN_MOST = 128
 
 
 def from_members(members: list[dict]) -> list[dict]:

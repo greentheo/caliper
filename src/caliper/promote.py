@@ -65,6 +65,11 @@ DESIGN_VOCABULARY = """  min_clearance(a, b)              smallest gap between t
   bbox(part).dx / .dy / .dz        one part's size in mm
   <part_id>                        every part in the design is bound by id"""
 
+#: CALI-68 (#28): how far a measurement can be off, on a part that's right. Parts are measured on a mesh
+#: tessellated to 0.05 mm, so a size can read up to 0.05 short at each side; a wall is ray-cast across that
+#: mesh from just inside its surface (19.05 mm ply reads 18.98). A rule that pins one of them allows for it.
+MEASURING = {"min_wall": 0.15, "bbox.dx": 0.1, "bbox.dy": 0.1, "bbox.dz": 0.1}
+
 _ID_OK = re.compile(r"^[a-z][a-z0-9_]*$")
 _YES = re.compile(r"\b(yes|yep|yeah|sure|ok|okay|do it|lock it in|lock that in|enforce|keep it|accept|"
                   r"please do|go ahead|sounds good)\b")
@@ -106,6 +111,9 @@ class Proposal:
         scope = "the design" if self.level == "design" else f"'{self.part}'"
         actual = "" if self.actual is None else f" (measured {_fmt(self.actual)})"
         lines = [f"💡 I can lock that in as a test on {scope}:", f"    {self.id}: {self.expr}"]
+        allowed = re.search(r" [-+] (\d+(?:\.\d+)?)\b", self.expr)
+        if allowed and any(k.split(".")[-1] in self.expr for k in MEASURING):
+            lines.append(f"    (the {allowed.group(1)} mm is what measuring it can be off by, on a part that's right)")
         if self.holds_now:
             lines.append(f"    ✓ it holds now{actual}. Every future revision would be checked "
                          f"against it.")
@@ -275,16 +283,30 @@ def _bounds(expr: str):
     kind = _OPS.get(type(tree.ops[0]))
     if kind is None:
         return None
-    rhs = tree.comparators[0]
-    if not isinstance(rhs, ast.Constant) or not isinstance(rhs.value, (int, float)):
+    value = _number(tree.comparators[0])
+    if value is None:
         return None
-    value = float(rhs.value)
     left = ast.unparse(tree.left).replace(" ", "")
     if kind == "ge":
         return left, value, math.inf
     if kind == "le":
         return left, -math.inf, value
     return left, value, value
+
+
+def _number(node) -> Optional[float]:
+    """A literal number, or literal numbers added and taken away (``19.05 - 0.15``, CALI-68)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+        return float(node.value)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        v = _number(node.operand)
+        return None if v is None else -v
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub)):
+        a, b = _number(node.left), _number(node.right)
+        if a is None or b is None:
+            return None
+        return a + b if isinstance(node.op, ast.Add) else a - b
+    return None
 
 
 def _incompatible(a, b) -> bool:
@@ -332,11 +354,51 @@ def _unique_id(store: DesignStore, aid: str, level: str) -> str:
     return out
 
 
+def _measured_as(node) -> Optional[str]:
+    """The measurement a comparison's left side is, in :data:`MEASURING`'s terms (``bbox(lid).dz`` counts as
+    ``bbox.dz``), or None."""
+    if isinstance(node, ast.Name):
+        return node.id if node.id in MEASURING else None
+    if isinstance(node, ast.Attribute) and node.attr in ("dx", "dy", "dz"):
+        base = node.value
+        if (isinstance(base, ast.Name) and base.id == "bbox") or (
+                isinstance(base, ast.Call) and isinstance(base.func, ast.Name) and base.func.id == "bbox"):
+            return f"bbox.{node.attr}"
+    return None
+
+
+def allow_for_measuring(expr: str) -> str:
+    """``min_wall >= 19.05`` -> ``min_wall >= 19.05 - 0.15``: a rule pinning a measured size, with what measuring
+    it can be off by written into it, so a part that's right reads as holding. Anything else unchanged."""
+    try:
+        tree = ast.parse(expr, mode="eval").body
+    except SyntaxError:
+        return expr
+    if not isinstance(tree, ast.Compare) or len(tree.ops) != 1:
+        return expr
+    rhs = tree.comparators[0]
+    what = _measured_as(tree.left)
+    if what is None or not isinstance(rhs, ast.Constant) or not isinstance(rhs.value, (int, float)) \
+            or isinstance(rhs.value, bool):
+        return expr
+    tol, left, v = MEASURING[what], ast.unparse(tree.left), ast.unparse(rhs)      # their number, as written
+    op = type(tree.ops[0])
+    if op in (ast.GtE, ast.Gt):
+        return f"{left} {'>=' if op is ast.GtE else '>'} {v} - {tol:g}"
+    if op in (ast.LtE, ast.Lt):
+        return f"{left} {'<=' if op is ast.LtE else '<'} {v} + {tol:g}"
+    if op is ast.Eq:
+        return f"{v} - {tol:g} <= {left} <= {v} + {tol:g}"
+    return expr
+
+
 def _candidate(store: DesignStore, aid: str, expr: str, level: str, part: str, why: str,
                source: str = "offline") -> Draft:
-    """Build and **validate** a candidate. A proposal that won't evaluate is never returned."""
+    """Build and **validate** a candidate. A proposal that won't evaluate is never returned. A rule that pins a
+    measured size allows for what measuring it can be off by (CALI-68)."""
     if not _ID_OK.match(aid):
         return Draft(measurable=True, reason=f"bad assertion id {aid!r}", rejected=[aid])
+    expr = allow_for_measuring(expr)
     aid = _unique_id(store, aid, level)
     v = validate(store, expr, level, part)
     if not v.ok:
