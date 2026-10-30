@@ -300,8 +300,42 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
     _metric(metrics, "waste.usd", cw["waste_usd"], "$", "of it left as offcut", "guess", "cut plan + prices")
     _metric(metrics, "waste.pct", round(cw["waste_pct"] * 100, 1), "%", "offcut, by cost", "measured", "cut plan")
 
-    # the user's checks and objectives
+    # will it hold (CALI-54): each part's own loads(), from its strength check on this version (run if missing)
+    from . import load_study
+
+    worst = None
+    for p in store.design.parts:
+        if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
+            continue
+        run = next((r for r in load_study.list_runs(store, p.id) if r.get("version") == p.version), None)
+        if run is None:
+            emit("strength", f"checking what {p.id} must hold")
+            try:
+                run = load_study.study(store, p.id)
+            except Exception as e:  # noqa: BLE001 — a check that can't run is unknown, not a crash
+                _metric(metrics, f"strength.{p.id}.error", str(e), "", f"{p.id}'s strength couldn't be checked",
+                        "model", "strength")
+                continue
+        breaks = [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
+        if run.get("safety") is not None:
+            _metric(metrics, f"strength.{p.id}.safety", run["safety"], "×", f"{p.id}, its weakest load",
+                    "model", "strength check")
+            worst = run["safety"] if worst is None else min(worst, run["safety"])
+        if breaks:
+            prev = metrics.get("strength.breaks_lb", {}).get("value")
+            _metric(metrics, "strength.breaks_lb", min(breaks + ([prev] if prev else [])), "lb",
+                    "the smallest predicted breaking load", "model", "strength check")
+    if worst is not None:
+        _metric(metrics, "strength.safety", worst, "×", "the weakest load any part must carry", "model",
+                "strength check")
+
+    # the user's checks and objectives (a proposed one is shown, and binds once it's kept: CALI-55)
     for c in g["checks"]:
+        if c.get("source") == "proposed":
+            m = metrics.get(c["metric"])
+            checks.append({**c, "status": "proposed", "value": m["value"] if m else None, "margin": None,
+                           "trust": m["trust"] if m else None, "unit": m["unit"] if m else ""})
+            continue
         m = metrics.get(c["metric"])
         if m is None or not isinstance(m["value"], (int, float)):
             checks.append({**c, "status": "unknown", "value": None, "margin": None, "trust": None})
@@ -325,7 +359,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             "objectives": objectives, "metrics": metrics, "cost": cw,
             "summary": {"pass": sum(c["status"] == "pass" for c in checks),
                         "fail": sum(c["status"] == "fail" for c in checks),
-                        "unknown": sum(c["status"] not in ("pass", "fail") for c in checks)}}
+                        "unknown": sum(c["status"] not in ("pass", "fail", "proposed") for c in checks),
+                        "proposed": sum(c["status"] == "proposed" for c in checks)}}
     os.makedirs(cards_dir(store), exist_ok=True)
     with open(os.path.join(cards_dir(store), time.strftime("%Y%m%d-%H%M%S") + ".json"), "w") as f:
         json.dump(card, f, indent=2, default=str)

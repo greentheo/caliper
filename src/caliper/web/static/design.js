@@ -682,18 +682,36 @@ function scoreView(d) {
     return u === '$' ? `$${n}` : `${n}${u ? ' ' + esc(u) : ''}`;
   };
   const tag = (t) => t ? `<span class="badge" title="how far to trust it">${esc(TRUST[t] || t)}</span>` : '';
-  const goals = d.has_goals ? '' : '<div class="muted small">No <code>scorecard.yaml</code> yet: only the design\'s own rules are checked. Tell me what it must do and I\'ll write it.</div>';
-  if (!card) return `${goals}<div class="actions"><button id="scGo">Score it</button></div><div id="scProgress"></div>`;
+  // where a check came from (CALI-55): the person's words, an assumption, kept, or only proposed so far
+  const from = (c) => c.source === 'stated' ? `<span class="badge ok" title="${esc(c.quote || '')}">you said</span>`
+    : c.source === 'assumed' ? '<span class="badge">assumed</span>'
+    : c.source === 'confirmed' ? '<span class="badge ok">kept</span>'
+    : c.source === 'proposed' ? `<span class="badge" title="${esc(c.why || '')}">proposed</span>
+        <button class="ghost" data-goal="${esc(c.id)}" data-keep="1">Keep</button><button class="ghost" data-goal="${esc(c.id)}" data-keep="0">Drop</button>`
+    : '';
+  const held = (d.goals && d.goals.checks) || [];
+  const goals = !d.has_goals
+    ? '<div class="muted small">Nothing to hold it to yet but its own rules. Tell me what it must do (“it has to hold me, 200 lb”, “under $50”) and I\'ll write it down.</div>'
+    : d.goals && !d.goals.ours ? '<div class="muted small">Held to its <code>scorecard.yaml</code>, as written by hand.</div>' : '';
+  if (!card) {
+    return `${held.length ? `<ul class="list small">${held.map((c) => `<li>${c.source === 'proposed' ? '◇' : '·'} ${esc(c.label || c.id)} ${from(c)}
+        ${c.why && c.source === 'proposed' ? `<div class="muted">${esc(c.why)}</div>` : ''}</li>`).join('')}</ul>` : ''}
+      ${goals}<div class="actions"><button id="scGo">Score it</button></div><div id="scProgress"></div>`;
+  }
   const delta = (o) => {
     if (o.change == null || Math.abs(o.change) < 1e-9) return '';
     const better = o.direction === 'max' ? o.change > 0 : o.change < 0;
     return ` <span class="small" style="color:var(${better ? '--ok' : '--bad'})">${o.change > 0 ? '+' : ''}${num(o.change)}</span>`;
   };
-  return `<div class="small">${card.summary.pass} pass · <b style="color:var(--bad)">${card.summary.fail} fail</b>${card.summary.unknown ? ` · ${card.summary.unknown} unknown` : ''}
+  return `<div class="small">${card.summary.pass} pass · <b style="color:var(--bad)">${card.summary.fail} fail</b>${card.summary.unknown ? ` · ${card.summary.unknown} unknown` : ''}${card.summary.proposed ? ` · ${card.summary.proposed} proposed` : ''}
       <span class="muted">· scored ${new Date(card.created * 1000).toLocaleString()}</span>
       ${stale ? '<span class="badge bad">a part has changed since</span>' : ''}</div>
-    <ul class="list small" style="margin-top:6px">${card.checks.map((c) => `<li>${c.status === 'pass' ? '✓' : c.status === 'fail' ? '<span style="color:var(--bad)">✗</span>' : '?'}
-      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${tag(c.trust)}</li>`).join('')}</ul>
+    <ul class="list small" style="margin-top:6px">${card.checks.map((c) => { const now = held.find((x) => x.id === c.id) || c;
+      return `<li>${c.status === 'pass' ? '✓' : c.status === 'fail' ? '<span style="color:var(--bad)">✗</span>' : c.status === 'proposed' ? '◇' : '?'}
+      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
+      ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}</li>`; }).join('')}
+      ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${esc(c.label || c.id)} ${from(c)}
+        <span class="muted">— new since this card</span></li>`).join('')}</ul>
     <table class="st" style="margin-top:6px">${card.objectives.map((o) => `<tr><td style="text-align:left">${esc(o.label)}</td>
       <td>${num(o.value, o.unit)}${delta(o)}</td><td>${tag(o.trust)}</td></tr>`).join('')}</table>
     ${card.cost ? `<details class="small" style="margin-top:6px"><summary>Stock: $${Math.round(card.cost.usd)} · offcut $${Math.round(card.cost.waste_usd)}</summary>
@@ -705,6 +723,15 @@ function scoreView(d) {
 }
 
 function wireScore() {
+  document.querySelectorAll('#scoreBox [data-goal]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        S.design = await api('POST', `/api/designs/${S.slug}/goals/${encodeURIComponent(b.dataset.goal)}`, { keep: b.dataset.keep === '1' });
+        render();
+      } catch (e) { showErr(e.message); b.disabled = false; }
+    };
+  });
   const go = $('scGo');
   if (!go) return;
   go.onclick = async () => {

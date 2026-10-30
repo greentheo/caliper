@@ -16,8 +16,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import (aero, chat, clarify, construction, cutplan, frame_study, lighten, load_study, promote,
-               release, scorecard, studies)
+from . import (aero, chat, clarify, construction, cutplan, frame_study, goals, lighten, load_study,
+               promote, release, scorecard, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -100,6 +100,10 @@ class FrameRequest(BaseModel):
 class LoadRequest(BaseModel):
     part: str
     min_safety: float = load_study.MIN_SAFETY     # at each load times its factor
+
+
+class GoalDecision(BaseModel):
+    keep: bool
 
 
 class GussetRequest(BaseModel):
@@ -215,9 +219,15 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "in_air": air,
         "studies": studies.index(store, runs, parts, air),
         "has_goals": os.path.exists(scorecard.goals_path(store)),
+        "goals": _goals_summary(store),
         "cutplan_unavailable": cutplan.available(),
         "aero_available": _aero_available(),
     }
+
+
+def _goals_summary(store: DesignStore) -> dict:
+    data = goals.read(store)
+    return {"ours": goals.ours(data), "checks": data.get("checks") or [], "objectives": data.get("objectives") or []}
 
 
 def _run_summary(rec: dict) -> dict:
@@ -313,7 +323,14 @@ def router():
         with RUNNER.locked(_lock(slug)):
             store = load(slug)
             clarify.answer_round(store, req.answers, skip=req.skip)
-            return design_state(store)
+
+        def checks(j):                  # what it's held to, from the answers (CALI-55), off the request
+            with RUNNER.locked(_lock(slug)):
+                s = DesignStore.load(slug)
+                return goals.update(s, "(the answers to the clarifying questions)")
+
+        RUNNER.submit("goals", checks, label=f"checks · {slug}", lock=f"goals:{slug}")
+        return design_state(load(slug))
 
     @r.post("/api/designs/{slug}/chat")
     def chat_turn(slug: str, req: ChatMessage):
@@ -433,6 +450,19 @@ def router():
 
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
         return {"job_id": job.id}
+
+    # -- what it's held to (CALI-55): keep or drop a check the conversation proposed -------------------
+    @r.post("/api/designs/{slug}/goals/{check_id}")
+    def goal_decide(slug: str, check_id: str, req: GoalDecision):
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                goals.decide(store, check_id, req.keep)
+            except KeyError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+            except ValueError as e:
+                raise HTTPException(status_code=409, detail=str(e))
+            return design_state(store)
 
     # -- lighten (CALI-71): through-cuts where the wood isn't working, every station checked in 3D --------
     @r.post("/api/designs/{slug}/lighten")

@@ -58,6 +58,8 @@ _REVERT = re.compile(r"\b(roll(\s+\w+)?\s*back|revert|undo|go\s+back|put\s+it\s+
 #: Feedback phrased as an obligation is a *rule*, not a one-off tweak — worth saying so even
 #: when Caliper can't turn it into a number (CALI-30).
 _OBLIGATION = re.compile(r"\b(must|always|never|needs? to|has to|should (?:never|always|not)?)\b")
+#: CALI-55: a number with a unit is usually a requirement ("under 10 lb", "16 in wide", "$50").
+_MEASURE = re.compile(r"\d\s*(?:lb|lbs|kg|in|inch|inches|mm|cm|ft|feet|mph|%)\b|\$\s*\d", re.I)
 #: CALI-54: feedback about what a part carries — a strength requirement, which goes into its loads().
 _CARRIES = re.compile(r"\b(hold|holds|carry|carries|support|supports|bear|weight|load|loads|lb|lbs|kg|pounds)\b")
 
@@ -741,6 +743,18 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
     else:
         result = answer(store, message, scope=scope or intent.part, note=intent.note, events=events)
 
+    # what it's held to (CALI-55): a turn that says what the design must do updates its scorecard's checks
+    if result.ok is not False and (_OBLIGATION.search(message.lower()) or _CARRIES.search(message.lower())
+                                   or _MEASURE.search(message)):
+        from . import goals
+
+        try:
+            said = goals.reply(goals.update(store, message, use_llm=use_llm, client=client))
+        except Exception as e:  # noqa: BLE001 — the change landed; the checks catch up next turn
+            said = ""
+            _emit(events, on_event, "error", f"couldn't update the scorecard's checks: {e}")
+        if said:
+            result.reply = f"{result.reply}\n\n{said}" if result.reply else said
     _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)
     # the reply TEXT is logged too, so a reloaded page can redraw the conversation as it was
     store.append_log({"kind": "reply", "action": result.action, "part": result.part,
