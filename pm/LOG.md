@@ -46,7 +46,9 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Tests: `test_firstrun.py` (one sentence in, four answers out: each step in order, its strength check at its
   checks' safety, its patterns, the reply; a failed build adds nothing; no strength check without whittle; through
   the API: answering builds it and a second build is refused; plain-words routing and the explain prompt),
-  `test_samples.py`, `test_errors.py`; `test_answers.py` updated for a one-part design.
+  `test_samples.py`, `test_errors.py`; `test_answers.py` updated for a one-part design; the build book's title is
+  the design's short name now. **Full suite: 517 passed** (422, then the 95 after `test_release.py`).
+- Commit: `73f6499`, PR into `main` (the seven-PR stack #25 → #41 merged into `main` first, in order).
 
 ### 2026-10-30 · CALI-73 (#39), CALI-74 (#40) · Lighter until the safety runs out; the four questions, steps 2–4
 - **Theo:** "it seems that we've hit an artificial limit… still 3.1X safe even though we removed 3.3 pounds,
