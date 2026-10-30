@@ -29,6 +29,8 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - **Not yet in #4:** the shop itself (machines and stock as a design input), the printer, routing by machine.
 - Tests: `test_patterns.py` (3: pieces lie flat, long edge down, holes in place; every printed page is
   8.5 × 11 in and the PDFs, SVG and history are right; nothing flat, no patterns) and `hand/` in the release.
+  **Full suite (over #2 and #4): 486 passed.**
+- Commit: `92248f0`, PR #37 (stacked on #36).
 
 ### 2026-10-30 · CALI-55 (#2) · What the design is held to, written from the conversation
 - **`goals.py`:** after the clarify round (in the background, off the request) and after any chat turn that
@@ -54,6 +56,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   assumed and proposed checks, an unknown metric dropped, keep and drop and both standing after a redraft;
   a proposed check shown but not counted, the strength metric from the part's run; a requirement-ish turn
   updates the checks and a question doesn't). `test_scorecard.py`'s summary gains `proposed`.
+- Commit: `e94ea70`, PR #36 (stacked on #35).
 
 ### 2026-10-30 · CALI-71 (#32) · Lighten the walls where the wood isn't working, in cuts a jigsaw can make
 - **Theo:** "proceed to 32, 2 and 4", after the interface spec (`specs/caliper-four-questions-spec.md`, PR #34).
@@ -79,7 +82,8 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   for where it did (#10's sandbag test).
 - Tests: `test_lighten.py` (4: holes cut, weighed and consistent; merge; the walls lighten, the top doesn't,
   every hole keeps its rim; adopting cuts them and a second study starts from them) and the book's
-  breaking load in `test_release.py`.
+  breaking load in `test_release.py`. **Full suite: 478 passed.**
+- Commit: `e431f44`, PR #35 (stacked on #33).
 
 ### 2026-10-30 · CALI-67 (#27), CALI-69 (#29) · Panels that fit the design, and a description that keeps up
 - **Theo,** walking through the strength check: the rough edges I'd listed were his feedback ("the whole
