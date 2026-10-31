@@ -1761,7 +1761,64 @@ function loadView(p) {
     <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button></div>
     <div id="lProgress"></div>
     ${runs.length ? loadResults(p, runs[pick], runs) : ''}
-    ${runs.length ? lightenView(p) : ''}`;
+    ${p.printed ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : (runs.length ? lightenView(p) : '')}`;
+}
+
+// carve it (CALI-82): a printed part, carved free-form where it isn't working; each step checked
+function carveRuns(pid) { return (S.design.carve_runs || []).filter((r) => r.part === pid); }
+function carveView(p) {
+  const run = carveRuns(p.id)[0];
+  const head = `<h5 style="margin:14px 0 4px">Carve it <span class="badge">printed, any shape</span></h5>
+    <div class="muted small">A printer makes any shape, so the printed part can be carved wherever it isn't working: in steps,
+      each one checked. ${p.carved ? 'It\'s carved now; carving again starts from its shape as drawn.' : ''}</div>
+    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo">${run ? 'Carve it again' : 'Carve it'}</button>
+      <span class="muted small">a few minutes</span></div><div id="carveProgress"></div>`;
+  if (!run) return head;
+  const stale = run.version !== p.version;
+  const W = 300, H = 110, top = Math.max(...run.stations.map((x) => x.safety || 0), run.min_safety * 1.5);
+  const x = (r) => 24 + (W - 34) * r / Math.max(...run.stations.map((s) => s.removed), 0.01);
+  const y = (sf) => H - 16 - (H - 26) * Math.min(sf, top) / top;
+  const dots = run.stations.map((st) => `<circle cx="${x(st.removed)}" cy="${y(st.safety || 0)}" r="5" data-carve="${st.index}"
+    class="${st.holds ? 'ok' : 'bad'}${S.station && S.station.run === run.id && S.station.index === st.index ? ' on' : ''}"><title>step ${st.index}</title></circle>`).join('');
+  const line = run.stations.map((st, i) => `${i ? 'L' : 'M'}${x(st.removed)},${y(st.safety || 0)}`).join(' ');
+  const best = run.stations.find((st) => st.index === run.best);
+  return `${head}
+    ${run.weak ? `<div class="note-warn small">${esc(run.weak)}</div>` : ''}
+    <svg class="trial-chart" viewBox="0 0 ${W} ${H}"><line x1="24" x2="${W - 10}" y1="${y(run.min_safety)}" y2="${y(run.min_safety)}" class="brk"/>
+      <text x="${W - 10}" y="${y(run.min_safety) - 3}" text-anchor="end">needs ${run.min_safety}x</text>
+      <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>${dots}
+      <text x="24" y="${H - 3}">as drawn</text><text x="${W - 10}" y="${H - 3}" text-anchor="end">carved away →</text></svg>
+    <div class="small">${best && best.saved_g ? `The lightest that holds: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% of the printed part
+      carved away, <b>${best.saved_g} g</b> less filament, ${best.safety}x.` : 'Nothing could come off and still hold.'}
+      ${stale ? '<span class="badge">older version</span>' : ''}</div>
+    <div class="muted small">Click a step to see it; <b>Carve it like this</b> makes it the part's shape and checks it again.</div>`;
+}
+async function runCarve(p) {
+  const prog = $('carveProgress'), go = $('carveGo');
+  go.disabled = true;
+  prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="carveMsg">starting…</div>';
+  try {
+    const runs = loadRuns(p.id);
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/carve`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2 });
+    await follow(job_id, (ev) => {
+      const msg = $('carveMsg'), bar = prog.querySelector('.bar > i');
+      if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
+      if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
+    });
+    clearStation();
+    await refresh();
+    const run = carveRuns(p.id)[0];
+    if (run && run.best) showStation(p.id, run, run.best);
+  } catch (e) {
+    prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    go.disabled = false;
+  }
+}
+function wireCarve(p) {
+  if ($('carveGo')) $('carveGo').onclick = () => runCarve(p);
+  document.querySelectorAll('#inspector [data-carve]').forEach((c) => {
+    c.onclick = () => showStation(p.id, carveRuns(p.id)[0], +c.dataset.carve);
+  });
 }
 
 // make it lighter (CALI-71): holes where the wood isn't working, through the thickness, each step re-checked
@@ -1855,6 +1912,7 @@ function wireLoad(p) {
   if (sel) sel.onchange = () => { S.loadRun[p.id] = +sel.value; clearStation(); renderInspector(); };
   const lg = $('lightGo');
   if (lg) lg.onclick = () => runLighten(p);
+  wireCarve(p);
   document.querySelectorAll('#loadBox tr[data-lst]').forEach((tr) => {
     tr.onclick = () => showStation(p.id, lightenRuns(p.id)[0], +tr.dataset.lst);
   });
@@ -2361,9 +2419,10 @@ async function runWhittle(p) {
 }
 
 // show a station in place of its part, with the part's current shape as a ghost around it
-const STUDY_PATH = { parametric: 'aero', frame: 'frame-study', lighten: 'lighten' };
+const STUDY_PATH = { parametric: 'aero', frame: 'frame-study', lighten: 'lighten', carve: 'carve' };
 async function showStation(pid, run, index) {
   const parametric = run.kind === 'parametric', framed = run.kind === 'frame', lightened = run.kind === 'lighten';
+  const carved = run.kind === 'carve';
   try {
     const r = await fetch(`/api/designs/${S.slug}/${STUDY_PATH[run.kind] || 'whittle'}/${run.id}/stations/${index}.stl`);
     if (!r.ok) throw new Error(`station ${index}: HTTP ${r.status}`);
@@ -2383,7 +2442,10 @@ async function showStation(pid, run, index) {
     const bar = $('stationBar');
     bar.hidden = false;
     const removed = parametric ? st.removed : st.removed_part;
-    const what = lightened
+    const what = carved
+      ? `<span><b>Preview, not carved yet:</b> step <b>${index}</b> · ${pct(st.removed)} of the printed part carved away ·
+        ${st.saved_g} g less filament · <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
+      : lightened
       ? `<span><b>Preview, not cut yet:</b> step <b>${index}</b> · ${pct(st.removed)} out of the walls${st.top_holes ? ` and ${st.top_holes} hole${st.top_holes === 1 ? '' : 's'} in the top` : ''} · ${lbs(st.saved_lb)} lighter ·
         <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
       : framed
@@ -2391,8 +2453,8 @@ async function showStation(pid, run, index) {
       : `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume
       ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>`;
     bar.innerHTML = `${what}
-      ${lightened && !index ? '' : `<button class="primary" id="adoptBtn" ${lightened && !st.holds ? 'disabled' : ''}>${lightened ? 'Cut these holes in '
-        : framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`}
+      ${(lightened || carved) && !index ? '' : `<button class="primary" id="adoptBtn" ${(lightened || carved) && !st.holds ? 'disabled' : ''}>${lightened ? 'Cut these holes in '
+        : carved ? 'Carve it like this: ' : framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`}
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };
     if ($('adoptBtn')) $('adoptBtn').onclick = () => adoptStation(pid, run.id, index, run.kind);
@@ -2411,8 +2473,8 @@ async function adoptStation(pid, wid, index, kind) {
     await api('POST', `/api/designs/${S.slug}/${STUDY_PATH[kind] || 'whittle'}/${wid}/adopt`, { station: index });
     clearStation();
     await refresh();
-    // holes cut in: check its strength again on the part as rebuilt — that's the number to go by
-    if (kind === 'lighten') {
+    // holes cut in, or carved: check its strength again on the part as rebuilt — that's the number to go by
+    if (kind === 'lighten' || kind === 'carve') {
       const p = S.design.parts.find((x) => x.id === pid);
       if (p && $('lGo')) runLoad(p);
     }
@@ -2423,7 +2485,7 @@ async function adoptStation(pid, wid, index, kind) {
 // Every study the design has, newest first: the part and the version it ran on, the line it came to, and a
 // way to open it where it lives. And per part, every study Caliper has: which can run on it now, and what the
 // others are missing (what to say or do to get them).
-const STUDY_BOX = { load: 'loadBox', lighten: 'loadBox', frame: 'frameBox', gussets: 'frameBox', aero: 'aeroBox', whittle: 'whittleBox',
+const STUDY_BOX = { load: 'loadBox', lighten: 'loadBox', carve: 'loadBox', frame: 'frameBox', gussets: 'frameBox', aero: 'aeroBox', whittle: 'whittleBox',
   cutplan: 'buildBox', patterns: 'buildBox', scorecard: 'scoreBox', release: 'relBox' };
 const studyFilter = { kind: '', part: '' };
 

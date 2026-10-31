@@ -139,11 +139,47 @@ def material(pieces: list[dict]) -> dict:
     return out
 
 
-def spacing_for(pieces: list[dict], volume: float, longest: float) -> tuple[float, Optional[str]]:
-    """Voxel size: VOXELS_THROUGH across the thinnest piece, unless that's more voxels than a study
-    should take; then as fine as MAX_VOXELS allows, and a note saying so."""
+#: A print across its layers is about half as strong as along them (the layers' bond), and which way a wall is
+#: pulled isn't known: so a printed part is taken at the weaker.
+LAYERS_ACROSS = 0.5
+
+
+def printed_material(declared: dict, mesh, printed_mesh=None) -> Optional[dict]:
+    """CALI-81: a part printed whole, analysed as a solid of its plastic at the share of it that's plastic (its
+    perimeters and infill) and at half strength for its layers. Rough, on the safe side, until a printed test
+    piece says otherwise (#42). None if it isn't printed."""
+    it = next((x for x in declared.get("construction") or [] if isinstance(x, dict) and x.get("kind") == "printed"),
+              None)
+    if it is None:
+        return None
+    from whittle import MATERIALS
+
+    key = it.get("material", "pla")
+    w, pm = MATERIALS.get(key), M.printed(key)
+    if w is None:
+        raise ValueError(f"the materials table has no strength for printed {key!r}")
+    body = printed_mesh if printed_mesh is not None else mesh      # a printed rest: just the printed solid
+    vol, area = float(abs(body.volume)), float(body.area)
+    shell = min(vol, area * M.PRINT_SHELL_MM)
+    infill = float(it.get("infill", M.PRINT_INFILL))
+    solid = (shell + infill * (vol - shell)) / vol if vol else 1.0
+    return {"key": key, "name": pm["name"], "E": w.youngs_modulus * solid,
+            "strength": w.strength * solid * LAYERS_ACROSS, "density": pm["density"] / 1000.0 * solid,
+            "across": 1.0, "printed": True, "solid": round(solid, 3),
+            "basis": f"whittle's {w.name} (E {w.youngs_modulus:g} MPa, strength {w.strength:g} MPa) at {solid:.0%}, "
+                     f"the share that's plastic ({M.PRINT_SHELL_MM:g} mm walls, {infill:.0%} infill), and half that "
+                     f"strength across its layers",
+            "note": "Printed: a rough model on the safe side. Infill and the bond between layers vary from printer "
+                    "to printer; a printed test piece loaded to breaking is the way to know."}
+
+
+def spacing_for(pieces: list[dict], volume: float, longest: float, walls: Optional[float] = None) -> tuple[float, Optional[str]]:
+    """Voxel size: VOXELS_THROUGH across the thinnest piece (or, printed, its thinnest wall), unless that's more
+    voxels than a study should take; then as fine as MAX_VOXELS allows, and a note saying so."""
     thin = [pc["thickness"] for pc in pieces if pc["kind"] == "sheet"]
     thin += [2 * pc["half"] for pc in pieces if pc["kind"] == "stick"]
+    if walls and walls > 0:
+        thin.append(walls)
     want = min(thin) / VOXELS_THROUGH if thin else longest / 48
     floor = max((volume / MAX_VOXELS) ** (1 / 3), longest / 160)
     if want >= floor:
@@ -171,8 +207,33 @@ def plate(a: float, b: float, t: float, force: float, footprint: float, E: float
     return {"stress_mpa": stress, "deflection_mm": alpha * force * b ** 2 / (E * t ** 3)}
 
 
-def _held_edges(pc: dict, k: int, others: list[dict], tol: float) -> int:
-    """How many of a panel's edges another piece holds: one it butts against, or one under it (up to a
+def beam(span: float, width: float, t: float, force: float, mat: dict) -> dict:
+    """A panel resting on two opposite edges, the load in the middle of its span: a simply supported beam (the
+    safe side: the edges free to turn, the load not spread). Stress, sag and safety, and at other thicknesses."""
+    def at(tt):
+        stress = force * span / 4 / (width * tt ** 2 / 6)
+        sag = force * span ** 3 / (48 * mat["E"] * width * tt ** 3 / 12)
+        return stress, sag
+
+    stress, sag = at(t)
+    safety = mat["strength"] / stress
+    by_t = []
+    for tt in C.THICKNESSES:
+        if tt > 26:
+            continue
+        st, sg = at(tt)
+        by_t.append({"thickness_mm": tt, "label": M.nominal(tt), "safety": round(mat["strength"] / st, 2),
+                     "safety_across": round(mat["strength"] * mat["across"] / st, 2), "deflection_mm": round(sg, 3)})
+    return {"done": True, "as": "beam", "span_mm": round(span, 1), "thickness_mm": t, "stress_mpa": round(stress, 2),
+            "safety": round(safety, 2), "safety_across": round(safety * mat["across"], 2),
+            "deflection_mm": round(sag, 3), "by_thickness": by_t,
+            "why": f"it rests on two opposite edges, {span / 25.4:.1f} in apart: a beam across them"
+                   + (f". Cut with its face grain running across the gap and it's about {safety:.1f} times over "
+                      f"instead of {safety * mat['across']:.1f}" if mat.get("across", 1.0) < 1.0 else "")}
+
+
+def _held_edges(pc: dict, k: int, others: list[dict], tol: float, under=None) -> list[int]:
+    """Which of a panel's edges another piece holds: one it butts against, or one under it (up to a
     fifth of the way in: a top that overhangs its sides by an inch still rests on them)."""
     from .consistency import _frame, segment_distance, slab_distance
 
@@ -180,7 +241,7 @@ def _held_edges(pc: dict, k: int, others: list[dict], tol: float) -> int:
     side, t = pc["sides"][k], pc["thickness"]
     o, u, v, n, flat = _frame(poly)
     centre = poly.mean(axis=0)
-    held = 0
+    held = []
     for i in range(len(poly)):
         p, q = poly[i], poly[(i + 1) % len(poly)]
         mid = (p + q) / 2
@@ -191,6 +252,9 @@ def _held_edges(pc: dict, k: int, others: list[dict], tol: float) -> int:
         probes = np.array([mid - inward * 2 * tol + side * n * t / 2]        # beside the edge
                           + [mid + inward * dist + side * n * (t + 2 * tol)  # under it
                              for dist in np.arange(t / 2, reach + 1e-6, t / 2)])
+        if under is not None and under(probes[1:]).any():      # resting on the printed solid (CALI-82)
+            held.append(i)
+            continue
         for other in others:
             if other["kind"] == "sheet":
                 d = min(slab_distance(probes, op, other["thickness"], s).min()
@@ -198,12 +262,12 @@ def _held_edges(pc: dict, k: int, others: list[dict], tol: float) -> int:
             else:
                 d = float((segment_distance(probes, other["a"], other["b"]) - other["half"]).min())
             if d <= tol:
-                held += 1
+                held.append(i)
                 break
     return held
 
 
-def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float) -> Optional[dict]:
+def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=None) -> Optional[dict]:
     """The sheet a load pushes on face-on, checked as a plate — or None if it lands on no sheet, or on
     one that isn't held all round (the FEA is the number for that one)."""
     from .consistency import _frame, _inside2d
@@ -224,12 +288,21 @@ def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float) -> Option
                     or abs(float(f @ n)) < 0.7 * fmag):
                 continue
             others = [x for x in pieces if x is not pc]
-            edges = _held_edges(pc, k, others, tol)
+            which = _held_edges(pc, k, others, tol, under)
+            edges = len(which)
             a, b = C.min_rect(flat.tolist())
             ext = hi - lo
             fu, fv = abs(float(ext @ np.abs(u))), abs(float(ext @ np.abs(v)))
             base = {"piece": pc["name"], "a_mm": round(a, 1), "b_mm": round(b, 1),
                     "edges": len(poly), "edges_held": edges, "footprint_mm": [round(fu, 1), round(fv, 1)]}
+            if len(poly) == 4 and sorted(which) in ([0, 2], [1, 3]):
+                # held on two opposite edges (a top on two sides): a beam across them (CALI-82)
+                e0, e1 = poly[which[0]], poly[(which[0] + 1) % 4]
+                along = (e1 - e0) / (np.linalg.norm(e1 - e0) or 1.0)
+                far = poly[(which[0] + 2) % 4] - e0
+                span = float(np.linalg.norm(far - (far @ along) * along))
+                width = float(np.linalg.norm(e1 - e0))
+                return {**base, **beam(span, width, pc["thickness"], float(abs(f @ n)), mat)}
             if edges < len(poly) or len(poly) != 4:
                 return {**base, "done": False,
                         "why": f"only {edges} of its {len(poly)} edges rest on another piece; the plate "
@@ -331,10 +404,19 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None) -
     if not mesh.is_watertight:
         raise ValueError(f"'{part_id}' isn't a closed solid, so it can't be voxelized")
     pieces = shapes(declared)
-    mat = material(pieces)
+    rest = C.printed_solid(store, part_id, declared)       # what's printed: the whole part, or the rest (CALI-82)
+    printed = printed_material(declared, mesh, rest)       # a printed part (CALI-81)
+    wood = [pc for pc in pieces if pc["kind"] in ("sheet", "stick")]
+    sheet_mat = material(wood) if wood else None
+    mat = printed or sheet_mat or material(pieces)
     _sides(mesh, pieces)
     tol = tolerance(mesh)
-    spacing, coarse = spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)))
+    walls = None
+    if printed:
+        from .measure import Geometry, min_wall_thickness
+
+        walls = min_wall_thickness(Geometry.from_mesh(mesh))
+    spacing, coarse = spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)), walls)
     held = parse_held(declared.get("held"), mesh.bounds.tolist(), max(spacing * 0.6, 1.0))
 
     emit("voxels", f"voxelizing '{part_id}' at {spacing:.1f} mm in {mat['name']}")
@@ -359,9 +441,54 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None) -
         except ValueError:
             raise ValueError(f"'{load['name']}' doesn't touch the part — it pushes on thin air")
         boxes.append(box)
-    return {"declared": declared, "loads": loads, "boxes": boxes, "mesh": mesh, "pieces": pieces,
-            "mat": mat, "tol": tol, "spacing": spacing, "coarse": coarse, "held": held, "ls": ls,
-            "attach": attach}
+    ctx = {"declared": declared, "loads": loads, "boxes": boxes, "mesh": mesh, "pieces": pieces,
+           "mat": mat, "tol": tol, "spacing": spacing, "coarse": coarse, "held": held, "ls": ls,
+           "attach": attach, "plate_mat": sheet_mat or mat}
+    if printed and wood:
+        _two_materials(ctx, wood, sheet_mat, rest)
+    return ctx
+
+
+def per_voxel(ls) -> bool:
+    """Whether this whittle takes a stiffness per voxel (greentheo/whittle, after 5363df5)."""
+    return hasattr(ls, "stiffness")
+
+
+def _two_materials(ctx: dict, wood: list[dict], sheet_mat: dict, rest) -> None:
+    """CALI-82: a plywood top on printed sides. The voxels in a declared sheet or stick are that material, the
+    rest printed: each with its stiffness (whittle's stiffness per voxel, where it has it) and judged against
+    its own strength. The plate check counts an edge held where the printed solid is under it."""
+    from .consistency import segment_distance, slab_distance
+
+    ls, mat, s = ctx["ls"], ctx["mat"], ctx["spacing"]
+    idx = np.argwhere(ls.solid)
+    centres = np.asarray(ls.grid.origin) + s * idx               # as the rest of the study places voxels
+    inside = np.zeros(len(idx), dtype=bool)
+    for pc in wood:
+        if pc["kind"] == "sheet":
+            for poly, side in zip(pc["polys"], pc["sides"]):
+                inside |= slab_distance(centres, poly, pc["thickness"], side) <= s * 0.5
+        else:
+            inside |= segment_distance(centres, pc["a"], pc["b"]) - pc["half"] <= s * 0.5
+    strength = np.full(ls.grid.shape, mat["strength"], dtype=float)
+    strength[tuple(idx[inside].T)] = sheet_mat["strength"]
+    stiff = np.ones(ls.grid.shape)
+    stiff[tuple(idx[inside].T)] = sheet_mat["E"] / mat["E"]
+    if per_voxel(ls):                                       # whittle with a stiffness per voxel
+        ls.stiffness = stiff
+        ctx["note"] = (f"Two materials: the {sheet_mat['name']} as {sheet_mat['name']} and the rest as "
+                       f"{mat['name']}, each voxel judged against its own strength.")
+    else:
+        ctx["note"] = (f"Two materials, judged each against its own strength, but analysed at {mat['name']}'s "
+                       f"stiffness throughout (this whittle has no stiffness per voxel): the "
+                       f"{sheet_mat['name']} reads softer than it is.")
+    ctx["strength_map"] = strength
+    if rest is not None:
+        import trimesh
+
+        near = trimesh.proximity.ProximityQuery(rest)
+        # inside the printed solid (trimesh: positive inside), or within tolerance of it
+        ctx["under"] = lambda pts, tol=ctx["tol"]: near.signed_distance(np.asarray(pts, float)) >= -tol
 
 
 def check_load(ctx: dict, i: int, min_safety: float, solid=None):
@@ -385,14 +512,16 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     if judged.sum() < 20:
         judged = r.solid
     vm = np.where(judged, r.von_mises, 0.0)
-    hot = np.unravel_index(int(np.argmax(vm)), vm.shape)
+    strength = ctx.get("strength_map")
+    worked = vm / strength if strength is not None else vm / mat["strength"]   # each voxel by its own (CALI-82)
+    hot = np.unravel_index(int(np.argmax(worked)), vm.shape)
     at = np.asarray(ls.grid.origin) + ls.grid.spacing * np.asarray(hot)
     peak = float(vm[hot])
     fea = {"supported": True, "peak_mpa": round(peak, 2), "robust_mpa": round(float(r.peak_stress), 2),
-           "safety": round(mat["strength"] / peak, 2) if peak > 0 else None,
+           "safety": round(1.0 / float(worked[hot]), 2) if worked[hot] > 0 else None,
            "deflection_mm": round(float(r.max_displacement), 3),
            "at": [round(float(x), 1) for x in at], "in": _nearest_piece(at, ctx["pieces"])}
-    pl = plate_check(ctx["pieces"], load, mat, ctx["tol"])
+    pl = plate_check(ctx["pieces"], load, ctx.get("plate_mat") or mat, ctx["tol"], under=ctx.get("under"))
     options = [("fea", fea["safety"])]
     if pl and pl.get("done"):
         options.append(("plate", pl["safety_across"]))
@@ -424,7 +553,13 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     """Every load the part declares, through whittle's FEA and the plate check. Returns the run record."""
     emit = emit or (lambda *a, **k: None)
     t0 = time.time()
-    ctx = prepare(store, part_id, emit)
+    try:
+        ctx = prepare(store, part_id, emit)
+    except ValueError as e:
+        # kept, so the card says why rather than offering a check that fails the same way (CALI-81)
+        store.append_history(part_id, {"kind": "load", "action": "failed", "why": str(e),
+                                       "version": store.design.part(part_id).version})
+        raise
     loads, mat, held = ctx["loads"], ctx["mat"], ctx["held"]
 
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
@@ -443,6 +578,8 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     notes = [f"{mat['name']}: E {mat['E']:g} MPa, strength {mat['strength']:g} MPa — {mat['basis']}.", *NOTES]
     if mat.get("note"):
         notes.append(mat["note"])
+    if ctx.get("note"):
+        notes.append(ctx["note"])
     if ctx["coarse"]:
         notes.append(ctx["coarse"])
     if any(h.get("default") for h in held):

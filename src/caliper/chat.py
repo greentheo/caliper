@@ -66,6 +66,8 @@ _EXPLAIN = re.compile(r"\b(explain|plain (?:words|english)|simpler words|more si
 #: CALI-78: a picture cut out of a panel, for looks ("put a T-rex on the side", "cut a dinosaur into the front").
 _PICTURE = re.compile(r"\b(?:put|draw|cut|carve|add|stick)\s+(?:a|an|the|some|my)?\s*(?P<subject>[\w\-' ]{2,40}?)"
                       r"\s+(?:on|onto|into|in|out of)\s+(?:the\s+|its\s+)?(?P<where>[\w ]{0,30})", re.I)
+#: CALI-82: carving a printed part where it isn't working ("carve the sides", "whittle them down").
+_CARVE = re.compile(r"\b(carve|whittle)\b", re.I)
 #: CALI-54: feedback about what a part carries — a strength requirement, which goes into its loads().
 _CARRIES = re.compile(r"\b(hold|holds|carry|carries|support|supports|bear|weight|load|loads|lb|lbs|kg|pounds)\b")
 
@@ -172,6 +174,11 @@ def last_touched(store: DesignStore) -> Optional[str]:
     return max(store.design.parts, key=lambda p: p.updated).id
 
 
+def _printed(store: DesignStore, part_id: str) -> bool:
+    return store.is_scripted(part_id) and bool(re.search(r"""["']kind["']\s*:\s*["']printed["']""",
+                                                         store.read_script(part_id)))
+
+
 def offline_classify(store: DesignStore, message: str, scope: Optional[str] = None) -> Intent:
     """Deterministic routing — no network. Ask-don't-assume when genuinely ambiguous.
 
@@ -182,6 +189,12 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
     """
     ids = [p.id for p in store.design.parts]
     question = _is_question(message)
+
+    # carve a printed part (CALI-82)
+    if _CARVE.search(message or "") and not question and ids:
+        target = scope or named_part(message, ids) or (ids[0] if len(ids) == 1 else None)
+        if target and _printed(store, target):
+            return Intent(action="carve", part=target, note="carve the printed part where it isn't working")
 
     # a picture: offline, only one it can draw, or one that says it's a picture (Claude routes the rest)
     pic = _PICTURE.search(message or "")
@@ -222,7 +235,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
 
 _CLASSIFY_SYSTEM = """You route a message in a CAD design conversation. Reply with ONLY a JSON object:
 
-{"action": "refine" | "author" | "revert" | "answer" | "picture",
+{"action": "refine" | "author" | "revert" | "answer" | "picture" | "carve",
  "part": "<existing part id, a new snake_case id, or null>",
  "intent": "<for author: a one-line description of the part to build; for picture: just the thing to draw, in
             a word or two (\"T-rex\", \"heart\"); else empty>",
@@ -236,6 +249,8 @@ _CLASSIFY_SYSTEM = """You route a message in a CAD design conversation. Reply wi
 - "revert": undo the last change to a part ("roll it back", "undo that"). `part` is that part.
 - "picture": cut a picture or shape out of a panel for looks ("put a T-rex on the side", "cut a heart
   into the back"), not a new working part. `part` is the existing part it goes on.
+- "carve": carve or whittle a 3D-printed part down where it isn't working ("carve the sides", "whittle
+  the legs down"). `part` is that part.
 - "answer": the user asked a question, asked for something to be explained or said more simply, or said
   something that changes nothing about any part.
 If the message is ambiguous about WHICH part, use "answer" — do not guess."""
@@ -269,11 +284,11 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
     m = re.search(r"\{.*\}", text, re.S)
     data = json.loads(m.group(0) if m else text)
     action = str(data.get("action", "")).strip()
-    if action not in ("refine", "author", "revert", "answer", "picture"):
+    if action not in ("refine", "author", "revert", "answer", "picture", "carve"):
         raise ValueError(f"unusable action {action!r}")
     part = data.get("part") or None
     ids = {p.id for p in store.design.parts}
-    if action == "picture" and part not in ids:
+    if action in ("picture", "carve") and part not in ids:
         part = scope if scope in ids else (next(iter(ids)) if len(ids) == 1 else None)
         if part is None:
             raise ValueError("a picture on which part?")
@@ -437,7 +452,11 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     _emit(events, on_event, "built", f"{part_id} built in {res.rounds} round(s)", part=part_id)
     report_dict = res.report.to_dict() if res.report is not None else None
     described = redescribe(entry.intent, message, res.script, use_llm=use_llm, client=client)
-    version = store.write_part(part_id, res.script, feedback=message, action="refine",
+    from . import carve
+
+    uncarved = carve.NAME in store.read_script(part_id)     # a carve fits the shape it was carved from (CALI-82)
+    script = carve.strip(res.script) if uncarved else res.script
+    version = store.write_part(part_id, script, feedback=message, action="refine",
                                report=report_dict, intent=described)
     _emit(events, on_event, "wrote", f"{part_id} → v{version}", part=part_id, version=version)
 
@@ -446,6 +465,8 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     broke, fixed = _delta(before, after)
 
     reply = _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb="revised")
+    if uncarved:
+        reply += "\n\nThe carve came off with this change (it was cut to the old shape): carve it again."
     proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
                                        drafter=drafter, enabled=promote_feedback,
                                        events=events, on_event=on_event)
@@ -604,6 +625,30 @@ def _decline(store: DesignStore, proposal, events: list[Event], on_event) -> Tur
                       events=events,
                       reply=(f"Fine — left as a one-off change. `{proposal.expr}` is **not** enforced, "
                              f"so a later revision may undo it."))
+
+
+def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) -> TurnResult:
+    """CALI-82: carve a printed part in steps (``carve.study``); the reply says the lightest that holds."""
+    from . import carve
+
+    events = events if events is not None else []
+    try:
+        rec = carve.study(store, part_id, emit=lambda k, t="", **d: _emit(events, on_event, k, t, part=part_id, **d))
+    except (ValueError, ImportError) as e:
+        return TurnResult(action="carve", ok=False, part=part_id, events=events, error=str(e),
+                          reply=f"I couldn't carve it: {e}.")
+    best = next((x for x in rec["stations"] if x["index"] == rec["best"]), None)
+    said = []
+    if rec.get("weak"):
+        said.append(f"⚠ {rec['weak']}")
+    if best and best["saved_g"]:
+        said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. The lightest that holds is step "
+                    f"{best['index']}: {best['removed']:.0%} of it carved away, {best['saved_g']} g less filament, "
+                    f"{best['safety']:g} times over. It's on the 3D view: **Carve it like this** to make it the "
+                    f"part's shape (under *Will it work? → the numbers*, with every step).")
+    else:
+        said.append("Nothing could come off it and still hold.")
+    return TurnResult(action="carve", ok=True, part=part_id, events=events, reply="\n\n".join(said))
 
 
 def picture_part(store: DesignStore, part_id: str, subject: str, where: str = "", *, points=None, events=None,
@@ -856,6 +901,8 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
                              use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
     elif intent.action == "revert" and intent.part:
         result = revert_part(store, intent.part, events=events, on_event=on_event)
+    elif intent.action == "carve" and intent.part:
+        result = carve_part(store, intent.part, events=events, on_event=on_event)
     elif intent.action == "picture" and intent.part:
         result = picture_part(store, intent.part, intent.intent, intent.where, events=events,
                               on_event=on_event, use_llm=use_llm, client=client)

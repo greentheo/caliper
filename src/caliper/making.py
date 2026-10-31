@@ -22,11 +22,8 @@ IN = 25.4
 
 def rows(store: DesignStore, part_id: str) -> list[dict]:
     """The part's take-off rows, a printed piece measured from the part's own solid."""
-    items = C._items(C.declared(store, part_id)) or []
-    if any(it.get("kind") == "printed" for it in items):
-        g = store.part_geometry(part_id).require_mesh()
-        items = [{**it, "volume_mm3": float(abs(g.volume)), "area_mm2": float(g.area),
-                  "at": [float(v) for v in g.center_mass]} if it.get("kind") == "printed" else it for it in items]
+    d = C.declared(store, part_id)
+    items = C.with_printed(store, part_id, C._items(d) or [], d)
     return C.takeoff(items) if items else []
 
 
@@ -47,7 +44,7 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
     printed = []
     printer = S.machine(shop, "printer")
     for pc in (p for p in pieces if p["kind"] == "printed" and p["ok"]):
-        mesh = store.part_geometry(part_id).require_mesh()
+        mesh = C.printed_solid(store, part_id)            # the sides, for a plywood top on printed sides
         volume = printer.get("volume_mm") or (256, 256, 256)
         parts = printing.split(mesh, volume)
         keep = out_dir or tempfile.mkdtemp(prefix="caliper-print-")

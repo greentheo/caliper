@@ -120,7 +120,10 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             work.append(_line(text + (" (Checked on an older version: check again.)" if stale else ""),
                               "warn" if stale else "ok" if c.get("holds") else "bad", study="load"))
     elif p.get("loads"):
-        work.append(_line("Not checked yet whether it holds what it must: Check it holds.", "warn", study="load"))
+        failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
+                       and h.get("action") == "failed" and h.get("version") == p["version"]), None)
+        work.append(_line(f"I couldn't check it holds: {failed['why']}." if failed else
+                          "Not checked yet whether it holds what it must: Check it holds.", "warn", study="load"))
     elif p.get("built") and p.get("role") != "fixed" and not p.get("framed"):
         work.append(_line("Not checked yet: say what it has to hold (\"it has to hold me, 200 lb\").", "warn",
                           study="load"))
