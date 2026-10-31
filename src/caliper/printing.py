@@ -72,8 +72,11 @@ def split(mesh, volume) -> list:
         above = trimesh.intersections.slice_mesh_plane(rest, normal, origin, cap=True)
         pins = _pins(mesh, axis, c)
         if pins is not None:
-            below = below.difference(pins, engine="manifold")
-            above = above.difference(pins, engine="manifold")
+            from .occt import OCCT
+
+            with OCCT:                                   # manifold3d, one boolean at a time
+                below = below.difference(pins, engine="manifold")
+                above = above.difference(pins, engine="manifold")
         pieces.append(below)
         rest = above
     pieces.append(rest)

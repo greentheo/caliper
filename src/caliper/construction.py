@@ -738,13 +738,31 @@ def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
     mesh = store.part_geometry(part_id).require_mesh()
     if not printed.get("rest"):
         return mesh
+    entry = store.design.part(part_id)
+    key = (store.root, part_id, entry.version if entry else None, store.read_script(part_id))
+    with _PRINTED_MU:
+        if key in _PRINTED:
+            return _PRINTED[key]
     import trimesh
+
+    from .occt import OCCT
 
     cutters = wood_solids(d, mesh, proud=0.5)              # half a mm proud each side: no slivers
     if not cutters:
         return mesh
-    out = mesh.difference(trimesh.util.concatenate(cutters), engine="manifold")
-    return out if len(out.faces) else mesh
+    with OCCT:                                             # manifold3d, one boolean at a time
+        out = mesh.difference(trimesh.util.concatenate(cutters), engine="manifold")
+    out = out if len(out.faces) else mesh
+    with _PRINTED_MU:
+        _PRINTED[key] = out
+        while len(_PRINTED) > 16:
+            _PRINTED.pop(next(iter(_PRINTED)))
+    return out
+
+
+#: The printed rest of a part, by its script: a boolean every card, plan and check asked for again.
+_PRINTED: dict = {}
+_PRINTED_MU = threading.Lock()
 
 
 def wood_solids(d: dict, mesh, proud: float = 0.0, inner: bool = True) -> list:

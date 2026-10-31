@@ -1761,7 +1761,7 @@ function loadView(p) {
     <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button></div>
     <div id="lProgress"></div>
     ${runs.length ? loadResults(p, runs[pick], runs) : ''}
-    ${runs.length ? (p.printed ? carveView(p) : lightenView(p)) : ''}`;
+    ${p.printed ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : (runs.length ? lightenView(p) : '')}`;
 }
 
 // carve it (CALI-82): a printed part, carved free-form where it isn't working; each step checked

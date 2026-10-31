@@ -182,16 +182,19 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
         raise ValueError(f"'{pid}' won't build to carve: {built.error}")
     whole = built.geometry.require_mesh()
     wood = C.wood_solids(built.declared or {}, whole)
+    from .occt import OCCT
+
     if wood:
         cut = trimesh.util.concatenate(wood)
-        exact = whole.intersection(cut, engine="manifold")
         # the carve kept the wood's voxels, half a voxel proud of it: trim that lip off its edges and outside,
         # and leave its inner face exact so the carved part stays joined to it
         lip = trimesh.util.concatenate(C.wood_solids(built.declared or {}, whole, proud=float(rec["spacing_mm"]),
                                                      inner=False))
-        printed = station.difference(lip, engine="manifold")
-        shape = trimesh.util.concatenate([exact, printed]) if not len(printed.faces) or not len(exact.faces) \
-            else exact.union(printed, engine="manifold")
+        with OCCT:                                       # manifold3d, one boolean at a time
+            exact = whole.intersection(cut, engine="manifold")
+            printed = station.difference(lip, engine="manifold")
+            shape = trimesh.util.concatenate([exact, printed]) if not len(printed.faces) or not len(exact.faces) \
+                else exact.union(printed, engine="manifold")
     else:
         shape = station
     name = f"carved-{rid}-{int(index):02d}.stl"
