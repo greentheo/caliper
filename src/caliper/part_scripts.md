@@ -65,6 +65,11 @@ def construction(params, build=None):
   "material": "petg"}` (optional `"infill": 0.2`). Caliper weighs it from the solid (walls plus infill),
   fits it to the shop's printer (splitting it with pin holes if it's too big), and costs the filament.
   Give the solid as it prints: no separate pieces for a printed part.
+  **Wood and printed in one part** (a plywood top on printed sides): list the sheets and sticks as usual,
+  then one printed piece with `"rest": true`, such as `{"name": "sides", "kind": "printed", "material":
+  "petg", "infill": 0.4, "rest": true}`. Everything in the solid that isn't a listed sheet or stick is
+  printed: Caliper prints only that, weighs both, and checks the strength in both materials. Use it when
+  the person asks for some parts printed and some cut from sheet; don't make the whole part printed.
 - **lump**: anything else, by `mass` (kg) at a point `at`: hardware, glue, a battery.
 
 The pieces are the part. After every revision Caliper builds the part and checks that what
@@ -77,6 +82,8 @@ measurement:
    the shape is left out of the bill of materials.
 3. **No more material than the shape holds.** The pieces' volume can't exceed the solid's by much (a
    wrong thickness or a piece listed twice).
+
+With a printed `"rest"`, only the first applies: the printed piece is the rest of the solid by definition.
 
 So model the shape as the pieces really are: a plywood stool's `build()` is its panels, each as thick
 as the sheet; a foam-and-glass shell's `build()` is the shell.
