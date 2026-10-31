@@ -166,3 +166,28 @@ def test_the_prompt_carries_the_reference_and_every_material():
         assert f.read() in prompt
     for key in (*materials.SHEETS, *materials.STICKS, *materials.COVERINGS):
         assert f"  - {key}: " in prompt
+
+
+def test_a_filled_box_round_its_panels_fails_when_its_strength_is_checked_in_3d():
+    """CALI-83: Theo's stool came out as a solid block while construction() listed its panels. Every panel lies in
+    the block and covers its surface, so only the volume shows it; with loads() the strength check analyses the
+    solid, so it fails. Without loads() (the camper's lofted box, kept for drag) it's left alone."""
+    pytest.importorskip("cadquery")
+    from caliper import sandbox
+
+    from .test_load_study import BOX_STOOL
+
+    filled = BOX_STOOL.replace('''    out = None
+    for lo, hi in _boxes(p, BUILD["t"]).values():
+        b = cq.Workplane().box(*(b - a for a, b in zip(lo, hi)), centered=False).translate(lo)
+        out = b if out is None else out.union(b)
+    return out''', '''    return cq.Workplane().box(p["w"], p["d"], p["h"], centered=False)''')
+    assert filled != BOX_STOOL
+    run = sandbox.run_script(filled, timeout=120)
+    got = {r.id: r for r in consistency.check(run.declared, run.geometry)}
+    assert got["construction_inside"].passed                  # (its bare underside fails covers too: no bottom panel)
+    vol = got["construction_volume"]
+    assert not vol.passed and vol.actual < 0.67 and "build() is filled in" in vol.detail
+    # the same block without loads(): a shape kept for its outside, weighed from its pieces
+    run = sandbox.run_script(filled.split("def loads(")[0], timeout=120)
+    assert {r.id: r for r in consistency.check(run.declared, run.geometry)}["construction_volume"].passed
