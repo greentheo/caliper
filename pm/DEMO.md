@@ -49,6 +49,8 @@ Newest demos first.
 - 🆕 **A picture on it (CALI-78, #46).** "Put a T-rex on the side": drawn (or drawn by you on the pad), cut out of
   a panel nobody stands on, smooth enough for a jigsaw, and checked that it still holds; on the patterns and the
   cut sheet.
+- 🆕 **Printed sides, carved (CALI-82, #54).** A part can be part plywood, part printed; its strength is checked
+  in both materials, and the printed part can be carved down where it isn't working, every step checked.
 - 🆕 **First run (CALI-59, #8).** One sentence, a few questions you can leave blank, **Build it**: Caliper builds
   it, checks it holds, draws the patterns and scores it, then answers the four questions. Or open the stool or
   the camper as a sample. Talk instead of typing; ask it to say it simpler; report what breaks if you want to.
@@ -563,6 +565,18 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-30 · A plywood top on printed sides, carved (CALI-81 #53, CALI-82 #54)
+1. Needs whittle at `65e7e59` (greentheo/whittle#4; `make tools`, or merge and pull your checkout). Without it the
+   two materials are analysed at the printed stiffness, and it says so.
+2. Ask for "a step stool with a 3/4 in plywood top and 3D printed sides, PETG at 40%". The part lists the top as a
+   sheet and `"kind": "printed", "rest": true`: *What do I buy?* has the plywood and the filament; with a printer in
+   **Shop**, *How do I make it?* prints only the sides.
+3. **Check it holds:** the top as a plate or (on two sides) a beam, in plywood; the sides as printed PETG.
+4. **Carve it** (a few minutes): the chart of steps down to where the sides stop holding. Click a step to see it,
+   **Carve it like this** to make it the shape, and the strength check runs again. "carve the sides" does it from
+   the chat.
+5. Offline: `python -m pytest tests/test_printed_strength.py tests/test_mixed.py`.
 
 ### 2026-10-30 · A filled-in box is caught; a lightening preview says it's one (CALI-83 #55)
 1. Open a stool whose shape was built as a block (Theo's `step-stool-2`): *What is it?* says its 3D shape and its
