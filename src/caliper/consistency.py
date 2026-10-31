@@ -309,11 +309,17 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
         return []
     tol = tolerance(mesh)
     out = []
+    # a printed rest (CALI-82: a plywood top on printed sides) is everything the pieces aren't, so it covers the
+    # rest of the solid by definition: only that each piece is inside it can be checked
+    rest = any(isinstance(it, dict) and it.get("kind") == "printed" and it.get("rest")
+               for it in declared.get("construction") or [])
     if pieces:
         _sides(mesh, pieces)
-        out += [_inside(mesh, pieces, tol), _covers(mesh, pieces, tol)]
-        vol = _volume(mesh, pieces, strength=bool(declared.get("loads")))
-        out += [vol] if vol else []
+        out.append(_inside(mesh, pieces, tol))
+        if not rest:
+            out.append(_covers(mesh, pieces, tol))
+            vol = _volume(mesh, pieces, strength=bool(declared.get("loads")))
+            out += [vol] if vol else []
     if declared.get("loads") is not None:
         out.append(_loads(mesh, declared["loads"], tol))
     return out

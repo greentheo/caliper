@@ -727,6 +727,67 @@ def _round3(v):
     return [round(float(x), 1) for x in v]
 
 
+def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
+    """The solid a part's printed piece is: the whole part, or, for ``"rest": true`` (CALI-82: a plywood top on
+    printed sides), the part with every declared sheet and stick taken out. None if nothing's printed."""
+    d = d if d is not None else declared(store, part_id)
+    printed = next((it for it in d.get("construction") or [] if isinstance(it, dict) and it.get("kind") == "printed"),
+                   None)
+    if printed is None:
+        return None
+    mesh = store.part_geometry(part_id).require_mesh()
+    if not printed.get("rest"):
+        return mesh
+    import numpy as np
+    import trimesh
+    from shapely.geometry import Polygon
+
+    from .consistency import _frame, _sides, shapes
+
+    pcs = [pc for pc in shapes(d) if pc["kind"] in ("sheet", "stick")]
+    _sides(mesh, pcs)
+    cutters = []
+    for pc in pcs:
+        if pc["kind"] == "sheet":
+            for poly, side in zip(pc["polys"], pc["sides"]):
+                o, u, v, n, flat = _frame(poly)
+                slab = trimesh.creation.extrude_polygon(Polygon(flat).buffer(0.5, join_style=2),
+                                                        pc["thickness"] + 1.0)
+                frame = np.eye(4)
+                frame[:3, 0], frame[:3, 1], frame[:3, 2] = u, v, n * side
+                frame[:3, 3] = o - n * side * 0.5                  # half a mm proud each side: no slivers
+                if np.linalg.det(frame[:3, :3]) < 0:              # keep it right-handed
+                    frame[:3, 1] = -v
+                    slab.apply_transform(np.diag([1.0, -1.0, 1.0, 1.0]))
+                slab.apply_transform(frame)
+                cutters.append(slab)
+        else:
+            half, a, b = pc["half"], pc["a"], pc["b"]
+            axis = b - a
+            length = float(np.linalg.norm(axis))
+            box = trimesh.creation.box(extents=(2 * half + 1.0, 2 * half + 1.0, length + 1.0))
+            z = axis / (length or 1.0)
+            x = np.cross(z, [0.0, 0.0, 1.0] if abs(z[2]) < 0.9 else [1.0, 0.0, 0.0])
+            x /= np.linalg.norm(x)
+            frame = np.eye(4)
+            frame[:3, 0], frame[:3, 1], frame[:3, 2], frame[:3, 3] = x, np.cross(z, x), z, (a + b) / 2
+            box.apply_transform(frame)
+            cutters.append(box)
+    if not cutters:
+        return mesh
+    out = mesh.difference(trimesh.util.concatenate(cutters), engine="manifold")
+    return out if len(out.faces) else mesh
+
+
+def with_printed(store: DesignStore, part_id: str, items: list, d: Optional[dict] = None) -> list:
+    """The items with the printed piece measured from its own solid (:func:`printed_solid`)."""
+    if not any(it.get("kind") == "printed" for it in items):
+        return items
+    g = printed_solid(store, part_id, d)
+    return [{**it, "volume_mm3": float(abs(g.volume)), "area_mm2": float(g.area),
+             "at": [float(v) for v in g.center_mass]} if it.get("kind") == "printed" else it for it in items]
+
+
 def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> dict:
     """One part: weight, centre of gravity, what it's made of, and what to buy."""
     d = declared(store, part_id, build)
@@ -736,10 +797,7 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
     if items is None:
         raise ValueError(f"'{part_id}' doesn't say what it's built from — give its script a "
                          f"construction(params, build) (or members() for a tube frame)")
-    if any(it.get("kind") == "printed" for it in items):
-        g = store.part_geometry(part_id).require_mesh()
-        items = [{**it, "volume_mm3": float(abs(g.volume)), "area_mm2": float(g.area),
-                  "at": [float(v) for v in g.center_mass]} if it.get("kind") == "printed" else it for it in items]
+    items = with_printed(store, part_id, items, d)
     rows = takeoff(items)
     mass, cog = totals(rows)
     saved = read_build(store.read_script(part_id)) or {}
