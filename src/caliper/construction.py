@@ -738,6 +738,19 @@ def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
     mesh = store.part_geometry(part_id).require_mesh()
     if not printed.get("rest"):
         return mesh
+    import trimesh
+
+    cutters = wood_solids(d, mesh, proud=0.5)              # half a mm proud each side: no slivers
+    if not cutters:
+        return mesh
+    out = mesh.difference(trimesh.util.concatenate(cutters), engine="manifold")
+    return out if len(out.faces) else mesh
+
+
+def wood_solids(d: dict, mesh, proud: float = 0.0, inner: bool = True) -> list:
+    """Each declared sheet and stick as a solid (``proud`` mm bigger all round): what's taken out of a part to
+    leave its printed rest, and kept exact when the rest is carved (CALI-82). ``inner=False`` keeps a sheet's
+    inner face exact (proud only round its edges and outside), so what's under it stays joined to it."""
     import numpy as np
     import trimesh
     from shapely.geometry import Polygon
@@ -751,11 +764,11 @@ def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
         if pc["kind"] == "sheet":
             for poly, side in zip(pc["polys"], pc["sides"]):
                 o, u, v, n, flat = _frame(poly)
-                slab = trimesh.creation.extrude_polygon(Polygon(flat).buffer(0.5, join_style=2),
-                                                        pc["thickness"] + 1.0)
+                poly2 = Polygon(flat).buffer(proud, join_style=2) if proud else Polygon(flat)
+                slab = trimesh.creation.extrude_polygon(poly2, pc["thickness"] + (2 if inner else 1) * proud)
                 frame = np.eye(4)
                 frame[:3, 0], frame[:3, 1], frame[:3, 2] = u, v, n * side
-                frame[:3, 3] = o - n * side * 0.5                  # half a mm proud each side: no slivers
+                frame[:3, 3] = o - n * side * proud
                 if np.linalg.det(frame[:3, :3]) < 0:              # keep it right-handed
                     frame[:3, 1] = -v
                     slab.apply_transform(np.diag([1.0, -1.0, 1.0, 1.0]))
@@ -765,7 +778,7 @@ def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
             half, a, b = pc["half"], pc["a"], pc["b"]
             axis = b - a
             length = float(np.linalg.norm(axis))
-            box = trimesh.creation.box(extents=(2 * half + 1.0, 2 * half + 1.0, length + 1.0))
+            box = trimesh.creation.box(extents=(2 * half + 2 * proud, 2 * half + 2 * proud, length + 2 * proud))
             z = axis / (length or 1.0)
             x = np.cross(z, [0.0, 0.0, 1.0] if abs(z[2]) < 0.9 else [1.0, 0.0, 0.0])
             x /= np.linalg.norm(x)
@@ -773,10 +786,7 @@ def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
             frame[:3, 0], frame[:3, 1], frame[:3, 2], frame[:3, 3] = x, np.cross(z, x), z, (a + b) / 2
             box.apply_transform(frame)
             cutters.append(box)
-    if not cutters:
-        return mesh
-    out = mesh.difference(trimesh.util.concatenate(cutters), engine="manifold")
-    return out if len(out.faces) else mesh
+    return cutters
 
 
 def with_printed(store: DesignStore, part_id: str, items: list, d: Optional[dict] = None) -> list:
