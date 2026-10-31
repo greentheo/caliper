@@ -16,7 +16,7 @@ install: ## editable-install caliper into the env (makes the `caliper` command a
 
 # The optional tools, pinned. Bump a ref deliberately (and let CI prove it). Your own checkouts are left
 # alone: an editable whittle install, or vendor/unfold-to-sheets as a symlink to a checkout you work in.
-WHITTLE_REF ?= 5363df559c355aa3934ad25d00e110c98ca4814a
+WHITTLE_REF ?= 65e7e59ee24d420bb10904117416fcd7e2cd7f5e
 UNFOLD_REF  ?= 8fc66c9419643da5b2f448014bc6fc20d2db07cd
 
 tools:  ## optional tools: whittle (studies) into the env, unfold-to-sheets (cut plans, on node) into vendor/
