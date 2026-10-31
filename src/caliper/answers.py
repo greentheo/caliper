@@ -90,6 +90,18 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                           + (f", from {made}" if made else "") + "."))
     else:
         what.append(_line("It won't build right now: say what's wrong with it, or roll it back.", "bad"))
+    if report:
+        # its shape and its pieces disagree (CALI-83: a stool built as a filled box): every study reads one or the other
+        try:
+            from . import consistency
+
+            off = sorted((r for r in consistency.check(C.declared(store, pid), store.part_geometry(pid))
+                          if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
+        except Exception:  # noqa: BLE001 — the card says what it can
+            off = []
+        if off:
+            what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"fix its shape to "
+                              f"match its pieces\" and I'll revise it.", "bad"))
 
     # Will it work?
     work = []

@@ -1502,11 +1502,18 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.shopOpen) { S.s
 
 // patterns for hand tools (CALI-48): most people have a jigsaw, not a CNC router — so every flat piece, holes and
 // all, to measure and mark, to print full size and tape, or to project and trace
+// a lightening step on screen isn't the part until it's cut in (CALI-83: patterns made while previewing one had no
+// holes, and that read as a bug)
+function previewNote(p) {
+  return S.station && S.station.part === p.id && (S.design.lighten_runs || []).some((r) => r.id === S.station.run)
+    ? `<div class="note-warn small">These are of the ${esc(p.id)} as it is, without the step you're previewing.
+        <b>Cut these holes</b> (in the bar under the 3D view) to make it part of it, then make them again.</div>` : '';
+}
 function patternView(p) {
   const run = (S.design.pattern_runs || []).find((r) => r.part === p.id);
   const url = (name) => `/api/designs/${S.slug}/patterns/${run.id}/${name}`;
   const stale = run && run.version !== p.version;
-  return `<h5 style="margin:14px 0 4px">Patterns for hand tools <span class="badge">jigsaw, saw, drill</span></h5>
+  return `<h5 style="margin:14px 0 4px">Patterns for hand tools <span class="badge">jigsaw, saw, drill</span></h5>${previewNote(p)}
     ${run ? `<div class="small">${stale ? '<span class="badge bad">the part has changed since</span> ' : ''}
         <a href="${url('measure-and-mark.pdf')}" target="_blank" rel="noopener"><b>Measure and mark</b></a>: each piece
         dimensioned from its square edges, on a 1 in grid ·
@@ -1547,6 +1554,7 @@ function cutplanView(p) {
     <div class="muted small">Not here: ${esc(S.design.cutplan_unavailable)}.</div>`;
   const run = (S.design.cutplans || []).find((r) => r.part === p.id);
   const url = (path) => `/api/designs/${S.slug}/cutplans/${run.id}/files/${path}`;
+  const note = previewNote(p);
   const sheets = run ? run.sheets.map((g) => {
     const svgs = g.files.filter((f) => f.name.startsWith('sheets/') && f.name.endsWith('.svg')).map((f) => f.name);
     return `<div style="margin-top:10px"><b>${g.sheets} × ${esc(g.stock)}</b>
@@ -1582,7 +1590,7 @@ function cutplanView(p) {
 ` : '';
   const stale = run && run.version !== p.version
     ? `<div class="small" style="color:var(--bad)">Made for v${run.version}; the part is v${p.version} now — make it again.</div>` : '';
-  return `<h5 style="margin:14px 0 4px">Cut plan</h5>
+  return `<h5 style="margin:14px 0 4px">Cut plan</h5>${note}
     ${run ? `${stale}${sheets}${plates}${tubes}${sticks}<div class="small"><a href="${url('cutlist.txt')}" target="_blank">cut list as text</a></div>
       ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`
       : `<div class="muted small">Flatten every panel onto the sheets it's cut from — score lines where it bends — and list every
@@ -2376,7 +2384,7 @@ async function showStation(pid, run, index) {
     bar.hidden = false;
     const removed = parametric ? st.removed : st.removed_part;
     const what = lightened
-      ? `<span>step <b>${index}</b> · ${pct(st.removed)} out of the walls${st.top_holes ? ` and ${st.top_holes} hole${st.top_holes === 1 ? '' : 's'} in the top` : ''} · ${lbs(st.saved_lb)} lighter ·
+      ? `<span><b>Preview, not cut yet:</b> step <b>${index}</b> · ${pct(st.removed)} out of the walls${st.top_holes ? ` and ${st.top_holes} hole${st.top_holes === 1 ? '' : 's'} in the top` : ''} · ${lbs(st.saved_lb)} lighter ·
         <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
       : framed
       ? `<span>design <b>${index}</b> · ${st.mass_lb} lb of steel · weakest ${st.safety}x · sags ${len(st.deflection_mm, 2)}</span>`
