@@ -139,11 +139,46 @@ def material(pieces: list[dict]) -> dict:
     return out
 
 
-def spacing_for(pieces: list[dict], volume: float, longest: float) -> tuple[float, Optional[str]]:
-    """Voxel size: VOXELS_THROUGH across the thinnest piece, unless that's more voxels than a study
-    should take; then as fine as MAX_VOXELS allows, and a note saying so."""
+#: A print across its layers is about half as strong as along them (the layers' bond), and which way a wall is
+#: pulled isn't known: so a printed part is taken at the weaker.
+LAYERS_ACROSS = 0.5
+
+
+def printed_material(declared: dict, mesh) -> Optional[dict]:
+    """CALI-81: a part printed whole, analysed as a solid of its plastic at the share of it that's plastic (its
+    perimeters and infill) and at half strength for its layers. Rough, on the safe side, until a printed test
+    piece says otherwise (#42). None if it isn't printed."""
+    it = next((x for x in declared.get("construction") or [] if isinstance(x, dict) and x.get("kind") == "printed"),
+              None)
+    if it is None:
+        return None
+    from whittle import MATERIALS
+
+    key = it.get("material", "pla")
+    w, pm = MATERIALS.get(key), M.printed(key)
+    if w is None:
+        raise ValueError(f"the materials table has no strength for printed {key!r}")
+    vol, area = float(abs(mesh.volume)), float(mesh.area)
+    shell = min(vol, area * M.PRINT_SHELL_MM)
+    infill = float(it.get("infill", M.PRINT_INFILL))
+    solid = (shell + infill * (vol - shell)) / vol if vol else 1.0
+    return {"key": key, "name": pm["name"], "E": w.youngs_modulus * solid,
+            "strength": w.strength * solid * LAYERS_ACROSS, "density": pm["density"] / 1000.0 * solid,
+            "across": 1.0, "printed": True, "solid": round(solid, 3),
+            "basis": f"whittle's {w.name} (E {w.youngs_modulus:g} MPa, strength {w.strength:g} MPa) at {solid:.0%}, "
+                     f"the share that's plastic ({M.PRINT_SHELL_MM:g} mm walls, {infill:.0%} infill), and half that "
+                     f"strength across its layers",
+            "note": "Printed: a rough model on the safe side. Infill and the bond between layers vary from printer "
+                    "to printer; a printed test piece loaded to breaking is the way to know."}
+
+
+def spacing_for(pieces: list[dict], volume: float, longest: float, walls: Optional[float] = None) -> tuple[float, Optional[str]]:
+    """Voxel size: VOXELS_THROUGH across the thinnest piece (or, printed, its thinnest wall), unless that's more
+    voxels than a study should take; then as fine as MAX_VOXELS allows, and a note saying so."""
     thin = [pc["thickness"] for pc in pieces if pc["kind"] == "sheet"]
     thin += [2 * pc["half"] for pc in pieces if pc["kind"] == "stick"]
+    if walls and walls > 0:
+        thin.append(walls)
     want = min(thin) / VOXELS_THROUGH if thin else longest / 48
     floor = max((volume / MAX_VOXELS) ** (1 / 3), longest / 160)
     if want >= floor:
@@ -331,10 +366,16 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None) -
     if not mesh.is_watertight:
         raise ValueError(f"'{part_id}' isn't a closed solid, so it can't be voxelized")
     pieces = shapes(declared)
-    mat = material(pieces)
+    printed = printed_material(declared, mesh)            # a part printed whole (CALI-81)
+    mat = printed or material(pieces)
     _sides(mesh, pieces)
     tol = tolerance(mesh)
-    spacing, coarse = spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)))
+    walls = None
+    if printed:
+        from .measure import Geometry, min_wall_thickness
+
+        walls = min_wall_thickness(Geometry.from_mesh(mesh))
+    spacing, coarse = spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)), walls)
     held = parse_held(declared.get("held"), mesh.bounds.tolist(), max(spacing * 0.6, 1.0))
 
     emit("voxels", f"voxelizing '{part_id}' at {spacing:.1f} mm in {mat['name']}")
@@ -424,7 +465,13 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     """Every load the part declares, through whittle's FEA and the plate check. Returns the run record."""
     emit = emit or (lambda *a, **k: None)
     t0 = time.time()
-    ctx = prepare(store, part_id, emit)
+    try:
+        ctx = prepare(store, part_id, emit)
+    except ValueError as e:
+        # kept, so the card says why rather than offering a check that fails the same way (CALI-81)
+        store.append_history(part_id, {"kind": "load", "action": "failed", "why": str(e),
+                                       "version": store.design.part(part_id).version})
+        raise
     loads, mat, held = ctx["loads"], ctx["mat"], ctx["held"]
 
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
