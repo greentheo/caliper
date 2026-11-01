@@ -122,9 +122,9 @@ nobody has checked yet says so and how to check it. The design-level card is the
 - **Top line:** the shopping list in one or two lines, and what it costs: "1 sheet of 3/4 in plywood, wood
   glue, 24 × 1¼ in screws, a quart of paint — about $45." Also the weight, when it matters ("8.9 lb, easy
   for a kid to carry").
-- **A gap today:** the list has the plywood and the paint but not the glue or the screws. `construction()`
-  can list them as lumps, but the designer doesn't think to, and "glued and screwed" should come with a
-  count of screws and how much glue. The prices are rough guesses too ($29 for a sheet of 3/4 in plywood);
+- **Fasteners and glue are on the list** (`fasteners.py`, #37): the joints are found from the pieces,
+  screws one every 6 in along each (at least two a joint), and glue at about 1/2 ml an inch. It's an
+  estimate for buying, said as one. The prices are rough guesses ($29 for a sheet of 3/4 in plywood);
   they're editable, and the numbers layer says where each came from.
 - **The numbers:** every piece and what it weighs, the materials with their basis, the centre of gravity
   (and the hitch moment, when there's a hitch), offcuts and waste, the prices and where they came from, and
@@ -196,9 +196,11 @@ Nothing is deleted. Every panel keeps working and moves under the question it an
 
 ## 7. How it's built
 
-- **The server writes the top lines** (`answers.py`: `answers(store, part=None)` → four cards, each
-  `{status, lines[], actions[], empty_hint}`), so the app, the CLI (`caliper answers`) and the build book
-  say the same thing, and they can be tested without a browser.
+- **The server writes the top lines** (`answers.py`: `answers(store, state, part_id=None)` → four cards,
+  each `{key, q, status, lines, hint}`). The app's cards and the chat's "Say it simpler" read them, and
+  they're tested without a browser by calling `answers()`. There's no `caliper answers` command: nothing
+  needs one in V1. The build books don't read their verdict lines from the cards yet, and they should,
+  so a person reads one number everywhere (#64 #9).
 - **The engineer layers are today's panels,** re-homed. `design.js` renders a card shell and drops the
   existing view functions (`loadView`, `buildView`, `cutplanView`…) inside "the numbers".
 - **Verdicts come from what's already measured:** the scorecard's checks and trust tags, the strength runs,
@@ -223,9 +225,11 @@ Nothing is deleted. Every panel keeps working and moves under the question it an
 
 ## 9. Open questions for Theo
 
-- **Who sets the tools?** The design ("this one's for the jigsaw") or the person ("I have a jigsaw and a
-  drill")? Probably the person, with a per-design override.
+- ~~**Who sets the tools?**~~ **Decided in code (CALI-48):** the person. Their shop, `~/.caliper/shop.yaml`,
+  is used by every design. A per-design override ("this one's for the jigsaw") isn't built. That's
+  still open, and nobody has asked for it yet.
 - **Where prices come from:** today they're editable defaults in the scorecard's basis. Fine for V1?
 - **Amber:** what counts as "close to the line"? Proposed: within 25% of the limit (a safety of 2 to 2.5
-  when 2 is required).
+  when 2 is required). It's being built at 25% (#64 #2), and failing safeties will no longer round up to
+  their limit. Theo can still move the band.
 - **The kid's reading level:** is "3 times over" right, or "it could hold three Dads"?
