@@ -731,6 +731,10 @@ def router():
         store = load(slug)
         if store.design.part(req.part) is None:
             raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
+        try:                                     # a carved part isn't lightened: said now, before any job (CALI-87)
+            carve.refuse_if_carved(store.read_script(req.part), "holes", "lighten it")
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
         if not _aero_available():
             raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
 

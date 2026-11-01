@@ -331,6 +331,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
           emit: Optional[Callable] = None) -> dict:
     """From the part as it is to where the safety runs out, every step checked in 3D: the walls first (holes
     where the wood isn't working), then hole-saw holes in the panel stood on, then thinner sheet (estimated)."""
+    from . import carve
+
+    carve.refuse_if_carved(store.read_script(part_id), "holes", "lighten it")   # before the study, not at adopt
     from scipy import ndimage
 
     from . import construction as C
@@ -609,7 +612,7 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     script = store.read_script(pid)
     from . import carve
 
-    carve.refuse_if_carved(script, "lightening it", "lighten it")
+    carve.refuse_if_carved(script, "holes", "lighten it")
     # a picture cut into a panel (CALI-78) stays; the lightening holes are this step's
     keep = [h for h in H.read(script) if h.get("picture")]
     script = H.write(script, keep + holes)

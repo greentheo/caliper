@@ -65,20 +65,40 @@ def test_a_drag_station_adopted_drops_the_carve(carved):
 
 
 def test_a_picture_on_a_carved_part_is_refused(carved):
-    with pytest.raises(ValueError, match="it's carved, so putting a T-rex on it would cut into the shape"):
+    with pytest.raises(ValueError, match="it's been carved, and a T-rex would cut through the carving"):
         pictures.put(carved, "stool", pictures.draw("T-rex", use_llm=False), subject="T-rex", strength=False)
     assert carve.NAME in carved.read_script("stool")
     from caliper import chat
 
     res = chat.picture_part(carved, "stool", "T-rex", "", strength=False)      # as the person reads it
     assert not res.ok and res.reply == (
-        "I couldn't put a T-rex on it: it's carved, so putting a T-rex on it would cut into the shape the carve was "
-        "made for. Take the carve off first (any change through the chat does), put the T-rex on, then carve it again.")
+        "I couldn't put a T-rex on it: it's been carved, and a T-rex would cut through the carving. Say \"roll it "
+        "back\" to take the carve off, put the T-rex on, then carve it again.")
 
 
 def test_lightening_a_carved_part_is_refused(carved):
     rid = _record(lighten.runs_dir(carved), {"part": "stool", "version": 2, "panels": [], "stations": [
         {"index": 0, "panels": {}, "removed": 0.0, "holes": 0, "saved_lb": 0.0, "safety": 3.0}]})
-    with pytest.raises(ValueError, match="it's carved, so lightening it would cut into the shape"):
+    with pytest.raises(ValueError, match="it's been carved, and holes would cut through the carving"):
         lighten.adopt(carved, rid, 0)
     assert carve.NAME in carved.read_script("stool")
+
+
+def test_lightening_a_carved_part_is_refused_before_the_study_runs(carved, monkeypatch):
+    """CALI-87 (#75 rework, item 7): it was refused only at adopt, after a study nobody could use."""
+    from caliper import load_study
+
+    def no_study(*a, **k):
+        raise AssertionError("the study ran")
+
+    monkeypatch.setattr(load_study, "prepare", no_study)
+    with pytest.raises(ValueError, match='Say "roll it back" to take the carve off, lighten it, then carve it again'):
+        lighten.study(carved, "stool")
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    monkeypatch.setenv("CALIPER_DESIGNS", os.path.dirname(carved.root))
+    got = TestClient(create_app()).post(f"/api/designs/{carved.design.slug}/lighten", json={"part": "stool"})
+    assert got.status_code == 422 and "roll it back" in got.json()["detail"]
