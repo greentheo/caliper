@@ -181,3 +181,19 @@ def test_the_book_lists_a_kids_book_only_when_one_was_made(store):
     root = os.path.join(R.releases_dir(store), rec["id"])
     assert rec["kids"] is None and not os.path.exists(os.path.join(root, "kids.html"))
     assert "kids.html" not in open(os.path.join(root, "index.html")).read()
+
+
+def test_a_kids_book_that_fails_is_said_and_kept_for_a_report(store, monkeypatch):
+    """CALI-87 (#75 rework, item 2): release.py swallowed the kids' book's error, and the package shipped without it
+    and without a word."""
+    from caliper import errors, kidbook
+
+    def broken(*a, **k):
+        raise ValueError("the truth value of an array with more than one element is ambiguous")
+
+    monkeypatch.setattr(kidbook, "make", broken)
+    rec = R.make(store, pdf=False)
+    assert rec["kids"] is None and rec["kids_error"]["error_id"]
+    assert any(e["id"] == rec["kids_error"]["error_id"] for e in errors.recent(5))
+    assert any(n.startswith("The kids' book couldn't be made") and rec["kids_error"]["error_id"] in n
+               for n in rec["notes"]), rec["notes"]
