@@ -115,10 +115,17 @@ Setting one up (from the main checkout):
 git worktree add ../caliper-nightshift <base-branch>
 cd ../caliper-nightshift
 ln -s ../caliper/.env .env                      # the key, never copied into a commit
+export PYTHONPATH=$PWD/src                      # see the trap below
 export CALIPER_DESIGNS=$PWD/../caliper-nightshift-designs
 /opt/anaconda3/envs/caliper/bin/python -m pytest tests/test_<area>.py   # the files you touch
 /opt/anaconda3/envs/caliper/bin/python -m caliper.cli serve --port 8016
 ```
+
+**The trap (found by night shift, 2026-11-01):** the environment's `caliper` is an editable install pointing
+at the owner's checkout, and the sandbox, the declaration probe and the frame study spawn
+`python -m caliper…` as subprocesses. Without `PYTHONPATH=<your worktree>/src`, a test run from your worktree
+builds parts with the *owner's* code, and its results say nothing about your branch. Set it for every test
+run and every server you start.
 
 The tools Caliper drives are pinned in the `Makefile` (`WHITTLE_REF`, `UNFOLD_REF`); CI fetches those
 commits. The environment imports whittle from the owner's checkout (`~/githubrepo/whittle`, editable): when
