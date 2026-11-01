@@ -58,7 +58,8 @@ def test_a_load_in_thin_air_fails_the_round():
     run = sandbox.run_script(STOOL + floating, timeout=120)
     got = {r.id: r for r in consistency.check(run.declared, run.geometry)}
     assert not got["loads_land"].passed
-    assert "'an adult stepping up' acts on" in got["loads_land"].detail and "40 mm from the part" in got["loads_land"].detail
+    assert "'an adult stepping up' doesn't touch the part — it pushes on thin air, 40.0 mm from its nearest surface" \
+        in got["loads_land"].detail
 
 
 def test_the_stool_holds_and_says_which_check_governs(tmp_path, monkeypatch):

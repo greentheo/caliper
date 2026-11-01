@@ -12,7 +12,8 @@ every build is checked against its declarations, as measurements that fail a rou
 - ``construction_covers``: the pieces cover the solid's surface. Nothing in the shape is left out of
   the bill of materials, and no panel in the shape is thicker than the sheet it's listed as.
 - ``construction_volume``: no more material than the solid holds (a wrong thickness, a piece twice).
-- ``loads_land``: every load in ``loads()`` says how much and where, and where is on the part.
+- ``loads_land``: every load in ``loads()`` says how much and where, and where is on the part, by the strength
+  check's own rule (CALI-84); every box in ``held()`` too.
 
 A part that declares nothing gets none of these: there is nothing to disagree with.
 """
@@ -265,29 +266,29 @@ def _volume(mesh, pieces: list[dict], strength: bool = False) -> Optional[Assert
                               + ", ".join(f"{pc['name']} {pc['volume'] / 1e6:.2f} L" for pc in heavy) + ")"))
 
 
-def _loads(mesh, items, tol: float) -> AssertionResult:
+def _loads(mesh, declared: dict, pieces: list[dict], tol: float) -> AssertionResult:
     """Every load says how much and where, and where is on the part: a load in thin air is a box in the
-    wrong place, and the strength study would find nothing to push on."""
-    from .load_study import parse_loads
+    wrong place, and the strength study would find nothing to push on. Asked as the strength check asks it
+    (``load_study.touches``, within one of its voxels), so the two can't disagree (CALI-84); held() too."""
+    from . import load_study as L
 
     try:
-        loads = parse_loads(items)
+        loads = L.parse_loads(declared["loads"])
+        held = L.parse_held(declared.get("held"), mesh.bounds.tolist(), 1.0) if declared.get("held") else []
     except (ValueError, TypeError) as e:
         return AssertionResult(id="loads_land", expr="every load in loads() says how much and where",
                                status="fail", passed=False, actual=None,
                                detail=f"{e} (see the loads() format)")
-    g = np.linspace(0.0, 1.0, 5)
-    cube = np.stack(np.meshgrid(g, g, g, indexing="ij"), -1).reshape(-1, 3)
+    rch = L.reach(tol, L.study_spacing(declared, mesh, pieces)[0])
     missed = []
-    for ld in loads:
-        lo, hi = np.asarray(ld["lo"]) - tol, np.asarray(ld["hi"]) + tol
-        gap = -float(_signed(mesh, lo + (hi - lo) * cube).max()) + tol      # from the box as declared
-        if gap > 2 * tol:
-            missed.append(f"'{ld['name']}' acts on {_xyz(ld['lo'])}..{_xyz(ld['hi'])}, {gap:.0f} mm from the part")
+    for item, support in [(h, True) for h in held] + [(ld, False) for ld in loads]:
+        on, gap = L.touches(mesh, (item["lo"], item["hi"]), rch)
+        if not on:
+            missed.append(L.missed(item["name"], gap, rch, support))
     ok = not missed
     return AssertionResult(id="loads_land", expr="every load in loads() pushes on the part",
-                           status="pass" if ok else "fail", passed=ok, actual=len(loads) - len(missed),
-                           detail="" if ok else "; ".join(missed) + " — put its box on the face it pushes on")
+                           status="pass" if ok else "fail", passed=ok, actual=len(loads) + len(held) - len(missed),
+                           detail="; ".join(missed))
 
 
 def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
@@ -321,5 +322,5 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
             vol = _volume(mesh, pieces, strength=bool(declared.get("loads")))
             out += [vol] if vol else []
     if declared.get("loads") is not None:
-        out.append(_loads(mesh, declared["loads"], tol))
+        out.append(_loads(mesh, declared, pieces, tol))
     return out
