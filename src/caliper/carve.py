@@ -240,11 +240,12 @@ def uncarve(script: str) -> tuple[str, bool]:
     return (strip(script), True) if carved(script) else (script, False)
 
 
-def refuse_if_carved(script: str, what: str) -> None:
-    """A picture or lightening would cut into the carved shape: refused until the carve is off (CALI-87)."""
+def refuse_if_carved(script: str, doing: str, then: str) -> None:
+    """A picture or lightening would cut into the carved shape: refused until the carve is off (CALI-87).
+    ``doing`` says what was asked ("putting a T-rex on it"), ``then`` how to ask again ("put the T-rex on")."""
     if carved(script):
-        raise ValueError(f"it's carved, and {what} would cut into the shape the carve was made for. Take the carve "
-                         f"off first (any revision through the chat does), then {what}, then carve it again")
+        raise ValueError(f"it's carved, so {doing} would cut into the shape the carve was made for. Take the carve "
+                         f"off first (any change through the chat does), {then}, then carve it again")
 
 
 def strip(script: str) -> str:

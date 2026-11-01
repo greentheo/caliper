@@ -65,14 +65,20 @@ def test_a_drag_station_adopted_drops_the_carve(carved):
 
 
 def test_a_picture_on_a_carved_part_is_refused(carved):
-    with pytest.raises(ValueError, match="it's carved"):
+    with pytest.raises(ValueError, match="it's carved, so putting a T-rex on it would cut into the shape"):
         pictures.put(carved, "stool", pictures.draw("T-rex", use_llm=False), subject="T-rex", strength=False)
     assert carve.NAME in carved.read_script("stool")
+    from caliper import chat
+
+    res = chat.picture_part(carved, "stool", "T-rex", "", strength=False)      # as the person reads it
+    assert not res.ok and res.reply == (
+        "I couldn't put a T-rex on it: it's carved, so putting a T-rex on it would cut into the shape the carve was "
+        "made for. Take the carve off first (any change through the chat does), put the T-rex on, then carve it again.")
 
 
 def test_lightening_a_carved_part_is_refused(carved):
     rid = _record(lighten.runs_dir(carved), {"part": "stool", "panels": [], "stations": [
         {"index": 0, "panels": {}, "removed": 0.0, "holes": 0, "saved_lb": 0.0, "safety": 3.0}]})
-    with pytest.raises(ValueError, match="it's carved"):
+    with pytest.raises(ValueError, match="it's carved, so lightening it would cut into the shape"):
         lighten.adopt(carved, rid, 0)
     assert carve.NAME in carved.read_script("stool")
