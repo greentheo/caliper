@@ -119,3 +119,22 @@ def test_two_pieces_with_one_name_get_the_screws_the_shopping_list_counts(tmp_pa
     said = sum(int(n) for n in re.findall(r"drives in (\d+) screws", book))
     assert said == C.report(store, "stool")["bom"]["fasteners"]["screws"]
     assert said == 18                       # as with the sides named apart: 8 joints, none merged, none twice
+
+
+SHARED = [c for k in range(2, 6) for c in __import__("itertools").combinations(
+    ["left", "right", "front", "back", "top"], k)]
+
+
+@pytest.mark.parametrize("same", SHARED, ids=["+".join(c) for c in SHARED])
+def test_any_pieces_sharing_a_name_still_get_a_book(tmp_path, same):
+    """CALI-87 (#75 rework, item 1): order() removed the chosen piece with ==, which compares numpy arrays, so 8 of
+    these 26 crashed (every one where left and back share a name) and the package shipped with no kids' book."""
+    store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
+    src = BOX_STOOL.replace('return [{"name": k, "kind": "sheet"',
+                            f'return [{{"name": "side" if k in {list(same)!r} else k, "kind": "sheet"')
+    store.write_part("stool", src, intent="a box stool, some pieces sharing a name")
+    root = str(tmp_path / "release")
+    os.makedirs(root)
+    kidbook.make(store, root, {"design": "Box stool", "strength": {}}, ["stool"], {"groups": []})
+    book = open(os.path.join(root, "kids.html")).read()
+    assert sum(int(n) for n in re.findall(r"drives in (\d+) screws", book)) == 18

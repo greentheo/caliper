@@ -75,7 +75,7 @@ def order(pcs: list[dict], joints: dict) -> list[tuple[dict, list[str]]]:
         nxt = min(meets or left, key=lambda pc: (round(low(pc)), -size(pc)))
         out.append((nxt, [n for n in names if tuple(sorted((nxt["key"], n))) in joints]))
         done.append(nxt)
-        left.remove(nxt)
+        left = [pc for pc in left if pc is not nxt]   # by identity: == compares the pieces' arrays (CALI-87)
     return out
 
 
