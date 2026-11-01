@@ -182,3 +182,17 @@ def test_a_check_that_couldnt_run_is_never_a_tick(tmp_path):
     got = pictures.put(plain, "stool", pictures.draw("T-rex", use_llm=False), subject="T-rex", where="the side",
                        strength=False)
     assert got["ok"] and "doesn't say what it must hold" in got["reply"]
+
+
+@pytest.mark.parametrize("where,want", [("the right side", {"right"}), ("on the left side", {"left"}),
+                                        ("the side", {"left", "right"}), ("the back", {"back"}), ("", {"front"})])
+def test_a_named_side_wins_over_the_word_side(where, want):
+    """CALI-87 (#63, finding 5): "side" stands for left and right, so "right side" matched both and the bigger
+    room won: asked for the right, it cut the left without a word."""
+    from shapely.geometry import box
+
+    found = [{"name": "left", "holes": 0, "room": box(0, 0, 200, 150)},       # the most room: the old pick
+             {"name": "right", "holes": 0, "room": box(0, 0, 150, 150)},
+             {"name": "front", "holes": 0, "room": box(0, 0, 120, 120)},
+             {"name": "back", "holes": 0, "room": box(0, 0, 100, 100)}]
+    assert pictures.choose(found, where)["name"] in want

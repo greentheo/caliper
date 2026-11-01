@@ -173,9 +173,14 @@ def choose(found: list[dict], where: str = "") -> dict:
     if not found:
         raise ValueError("there's no flat panel to put a picture on (nobody stands on, with room inside its rim)")
     words = set(re.findall(r"[a-z]+", (where or "").lower()))
-    if words & {"side", "sides", "end", "ends"}:                  # a box's sides are its left and right
-        words |= {"side", "left", "right"}
-    named = [p for p in found if words & set(re.findall(r"[a-z]+", p["name"].lower())) - {"panel"}]
+
+    def naming(ws):
+        return [p for p in found if ws & set(re.findall(r"[a-z]+", p["name"].lower())) - {"panel"}]
+
+    # a side named outright ("the right side") wins over the word "side", which stands for both (CALI-87)
+    named = naming(words & {"left", "right", "front", "back", "top", "bottom"}) or naming(words)
+    if not named and words & {"side", "sides", "end", "ends"}:  # a box's sides are its left and right
+        named = naming({"side", "left", "right"})
     pool = named or [p for p in found if "front" in p["name"].lower()] or found
     return max(pool, key=lambda p: (p["holes"] == 0, p["room"].area))
 
