@@ -138,6 +138,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
 
         tried = trials.summary(store, pid, inches)            # what the real one did (CALI-80)
         if tried:
+            if tried["status"] in ("bad", "warn"):
+                # a test that went against the prediction outranks it: no ✓ left above a failed test (CALI-86)
+                work = [ln for ln in work if not (ln.get("study") == "load" and ln["status"] == "ok")]
             work.append(_line(tried["text"], tried["status"], study="trial"))
     frames = [r for r in state.get("frame_runs") or [] if r["part"] == pid]
     if frames:
@@ -257,6 +260,11 @@ def measured(store: DesignStore, state: dict) -> dict:
         out["strength.safety"] = min(safeties)
     if breaks:
         out["strength.breaks_lb"] = min(breaks)
+    from . import trials
+
+    tested = [t for t in (trials.summary(store, pid) for pid in current) if t and t["status"] in ("bad", "warn")]
+    if tested:                                         # the worst real test, which outranks the prediction (CALI-86)
+        out["strength.test"] = min(tested, key=lambda t: ORDER.index(t["status"]))
     weight = usd = missing = hours = 0.0
     weighed = False
     for p in state["parts"]:
@@ -310,6 +318,11 @@ def held_to(state: dict, now: dict) -> list[dict]:
         label = label[0].upper() + label[1:]
         if c.get("source") == "proposed":
             out.append(_line(f"Proposed: {label}. Keep or drop it under the numbers.", "info", goal=c["id"]))
+            continue
+        test = now.get("strength.test") if c["metric"].startswith("strength") else None
+        if test:                                       # what a real test did, over what the check predicted
+            out.append(_line(f"{'✗' if test['status'] == 'bad' else '!'} {label}: {test['text']}", test["status"],
+                             study="load", model="scorecard"))
             continue
         v, late = now.get(c["metric"]), False
         if v is None and c["metric"] in scored:

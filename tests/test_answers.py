@@ -132,3 +132,23 @@ def test_a_shape_that_doesnt_match_its_pieces_says_so(store):
     what = answers.answers(store, design_api.design_state(store), "stool")[0]
     bad = [ln for ln in what["lines"] if ln["status"] == "bad"]
     assert bad and "don't match" in bad[0]["text"] and "filled in" in bad[0]["text"] and what["status"] == "bad"
+
+
+def test_a_failed_test_overrides_the_prediction_on_both_cards(tmp_path):
+    """CALI-86 (#71 rework, item 2; rule 6): a break at 150 lb turned the test's line red, while the design's card
+    still said "✓ Holds Dad" and the part's still said "Holds …, N times over"."""
+    from caliper import answers, design_api, samples, trials
+
+    store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
+    pr = trials.predict(store, "step_stool")
+    must = pr["lb"] * pr["factor"]
+    trials.record(store, "step_stool", 150, broke=True)
+    said = f"It broke at 150 lb in your test. We predicted it would hold {must:,.0f}."
+    part = answers.answers(store, design_api.design_state(store), "step_stool")[1]
+    assert part["status"] == "bad"
+    assert not [ln for ln in part["lines"] if ln["status"] == "ok" and ln["text"].startswith("Holds")], part["lines"]
+    assert any(ln["status"] == "bad" and ln["text"] == said for ln in part["lines"]), part["lines"]
+    design = answers.answers(store, design_api.design_state(store), None)[1]
+    strength = [ln for ln in design["lines"] if ln.get("study") == "load"]
+    assert strength and all(ln["status"] == "bad" and "broke at 150 lb in your test" in ln["text"] for ln in strength)
+    assert not any(ln["text"].startswith("✓ Holds") for ln in design["lines"]), design["lines"]
