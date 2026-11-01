@@ -156,38 +156,59 @@ def compared(store: DesignStore, part_id: str) -> dict:
     return got
 
 
+#: A break this close to the predicted load counts as matching the prediction (the foreman's band, #71 rework).
+MATCHES = 0.9
+#: A sag more than this many times outside the predicted range is one the model doesn't fit.
+SAG_OUT = 2.0
+
+
+def _times_over(factor: float) -> str:
+    return "twice over" if factor == 2 else f"{factor:g} times over"
+
+
 def summary(store: DesignStore, part_id: str, inches: bool = True) -> Optional[dict]:
-    """The card's line: the heaviest load it held (and its sag against the prediction), or where it broke."""
+    """The card's line: where it broke, judged against what it must hold and what we predicted; or the heaviest load
+    it held, with the worst-fitting sag of every step that has one (CALI-86: each step judged, the worst governs)."""
     got = compared(store, part_id)
     live = [r for r in got["rows"] if not r["stale"]]
     if not live:
         return None
     pred = got["prediction"] or {}
-    broke = next((r for r in live if r["broke"]), None)
     must = pred["lb"] * pred.get("factor", 1.0) if pred.get("lb") else None
+    broke = min((r for r in live if r["broke"]), key=lambda r: r["load_lb"], default=None)
     if broke:
-        # broke short of what it must hold is a fail; short of the prediction, the check was optimistic (CALI-86)
-        at = broke["load_lb"]
-        said = f"Tested: it broke at {at:,.0f} lb"
-        if pred.get("breaks_lb"):
-            said += f" (we predicted about {pred['breaks_lb']:,.0f})"
-        if must and at < must:
-            return {"text": said + f": less than the {must:,.0f} lb it must hold.", "status": "bad", "broke": True}
-        if pred.get("breaks_lb") and at < pred["breaks_lb"]:
-            return {"text": said + ": before we predicted, so the check reads strong here.", "status": "warn",
-                    "broke": True}
-        return {"text": said + ".", "status": "ok" if pred.get("breaks_lb") else "info", "broke": True}
+        at, breaks = broke["load_lb"], pred.get("breaks_lb")
+        if must and at < must:                              # a fail, whatever was predicted (rule 6)
+            return {"text": f"It broke at {at:,.0f} lb in your test. We predicted it would hold {must:,.0f}.",
+                    "status": "bad", "broke": True}
+        if breaks and at < MATCHES * breaks:
+            held = (f" It still held the {must:,.0f} lb it must hold ({pred['lb']:g} lb, "
+                    f"{_times_over(pred.get('factor', 1.0))} for {pred.get('case', 'its load').lower()})." if must else "")
+            return {"text": f"It broke sooner than we predicted, so our check was too hopeful.{held} "
+                            f"(It broke at {at:,.0f} lb; we predicted about {breaks:,.0f}.)",
+                    "status": "warn", "broke": True}
+        said = f"Tested: it broke at {at:,.0f} lb" + (f", as we predicted (about {breaks:,.0f})" if breaks else "")
+        return {"text": said + ".", "status": "ok" if breaks else "info", "broke": True}
     top = max(live, key=lambda r: r["load_lb"])
     said, status = f"Tested: it held {top['load_lb']:,.0f} lb", "ok"
-    if top.get("sag_mm") is not None:
-        said += f", sagging {_sag(top['sag_mm'], inches)}"
-        if top.get("predicted_mm"):
-            a, b = top["predicted_mm"]
-            said += f" (we predicted {_sag(a, inches, unit=False)}–{_sag(b, inches)})"
-            if top["sag_mm"] > 2 * b:                       # well outside the range: the model doesn't fit it
-                said, status = said + ": it sagged more than we predicted", "warn"
-            elif top["sag_mm"] < a / 2:
-                said, status = said + ": it sagged less than we predicted", "warn"
+    worst, how = None, 1.0                                   # the step whose sag fits the prediction worst
+    for r in live:
+        if r.get("sag_mm") is None or not r.get("predicted_mm"):
+            continue
+        a, b = r["predicted_mm"]
+        out = max(r["sag_mm"] / b if b > 0 else 1.0, a / r["sag_mm"] if r["sag_mm"] > 0 else 1.0)
+        if worst is None or out > how:
+            worst, how = r, out
+    if worst is not None:
+        a, b = worst["predicted_mm"]
+        step = f"at {worst['load_lb']:,.0f} lb it sagged {_sag(worst['sag_mm'], inches)} " \
+               f"(we predicted {_sag(a, inches, unit=False)}–{_sag(b, inches)})"
+        if worst["sag_mm"] > SAG_OUT * b:
+            said, status = f"{said}, but {step}: it sagged more than we predicted", "warn"
+        elif worst["sag_mm"] < a / SAG_OUT:
+            said, status = f"{said}, but {step}: it sagged less than we predicted, so it's stiffer than our check said", "warn"
+        else:
+            said += f"; {step}"
     return {"text": said + ".", "status": status, "broke": False}
 
 
