@@ -52,6 +52,12 @@ flags anything that needs one to the owner.
 without the chat around them: the question in one sentence, the options, what turns on it, a
 recommendation (or why there isn't one). The foreman leads every report with them.
 
+**Best answered on the issue, by the owner, signed `— Theo`.** Every seat pushes as the same account, so the
+signature is what tells a reader the words are his. A decision the owner gives in one seat's chat and that
+seat records on the board is still relayed for every other seat (rule 1): they confirm it with the owner in
+their own session before acting on a permission. (Learned 2026-11-01: the reviewer, rightly, wouldn't post on
+the foreman's record of #67.)
+
 ## The board
 
 GitHub Issues on `greentheo/caliper`, via `gh`.
