@@ -43,12 +43,12 @@ def test_one_page_a_piece_in_the_order_they_go_together(stool, tmp_path):
     assert titles[-1] == "Test it" and titles[-2] == "Add the top"          # the top goes on last
     assert titles[4].startswith("Start with the") and len(titles) == 4 + 5 + 1
     assert "18 #8 wood screws" in book and "a box of 50" not in book       # a kid's words
-    assert "For the T-rex, drill a hole just inside the line first" in book
+    assert "For the T-rex, the grown-up drills a hole just inside the line first" in book
     assert "3.1 times over" in book and "not a certificate" in book
     for k in range(5, 10):
         assert os.path.exists(os.path.join(root, "kids", f"step-{k:02d}.png"))
     # every screw the shopping list counts goes in on some page
-    said = sum(int(n) for n in re.findall(r"put in (\d+) screws", book))
+    said = sum(int(n) for n in re.findall(r"drives in (\d+) screws", book))
     assert said == C.report(stool, "stool")["bom"]["fasteners"]["screws"]
 
 
@@ -62,3 +62,23 @@ def test_drawings_show_a_panels_holes_and_look_at_the_picture(stool):
     assert math.cos(math.radians(az)) < -0.5                               # looking at the left side (x = 0)
     assert math.sin(math.radians(az)) < 0                                  # and the front (y = 0) with it
     assert kidbook.facing(list(pcs.values()), set()) == 35.0
+
+
+def test_no_page_puts_a_kid_s_hands_at_the_work_while_a_tool_runs(stool, tmp_path):
+    """CALI-86 (#62, finding 6; rule 6): the cut page had the kid holding the pattern while the jigsaw ran, and the
+    screw pages had them holding a piece while it was screwed. A grown-up clamps, cuts and drives the screws; the
+    kid stands back with safety glasses on while a tool runs."""
+    root = str(tmp_path / "release")
+    os.makedirs(root)
+    rec = {"design": "Box stool", "strength": {"stool": [{"name": "An adult stepping up", "safety": 3.11}]}}
+    kidbook.make(stool, root, rec, ["stool"], {"groups": []})
+    book = open(os.path.join(root, "kids.html")).read()
+    pages = re.findall(r"<section class='step'>(.*?)</section>", book, re.S)
+    tool = [p for p in pages if re.search(r"jigsaw|drill|screws", re.sub(r"<[^>]+>", " ", p.split("</h2>", 1)[1]),
+                                          re.I) and "Get your things" not in p]
+    assert len(tool) >= 5                                  # cutting, and every piece that's screwed on
+    for p in tool:
+        said = " ".join(re.findall(r"<p class='say'>(.*?)</p>", p, re.S))
+        assert not re.search(r"\bhold|\bsteady|\bpress", said, re.I), said
+        assert "grown-up" in said and "stand back" in said and "safety glasses" in said, said
+    assert "two clamps" in book                            # what the grown-up clamps it with is on the list
