@@ -139,7 +139,9 @@ at the owner's checkout, and the sandbox, the declaration probe and the frame st
 `python -m caliper…` as subprocesses. Without `PYTHONPATH=<your worktree>/src`, a test run from your worktree
 builds parts with the *owner's* code, and its results say nothing about your branch. Set it for every test
 run and every server you start. And don't run a probe with `python -I`: isolated mode ignores `PYTHONPATH`,
-so it imports the owner's checkout again (the reviewer hit this, 2026-11-01).
+so it imports the owner's checkout again (the reviewer hit this, 2026-11-01). And don't add `-q`: `pyproject.toml` already sets `addopts = "-q"`, so a second
+one makes `-qq`, which still prints the `-rs` skip reasons but drops the final `N passed, N skipped` line
+(night shift found it, 2026-11-01; the foreman checked which half). Run `pytest -rs`.
 
 The tools Caliper drives are pinned in the `Makefile` (`WHITTLE_REF`, `UNFOLD_REF`); CI fetches those
 commits. The environment imports whittle from the owner's checkout (`~/githubrepo/whittle`, editable): when

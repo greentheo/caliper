@@ -28,8 +28,8 @@ been:
    ```bash
    export PYTHONPATH=$PWD/src:<whittle checkout at WHITTLE_REF>/src     # README: the trap
    export CALIPER_UNFOLD_DIR=<unfold-to-sheets checkout at UNFOLD_REF>  # else cut-plan tests skip
-   /opt/anaconda3/envs/caliper/bin/python -m pytest tests/test_<what it touches>.py -q -rs
-   /opt/anaconda3/envs/caliper/bin/python -m pytest -q -rs              # once per stack, at the top
+   /opt/anaconda3/envs/caliper/bin/python -m pytest tests/test_<what it touches>.py -rs
+   /opt/anaconda3/envs/caliper/bin/python -m pytest -rs                 # once per stack, at the top
    node --check src/caliper/web/static/design.js                         # when the page changed
    ```
    Use the tool versions the `Makefile` pins (`WHITTLE_REF`, `UNFOLD_REF`), as CI does. `-rs` lists what was

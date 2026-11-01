@@ -56,8 +56,8 @@ Update `src/caliper/part_scripts.md` when what a script may declare changes.
 ```bash
 export PYTHONPATH=$PWD/src            # always (README: the trap); add a whittle checkout when the pin needs it
 export CALIPER_UNFOLD_DIR=<unfold-to-sheets at UNFOLD_REF>               # else the cut-plan tests skip
-/opt/anaconda3/envs/caliper/bin/python -m pytest tests/test_<area>.py -q -rs # while working
-/opt/anaconda3/envs/caliper/bin/python -m pytest -q -rs                     # once, before the PR (20-40 min)
+/opt/anaconda3/envs/caliper/bin/python -m pytest tests/test_<area>.py -rs    # while working
+/opt/anaconda3/envs/caliper/bin/python -m pytest -rs                        # once, before the PR (20-40 min)
 node --check src/caliper/web/static/design.js                                # when the page changed
 ```
 For anything a person sees: run the app on 8016 with a scratch designs folder, and click through the
