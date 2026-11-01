@@ -152,3 +152,41 @@ def test_a_failed_test_overrides_the_prediction_on_both_cards(tmp_path):
     strength = [ln for ln in design["lines"] if ln.get("study") == "load"]
     assert strength and all(ln["status"] == "bad" and "broke at 150 lb in your test" in ln["text"] for ln in strength)
     assert not any(ln["text"].startswith("✓ Holds") for ln in design["lines"]), design["lines"]
+
+
+#: Two of the camper's checks, as its scorecard.yaml has them: one rests on the frame's model, one on the cut plan.
+CAMPER_FRAME = {"id": "frame_yield", "label": "the frame survives 3.5x its standing load", "metric": "frame.yield_x",
+                "op": ">=", "limit": 3.5, "source": "stated"}
+CAMPER_SHEET = {"id": "fits", "label": "every piece fits a sheet", "metric": "make.missing", "op": "<=", "limit": 0,
+                "source": "stated"}
+
+
+def _work(checks, now):
+    from caliper import answers
+
+    state = {"goals": {"checks": checks}, "scorecards": [], "parts": []}
+    return answers._card("work", "Will it work?", answers.held_to(state, now))
+
+
+def test_the_promise_follows_a_strength_or_frame_verdict_pass_or_fail():
+    """CALI-86 (#71 rework, item 1): a failing frame check carries the promise as a passing one does (the ok-only
+    mutant), and a cut-plan check doesn't."""
+    from caliper import answers
+
+    assert _work([CAMPER_FRAME], {"frame.yield_x": 4.0}).get("promise") == answers.PROMISE
+    failing = _work([CAMPER_FRAME], {"frame.yield_x": 2.0})
+    assert failing["lines"][0]["status"] == "bad" and failing.get("promise") == answers.PROMISE
+    assert "promise" not in _work([CAMPER_SHEET], {"make.missing": 0})
+    for metric in ("strength.safety", "frame.walls_safety", "snow.safety", "floor.mattress_safety"):
+        assert answers.rests_on_model(metric), metric
+    for metric in ("make.missing", "hitch.tongue_lb", "weight.total_lb", "cost.usd"):
+        assert not answers.rests_on_model(metric), metric
+
+
+def test_the_first_run_reply_and_the_chat_s_facts_carry_the_promise(tmp_path):
+    from caliper import answers, chat, design_api, firstrun, samples
+
+    store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
+    cards = answers.answers(store, design_api.design_state(store), "step_stool")
+    assert answers.PROMISE in firstrun.summary(cards)
+    assert answers.PROMISE in chat._facts(store, None)

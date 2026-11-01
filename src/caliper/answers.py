@@ -52,6 +52,13 @@ def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
 
 
+def rests_on_model(metric: str) -> bool:
+    """Whether a scorecard check's number comes from a strength or frame model (and so carries the promise): not a
+    weight, a cost, or whether the pieces fit a sheet (CALI-86)."""
+    m = metric or ""
+    return m.startswith(("strength.", "frame.")) or m.endswith("safety") or "yield" in m
+
+
 def _card(key: str, q: str, lines: list[dict], hint: str = "") -> dict:
     card = {"key": key, "q": q, "status": _worst(lines) if lines else "info", "lines": lines, "hint": hint}
     # any verdict resting on a model (a strength or frame study, or the scorecard's checks) says what it promises
@@ -337,7 +344,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
         out.append(_line(f"{'✓' if ok else '✗'} {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}"
                          + (" (scored before the last change: score it again)." if late else "."),
                          "warn" if late else "ok" if ok else "bad",
-                         study="load" if c["metric"].startswith("strength") else None, model="scorecard"))
+                         study="load" if c["metric"].startswith("strength") else None,
+                         model=rests_on_model(c["metric"])))
     return out
 
 
