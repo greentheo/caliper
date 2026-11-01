@@ -121,6 +121,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
               "version": store.design.part(part_id).version, "min_safety": min_safety,
               "material": mat["name"], "spacing_mm": round(s, 2), "seconds": round(time.time() - t0, 1),
               "stations": out, "best": best["index"] if best else None, "weak": weak_note,
+              "share": "printed",                     # removed is the printed part's share (CALI-86); older runs: the solid's
               "notes": [*([weak_note] if weak_note else []),
                         "The safety on the chart is the printed part's own; the whole part's is beside it.",
                         f"Carved by whittle's sweep, {mat['name']} only: the "
@@ -134,6 +135,13 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g" if best and best["saved_g"]
          else f"{len(out)} steps", run=rid, progress=1.0)
     return record
+
+
+def share(rec: dict) -> str:
+    """What a run's "removed" is a share of, in words: a run saved before CALI-86 counted the whole solid, wood and
+    all, and keeps that meaning; it's said, never relabelled."""
+    return ("of the printed part" if rec.get("share") == "printed"
+            else "of the whole solid (carved before CALI-86: carve again for the printed share)")
 
 
 def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
