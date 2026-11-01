@@ -3,8 +3,10 @@
 Nothing leaves the machine on its own. What broke (a job that failed, a request that crashed, an error
 on the page) is kept on this machine in ``~/.caliper/errors.jsonl`` (or ``$CALIPER_ERRORS``), the newest
 50 of them, with your home folder written as ``~``. A **report** is one of them, plus Caliper's version,
-the OS and Python. It holds nothing of the design: no prompt, no part, no script. The page shows it in
-full, and sending it opens a new GitHub issue in your browser with it filled in, so you send it yourself.
+the OS and Python. It holds no prompt, no script and nothing typed: a job is named by its kind, and a design's
+folder or address by ``designs/<design>``. The error's own words can still name a part or a load, so the page
+shows the report in full, and sending it opens a new GitHub issue in your browser with it filled in, so you
+send it yourself.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import sys
 import time
 import traceback
@@ -30,10 +33,31 @@ def path() -> str:
     return os.environ.get("CALIPER_ERRORS") or os.path.join(os.path.expanduser("~"), ".caliper", "errors.jsonl")
 
 
+#: What a job was, said by its kind: a job's label is the person's own words (a chat turn's is their message).
+JOBS = {"chat": "a chat turn", "clarify": "a question about the design", "firstrun": "a first build",
+        "load": "a strength check", "lighten": "lightening a part", "carve": "carving a part",
+        "picture": "a picture on a part", "goals": "writing what it's held to", "scorecard": "a scorecard",
+        "cutplan": "a cut plan", "release": "a build package", "frame": "sizing a frame",
+        "gussets": "gusset plates", "aero": "a drag search", "whittle": "a whittle study"}
+#: A design's folder or address names it, and a design's name is the person's words (its slug comes from them).
+_DESIGN = re.compile(r"designs/[^/\s'\"]+")
+
+
+def job_where(kind: str) -> str:
+    return JOBS.get(kind, f"a {kind} job")
+
+
 def scrub(text: str) -> str:
-    """Your home folder as ``~``, so a report doesn't carry your user name."""
+    """Your home folder as ``~`` and any design's name as ``<design>``, so a report carries neither your user
+    name nor anything you called a design."""
+    text = text or ""
+    custom = os.environ.get("CALIPER_DESIGNS")
+    if custom:
+        text = re.sub(re.escape(custom.rstrip("/")) + r"/[^/\s'\"]+", "designs/<design>", text)
     home = os.path.expanduser("~")
-    return (text or "").replace(home, "~") if home and home != "/" else (text or "")
+    if home and home != "/":
+        text = text.replace(home, "~")
+    return _DESIGN.sub("designs/<design>", text)
 
 
 def record(where: str, error: str, trace: str = "") -> dict:
@@ -82,15 +106,24 @@ def report(error_id: Optional[str] = None) -> Optional[dict]:
     if e is None:
         return None
     when = time.strftime("%Y-%m-%d %H:%M", time.localtime(e["at"]))
-    head = (f"**What broke:** {e['error']}\n**Where:** {e['where']}\n**When:** {when}\n\n"
-            f"Caliper {__version__} · {_os()} ({platform.machine()}) · Python {sys.version.split()[0]}\n\n"
-            "**What I was doing:** (say here, if you like)\n\n")
-    trace = e.get("trace") or ""
-    body = head + (f"```\n{trace}\n```\n" if trace else "")
-    title = f"Error: {e['error'][:80]}"
-    url = f"{ISSUES}?title={quote(title)}&body={quote(body)}"
-    while len(url) > MOST_URL and trace:
-        trace = trace[len(trace) // 4:]                           # keep the end: the line that failed
-        body = head + f"```\n…{trace}\n```\n"
-        url = f"{ISSUES}?title={quote(title)}&body={quote(body)}"
+
+    def build(error: str, trace: str) -> tuple[str, str, str]:
+        head = (f"**What broke:** {error}\n**Where:** {e['where']}\n**When:** {when}\n\n"
+                f"Caliper {__version__} · {_os()} ({platform.machine()}) · Python {sys.version.split()[0]}\n\n"
+                "**What I was doing:** (say here, if you like)\n\n")
+        body = head + (f"```\n{trace}\n```\n" if trace else "")
+        title = f"Error: {error[:80]}"
+        return title, body, f"{ISSUES}?title={quote(title)}&body={quote(body)}"
+
+    # too long for a link: cut the trace from its start (the end is the line that failed), then the error from its
+    # end. Each pass cuts at least a character, so it always stops.
+    error, trace = e["error"], e.get("trace") or ""
+    title, body, url = build(error, trace)
+    while len(url) > MOST_URL and (trace or len(error) > 1):
+        if trace:
+            trace = trace[max(1, len(trace) // 4):]
+            title, body, url = build(error, "…" + trace if trace else "")
+        else:
+            error = error[:len(error) - max(1, len(error) // 4)]
+            title, body, url = build(error + "…", "")
     return {"id": e["id"], "title": title, "body": body, "url": url}

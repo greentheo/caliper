@@ -113,11 +113,13 @@ class JobRunner:
                 # the traceback's LAST line is the actual exception (the CALI-27 discipline)
                 tail = [ln for ln in traceback.format_exc().strip().splitlines() if ln.strip()]
                 job.error = f"{type(e).__name__}: {e}"
-                job.status = "error"
-                job.emit("error", job.error, trace=tail[-1] if tail else "")
                 from . import errors
 
-                job.error_id = errors.record(f"{job.kind}: {job.label}", job.error, traceback.format_exc())["id"]
+                # kept by its kind, never its label (a chat turn's label is the message, CALI-86), and before
+                # the job reads as failed, so whoever sees it fail has the error to report
+                job.error_id = errors.record(errors.job_where(job.kind), job.error, traceback.format_exc())["id"]
+                job.status = "error"
+                job.emit("error", job.error, trace=tail[-1] if tail else "")
             finally:
                 job.finished = time.time()
 
