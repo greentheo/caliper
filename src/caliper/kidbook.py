@@ -11,7 +11,8 @@ in a few big stages. Showcase 1 (#10) asks for one a kid can read, so a wooden b
 5. **One page a piece**, in the order they go together: the build so far in pale, the new piece in colour, the
    same view every page. It says what it goes against and how many screws hold it.
 6. **Paint it**, if it's painted.
-7. **Test it:** gently, with a grown-up holding it, and what the numbers do and don't promise.
+7. **Test it:** a grown-up stands on it first while the kid watches, then the kid; and what the numbers do
+   and don't promise.
 
 The steps come from the pieces themselves: which touch which (the joints the shopping list counts screws
 for), and how high each one sits. Only for a build that's all wood, glued and screwed; a welded frame stays
@@ -134,7 +135,8 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
     tools = ["a pencil and a long ruler", "sandpaper"]
     hand = set(S.read().get("hand") or [])
     tools += [t for t in ("jigsaw", "drill") if t in hand or not hand]
-    tools += ["two clamps", "safety glasses (everyone)", "a grown-up for the saw and the drill"]
+    tools += ["two clamps", "safety glasses (everyone)", "ear defenders (a jigsaw is loud)",
+              "a grown-up for the saw and the drill"]
     pages.append({"title": "Get your things", "say": "Tick each one off when you have it.",
                   "check": things + tools, "img": None})
     # draw the pieces: the patterns, by name
@@ -150,8 +152,10 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
                          "a ruler. Write each piece's name on it in pencil.",
                   "link": [(f"hand/{pid}/print-full-size.pdf", "Print the patterns full size") for pid in part_ids]})
     # a kid's hands are never at the work while a tool runs (CALI-86, rule 6): the grown-up clamps and cuts
-    cut = ("A grown-up clamps the wood to the table and cuts along the lines with the jigsaw. You stand back with "
-           "your safety glasses on and watch the line: say if the blade wanders off it.")
+    cut = ("A grown-up clamps the wood to the table with the line hanging past the table's edge (so the blade "
+           "doesn't cut the table), then cuts along the lines with the jigsaw. You stand an arm's length behind the "
+           "grown-up, never in front of the saw, with your safety glasses and ear defenders on, and watch the line: "
+           "say if the blade wanders off it.")
     if holes:
         cut += (f" For {'the ' + ' and the '.join(pictures) if pictures else 'each hole'}, the grown-up drills a "
                 "hole just inside the line first: the jigsaw blade goes in through it.")
@@ -179,7 +183,8 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
                 n_screws = sum(screws_for(joints[tuple(sorted((pc["name"], a)))]) for a in against)
                 say = (f"Put glue on the edges where the {_name(pc['name'])} touches the "
                        f"{' and the '.join(_name(a) for a in against)}. A grown-up clamps it in place and drives "
-                       f"in {n_screws} screws with the drill, while you stand back with your safety glasses on.")
+                       f"in {n_screws} screws with the drill, while you stand an arm's length behind with your safety "
+                       f"glasses and ear defenders on.")
             img = f"kids/step-{len(pages) + 1:02d}.png"
             with open(os.path.join(root, img), "wb") as f:
                 f.write(release.draw(view, [(done, "done"), ([new], "now")]))
@@ -200,7 +205,9 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
     with open(os.path.join(root, "kids", "finished.png"), "wb") as f:
         f.write(release.draw(view, [(every, "now")]))
     pages.append({"title": "Test it", "img": "kids/finished.png",
-                  "say": "Stand on it gently, with a grown-up holding it. Then let a grown-up try. " + " ".join(held),
+                  # trying a new stool is a grown-up's step (rule 6): they go first, the kid watches
+                  "say": "A grown-up stands on it first, gently, while you watch. Then it's your turn, with the "
+                         "grown-up right beside you. " + " ".join(held),
                   "note": answers.PROMISE, "grownup": True})
     with open(os.path.join(root, "kids.html"), "w") as f:
         f.write(page(release.title(rec["design"]), pages))

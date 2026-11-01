@@ -254,17 +254,23 @@ def plate(a: float, b: float, t: float, force: float, footprint: float, E: float
 
 #: How far either side of a load a panel on two edges carries it, as a share of the span: BS 8110-1:1997 clause
 #: 3.5.2.2 (a concentrated load on a slab spanning one way) gives the load's width + 2.4·x·(1 - x/L) for a load x
-#: from a support, so 0.6·L at mid-span. Against the Lévy plate solution (tests/test_beam_width.py) it reads 31%
-#: high in stress on a panel three spans wide and 23% high at 1.5 spans: the safe side (CALI-86).
+#: from a support, so 0.6·L at mid-span; near an unsupported edge, no more than half that plus the load's distance
+#: from the edge. (DIN 1045 Heft 240 gives 0.625·L at mid-span.) NEEDS ENGINEER CHECK: read from the clause as the
+#: reviewer and the foreman both understand it, not yet checked against the printed text. Against the Lévy plate
+#: solution (tests/test_beam_width.py) it reads 31% high in stress on a panel three spans wide and 23% high at 1.5
+#: spans: the safe side (CALI-86).
 BEAM_SPREAD = 0.6
 
 
-def beam(span: float, width: float, t: float, force: float, mat: dict, footprint: float = 0.0) -> dict:
-    """A panel resting on two opposite edges, the load (``footprint`` mm wide along the edges) in the middle of its
-    span: a simply supported beam (the safe side: the edges free to turn, the load not spread along the span), as
-    wide as carries the load: the panel, or :data:`BEAM_SPREAD` of the span beside the load if that's less. Stress,
-    sag and safety, and at other thicknesses."""
-    carries = min(width, footprint + BEAM_SPREAD * span)
+def beam(span: float, width: float, t: float, force: float, mat: dict, footprint: float = 0.0,
+         edge: Optional[float] = None) -> dict:
+    """A panel resting on two opposite edges, the load (``footprint`` mm wide along the edges, its middle ``edge`` mm
+    from the nearer free end; the middle if not given) in the middle of its span: a simply supported beam (the safe
+    side: the edges free to turn, the load not spread along the span), as wide as carries the load: the panel, or
+    BS 8110's effective width if that's less (:data:`BEAM_SPREAD`). Stress, sag and safety, and at other
+    thicknesses, all at that width."""
+    spread = footprint + BEAM_SPREAD * span
+    carries = min(width, spread, 0.5 * spread + (width / 2 if edge is None else max(edge, 0.0)))
 
     def at(tt):
         stress = force * span / 4 / (carries * tt ** 2 / 6)
@@ -284,8 +290,9 @@ def beam(span: float, width: float, t: float, force: float, mat: dict, footprint
             "safety": round(safety, 2), "safety_across": round(safety * mat["across"], 2),
             "deflection_mm": round(sag, 3), "by_thickness": by_t, "width_mm": round(carries, 1),
             "why": f"it rests on two opposite edges, {span / 25.4:.1f} in apart: a beam across them"
-                   + (f", {carries / 25.4:.1f} in of it carrying the load (BS 8110's effective width for a load on a "
-                      f"panel this wide)" if carries < width else "")
+                   + (f", {carries / 25.4:.1f} in of it carrying the load (BS 8110's effective width for a load "
+                      f"{'this near its free end' if carries < min(width, spread) else 'on a panel this wide'})"
+                      if carries < width else "")
                    + (f". Cut with its face grain running across the gap and it's about {safety:.1f} times over "
                       f"instead of {safety * mat['across']:.1f}" if mat.get("across", 1.0) < 1.0 else "")}
 
@@ -360,8 +367,10 @@ def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=Non
                 far = poly[(which[0] + 2) % 4] - e0
                 span = float(np.linalg.norm(far - (far @ along) * along))
                 width = float(np.linalg.norm(e1 - e0))
+                at = float((c - e0) @ along)                 # where the load's middle is along the held edges
                 return {**base, **beam(span, width, pc["thickness"], float(abs(f @ n)), mat,
-                                       footprint=abs(float(ext @ np.abs(along))))}
+                                       footprint=abs(float(ext @ np.abs(along))),
+                                       edge=min(at, width - at))}
             if edges < len(poly) or len(poly) != 4:
                 return {**base, "done": False,
                         "why": f"only {edges} of its {len(poly)} edges rest on another piece; the plate "

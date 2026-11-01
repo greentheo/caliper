@@ -108,3 +108,77 @@ def test_a_design_s_name_is_scrubbed_from_paths_and_urls(tmp_path, monkeypatch):
     monkeypatch.setenv("CALIPER_DESIGNS", str(custom))
     e = errors.record("w", "OSError", f'File "{custom}/garden-bench-for-mum/parts/p.py"')
     assert "garden-bench" not in e["trace"] and "designs/<design>/parts/p.py" in e["trace"]
+
+
+def test_anyones_home_folder_is_scrubbed():
+    """CALI-86 (#69 rework, item 2a): only $HOME was scrubbed; someone else's path came through whole."""
+    e = errors.record("w", "OSError: '/Users/sarah/x.py'", 'File "/home/bob/y.py", line 2\nFile "/Users/sarah/z/w.py"')
+    assert "sarah" not in e["error"] + e["trace"] and "bob" not in e["trace"]
+    assert "~/x.py" in e["error"] and "~/y.py" in e["trace"]
+
+
+def _client(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    return TestClient(create_app(), raise_server_exceptions=False)
+
+
+def test_a_crash_says_a_plain_sentence_and_the_error_id(tmp_path, monkeypatch):
+    """CALI-86 (#69 rework, item 2b): a 500's detail was the raw exception, paths and all."""
+    pytest.importorskip("fastapi")
+    from caliper.design import DesignStore
+
+    c = _client(tmp_path, monkeypatch)
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", "def build(p):\n    return None\n", intent="a stool")
+    from caliper import trials
+
+    def broken(*a, **k):
+        raise OSError(13, "Permission denied", "/Users/sarah/y.py")
+
+    monkeypatch.setattr(trials, "compared", broken)
+    got = c.get(f"/api/designs/{store.design.slug}/parts/stool/trial")
+    assert got.status_code == 500
+    body = got.json()
+    assert body["error_id"] and body["error_id"] in body["detail"]
+    assert "/" not in body["detail"] and "sarah" not in body["detail"] and "Permission" not in body["detail"]
+
+
+def test_a_yaml_error_keeps_its_line_and_column_but_not_what_it_quotes(tmp_path, monkeypatch):
+    """CALI-86 (#69 rework, item 2c): a design.yaml that won't parse put the person's own sentence into the report:
+    the reviewer's "a surprise stool for Emma: she turns 6 on friday"."""
+    pytest.importorskip("fastapi")
+    from caliper.design import DesignStore
+
+    c = _client(tmp_path, monkeypatch)
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    path = os.path.join(store.root, "design.yaml")
+    text = open(path).read()
+    with open(path, "w") as f:
+        f.write(text + "\nprompt: a surprise stool for Emma: she turns 6 on friday\n")
+    got = c.get(f"/api/designs/{store.design.slug}")
+    assert got.status_code == 500
+    rep = c.get(f"/api/errors/report?id={got.json()['error_id']}").json()
+    said = (rep["body"] + rep["title"] + rep["url"]).lower()
+    for word in ("emma", "surprise", "friday", "turns"):
+        assert word not in said, word
+    assert "line" in rep["body"] and "column" in rep["body"]
+
+
+def test_a_failed_job_s_yaml_error_drops_its_excerpt_too():
+    import yaml
+
+    from caliper.jobs import JobRunner
+
+    said = {"text": "prompt: a surprise stool for Emma: she turns 6 on friday\n"}
+
+    def bad(job):
+        yaml.safe_load(said["text"])                 # the words come from a file, as they would, not from this line
+
+    j = JobRunner().submit("chat", bad, label="x")
+    _wait(j)
+    e = next(x for x in errors.recent(5) if x["id"] == j.error_id)
+    assert "Emma" not in e["error"] + e["trace"] and "line 1, column" in e["error"]

@@ -94,3 +94,74 @@ def test_a_narrow_panel_is_a_beam_over_its_whole_width_as_before():
     got = L.beam(300, 220, T, P, PLY, footprint=100)               # test_mixed's top: 220 < 100 + 0.6 x 300
     assert got["width_mm"] == 220
     assert got["stress_mpa"] == pytest.approx(P * 300 / 4 / (220 * T ** 2 / 6), rel=1e-3)
+
+
+#: A 1/2 in top 900 wide across 300 mm, on two plywood sides along its long edges: held on two edges, free at its
+#: ends (x = 0 and x = 900). Each foot is a loads() box; where it is, and which way it's long, is the point.
+TOP = '''import cadquery as cq
+
+W, SPAN, T, S, H = 900.0, 300.0, 12.7, 19.05, 200.0
+FEET = {"centred": ((400, 100), (500, 200)), "at the free end": ((0, 100), (100, 200)),
+        "long across the span": ((450, 50), (550, 250)), "long along the edge": ((350, 100), (550, 200))}
+FOOT = "centred"
+
+
+def _boxes():
+    return [((0, 0, H - T), (W, SPAN, H)), ((0, 0, 0), (W, S, H - T)), ((0, SPAN - S, 0), (W, SPAN, H - T))]
+
+
+def build(params):
+    out = None
+    for lo, hi in _boxes():
+        b = cq.Workplane().box(*(b - a for a, b in zip(lo, hi)), centered=False).translate(lo)
+        out = b if out is None else out.union(b)
+    return out
+
+
+def construction(params, build=None):
+    return [{"name": "top", "kind": "sheet", "material": "plywood", "thickness": T,
+             "outline": [(0, 0, H), (W, 0, H), (W, SPAN, H), (0, SPAN, H)]},
+            {"name": "front", "kind": "sheet", "material": "plywood", "thickness": S,
+             "outline": [(0, 0, 0), (W, 0, 0), (W, 0, H - T), (0, 0, H - T)]},
+            {"name": "back", "kind": "sheet", "material": "plywood", "thickness": S,
+             "outline": [(0, SPAN, 0), (W, SPAN, 0), (W, SPAN, H - T), (0, SPAN, H - T)]}]
+
+
+def loads(params, build=None):
+    (x0, y0), (x1, y1) = FEET[FOOT]
+    return [{"name": "a foot", "lb": 200, "factor": 2.0, "lo": (x0, y0, H - 2), "hi": (x1, y1, H)}]
+'''
+
+
+def _beam_of(foot):
+    """The plate check's verdict on the top for one foot, through the real path (no FEA needed for it)."""
+    from caliper import consistency, sandbox
+
+    run = sandbox.run_script(TOP.replace('FOOT = "centred"', f'FOOT = "{foot}"'), timeout=120)
+    pieces = consistency.shapes(run.declared)
+    mesh = run.geometry.require_mesh()
+    consistency._sides(mesh, pieces)
+    (load,) = L.parse_loads(run.declared["loads"])
+    got = L.plate_check(pieces, load, PLY, consistency.tolerance(mesh))
+    assert got and got["as"] == "beam" and got["edges_held"] == 2 and got["span_mm"] == pytest.approx(300, abs=1)
+    return got
+
+
+def _stress(width):
+    return P * 300 / 4 / (width * T ** 2 / 6)
+
+
+@pytest.mark.parametrize("foot,width", [
+    ("centred", 100 + 0.6 * 300),                        # b_e: the foot's width along the edges + 0.6 of the span
+    ("at the free end", 0.5 * (100 + 0.6 * 300) + 50),   # BS 8110 near an unsupported edge: 0.5 b_e + 50 = 190 mm
+    ("long across the span", 100 + 0.6 * 300),           # 200 mm across the span, 100 along the edges: still 100
+    ("long along the edge", 200 + 0.6 * 300),            # 200 mm along the edges
+])
+def test_the_plate_check_gives_the_beam_the_width_where_the_foot_is(foot, width):
+    """CALI-86 (#69 rework, item 1; rule 6): the beam took the foot's width but not where it was, so a foot at a
+    tread's free end got the same width as one in the middle (the reviewer: 17.7 MPa where it's about 26)."""
+    got = _beam_of(foot)
+    assert got["width_mm"] == pytest.approx(width, abs=1)
+    assert got["stress_mpa"] == pytest.approx(_stress(width), rel=0.01)
+    # the sag at the same width as the stress
+    assert got["deflection_mm"] == pytest.approx(P * 300 ** 3 / (48 * PLY["E"] * width * T ** 3 / 12), rel=0.01)

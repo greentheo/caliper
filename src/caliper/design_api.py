@@ -15,7 +15,7 @@ import os
 import re
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from . import (aero, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
                load_study, making, patterns, promote, release, samples, scorecard, shop, studies)
@@ -52,6 +52,13 @@ class TrialStep(BaseModel):
     sag_mm: Optional[float] = None
     broke: bool = False
     note: str = ""
+
+    @field_validator("load_lb", "sag_mm", mode="before")
+    @classmethod
+    def _a_number(cls, v):
+        if isinstance(v, bool):                      # true isn't 1 lb (CALI-86)
+            raise ValueError("a number, not true or false")
+        return v
 
 
 class DesignSettings(BaseModel):
@@ -257,7 +264,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "part_errors": part_errors,
         "proposal": proposal.to_dict() if proposal else None,
         "clarify": [q.to_dict() for q in clarify.pending(store)],
-        "log": store.log(),
+        "log": store.log(skipped := []),
+        "log_skipped": len(skipped),
         "whittle_runs": [_run_summary(r) for r in runs["whittle"]],
         "aero_runs": runs["aero"],
         "frame_runs": runs["frame"],
