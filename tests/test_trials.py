@@ -1,5 +1,7 @@
 """CALI-80 (#48) — record the test: what the strength check predicted, against what the real one did."""
 
+import os
+
 import pytest
 
 from caliper import answers, design_api, load_study, trials
@@ -59,7 +61,8 @@ def test_each_step_is_kept_and_set_beside_the_prediction(checked):
     # and where it broke
     trials.record(checked, "stool", 1100, broke=True)
     assert trials.summary(checked, "stool")["text"] == (
-        f"Tested: it broke at 1,100 lb (we predicted about {pr['breaks_lb']:,.0f}).")
+        f"Tested: it broke at 1,100 lb (we predicted about {pr['breaks_lb']:,.0f}): before we predicted, so the "
+        f"check reads strong here.")
     # a test of an older version reads as one
     checked.write_part("stool", BOX_STOOL, intent="v2")
     assert all(r["stale"] for r in trials.compared(checked, "stool")["rows"])
@@ -125,3 +128,32 @@ def test_the_api_refuses_nan_and_a_nan_already_on_file_doesnt_break_the_page(pla
     assert c.get(f"/api/designs/{slug}").status_code == 200
     assert c.get(f"/api/designs/{slug}/parts/stool/trial").status_code == 200
     assert c.get(f"/api/designs/{slug}/answers?part=stool").status_code == 200
+
+
+def test_the_test_record_s_verdicts_are_the_right_colour(checked):
+    """CALI-86 (#62, finding 11; rule 6): "broke at 150 lb" on a part that must hold 400 was `info`, and a sag 15x
+    the prediction was a green tick."""
+    pr = trials.predict(checked, "stool")
+    lo, hi = pr["per_lb_mm"]
+    must = pr["lb"] * pr["factor"]
+    assert must == 400
+
+    def line(*steps):
+        if os.path.exists(trials.path(checked, "stool")):
+            os.remove(trials.path(checked, "stool"))
+        for load, kw in steps:
+            trials.record(checked, "stool", load, **kw)
+        return trials.summary(checked, "stool")
+
+    got = line((150, {"broke": True}))
+    assert got["status"] == "bad" and "less than the 400 lb it must hold" in got["text"]
+    got = line((must + 50, {"broke": True}))
+    assert got["status"] == "warn" and "before we predicted" in got["text"]
+    got = line((pr["breaks_lb"] + 50, {"broke": True}))
+    assert got["status"] == "ok"
+    got = line((200, {"sag_mm": hi * 200 * 15}))
+    assert got["status"] == "warn" and "sagged more than we predicted" in got["text"]
+    got = line((200, {"sag_mm": lo * 200 / 15}))
+    assert got["status"] == "warn" and "sagged less than we predicted" in got["text"]
+    got = line((200, {"sag_mm": (lo + hi) / 2 * 200}))
+    assert got["status"] == "ok" and "predicted" in got["text"]

@@ -69,6 +69,7 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     loads = sorted({case["lb"], *range(step, int(breaks or applied * 2) + step, step)})
     steps = [{"lb": lb, "sag_mm": [round(lo * lb, 3), round(hi * lb, 3)]} for lb in loads]
     return {"part": part_id, "version": run["version"], "run": run["id"], "case": case["name"], "lb": case["lb"],
+            "factor": case["factor"],
             "where": plate.get("piece") if plate.get("done") else case["fea"].get("in"),
             "breaks_lb": breaks, "steps": steps, "per_lb_mm": [round(lo, 6), round(hi, 6)],
             "measure_with": measure_with(hi * case["lb"]),
@@ -162,19 +163,31 @@ def summary(store: DesignStore, part_id: str, inches: bool = True) -> Optional[d
         return None
     pred = got["prediction"] or {}
     broke = next((r for r in live if r["broke"]), None)
+    must = pred["lb"] * pred.get("factor", 1.0) if pred.get("lb") else None
     if broke:
-        said = f"Tested: it broke at {broke['load_lb']:,.0f} lb"
+        # broke short of what it must hold is a fail; short of the prediction, the check was optimistic (CALI-86)
+        at = broke["load_lb"]
+        said = f"Tested: it broke at {at:,.0f} lb"
         if pred.get("breaks_lb"):
             said += f" (we predicted about {pred['breaks_lb']:,.0f})"
-        return {"text": said + ".", "status": "info", "broke": True}
+        if must and at < must:
+            return {"text": said + f": less than the {must:,.0f} lb it must hold.", "status": "bad", "broke": True}
+        if pred.get("breaks_lb") and at < pred["breaks_lb"]:
+            return {"text": said + ": before we predicted, so the check reads strong here.", "status": "warn",
+                    "broke": True}
+        return {"text": said + ".", "status": "ok" if pred.get("breaks_lb") else "info", "broke": True}
     top = max(live, key=lambda r: r["load_lb"])
-    said = f"Tested: it held {top['load_lb']:,.0f} lb"
+    said, status = f"Tested: it held {top['load_lb']:,.0f} lb", "ok"
     if top.get("sag_mm") is not None:
         said += f", sagging {_sag(top['sag_mm'], inches)}"
         if top.get("predicted_mm"):
             a, b = top["predicted_mm"]
             said += f" (we predicted {_sag(a, inches, unit=False)}–{_sag(b, inches)})"
-    return {"text": said + ".", "status": "ok", "broke": False}
+            if top["sag_mm"] > 2 * b:                       # well outside the range: the model doesn't fit it
+                said, status = said + ": it sagged more than we predicted", "warn"
+            elif top["sag_mm"] < a / 2:
+                said, status = said + ": it sagged less than we predicted", "warn"
+    return {"text": said + ".", "status": status, "broke": False}
 
 
 def _sag(mm: float, inches: bool, unit: bool = True) -> str:
