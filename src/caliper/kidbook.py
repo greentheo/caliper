@@ -55,6 +55,46 @@ def _name(n: str) -> str:
     return (n or "piece").replace("_", " ")
 
 
+_NTH = ["first", "second", "third", "fourth", "fifth", "sixth"]
+
+
+def _words(seq: list) -> dict:
+    """What each piece is called on the pages, by key: its name, or, for pieces that share one, "first side" and
+    "other side" (or "second side", "third side" ...) in the order they go on (CALI-87)."""
+    count: dict = {}
+    for pc, _ in seq:
+        count[pc["name"]] = count.get(pc["name"], 0) + 1
+    seen: dict = {}
+    out = {}
+    for pc, _ in seq:
+        n = pc["name"]
+        seen[n] = seen.get(n, 0) + 1
+        if count[n] == 1:
+            out[pc["key"]] = _name(n)
+        else:
+            k = seen[n] - 1
+            nth = "other" if count[n] == 2 and k == 1 else (_NTH[k] if k < len(_NTH) else f"#{k + 1}")
+            out[pc["key"]] = f"{nth} {_name(n)}"
+    return out
+
+
+def _together(against: list, wood: list, words: dict) -> str:
+    """The pieces a piece goes against, in words: "both sides, the back and the front" when every piece sharing a
+    name is among them."""
+    name_of = {w["key"]: w["name"] for w in wood}
+    parts, done = [], set()
+    for a in against:
+        n = name_of[a]
+        same = [w["key"] for w in wood if w["name"] == n]
+        if len(same) == 2 and set(same) <= set(against):
+            if n not in done:
+                parts.append(f"both {_name(n)}s")
+                done.add(n)
+        else:
+            parts.append(f"the {words[a]}")
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
 def order(pcs: list[dict], joints: dict) -> list[tuple[dict, list[str]]]:
     """The pieces in the order they go together: the lowest standing piece first, then each one that meets what's
     already there, lowest and biggest first. Each with the pieces it goes against."""
@@ -171,25 +211,29 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
         _sides(mesh, pcs)
         wood = [pc for pc in pcs if pc.get("material") in WOOD]
         joints = fasteners.joints(wood, tolerance(mesh))
-        drawn = {p["name"]: p for p in release.pieces(store, pid)}
-        for k, (pc, against) in enumerate(order(wood, joints)):
-            new = drawn.get(pc["name"])
+        # each drawing by the piece's own key, numbered as fasteners.keys numbers the wood (CALI-87)
+        drawn_wood = [p for p in release.pieces(store, pid) if p.get("material") in WOOD and p["kind"] in ("sheet", "stick")]
+        fasteners.keys(drawn_wood)
+        drawn = {p["key"]: p for p in drawn_wood}
+        seq = order(wood, joints)
+        words = _words(seq)
+        for k, (pc, against) in enumerate(seq):
+            new = drawn.get(pc["key"])
             if new is None:
                 continue
             if not against:
-                say = f"Stand the {_name(pc['name'])} up where the picture shows. This one is the start."
+                say = f"Stand the {words[pc['key']]} up where the picture shows. This one is the start."
                 n_screws = 0
             else:
                 n_screws = sum(screws_for(joints[tuple(sorted((pc["key"], a)))]) for a in against)
-                said = {w["key"]: w["name"] for w in wood}
-                say = (f"Put glue on the edges where the {_name(pc['name'])} touches the "
-                       f"{' and the '.join(_name(said[a]) for a in against)}. A grown-up clamps it in place and drives "
+                say = (f"Put glue on the edges where the {words[pc['key']]} touches {_together(against, wood, words)}. "
+                       f"A grown-up clamps it in place and drives "
                        f"in {n_screws} screws with the drill, while you stand an arm's length behind with your safety "
                        f"glasses and ear defenders on.")
             img = f"kids/step-{len(pages) + 1:02d}.png"
             with open(os.path.join(root, img), "wb") as f:
                 f.write(release.draw(view, [(done, "done"), ([new], "now")]))
-            pages.append({"title": f"Add the {_name(pc['name'])}" if against else f"Start with the {_name(pc['name'])}",
+            pages.append({"title": f"Add the {words[pc['key']]}" if against else f"Start with the {words[pc['key']]}",
                           "say": say, "img": img, "grownup": bool(n_screws), "screws": n_screws})
             done.append(new)
     if any("paint" in (p.get("covers") or []) for p in every):

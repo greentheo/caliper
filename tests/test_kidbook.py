@@ -138,3 +138,27 @@ def test_any_pieces_sharing_a_name_still_get_a_book(tmp_path, same):
     kidbook.make(store, root, {"design": "Box stool", "strength": {}}, ["stool"], {"groups": []})
     book = open(os.path.join(root, "kids.html")).read()
     assert sum(int(n) for n in re.findall(r"drives in (\d+) screws", book)) == 18
+
+
+def test_pieces_with_one_name_are_told_apart_on_the_pages(tmp_path):
+    """CALI-87 (#75 rework, item 3): drawings were found by name, so both "side" pages drew the same piece, and
+    both said "Add the side"."""
+    import html
+
+    store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", BOX_STOOL.replace('return [{"name": k, "kind": "sheet"',
+                                                'return [{"name": "side" if k in ("left", "right") else k, "kind": "sheet"'),
+                     intent="a box stool, both sides called side")
+    root = str(tmp_path / "release")
+    os.makedirs(root)
+    kidbook.make(store, root, {"design": "Box stool", "strength": {}}, ["stool"], {"groups": []})
+    book = html.unescape(open(os.path.join(root, "kids.html")).read())
+    titles = re.findall(r"<h2><span class='n'>\d+</span>([^<]+)</h2>", book)
+    sides = [t for t in titles if t.endswith("side")]
+    assert sorted(sides) == sorted({"Start with the first side", "Add the first side"} & set(sides)
+                                   | {"Add the other side"}) and len(set(sides)) == 2, titles
+    pages = re.findall(r"<section class='step'>(.*?)</section>", book, re.S)
+    imgs = [re.search(r"src='(kids/step-\d+\.png)'", p).group(1) for p in pages if re.search(r"<h2>.*side</h2>", p)]
+    assert len(imgs) == 2 and open(os.path.join(root, imgs[0]), "rb").read() != open(os.path.join(root, imgs[1]), "rb").read()
+    top = next(p for p in pages if "Add the top" in p)
+    assert "touches both sides" in top, top
