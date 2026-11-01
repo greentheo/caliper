@@ -120,3 +120,29 @@ def test_a_save_that_fails_leaves_the_old_sample_whole(tmp_path):
         samples.save(store.design.slug, "step-stool", base=base, out=str(out))
     assert sorted(os.listdir(out / "step-stool")) == before
     assert sorted(os.listdir(out)) == ["step-stool"]                   # and no half-made folder beside it
+
+
+def test_each_sample_guard_refuses_on_its_own(tmp_path):
+    """CALI-86 (#71 rework, item 10): a plain name that isn't a sample, and a sample whose folder name isn't plain."""
+    import shutil
+
+    base = tmp_path / "designs"
+    with pytest.raises(KeyError):                         # plain, but not one of the samples there are
+        samples.open_sample("nosuch", base=str(base))
+    root = tmp_path / "samples"
+    shutil.copytree(os.path.join(samples.SAMPLES_DIR, "step-stool"), root / "Step_Stool")
+    assert [x["name"] for x in samples.available(str(root))] == ["Step_Stool"]
+    with pytest.raises(KeyError):                         # one of them, but not a plain name
+        samples.open_sample("Step_Stool", base=str(base), root=str(root))
+    assert not base.exists() or os.listdir(base) == []
+
+
+def test_an_unknown_sample_is_a_404_with_no_path(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    got = TestClient(create_app(), raise_server_exceptions=False).post("/api/samples/nosuch")
+    assert got.status_code == 404 and "/" not in got.json()["detail"]

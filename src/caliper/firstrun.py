@@ -153,5 +153,7 @@ def summary(cards: list[dict]) -> str:
         text = [ln["text"] if ln["text"][-1] in ".!?…" else ln["text"] + "." for ln in said[:2]]
         if text:
             lines.append(f"- **{c['q']}** " + " ".join(text))
+    if any(c.get("promise") for c in cards):           # a strength verdict says what it promises (CALI-86)
+        lines += ["", next(c["promise"] for c in cards if c.get("promise"))]
     lines += ["", "Click a card on the right to see it, or ask me why."]
     return "\n".join(lines)

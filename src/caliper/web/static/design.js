@@ -1770,6 +1770,11 @@ function loadView(p) {
 
 // carve it (CALI-82): a printed part, carved free-form where it isn't working; each step checked
 function carveRuns(pid) { return (S.design.carve_runs || []).filter((r) => r.part === pid); }
+// what a carve's "removed" is a share of: a run from before CALI-86 counted the whole solid, and says so
+function carveShare(run) {
+  return run && run.share === 'printed' ? 'of the printed part'
+    : 'of the whole solid (carved before CALI-86: carve again for the printed share)';
+}
 function carveView(p) {
   const run = carveRuns(p.id)[0];
   const head = `<h5 style="margin:14px 0 4px">Carve it <span class="badge">printed, any shape</span></h5>
@@ -1791,8 +1796,8 @@ function carveView(p) {
     <svg class="trial-chart" viewBox="0 0 ${W} ${H}"><line x1="24" x2="${W - 10}" y1="${y(run.min_safety)}" y2="${y(run.min_safety)}" class="brk"/>
       <text x="${W - 10}" y="${y(run.min_safety) - 3}" text-anchor="end">needs ${run.min_safety}x</text>
       <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>${dots}
-      <text x="24" y="${H - 3}">as drawn</text><text x="${W - 10}" y="${H - 3}" text-anchor="end">of the printed part carved away →</text></svg>
-    <div class="small">${best && best.saved_g ? `The lightest step where the printed part holds: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% of the printed part
+      <text x="24" y="${H - 3}">as drawn</text><text x="${W - 10}" y="${H - 3}" text-anchor="end">${carveShare(run)} carved away →</text></svg>
+    <div class="small">${best && best.saved_g ? `The lightest step where the printed part holds: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% ${carveShare(run)}
       carved away, <b>${best.saved_g} g</b> less filament, the printed part ${best.safety}x;
       ${best.whole_holds ? `the whole part ${best.whole}x` : `<b class="bad">the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold</b>`}.`
       : 'Nothing could come off and still hold.'}
@@ -2449,7 +2454,7 @@ async function showStation(pid, run, index) {
     bar.hidden = false;
     const removed = parametric ? st.removed : st.removed_part;
     const what = carved
-      ? `<span><b>Preview, not carved yet:</b> step <b>${index}</b> · ${pct(st.removed)} of the printed part carved away ·
+      ? `<span><b>Preview, not carved yet:</b> step <b>${index}</b> · ${pct(st.removed)} ${carveShare(run)} carved away ·
         ${st.saved_g} g less filament · <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
       : lightened
       ? `<span><b>Preview, not cut yet:</b> step <b>${index}</b> · ${pct(st.removed)} out of the walls${st.top_holes ? ` and ${st.top_holes} hole${st.top_holes === 1 ? '' : 's'} in the top` : ''} · ${lbs(st.saved_lb)} lighter ·
