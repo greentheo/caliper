@@ -56,3 +56,43 @@ def test_a_part_with_nothing_flat_has_no_patterns(tmp_path):
     s.write_part("block", "def build(params):\n    import cadquery as cq\n    return cq.Workplane().box(10, 10, 10)\n")
     with pytest.raises(ValueError, match="no flat sheet pieces"):
         patterns.make(s, "block")
+
+
+#: An L-shaped hole in each side, which faces opposite ways: the pattern must be the L as seen from outside.
+L = [(40, 40), (120, 40), (120, 70), (70, 70), (70, 140), (40, 140)]
+L_HOLES = f'''
+
+HOLES = [{{"piece": "left", "normal": [1, 0, 0], "depth": 19.05,
+          "polygons": [{[[0.0, y, z] for y, z in L]}]}},
+         {{"piece": "right", "normal": [-1, 0, 0], "depth": 19.05,
+          "polygons": [{[[406.4, y, z] for y, z in L]}]}}]
+'''
+
+
+def _signed_area(pts) -> float:
+    import numpy as np
+
+    p = np.asarray(pts, float)
+    return 0.5 * float(np.sum(p[:, 0] * np.roll(p[:, 1], -1) - np.roll(p[:, 0], -1) * p[:, 1]))
+
+
+@pytest.mark.parametrize("piece,outward", [("left", (-1, 0, 0)), ("right", (1, 0, 0))])
+def test_each_pattern_is_the_panel_seen_from_its_outside_face(tmp_path, piece, outward):
+    """CALI-86 (#62, finding 7): the left side's pattern was mirrored, so a T-rex traced from it faced the wrong way.
+    Turning a pattern round keeps which way an L goes round; mirroring it reverses it."""
+    import numpy as np
+
+    s = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
+    s.write_part("stool", BOX_STOOL + L_HOLES, intent="L holes in both sides")
+    pc = next(p for p in patterns.pieces(s, "stool") if p["name"] == piece)
+    (hole,) = pc["holes"]
+    m = np.asarray(outward, float)                         # towards someone standing outside, looking at it
+    up = np.array([0.0, 0.0, 1.0])
+    right = np.cross(up, m)
+    x0 = 0.0 if piece == "left" else 406.4
+    seen = [(np.array([x0, y, z]) @ right, z) for y, z in L]
+    assert np.sign(_signed_area(hole)) == np.sign(_signed_area(seen))
+    assert pc["face"] == "outside"
+    rec = patterns.make(s, "stool")
+    svg = open(os.path.join(patterns.runs_dir(s), rec["id"], f"project-{piece}.svg")).read()
+    assert "this is the outside face" in svg

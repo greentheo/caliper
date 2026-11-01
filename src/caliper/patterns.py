@@ -14,8 +14,9 @@ flat sheet piece, holes and all, comes three ways:
 3. **Project and trace** (``project-<piece>.svg``): the piece at full size, white on black, beside a 4 in
    calibration square. Zoom the projector until the square measures 4 in on the board, then trace.
 
-Pieces are drawn as seen from the face their outline gives (the outside, for a box), with their longest
-edge along the bottom. Pages are rasters at :data:`DPI`, so they print at true size anywhere, without a
+Pieces are drawn as seen from their outside face (away from the part's middle), and the page says so, with their
+longest edge along the bottom: turned to get there, never flipped, so a picture or a notch traced from the pattern
+comes out the way it is on the part (CALI-86). Pages are rasters at :data:`DPI`, so they print at true size anywhere, without a
 PDF library.
 """
 
@@ -64,12 +65,24 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
     from .consistency import _frame
 
     d = C.declared(store, part_id)
+    try:
+        middle = store.part_geometry(part_id).require_mesh().bounds.mean(axis=0)
+    except Exception:  # noqa: BLE001 — no solid to say which way is out: each piece from the face its outline gives
+        middle = None
     out = []
     for it in d.get("construction") or []:
         if it.get("kind") != "sheet" or not it.get("outline"):
             continue
         poly = np.asarray(it["outline"], float)
         o, u, v, n, flat = _frame(poly)
+        # seen from the outside face, away from the part's middle (CALI-86: the left side was drawn from inside,
+        # mirrored); a piece through the middle, from the face its outline gives, named by the way it faces
+        out_of = float((poly.mean(axis=0) - middle) @ n) if middle is not None else 0.0
+        toward = n if out_of >= -1.0 else -n
+        face = "outside" if abs(out_of) > 1.0 else _facing(toward)
+        if toward is not n:
+            v = -v                                # still the panel's own plane, now as someone outside sees it
+        flat = np.stack([(poly - o) @ u, (poly - o) @ v], axis=1)
         holes = [np.stack([(np.asarray(h, float) - o) @ u, (np.asarray(h, float) - o) @ v], axis=1)
                  for h in it.get("holes") or []]
         edges = np.roll(flat, -1, axis=0) - flat
@@ -77,15 +90,23 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
         a = -math.atan2(edges[k][1], edges[k][0])
         R = np.array([[math.cos(a), -math.sin(a)], [math.sin(a), math.cos(a)]])
         pts, holes = flat @ R.T, [h @ R.T for h in holes]
-        if pts[:, 1].mean() < pts[k, 1]:          # the long edge at the bottom, the piece above it
-            pts, holes = pts * [1, -1], [h * [1, -1] for h in holes]
+        if pts[:, 1].mean() < pts[k, 1]:          # the long edge at the bottom, the piece above it: turned, not flipped
+            pts, holes = pts * [-1, -1], [h * [-1, -1] for h in holes]
         lo = pts.min(axis=0)
         pts, holes = pts - lo, [h - lo for h in holes]
         t = float(it["thickness"])
         out.append({"name": it.get("name") or "piece", "material": it.get("material"), "thickness": t,
                     "label": f"{M.nominal(t)} {M.sheet(it['material'])['name']}" if it.get("material") in M.SHEETS
-                    else f"{M.nominal(t)} sheet", "outline": pts, "holes": holes, "size": pts.max(axis=0)})
+                    else f"{M.nominal(t)} sheet", "outline": pts, "holes": holes, "size": pts.max(axis=0),
+                    "face": face, "seen": f"this is the {face} face" if face == "outside" else f"this is the face {face}"})
     return out
+
+
+def _facing(m) -> str:
+    """Which way a face looks, in a builder's words (z up, the front at -y)."""
+    k = int(np.argmax(np.abs(m)))
+    return [("toward the left", "toward the right"), ("toward the front", "toward the back"),
+            ("underneath", "on top")][k][int(m[k] > 0)]
 
 
 def _rectangle(pts: np.ndarray, size) -> bool:
@@ -148,7 +169,7 @@ def measure_page(pc: dict):
     _dimension(dr, (X(0), Y(0) + 40), (X(sx), Y(0) + 40), inches(sx), f)
     _dimension(dr, (X(0) - 60, Y(0)), (X(0) - 60, Y(sy)), inches(sy), f)
     # the title and how to read it
-    dr.text((0.6 * DPI, 0.35 * DPI), f"{pc['name']}: {pc['label']}", fill="black", font=big)
+    dr.text((0.6 * DPI, 0.35 * DPI), f"{pc['name']}: {pc['label']} — {pc['seen']}", fill="black", font=big)
     lines = ["Measure everything from the bottom-left corner: the bottom edge and the left edge are straight "
              "and square. Grid lines are 1 in."]
     if not _rectangle(pc["outline"], pc["size"]):
@@ -233,7 +254,7 @@ def tiles(pc: dict) -> tuple[list, tuple[int, int], bool]:
                         [W - MARGIN * DPI, 0, W, H]):
                 dr.rectangle(box, fill="white")
             label = f"{chr(65 + r)}{c + 1}"
-            dr.text((MARGIN * DPI, 6), f"{pc['name']}, page {label} ({r * cols + c + 1} of {rows * cols})"
+            dr.text((MARGIN * DPI, 6), f"{pc['name']} ({pc['seen']}), page {label} ({r * cols + c + 1} of {rows * cols})"
                     + (f" · overlaps {chr(65 + r)}{c + 2} on the right" if c < cols - 1 else "")
                     + (f" · overlaps {chr(66 + r)}{c + 1} below" if r < rows - 1 else ""),
                     fill="black", font=_font(13))
@@ -260,7 +281,7 @@ def _map(pc: dict, cols: int, rows: int, step) -> object:
     dr.polygon([(X(x), Y(y)) for x, y in pc["outline"]], outline="black", width=3)
     for h in pc["holes"]:
         dr.polygon([(X(x), Y(y)) for x, y in h], outline="black", width=2)
-    dr.text((0.6 * DPI, 0.35 * DPI), f"{pc['name']}: {pc['label']}, full size on {cols * rows} page(s)",
+    dr.text((0.6 * DPI, 0.35 * DPI), f"{pc['name']}: {pc['label']}, full size on {cols * rows} page(s) — {pc['seen']}",
             fill="black", font=_font(24))
     import textwrap
 
@@ -296,7 +317,7 @@ def project_svg(pc: dict) -> str:
             f'<text x="{cx:.2f}" y="{h - pad - cal - 4:.2f}" fill="#ffd166" font-size="7" font-family="sans-serif">'
             f'zoom until this is {CALIBRATE_IN:g} in square</text>'
             f'<text x="{pad:.2f}" y="{0.5 * IN:.2f}" fill="white" font-size="9" font-family="sans-serif">'
-            f'{html.escape(pc["name"])}: {html.escape(pc["label"])}. Line the board\'s corner up with the bottom-left '
+            f'{html.escape(pc["name"])}: {html.escape(pc["label"])}, {html.escape(pc["seen"])}. Line the board\'s corner up with the bottom-left '
             f'corner, then trace.</text></svg>')
 
 
