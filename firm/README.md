@@ -61,6 +61,9 @@ GitHub Issues on `greentheo/caliper`, via `gh`.
   (buildable without the owner), `size: S | M | L`, and the project's own: `P0`–`P2`, `area: author |
   studies | make | app | ui | measure`, `showcase`, `bug`, `parked`, `blocked`.
 - `Blocked by: #NN` in an issue body is honoured: skip it while #NN is open.
+- **A stacked PR's `Closes #N` doesn't link or close anything until the PR is retargeted to `main`:**
+  GitHub only honours closing keywords on the default branch. Name the issue in the title too, and check the
+  link once it's retargeted, before merging.
 - **The owner's conventions win where they differ from the firm's defaults:** issue titles keep the id
   (`CALI-84 · …`; the next id is the highest in use + 1); branches `cali-N-short-name`; commits
   `CALI-N (#issue): what and why`, ending with the `Co-Authored-By` line; PR bodies end with the Claude Code
@@ -125,7 +128,8 @@ export CALIPER_DESIGNS=$PWD/../caliper-nightshift-designs
 at the owner's checkout, and the sandbox, the declaration probe and the frame study spawn
 `python -m caliper…` as subprocesses. Without `PYTHONPATH=<your worktree>/src`, a test run from your worktree
 builds parts with the *owner's* code, and its results say nothing about your branch. Set it for every test
-run and every server you start.
+run and every server you start. And don't run a probe with `python -I`: isolated mode ignores `PYTHONPATH`,
+so it imports the owner's checkout again (the reviewer hit this, 2026-11-01).
 
 The tools Caliper drives are pinned in the `Makefile` (`WHITTLE_REF`, `UNFOLD_REF`); CI fetches those
 commits. The environment imports whittle from the owner's checkout (`~/githubrepo/whittle`, editable): when
