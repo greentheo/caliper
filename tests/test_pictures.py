@@ -164,3 +164,21 @@ def test_a_drawing_from_the_pad_is_cut_out(client):
     kinds = [e["kind"] for e in state["log"]]
     assert kinds[-3:] == ["message", "load", "reply"] and "star" in state["log"][-1]["reply"]   # the recheck between
     assert c.post(f"/api/designs/{slug}/parts/stool/picture", json={}).status_code == 422
+
+
+def test_a_check_that_couldnt_run_is_never_a_tick(tmp_path):
+    """CALI-86 (#62, finding 10; rule 6): with no strength check installed, a part that says what it must hold got
+    "✓ … It doesn't say what it must hold" and ok True."""
+    store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", BOX_STOOL, intent="a box step stool")
+    got = pictures.put(store, "stool", pictures.draw("T-rex", use_llm=False), subject="T-rex", where="the side",
+                       strength=False)
+    assert got["ok"] is False and "✓" not in got["reply"]
+    assert "I couldn't check it still holds: the strength check isn't installed" in got["reply"]
+    assert "doesn't say what it must hold" not in got["reply"]
+    # a part with no loads() at all still says that, and is fine
+    plain = DesignStore.create("a box", base=str(tmp_path / "plain"))
+    plain.write_part("stool", BOX_STOOL.split("\ndef loads(")[0], intent="a box")
+    got = pictures.put(plain, "stool", pictures.draw("T-rex", use_llm=False), subject="T-rex", where="the side",
+                       strength=False)
+    assert got["ok"] and "doesn't say what it must hold" in got["reply"]
