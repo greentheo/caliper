@@ -739,7 +739,9 @@ def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
     if not printed.get("rest"):
         return mesh
     entry = store.design.part(part_id)
-    key = (store.root, part_id, entry.version if entry else None, store.read_script(part_id))
+    # by the declarations it's cut from too: a what-if (another top thickness) is another printed rest (CALI-87)
+    key = (store.root, part_id, entry.version if entry else None, store.read_script(part_id),
+           json.dumps(d, sort_keys=True, default=str))
     with _PRINTED_MU:
         if key in _PRINTED:
             return _PRINTED[key]
