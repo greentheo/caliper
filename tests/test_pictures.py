@@ -182,3 +182,11 @@ def test_a_check_that_couldnt_run_is_never_a_tick(tmp_path):
     got = pictures.put(plain, "stool", pictures.draw("T-rex", use_llm=False), subject="T-rex", where="the side",
                        strength=False)
     assert got["ok"] and "doesn't say what it must hold" in got["reply"]
+
+
+def test_nor_is_the_chat_turn(tmp_path):
+    """CALI-86 (#71 rework, item 9): the turn the person sees in the chat isn't ok either."""
+    store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", BOX_STOOL, intent="a box step stool")
+    res = chat.picture_part(store, "stool", "T-rex", "the side", strength=False, use_llm=False)
+    assert res.ok is False and "couldn't check it still holds" in res.reply and "✓" not in res.reply
