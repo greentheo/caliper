@@ -30,7 +30,7 @@ been:
    export CALIPER_UNFOLD_DIR=<unfold-to-sheets checkout at UNFOLD_REF>  # else cut-plan tests skip
    /opt/anaconda3/envs/caliper/bin/python -m pytest tests/test_<what it touches>.py -rs
    /opt/anaconda3/envs/caliper/bin/python -m pytest -rs                 # once per stack, at the top
-   node --check src/caliper/web/static/design.js                         # when the page changed
+   cp src/caliper/web/static/design.js "${TMPDIR:-/tmp}/design.mjs" && node --check "${TMPDIR:-/tmp}/design.mjs"  # page changed
    ```
    Use the tool versions the `Makefile` pins (`WHITTLE_REF`, `UNFOLD_REF`), as CI does. `-rs` lists what was
    skipped: a cut-plan test that skipped for want of unfold-to-sheets checked nothing, so say so. When something

@@ -49,7 +49,8 @@ writing code. At most three passes.
 ### 6. Build
 One logical change at a time, matching the surrounding code's style and comment density (module docstrings
 say what and why; comments name the issue that needs them). The page is plain JavaScript with no build step:
-bump `?v=` on `design.js` / `design.css` in `index.html` when you change them, and `node --check` the file.
+bump `?v=` on `design.js` / `design.css` in `index.html` when you change them, and `node --check` a copy named `.mjs` (below): `design.js` is an ES module, and Node before 22 reads a `.js` as
+CommonJS and fails on its first `import`, so the plain command passes or fails depending on whose `node` runs it.
 Update `src/caliper/part_scripts.md` when what a script may declare changes.
 
 ### 7. Verify — all of it, and say what you ran
@@ -58,7 +59,7 @@ export PYTHONPATH=$PWD/src            # always (README: the trap); add a whittle
 export CALIPER_UNFOLD_DIR=<unfold-to-sheets at UNFOLD_REF>               # else the cut-plan tests skip
 /opt/anaconda3/envs/caliper/bin/python -m pytest tests/test_<area>.py -rs    # while working
 /opt/anaconda3/envs/caliper/bin/python -m pytest -rs                        # once, before the PR (20-40 min)
-node --check src/caliper/web/static/design.js                                # when the page changed
+cp src/caliper/web/static/design.js "${TMPDIR:-/tmp}/design.mjs" && node --check "${TMPDIR:-/tmp}/design.mjs"  # page changed
 ```
 For anything a person sees: run the app on 8016 with a scratch designs folder, and click through the
 acceptance criteria in the browser. For anything that changes a strength verdict: run the suite's strength
