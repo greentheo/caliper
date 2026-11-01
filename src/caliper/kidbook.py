@@ -69,10 +69,10 @@ def order(pcs: list[dict], joints: dict) -> list[tuple[dict, list[str]]]:
     done: list[dict] = []
     out = []
     while left:
-        names = {d["name"] for d in done}
-        meets = [pc for pc in left if any(tuple(sorted((pc["name"], n))) in joints for n in names)]
+        names = {d["key"] for d in done}                 # each piece by its own key (fasteners.keys)
+        meets = [pc for pc in left if any(tuple(sorted((pc["key"], n))) in joints for n in names)]
         nxt = min(meets or left, key=lambda pc: (round(low(pc)), -size(pc)))
-        out.append((nxt, [n for n in names if tuple(sorted((nxt["name"], n))) in joints]))
+        out.append((nxt, [n for n in names if tuple(sorted((nxt["key"], n))) in joints]))
         done.append(nxt)
         left.remove(nxt)
     return out
@@ -176,9 +176,10 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
                 say = f"Stand the {_name(pc['name'])} up where the picture shows. This one is the start."
                 n_screws = 0
             else:
-                n_screws = sum(screws_for(joints[tuple(sorted((pc["name"], a)))]) for a in against)
+                n_screws = sum(screws_for(joints[tuple(sorted((pc["key"], a)))]) for a in against)
+                said = {w["key"]: w["name"] for w in wood}
                 say = (f"Put glue on the edges where the {_name(pc['name'])} touches the "
-                       f"{' and the '.join(_name(a) for a in against)}. A grown-up clamps it in place and drives "
+                       f"{' and the '.join(_name(said[a]) for a in against)}. A grown-up clamps it in place and drives "
                        f"in {n_screws} screws with the drill, while you stand back with your safety glasses on.")
             img = f"kids/step-{len(pages) + 1:02d}.png"
             with open(os.path.join(root, img), "wb") as f:

@@ -82,3 +82,21 @@ def test_no_page_puts_a_kid_s_hands_at_the_work_while_a_tool_runs(stool, tmp_pat
         assert not re.search(r"\bhold|\bsteady|\bpress", said, re.I), said
         assert "grown-up" in said and "stand back" in said and "safety glasses" in said, said
     assert "two clamps" in book                            # what the grown-up clamps it with is on the list
+
+
+def test_two_pieces_with_one_name_get_the_screws_the_shopping_list_counts(tmp_path):
+    """CALI-87 (#63, finding 9): joints were keyed by name, so two pieces both called "side" against the top were one
+    joint to the shopping list and two to the book (22 screws on the pages, 16 in the BOM)."""
+    store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
+    same = BOX_STOOL.replace('"left": [(0, 0, 0)', '"side": [(0, 0, 0)').replace('"right": [(w, 0, 0)', '"side ": [(w, 0, 0)')
+    same = same.replace('return [{"name": k, "kind": "sheet"', 'return [{"name": k.strip(), "kind": "sheet"')
+    assert same.count('"side') == 2
+    store.write_part("stool", same, intent="a box stool, both sides called side")
+    assert [p["name"] for p in C.declared(store, "stool")["construction"]].count("side") == 2
+    root = str(tmp_path / "release")
+    os.makedirs(root)
+    kidbook.make(store, root, {"design": "Box stool", "strength": {}}, ["stool"], {"groups": []})
+    book = open(os.path.join(root, "kids.html")).read()
+    said = sum(int(n) for n in re.findall(r"drives in (\d+) screws", book))
+    assert said == C.report(store, "stool")["bom"]["fasteners"]["screws"]
+    assert said == 18                       # as with the sides named apart: 8 joints, none merged, none twice
