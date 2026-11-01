@@ -566,6 +566,13 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-01 · A load just above its face pushes on it; one that misses says so in both checks (CALI-84 #58)
+1. Open Theo's printed `step-stool` and **Check it holds**. Expect: the adult's foot, 1.2 mm above the recess
+   floor, now lands, and the check stops at the child's box instead, in the same words the designer's check uses:
+   it's in the air, 2.4 mm from the nearest surface, because the script's lower step is inside the upper body.
+   (Measured on the script offline; not yet clicked through in the app.)
+2. Offline: `PYTHONPATH=src python -m pytest tests/test_load_lands.py tests/test_load_study.py`.
+
 ### 2026-11-01 · The reviewer's findings on the open stack, part 2 (CALI-86 #62, findings 8–13)
 1. **Carve a plywood top on printed sides:** the chart, the Studies line and the reply say "% of the printed
    part carved away", and the share matches the filament saved.
