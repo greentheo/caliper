@@ -566,6 +566,13 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-01 · #75 reworked from the reviewer's review (CALI-87 #63)
+1. **Name both sides of a box stool "side" and make a build package:** the kids' book is there, with "Add the
+   first side", "Add the other side", and "touches both sides" on the top's page.
+2. **Lighten a carved part:** refused straight away, telling you to say "roll it back" first.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_kidbook.py tests/test_release.py
+   tests/test_carve_dropped.py tests/test_carve_stale.py tests/test_consistency.py tests/test_pictures.py`.
+
 ### 2026-11-01 · #71 reworked from the reviewer's review (CALI-86 #62)
 1. **Record a test on the sample stool that broke at 150 lb:** both the design's and the part's *Will it work?*
    go red with "It broke at 150 lb in your test. We predicted it would hold 400." No ✓ is left above it.
