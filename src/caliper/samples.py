@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from typing import Optional
 
@@ -27,6 +28,8 @@ RUNS = ("loads", "lighten", "patterns", "cutplans", "frames", "aero", "gussets",
 TEXT = (".json", ".jsonl", ".yaml", ".txt", ".html", ".svg", ".py", ".csv")
 #: The order they're offered in: the small one first.
 FIRST = ("step-stool", "camper")
+#: What a sample may be called: a plain name, so saving one never reaches outside its own folder (CALI-86).
+NAME = re.compile(r"[a-z0-9][a-z0-9-]*\Z")
 
 
 def available(root: Optional[str] = None) -> list[dict]:
@@ -80,8 +83,14 @@ def _part_of(path: str) -> str:
 
 def save(slug: str, name: str, base: Optional[str] = None, out: Optional[str] = None) -> str:
     """Snapshot one of your designs as a sample. Returns where it went."""
+    if not isinstance(name, str) or not NAME.match(name):
+        raise ValueError(f"a sample needs a plain name, lowercase letters, digits and dashes (like step-stool), "
+                         f"not {name!r}")
+    root = os.path.realpath(out or SAMPLES_DIR)
+    dest = os.path.join(root, name)
+    if os.path.dirname(os.path.realpath(dest)) != root:          # a link out of the samples folder, say
+        raise ValueError(f"a sample needs a plain name: {name!r} isn't a folder in {root}")
     store = DesignStore.load(slug, base=base)
-    dest = os.path.join(out or SAMPLES_DIR, name)
     if os.path.exists(dest):
         shutil.rmtree(dest)
     os.makedirs(dest)

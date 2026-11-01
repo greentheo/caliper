@@ -382,7 +382,11 @@ def _cmd_sample(args) -> int:
     if not args.slug:
         print("caliper sample save <name> --slug <your design>")
         return 2
-    print(f"saved {args.slug} as {samples.save(args.slug, args.name, base=args.base)}")
+    try:
+        print(f"saved {args.slug} as {samples.save(args.slug, args.name, base=args.base)}")
+    except ValueError as e:
+        print(e)
+        return 2
     return 0
 
 
