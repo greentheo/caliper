@@ -272,9 +272,13 @@ def _volume(mesh, pieces: list[dict], strength: bool = False, tol: float = 2.0) 
     if strength and (ratio < VOLUME_MIN or loose > SOLID_IN_NO_PIECE):
         # a solid block round its panels (CALI-83: Theo's stool was built as a filled box): every panel lies in
         # it and covers its surface, so only the volume shows it
+        core = ratio >= VOLUME_MIN                    # the volumes pass, and the share in no piece fails (CALI-87)
         return AssertionResult(
-            id="construction_volume", expr=f"the solid is its pieces ({VOLUME_MIN:g}–{VOLUME_MAX:g}× its volume)",
-            status="fail", passed=False, actual=round(ratio, 3), margin=round(ratio - VOLUME_MIN, 3),
+            id="construction_volume",
+            expr=(f"no more than {SOLID_IN_NO_PIECE:.0%} of the solid is in no piece" if core
+                  else f"the solid is its pieces ({VOLUME_MIN:g}–{VOLUME_MAX:g}× its volume)"),
+            status="fail", passed=False, actual=round(loose if core else ratio, 3),
+            margin=round(SOLID_IN_NO_PIECE - loose if core else ratio - VOLUME_MIN, 3),
             detail=(f"the solid ({solid / 1e6:.2f} L) is {1 / ratio:.1f}× what the pieces add up to, and "
                     f"{loose:.0%} of it is in no piece: build() is filled in, and the strength check analyses the solid. Make build() the pieces themselves, "
                     f"each panel as thick as its sheet and hollow between them, as it will really be built"))

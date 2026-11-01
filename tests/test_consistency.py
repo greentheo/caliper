@@ -230,3 +230,13 @@ def test_a_small_filled_box_is_caught_like_a_big_one():
     filled = sandbox.run_script(CUBE.replace("FILLED = False", "FILLED = True"), timeout=120)
     got = {r.id: r for r in consistency.check(filled.declared, filled.geometry)}
     assert not got["construction_volume"].passed and "filled in" in got["construction_volume"].detail
+
+
+def test_a_small_filled_box_reports_the_share_it_fails_on():
+    """CALI-87 (#75 rework, item 4): the core share failed the cube, but the result reported the volume ratio's
+    margin (which passes)."""
+    filled = sandbox.run_script(CUBE.replace("FILLED = False", "FILLED = True"), timeout=120)
+    got = {r.id: r for r in consistency.check(filled.declared, filled.geometry)}["construction_volume"]
+    assert not got.passed and "10%" in got.expr
+    assert got.actual == pytest.approx(0.187, abs=0.02) and got.margin == pytest.approx(0.1 - got.actual, abs=1e-3)
+    assert "19% of it is in no piece" in got.detail or "18% of it is in no piece" in got.detail
