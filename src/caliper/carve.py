@@ -168,6 +168,10 @@ def station_path(store: DesignStore, rid: str, index: int) -> str:
     return os.path.join(runs_dir(store), rid, st["stl"])
 
 
+class Stale(ValueError):
+    """A run of an older version of the part than the one there is."""
+
+
 def adopt(store: DesignStore, rid: str, index: int) -> dict:
     """Make a step's shape the part's: the wood exactly as the script makes it, the printed rest as carved."""
     import trimesh
@@ -179,6 +183,12 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     if rec is None:
         raise FileNotFoundError(f"no carve {rid!r}")
     pid = rec["part"]
+    entry = store.design.part(pid)
+    if entry is None:
+        raise FileNotFoundError(f"no part {pid!r}")
+    if rec.get("version") != entry.version:          # a carve is of one version's shape (CALI-87)
+        raise Stale(f"this carve is of version {rec.get('version')} and the part is at version {entry.version}: "
+                    f"carve it again")
     station = trimesh.load(station_path(store, rid, index), force="mesh")
     script = strip(store.read_script(pid))
     built = sandbox.run_script(script, timeout=120)

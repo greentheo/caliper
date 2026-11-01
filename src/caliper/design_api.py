@@ -702,6 +702,8 @@ def router():
                 got = carve.adopt(store, rid, req.station)
             except FileNotFoundError as e:
                 raise HTTPException(status_code=404, detail=str(e))
+            except carve.Stale as e:
+                raise HTTPException(status_code=409, detail=str(e))
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=str(e))
             return {**got, "design": design_state(store)}
