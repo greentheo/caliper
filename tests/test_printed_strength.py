@@ -77,10 +77,37 @@ def test_a_printed_part_s_verdict_says_about(store, tmp_path):
     load_study.study(store, "box")
     line = next(ln for ln in answers.answers(store, design_api.design_state(store), "box")[1]["lines"]
                 if ln.get("study") == "load")
-    assert "about" in line["text"] and "printed parts are a rough model" in line["text"], line["text"]
+    # the reviewer's wording (#71 rework, item 6): "about" on the top line, the caveat one click down by the promise
+    assert line["text"].startswith("Holds a foot, about ") and line["text"].endswith(" times over."), line["text"]
+    work = answers.answers(store, design_api.design_state(store), "box")[1]
+    assert "Printed parts are a rough model" in work["promise"]
     ply = DesignStore.create("a box stool", base=str(tmp_path / "ply"))
     ply.write_part("stool", BOX_STOOL, intent="a box stool")
     load_study.study(ply, "stool")
     line = next(ln for ln in answers.answers(ply, design_api.design_state(ply), "stool")[1]["lines"]
                 if ln.get("study") == "load")
     assert "about" not in line["text"] and "rough" not in line["text"], line["text"]
+
+
+def test_a_printed_part_that_doesnt_hold_says_about_too(store):
+    """CALI-86 (#71 rework, item 5): the "Doesn't hold" branch."""
+    store.write_part("box", PRINTED.replace('"lb": 50', '"lb": 900'), intent="a printed box, a heavy load")
+    load_study.study(store, "box")
+    line = next(ln for ln in answers.answers(store, design_api.design_state(store), "box")[1]["lines"]
+                if ln.get("study") == "load")
+    assert line["text"].startswith("Doesn't hold a foot: only about "), line["text"]
+
+
+def test_a_mixed_part_governed_by_its_plywood_gets_plywoods_words(tmp_path, monkeypatch):
+    """CALI-86 (#71 rework, item 5): the caveat follows what governs. test_mixed's top fails as a plywood beam."""
+    pytest.importorskip("whittle")
+    from .test_mixed import MIXED
+
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    s = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    s.write_part("stool", MIXED, intent="a plywood top on printed sides")
+    rec = load_study.study(s, "stool")
+    assert rec["material"].get("printed") and rec["cases"][0]["governs"] == "plate"
+    work = answers.answers(s, design_api.design_state(s), "stool")[1]
+    line = next(ln for ln in work["lines"] if ln.get("study") == "load")
+    assert "about" not in line["text"] and "rough" not in work.get("promise", ""), (line["text"], work.get("promise"))

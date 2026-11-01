@@ -226,3 +226,11 @@ def test_a_picture_job_that_fails_still_answers_in_the_log(client, monkeypatch):
     assert j["status"] == "error"
     last = c.get(f"/api/designs/{slug}").json()["log"][-1]
     assert last["kind"] == "reply" and last["ok"] is False and "couldn't" in last["reply"]
+
+
+def test_nor_is_the_chat_turn(tmp_path):
+    """CALI-86 (#71 rework, item 9): the turn the person sees in the chat isn't ok either."""
+    store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", BOX_STOOL, intent="a box step stool")
+    res = chat.picture_part(store, "stool", "T-rex", "the side", strength=False, use_llm=False)
+    assert res.ok is False and "couldn't check it still holds" in res.reply and "✓" not in res.reply

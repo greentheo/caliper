@@ -187,9 +187,11 @@ def test_the_share_carved_away_is_of_the_printed_part(stool, monkeypatch):
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
     stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
-    rec = carve.study(stool, "stool", stations=3, remove_up_to=0.6)
+    heard = []
+    rec = carve.study(stool, "stool", stations=3, remove_up_to=0.6, emit=lambda k, t="", **d: heard.append(t))
     st = rec["stations"]
     assert len(st) > 1 and st[-1]["removed"] > 0
+    assert rec["share"] == "printed" and any("of the printed part carved away" in t for t in heard)   # progress
     for x in st:
         assert x["removed"] == pytest.approx(1 - x["printed_g"] / st[0]["printed_g"], abs=0.01), x
     assert "of the printed part" in studies._headline("carve", rec)[0]

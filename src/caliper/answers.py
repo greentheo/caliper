@@ -52,11 +52,18 @@ def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
 
 
+def rests_on_model(metric: str) -> bool:
+    """Whether a scorecard check's number comes from a strength or frame model (and so carries the promise): not a
+    weight, a cost, or whether the pieces fit a sheet (CALI-86)."""
+    m = metric or ""
+    return m.startswith(("strength.", "frame.")) or m.endswith("safety") or "yield" in m
+
+
 def _card(key: str, q: str, lines: list[dict], hint: str = "") -> dict:
     card = {"key": key, "q": q, "status": _worst(lines) if lines else "info", "lines": lines, "hint": hint}
     # any verdict resting on a model (a strength or frame study, or the scorecard's checks) says what it promises
     if any((ln.get("study") in ("load", "frame") or ln.get("model")) and ln["status"] in ("ok", "bad") for ln in lines):
-        card["promise"] = PROMISE
+        card["promise"] = PROMISE + "".join(f" {r}" for r in dict.fromkeys(ln["rough"] for ln in lines if ln.get("rough")))
     return card
 
 
@@ -111,20 +118,21 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     runs = [r for r in state.get("load_runs") or [] if r["part"] == pid]
     if runs:
         run, stale = runs[0], runs[0].get("version") != p["version"]
-        # a printed part's strength is a rough model, and its line says so in a word (CALI-86)
-        rough = bool((run.get("material") or {}).get("printed"))
-        about = "about " if rough else ""
-        caveat = " (printed parts are a rough model: see the numbers)" if rough else ""
+        from . import load_study as L
+
         for c in run["cases"]:
             if c.get("safety") is None:
                 continue
+            # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
+            rough = L.rough(run, c)
+            about = "about " if rough else ""
             if c.get("holds"):
-                text = f"Holds {c['name'].lower()}, {about}{_times(c['safety'])}{caveat}."
+                text = f"Holds {c['name'].lower()}, {about}{_times(c['safety'])}."
             else:
-                text = (f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs "
-                        f"{run['min_safety']:g}{caveat}.")
+                text = f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs {run['min_safety']:g}."
             work.append(_line(text + (" (Checked on an older version: check again.)" if stale else ""),
-                              "warn" if stale else "ok" if c.get("holds") else "bad", study="load"))
+                              "warn" if stale else "ok" if c.get("holds") else "bad", study="load",
+                              **({"rough": L.ROUGH} if rough else {})))
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
                        and h.get("action") == "failed" and h.get("version") == p["version"]), None)
@@ -138,6 +146,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
 
         tried = trials.summary(store, pid, inches)            # what the real one did (CALI-80)
         if tried:
+            if tried["status"] in ("bad", "warn"):
+                # a test that went against the prediction outranks it: no ✓ left above a failed test (CALI-86)
+                work = [ln for ln in work if not (ln.get("study") == "load" and ln["status"] == "ok")]
             work.append(_line(tried["text"], tried["status"], study="trial"))
     frames = [r for r in state.get("frame_runs") or [] if r["part"] == pid]
     if frames:
@@ -257,6 +268,11 @@ def measured(store: DesignStore, state: dict) -> dict:
         out["strength.safety"] = min(safeties)
     if breaks:
         out["strength.breaks_lb"] = min(breaks)
+    from . import trials
+
+    tested = [t for t in (trials.summary(store, pid) for pid in current) if t and t["status"] in ("bad", "warn")]
+    if tested:                                         # the worst real test, which outranks the prediction (CALI-86)
+        out["strength.test"] = min(tested, key=lambda t: ORDER.index(t["status"]))
     weight = usd = missing = hours = 0.0
     weighed = False
     for p in state["parts"]:
@@ -311,6 +327,11 @@ def held_to(state: dict, now: dict) -> list[dict]:
         if c.get("source") == "proposed":
             out.append(_line(f"Proposed: {label}. Keep or drop it under the numbers.", "info", goal=c["id"]))
             continue
+        test = now.get("strength.test") if c["metric"].startswith("strength") else None
+        if test:                                       # what a real test did, over what the check predicted
+            out.append(_line(f"{'✗' if test['status'] == 'bad' else '!'} {label}: {test['text']}", test["status"],
+                             study="load", model="scorecard"))
+            continue
         v, late = now.get(c["metric"]), False
         if v is None and c["metric"] in scored:
             v, late = scored[c["metric"]], stale
@@ -324,7 +345,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
         out.append(_line(f"{'✓' if ok else '✗'} {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}"
                          + (" (scored before the last change: score it again)." if late else "."),
                          "warn" if late else "ok" if ok else "bad",
-                         study="load" if c["metric"].startswith("strength") else None, model="scorecard"))
+                         study="load" if c["metric"].startswith("strength") else None,
+                         model=rests_on_model(c["metric"])))
     return out
 
 

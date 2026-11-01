@@ -119,3 +119,27 @@ def test_the_carve_headline_reads_the_step_it_says():
     # holds as drawn and at the step: green
     text, ok = studies._headline("carve", _carve([2.5, 2.4, 2.3, 1.2]))
     assert ok is True and text.startswith("30% ") and "still 2.4x" in text
+
+
+def test_an_old_carve_keeps_its_meaning(monkeypatch):
+    """CALI-86 (#71 rework, item 8): a carve saved before CALI-86 counted the whole solid. It says so; it's never
+    relabelled as the printed part's share. The page, the chat and the progress say what each run's share is."""
+    import os
+
+    from caliper import carve, chat, studies
+
+    old, new = _carve([2.5, 2.4, 2.3, 1.2]), {**_carve([2.5, 2.4, 2.3, 1.2]), "share": "printed"}
+    assert "of the whole solid (carved before CALI-86: carve again for the printed share)" in studies._headline("carve", old)[0]
+    assert "30% of the printed part carved away" in studies._headline("carve", new)[0]
+    # the chat's reply on a carve it just made
+    monkeypatch.setattr(carve, "study", lambda *a, **k: {**new, "id": "x", "part": "p", "notes": []})
+    from caliper.design import DesignStore
+    import tempfile
+
+    store = DesignStore.create("a stool", base=tempfile.mkdtemp())
+    store.write_part("p", "def build(params):\n    return None\n", intent="x")
+    res = chat.carve_part(store, "p")
+    assert "30% of the printed part carved away" in res.reply and "about 2.4 times over" in res.reply, res.reply
+    # the page labels every run by its own share, in all three places it says one
+    js = open(os.path.join(os.path.dirname(studies.__file__), "web", "static", "design.js")).read()
+    assert js.count("${carveShare(run)}") == 3 and "of the printed part carved away" not in js
