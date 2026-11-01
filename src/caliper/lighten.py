@@ -596,6 +596,14 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     if st.get("estimate"):
         raise ValueError(f"step {index} is an estimate in {st['label']} sheet: rebuild it in that sheet first")
     pid = rec["part"]
+    from .carve import Stale
+
+    entry = store.design.part(pid)
+    if entry is None:
+        raise FileNotFoundError(f"no part {pid!r}")
+    if rec.get("version") != entry.version:          # its holes are where that version's walls were (CALI-87)
+        raise Stale(f"this lightening is of version {rec.get('version')} and the part is at version {entry.version}: "
+                    f"lighten it again")
     holes = [{"piece": p["name"], "normal": p["normal"], "depth": p["thickness_mm"],
               "polygons": st["panels"].get(p["name"], [])} for p in rec["panels"] if st["panels"].get(p["name"])]
     script = store.read_script(pid)

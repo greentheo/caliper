@@ -77,7 +77,7 @@ def test_a_picture_on_a_carved_part_is_refused(carved):
 
 
 def test_lightening_a_carved_part_is_refused(carved):
-    rid = _record(lighten.runs_dir(carved), {"part": "stool", "panels": [], "stations": [
+    rid = _record(lighten.runs_dir(carved), {"part": "stool", "version": 2, "panels": [], "stations": [
         {"index": 0, "panels": {}, "removed": 0.0, "holes": 0, "saved_lb": 0.0, "safety": 3.0}]})
     with pytest.raises(ValueError, match="it's carved, so lightening it would cut into the shape"):
         lighten.adopt(carved, rid, 0)

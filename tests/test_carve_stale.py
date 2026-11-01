@@ -46,3 +46,30 @@ def test_nor_through_the_api(tmp_path, monkeypatch):
     monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
     got = TestClient(create_app()).post(f"/api/designs/{store.design.slug}/carve/{rid}/adopt", json={"station": 0})
     assert got.status_code == 409 and "version" in got.json()["detail"]
+
+
+def test_a_lightening_of_an_older_version_isnt_adopted(tmp_path, monkeypatch):
+    """CALI-87 (#75 rework, item 5): lighten.adopt took a study of any version, as carve.adopt did."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper import lighten
+    from caliper.server import create_app
+
+    from .test_load_study import BOX_STOOL
+
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", BOX_STOOL, intent="a box stool")
+    rid = "20261101-000000-abcd"
+    os.makedirs(os.path.join(lighten.runs_dir(store), rid))
+    with open(os.path.join(lighten.runs_dir(store), rid, "run.json"), "w") as f:
+        json.dump({"id": rid, "part": "stool", "kind": "lighten", "version": 1, "panels": [],
+                   "stations": [{"index": 0, "panels": {}, "removed": 0.0, "holes": 0, "saved_lb": 0.0,
+                                 "safety": 3.1, "holds": True}]}, f)
+    store.write_part("stool", BOX_STOOL.replace('"h": 228.6', '"h": 230.0'), intent="a touch taller")
+    with pytest.raises(carve.Stale, match="version 1.*version 2"):
+        lighten.adopt(store, rid, 0)
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    got = TestClient(create_app()).post(f"/api/designs/{store.design.slug}/lighten/{rid}/adopt", json={"station": 0})
+    assert got.status_code == 409 and "version" in got.json()["detail"]
+    assert store.design.part("stool").version == 2
