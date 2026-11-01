@@ -92,3 +92,14 @@ def test_the_api_refuses_them_too(tmp_path, monkeypatch, name):
     got = TestClient(create_app()).post(f"/api/samples/{name}")
     assert got.status_code in (404, 405), got.status_code
     assert not base.exists() or os.listdir(base) == []
+
+
+def test_the_camper_s_verdicts_carry_the_promise(tmp_path):
+    """CALI-86 (#62, finding 13): a strength verdict always says what it promises, and the camper's scorecard
+    verdicts ("safe to tow") rest on the frame's model as much as a load study's do."""
+    from caliper import answers, design_api
+
+    store = samples.open_sample("camper", base=str(tmp_path / "designs"))
+    work = answers.answers(store, design_api.design_state(store), None)[1]
+    assert any(ln["status"] in ("ok", "bad") and ln["text"][:1] in "✓✗" for ln in work["lines"]), work["lines"]
+    assert work.get("promise") == answers.PROMISE

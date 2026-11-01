@@ -54,7 +54,8 @@ def _worst(lines: list[dict]) -> str:
 
 def _card(key: str, q: str, lines: list[dict], hint: str = "") -> dict:
     card = {"key": key, "q": q, "status": _worst(lines) if lines else "info", "lines": lines, "hint": hint}
-    if any(ln.get("study") in ("load", "frame") and ln["status"] in ("ok", "bad") for ln in lines):
+    # any verdict resting on a model (a strength or frame study, or the scorecard's checks) says what it promises
+    if any((ln.get("study") in ("load", "frame") or ln.get("model")) and ln["status"] in ("ok", "bad") for ln in lines):
         card["promise"] = PROMISE
     return card
 
@@ -323,7 +324,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
         out.append(_line(f"{'✓' if ok else '✗'} {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}"
                          + (" (scored before the last change: score it again)." if late else "."),
                          "warn" if late else "ok" if ok else "bad",
-                         study="load" if c["metric"].startswith("strength") else None))
+                         study="load" if c["metric"].startswith("strength") else None, model="scorecard"))
     return out
 
 
