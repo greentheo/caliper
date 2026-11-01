@@ -11,6 +11,7 @@ follows it on ``GET /api/jobs/{id}/events`` (Server-Sent Events, CALI-31).
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from typing import Optional
@@ -576,15 +577,23 @@ def router():
             raise HTTPException(status_code=404, detail=f"no part {pid!r}")
         if not req.points and not req.subject.strip():
             raise HTTPException(status_code=422, detail="say what to draw, or draw it")
+        if any(len(q) != 2 or not all(math.isfinite(v) for v in q) for q in req.points):    # CALI-87
+            raise HTTPException(status_code=422, detail="the drawing has a point that isn't a place on the pad")
 
         def work(j):
             s = DesignStore.load(slug)
             said = (f"(drew {req.subject or 'a picture'} to cut out" if req.points else f"(put {req.subject} on it") \
                 + (f", {req.where})" if req.where else ")")
             s.append_log({"kind": "message", "text": said, "scope": pid, "action": "picture", "part": pid})
-            res = chat.picture_part(s, pid, req.subject or "picture", req.where, points=req.points or None,
-                                    strength=_aero_available(),
-                                    on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            try:
+                res = chat.picture_part(s, pid, req.subject or "picture", req.where, points=req.points or None,
+                                        strength=_aero_available(),
+                                        on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            except Exception as e:
+                # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87)
+                s.append_log({"kind": "reply", "action": "picture", "part": pid, "ok": False,
+                              "reply": f"I couldn't put it on: {type(e).__name__}: {e}"})
+                raise
             s.append_log({"kind": "reply", "action": "picture", "part": pid, "version": res.version, "ok": res.ok,
                           "reply": res.reply})
             return turn_result(res)

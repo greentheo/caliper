@@ -196,3 +196,33 @@ def test_a_named_side_wins_over_the_word_side(where, want):
              {"name": "front", "holes": 0, "room": box(0, 0, 120, 120)},
              {"name": "back", "holes": 0, "room": box(0, 0, 100, 100)}]
     assert pictures.choose(found, where)["name"] in want
+
+
+def test_a_drawing_with_a_point_that_isnt_a_number_is_refused(client):
+    """CALI-87 (#63, finding 6): a NaN from the pad killed the job and left the log with no reply."""
+    c, slug = client
+    before = len(c.get(f"/api/designs/{slug}").json()["log"])
+    for bad in ('[[0, 0], [NaN, 5], [9, 9], [0, 9]]', '[[0, 0], [Infinity, 5], [9, 9], [0, 9]]'):
+        got = c.post(f"/api/designs/{slug}/parts/stool/picture", content='{"subject": "x", "points": ' + bad + '}',
+                     headers={"content-type": "application/json"})
+        assert got.status_code == 422, bad
+    assert len(c.get(f"/api/designs/{slug}").json()["log"]) == before
+
+
+def test_a_picture_job_that_fails_still_answers_in_the_log(client, monkeypatch):
+    c, slug = client
+
+    def broken(*a, **k):
+        raise RuntimeError("the sandbox died")
+
+    monkeypatch.setattr(chat, "picture_part", broken)
+    job = c.post(f"/api/designs/{slug}/parts/stool/picture", json={"subject": "T-rex"}).json()
+    end = time.time() + 60
+    while time.time() < end:
+        j = c.get(f"/api/jobs/{job['job_id']}").json()
+        if j["status"] in ("done", "error"):
+            break
+        time.sleep(0.05)
+    assert j["status"] == "error"
+    last = c.get(f"/api/designs/{slug}").json()["log"][-1]
+    assert last["kind"] == "reply" and last["ok"] is False and "couldn't" in last["reply"]
