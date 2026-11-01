@@ -63,7 +63,7 @@ def _card(key: str, q: str, lines: list[dict], hint: str = "") -> dict:
     card = {"key": key, "q": q, "status": _worst(lines) if lines else "info", "lines": lines, "hint": hint}
     # any verdict resting on a model (a strength or frame study, or the scorecard's checks) says what it promises
     if any((ln.get("study") in ("load", "frame") or ln.get("model")) and ln["status"] in ("ok", "bad") for ln in lines):
-        card["promise"] = PROMISE
+        card["promise"] = PROMISE + "".join(f" {r}" for r in dict.fromkeys(ln["rough"] for ln in lines if ln.get("rough")))
     return card
 
 
@@ -118,20 +118,21 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     runs = [r for r in state.get("load_runs") or [] if r["part"] == pid]
     if runs:
         run, stale = runs[0], runs[0].get("version") != p["version"]
-        # a printed part's strength is a rough model, and its line says so in a word (CALI-86)
-        rough = bool((run.get("material") or {}).get("printed"))
-        about = "about " if rough else ""
-        caveat = " (printed parts are a rough model: see the numbers)" if rough else ""
+        from . import load_study as L
+
         for c in run["cases"]:
             if c.get("safety") is None:
                 continue
+            # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
+            rough = L.rough(run, c)
+            about = "about " if rough else ""
             if c.get("holds"):
-                text = f"Holds {c['name'].lower()}, {about}{_times(c['safety'])}{caveat}."
+                text = f"Holds {c['name'].lower()}, {about}{_times(c['safety'])}."
             else:
-                text = (f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs "
-                        f"{run['min_safety']:g}{caveat}.")
+                text = f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs {run['min_safety']:g}."
             work.append(_line(text + (" (Checked on an older version: check again.)" if stale else ""),
-                              "warn" if stale else "ok" if c.get("holds") else "bad", study="load"))
+                              "warn" if stale else "ok" if c.get("holds") else "bad", study="load",
+                              **({"rough": L.ROUGH} if rough else {})))
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
                        and h.get("action") == "failed" and h.get("version") == p["version"]), None)

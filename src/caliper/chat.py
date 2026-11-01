@@ -644,7 +644,7 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
     if best and best["saved_g"]:
         said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. The lightest that holds is step "
                     f"{best['index']}: {best['removed']:.0%} of the printed part carved away, {best['saved_g']} g less filament, "
-                    f"{best['safety']:g} times over. It's on the 3D view: **Carve it like this** to make it the "
+                    f"about {best['safety']:g} times over (printed parts are a rough model). It's on the 3D view: **Carve it like this** to make it the "
                     f"part's shape (under *Will it work? → the numbers*, with every step).")
     else:
         said.append("Nothing could come off it and still hold.")

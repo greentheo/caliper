@@ -562,6 +562,17 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     return case, r
 
 
+#: What a printed verdict's number rests on, said beside the promise (CALI-86, #71 rework).
+ROUGH = ("Printed parts are a rough model: the plastic's share at half its strength across the layers, on the safe "
+         "side, until a printed test piece loaded to breaking says otherwise.")
+
+
+def rough(run: dict, case: dict) -> bool:
+    """Whether a verdict rests on the printed model: the part's printed, and the plywood's plate check doesn't govern
+    this case (a plywood top on printed sides that fails as a beam is plywood's verdict)."""
+    return bool((run.get("material") or {}).get("printed")) and case.get("governs") != "plate"
+
+
 NOTES = [
     "The FEA takes the joints as solid wood and its panel edges come out partly clamped, so it reads "
     "stiffer than glued-and-screwed; the plate check frees the edges, the safe side. Neither checks the "
