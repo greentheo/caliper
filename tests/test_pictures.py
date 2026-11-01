@@ -234,3 +234,26 @@ def test_nor_is_the_chat_turn(tmp_path):
     store.write_part("stool", BOX_STOOL, intent="a box step stool")
     res = chat.picture_part(store, "stool", "T-rex", "the side", strength=False, use_llm=False)
     assert res.ok is False and "couldn't check it still holds" in res.reply and "✓" not in res.reply
+
+
+def test_a_chat_turn_that_fails_still_answers_in_the_log(client, monkeypatch):
+    """CALI-87 (#75 rework, item 6): as a picture job does (finding 6), a refine that raises after the person's
+    message is logged writes the failure as the reply, so the conversation isn't left hanging."""
+    c, slug = client
+
+    def broken(*a, **k):
+        raise RuntimeError("the sandbox died")
+
+    monkeypatch.setattr(chat, "refine_part", broken)
+    monkeypatch.setattr(chat, "classify", lambda *a, **k: chat.Intent(action="refine", part="stool", intent="taller"))
+    job = c.post(f"/api/designs/{slug}/chat", json={"message": "make it a bit taller", "scope": "stool"}).json()
+    end = time.time() + 60
+    while time.time() < end:
+        j = c.get(f"/api/jobs/{job['job_id']}").json()
+        if j["status"] in ("done", "error"):
+            break
+        time.sleep(0.05)
+    assert j["status"] == "error"
+    log = c.get(f"/api/designs/{slug}").json()["log"]
+    assert log[-2]["kind"] == "message" and log[-2]["text"] == "make it a bit taller"
+    assert log[-1]["kind"] == "reply" and log[-1]["ok"] is False and "couldn't" in log[-1]["reply"]

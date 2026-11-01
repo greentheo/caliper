@@ -429,8 +429,17 @@ def router():
 
         def work(j):
             store = DesignStore.load(slug)
-            res = chat.turn(store, req.message.strip(), scope=req.scope or None,
-                            on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            before = len(store.log())
+            try:
+                res = chat.turn(store, req.message.strip(), scope=req.scope or None,
+                                on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            except Exception as e:
+                # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87)
+                said = store.log()[before:]
+                if any(x.get("kind") == "message" for x in said) and not any(x.get("kind") == "reply" for x in said):
+                    store.append_log({"kind": "reply", "action": "error", "ok": False,
+                                      "reply": f"I couldn't do that: {type(e).__name__}: {e}"})
+                raise
             return turn_result(res)
 
         job = RUNNER.submit("chat", work, label=req.message[:60], lock=_lock(slug))
