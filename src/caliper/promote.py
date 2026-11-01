@@ -270,14 +270,22 @@ _OPS = {ast.GtE: "ge", ast.Gt: "ge", ast.LtE: "le", ast.Lt: "le", ast.Eq: "eq"}
 def _bounds(expr: str):
     """``left OP number`` → ``(left_source, lo, hi)``, or ``None`` if it isn't that simple shape.
 
-    Only single comparisons against a literal are handled. Anything else (chained bands, booleans,
-    calls returning non-numbers) returns ``None`` and is treated as "can't reason about it" — which is
+    Single comparisons against a literal, and a band between two literals, are handled. Anything else
+    (booleans, calls returning non-numbers) returns ``None`` and is treated as "can't reason about it" — which is
     the right default: a false conflict claim is worse than no claim.
     """
     try:
         tree = ast.parse(expr, mode="eval").body
     except SyntaxError:
         return None
+    if isinstance(tree, ast.Compare) and len(tree.ops) == 2:
+        # a band, ``lo <= x <= hi`` (or ``hi >= x >= lo``): what allowing for measuring makes of ``==`` (CALI-87)
+        kinds = [_OPS.get(type(op)) for op in tree.ops]
+        a, b = _number(tree.left), _number(tree.comparators[1])
+        if a is None or b is None or kinds[0] != kinds[1] or kinds[0] not in ("le", "ge"):
+            return None
+        left = ast.unparse(tree.comparators[0]).replace(" ", "")
+        return (left, a, b) if kinds[0] == "le" else (left, b, a)
     if not isinstance(tree, ast.Compare) or len(tree.ops) != 1 or len(tree.comparators) != 1:
         return None
     kind = _OPS.get(type(tree.ops[0]))
