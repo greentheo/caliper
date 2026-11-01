@@ -69,3 +69,26 @@ def test_saving_under_a_name_that_isnt_a_plain_slug_is_refused_and_removes_nothi
         samples.save(store.design.slug, name, base=base, out=str(out))
     assert (out / "step-stool" / "design.yaml").read_text() == "kept"
     assert sorted(os.listdir(out)) == ["step-stool"]
+
+
+@pytest.mark.parametrize("name", ["..", ".", "", "a/b", "step-stool/..", "../step-stool"])
+def test_opening_a_name_that_isnt_a_sample_is_refused(tmp_path, name):
+    """CALI-86 (#62, finding 12): os.path.basename("..") is "..", so open_sample("..") copied Caliper's package."""
+    base = tmp_path / "designs"
+    with pytest.raises(KeyError):
+        samples.open_sample(name, base=str(base))
+    assert not base.exists() or os.listdir(base) == []
+
+
+@pytest.mark.parametrize("name", ["%2E%2E", "%2E", "a%2Fb"])
+def test_the_api_refuses_them_too(tmp_path, monkeypatch, name):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    base = tmp_path / "designs"
+    monkeypatch.setenv("CALIPER_DESIGNS", str(base))
+    got = TestClient(create_app()).post(f"/api/samples/{name}")
+    assert got.status_code in (404, 405), got.status_code
+    assert not base.exists() or os.listdir(base) == []
