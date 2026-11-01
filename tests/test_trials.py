@@ -125,3 +125,56 @@ def test_the_api_refuses_nan_and_a_nan_already_on_file_doesnt_break_the_page(pla
     assert c.get(f"/api/designs/{slug}").status_code == 200
     assert c.get(f"/api/designs/{slug}/parts/stool/trial").status_code == 200
     assert c.get(f"/api/designs/{slug}/answers?part=stool").status_code == 200
+
+
+@pytest.mark.parametrize("line", [
+    '{"at": 1, "load_lb": 200, "sag_mm": 0.4, "broke": false, "note": ""}',                   # no version
+    '{"at": 1, "version": 1, "load_lb": "200", "sag_mm": null, "broke": false, "note": ""}',  # a load as a string
+    '{"at": 1, "version": 1, "load_lb": true, "sag_mm": null, "broke": false, "note": ""}',   # true isn't a number
+    '{"at": 1, "version": 1, "load_lb": 200, "sag_mm": NaN, "broke": false, "note": ""}',     # the sag checked too
+    '{"at": 1, "version": 1, "load_lb": 200, "sag_mm": "0.4", "broke": false, "note": ""}',
+    '[200, 0.4]',
+])
+def test_a_line_on_file_that_isnt_a_step_is_left_out_never_a_500(plain, line):
+    """CALI-86 (#69 rework, item 3): a line with no version, or a load written as a string, made /trial and /answers
+    a 500; a NaN sag got past the read."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    trials.record(plain, "stool", 200, sag_mm=0.4)
+    with open(trials.path(plain, "stool"), "a") as f:
+        f.write(line + "\n")
+    got = trials.compared(plain, "stool")
+    assert [r["load_lb"] for r in got["rows"]] == [200] and got["skipped"] == 1
+    c = TestClient(create_app(), raise_server_exceptions=False)
+    slug = plain.design.slug
+    for url in (f"/api/designs/{slug}/parts/stool/trial", f"/api/designs/{slug}/answers?part=stool",
+                f"/api/designs/{slug}"):
+        assert c.get(url).status_code == 200, url
+
+
+def test_the_api_takes_true_for_no_number(plain):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    c = TestClient(create_app())
+    for body in ({"load_lb": True}, {"load_lb": 200, "sag_mm": True}):
+        assert c.post(f"/api/designs/{plain.design.slug}/parts/stool/trial", json=body).status_code == 422, body
+    assert trials.rows(plain, "stool") == []
+
+
+def test_a_nan_already_in_the_conversation_log_doesnt_break_the_design(plain):
+    """CALI-86 (#69 rework, item 3): append_log wrote a NaN before CALI-86, and nothing read log.jsonl defensively."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    with open(plain.log_path, "a") as f:
+        f.write('{"kind": "trial", "action": "recorded", "part": "stool", "load_lb": NaN, "broke": false}\n')
+    got = TestClient(create_app(), raise_server_exceptions=False).get(f"/api/designs/{plain.design.slug}")
+    assert got.status_code == 200 and got.json()["log_skipped"] == 1

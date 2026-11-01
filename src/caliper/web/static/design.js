@@ -496,6 +496,8 @@ function renderThread() {
   const d = S.design;
   if (!d) return;
   const html = [];
+  // a line of the log that isn't a record (torn, or a NaN from before CALI-86) is left out, and said
+  if (d.log_skipped) html.push(`<div class="muted small">${d.log_skipped} line${d.log_skipped > 1 ? 's' : ''} of this design's log couldn't be read and ${d.log_skipped > 1 ? 'are' : 'is'} left out.</div>`);
   for (const e of d.log) {
     if (e.kind === 'created') {
       html.push(`<div class="note">Started <b>${esc(d.name)}</b> — ${esc(e.prompt)}</div>`);
