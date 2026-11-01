@@ -110,13 +110,18 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     runs = [r for r in state.get("load_runs") or [] if r["part"] == pid]
     if runs:
         run, stale = runs[0], runs[0].get("version") != p["version"]
+        # a printed part's strength is a rough model, and its line says so in a word (CALI-86)
+        rough = bool((run.get("material") or {}).get("printed"))
+        about = "about " if rough else ""
+        caveat = " (printed parts are a rough model: see the numbers)" if rough else ""
         for c in run["cases"]:
             if c.get("safety") is None:
                 continue
             if c.get("holds"):
-                text = f"Holds {c['name'].lower()}, {_times(c['safety'])}."
+                text = f"Holds {c['name'].lower()}, {about}{_times(c['safety'])}{caveat}."
             else:
-                text = f"Doesn't hold {c['name'].lower()}: only {_times(c['safety'])}, and it needs {run['min_safety']:g}."
+                text = (f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs "
+                        f"{run['min_safety']:g}{caveat}.")
             work.append(_line(text + (" (Checked on an older version: check again.)" if stale else ""),
                               "warn" if stale else "ok" if c.get("holds") else "bad", study="load"))
     elif p.get("loads"):

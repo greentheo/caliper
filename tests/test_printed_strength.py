@@ -67,3 +67,20 @@ def test_a_check_that_cant_run_says_why_on_the_card(store):
         load_study.study(store, "box")
     work = answers.answers(store, design_api.design_state(store), "box")[1]
     assert work["lines"][0]["text"].startswith("I couldn't check it holds: 'a foot' doesn't touch the part")
+
+
+def test_a_printed_part_s_verdict_says_about(store, tmp_path):
+    """CALI-86 (#62, finding 9; rule 6): a printed part's strength model is rough, and its card said "Holds …, N
+    times over" as plainly as a plywood one's."""
+    from .test_load_study import BOX_STOOL
+
+    load_study.study(store, "box")
+    line = next(ln for ln in answers.answers(store, design_api.design_state(store), "box")[1]["lines"]
+                if ln.get("study") == "load")
+    assert "about" in line["text"] and "printed parts are a rough model" in line["text"], line["text"]
+    ply = DesignStore.create("a box stool", base=str(tmp_path / "ply"))
+    ply.write_part("stool", BOX_STOOL, intent="a box stool")
+    load_study.study(ply, "stool")
+    line = next(ln for ln in answers.answers(ply, design_api.design_state(ply), "stool")[1]["lines"]
+                if ln.get("study") == "load")
+    assert "about" not in line["text"] and "rough" not in line["text"], line["text"]
