@@ -117,7 +117,7 @@ class JobRunner:
 
                 # kept by its kind, never its label (a chat turn's label is the message, CALI-86), and before
                 # the job reads as failed, so whoever sees it fail has the error to report
-                job.error_id = errors.record(errors.job_where(job.kind), job.error, traceback.format_exc())["id"]
+                job.error_id = errors.record_exception(errors.job_where(job.kind), e)["id"]
                 job.status = "error"
                 job.emit("error", job.error, trace=tail[-1] if tail else "")
             finally:

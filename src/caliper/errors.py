@@ -3,9 +3,9 @@
 Nothing leaves the machine on its own. What broke (a job that failed, a request that crashed, an error
 on the page) is kept on this machine in ``~/.caliper/errors.jsonl`` (or ``$CALIPER_ERRORS``), the newest
 50 of them, with your home folder written as ``~``. A **report** is one of them, plus Caliper's version,
-the OS and Python. It holds no prompt, no script and nothing typed: a job is named by its kind, and a design's
-folder or address by ``designs/<design>``. The error's own words can still name a part or a load, so the page
-shows the report in full, and sending it opens a new GitHub issue in your browser with it filled in, so you
+the OS and Python. A job is named by its kind, a design's folder or address by ``designs/<design>``, anyone's home
+folder by ``~``, and a YAML error by its line and column, not the lines it quotes. The error's own words can still
+quote what was typed or name a part, so the page shows the report in full, and sending it opens a new GitHub issue in your browser with it filled in, so you
 send it yourself.
 """
 
@@ -41,6 +41,7 @@ JOBS = {"chat": "a chat turn", "clarify": "a question about the design", "firstr
         "gussets": "gusset plates", "aero": "a drag search", "whittle": "a whittle study"}
 #: A design's folder or address names it, and a design's name is the person's words (its slug comes from them).
 _DESIGN = re.compile(r"designs/[^/\s'\"]+")
+_HOMES = re.compile(r"/(?:Users|home)/[^/\s'\"]+")
 
 
 def job_where(kind: str) -> str:
@@ -57,6 +58,7 @@ def scrub(text: str) -> str:
     home = os.path.expanduser("~")
     if home and home != "/":
         text = text.replace(home, "~")
+    text = _HOMES.sub("~", text)                             # anyone's home folder, not just this one (CALI-86)
     return _DESIGN.sub("designs/<design>", text)
 
 
@@ -77,9 +79,29 @@ def record(where: str, error: str, trace: str = "") -> dict:
     return e
 
 
+def _said(exc: BaseException) -> str:
+    """What the exception says, minus anything it quotes from a file the person wrote: a YAML error keeps its
+    problem, line and column but not the excerpt it shows, which is their own words (CALI-86)."""
+    try:
+        import yaml
+    except ImportError:                                   # pragma: no cover — yaml is a dependency
+        yaml = None
+    if yaml is not None and isinstance(exc, yaml.MarkedYAMLError):
+        mark = exc.problem_mark or exc.context_mark
+        where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
+        return f"{type(exc).__name__}: {exc.problem or exc.context or 'the file would not parse'}{where}"
+    return f"{type(exc).__name__}: {exc}"
+
+
 def record_exception(where: str, exc: BaseException) -> dict:
-    return record(where, f"{type(exc).__name__}: {exc}",
-                  "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))
+    said = _said(exc)
+    frames = "".join(traceback.format_tb(exc.__traceback__))
+    return record(where, said, "Traceback (most recent call last):\n" + frames + said)
+
+
+def plain(e: dict) -> str:
+    """What a page is told when a request crashes: a sentence and the error's id, never the error's own words."""
+    return f"Something went wrong on Caliper's side (error {e['id']}). You can see what broke and report it."
 
 
 def recent(n: int = 10) -> list[dict]:

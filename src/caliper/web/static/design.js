@@ -58,8 +58,8 @@ async function reportError(errorId, message) {
     if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'reportDlg'; dlg.className = 'report'; document.body.append(dlg); }
     dlg.innerHTML = `<h3>Report what broke</h3>
       <p class="small">Nothing has been sent. This is everything the report holds: what broke, where, and which
-        Caliper and computer it was. It doesn't name your design or hold anything you typed, but the error's own
-        words can name a part or a load, so read it before you send it. Add what you were doing if you like.</p>
+        Caliper and computer it was. It doesn't name your design. The error's own words can quote what you typed or
+        name a part, so read it before you send it. Add what you were doing if you like.</p>
       <textarea id="reportBody" rows="12">${esc(rep.body)}</textarea>
       <div class="actions"><button class="primary" id="reportSend">Open it as a GitHub issue</button>
         <button id="reportCopy">Copy</button><button class="ghost" id="reportClose">Not now</button></div>

@@ -241,7 +241,7 @@ def create_app():
         from . import errors
 
         e = errors.record_exception(f"{request.method} {request.url.path}", exc)
-        return JSONResponse(status_code=500, content={"detail": e["error"], "error_id": e["id"]})
+        return JSONResponse(status_code=500, content={"detail": errors.plain(e), "error_id": e["id"]})
 
     @app.get("/api/errors/report")
     def error_report(id: Optional[str] = None):
