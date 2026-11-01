@@ -82,3 +82,46 @@ def test_through_the_api(checked, monkeypatch):
     assert got["rows"][-1]["load_lb"] == 200 and got["rows"][-1]["predicted_mm"]
     assert c.post(f"/api/designs/{slug}/parts/stool/trial", json={"load_lb": -5}).status_code == 422
     assert c.post(f"/api/designs/{slug}/parts/nope/trial", json={"load_lb": 5}).status_code == 404
+
+
+@pytest.fixture
+def plain(tmp_path, monkeypatch):
+    """A part with no strength check: enough to record steps against, and cheap."""
+    store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", BOX_STOOL, intent="a box step stool")
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    return store
+
+
+@pytest.mark.parametrize("load,sag", [(float("nan"), None), (float("inf"), None), (200, float("nan")),
+                                      (200, float("inf")), (200, -0.5), (200, 0.0)])
+def test_a_step_must_be_a_real_number_more_than_nothing(plain, load, sag):
+    """CALI-86 (#62, finding 5): a NaN slipped past `not load or load <= 0` and broke the design's page."""
+    with pytest.raises(ValueError):
+        trials.record(plain, "stool", load, sag_mm=sag)
+    assert trials.rows(plain, "stool") == []
+
+
+def test_the_api_refuses_nan_and_a_nan_already_on_file_doesnt_break_the_page(plain):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    c = TestClient(create_app())
+    slug = plain.design.slug
+    for body in ('{"load_lb": NaN}', '{"load_lb": Infinity}', '{"load_lb": 200, "sag_mm": NaN}'):
+        got = c.post(f"/api/designs/{slug}/parts/stool/trial", content=body,
+                     headers={"content-type": "application/json"})
+        assert got.status_code == 422, body
+    # a trials file someone wrote by hand, with a NaN in it, beside a good line and one that isn't JSON
+    trials.record(plain, "stool", 200, sag_mm=0.4)
+    with open(trials.path(plain, "stool"), "a") as f:
+        f.write('{"at": 1, "version": 1, "load_lb": NaN, "sag_mm": null, "broke": false, "note": ""}\n')
+        f.write("not json\n")
+    got = trials.compared(plain, "stool")
+    assert [r["load_lb"] for r in got["rows"]] == [200] and got["skipped"] == 2
+    assert "2 lines" in got["skipped_note"]
+    assert c.get(f"/api/designs/{slug}").status_code == 200
+    assert c.get(f"/api/designs/{slug}/parts/stool/trial").status_code == 200
+    assert c.get(f"/api/designs/{slug}/answers?part=stool").status_code == 200

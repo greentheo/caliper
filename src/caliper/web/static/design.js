@@ -946,7 +946,8 @@ function trialView(p) {
       <label>sag <input id="trSag" type="number" min="0" step="0.001" placeholder="${inches() ? '0.004' : '0.10'}"> ${inches() ? 'in' : 'mm'}</label>
       <label><input id="trBroke" type="checkbox"> it broke</label>
       <button class="small" id="trAdd">Record</button></div>
-    <div class="muted small">${esc(pr.basis)}. Every step is kept with the design for calibrating the check.</div>`;
+    <div class="muted small">${esc(pr.basis)}. Every step is kept with the design for calibrating the check.</div>
+    ${t.skipped_note ? `<div class="small"><b class="bad">Left out:</b> ${esc(t.skipped_note)}.</div>` : ''}`;
 }
 function trialChart(pr, rows) {
   // load across, sag up: the predicted band, and what was measured
