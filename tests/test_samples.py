@@ -69,3 +69,20 @@ def test_saving_under_a_name_that_isnt_a_plain_slug_is_refused_and_removes_nothi
         samples.save(store.design.slug, name, base=base, out=str(out))
     assert (out / "step-stool" / "design.yaml").read_text() == "kept"
     assert sorted(os.listdir(out)) == ["step-stool"]
+
+
+def test_a_save_that_fails_leaves_the_old_sample_whole(tmp_path):
+    """CALI-86 (#69 rework, item 4): save() removed the sample before copying, so a design with no parts/ saved over
+    step-stool left only three files and lost its loads, patterns and cut plans."""
+    import shutil
+
+    out = tmp_path / "samples"
+    shutil.copytree(os.path.join(samples.SAMPLES_DIR, "step-stool"), out / "step-stool")
+    before = sorted(os.listdir(out / "step-stool"))
+    base = str(tmp_path / "designs")
+    store = DesignStore.create("no parts", base=base)
+    shutil.rmtree(os.path.join(store.root, "parts"), ignore_errors=True)
+    with pytest.raises(OSError):
+        samples.save(store.design.slug, "step-stool", base=base, out=str(out))
+    assert sorted(os.listdir(out / "step-stool")) == before
+    assert sorted(os.listdir(out)) == ["step-stool"]                   # and no half-made folder beside it

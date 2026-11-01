@@ -91,32 +91,45 @@ def save(slug: str, name: str, base: Optional[str] = None, out: Optional[str] = 
     if os.path.dirname(os.path.realpath(dest)) != root:          # a link out of the samples folder, say
         raise ValueError(f"a sample needs a plain name: {name!r} isn't a folder in {root}")
     store = DesignStore.load(slug, base=base)
+    # built beside it and swapped in whole, so a save that fails leaves the old sample as it was (CALI-86)
+    import tempfile
+
+    os.makedirs(root, exist_ok=True)
+    work = tempfile.mkdtemp(prefix=".saving-", dir=root)
+    try:
+        for f in FILES:
+            if os.path.exists(os.path.join(store.root, f)):
+                shutil.copy2(os.path.join(store.root, f), os.path.join(work, f))
+        shutil.copytree(os.path.join(store.root, "parts"), os.path.join(work, "parts"))
+        for kind in RUNS:
+            folder = os.path.join(store.root, kind)
+            if not os.path.isdir(folder):
+                continue
+            newest: dict = {}
+            for run in sorted(os.listdir(folder)):            # named by time: the last of each part is the newest
+                newest[_part_of(os.path.join(folder, run))] = run
+            for run in newest.values():
+                a, b = os.path.join(folder, run), os.path.join(work, kind, run)
+                os.makedirs(os.path.dirname(b), exist_ok=True)
+                (shutil.copytree if os.path.isdir(a) else shutil.copy2)(a, b)
+        home = os.path.expanduser("~")
+        for here, _, files in os.walk(work):
+            for f in files:
+                if f.endswith(TEXT):
+                    p = os.path.join(here, f)
+                    with open(p, encoding="utf-8", errors="surrogateescape") as fh:
+                        text = fh.read()
+                    if home in text:
+                        with open(p, "w", encoding="utf-8", errors="surrogateescape") as fh:
+                            fh.write(text.replace(home, "~"))
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        raise
+    old = None
     if os.path.exists(dest):
-        shutil.rmtree(dest)
-    os.makedirs(dest)
-    for f in FILES:
-        if os.path.exists(os.path.join(store.root, f)):
-            shutil.copy2(os.path.join(store.root, f), os.path.join(dest, f))
-    shutil.copytree(os.path.join(store.root, "parts"), os.path.join(dest, "parts"))
-    for kind in RUNS:
-        folder = os.path.join(store.root, kind)
-        if not os.path.isdir(folder):
-            continue
-        newest: dict = {}
-        for run in sorted(os.listdir(folder)):            # named by time: the last of each part is the newest
-            newest[_part_of(os.path.join(folder, run))] = run
-        for run in newest.values():
-            a, b = os.path.join(folder, run), os.path.join(dest, kind, run)
-            os.makedirs(os.path.dirname(b), exist_ok=True)
-            (shutil.copytree if os.path.isdir(a) else shutil.copy2)(a, b)
-    home = os.path.expanduser("~")
-    for here, _, files in os.walk(dest):
-        for f in files:
-            if f.endswith(TEXT):
-                p = os.path.join(here, f)
-                with open(p, encoding="utf-8", errors="surrogateescape") as fh:
-                    text = fh.read()
-                if home in text:
-                    with open(p, "w", encoding="utf-8", errors="surrogateescape") as fh:
-                        fh.write(text.replace(home, "~"))
+        old = tempfile.mkdtemp(prefix=".old-", dir=root)
+        os.rename(dest, os.path.join(old, name))
+    os.rename(work, dest)
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
     return dest
