@@ -64,7 +64,12 @@ cp src/caliper/web/static/design.js "${TMPDIR:-/tmp}/design.mjs" && node --check
 For anything a person sees: run the app on 8016 with a scratch designs folder, and click through the
 acceptance criteria in the browser. For anything that changes a strength verdict: run the suite's strength
 fixtures before and after and put the numbers in the PR (rule 6). Read the exit status directly, not
-through a pipe.
+through a pipe. Count from pytest's summary line (`N passed, N skipped`), not the progress dots: dots and
+`s`'s in the warnings section get counted too.
+
+**On a stack, run the full suite once, at the top,** after any rework is settled and merged forward. A run
+under a lower branch goes stale the moment a rework lands above it (night shift killed four, 2026-11-01).
+Post the one count on every PR it covers.
 
 ### 8. Pull request
 - Commit `CALI-N (#issue): what changed and why`, ending with the `Co-Authored-By` line; push;
