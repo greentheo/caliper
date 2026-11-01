@@ -930,11 +930,14 @@ def adopt(store: DesignStore, part_id: str, values: dict) -> dict:
     for k, v in changed.items():
         if k in saved and isinstance(saved[k], (int, float)) and not isinstance(saved[k], bool):
             changed[k] = float(v)
-    script = write_build(script, changed)
+    from . import carve
+
+    script, dropped = carve.uncarve(write_build(script, changed))
     pretty = ", ".join(f"{k} {M.nominal(v) if k.endswith('_t') else v}" for k, v in changed.items())
-    version = store.write_part(part_id, script, action="build", feedback=f"built from: {pretty}",
+    note = carve.DROPPED if dropped else ""
+    version = store.write_part(part_id, script, action="build", feedback=f"built from: {pretty}" + (f". {note}" if note else ""),
                                extra={"build": changed})
-    return {"version": version, "build": read_build(script), "changed": changed}
+    return {"version": version, "build": read_build(script), "changed": changed, "note": note}
 
 
 # ---------------------------------------------------------------------------

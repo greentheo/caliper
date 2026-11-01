@@ -599,6 +599,9 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     holes = [{"piece": p["name"], "normal": p["normal"], "depth": p["thickness_mm"],
               "polygons": st["panels"].get(p["name"], [])} for p in rec["panels"] if st["panels"].get(p["name"])]
     script = store.read_script(pid)
+    from . import carve
+
+    carve.refuse_if_carved(script, "lightening it")
     # a picture cut into a panel (CALI-78) stays; the lightening holes are this step's
     keep = [h for h in H.read(script) if h.get("picture")]
     script = H.write(script, keep + holes)

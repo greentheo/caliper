@@ -225,6 +225,28 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     return {"version": version, "removed": st["removed"], "saved_g": st["saved_g"], "file": name}
 
 
+#: What a revision that dropped the carve says (CALI-87: one rule for every writer of a part's script).
+DROPPED = "The carve came off with this change (it was cut to the old shape): carve it again."
+_LINE = re.compile(r"^" + NAME + r"\s*=", re.M)
+
+
+def carved(script: str) -> bool:
+    return bool(_LINE.search(script or ""))
+
+
+def uncarve(script: str) -> tuple[str, bool]:
+    """A revision of a part changes the shape its carve was cut from: the script without the carve, and whether
+    there was one. Every writer that changes build() or its declarations goes through this."""
+    return (strip(script), True) if carved(script) else (script, False)
+
+
+def refuse_if_carved(script: str, what: str) -> None:
+    """A picture or lightening would cut into the carved shape: refused until the carve is off (CALI-87)."""
+    if carved(script):
+        raise ValueError(f"it's carved, and {what} would cut into the shape the carve was made for. Take the carve "
+                         f"off first (any revision through the chat does), then {what}, then carve it again")
+
+
 def strip(script: str) -> str:
     """The script without its carve (a revision changes what was carved)."""
     return re.sub(r'\n*(?:# The printed rest as carved[^\n]*\n)?' + NAME + r'\s*=\s*["\'][^"\']*["\']\n?', "\n",

@@ -260,6 +260,9 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
     from . import load_study as L
 
     emit = emit or (lambda *a, **k: None)
+    from . import carve
+
+    carve.refuse_if_carved(store.read_script(part_id), f"a {subject} cut out of it")
     panel = choose(panels(store, part_id), where)
     emit("step", f"Fitting the {subject} on the {panel['name']}", step="fit")
     poly = fit(shape, panel)
