@@ -26,11 +26,14 @@ been:
 2. **Check out the branch in your worktree** (never in `~/githubrepo/caliper`: the owner's app runs there)
    and re-run, yourself:
    ```bash
-   /opt/anaconda3/envs/caliper/bin/python -m pytest tests/test_<what it touches>.py -q
-   /opt/anaconda3/envs/caliper/bin/python -m pytest -q                  # once per stack, at the top
+   export PYTHONPATH=$PWD/src:<whittle checkout at WHITTLE_REF>/src     # README: the trap
+   export CALIPER_UNFOLD_DIR=<unfold-to-sheets checkout at UNFOLD_REF>  # else cut-plan tests skip
+   /opt/anaconda3/envs/caliper/bin/python -m pytest tests/test_<what it touches>.py -q -rs
+   /opt/anaconda3/envs/caliper/bin/python -m pytest -q -rs              # once per stack, at the top
    node --check src/caliper/web/static/design.js                         # when the page changed
    ```
-   Use the tool versions the `Makefile` pins (`WHITTLE_REF`, `UNFOLD_REF`), as CI does. When something
+   Use the tool versions the `Makefile` pins (`WHITTLE_REF`, `UNFOLD_REF`), as CI does. `-rs` lists what was
+   skipped: a cut-plan test that skipped for want of unfold-to-sheets checked nothing, so say so. When something
    fails, run it on the base branch too, so a failure that was already there isn't reported as new.
 3. **Re-derive the claims.** "Tests pass": run them. "3.1x → 2.98x": run the study. "Cards in 0.9 s": time
    them. A summary is not a source.
