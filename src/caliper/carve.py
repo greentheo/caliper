@@ -73,10 +73,15 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
                      progress=lambda f: emit("carving", "", progress=round(0.7 * f, 3)))
     density = M.printed(mat["key"])["density"] / 1000.0           # g/cm³, solid
     voxel_cm3 = ls.grid.voxel_volume / 1000.0
-    printed0 = None
+    printed0 = voxels0 = None
     out = []
     for k, st in enumerate(sweep.stations):
-        emit("checking", f"step {k}: {st.removed:.0%} of it carved away", progress=0.7 + 0.3 * k / len(sweep.stations))
+        # the share of the printed part: whittle's own `removed` counts the wood it keeps too (CALI-86)
+        printed_voxels = float((st.design & ~wood).sum())
+        voxels0 = printed_voxels if voxels0 is None else voxels0
+        removed = 1.0 - printed_voxels / voxels0 if voxels0 else 0.0
+        emit("checking", f"step {k}: {removed:.0%} of the printed part carved away",
+             progress=0.7 + 0.3 * k / len(sweep.stations))
         worst, sides, weak = None, None, None
         for i in range(len(ctx["loads"])):
             case, r = L.check_load(ctx, i, min_safety, solid=st.design)
@@ -90,7 +95,6 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
                 sides = mine if sides is None or (mine is not None and mine < sides) else sides
             else:
                 sides = 0.0
-        printed_voxels = float((st.design & ~wood).sum())
         grams = printed_voxels * voxel_cm3 * density * mat["solid"]
         printed0 = grams if printed0 is None else printed0
         mesh = st.build()
@@ -100,7 +104,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         f = f"station_{k:02d}.stl"
         tm.export(os.path.join(out_dir, f))
         holds = sides is not None and sides >= min_safety         # the printed part, carved: what this is about
-        out.append({"index": k, "removed": round(float(st.removed), 3), "safety": sides, "holds": holds,
+        out.append({"index": k, "removed": round(removed, 3), "safety": sides, "holds": holds,
                     "whole": worst, "whole_holds": worst is not None and worst >= min_safety, "weakest": weak,
                     "printed_g": round(grams), "saved_g": round(printed0 - grams), "stl": f})
         if not holds and k > 0:

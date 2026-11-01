@@ -1789,7 +1789,7 @@ function carveView(p) {
     <svg class="trial-chart" viewBox="0 0 ${W} ${H}"><line x1="24" x2="${W - 10}" y1="${y(run.min_safety)}" y2="${y(run.min_safety)}" class="brk"/>
       <text x="${W - 10}" y="${y(run.min_safety) - 3}" text-anchor="end">needs ${run.min_safety}x</text>
       <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>${dots}
-      <text x="24" y="${H - 3}">as drawn</text><text x="${W - 10}" y="${H - 3}" text-anchor="end">carved away →</text></svg>
+      <text x="24" y="${H - 3}">as drawn</text><text x="${W - 10}" y="${H - 3}" text-anchor="end">of the printed part carved away →</text></svg>
     <div class="small">${best && best.saved_g ? `The lightest that holds: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% of the printed part
       carved away, <b>${best.saved_g} g</b> less filament, the printed part ${best.safety}x;
       ${best.whole_holds ? `the whole part ${best.whole}x` : `<b class="bad">the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold</b>`}.`
