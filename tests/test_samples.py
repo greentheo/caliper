@@ -103,3 +103,20 @@ def test_the_camper_s_verdicts_carry_the_promise(tmp_path):
     work = answers.answers(store, design_api.design_state(store), None)[1]
     assert any(ln["status"] in ("ok", "bad") and ln["text"][:1] in "✓✗" for ln in work["lines"]), work["lines"]
     assert work.get("promise") == answers.PROMISE
+
+
+def test_a_save_that_fails_leaves_the_old_sample_whole(tmp_path):
+    """CALI-86 (#69 rework, item 4): save() removed the sample before copying, so a design with no parts/ saved over
+    step-stool left only three files and lost its loads, patterns and cut plans."""
+    import shutil
+
+    out = tmp_path / "samples"
+    shutil.copytree(os.path.join(samples.SAMPLES_DIR, "step-stool"), out / "step-stool")
+    before = sorted(os.listdir(out / "step-stool"))
+    base = str(tmp_path / "designs")
+    store = DesignStore.create("no parts", base=base)
+    shutil.rmtree(os.path.join(store.root, "parts"), ignore_errors=True)
+    with pytest.raises(OSError):
+        samples.save(store.design.slug, "step-stool", base=base, out=str(out))
+    assert sorted(os.listdir(out / "step-stool")) == before
+    assert sorted(os.listdir(out)) == ["step-stool"]                   # and no half-made folder beside it

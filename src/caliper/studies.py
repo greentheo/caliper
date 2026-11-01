@@ -119,6 +119,10 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
                     + (f"; carving the printed part: {carved}" if carved else "")), False
         if not carved:
             return "nothing could come off and still hold", False
+        if not best.get("whole_holds", True):
+            # the printed part holds at this step, but carving it makes the whole part fail (CALI-86)
+            return (f"{carved}, but the whole part is then {round(best['whole'], 1):g}x, and it needs "
+                    f"{r.get('min_safety', 2):g}x"), False
         return carved, True
     if kind == "frame":
         ok = [s for s in r.get("stations", []) if s.get("safety", 0) >= r.get("min_safety", 0)]

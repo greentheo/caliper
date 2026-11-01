@@ -99,11 +99,9 @@ def record(store: DesignStore, part_id: str, load_lb: float, sag_mm: Optional[fl
 
 
 def _real(x) -> bool:
-    """A measurement: a finite number more than nothing (NaN gets past ``x <= 0``, CALI-86)."""
-    try:
-        return math.isfinite(float(x)) and float(x) > 0
-    except (TypeError, ValueError):
-        return False
+    """A measurement: a finite number more than nothing (NaN gets past ``x <= 0``; a string or true isn't a
+    number, CALI-86)."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and x > 0
 
 
 def _row(line: str) -> Optional[dict]:
@@ -115,6 +113,9 @@ def _row(line: str) -> Optional[dict]:
     if not isinstance(r, dict) or not _real(r.get("load_lb")) or (r.get("sag_mm") is not None
                                                                   and not _real(r["sag_mm"])):
         return None
+    if not isinstance(r.get("version"), int) or isinstance(r.get("version"), bool) \
+            or not isinstance(r.get("broke", False), bool):
+        return None                                 # every field a step is read by, as record() writes it
     return r
 
 
