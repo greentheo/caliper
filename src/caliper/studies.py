@@ -108,10 +108,18 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     if kind == "carve":
         st = r.get("stations", [])
         best = next((x for x in st if x["index"] == r.get("best")), None)
-        if best is None or not best["saved_g"]:
+        carved = (f"{best['removed']:.0%} carved away, {best['saved_g']} g less filament, still "
+                  f"{round(best['safety'], 1):g}x" if best and best["saved_g"] else "")
+        first = st[0] if st else {}
+        if first and not first.get("whole_holds"):
+            # the part fails where carving can't reach: that's the verdict, never a green line (CALI-86)
+            whole = first.get("whole")
+            return ("doesn't hold as it is: " + (f"{round(whole, 1):g}x" if whole is not None else "not checked")
+                    + f", needs {r.get('min_safety', 2):g}x" + (f" (the {first['weakest']})" if first.get("weakest") else "")
+                    + (f"; carving the printed part: {carved}" if carved else "")), False
+        if not carved:
             return "nothing could come off and still hold", False
-        return (f"{best['removed']:.0%} carved away, {best['saved_g']} g less filament, still "
-                f"{round(best['safety'], 1):g}x"), True
+        return carved, True
     if kind == "frame":
         ok = [s for s in r.get("stations", []) if s.get("safety", 0) >= r.get("min_safety", 0)]
         if not ok:
