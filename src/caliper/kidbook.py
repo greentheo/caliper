@@ -92,6 +92,7 @@ def _together(against: list, wood: list, words: dict) -> str:
                 done.add(n)
         else:
             parts.append(f"the {words[a]}")
+    parts.sort(key=lambda w: not w.startswith("both "))   # "both sides" first, then the rest as they went on
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
@@ -110,7 +111,7 @@ def order(pcs: list[dict], joints: dict) -> list[tuple[dict, list[str]]]:
     done: list[dict] = []
     out = []
     while left:
-        names = {d["key"] for d in done}                 # each piece by its own key (fasteners.keys)
+        names = [d["key"] for d in done]                 # each piece by its own key, in the order they went on
         meets = [pc for pc in left if any(tuple(sorted((pc["key"], n))) in joints for n in names)]
         nxt = min(meets or left, key=lambda pc: (round(low(pc)), -size(pc)))
         out.append((nxt, [n for n in names if tuple(sorted((nxt["key"], n))) in joints]))
