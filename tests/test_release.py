@@ -172,3 +172,12 @@ def test_the_book_keeps_where_it_should_break_with_room_for_where_it_did(store):
     # and the patterns for hand tools go with it (CALI-48)
     assert any(f.startswith("hand/crate/") and f.endswith("print-full-size.pdf") for f in rec["files"])
     assert "hand/" in book
+
+
+def test_the_book_lists_a_kids_book_only_when_one_was_made(store):
+    """CALI-87 (#63, finding 10): the index listed kids.html for a build that got none (this crate has XPS in it,
+    so it isn't all wood)."""
+    rec = R.make(store, pdf=False)
+    root = os.path.join(R.releases_dir(store), rec["id"])
+    assert rec["kids"] is None and not os.path.exists(os.path.join(root, "kids.html"))
+    assert "kids.html" not in open(os.path.join(root, "index.html")).read()

@@ -952,6 +952,8 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                          ("shopping.txt, shopping.csv", "this shopping list"),
                          ("scorecard.json", "the scorecard as released, with every number and how far to trust it"),
                          ("source/", "each part's script at the version released, and the design's own files")):
+        if folder == "kids.html" and not rec.get("kids"):          # only when one was made (CALI-87)
+            continue
         out.append(f"<tr><td><code>{_e(folder)}</code></td><td>{_e(what)}</td></tr>")
     out.append("</table><p class='muted small'>Made by Caliper. Every number here was measured from the design or "
                "a model of it, and says how far to trust it; the prices are guesses.</p></body></html>")
