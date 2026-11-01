@@ -72,16 +72,35 @@ def test_no_page_puts_a_kid_s_hands_at_the_work_while_a_tool_runs(stool, tmp_pat
     os.makedirs(root)
     rec = {"design": "Box stool", "strength": {"stool": [{"name": "An adult stepping up", "safety": 3.11}]}}
     kidbook.make(stool, root, rec, ["stool"], {"groups": []})
-    book = open(os.path.join(root, "kids.html")).read()
+    import html
+
+    book = html.unescape(open(os.path.join(root, "kids.html")).read())      # as the page reads
     pages = re.findall(r"<section class='step'>(.*?)</section>", book, re.S)
     tool = [p for p in pages if re.search(r"jigsaw|drill|screws", re.sub(r"<[^>]+>", " ", p.split("</h2>", 1)[1]),
                                           re.I) and "Get your things" not in p]
     assert len(tool) >= 5                                  # cutting, and every piece that's screwed on
     for p in tool:
         said = " ".join(re.findall(r"<p class='say'>(.*?)</p>", p, re.S))
-        assert not re.search(r"\bhold|\bsteady|\bpress", said, re.I), said
-        assert "grown-up" in said and "stand back" in said and "safety glasses" in said, said
-    assert "two clamps" in book                            # what the grown-up clamps it with is on the list
+        assert not AT_THE_WORK.search(said), said
+        assert "grown-up" in said and "arm's length behind" in said and "safety glasses" in said, said
+        assert "ear defenders" in said, said
+    assert "two clamps" in book and "ear defenders" in book    # on the list too
+    cut = next(p for p in tool if "Cut them out" in p)
+    assert "past the table's edge" in cut and "never in front of the saw" in cut
+    # the test of the finished stool is a grown-up's step: they stand on it first, the kid watches (rule 6)
+    test = next(p for p in pages if "Test it" in p)
+    assert re.search(r"A grown-up stands on it first.*while you watch", test), test
+
+
+#: A kid's hands at the work: what no page with a running tool may ask (CALI-86, the reviewer's list included).
+AT_THE_WORK = re.compile(r"\bhold|\bsteady|\bpress|\bgrip|hand flat|hands? on the|both hands", re.I)
+
+
+@pytest.mark.parametrize("said", ["hold the pattern still", "grip the board so it can't move",
+                                  "put your hand flat on the wood next to the line", "keep both hands on the piece",
+                                  "steady it for the grown-up", "press it down"])
+def test_the_check_catches_every_way_of_putting_a_kids_hands_there(said):
+    assert AT_THE_WORK.search(said)
 
 
 def test_two_pieces_with_one_name_get_the_screws_the_shopping_list_counts(tmp_path):

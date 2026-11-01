@@ -107,7 +107,9 @@ def _append_jsonl(path: str, entry: dict) -> dict:
     return entry
 
 
-def _read_jsonl(path: str) -> list[dict]:
+def _read_jsonl(path: str, skipped: Optional[list] = None) -> list[dict]:
+    """Every record in a JSON-lines file that is one. A line that isn't (torn, hand-edited, or carrying a NaN that
+    no page can parse, CALI-86) is left out, and counted in ``skipped`` if it's given."""
     if not os.path.exists(path):
         return []
     out = []
@@ -117,9 +119,14 @@ def _read_jsonl(path: str) -> list[dict]:
             if not line:
                 continue
             try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue  # a torn final line must not make the whole history unreadable
+                rec = json.loads(line)
+                json.dumps(rec, allow_nan=False)                 # NaN and Infinity aren't JSON a browser reads
+            except ValueError:
+                rec = None
+            if isinstance(rec, dict):
+                out.append(rec)
+            elif skipped is not None:
+                skipped.append(line)
     return out
 
 
@@ -541,8 +548,8 @@ class DesignStore:
         entry = {"ts": _now(), **entry}
         return _append_jsonl(self.log_path, entry)
 
-    def log(self) -> list[dict]:
-        return _read_jsonl(self.log_path)
+    def log(self, skipped: Optional[list] = None) -> list[dict]:
+        return _read_jsonl(self.log_path, skipped)
 
     def part_geometry(self, part_id: str):
         """Build/load one part as it sits in the design (posed, B-rep kept for scripts)."""

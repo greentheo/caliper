@@ -76,23 +76,60 @@ def _signed_area(pts) -> float:
     return 0.5 * float(np.sum(p[:, 0] * np.roll(p[:, 1], -1) - np.roll(p[:, 0], -1) * p[:, 1]))
 
 
-@pytest.mark.parametrize("piece,outward", [("left", (-1, 0, 0)), ("right", (1, 0, 0))])
+#: The same L on the front and back (±y), which an x-only reading of "outside" gets wrong (the reviewer's mutant).
+L_HOLES_Y = f'''
+
+HOLES = [{{"piece": "front", "normal": [0, 1, 0], "depth": 19.05,
+          "polygons": [{[[60.0 + x, 0.0, z] for x, z in L]}]}},
+         {{"piece": "back", "normal": [0, -1, 0], "depth": 19.05,
+          "polygons": [{[[60.0 + x, 254.0, z] for x, z in L]}]}}]
+'''
+
+
+@pytest.mark.parametrize("piece,outward", [("left", (-1, 0, 0)), ("right", (1, 0, 0)),
+                                           ("front", (0, -1, 0)), ("back", (0, 1, 0))])
 def test_each_pattern_is_the_panel_seen_from_its_outside_face(tmp_path, piece, outward):
     """CALI-86 (#62, finding 7): the left side's pattern was mirrored, so a T-rex traced from it faced the wrong way.
     Turning a pattern round keeps which way an L goes round; mirroring it reverses it."""
     import numpy as np
 
     s = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
-    s.write_part("stool", BOX_STOOL + L_HOLES, intent="L holes in both sides")
+    sideways = piece in ("left", "right")
+    s.write_part("stool", BOX_STOOL + (L_HOLES if sideways else L_HOLES_Y), intent="L holes in two panels")
     pc = next(p for p in patterns.pieces(s, "stool") if p["name"] == piece)
     (hole,) = pc["holes"]
     m = np.asarray(outward, float)                         # towards someone standing outside, looking at it
     up = np.array([0.0, 0.0, 1.0])
     right = np.cross(up, m)
-    x0 = 0.0 if piece == "left" else 406.4
-    seen = [(np.array([x0, y, z]) @ right, z) for y, z in L]
+    if sideways:
+        x0 = 0.0 if piece == "left" else 406.4
+        corners = [np.array([x0, y, z]) for y, z in L]
+    else:
+        y0 = 0.0 if piece == "front" else 254.0
+        corners = [np.array([60.0 + x, y0, z]) for x, z in L]
+    seen = [(q @ right, q[2]) for q in corners]
     assert np.sign(_signed_area(hole)) == np.sign(_signed_area(seen))
     assert pc["face"] == "outside"
     rec = patterns.make(s, "stool")
     svg = open(os.path.join(patterns.runs_dir(s), rec["id"], f"project-{piece}.svg")).read()
     assert "this is the outside face" in svg
+
+
+def test_every_page_title_is_in_characters_the_page_font_has(store):
+    """CALI-86 (#69 rework, item 5): the titles joined with an em dash, which PIL's default font hasn't got, so the
+    pages printed "3/4 in softwood plywood ▯ this is the outside face"."""
+    from PIL import Image, ImageDraw
+
+    font = patterns._font(40)
+
+    def ink(ch):
+        im = Image.new("L", (90, 90), 0)
+        ImageDraw.Draw(im).text((10, 10), ch, fill=255, font=font)
+        return im.tobytes()
+
+    missing = ink("\U0010FFFF")
+    assert ink("—") == missing                              # the check can tell: the old title's dash fails it
+    for pc in patterns.pieces(store, "stool"):
+        for title in patterns.titles(pc, cols=2, rows=2).values():
+            gone = sorted({ch for ch in title if not ch.isspace() and ink(ch) == missing})
+            assert not gone, (title, gone)

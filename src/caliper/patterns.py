@@ -102,6 +102,14 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
     return out
 
 
+def titles(pc: dict, cols: int = 1, rows: int = 1, r: int = 0, c: int = 0) -> dict:
+    """The words across the top of a piece's pages, in characters the pages' font has: no dashes beyond ASCII
+    (CALI-86: an em dash printed as a box)."""
+    return {"measure": f"{pc['name']}: {pc['label']} ({pc['seen']})",
+            "full": f"{pc['name']}: {pc['label']}, full size on {cols * rows} page(s) ({pc['seen']})",
+            "tile": f"{pc['name']} ({pc['seen']}), page {chr(65 + r)}{c + 1} ({r * cols + c + 1} of {rows * cols})"}
+
+
 def _facing(m) -> str:
     """Which way a face looks, in a builder's words (z up, the front at -y)."""
     k = int(np.argmax(np.abs(m)))
@@ -169,7 +177,7 @@ def measure_page(pc: dict):
     _dimension(dr, (X(0), Y(0) + 40), (X(sx), Y(0) + 40), inches(sx), f)
     _dimension(dr, (X(0) - 60, Y(0)), (X(0) - 60, Y(sy)), inches(sy), f)
     # the title and how to read it
-    dr.text((0.6 * DPI, 0.35 * DPI), f"{pc['name']}: {pc['label']} — {pc['seen']}", fill="black", font=big)
+    dr.text((0.6 * DPI, 0.35 * DPI), titles(pc)["measure"], fill="black", font=big)
     lines = ["Measure everything from the bottom-left corner: the bottom edge and the left edge are straight "
              "and square. Grid lines are 1 in."]
     if not _rectangle(pc["outline"], pc["size"]):
@@ -254,7 +262,7 @@ def tiles(pc: dict) -> tuple[list, tuple[int, int], bool]:
                         [W - MARGIN * DPI, 0, W, H]):
                 dr.rectangle(box, fill="white")
             label = f"{chr(65 + r)}{c + 1}"
-            dr.text((MARGIN * DPI, 6), f"{pc['name']} ({pc['seen']}), page {label} ({r * cols + c + 1} of {rows * cols})"
+            dr.text((MARGIN * DPI, 6), titles(pc, cols, rows, r, c)["tile"]
                     + (f" · overlaps {chr(65 + r)}{c + 2} on the right" if c < cols - 1 else "")
                     + (f" · overlaps {chr(66 + r)}{c + 1} below" if r < rows - 1 else ""),
                     fill="black", font=_font(13))
@@ -281,7 +289,7 @@ def _map(pc: dict, cols: int, rows: int, step) -> object:
     dr.polygon([(X(x), Y(y)) for x, y in pc["outline"]], outline="black", width=3)
     for h in pc["holes"]:
         dr.polygon([(X(x), Y(y)) for x, y in h], outline="black", width=2)
-    dr.text((0.6 * DPI, 0.35 * DPI), f"{pc['name']}: {pc['label']}, full size on {cols * rows} page(s) — {pc['seen']}",
+    dr.text((0.6 * DPI, 0.35 * DPI), titles(pc, cols, rows)["full"],
             fill="black", font=_font(24))
     import textwrap
 
