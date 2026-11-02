@@ -739,7 +739,9 @@ def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
     if not printed.get("rest"):
         return mesh
     entry = store.design.part(part_id)
-    key = (store.root, part_id, entry.version if entry else None, store.read_script(part_id))
+    # by the declarations it's cut from too: a what-if (another top thickness) is another printed rest (CALI-87)
+    key = (store.root, part_id, entry.version if entry else None, store.read_script(part_id),
+           json.dumps(d, sort_keys=True, default=str))
     with _PRINTED_MU:
         if key in _PRINTED:
             return _PRINTED[key]
@@ -928,11 +930,14 @@ def adopt(store: DesignStore, part_id: str, values: dict) -> dict:
     for k, v in changed.items():
         if k in saved and isinstance(saved[k], (int, float)) and not isinstance(saved[k], bool):
             changed[k] = float(v)
-    script = write_build(script, changed)
+    from . import carve
+
+    script, dropped = carve.uncarve(write_build(script, changed))
     pretty = ", ".join(f"{k} {M.nominal(v) if k.endswith('_t') else v}" for k, v in changed.items())
-    version = store.write_part(part_id, script, action="build", feedback=f"built from: {pretty}",
+    note = carve.DROPPED if dropped else ""
+    version = store.write_part(part_id, script, action="build", feedback=f"built from: {pretty}" + (f". {note}" if note else ""),
                                extra={"build": changed})
-    return {"version": version, "build": read_build(script), "changed": changed}
+    return {"version": version, "build": read_build(script), "changed": changed, "note": note}
 
 
 # ---------------------------------------------------------------------------

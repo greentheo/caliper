@@ -952,6 +952,8 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                          ("shopping.txt, shopping.csv", "this shopping list"),
                          ("scorecard.json", "the scorecard as released, with every number and how far to trust it"),
                          ("source/", "each part's script at the version released, and the design's own files")):
+        if folder == "kids.html" and not rec.get("kids"):          # only when one was made (CALI-87)
+            continue
         out.append(f"<tr><td><code>{_e(folder)}</code></td><td>{_e(what)}</td></tr>")
     out.append("</table><p class='muted small'>Made by Caliper. Every number here was measured from the design or "
                "a model of it, and says how far to trust it; the prices are guesses.</p></body></html>")
@@ -1119,11 +1121,20 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     try:
         kids = kidbook.make(store, root, {"design": store.design.name, "strength": _strength(store, versions)},
                             [p.id for p in built if p.id in versions], shop)
-    except Exception as e:  # noqa: BLE001 — the shop's book stands without it
+    except Exception as e:  # noqa: BLE001 — the shop's book stands without it, and says it's missing (CALI-87)
+        from . import errors
+
         kids = None
+        kept = errors.record_exception("a build package's kids' book", e)
+        kids_error = {"error": kept["error"], "error_id": kept["id"]}
         emit("error", f"couldn't make the kids' book: {e}")
+    else:
+        kids_error = None
 
     notes = list(card.get("notes") or [])
+    if kids_error:
+        notes.append(f"The kids' book couldn't be made (error {kids_error['error_id']}: report it from the app); the "
+                     f"rest of this package is whole.")
     for plan in plans.values():
         notes += [n for n in plan.get("notes") or [] if n not in notes]
     notes.append("Print the pattern PDFs at 100% (no fit-to-page) and put a ruler on the scale bar before cutting "
@@ -1135,7 +1146,7 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
            "ready": card["summary"]["fail"] == 0 and card["summary"]["unknown"] == 0,
            "cutplans": {pid: plan["id"] for pid, plan in plans.items()},
            "shopping_usd": shop["usd"], "steps": [{"n": s["n"], "title": s["title"], "img": s["img"]} for s in st],
-           "kids": kids,
+           "kids": kids, "kids_error": kids_error,
            "sheets": sum(g["sheets"] for plan in plans.values() for g in plan.get("sheets") or []),
            "notes": notes}
     with open(os.path.join(root, BOOK), "w") as f:

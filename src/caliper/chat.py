@@ -454,8 +454,8 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     described = redescribe(entry.intent, message, res.script, use_llm=use_llm, client=client)
     from . import carve
 
-    uncarved = carve.NAME in store.read_script(part_id)     # a carve fits the shape it was carved from (CALI-82)
-    script = carve.strip(res.script) if uncarved else res.script
+    uncarved = carve.carved(store.read_script(part_id))   # a carve fits the shape it was carved from (CALI-82)
+    script = carve.uncarve(res.script)[0]
     version = store.write_part(part_id, script, feedback=message, action="refine",
                                report=report_dict, intent=described)
     _emit(events, on_event, "wrote", f"{part_id} → v{version}", part=part_id, version=version)
@@ -466,7 +466,7 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
 
     reply = _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb="revised")
     if uncarved:
-        reply += "\n\nThe carve came off with this change (it was cut to the old shape): carve it again."
+        reply += "\n\n" + carve.DROPPED
     proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
                                        drafter=drafter, enabled=promote_feedback,
                                        events=events, on_event=on_event)

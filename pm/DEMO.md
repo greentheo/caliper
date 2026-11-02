@@ -566,6 +566,13 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-01 · #75 reworked from the reviewer's review (CALI-87 #63)
+1. **Name both sides of a box stool "side" and make a build package:** the kids' book is there, with "Add the
+   first side", "Add the other side", and "touches both sides" on the top's page.
+2. **Lighten a carved part:** refused straight away, telling you to say "roll it back" first.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_kidbook.py tests/test_release.py
+   tests/test_carve_dropped.py tests/test_carve_stale.py tests/test_consistency.py tests/test_pictures.py`.
+
 ### 2026-11-01 · #71 reworked from the reviewer's review (CALI-86 #62)
 1. **Record a test on the sample stool that broke at 150 lb:** both the design's and the part's *Will it work?*
    go red with "It broke at 150 lb in your test. We predicted it would hold 400." No ✓ is left above it.
@@ -589,6 +596,16 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
    has the grown-up go first.
 6. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_beam_width.py tests/test_errors.py tests/test_trials.py
    tests/test_samples.py tests/test_patterns.py tests/test_studies.py tests/test_kidbook.py`.
+
+### 2026-11-01 · The reviewer's correctness findings, fixed (CALI-87 #63)
+1. **A carved part:** adopt a BUILD what-if, a frame design or a drag station, and the reply and History say
+   the carve came off. "Put a T-rex on it" says it's carved, and what to do first.
+2. **"Put a T-rex on the right side":** it goes on the right.
+3. **The CNC sheet for a stool with a lightening hole:** the hole is the first cut in the SVG and the DXF.
+4. **A build package for a crate with XPS in it:** the book doesn't list a kids' book.
+5. Offline: `PYTHONPATH=src CALIPER_UNFOLD_DIR=<unfold-to-sheets> python -m pytest tests/test_carve_dropped.py
+   tests/test_carve_stale.py tests/test_printed_cache.py tests/test_cutplan.py tests/test_consistency.py
+   tests/test_kidbook.py tests/test_pictures.py tests/test_promote.py -rs`.
 
 ### 2026-11-01 · A load just above its face pushes on it; one that misses says so in both checks (CALI-84 #58)
 1. Open Theo's printed `step-stool` and **Check it holds**. Expect: the adult's foot, 1.2 mm above the recess

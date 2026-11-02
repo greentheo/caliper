@@ -184,9 +184,76 @@ def test_a_check_that_couldnt_run_is_never_a_tick(tmp_path):
     assert got["ok"] and "doesn't say what it must hold" in got["reply"]
 
 
+@pytest.mark.parametrize("where,want", [("the right side", {"right"}), ("on the left side", {"left"}),
+                                        ("the side", {"left", "right"}), ("the back", {"back"}), ("", {"front"})])
+def test_a_named_side_wins_over_the_word_side(where, want):
+    """CALI-87 (#63, finding 5): "side" stands for left and right, so "right side" matched both and the bigger
+    room won: asked for the right, it cut the left without a word."""
+    from shapely.geometry import box
+
+    found = [{"name": "left", "holes": 0, "room": box(0, 0, 200, 150)},       # the most room: the old pick
+             {"name": "right", "holes": 0, "room": box(0, 0, 150, 150)},
+             {"name": "front", "holes": 0, "room": box(0, 0, 120, 120)},
+             {"name": "back", "holes": 0, "room": box(0, 0, 100, 100)}]
+    assert pictures.choose(found, where)["name"] in want
+
+
+def test_a_drawing_with_a_point_that_isnt_a_number_is_refused(client):
+    """CALI-87 (#63, finding 6): a NaN from the pad killed the job and left the log with no reply."""
+    c, slug = client
+    before = len(c.get(f"/api/designs/{slug}").json()["log"])
+    for bad in ('[[0, 0], [NaN, 5], [9, 9], [0, 9]]', '[[0, 0], [Infinity, 5], [9, 9], [0, 9]]'):
+        got = c.post(f"/api/designs/{slug}/parts/stool/picture", content='{"subject": "x", "points": ' + bad + '}',
+                     headers={"content-type": "application/json"})
+        assert got.status_code == 422, bad
+    assert len(c.get(f"/api/designs/{slug}").json()["log"]) == before
+
+
+def test_a_picture_job_that_fails_still_answers_in_the_log(client, monkeypatch):
+    c, slug = client
+
+    def broken(*a, **k):
+        raise RuntimeError("the sandbox died")
+
+    monkeypatch.setattr(chat, "picture_part", broken)
+    job = c.post(f"/api/designs/{slug}/parts/stool/picture", json={"subject": "T-rex"}).json()
+    end = time.time() + 60
+    while time.time() < end:
+        j = c.get(f"/api/jobs/{job['job_id']}").json()
+        if j["status"] in ("done", "error"):
+            break
+        time.sleep(0.05)
+    assert j["status"] == "error"
+    last = c.get(f"/api/designs/{slug}").json()["log"][-1]
+    assert last["kind"] == "reply" and last["ok"] is False and "couldn't" in last["reply"]
+
+
 def test_nor_is_the_chat_turn(tmp_path):
     """CALI-86 (#71 rework, item 9): the turn the person sees in the chat isn't ok either."""
     store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
     store.write_part("stool", BOX_STOOL, intent="a box step stool")
     res = chat.picture_part(store, "stool", "T-rex", "the side", strength=False, use_llm=False)
     assert res.ok is False and "couldn't check it still holds" in res.reply and "✓" not in res.reply
+
+
+def test_a_chat_turn_that_fails_still_answers_in_the_log(client, monkeypatch):
+    """CALI-87 (#75 rework, item 6): as a picture job does (finding 6), a refine that raises after the person's
+    message is logged writes the failure as the reply, so the conversation isn't left hanging."""
+    c, slug = client
+
+    def broken(*a, **k):
+        raise RuntimeError("the sandbox died")
+
+    monkeypatch.setattr(chat, "refine_part", broken)
+    monkeypatch.setattr(chat, "classify", lambda *a, **k: chat.Intent(action="refine", part="stool", intent="taller"))
+    job = c.post(f"/api/designs/{slug}/chat", json={"message": "make it a bit taller", "scope": "stool"}).json()
+    end = time.time() + 60
+    while time.time() < end:
+        j = c.get(f"/api/jobs/{job['job_id']}").json()
+        if j["status"] in ("done", "error"):
+            break
+        time.sleep(0.05)
+    assert j["status"] == "error"
+    log = c.get(f"/api/designs/{slug}").json()["log"]
+    assert log[-2]["kind"] == "message" and log[-2]["text"] == "make it a bit taller"
+    assert log[-1]["kind"] == "reply" and log[-1]["ok"] is False and "couldn't" in log[-1]["reply"]

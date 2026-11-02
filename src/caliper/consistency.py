@@ -38,6 +38,9 @@ COVER_MIN = 0.98
 #: piece is too thick or listed twice.
 VOLUME_MIN = 0.67
 VOLUME_MAX = 1.25
+#: Share of the solid that may lie in no piece at all before build() reads as filled in (CALI-87): a ratio of
+#: volumes misses a small filled box, whose panels are most of it; the solid outside every panel doesn't.
+SOLID_IN_NO_PIECE = 0.1
 SURFACE_SAMPLES = 1500
 GRID = 10
 
@@ -239,7 +242,25 @@ def _covers(mesh, pieces: list[dict], tol: float) -> AssertionResult:
         actual=round(share, 3), margin=round(share - COVER_MIN, 3), detail=detail)
 
 
-def _volume(mesh, pieces: list[dict], strength: bool = False) -> Optional[AssertionResult]:
+def _in_no_piece(mesh, pieces: list[dict], tol: float, n: int = 14) -> float:
+    """The share of the solid (on a grid through it) that's in no piece: a sheet's slab or a stick's section."""
+    lo, hi = mesh.bounds
+    g = [np.linspace(a, b, n + 2)[1:-1] for a, b in zip(lo, hi)]
+    pts = np.stack(np.meshgrid(*g, indexing="ij"), -1).reshape(-1, 3)
+    pts = pts[mesh.contains(pts)]
+    if not len(pts):
+        return 0.0
+    near = np.full(len(pts), np.inf)
+    for pc in pieces:
+        if pc["kind"] == "sheet":
+            for p, side in zip(pc["polys"], pc["sides"]):
+                near = np.minimum(near, slab_distance(pts, p, pc["thickness"], side))
+        else:
+            near = np.minimum(near, segment_distance(pts, pc["a"], pc["b"]) - pc["reach"])
+    return float((near > tol).mean())
+
+
+def _volume(mesh, pieces: list[dict], strength: bool = False, tol: float = 2.0) -> Optional[AssertionResult]:
     """The pieces' volume against the solid's. ``strength``: the part's strength check analyses the solid itself
     (it declares loads()), so a solid much bigger than its pieces fails too."""
     solid = float(mesh.volume)
@@ -247,14 +268,19 @@ def _volume(mesh, pieces: list[dict], strength: bool = False) -> Optional[Assert
         return None
     ratio = sum(pc["volume"] for pc in pieces) / solid
     heavy = sorted(pieces, key=lambda pc: -pc["volume"])[:3]
-    if strength and ratio < VOLUME_MIN:
+    loose = _in_no_piece(mesh, pieces, tol) if strength else 0.0
+    if strength and (ratio < VOLUME_MIN or loose > SOLID_IN_NO_PIECE):
         # a solid block round its panels (CALI-83: Theo's stool was built as a filled box): every panel lies in
         # it and covers its surface, so only the volume shows it
+        core = ratio >= VOLUME_MIN                    # the volumes pass, and the share in no piece fails (CALI-87)
         return AssertionResult(
-            id="construction_volume", expr=f"the solid is its pieces ({VOLUME_MIN:g}–{VOLUME_MAX:g}× its volume)",
-            status="fail", passed=False, actual=round(ratio, 3), margin=round(ratio - VOLUME_MIN, 3),
-            detail=(f"the solid ({solid / 1e6:.2f} L) is {1 / ratio:.1f}× what the pieces add up to: build() is "
-                    f"filled in, and the strength check analyses the solid. Make build() the pieces themselves, "
+            id="construction_volume",
+            expr=(f"no more than {SOLID_IN_NO_PIECE:.0%} of the solid is in no piece" if core
+                  else f"the solid is its pieces ({VOLUME_MIN:g}–{VOLUME_MAX:g}× its volume)"),
+            status="fail", passed=False, actual=round(loose if core else ratio, 3),
+            margin=round(SOLID_IN_NO_PIECE - loose if core else ratio - VOLUME_MIN, 3),
+            detail=(f"the solid ({solid / 1e6:.2f} L) is {1 / ratio:.1f}× what the pieces add up to, and "
+                    f"{loose:.0%} of it is in no piece: build() is filled in, and the strength check analyses the solid. Make build() the pieces themselves, "
                     f"each panel as thick as its sheet and hollow between them, as it will really be built"))
     ok = ratio <= VOLUME_MAX
     return AssertionResult(
@@ -319,7 +345,7 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
         out.append(_inside(mesh, pieces, tol))
         if not rest:
             out.append(_covers(mesh, pieces, tol))
-            vol = _volume(mesh, pieces, strength=bool(declared.get("loads")))
+            vol = _volume(mesh, pieces, strength=bool(declared.get("loads")), tol=tol)
             out += [vol] if vol else []
     if declared.get("loads") is not None:
         out.append(_loads(mesh, declared, pieces, tol))

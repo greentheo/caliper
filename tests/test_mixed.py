@@ -100,7 +100,9 @@ def test_two_materials_each_judged_against_its_own_strength(stool, monkeypatch, 
                                                            round(ctx["plate_mat"]["strength"], 3)}
     rec = load_study.study(stool, "stool")
     (case,) = rec["cases"]
-    assert case["safety"] and case["fea"]["in"] in ("top", None) or case["fea"]["safety"]
+    # the case's safety is the lower of the FEA's and the plate check's: what governs, as stated (CALI-87)
+    assert case["fea"]["safety"] is not None and case["plate"]["safety_across"] is not None
+    assert case["safety"] == min(case["fea"]["safety"], case["plate"]["safety_across"])
     # the top rests on the printed sides along two edges: a beam across them, the safe side
     pl = case["plate"]
     assert pl["piece"] == "top" and pl["edges_held"] == 2 and pl["done"] and pl["as"] == "beam"
@@ -135,12 +137,16 @@ def test_the_printed_sides_carve_down_until_it_doesnt_hold(stool, monkeypatch):
     best = next(x for x in st if x["index"] == rec["best"])
     # using a step: the plywood exactly as drawn, the sides as carved, and the part rebuilt from it
     before = C.report(stool, "stool")
+    uncarved = abs(C.printed_solid(stool, "stool").volume)
     got = carve.adopt(stool, rec["id"], best["index"])
     assert got["version"] == 3 and f'CARVED = "{got["file"]}"' in stool.read_script("stool")
     mesh = stool.part_geometry("stool").require_mesh()
     assert mesh.is_watertight
     sides = C.printed_solid(stool, "stool")
-    assert abs(sides.volume) <= abs(C.printed_solid(stool, "stool").volume) + 1
+    if best["saved_g"]:                                        # carved: less printed than as drawn (CALI-87)
+        assert abs(sides.volume) < uncarved
+    else:
+        assert abs(sides.volume) == pytest.approx(uncarved, rel=1e-3)
     after = C.report(stool, "stool")
     top = lambda r: next(x for x in r["bom"]["sheets"])["count"]   # noqa: E731 — the plywood is unchanged
     assert top(after) == top(before)

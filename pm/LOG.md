@@ -5,6 +5,20 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 
 ---
 
+### 2026-11-01 · CALI-87 (#63), #75 rework · The reviewer's review of #63, worked
+New commits only, on `cali-87-correctness`.
+1. A regression from finding 9: the kids' book crashed when certain pieces shared a name (8 of 26 ways), and
+   the package shipped without it. The chosen piece is now taken out by identity, and all 26 make a book with
+   18 screws. `edc63e0`
+2. A kids' book that fails is said in the package's notes and kept for a report. `cb45cae`
+3. Pages tell same-named pieces apart: drawings by key, "the first side" / "the other side", "touches both
+   sides". `23e9025`
+4. A filled box caught by its core reports the core share against 10%. `21cf8f3`
+5. A lightening study is adopted only onto its own version (409). `64d1b6b`
+6. A chat turn that fails still answers in the log. `d492d90`
+7. The carve refusal names "roll it back". Lightening a carved part is refused before the study runs.
+   `5314c0f`
+
 ### 2026-11-01 · CALI-86 (#62), #71 rework · The reviewer's review of findings 8–13, worked
 The foreman's ten items. New commits only; the reviewed ones keep their hashes.
 - **2 (rule 6):** a live test that broke below what the part must hold, or sagged well out of the predicted
@@ -44,6 +58,26 @@ The foreman accepted every disagreement in the reviewer's review of #69. One com
    first. `95369a3`
 
 ---
+
+### 2026-11-01 · CALI-87 (#63) · The reviewer's correctness findings on the open stack, fixed
+Stacked on #58 (which is on #62). One commit per finding, each with a test seen failing first.
+- **1 (#57):** the printed rest was cached per version, not per what-if, so a 3/4 in what-if left the part as
+  drawn with the what-if's sides. Now it's keyed on the declarations too. `1a8337a`
+- **2 (#57):** every script writer (BUILD what-if, frame, gussets, drag, refine) now drops a carve through
+  `carve.uncarve()` and says so. A picture or lightening on a carved part is refused, with the reason. `7c83d87`
+- **3 (#57):** a carve of an older version isn't adopted (409). `b829d70`
+- **4 (#57):** two test assertions that couldn't fail now can, and each was made to fail on purpose. `e21a9f6`
+- **5 (#50):** "the right side" cut the left. A side named outright now wins over "side". `5fe022b`
+- **6 (#50):** a NaN pad point is refused (422), and a failed picture job still logs a reply. `3bf812f`
+- **7 (#49):** the cut sheet now cuts holes before outlines, in SVG and DXF (Caliper's driver; no
+  unfold-to-sheets change). `bbd87b4`
+- **8 (#49):** a pinned size (`==`, made a band by measuring allowance) is checked for conflicts again.
+  `071a3a9`
+- **9 (#52):** joints are keyed by piece, not by name. Two pieces both called "side" were 16 screws in the BOM
+  and 22 in the kids' book; both now say 18. `720e5c7`
+- **10 (#52):** the build book lists `kids.html` only when one was made. `2d593ee`
+- **11 (#56):** a small filled box is caught by the share of solid in no piece (more than 10%), not just by
+  the volume ratio. `54c9fe5`
 
 ### 2026-11-01 · CALI-84 (#58) · One rule for where a load lands
 - **Found in the walkthrough:** Theo's printed two-step stool passed `loads_land`, then its strength check said the

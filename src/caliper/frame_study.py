@@ -558,13 +558,16 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
         outer, wall = tube_size(key)
         values[names[0]], values[names[1]] = round(outer, 3), round(min(wall, outer / 2.0), 3)
     values.update(rec.get("params") or {})      # a what-if layout comes with its sizes
-    script = write_params(store.read_script(pid), values)
+    from . import carve
+
+    script, dropped = carve.uncarve(write_params(store.read_script(pid), values))
+    note = carve.DROPPED if dropped else ""
     pretty = ", ".join(f"{g} {k}" for g, k in st["design"].items())
     version = store.write_part(pid, script, action="frame",
-                               feedback=f"sized by frame study: design {index} ({pretty})",
+                               feedback=f"sized by frame study: design {index} ({pretty})" + (f". {note}" if note else ""),
                                extra={"frame_run": rid, "station": int(index), "design": st["design"],
                                       "mass_lb": st["mass_lb"], "safety": st["safety"]})
-    return {"version": version, "design": st["design"]}
+    return {"version": version, "design": st["design"], "note": note}
 
 
 # ---------------------------------------------------------------------------
@@ -717,12 +720,16 @@ def adopt_gussets(store: DesignStore, rid: str, picks: Optional[dict] = None) ->
         cut = (at.lineno - 1) if at is not None else len(lines)
         script = ("".join(lines[:cut]) + "# Gusset plates, as sized by whittle's plate mode (Caliper writes this).\n"
                   + block + "\n\n" + "".join(lines[cut:]))
+    from . import carve
+
+    script, dropped = carve.uncarve(script)
+    note = carve.DROPPED if dropped else ""
     pretty = ", ".join(f"{n} {p['count']} × {p['mass_kg']} kg ({p['safety']}x)" for n, p in plates.items())
-    version = store.write_part(pid, script, action="frame", feedback=f"gusset plates: {pretty}",
+    version = store.write_part(pid, script, action="frame", feedback=f"gusset plates: {pretty}" + (f". {note}" if note else ""),
                                extra={"gusset_run": rid, "plates": {n: {k: p[k] for k in ("mass_kg", "safety", "relief")}
                                                                     for n, p in plates.items()}})
     return {"version": version, "plates": {n: {k: p[k] for k in ("count", "mass_kg", "safety", "relief")}
-                                           for n, p in plates.items()}}
+                                           for n, p in plates.items()}, "note": note}
 
 
 def analyse(store: DesignStore, part_id: str, *, payload_lb: float = 0.0, factor: float = 2.5,

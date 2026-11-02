@@ -176,6 +176,10 @@ def station_path(store: DesignStore, rid: str, index: int) -> str:
     return os.path.join(runs_dir(store), rid, st["stl"])
 
 
+class Stale(ValueError):
+    """A run of an older version of the part than the one there is."""
+
+
 def adopt(store: DesignStore, rid: str, index: int) -> dict:
     """Make a step's shape the part's: the wood exactly as the script makes it, the printed rest as carved."""
     import trimesh
@@ -187,6 +191,12 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     if rec is None:
         raise FileNotFoundError(f"no carve {rid!r}")
     pid = rec["part"]
+    entry = store.design.part(pid)
+    if entry is None:
+        raise FileNotFoundError(f"no part {pid!r}")
+    if rec.get("version") != entry.version:          # a carve is of one version's shape (CALI-87)
+        raise Stale(f"this carve is of version {rec.get('version')} and the part is at version {entry.version}: "
+                    f"carve it again")
     station = trimesh.load(station_path(store, rid, index), force="mesh")
     script = strip(store.read_script(pid))
     built = sandbox.run_script(script, timeout=120)
@@ -221,6 +231,30 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
                                         f"lighter, {st['safety']}x",
                                extra={"carve_run": rid, "station": int(index)})
     return {"version": version, "removed": st["removed"], "saved_g": st["saved_g"], "file": name}
+
+
+#: What a revision that dropped the carve says (CALI-87: one rule for every writer of a part's script).
+DROPPED = "The carve came off with this change (it was cut to the old shape): carve it again."
+_LINE = re.compile(r"^" + NAME + r"\s*=", re.M)
+
+
+def carved(script: str) -> bool:
+    return bool(_LINE.search(script or ""))
+
+
+def uncarve(script: str) -> tuple[str, bool]:
+    """A revision of a part changes the shape its carve was cut from: the script without the carve, and whether
+    there was one. Every writer that changes build() or its declarations goes through this."""
+    return (strip(script), True) if carved(script) else (script, False)
+
+
+def refuse_if_carved(script: str, what: str, then: str) -> None:
+    """A picture or lightening would cut through the carving: refused until the carve is off (CALI-87). ``what`` is
+    what would cut ("a T-rex", "holes"), ``then`` how to ask again ("put the T-rex on"). "Roll it back" is the chat's
+    word for taking the last change off (chat._REVERT)."""
+    if carved(script):
+        raise ValueError(f"it's been carved, and {what} would cut through the carving. Say \"roll it back\" to take the "
+                         f"carve off, {then}, then carve it again")
 
 
 def strip(script: str) -> str:

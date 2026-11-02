@@ -38,6 +38,14 @@ for (const p of result.pieces) {
   p.flat.folds = keep;
 }
 const view = buildSheets(result);
+// Holes before outlines (CALI-87, as #45 says): a panel cut free first has nothing holding it while its holes are
+// cut. Only the cut lines change places, among themselves; everything else stays where unfold-to-sheets put it.
+for (const sheet of view.sheets ?? []) {
+  const at = sheet.items.map((it, i) => (it.layer === 'cut' ? i : -1)).filter((i) => i >= 0);
+  const cuts = at.map((i) => sheet.items[i]);
+  const ordered = [...cuts.filter((it) => it.kind === 'hole'), ...cuts.filter((it) => it.kind !== 'hole')];
+  at.forEach((i, k) => { sheet.items[i] = ordered[k]; });
+}
 const assembly = buildAssembly(result);
 const files = buildPackage(result, view, assembly);
 for (const f of files) {

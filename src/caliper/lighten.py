@@ -331,6 +331,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
           emit: Optional[Callable] = None) -> dict:
     """From the part as it is to where the safety runs out, every step checked in 3D: the walls first (holes
     where the wood isn't working), then hole-saw holes in the panel stood on, then thinner sheet (estimated)."""
+    from . import carve
+
+    carve.refuse_if_carved(store.read_script(part_id), "holes", "lighten it")   # before the study, not at adopt
     from scipy import ndimage
 
     from . import construction as C
@@ -596,9 +599,20 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     if st.get("estimate"):
         raise ValueError(f"step {index} is an estimate in {st['label']} sheet: rebuild it in that sheet first")
     pid = rec["part"]
+    from .carve import Stale
+
+    entry = store.design.part(pid)
+    if entry is None:
+        raise FileNotFoundError(f"no part {pid!r}")
+    if rec.get("version") != entry.version:          # its holes are where that version's walls were (CALI-87)
+        raise Stale(f"this lightening is of version {rec.get('version')} and the part is at version {entry.version}: "
+                    f"lighten it again")
     holes = [{"piece": p["name"], "normal": p["normal"], "depth": p["thickness_mm"],
               "polygons": st["panels"].get(p["name"], [])} for p in rec["panels"] if st["panels"].get(p["name"])]
     script = store.read_script(pid)
+    from . import carve
+
+    carve.refuse_if_carved(script, "holes", "lighten it")
     # a picture cut into a panel (CALI-78) stays; the lightening holes are this step's
     keep = [h for h in H.read(script) if h.get("picture")]
     script = H.write(script, keep + holes)

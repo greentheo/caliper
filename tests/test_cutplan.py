@@ -182,3 +182,36 @@ def test_the_cut_plan_cuts_the_lightening_holes(tmp_path):
         xs, ys = [p[0] for p in pts], [p[1] for p in pts]
         sizes.append(sorted([max(xs) - min(xs), max(ys) - min(ys)]))
     assert [pytest.approx(50.8, abs=0.1)] * 2 in sizes
+
+
+def test_the_cut_sheet_cuts_the_holes_before_the_outlines(tmp_path):
+    """CALI-87 (#63, finding 7): #45's notes say holes first, so the panel is still held by the sheet while they're
+    cut; the SVG and DXF drew each piece's outline first."""
+    import re
+
+    from .test_lighten import HOLE
+    from .test_load_study import BOX_STOOL
+
+    s = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    s.write_part("stool", BOX_STOOL + HOLE, intent="a box stool with a hole in its left side")
+    rec = cutplan.run(s, "stool")
+    root = os.path.join(cutplan.runs_dir(s), rec["id"], rec["sheets"][0]["key"], "sheets")
+
+    def small(pts):
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        return max(max(xs) - min(xs), max(ys) - min(ys)) < 60          # the 2 in hole; every panel is bigger
+
+    svg = open(os.path.join(root, "sheet-01.svg")).read().split('<g id="cut"')[1].split("</g>")[0]
+    paths = [[tuple(map(float, p.split())) for p in re.findall(r"[ML]\s*([-\d.]+ [-\d.]+)", d)]
+             for d in re.findall(r'd="([^"]+)"', svg)]
+    assert [small(p) for p in paths] == [True] + [False] * 5
+    dxf = open(os.path.join(root, "sheet-01.dxf"), encoding="latin-1").read()
+    polys = []
+    for ent in dxf.split("\nPOLYLINE\n")[1:]:
+        body = ent.split("\nSEQEND\n")[0]
+        if "\n8\nCUT\n" not in "\n" + body:
+            continue
+        xs = [float(x) for x in re.findall(r"\n10\n\s*([-\d.]+)", body)]
+        ys = [float(y) for y in re.findall(r"\n20\n\s*([-\d.]+)", body)]
+        polys.append(list(zip(xs, ys)))
+    assert len(polys) == 6 and small(polys[0]) and not any(small(p) for p in polys[1:])

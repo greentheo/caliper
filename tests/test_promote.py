@@ -436,7 +436,8 @@ def test_a_proposal_that_does_not_hold_says_the_edit_missed_the_ask(gantry):
 def test_bounds_only_reads_the_shapes_it_can_reason_about():
     assert promote._bounds("min_clearance(a, b) >= 3")[1] == 3.0
     assert promote._bounds("bbox.dz <= 40")[2] == 40.0
-    assert promote._bounds("0.1 <= x <= 0.3") is None      # a band — don't guess
+    assert promote._bounds("0.1 <= x <= 0.3") == ("x", 0.1, 0.3)   # a band between two numbers (CALI-87)
+    assert promote._bounds("0.1 <= x >= 0.3") is None      # a chain that isn't a band — don't guess
     assert promote._bounds("is_watertight") is None        # not a comparison
     assert promote._bounds("bbox.dz <=") is None           # not even parseable
 
@@ -542,3 +543,16 @@ def test_a_drafted_wall_rule_carries_the_allowance_and_says_so(gantry):
     p = got.proposal
     assert p.expr == "min_wall >= 9.95 - 0.15" and p.holds_now          # a 10 mm block
     assert "what measuring it can be off by" in p.describe()
+
+
+def test_a_rule_pinned_to_a_size_is_still_checked_for_conflicts(gantry):
+    """CALI-87 (#63, finding 8): allowing for measuring turns `==` into a two-sided band, which _bounds read as "can't
+    reason about it", so a pinned size was never checked against the rules already there."""
+    gantry.assembly.assertions.append(Assertion(id="carriage_low", expr="bbox(carriage).dz <= 30"))
+    gantry.save()
+    band = promote.allow_for_measuring("bbox(carriage).dz == 50")
+    assert band == "50 - 0.1 <= bbox(carriage).dz <= 50 + 0.1"
+    assert promote._bounds(band) == ("bbox(carriage).dz", pytest.approx(49.9), pytest.approx(50.1))
+    assert [c[1] for c in promote.conflicts(gantry, band, "design", "carriage")] == ["carriage_low"]
+    assert promote.conflicts(gantry, promote.allow_for_measuring("bbox(carriage).dz == 20"), "design", "carriage") == []
+    assert promote._bounds("30 >= bbox(carriage).dz >= 10") == ("bbox(carriage).dz", 10, 30)

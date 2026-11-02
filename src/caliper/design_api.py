@@ -11,6 +11,7 @@ follows it on ``GET /api/jobs/{id}/events`` (Server-Sent Events, CALI-31).
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from typing import Optional
@@ -428,8 +429,17 @@ def router():
 
         def work(j):
             store = DesignStore.load(slug)
-            res = chat.turn(store, req.message.strip(), scope=req.scope or None,
-                            on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            before = len(store.log())
+            try:
+                res = chat.turn(store, req.message.strip(), scope=req.scope or None,
+                                on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            except Exception as e:
+                # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87)
+                said = store.log()[before:]
+                if any(x.get("kind") == "message" for x in said) and not any(x.get("kind") == "reply" for x in said):
+                    store.append_log({"kind": "reply", "action": "error", "ok": False,
+                                      "reply": f"I couldn't do that: {type(e).__name__}: {e}"})
+                raise
             return turn_result(res)
 
         job = RUNNER.submit("chat", work, label=req.message[:60], lock=_lock(slug))
@@ -584,15 +594,23 @@ def router():
             raise HTTPException(status_code=404, detail=f"no part {pid!r}")
         if not req.points and not req.subject.strip():
             raise HTTPException(status_code=422, detail="say what to draw, or draw it")
+        if any(len(q) != 2 or not all(math.isfinite(v) for v in q) for q in req.points):    # CALI-87
+            raise HTTPException(status_code=422, detail="the drawing has a point that isn't a place on the pad")
 
         def work(j):
             s = DesignStore.load(slug)
             said = (f"(drew {req.subject or 'a picture'} to cut out" if req.points else f"(put {req.subject} on it") \
                 + (f", {req.where})" if req.where else ")")
             s.append_log({"kind": "message", "text": said, "scope": pid, "action": "picture", "part": pid})
-            res = chat.picture_part(s, pid, req.subject or "picture", req.where, points=req.points or None,
-                                    strength=_aero_available(),
-                                    on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            try:
+                res = chat.picture_part(s, pid, req.subject or "picture", req.where, points=req.points or None,
+                                        strength=_aero_available(),
+                                        on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            except Exception as e:
+                # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87)
+                s.append_log({"kind": "reply", "action": "picture", "part": pid, "ok": False,
+                              "reply": f"I couldn't put it on: {type(e).__name__}: {e}"})
+                raise
             s.append_log({"kind": "reply", "action": "picture", "part": pid, "version": res.version, "ok": res.ok,
                           "reply": res.reply})
             return turn_result(res)
@@ -710,6 +728,8 @@ def router():
                 got = carve.adopt(store, rid, req.station)
             except FileNotFoundError as e:
                 raise HTTPException(status_code=404, detail=str(e))
+            except carve.Stale as e:
+                raise HTTPException(status_code=409, detail=str(e))
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=str(e))
             return {**got, "design": design_state(store)}
@@ -720,6 +740,10 @@ def router():
         store = load(slug)
         if store.design.part(req.part) is None:
             raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
+        try:                                     # a carved part isn't lightened: said now, before any job (CALI-87)
+            carve.refuse_if_carved(store.read_script(req.part), "holes", "lighten it")
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
         if not _aero_available():
             raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
 
@@ -751,6 +775,8 @@ def router():
                 got = lighten.adopt(store, rid, req.station)
             except FileNotFoundError as e:
                 raise HTTPException(status_code=404, detail=str(e))
+            except carve.Stale as e:
+                raise HTTPException(status_code=409, detail=str(e))
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=str(e))
             store.append_log({"kind": "lighten", "action": "adopted", "run": rid, "station": req.station,
