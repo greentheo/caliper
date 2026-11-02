@@ -133,6 +133,9 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
         steps["score"] = "nothing to hold it to"
 
     reply = summary(cards(store, pid)) if cards else res.reply
+    if steps.get("strength", "").startswith("failed: "):
+        # said, not hidden behind a "Check it holds" that would fail the same way (CALI-81)
+        reply += f"\n\n⚠ I couldn't check it holds: {steps['strength'][len('failed: '):]}."
     store.append_log({"kind": "reply", "action": "author", "part": pid, "version": res.version,
                       "ok": bool(res.ok), "reply": reply, "firstrun": True})
     emit("step", "Done", step="done", part=pid)

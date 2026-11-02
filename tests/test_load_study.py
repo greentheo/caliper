@@ -69,12 +69,15 @@ def test_the_stool_holds_and_says_which_check_governs(tmp_path, monkeypatch):
     events = []
     rec = load_study.study(store, "stool", emit=lambda k, t="", **d: events.append(k))
     step, shove = rec["cases"]
-    # the top is 14 x 10 in and rests on its two sides (an inch in from its ends), not all round:
-    # no plate check, so the FEA governs
-    assert step["plate"]["piece"] == "top" and step["plate"]["done"] is False
-    assert "2 of its 4 edges" in step["plate"]["why"]
-    assert step["governs"] == "fea" and step["fea"]["supported"] and step["safety"] > 2
-    assert step["holds"] and rec["holds"]
+    # the top is 14 x 10 in and rests on its two sides (an inch in from its ends), not all round: a beam
+    # across them (CALI-82), the safe side, and plywood across its grain. 3/4 in over 14 in under 400 lb isn't
+    # 2 times over that way, and it says which way to cut it to get there.
+    pl = step["plate"]
+    assert pl["piece"] == "top" and pl["done"] and pl["as"] == "beam" and pl["edges_held"] == 2
+    assert pl["span_mm"] == pytest.approx(355.6, abs=1)
+    assert "face grain running across the gap" in pl["why"]
+    assert step["governs"] == "plate" and step["safety"] == pl["safety_across"] < step["fea"]["safety"]
+    assert not step["holds"] and pl["safety"] > 2               # grain along the span: it would
     assert shove["plate"] is None                                 # pushed side-on: no plate it lands face-on
     assert shove["fea"]["supported"] and shove["holds"]
     assert rec["material"]["key"] == "plywood" and rec["version"] == 1

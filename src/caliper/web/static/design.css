@@ -263,3 +263,5 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
 /* a preview that isn't the part yet (CALI-83) */
 .note-warn { background: rgba(210, 153, 34, .12); border: 1px solid rgba(210, 153, 34, .45); color: var(--ink);
   border-radius: 8px; padding: 6px 9px; margin: 4px 0 8px; }
+.trial-chart circle[data-carve] { cursor: pointer; }
+.trial-chart circle.on { stroke: var(--ink); stroke-width: 2; }

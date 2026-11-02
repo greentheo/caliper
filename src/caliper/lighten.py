@@ -313,7 +313,10 @@ def preview(mesh, plist: list[dict], holes: dict) -> bytes:
             T[:3, 3] = p["o"] - p["n"] * 1.0             # (trimesh keeps a mirrored prism outside-out)
             pr.apply_transform(T)
             prisms.append(pr)
-    out = mesh.difference(trimesh.util.concatenate(prisms), engine="manifold") if prisms else mesh
+    from .occt import OCCT
+
+    with OCCT:                                           # manifold3d, one boolean at a time
+        out = mesh.difference(trimesh.util.concatenate(prisms), engine="manifold") if prisms else mesh
     return out.export(file_type="stl")
 
 
