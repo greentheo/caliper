@@ -33,6 +33,9 @@ from .evaluate import AssertionResult
 INSIDE_MIN = 0.9
 COVER_MIN = 0.98
 #: The pieces may come to this much more than the solid's volume (joints counted twice, rounded corners).
+#: The pieces' volume against the solid's: much less and build() is filled in (CALI-83), much more and a
+#: piece is too thick or listed twice.
+VOLUME_MIN = 0.67
 VOLUME_MAX = 1.25
 SURFACE_SAMPLES = 1500
 GRID = 10
@@ -235,15 +238,27 @@ def _covers(mesh, pieces: list[dict], tol: float) -> AssertionResult:
         actual=round(share, 3), margin=round(share - COVER_MIN, 3), detail=detail)
 
 
-def _volume(mesh, pieces: list[dict]) -> Optional[AssertionResult]:
+def _volume(mesh, pieces: list[dict], strength: bool = False) -> Optional[AssertionResult]:
+    """The pieces' volume against the solid's. ``strength``: the part's strength check analyses the solid itself
+    (it declares loads()), so a solid much bigger than its pieces fails too."""
     solid = float(mesh.volume)
     if solid <= 0:
         return None
     ratio = sum(pc["volume"] for pc in pieces) / solid
-    ok = ratio <= VOLUME_MAX
     heavy = sorted(pieces, key=lambda pc: -pc["volume"])[:3]
+    if strength and ratio < VOLUME_MIN:
+        # a solid block round its panels (CALI-83: Theo's stool was built as a filled box): every panel lies in
+        # it and covers its surface, so only the volume shows it
+        return AssertionResult(
+            id="construction_volume", expr=f"the solid is its pieces ({VOLUME_MIN:g}–{VOLUME_MAX:g}× its volume)",
+            status="fail", passed=False, actual=round(ratio, 3), margin=round(ratio - VOLUME_MIN, 3),
+            detail=(f"the solid ({solid / 1e6:.2f} L) is {1 / ratio:.1f}× what the pieces add up to: build() is "
+                    f"filled in, and the strength check analyses the solid. Make build() the pieces themselves, "
+                    f"each panel as thick as its sheet and hollow between them, as it will really be built"))
+    ok = ratio <= VOLUME_MAX
     return AssertionResult(
-        id="construction_volume", expr=f"no more material than the solid holds (≤ {VOLUME_MAX:g}× its volume)",
+        id="construction_volume", expr=(f"the solid is its pieces ({VOLUME_MIN:g}–{VOLUME_MAX:g}× its volume)" if strength
+                                         else f"no more material than the solid holds (≤ {VOLUME_MAX:g}× its volume)"),
         status="pass" if ok else "fail", passed=ok, actual=round(ratio, 3), margin=round(VOLUME_MAX - ratio, 3),
         detail="" if ok else (f"the pieces add up to {ratio:.2f}× the solid ({solid / 1e6:.2f} L): check each "
                               f"sheet's thickness against build(), and that no piece is listed twice (biggest: "
@@ -297,7 +312,7 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
     if pieces:
         _sides(mesh, pieces)
         out += [_inside(mesh, pieces, tol), _covers(mesh, pieces, tol)]
-        vol = _volume(mesh, pieces)
+        vol = _volume(mesh, pieces, strength=bool(declared.get("loads")))
         out += [vol] if vol else []
     if declared.get("loads") is not None:
         out.append(_loads(mesh, declared["loads"], tol))

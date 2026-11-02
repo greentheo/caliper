@@ -120,3 +120,15 @@ def test_a_scripts_declarations_are_read_once_until_it_changes(store, monkeypatc
     assert len(runs) == 1
     store.write_part("stool", BOX_STOOL.replace('"t": 19.05', '"t": 15.875'), intent="5/8 in")
     assert C.declared(store, "stool")["construction"][0]["thickness"] == 15.875 and len(runs) == 2
+
+
+def test_a_shape_that_doesnt_match_its_pieces_says_so(store):
+    """CALI-83: built as a filled box, a part's cards say so, and what to say to fix it."""
+    store.write_part("stool", BOX_STOOL.replace('''    out = None
+    for lo, hi in _boxes(p, BUILD["t"]).values():
+        b = cq.Workplane().box(*(b - a for a, b in zip(lo, hi)), centered=False).translate(lo)
+        out = b if out is None else out.union(b)
+    return out''', '''    return cq.Workplane().box(p["w"], p["d"], p["h"], centered=False)'''), intent="a filled box")
+    what = answers.answers(store, design_api.design_state(store), "stool")[0]
+    bad = [ln for ln in what["lines"] if ln["status"] == "bad"]
+    assert bad and "don't match" in bad[0]["text"] and "filled in" in bad[0]["text"] and what["status"] == "bad"

@@ -259,3 +259,7 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
 .trial-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; font-size: 12px; }
 .trial-add input[type=number] { width: 70px; background: var(--bg); color: var(--ink); border: 1px solid var(--line);
   border-radius: 6px; padding: 3px 5px; }
+
+/* a preview that isn't the part yet (CALI-83) */
+.note-warn { background: rgba(210, 153, 34, .12); border: 1px solid rgba(210, 153, 34, .45); color: var(--ink);
+  border-radius: 8px; padding: 6px 9px; margin: 4px 0 8px; }
