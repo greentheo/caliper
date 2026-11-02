@@ -98,3 +98,25 @@ def test_will_it_work_lists_what_the_design_is_held_to(store):
     # a part alone in its design answers for the design too, after its own strength line
     part = {c["key"]: c for c in answers.answers(store, design_api.design_state(store), "stool")}["work"]
     assert any(t["text"].startswith("✗ Under $5") for t in part["lines"])
+
+
+def test_a_scripts_declarations_are_read_once_until_it_changes(store, monkeypatch):
+    """CALI-59: one set of cards read the script's declarations nine times, a second and a half each."""
+    import subprocess
+
+    runs = []
+    real = subprocess.run
+    def counted(cmd, *a, **k):                             # only the declaration probes, not the build
+        if "@@BUILT@@" in cmd[-1]:
+            runs.append(1)
+        return real(cmd, *a, **k)
+
+    monkeypatch.setattr(C.subprocess, "run", counted)
+    C._SEEN.clear()
+    first = C.declared(store, "stool")
+    first["construction"].clear()                         # a caller changing what it got changes nothing
+    assert C.declared(store, "stool")["construction"] and len(runs) == 1
+    answers.answers(store, design_api.design_state(store), "stool")
+    assert len(runs) == 1
+    store.write_part("stool", BOX_STOOL.replace('"t": 19.05', '"t": 15.875'), intent="5/8 in")
+    assert C.declared(store, "stool")["construction"][0]["thickness"] == 15.875 and len(runs) == 2

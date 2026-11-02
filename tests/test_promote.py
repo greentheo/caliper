@@ -55,7 +55,7 @@ def test_a_size_limit_becomes_a_part_assertion(gantry):
     pytest.importorskip("cadquery")
     got = promote.offline_draft(gantry, "carriage", "it must be no taller than 40mm")
     assert got.proposal.level == "part"             # one part's own geometry
-    assert got.proposal.expr == "bbox.dz <= 40.0"
+    assert got.proposal.expr == "bbox.dz <= 40.0 + 0.1"         # what measuring a size can be off by (#28)
 
 
 def test_a_no_collision_rule_is_recognised(gantry):
@@ -67,7 +67,7 @@ def test_a_no_collision_rule_is_recognised(gantry):
 def test_a_wall_minimum_is_recognised(gantry):
     pytest.importorskip("cadquery")
     got = promote.offline_draft(gantry, "carriage", "walls of at least 2mm please")
-    assert got.proposal.expr == "min_wall >= 2.0"
+    assert got.proposal.expr == "min_wall >= 2.0 - 0.15"
 
 
 def test_a_rule_about_something_that_is_not_a_part_is_not_invented(gantry):
@@ -168,7 +168,7 @@ def test_accepting_a_part_rule_puts_it_on_the_part_spec(gantry):
     pytest.importorskip("cadquery")
     p = promote.offline_draft(gantry, "carriage", "it must be no taller than 40mm").proposal
     promote.accept(gantry, p)
-    assert [a.expr for a in gantry.read_spec("carriage").assertions] == ["bbox.dz <= 40.0"]
+    assert [a.expr for a in gantry.read_spec("carriage").assertions] == ["bbox.dz <= 40.0 + 0.1"]
 
 
 def test_accepting_records_why_the_rule_exists(gantry):
@@ -513,3 +513,32 @@ def test_a_strength_requirement_is_sent_to_the_strength_check_not_refused(gantry
     assert res.proposal is None
     assert "can't make it one" not in res.reply
     assert "`loads()` now" in res.reply and "Check it holds" in res.reply
+
+
+# --- CALI-68 (#28): a rule pinning a measured size allows for what measuring it can be off by ----------------
+def test_three_quarter_ply_measured_at_18_98_holds_three_quarter_inch_walls():
+    from caliper.evaluate import evaluate_assertion
+
+    expr = promote.allow_for_measuring("min_wall >= 19.05")
+    assert expr == "min_wall >= 19.05 - 0.15"
+    assert evaluate_assertion(Assertion(id="w", expr=expr), {"min_wall": 18.98}).status == "pass"
+    assert evaluate_assertion(Assertion(id="w", expr="min_wall >= 19.05"), {"min_wall": 18.98}).status == "fail"
+    # a real miss is still a miss
+    assert evaluate_assertion(Assertion(id="w", expr=expr), {"min_wall": 15.88}).status == "fail"
+
+
+def test_only_measured_sizes_are_allowed_for():
+    a = promote.allow_for_measuring
+    assert a("bbox.dz <= 228.6") == "bbox.dz <= 228.6 + 0.1"
+    assert a("bbox(stool).dx == 406.4") == "406.4 - 0.1 <= bbox(stool).dx <= 406.4 + 0.1"
+    for same in ("min_clearance(a, b) >= 2.0", "body_count == 1", "220 <= bbox.dz <= 235", "is_watertight"):
+        assert a(same) == same
+    # and a rule with the allowance still reads as a bound, so contradictions are still caught
+    assert promote._bounds("min_wall >= 19.05 - 0.15") == ("min_wall", pytest.approx(18.9), float("inf"))
+
+
+def test_a_drafted_wall_rule_carries_the_allowance_and_says_so(gantry):
+    got = promote.offline_draft(gantry, "carriage", "walls at least 9.95 mm")
+    p = got.proposal
+    assert p.expr == "min_wall >= 9.95 - 0.15" and p.holds_now          # a 10 mm block
+    assert "what measuring it can be off by" in p.describe()
