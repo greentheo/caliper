@@ -50,9 +50,11 @@ def available(root: Optional[str] = None) -> list[dict]:
 
 def open_sample(name: str, base: Optional[str] = None, root: Optional[str] = None) -> DesignStore:
     """A copy of the sample in your designs, under a slug of its own."""
-    src = os.path.join(root or SAMPLES_DIR, name)
-    if name != os.path.basename(name) or not os.path.isdir(src):
+    # a plain name, and one of the samples there are (CALI-86: os.path.basename("..") is "..", so ".." copied the
+    # package folder)
+    if not isinstance(name, str) or not NAME.match(name) or name not in {x["name"] for x in available(root)}:
         raise KeyError(f"no sample {name!r}")
+    src = os.path.join(root or SAMPLES_DIR, name)
     base = base or designs_dir()
     os.makedirs(base, exist_ok=True)
     slug, n = slugify(name), 1

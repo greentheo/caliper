@@ -566,6 +566,16 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-01 · #71 reworked from the reviewer's review (CALI-86 #62)
+1. **Record a test on the sample stool that broke at 150 lb:** both the design's and the part's *Will it work?*
+   go red with "It broke at 150 lb in your test. We predicted it would hold 400." No ✓ is left above it.
+2. **Record several steps, one sagging far more than predicted:** that step governs the line, even if a heavier
+   one has no sag.
+3. **A printed box:** "Holds a foot, about … times over." The rough-model note sits by the promise.
+4. **An old carve run:** it reads "of the whole solid (carved before CALI-86 …)".
+5. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_trials.py tests/test_answers.py
+   tests/test_printed_strength.py tests/test_studies.py tests/test_samples.py tests/test_pictures.py`.
+
 ### 2026-11-01 · #69 reworked from the reviewer's review (CALI-86 #62)
 1. **A foot at the free end of a wide top on two sides:** the numbers name a narrower width ("… this near its
    free end") and a lower safety than the same foot in the middle.
@@ -579,6 +589,19 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
    has the grown-up go first.
 6. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_beam_width.py tests/test_errors.py tests/test_trials.py
    tests/test_samples.py tests/test_patterns.py tests/test_studies.py tests/test_kidbook.py`.
+
+### 2026-11-01 · The reviewer's findings on the open stack, part 2 (CALI-86 #62, findings 8–13)
+1. **Carve a plywood top on printed sides:** the chart, the Studies line and the reply say "% of the printed
+   part carved away", and the share matches the filament saved.
+2. **Check a printed part holds:** *Will it work?* says "about N times over (printed parts are a rough model…)".
+3. **Without whittle installed, put a T-rex on a part that has loads():** the reply says it couldn't check it
+   still holds, with no ✓.
+4. **Record a test that broke at 150 lb on the stool** (it must hold 400): the card's line is red and says so. A
+   sag 15× the prediction is amber.
+5. `curl -X POST localhost:8016/api/samples/%2E%2E`: 404, and nothing is copied.
+6. **Open the camper sample:** *Will it work?* carries "A prediction, not a certificate …".
+7. Offline: `PYTHONPATH=src python -m pytest tests/test_mixed.py tests/test_printed_strength.py
+   tests/test_pictures.py tests/test_trials.py tests/test_samples.py -rs`.
 
 ### 2026-11-01 · The reviewer's findings on the open stack, part 1 (CALI-86 #62, findings 1–7)
 1. **A wide top on two sides:** draw a 3 ft wide, 1/2 in top on two printed sides 1 ft apart and **Check it holds**.

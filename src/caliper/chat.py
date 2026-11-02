@@ -643,8 +643,8 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
         said.append(f"⚠ {rec['weak']}")
     if best and best["saved_g"]:
         said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. The lightest that holds is step "
-                    f"{best['index']}: {best['removed']:.0%} of it carved away, {best['saved_g']} g less filament, "
-                    f"{best['safety']:g} times over. It's on the 3D view: **Carve it like this** to make it the "
+                    f"{best['index']}: {best['removed']:.0%} {carve.share(rec)} carved away, {best['saved_g']} g less filament, "
+                    f"about {best['safety']:g} times over (printed parts are a rough model). It's on the 3D view: **Carve it like this** to make it the "
                     f"part's shape (under *Will it work? → the numbers*, with every step).")
     else:
         said.append("Nothing could come off it and still hold.")
@@ -745,10 +745,14 @@ def _facts(store: DesignStore, scope: Optional[str]) -> str:
     out = [f"design: {store.design.name}: {store.design.prompt}", f"units: {store.design.display_units}"]
     for r in store.design.requirements:
         out.append(f"requirement: {r.question} -> {r.answer}" + ("" if r.source == "answered" else " (assumed)"))
+    promised = False
     for pid in [None] + [p.id for p in store.design.parts if p.id == scope or len(store.design.parts) == 1]:
         for c in answers.answers(store, state, pid):
             for ln in c["lines"]:
                 out.append(f"{pid or 'the design'} · {c['q']} {ln['text']}")
+            promised = promised or bool(c.get("promise"))
+    if promised:                                       # so a plain answer about strength can say it (CALI-86)
+        out.append(f"what a strength verdict promises: {answers.PROMISE}")
     for run in load_study.list_runs(store)[:2]:
         for c in run.get("cases") or []:
             out.append(f"strength check of {run['part']} v{run['version']}: {c.get('name')} {c.get('lb')} lb x "

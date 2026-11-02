@@ -108,7 +108,9 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     if kind == "carve":
         st = r.get("stations", [])
         best = next((x for x in st if x["index"] == r.get("best")), None)
-        carved = (f"{best['removed']:.0%} carved away, {best['saved_g']} g less filament, still "
+        from . import carve
+
+        carved = (f"{best['removed']:.0%} {carve.share(r)} carved away, {best['saved_g']} g less filament, still "
                   f"{round(best['safety'], 1):g}x" if best and best["saved_g"] else "")
         first = st[0] if st else {}
         if first and not first.get("whole_holds"):

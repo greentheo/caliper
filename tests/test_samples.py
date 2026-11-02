@@ -71,6 +71,40 @@ def test_saving_under_a_name_that_isnt_a_plain_slug_is_refused_and_removes_nothi
     assert sorted(os.listdir(out)) == ["step-stool"]
 
 
+@pytest.mark.parametrize("name", ["..", ".", "", "a/b", "step-stool/..", "../step-stool"])
+def test_opening_a_name_that_isnt_a_sample_is_refused(tmp_path, name):
+    """CALI-86 (#62, finding 12): os.path.basename("..") is "..", so open_sample("..") copied Caliper's package."""
+    base = tmp_path / "designs"
+    with pytest.raises(KeyError):
+        samples.open_sample(name, base=str(base))
+    assert not base.exists() or os.listdir(base) == []
+
+
+@pytest.mark.parametrize("name", ["%2E%2E", "%2E", "a%2Fb"])
+def test_the_api_refuses_them_too(tmp_path, monkeypatch, name):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    base = tmp_path / "designs"
+    monkeypatch.setenv("CALIPER_DESIGNS", str(base))
+    got = TestClient(create_app()).post(f"/api/samples/{name}")
+    assert got.status_code in (404, 405), got.status_code
+    assert not base.exists() or os.listdir(base) == []
+
+
+def test_the_camper_s_verdicts_carry_the_promise(tmp_path):
+    """CALI-86 (#62, finding 13): a strength verdict always says what it promises, and the camper's scorecard
+    verdicts ("safe to tow") rest on the frame's model as much as a load study's do."""
+    from caliper import answers, design_api
+
+    store = samples.open_sample("camper", base=str(tmp_path / "designs"))
+    work = answers.answers(store, design_api.design_state(store), None)[1]
+    assert any(ln["status"] in ("ok", "bad") and ln["text"][:1] in "✓✗" for ln in work["lines"]), work["lines"]
+    assert work.get("promise") == answers.PROMISE
+
+
 def test_a_save_that_fails_leaves_the_old_sample_whole(tmp_path):
     """CALI-86 (#69 rework, item 4): save() removed the sample before copying, so a design with no parts/ saved over
     step-stool left only three files and lost its loads, patterns and cut plans."""
@@ -86,3 +120,29 @@ def test_a_save_that_fails_leaves_the_old_sample_whole(tmp_path):
         samples.save(store.design.slug, "step-stool", base=base, out=str(out))
     assert sorted(os.listdir(out / "step-stool")) == before
     assert sorted(os.listdir(out)) == ["step-stool"]                   # and no half-made folder beside it
+
+
+def test_each_sample_guard_refuses_on_its_own(tmp_path):
+    """CALI-86 (#71 rework, item 10): a plain name that isn't a sample, and a sample whose folder name isn't plain."""
+    import shutil
+
+    base = tmp_path / "designs"
+    with pytest.raises(KeyError):                         # plain, but not one of the samples there are
+        samples.open_sample("nosuch", base=str(base))
+    root = tmp_path / "samples"
+    shutil.copytree(os.path.join(samples.SAMPLES_DIR, "step-stool"), root / "Step_Stool")
+    assert [x["name"] for x in samples.available(str(root))] == ["Step_Stool"]
+    with pytest.raises(KeyError):                         # one of them, but not a plain name
+        samples.open_sample("Step_Stool", base=str(base), root=str(root))
+    assert not base.exists() or os.listdir(base) == []
+
+
+def test_an_unknown_sample_is_a_404_with_no_path(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    got = TestClient(create_app(), raise_server_exceptions=False).post("/api/samples/nosuch")
+    assert got.status_code == 404 and "/" not in got.json()["detail"]

@@ -73,10 +73,15 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
                      progress=lambda f: emit("carving", "", progress=round(0.7 * f, 3)))
     density = M.printed(mat["key"])["density"] / 1000.0           # g/cm³, solid
     voxel_cm3 = ls.grid.voxel_volume / 1000.0
-    printed0 = None
+    printed0 = voxels0 = None
     out = []
     for k, st in enumerate(sweep.stations):
-        emit("checking", f"step {k}: {st.removed:.0%} of it carved away", progress=0.7 + 0.3 * k / len(sweep.stations))
+        # the share of the printed part: whittle's own `removed` counts the wood it keeps too (CALI-86)
+        printed_voxels = float((st.design & ~wood).sum())
+        voxels0 = printed_voxels if voxels0 is None else voxels0
+        removed = 1.0 - printed_voxels / voxels0 if voxels0 else 0.0
+        emit("checking", f"step {k}: {removed:.0%} of the printed part carved away",
+             progress=0.7 + 0.3 * k / len(sweep.stations))
         worst, sides, weak = None, None, None
         for i in range(len(ctx["loads"])):
             case, r = L.check_load(ctx, i, min_safety, solid=st.design)
@@ -90,7 +95,6 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
                 sides = mine if sides is None or (mine is not None and mine < sides) else sides
             else:
                 sides = 0.0
-        printed_voxels = float((st.design & ~wood).sum())
         grams = printed_voxels * voxel_cm3 * density * mat["solid"]
         printed0 = grams if printed0 is None else printed0
         mesh = st.build()
@@ -100,7 +104,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         f = f"station_{k:02d}.stl"
         tm.export(os.path.join(out_dir, f))
         holds = sides is not None and sides >= min_safety         # the printed part, carved: what this is about
-        out.append({"index": k, "removed": round(float(st.removed), 3), "safety": sides, "holds": holds,
+        out.append({"index": k, "removed": round(removed, 3), "safety": sides, "holds": holds,
                     "whole": worst, "whole_holds": worst is not None and worst >= min_safety, "weakest": weak,
                     "printed_g": round(grams), "saved_g": round(printed0 - grams), "stl": f})
         if not holds and k > 0:
@@ -117,6 +121,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
               "version": store.design.part(part_id).version, "min_safety": min_safety,
               "material": mat["name"], "spacing_mm": round(s, 2), "seconds": round(time.time() - t0, 1),
               "stations": out, "best": best["index"] if best else None, "weak": weak_note,
+              "share": "printed",                     # removed is the printed part's share (CALI-86); older runs: the solid's
               "notes": [*([weak_note] if weak_note else []),
                         "The safety on the chart is the printed part's own; the whole part's is beside it.",
                         f"Carved by whittle's sweep, {mat['name']} only: the "
@@ -130,6 +135,13 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g" if best and best["saved_g"]
          else f"{len(out)} steps", run=rid, progress=1.0)
     return record
+
+
+def share(rec: dict) -> str:
+    """What a run's "removed" is a share of, in words: a run saved before CALI-86 counted the whole solid, wood and
+    all, and keeps that meaning; it's said, never relabelled."""
+    return ("of the printed part" if rec.get("share") == "printed"
+            else "of the whole solid (carved before CALI-86: carve again for the printed share)")
 
 
 def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:

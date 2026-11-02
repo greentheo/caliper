@@ -262,7 +262,8 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
         raise ValueError(f"there isn't room on the {panel['name']} for a {subject} a jigsaw can cut")
     min_safety = min_safety or firstrun._min_safety(store)
     script = store.read_script(part_id)
-    checked, predicted, shrunk = "def loads(" in script and strength, None, 0
+    has_loads = "def loads(" in script
+    checked, predicted, shrunk = has_loads and strength, None, 0
     if checked:
         emit("step", "Checking it still holds with the picture cut out", step="check")
         ctx = L.prepare(store, part_id)
@@ -289,8 +290,10 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
     version = store.write_part(part_id, script, action="picture",
                                feedback=f"cut a {subject} out of the {panel['name']}, {size[0]:g} x {size[1]:g} in",
                                extra={"picture": subject, "panel": panel["name"]})
-    out = {"ok": True, "panel": panel["name"], "subject": subject, "size_in": size, "version": version,
-           "predicted": predicted, "shrunk": shrunk, "min_safety": min_safety, "safety": None}
+    # a part that says what it must hold, checked by nothing, is not a tick (CALI-86)
+    out = {"ok": not (has_loads and not strength), "panel": panel["name"], "subject": subject, "size_in": size,
+           "version": version, "predicted": predicted, "shrunk": shrunk, "min_safety": min_safety, "safety": None,
+           "unchecked": "the strength check isn't installed" if has_loads and not strength else None}
     if checked:
         emit("step", "Checking the part as it's now built", step="recheck")
         run = L.study(store, part_id, min_safety=min_safety)
@@ -301,6 +304,9 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
 
 def reply(got: dict) -> str:
     size = f"{got['size_in'][0]:g} × {got['size_in'][1]:g} in"
+    if got.get("unchecked"):
+        return (f"I cut a {got['subject']} {size} out of the {got['panel']}, but I couldn't check it still holds: "
+                f"{got['unchecked']}. Check it holds before anyone stands on it.")
     said = f"✓ I cut a {got['subject']} {size} out of the {got['panel']}."
     if got.get("shrunk"):
         said += " I made it smaller to keep it strong."

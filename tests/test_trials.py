@@ -1,5 +1,7 @@
 """CALI-80 (#48) — record the test: what the strength check predicted, against what the real one did."""
 
+import os
+
 import pytest
 
 from caliper import answers, design_api, load_study, trials
@@ -52,14 +54,16 @@ def test_each_step_is_kept_and_set_beside_the_prediction(checked):
     assert got["rows"][1]["ratio"] > 1.4
     # the card: the heaviest it held, its sag against the prediction, in inches
     line = trials.summary(checked, "stool", inches=True)
-    assert line["status"] == "ok" and line["text"].startswith("Tested: it held 400 lb, sagging 0.0")
+    assert line["status"] == "ok" and line["text"].startswith("Tested: it held 400 lb; at 400 lb it sagged 0.0")
     assert "we predicted" in line["text"] and line["text"].endswith(" in).")
     work = answers.answers(checked, design_api.design_state(checked), "stool")[1]
     assert any(ln.get("study") == "trial" and ln["text"] == line["text"] for ln in work["lines"])
     # and where it broke
     trials.record(checked, "stool", 1100, broke=True)
-    assert trials.summary(checked, "stool")["text"] == (
-        f"Tested: it broke at 1,100 lb (we predicted about {pr['breaks_lb']:,.0f}).")
+    assert trials.summary(checked, "stool")["text"] == (           # more than 10% short of the prediction
+        f"It broke sooner than we predicted, so our check was too hopeful. It still held the 400 lb it must hold "
+        f"(200 lb, twice over for an adult stepping up). (It broke at 1,100 lb; we predicted about "
+        f"{pr['breaks_lb']:,.0f}.)")
     # a test of an older version reads as one
     checked.write_part("stool", BOX_STOOL, intent="v2")
     assert all(r["stale"] for r in trials.compared(checked, "stool")["rows"])
@@ -127,6 +131,35 @@ def test_the_api_refuses_nan_and_a_nan_already_on_file_doesnt_break_the_page(pla
     assert c.get(f"/api/designs/{slug}/answers?part=stool").status_code == 200
 
 
+def test_the_test_record_s_verdicts_are_the_right_colour(checked):
+    """CALI-86 (#62, finding 11; rule 6): "broke at 150 lb" on a part that must hold 400 was `info`, and a sag 15x
+    the prediction was a green tick."""
+    pr = trials.predict(checked, "stool")
+    lo, hi = pr["per_lb_mm"]
+    must = pr["lb"] * pr["factor"]
+    assert must == 400
+
+    def line(*steps):
+        if os.path.exists(trials.path(checked, "stool")):
+            os.remove(trials.path(checked, "stool"))
+        for load, kw in steps:
+            trials.record(checked, "stool", load, **kw)
+        return trials.summary(checked, "stool")
+
+    got = line((150, {"broke": True}))
+    assert got["status"] == "bad" and got["text"] == "It broke at 150 lb in your test. We predicted it would hold 400."
+    got = line((must + 50, {"broke": True}))
+    assert got["status"] == "warn" and "sooner than we predicted" in got["text"]
+    got = line((pr["breaks_lb"] + 50, {"broke": True}))
+    assert got["status"] == "ok"
+    got = line((200, {"sag_mm": hi * 200 * 15}))
+    assert got["status"] == "warn" and "sagged more than we predicted" in got["text"]
+    got = line((200, {"sag_mm": lo * 200 / 15}))
+    assert got["status"] == "warn" and "sagged less than we predicted" in got["text"]
+    got = line((200, {"sag_mm": (lo + hi) / 2 * 200}))
+    assert got["status"] == "ok" and "predicted" in got["text"]
+
+
 @pytest.mark.parametrize("line", [
     '{"at": 1, "load_lb": 200, "sag_mm": 0.4, "broke": false, "note": ""}',                   # no version
     '{"at": 1, "version": 1, "load_lb": "200", "sag_mm": null, "broke": false, "note": ""}',  # a load as a string
@@ -178,3 +211,49 @@ def test_a_nan_already_in_the_conversation_log_doesnt_break_the_design(plain):
         f.write('{"kind": "trial", "action": "recorded", "part": "stool", "load_lb": NaN, "broke": false}\n')
     got = TestClient(create_app(), raise_server_exceptions=False).get(f"/api/designs/{plain.design.slug}")
     assert got.status_code == 200 and got.json()["log_skipped"] == 1
+
+
+def _only(store, *steps):
+    """The card's line for exactly these steps."""
+    if os.path.exists(trials.path(store, "stool")):
+        os.remove(trials.path(store, "stool"))
+    for load, kw in steps:
+        trials.record(store, "stool", load, **kw)
+    return trials.summary(store, "stool")
+
+
+def test_every_edge_of_the_verdict_is_pinned(checked):
+    """CALI-86 (#71 rework, items 4 and 7): a test at each edge the reviewer listed, so moving one fails."""
+    pr = trials.predict(checked, "stool")
+    lo, hi = pr["per_lb_mm"]
+    must, breaks = pr["lb"] * pr["factor"], pr["breaks_lb"]
+    # what it must hold: at it isn't a fail, one below is
+    assert _only(checked, (must, {"broke": True}))["status"] == "warn"
+    got = _only(checked, (must - 1, {"broke": True}))
+    assert got["status"] == "bad"
+    assert got["text"] == f"It broke at {must - 1:,.0f} lb in your test. We predicted it would hold {must:,.0f}."
+    # the prediction: within 10% of it counts as matching it, just under that is too hopeful
+    assert _only(checked, (breaks, {"broke": True}))["status"] == "ok"
+    assert _only(checked, (0.9 * breaks, {"broke": True}))["status"] == "ok"
+    got = _only(checked, (0.9 * breaks - 5, {"broke": True}))
+    assert got["status"] == "warn" and got["text"].startswith("It broke sooner than we predicted, so our check was "
+                                                              "too hopeful. It still held the 400 lb it must hold")
+    assert "(200 lb, twice over for an adult stepping up)" in got["text"]
+    # the sag: up to 2x outside the predicted range is fine, past it isn't (the range as the card rounds it)
+    a, b = round(lo * 200, 3), round(hi * 200, 3)
+    assert _only(checked, (200, {"sag_mm": 2 * b}))["status"] == "ok"
+    assert _only(checked, (200, {"sag_mm": 2 * b * 1.01}))["status"] == "warn"
+    assert _only(checked, (200, {"sag_mm": a / 2}))["status"] == "ok"
+    got = _only(checked, (200, {"sag_mm": a / 2 * 0.99}))
+    assert got["status"] == "warn" and "sagged less than we predicted, so it's stiffer than our check said" in got["text"]
+
+
+def test_every_step_is_judged_and_the_worst_governs(checked):
+    """CALI-86 (#71 rework, item 3; #70 #1): only the heaviest step was judged, so a heavier step with no sag hid a
+    lighter one that sagged 15x the prediction."""
+    pr = trials.predict(checked, "stool")
+    lo, hi = pr["per_lb_mm"]
+    got = _only(checked, (200, {"sag_mm": hi * 200 * 15}), (400, {}))
+    assert got["status"] == "warn" and "at 200 lb it sagged" in got["text"] and "more than we predicted" in got["text"]
+    got = _only(checked, (200, {"sag_mm": (lo + hi) / 2 * 200}), (400, {"sag_mm": hi * 400 * 15}))
+    assert got["status"] == "warn" and "at 400 lb" in got["text"]

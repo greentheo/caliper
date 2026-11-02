@@ -5,6 +5,23 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 
 ---
 
+### 2026-11-01 · CALI-86 (#62), #71 rework · The reviewer's review of findings 8–13, worked
+The foreman's ten items. New commits only; the reviewed ones keep their hashes.
+- **2 (rule 6):** a live test that broke below what the part must hold, or sagged well out of the predicted
+  band, outranks the prediction. The part card loses its ✓ lines, and the design's strength checks read the
+  test: "It broke at 150 lb in your test. We predicted it would hold 400." `57e9568`
+- **3, 4, 7:** every step is judged and the worst governs (closes #70 #1). Each edge is pinned by a test. A
+  break within 10% of the prediction matches it; short of that is "our check was too hopeful"; a low sag is
+  "stiffer than our check said". `c88a047`
+- **1:** the promise follows only strength and frame verdicts (`rests_on_model`), and goes in the first-run
+  reply and `chat._facts`. `56e7eeb`
+- **5, 6:** "about" follows the printed model where it governs (`load_study.rough`); a plywood-governed verdict
+  keeps plywood's words. The top line is "Holds a foot, about 2.6 times over.", with the caveat by the promise.
+  "About" is also on the carve reply and the release table. `2f59997`
+- **8:** an old carve run says "of the whole solid (carved before CALI-86 …)", never relabelled. `a59f9f4`
+- **9, 10:** the chat turn isn't ok when the check couldn't run; each sample guard is tested alone; an unknown
+  sample is a 404 with no path.
+
 ### 2026-11-01 · CALI-86 (#62), #69 rework · The reviewer's review of findings 1–7, worked
 The foreman accepted every disagreement in the reviewer's review of #69. One commit per item, new commits only
 (the reviewed ones keep their hashes).
@@ -25,6 +42,21 @@ The foreman accepted every disagreement in the reviewer's review of #69. One com
 7. **(rule 6)** In the kids' book, the kid stands an arm's length behind and never in front of the saw, with
    ear defenders. The wood is clamped with the line past the table's edge. The grown-up stands on the new stool
    first. `95369a3`
+
+---
+
+### 2026-11-01 · CALI-86 (#62), findings 8–13 · The reviewer's findings on the open stack, fixed (part 2)
+Stacked on findings 1–7. One commit each, each with a test seen failing first.
+- **8 (#57):** "% carved away" counted the plywood the carve keeps: 30% was 46% of the print. Now it's the
+  printed part's share, and labelled so. `663f332`
+- **9 (#57, rule 6):** a printed part's verdict now says "about … (printed parts are a rough model)". `9aacd52`
+- **10 (#50, rule 6):** with no strength check installed, a picture on a part with loads() got a ✓. Now it
+  says it couldn't check, and isn't ok. `622c402`
+- **11 (#51, rule 6):** breaking below what the part must hold is bad, breaking short of the prediction is warn,
+  and a sag more than 2× outside the predicted range is warn, with words. `2c041c2`
+- **12 (#43):** `open_sample("..")` copied the package folder. Now it takes only a listed sample's slug.
+  `258fe5e`
+- **13 (#43):** scorecard verdicts (the camper's "safe to tow" lines) now carry the promise. `0b21850`
 
 ### 2026-11-01 · CALI-86 (#62), findings 1–7 · The reviewer's findings on the open stack, fixed
 The reviewer's pass over #43–#57, checked by the foreman. One commit each, each with a test seen failing first.
