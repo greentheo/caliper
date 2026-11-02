@@ -36,12 +36,60 @@ async function api(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!r.ok) {
-    let msg = `HTTP ${r.status}`;
-    try { const j = await r.json(); msg = j.detail || j.error || msg; } catch (e) { /* not JSON */ }
-    throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    let msg = `HTTP ${r.status}`, errorId = '';
+    try { const j = await r.json(); msg = j.detail || j.error || msg; errorId = j.error_id || ''; } catch (e) { /* not JSON */ }
+    const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    if (errorId) { err.errorId = errorId; (window.__errIds = window.__errIds || {})[err.message] = errorId; }   // a crash the server kept (CALI-59)
+    throw err;
   }
   return r.json();
 }
+
+// ------------------------------------------------------------------------- reporting it (CALI-59)
+// What broke is kept on this machine. A report is shown in full first; sending it opens a new GitHub issue
+// in the browser with it filled in, so the person sends it themselves. Nothing is sent on its own.
+async function reportError(errorId, message) {
+  try {
+    // where on the page, never which design: its name is the person's own words
+    const where = S.scope ? "a part's cards" : (S.slug ? 'a design' : 'the welcome');
+    if (!errorId) errorId = (await api('POST', '/api/errors', { where, error: message || 'something broke' })).id;
+    const rep = await api('GET', `/api/errors/report?id=${encodeURIComponent(errorId)}`);
+    let dlg = $('reportDlg');
+    if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'reportDlg'; dlg.className = 'report'; document.body.append(dlg); }
+    dlg.innerHTML = `<h3>Report what broke</h3>
+      <p class="small">Nothing has been sent. This is everything the report holds: what broke, where, and which
+        Caliper and computer it was. It doesn't name your design. The error's own words can quote what you typed or
+        name a part, so read it before you send it. Add what you were doing if you like.</p>
+      <textarea id="reportBody" rows="12">${esc(rep.body)}</textarea>
+      <div class="actions"><button class="primary" id="reportSend">Open it as a GitHub issue</button>
+        <button id="reportCopy">Copy</button><button class="ghost" id="reportClose">Not now</button></div>
+      <p class="muted small">Sending opens github.com in your browser with the report filled in; you press
+        Submit there (it needs a GitHub account).</p>`;
+    $('reportClose').onclick = () => dlg.close();
+    $('reportCopy').onclick = async () => {
+      try { await navigator.clipboard.writeText($('reportBody').value); $('reportCopy').textContent = 'Copied'; }
+      catch (e) { $('reportBody').select(); }
+    };
+    $('reportSend').onclick = () => {
+      let body = $('reportBody').value;
+      while (encodeURIComponent(body).length > 6500) body = body.slice(0, Math.floor(body.length * 0.9)) + '…';
+      const url = rep.url.split('&body=')[0] + '&body=' + encodeURIComponent(body);
+      window.open(url, '_blank', 'noopener'); dlg.close();
+    };
+    dlg.showModal();
+  } catch (e) { showErr('couldn\'t make the report: ' + e.message); }
+}
+function reportLink(errorId, message) {
+  const b = document.createElement('button');
+  b.className = 'linkish'; b.textContent = 'Report it…';
+  b.onclick = () => reportError(errorId, message);
+  return b;
+}
+$('errbar').addEventListener('click', (e) => {
+  if (e.target.dataset.report === undefined) return;
+  const last = (window.__err || []).slice(-1)[0] || '';
+  reportError((window.__errIds || {})[last] || '', last);
+});
 
 // Follow a job: Server-Sent Events, de-duplicated by sequence number, falling back to polling if the
 // stream drops (a browser reconnect would otherwise replay events from the start).
@@ -50,7 +98,8 @@ function follow(jobId, onEvent) {
     let seen = -1, done = false, es = null;
     const finish = (p) => {
       if (done) return; done = true; if (es) es.close();
-      p.status === 'done' ? resolve(p.result) : reject(new Error(p.error || 'the job failed'));
+      p.status === 'done' ? resolve(p.result)
+        : reject(Object.assign(new Error(p.error || 'the job failed'), { errorId: p.error_id || '' }));
     };
     const handle = (ev) => {
       if (ev.kind === 'end') return finish(ev);
@@ -388,6 +437,7 @@ $('newBtn').onclick = startNew;
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
+  if (first) S.buildBubble = null;
   location.hash = encodeURIComponent(slug);
   S.design = await api('GET', `/api/designs/${slug}`);
   if (first) { for (const m of meshes.values()) scene.remove(m); meshes.clear(); clearStation(); }
@@ -436,7 +486,7 @@ function renderScope() {
     ? `What should change about ${S.scope}?`
     : (S.design && S.design.parts.length
       ? 'Click a part to talk about it, or ask about the whole design…'
-      : 'Tell me which part to build first…');
+      : 'Tell me more about it, or ask a question…');
 }
 $('scopeClear').onclick = () => setScope(null);
 
@@ -446,6 +496,8 @@ function renderThread() {
   const d = S.design;
   if (!d) return;
   const html = [];
+  // a line of the log that isn't a record (torn, or a NaN from before CALI-86) is left out, and said
+  if (d.log_skipped) html.push(`<div class="muted small">${d.log_skipped} line${d.log_skipped > 1 ? 's' : ''} of this design's log couldn't be read and ${d.log_skipped > 1 ? 'are' : 'is'} left out.</div>`);
   for (const e of d.log) {
     if (e.kind === 'created') {
       html.push(`<div class="note">Started <b>${esc(d.name)}</b> — ${esc(e.prompt)}</div>`);
@@ -453,7 +505,7 @@ function renderThread() {
       html.push(`<div class="note">Requirement changed — ${esc(e.question || '')} → <b>${esc(e.answer || '')}</b></div>`);
     } else if (e.kind === 'clarify' && e.action !== 'asked') {
       html.push(`<div class="note">Requirements recorded — ${e.answered || 0} answered, ` +
-        `${e.assumed || 0} assumed. Tell me which part to build first.</div>`);
+        `${e.assumed || 0} assumed.</div>`);
     } else if (e.kind === 'message') {
       html.push(`<div class="msg you">${e.scope ? `<div class="scope">on ${esc(e.scope)}</div>` : ''}` +
         `${md(e.text)}</div>`);
@@ -486,6 +538,17 @@ function renderThread() {
     }
   }
   if (d.clarify && d.clarify.length) html.push(clarifyCard(d.clarify));
+  // answered, nothing built, nothing building: one button (CALI-59)
+  const unbuilt = !d.parts.length && !(d.clarify && d.clarify.length) && !d.building && !S.busy;
+  if (unbuilt) {
+    html.push(`<div class="actions"><button class="primary" id="buildFirst">Build it</button>
+      <span class="muted small">or say what to build first</span></div>`);
+  }
+  const lastSaid = [...d.log].reverse().find((e) => e.kind === 'message' || e.kind === 'reply');
+  if (lastSaid && lastSaid.kind === 'reply' && lastSaid.reply && !d.proposal && !S.busy) {
+    html.push(`<div class="actions simpler"><button class="ghost small" data-say="Say that again in simpler words, for a kid.">
+      Say it simpler</button></div>`);
+  }
   if (d.proposal && !S.busy) {
     html.push(`<div class="actions">
       <button class="ok" data-say="yes">Yes, lock it in</button>
@@ -494,34 +557,93 @@ function renderThread() {
   t.innerHTML = html.join('') || '<div class="note">Nothing yet.</div>';
   t.querySelectorAll('[data-say]').forEach((b) => { b.onclick = () => send(b.dataset.say, null); });
   wireClarify();
+  if ($('buildFirst')) {
+    $('buildFirst').onclick = async () => {
+      try { followBuild((await api('POST', `/api/designs/${S.slug}/build`)).job_id); }
+      catch (e) { showErr(e.message); }
+    };
+  }
+  if (S.buildBubble) t.append(S.buildBubble);          // a redraw mid-build keeps its progress
+  if (d.building && S.following !== d.building) followBuild(d.building);
   t.scrollTop = t.scrollHeight;
 }
 
 function clarifyCard(qs) {
   return `<div class="card" id="clarify">
     <h3>A few questions first</h3>
-    <p class="muted small">Asked once, then they're fixed requirements every part is built against.
-      Leave one blank and I'll use the suggestion, marked as an assumption.</p>
+    <p class="muted small">Leave any blank and I'll use the grey suggestion, marked as a guess you can
+      change later. Then I build it, check it and plan how to make it.</p>
     ${qs.map((q) => `<div class="q"><label for="q_${esc(q.id)}">${esc(q.question)}</label>
       ${q.why ? `<div class="why">${esc(q.why)}</div>` : ''}
       <input type="text" id="q_${esc(q.id)}" data-q="${esc(q.id)}" placeholder="${esc(q.default)}"></div>`).join('')}
     <div class="actions">
-      <button class="primary" id="clarifyGo">Use these answers</button>
-      <button id="clarifySkip">Just build it</button>
+      <button class="primary" id="clarifyGo">Build it</button>
     </div></div>`;
 }
 function wireClarify() {
-  const go = $('clarifyGo'), skip = $('clarifySkip');
+  const go = $('clarifyGo');
   if (!go) return;
-  const submit = async (isSkip) => {
+  go.onclick = async () => {
     const answers = {};
     document.querySelectorAll('#clarify [data-q]').forEach((i) => { answers[i.dataset.q] = i.value; });
-    go.disabled = skip.disabled = true;
-    try { S.design = await api('POST', `/api/designs/${S.slug}/clarify`, { answers, skip: isSkip }); render(); }
-    catch (e) { showErr(e.message); go.disabled = skip.disabled = false; }
+    go.disabled = true;
+    // the answers, then the first build (CALI-59): one sentence in, four answers out
+    try { S.design = await api('POST', `/api/designs/${S.slug}/clarify`, { answers, build: true }); render(); }
+    catch (e) { showErr(e.message); go.disabled = false; }
   };
-  go.onclick = () => submit(false);
-  skip.onclick = () => submit(true);
+}
+
+// the first build, said as it goes: what it's held to, the part, its strength, its patterns (CALI-59)
+const BUILD_STEPS = { goals: 'Writing down what it has to do', build: 'Building it',
+  strength: 'Checking it holds what it must', patterns: 'Drawing the patterns to cut it out',
+  score: 'Scoring it against what it has to do' };
+async function followBuild(jobId) {
+  S.following = jobId; S.busy = true; $('send').disabled = true;
+  const t = $('thread');
+  t.querySelectorAll('.actions').forEach((n) => n.remove());
+  const cal = document.createElement('div');
+  cal.className = 'msg cal';
+  cal.innerHTML = `<div class="who">Caliper</div><div class="head"><span class="spin"></span>Starting…</div>
+    <ol class="build-steps">${Object.entries(BUILD_STEPS).map(([k, v]) =>
+      `<li data-step="${k}">${esc(v)}<span class="detail muted small"></span></li>`).join('')}</ol>`;
+  t.append(cal); t.scrollTop = t.scrollHeight;
+  S.buildBubble = cal;
+  const head = cal.querySelector('.head');
+  let at = null;
+  const mark = (k) => {
+    if (!BUILD_STEPS[k]) return;
+    cal.querySelectorAll('li').forEach((li) => {
+      const before = Object.keys(BUILD_STEPS).indexOf(li.dataset.step) < Object.keys(BUILD_STEPS).indexOf(k);
+      li.classList.toggle('done', before || li.classList.contains('done'));
+      li.classList.toggle('now', li.dataset.step === k);
+    });
+    at = k; since = Date.now(); head.innerHTML = `<span class="spin"></span>${esc(BUILD_STEPS[k])}…`;
+  };
+  // a long step (writing the design takes a minute or two) shows it's still going
+  let since = Date.now();
+  const tick = setInterval(() => {
+    if (!at || !cal.isConnected) return;
+    const s = Math.round((Date.now() - since) / 1000);
+    if (s >= 5) head.innerHTML = `<span class="spin"></span>${esc(BUILD_STEPS[at])}… <span class="muted small">${s} s</span>`;
+  }, 1000);
+  try {
+    await follow(jobId, (ev) => {
+      if (ev.kind === 'step') return ev.step === 'done' ? null : mark(ev.step);
+      const li = at && cal.querySelector(`li[data-step="${at}"] .detail`);
+      const said = ev.kind === 'authoring' ? 'writing the design'
+        : ev.kind === 'built' ? 'it builds' : ev.kind === 'strength' ? ev.text
+          : ev.kind === 'error' ? `⚠ ${ev.text}` : '';
+      if (li && said) li.textContent = ` · ${said}`;
+    });
+  } catch (e) {
+    cal.classList.add('bad'); head.innerHTML = `⚠ ${esc(e.message)} `;
+    head.append(reportLink(e.errorId, e.message));
+  } finally {
+    clearInterval(tick);
+    S.busy = false; $('send').disabled = false;
+  }
+  if (!cal.classList.contains('bad')) S.buildBubble = null;      // the reply in the log says it now
+  await refresh();
 }
 
 // a turn in flight: your message, then a reply bubble that narrates as events stream in
@@ -548,9 +670,10 @@ function liveTurn(text, scope) {
       head.innerHTML = `<span class="spin"></span>${esc(label)}`;
       t.scrollTop = t.scrollHeight;
     },
-    fail(msg) {
+    fail(msg, errorId) {
       cal.classList.add('bad');
-      head.innerHTML = `⚠ ${esc(msg)}`;
+      head.innerHTML = `⚠ ${esc(msg)} `;
+      head.append(reportLink(errorId, msg));
     },
   };
 }
@@ -559,6 +682,7 @@ const STEP_TEXT = {
   classified: (e) => (e.action === 'answer' ? 'reading the design'
     : e.action === 'author' ? `building a new part: ${e.part}`
       : e.action === 'refine' ? `revising ${e.part}`
+        : e.action === 'picture' ? `putting a picture on ${e.part}`
         : e.action === 'revert' ? `rolling ${e.part} back` : e.text),
 };
 
@@ -573,7 +697,7 @@ async function send(text, scope) {
     S.busy = false;
     await refresh();
   } catch (e) {
-    live.fail(e.message);
+    live.fail(e.message, e.errorId);
   } finally {
     S.busy = false; $('send').disabled = false;
   }
@@ -588,28 +712,86 @@ $('msg').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
 });
 
-// a brand-new design: the first message is the root prompt, then the clarify round
+// a brand-new design: one sentence, a few questions, then it's built (CALI-59). Or open one of ours.
 function startNew() {
   // remember where we were: the button sits beside the design picker and is easy to hit by mistake
   const was = S.slug ? { slug: S.slug, name: S.design ? S.design.name : S.slug } : null;
-  S.slug = null; S.design = null; S.scope = null;
+  S.slug = null; S.design = null; S.scope = null; S.buildBubble = null;
   for (const m of meshes.values()) scene.remove(m);
   meshes.clear(); clearStation();
   history.replaceState(null, '', location.pathname);
-  $('inspector').innerHTML = '<div class="empty">Your design will show up here.</div>';
+  $('inspector').innerHTML = `<div class="empty">The answers show up here: what it is, whether it works, what to
+    buy and how to make it.</div>`;
   $('scopeRow').hidden = true;
-  $('thread').innerHTML = `<div class="card">
-    <h3>What are you building?</h3>
-    <p class="muted small">Describe the whole thing — sizes, what it attaches to, what it carries.
-      I'll ask a few questions, then we build it part by part.</p>
-    <textarea id="newPrompt" rows="5" placeholder="e.g. a step stool so my kid can reach the sink, from 3/4 in plywood…"></textarea>
+  $('thread').innerHTML = `<div class="card welcome">
+    <h3>What do you want to make?</h3>
+    <p class="muted small">Say it in a sentence: what it is, what it's for, what it's made of. I'll ask a few
+      questions, then build it, check it holds and plan how to make it with your tools.</p>
+    <div class="say"><textarea id="newPrompt" rows="3"
+      placeholder="a step stool so my kid can reach the sink, from 3/4 in plywood"></textarea>
+      ${micButton('newPrompt')}</div>
     <div class="actions"><button class="primary" id="newGo">Start</button>
-      ${was ? `<button id="newBack" class="ghost">← back to ${esc(was.name)}</button>` : ''}</div></div>`;
+      ${was ? `<button id="newBack" class="ghost">← back to ${esc(was.name)}</button>` : ''}</div>
+    <div id="sampleRow" class="samples"></div></div>`;
   $('msg').placeholder = 'Or type it here…';
   $('newGo').onclick = () => createDesign($('newPrompt').value);
+  $('newPrompt').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); createDesign($('newPrompt').value); }
+  });
   if (was) $('newBack').onclick = () => { $('designPick').value = was.slug; openDesign(was.slug); };
+  wireMics($('thread'));
   $('newPrompt').focus();
+  showSamples();
 }
+async function showSamples() {
+  let got;
+  try { got = await api('GET', '/api/samples'); } catch (e) { return; }
+  const row = $('sampleRow');
+  if (!row || !got.samples.length) return;
+  row.innerHTML = `<div class="muted small">Or open one of ours and look around:</div>` + got.samples.map((x) =>
+    `<button class="sample" data-sample="${esc(x.name)}"><b>${esc(x.title)}</b><span>${esc(x.about)}</span></button>`).join('');
+  row.querySelectorAll('[data-sample]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      try { await loadDesigns((await api('POST', `/api/samples/${encodeURIComponent(b.dataset.sample)}`)).slug); }
+      catch (e) { showErr(e.message); b.disabled = false; }
+    };
+  });
+}
+
+// ---------------------------------------------------------------------- talking instead of typing (CALI-59)
+// The browser's own speech recognition where it has one. Without it, the Mac's dictation types into any text
+// box, so the button says how to start that.
+const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+let listening = null;
+function micButton(target) {
+  return `<button type="button" class="mic ghost" data-mic="${target}" title="talk instead of typing">🎤</button>`;
+}
+function wireMics(root) {
+  root.querySelectorAll('[data-mic]').forEach((b) => { b.onclick = () => dictate($(b.dataset.mic), b); });
+}
+function micTip(btn, text) {
+  let tip = btn.parentElement.querySelector('.mic-tip');
+  if (!tip) { tip = document.createElement('div'); tip.className = 'mic-tip'; btn.parentElement.append(tip); }
+  tip.textContent = text;
+  clearTimeout(micTip.t); micTip.t = setTimeout(() => tip.remove(), 9000);
+}
+const MAC_DICTATION = 'Press the 🎤 key (or Fn twice) and talk: your Mac types what you say into the box. Press it again when you\'re done.';
+function dictate(box, btn) {
+  if (listening) { listening.stop(); return; }
+  box.focus();
+  if (!Speech) return micTip(btn, MAC_DICTATION);
+  const rec = new Speech();
+  rec.lang = navigator.language || 'en-US'; rec.interimResults = true; rec.continuous = false;
+  const start = box.value ? box.value.replace(/\s*$/, ' ') : '';
+  rec.onresult = (e) => { box.value = start + [...e.results].map((r) => r[0].transcript).join(''); };
+  rec.onerror = (e) => micTip(btn, e.error === 'not-allowed' || e.error === 'service-not-allowed'
+    ? `The browser isn't allowed to listen. ${MAC_DICTATION}` : `I didn't catch that (${e.error}). Try again, or: ${MAC_DICTATION}`);
+  rec.onend = () => { listening = null; btn.classList.remove('on'); };
+  try { rec.start(); listening = rec; btn.classList.add('on'); micTip(btn, 'Listening… press 🎤 again to stop.'); }
+  catch (e) { micTip(btn, MAC_DICTATION); }
+}
+wireMics(document);
 async function createDesign(prompt) {
   if (!prompt.trim()) return;
   S.busy = true;
@@ -679,7 +861,7 @@ function designView(d) {
 // today's panels for that question, and once someone opens it, it stays open for them.
 const QUESTIONS = [['what', 'What is it?'], ['work', 'Will it work?'], ['buy', 'What do I buy?'], ['make', 'How do I make it?']];
 const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' };
-const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox' };
+const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox', trial: 'trialBox' };
 function numbersOpen(k) { try { return localStorage.getItem(`caliper.numbers.${k}`) === '1'; } catch (e) { return false; } }
 function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${k}`, on ? '1' : '0'); } catch (e) { /* private window */ } }
 
@@ -695,7 +877,8 @@ function qlines(c) {
   return c.lines.map((ln, i) => `<div class="qline q-${ln.status}${i === 0 ? ' top' : ''}${GOTO[ln.study || ln.action] ? ' go' : ''}"
     ${GOTO[ln.study || ln.action] ? `data-goto="${GOTO[ln.study || ln.action]}"` : ''}>${esc(ln.text)}</div>
     ${(ln.links || []).length ? `<div class="qlinks">${ln.links.map((l) => `<a class="btn" href="${esc(l.url)}" target="_blank"
-      rel="noopener">${esc(l.label)}</a>`).join('')}</div>` : ''}`).join('');
+      rel="noopener">${esc(l.label)}</a>`).join('')}</div>` : ''}`).join('')
+    + (c.promise ? `<div class="qpromise">${esc(c.promise)}</div>` : '');
 }
 
 // the viewport follows the question (spec step 4): the stress for "will it work", the pieces for "what do I buy"
@@ -730,11 +913,158 @@ function cardsView(groups) {
     return `<section class="qcard q-${c ? c.status : 'info'}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
       <div class="qhead" title="${S.scope ? 'show this in 3D' : ''}"><span class="qmark">${c ? QMARK[c.status] : '·'}</span><h3>${q}</h3></div>
       <div class="qlines" id="q-${k}">${qlines(c)}</div>
+      ${k === 'what' && picturePart() ? '<div class="qlinks"><button class="btn" data-picture="1">🦖 Put a picture on it</button></div>' : ''}
       <details class="numbers" data-card="${k}" ${numbersOpen(k) ? 'open' : ''}><summary>the numbers</summary>
         ${groups[k] || '<div class="empty">Nothing here yet.</div>'}</details>
     </section>`;
   }).join('');
 }
+// ------------------------------------------------------------------- test it (CALI-80)
+// What the strength check predicts at each load step, what to measure the sag with, and what the real one did.
+const sagText = (mm) => (inches() ? `${(mm / IN).toFixed(3)} in` : `${mm.toFixed(2)} mm`);
+function trialView(p) {
+  const t = S.trial && S.trial.part === p.id && S.trial.key === p.version ? S.trial.data : null;
+  if (!t) { setTimeout(() => loadTrial(p), 0); return '<div class="muted small"><span class="spin"></span>working out what to expect…</div>'; }
+  const pr = t.prediction;
+  if (!pr) return '<div class="empty">Check it holds first: the test is set beside what that predicts.</div>';
+  const rows = t.rows.filter((r) => !r.stale);
+  const show = pr.steps.filter((st, i) => i < 3 || st.lb === pr.lb || i === pr.steps.length - 1
+    || st.lb % (pr.steps.length > 20 ? 200 : 100) === 0);
+  const chart = trialChart(pr, rows);
+  return `<p class="small">Put the load where <b>${esc(pr.case)}</b> goes, in steps, and measure how far the middle of
+      the ${esc(pr.where || 'top')} sags. Measure it with ${esc(pr.measure_with)}.
+      It should break at about <b>${(pr.breaks_lb || 0).toLocaleString()} lb</b>.</p>
+    ${chart}
+    <table class="st"><tr><th>load</th><th>should sag</th><th>sagged</th><th></th></tr>
+      ${show.map((st) => {
+        const got = rows.filter((r) => r.load_lb === st.lb).slice(-1)[0];
+        return `<tr><td>${st.lb.toLocaleString()} lb</td><td>${sagText(st.sag_mm[0])}–${sagText(st.sag_mm[1])}</td>
+          <td>${got ? (got.broke ? '<b class="bad">broke</b>' : got.sag_mm != null ? sagText(got.sag_mm) : 'held') : ''}</td>
+          <td class="muted">${got && got.ratio ? `${got.ratio}×` : ''}</td></tr>`;
+      }).join('')}
+    </table>
+    ${rows.filter((r) => !show.some((st) => st.lb === r.load_lb)).length ? `<div class="muted small">and ${rows.filter((r) => !show.some((st) => st.lb === r.load_lb)).map((r) => `${r.load_lb} lb${r.broke ? ' (broke)' : ''}`).join(', ')}</div>` : ''}
+    <div class="trial-add">
+      <label>load <input id="trLoad" type="number" min="1" step="10" placeholder="200"> lb</label>
+      <label>sag <input id="trSag" type="number" min="0" step="0.001" placeholder="${inches() ? '0.004' : '0.10'}"> ${inches() ? 'in' : 'mm'}</label>
+      <label><input id="trBroke" type="checkbox"> it broke</label>
+      <button class="small" id="trAdd">Record</button></div>
+    <div class="muted small">${esc(pr.basis)}. Every step is kept with the design for calibrating the check.</div>
+    ${t.skipped_note ? `<div class="small"><b class="bad">Left out:</b> ${esc(t.skipped_note)}.</div>` : ''}`;
+}
+function trialChart(pr, rows) {
+  // load across, sag up: the predicted band, and what was measured
+  const W = 300, H = 120, maxLb = Math.max(pr.breaks_lb || 0, ...rows.map((r) => r.load_lb), pr.lb);
+  const maxSag = Math.max(pr.per_lb_mm[1] * maxLb, ...rows.map((r) => r.sag_mm || 0)) || 1;
+  const x = (lb) => 30 + (W - 40) * lb / maxLb, y = (mm) => H - 18 - (H - 28) * mm / maxSag;
+  const band = `M${x(0)},${y(0)} L${x(maxLb)},${y(pr.per_lb_mm[1] * maxLb)} L${x(maxLb)},${y(pr.per_lb_mm[0] * maxLb)} Z`;
+  const dots = rows.filter((r) => r.sag_mm != null).map((r) => `<circle cx="${x(r.load_lb)}" cy="${y(r.sag_mm)}" r="3.5"
+    class="${r.broke ? 'bad' : 'ok'}"/>`).join('');
+  const breaks = pr.breaks_lb ? `<line x1="${x(pr.breaks_lb)}" x2="${x(pr.breaks_lb)}" y1="8" y2="${H - 18}" class="brk"/>
+    <text x="${x(pr.breaks_lb) - 4}" y="16" text-anchor="end">breaks ~${pr.breaks_lb.toLocaleString()} lb</text>` : '';
+  return `<svg class="trial-chart" viewBox="0 0 ${W} ${H}"><path d="${band}" class="band"/>${breaks}${dots}
+    <line x1="30" x2="${W - 10}" y1="${H - 18}" y2="${H - 18}" class="axis"/><text x="${W - 10}" y="${H - 4}" text-anchor="end">load (lb)</text>
+    <text x="30" y="${H - 4}">0</text><text x="4" y="12">sag</text></svg>`;
+}
+async function loadTrial(p) {
+  if (S.trialLoading === p.id + p.version) return;
+  S.trialLoading = p.id + p.version;
+  try {
+    S.trial = { part: p.id, key: p.version, data: await api('GET', `/api/designs/${S.slug}/parts/${encodeURIComponent(p.id)}/trial`) };
+    const box = $('trialBox');
+    if (box) { box.innerHTML = trialView(p); wireTrial(p); }
+  } catch (e) { const box = $('trialBox'); if (box) box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  finally { S.trialLoading = null; }
+}
+function wireTrial(p) {
+  const add = $('trAdd');
+  if (!add) return;
+  add.onclick = async () => {
+    const load = +$('trLoad').value, sag = $('trSag').value;
+    if (!load) { $('trLoad').focus(); return; }
+    add.disabled = true;
+    try {
+      const body = { load_lb: load, broke: $('trBroke').checked,
+        sag_mm: sag === '' ? null : (+sag) * (inches() ? IN : 1) };
+      S.trial = { part: p.id, key: p.version,
+        data: await api('POST', `/api/designs/${S.slug}/parts/${encodeURIComponent(p.id)}/trial`, body) };
+      S.answers = null;                          // the card says what the test found
+      await refresh();
+    } catch (e) { showErr(e.message); add.disabled = false; }
+  };
+}
+
+// ------------------------------------------------------------------- a picture on it (CALI-78)
+// Say what it is or draw it; it's cut out of a panel nobody stands on, smooth enough for a jigsaw, and the
+// strength check says whether it still holds (it's made smaller until it does).
+function picturePart() {
+  const d = S.design;
+  if (!d) return null;
+  if (S.scope) { const p = d.parts.find((x) => x.id === S.scope); return p && p.built ? p : null; }
+  const parts = d.parts.filter((p) => p.role !== 'fixed');
+  return parts.length === 1 && parts[0].built ? parts[0] : null;
+}
+document.addEventListener('click', (e) => { if (e.target.dataset && e.target.dataset.picture) openPicture(); });
+async function openPicture() {
+  const p = picturePart();
+  if (!p) return;
+  let dlg = $('pictureDlg');
+  if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'pictureDlg'; dlg.className = 'report'; document.body.append(dlg); }
+  dlg.innerHTML = `<h3>Put a picture on it</h3>
+    <p class="small muted">Say what it is, or draw it. I cut it out of a panel nobody stands on, as big as fits and
+      smooth enough for a jigsaw, then check it still holds.</p>
+    <div class="say"><input id="picSubject" type="text" placeholder="a T-rex">${micButton('picSubject')}</div>
+    <div class="muted small" style="margin-top:8px">or draw it, all the way round:</div>
+    <canvas id="picPad" class="pad" width="320" height="220"></canvas>
+    <div class="actions" style="margin-top:4px"><button class="ghost small" id="picClear">Clear</button>
+      <label class="small muted">on the <select id="picWhere"><option value="">front</option></select></label></div>
+    <div class="actions"><button class="primary" id="picGo">Cut it out</button>
+      <button class="ghost" id="picClose">Not now</button></div>`;
+  wireMics(dlg);
+  const pad = $('picPad'), ctx = pad.getContext('2d');
+  let pts = [], down = false;
+  const at = (e) => { const r = pad.getBoundingClientRect(); return [(e.clientX - r.left) * pad.width / r.width, (e.clientY - r.top) * pad.height / r.height]; };
+  const paint = () => {
+    ctx.clearRect(0, 0, pad.width, pad.height);
+    if (pts.length < 2) return;
+    ctx.beginPath(); ctx.moveTo(...pts[0]); pts.forEach((q) => ctx.lineTo(...q));
+    if (!down) { ctx.closePath(); ctx.fillStyle = 'rgba(78,161,255,.18)'; ctx.fill(); }
+    ctx.strokeStyle = '#4ea1ff'; ctx.lineWidth = 3; ctx.lineJoin = ctx.lineCap = 'round'; ctx.stroke();
+  };
+  pad.onpointerdown = (e) => {
+    down = true; pts = [at(e)];
+    try { pad.setPointerCapture(e.pointerId); } catch (err) { /* a pen or finger the page didn't start */ }
+    paint();
+  };
+  pad.onpointermove = (e) => { if (down) { pts.push(at(e)); paint(); } };
+  pad.onpointerup = () => { down = false; paint(); };
+  $('picClear').onclick = () => { pts = []; paint(); };
+  $('picClose').onclick = () => dlg.close();
+  try {
+    const got = await api('GET', `/api/designs/${S.slug}/parts/${encodeURIComponent(p.id)}/picture`);
+    $('picWhere').innerHTML = got.panels.map((x) => `<option value="${esc(x.name)}">${esc(x.name)}</option>`).join('');
+    const front = got.panels.find((x) => /front/i.test(x.name));
+    if (front) $('picWhere').value = front.name;
+  } catch (e) { /* the server picks */ }
+  $('picGo').onclick = async () => {
+    const subject = $('picSubject').value.trim(), where = $('picWhere').value;
+    if (!subject && pts.length < 8) { $('picSubject').focus(); return; }
+    dlg.close();
+    const text = pts.length >= 8 ? `(drew ${subject || 'a picture'} to cut out)` : `put ${subject} on the ${where || 'front'}`;
+    S.busy = true; $('send').disabled = true;
+    const live = liveTurn(text, p.id);
+    try {
+      const { job_id } = await api('POST', `/api/designs/${S.slug}/parts/${encodeURIComponent(p.id)}/picture`,
+        { subject: subject || 'picture', where, points: pts.length >= 8 ? pts.map(([x, y]) => [Math.round(x), Math.round(y)]) : [] });
+      await follow(job_id, (ev) => live.step(ev));
+      S.busy = false;
+      await refresh();
+    } catch (e) { live.fail(e.message, e.errorId); }
+    finally { S.busy = false; $('send').disabled = false; }
+  };
+  dlg.showModal();
+}
+
 async function loadAnswers() {
   if (!S.design) return;
   const key = answersKey();
@@ -941,6 +1271,8 @@ function partView(p) {
     <details id="adv"><summary>Advanced — script &amp; spec</summary><div id="advBody" class="small muted">loading…</div></details>`;
   const work = `${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
     <div id="loadBox">${loadView(p)}</div>` : ''}
+    ${p.loads && p.role !== 'fixed' ? `<h4>Test it <span class="badge">the real one</span></h4>
+    <div id="trialBox">${trialView(p)}</div>` : ''}
     ${p.framed ? `<h4>Size the frame <span class="badge">tubes back</span></h4>
     <div id="frameBox">${frameView(p)}</div>` : ''}
     ${!p.framed && (S.design.in_air.yes || aeroRuns(p.id).length || runsFor(p.id).length) ? `<h4>Shape it for drag <span class="badge">numbers back</span></h4>
@@ -964,6 +1296,7 @@ function wireInspector(p) {
   if (!p) { wireBalance(); wireScore(); wireRelease(); return; }
   wireBuilt(p);
   wireCutplan(p);
+  wireTrial(p);
   const role = $('roleRef');
   if (role) role.onchange = async () => {
     S.design = await api('PATCH', `/api/designs/${S.slug}/parts/${p.id}`, { role: role.checked ? 'fixed' : 'movable' });
@@ -1173,11 +1506,18 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.shopOpen) { S.s
 
 // patterns for hand tools (CALI-48): most people have a jigsaw, not a CNC router — so every flat piece, holes and
 // all, to measure and mark, to print full size and tape, or to project and trace
+// a lightening step on screen isn't the part until it's cut in (CALI-83: patterns made while previewing one had no
+// holes, and that read as a bug)
+function previewNote(p) {
+  return S.station && S.station.part === p.id && (S.design.lighten_runs || []).some((r) => r.id === S.station.run)
+    ? `<div class="note-warn small">These are of the ${esc(p.id)} as it is, without the step you're previewing.
+        <b>Cut these holes</b> (in the bar under the 3D view) to make it part of it, then make them again.</div>` : '';
+}
 function patternView(p) {
   const run = (S.design.pattern_runs || []).find((r) => r.part === p.id);
   const url = (name) => `/api/designs/${S.slug}/patterns/${run.id}/${name}`;
   const stale = run && run.version !== p.version;
-  return `<h5 style="margin:14px 0 4px">Patterns for hand tools <span class="badge">jigsaw, saw, drill</span></h5>
+  return `<h5 style="margin:14px 0 4px">Patterns for hand tools <span class="badge">jigsaw, saw, drill</span></h5>${previewNote(p)}
     ${run ? `<div class="small">${stale ? '<span class="badge bad">the part has changed since</span> ' : ''}
         <a href="${url('measure-and-mark.pdf')}" target="_blank" rel="noopener"><b>Measure and mark</b></a>: each piece
         dimensioned from its square edges, on a 1 in grid ·
@@ -1218,6 +1558,7 @@ function cutplanView(p) {
     <div class="muted small">Not here: ${esc(S.design.cutplan_unavailable)}.</div>`;
   const run = (S.design.cutplans || []).find((r) => r.part === p.id);
   const url = (path) => `/api/designs/${S.slug}/cutplans/${run.id}/files/${path}`;
+  const note = previewNote(p);
   const sheets = run ? run.sheets.map((g) => {
     const svgs = g.files.filter((f) => f.name.startsWith('sheets/') && f.name.endsWith('.svg')).map((f) => f.name);
     return `<div style="margin-top:10px"><b>${g.sheets} × ${esc(g.stock)}</b>
@@ -1253,7 +1594,7 @@ function cutplanView(p) {
 ` : '';
   const stale = run && run.version !== p.version
     ? `<div class="small" style="color:var(--bad)">Made for v${run.version}; the part is v${p.version} now — make it again.</div>` : '';
-  return `<h5 style="margin:14px 0 4px">Cut plan</h5>
+  return `<h5 style="margin:14px 0 4px">Cut plan</h5>${note}
     ${run ? `${stale}${sheets}${plates}${tubes}${sticks}<div class="small"><a href="${url('cutlist.txt')}" target="_blank">cut list as text</a></div>
       ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`
       : `<div class="muted small">Flatten every panel onto the sheets it's cut from — score lines where it bends — and list every
@@ -1424,7 +1765,71 @@ function loadView(p) {
     <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button></div>
     <div id="lProgress"></div>
     ${runs.length ? loadResults(p, runs[pick], runs) : ''}
-    ${runs.length ? lightenView(p) : ''}`;
+    ${p.printed ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : (runs.length ? lightenView(p) : '')}`;
+}
+
+// carve it (CALI-82): a printed part, carved free-form where it isn't working; each step checked
+function carveRuns(pid) { return (S.design.carve_runs || []).filter((r) => r.part === pid); }
+// what a carve's "removed" is a share of: a run from before CALI-86 counted the whole solid, and says so
+function carveShare(run) {
+  return run && run.share === 'printed' ? 'of the printed part'
+    : 'of the whole solid (carved before CALI-86: carve again for the printed share)';
+}
+function carveView(p) {
+  const run = carveRuns(p.id)[0];
+  const head = `<h5 style="margin:14px 0 4px">Carve it <span class="badge">printed, any shape</span></h5>
+    <div class="muted small">A printer makes any shape, so the printed part can be carved wherever it isn't working: in steps,
+      each one checked. ${p.carved ? 'It\'s carved now; carving again starts from its shape as drawn.' : ''}</div>
+    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo">${run ? 'Carve it again' : 'Carve it'}</button>
+      <span class="muted small">a few minutes</span></div><div id="carveProgress"></div>`;
+  if (!run) return head;
+  const stale = run.version !== p.version;
+  const W = 300, H = 110, top = Math.max(...run.stations.map((x) => x.safety || 0), run.min_safety * 1.5);
+  const x = (r) => 24 + (W - 34) * r / Math.max(...run.stations.map((s) => s.removed), 0.01);
+  const y = (sf) => H - 16 - (H - 26) * Math.min(sf, top) / top;
+  const dots = run.stations.map((st) => `<circle cx="${x(st.removed)}" cy="${y(st.safety || 0)}" r="5" data-carve="${st.index}"
+    class="${st.holds ? 'ok' : 'bad'}${S.station && S.station.run === run.id && S.station.index === st.index ? ' on' : ''}"><title>step ${st.index}</title></circle>`).join('');
+  const line = run.stations.map((st, i) => `${i ? 'L' : 'M'}${x(st.removed)},${y(st.safety || 0)}`).join(' ');
+  const best = run.stations.find((st) => st.index === run.best);
+  return `${head}
+    ${run.weak ? `<div class="note-warn small">${esc(run.weak)}</div>` : ''}
+    <svg class="trial-chart" viewBox="0 0 ${W} ${H}"><line x1="24" x2="${W - 10}" y1="${y(run.min_safety)}" y2="${y(run.min_safety)}" class="brk"/>
+      <text x="${W - 10}" y="${y(run.min_safety) - 3}" text-anchor="end">needs ${run.min_safety}x</text>
+      <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>${dots}
+      <text x="24" y="${H - 3}">as drawn</text><text x="${W - 10}" y="${H - 3}" text-anchor="end">${carveShare(run)} carved away →</text></svg>
+    <div class="small">${best && best.saved_g ? `The lightest step where the printed part holds: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% ${carveShare(run)}
+      carved away, <b>${best.saved_g} g</b> less filament, the printed part ${best.safety}x;
+      ${best.whole_holds ? `the whole part ${best.whole}x` : `<b class="bad">the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold</b>`}.`
+      : 'Nothing could come off and still hold.'}
+      ${stale ? '<span class="badge">older version</span>' : ''}</div>
+    <div class="muted small">Click a step to see it; <b>Carve it like this</b> makes it the part's shape and checks it again.</div>`;
+}
+async function runCarve(p) {
+  const prog = $('carveProgress'), go = $('carveGo');
+  go.disabled = true;
+  prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="carveMsg">starting…</div>';
+  try {
+    const runs = loadRuns(p.id);
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/carve`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2 });
+    await follow(job_id, (ev) => {
+      const msg = $('carveMsg'), bar = prog.querySelector('.bar > i');
+      if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
+      if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
+    });
+    clearStation();
+    await refresh();
+    const run = carveRuns(p.id)[0];
+    if (run && run.best) showStation(p.id, run, run.best);
+  } catch (e) {
+    prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    go.disabled = false;
+  }
+}
+function wireCarve(p) {
+  if ($('carveGo')) $('carveGo').onclick = () => runCarve(p);
+  document.querySelectorAll('#inspector [data-carve]').forEach((c) => {
+    c.onclick = () => showStation(p.id, carveRuns(p.id)[0], +c.dataset.carve);
+  });
 }
 
 // make it lighter (CALI-71): holes where the wood isn't working, through the thickness, each step re-checked
@@ -1518,6 +1923,7 @@ function wireLoad(p) {
   if (sel) sel.onchange = () => { S.loadRun[p.id] = +sel.value; clearStation(); renderInspector(); };
   const lg = $('lightGo');
   if (lg) lg.onclick = () => runLighten(p);
+  wireCarve(p);
   document.querySelectorAll('#loadBox tr[data-lst]').forEach((tr) => {
     tr.onclick = () => showStation(p.id, lightenRuns(p.id)[0], +tr.dataset.lst);
   });
@@ -2024,9 +2430,10 @@ async function runWhittle(p) {
 }
 
 // show a station in place of its part, with the part's current shape as a ghost around it
-const STUDY_PATH = { parametric: 'aero', frame: 'frame-study', lighten: 'lighten' };
+const STUDY_PATH = { parametric: 'aero', frame: 'frame-study', lighten: 'lighten', carve: 'carve' };
 async function showStation(pid, run, index) {
   const parametric = run.kind === 'parametric', framed = run.kind === 'frame', lightened = run.kind === 'lighten';
+  const carved = run.kind === 'carve';
   try {
     const r = await fetch(`/api/designs/${S.slug}/${STUDY_PATH[run.kind] || 'whittle'}/${run.id}/stations/${index}.stl`);
     if (!r.ok) throw new Error(`station ${index}: HTTP ${r.status}`);
@@ -2046,16 +2453,19 @@ async function showStation(pid, run, index) {
     const bar = $('stationBar');
     bar.hidden = false;
     const removed = parametric ? st.removed : st.removed_part;
-    const what = lightened
-      ? `<span>step <b>${index}</b> · ${pct(st.removed)} out of the walls${st.top_holes ? ` and ${st.top_holes} hole${st.top_holes === 1 ? '' : 's'} in the top` : ''} · ${lbs(st.saved_lb)} lighter ·
+    const what = carved
+      ? `<span><b>Preview, not carved yet:</b> step <b>${index}</b> · ${pct(st.removed)} ${carveShare(run)} carved away ·
+        ${st.saved_g} g less filament · <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
+      : lightened
+      ? `<span><b>Preview, not cut yet:</b> step <b>${index}</b> · ${pct(st.removed)} out of the walls${st.top_holes ? ` and ${st.top_holes} hole${st.top_holes === 1 ? '' : 's'} in the top` : ''} · ${lbs(st.saved_lb)} lighter ·
         <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
       : framed
       ? `<span>design <b>${index}</b> · ${st.mass_lb} lb of steel · weakest ${st.safety}x · sags ${len(st.deflection_mm, 2)}</span>`
       : `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume
       ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>`;
     bar.innerHTML = `${what}
-      ${lightened && !index ? '' : `<button class="primary" id="adoptBtn" ${lightened && !st.holds ? 'disabled' : ''}>${lightened ? 'Cut these holes in '
-        : framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`}
+      ${(lightened || carved) && !index ? '' : `<button class="primary" id="adoptBtn" ${(lightened || carved) && !st.holds ? 'disabled' : ''}>${lightened ? 'Cut these holes in '
+        : carved ? 'Carve it like this: ' : framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`}
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };
     if ($('adoptBtn')) $('adoptBtn').onclick = () => adoptStation(pid, run.id, index, run.kind);
@@ -2074,8 +2484,8 @@ async function adoptStation(pid, wid, index, kind) {
     await api('POST', `/api/designs/${S.slug}/${STUDY_PATH[kind] || 'whittle'}/${wid}/adopt`, { station: index });
     clearStation();
     await refresh();
-    // holes cut in: check its strength again on the part as rebuilt — that's the number to go by
-    if (kind === 'lighten') {
+    // holes cut in, or carved: check its strength again on the part as rebuilt — that's the number to go by
+    if (kind === 'lighten' || kind === 'carve') {
       const p = S.design.parts.find((x) => x.id === pid);
       if (p && $('lGo')) runLoad(p);
     }
@@ -2086,7 +2496,7 @@ async function adoptStation(pid, wid, index, kind) {
 // Every study the design has, newest first: the part and the version it ran on, the line it came to, and a
 // way to open it where it lives. And per part, every study Caliper has: which can run on it now, and what the
 // others are missing (what to say or do to get them).
-const STUDY_BOX = { load: 'loadBox', lighten: 'loadBox', frame: 'frameBox', gussets: 'frameBox', aero: 'aeroBox', whittle: 'whittleBox',
+const STUDY_BOX = { load: 'loadBox', lighten: 'loadBox', carve: 'loadBox', frame: 'frameBox', gussets: 'frameBox', aero: 'aeroBox', whittle: 'whittleBox',
   cutplan: 'buildBox', patterns: 'buildBox', scorecard: 'scoreBox', release: 'relBox' };
 const studyFilter = { kind: '', part: '' };
 

@@ -19,6 +19,9 @@ from .design import DesignStore
 IN = 25.4
 #: Card status, worst first: something fails, something isn't checked yet, all good, just information.
 ORDER = ("bad", "warn", "ok", "info")
+#: What a strength verdict promises and what it doesn't (CALI-59), said wherever one is shown.
+PROMISE = ("A prediction, not a certificate: it rests on the loads it was given and on textbook strengths for "
+           "the material. Real wood varies and so do joints, so test it gently before you trust it with a person.")
 
 
 def _len(mm: float, inches: bool) -> str:
@@ -35,15 +38,33 @@ def _sentence(text: str, most: int = 120) -> str:
     """The first sentence, ending in a full stop, for a top line: a description can be a paragraph of build
     instructions."""
     first = (text or "").strip().split(". ")[0].rstrip(".")
-    return first + "." if len(first) <= most else first[:most - 1].rsplit(" ", 1)[0].rstrip(",;") + "…"
+    if len(first) <= most:
+        return first + "."
+    # cut where a phrase ends ("…, built from five panels (two sides, …" -> "…, built from five panels…")
+    for sep in (" (", " — ", "; ", ", "):                   # an aside first, then a clause
+        cut = first.rfind(sep, 0, most - 1)
+        if cut > most // 2:
+            return first[:cut].rstrip(",;") + "…"
+    return first[:most - 1].rsplit(" ", 1)[0].rstrip(",;") + "…"
 
 
 def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
 
 
+def rests_on_model(metric: str) -> bool:
+    """Whether a scorecard check's number comes from a strength or frame model (and so carries the promise): not a
+    weight, a cost, or whether the pieces fit a sheet (CALI-86)."""
+    m = metric or ""
+    return m.startswith(("strength.", "frame.")) or m.endswith("safety") or "yield" in m
+
+
 def _card(key: str, q: str, lines: list[dict], hint: str = "") -> dict:
-    return {"key": key, "q": q, "status": _worst(lines) if lines else "info", "lines": lines, "hint": hint}
+    card = {"key": key, "q": q, "status": _worst(lines) if lines else "info", "lines": lines, "hint": hint}
+    # any verdict resting on a model (a strength or frame study, or the scorecard's checks) says what it promises
+    if any((ln.get("study") in ("load", "frame") or ln.get("model")) and ln["status"] in ("ok", "bad") for ln in lines):
+        card["promise"] = PROMISE + "".join(f" {r}" for r in dict.fromkeys(ln["rough"] for ln in lines if ln.get("rough")))
+    return card
 
 
 def _line(text: str, status: str = "info", **kw) -> dict:
@@ -74,9 +95,21 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         made = ", ".join(dict.fromkeys(g["label"] for g in bom.get("sheets", []) + bom.get("sticks", [])
                                        + bom.get("printed", []))) if report else ""
         what.append(_line(f"{_len(a, inches)[:-3]} × {_len(b, inches)}, {_len(z, inches)} tall"
-                          + (f", from {made}" if made else "")))
+                          + (f", from {made}" if made else "") + "."))
     else:
         what.append(_line("It won't build right now: say what's wrong with it, or roll it back.", "bad"))
+    if report:
+        # its shape and its pieces disagree (CALI-83: a stool built as a filled box): every study reads one or the other
+        try:
+            from . import consistency
+
+            off = sorted((r for r in consistency.check(C.declared(store, pid), store.part_geometry(pid))
+                          if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
+        except Exception:  # noqa: BLE001 — the card says what it can
+            off = []
+        if off:
+            what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"fix its shape to "
+                              f"match its pieces\" and I'll revise it.", "bad"))
 
     # Will it work?
     work = []
@@ -85,20 +118,38 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     runs = [r for r in state.get("load_runs") or [] if r["part"] == pid]
     if runs:
         run, stale = runs[0], runs[0].get("version") != p["version"]
+        from . import load_study as L
+
         for c in run["cases"]:
             if c.get("safety") is None:
                 continue
+            # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
+            rough = L.rough(run, c)
+            about = "about " if rough else ""
             if c.get("holds"):
-                text = f"Holds {c['name'].lower()}, {_times(c['safety'])}."
+                text = f"Holds {c['name'].lower()}, {about}{_times(c['safety'])}."
             else:
-                text = f"Doesn't hold {c['name'].lower()}: only {_times(c['safety'])}, and it needs {run['min_safety']:g}."
+                text = f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs {run['min_safety']:g}."
             work.append(_line(text + (" (Checked on an older version: check again.)" if stale else ""),
-                              "warn" if stale else "ok" if c.get("holds") else "bad", study="load"))
+                              "warn" if stale else "ok" if c.get("holds") else "bad", study="load",
+                              **({"rough": L.ROUGH} if rough else {})))
     elif p.get("loads"):
-        work.append(_line("Not checked yet whether it holds what it must: Check it holds.", "warn", study="load"))
+        failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
+                       and h.get("action") == "failed" and h.get("version") == p["version"]), None)
+        work.append(_line(f"I couldn't check it holds: {failed['why']}." if failed else
+                          "Not checked yet whether it holds what it must: Check it holds.", "warn", study="load"))
     elif p.get("built") and p.get("role") != "fixed" and not p.get("framed"):
         work.append(_line("Not checked yet: say what it has to hold (\"it has to hold me, 200 lb\").", "warn",
                           study="load"))
+    if p.get("loads") and p.get("role") != "fixed":
+        from . import trials
+
+        tried = trials.summary(store, pid, inches)            # what the real one did (CALI-80)
+        if tried:
+            if tried["status"] in ("bad", "warn"):
+                # a test that went against the prediction outranks it: no ✓ left above a failed test (CALI-86)
+                work = [ln for ln in work if not (ln.get("study") == "load" and ln["status"] == "ok")]
+            work.append(_line(tried["text"], tried["status"], study="trial"))
     frames = [r for r in state.get("frame_runs") or [] if r["part"] == pid]
     if frames:
         d = frames[0].get("drawn") or {}
@@ -217,6 +268,11 @@ def measured(store: DesignStore, state: dict) -> dict:
         out["strength.safety"] = min(safeties)
     if breaks:
         out["strength.breaks_lb"] = min(breaks)
+    from . import trials
+
+    tested = [t for t in (trials.summary(store, pid) for pid in current) if t and t["status"] in ("bad", "warn")]
+    if tested:                                         # the worst real test, which outranks the prediction (CALI-86)
+        out["strength.test"] = min(tested, key=lambda t: ORDER.index(t["status"]))
     weight = usd = missing = hours = 0.0
     weighed = False
     for p in state["parts"]:
@@ -250,6 +306,8 @@ def _num(metric: str, v: float, unit: str = "") -> str:
         return f"${v:,.0f}"
     if unit == "×":
         return f"{v:g}x" if v < 10 else "more than 10x"
+    if v == 1 and unit.endswith("s") and unit not in ("lbs",):
+        unit = unit[:-1]                                    # 1 sheet, 1 piece
     return f"{v:g} {unit}".strip()
 
 
@@ -269,6 +327,11 @@ def held_to(state: dict, now: dict) -> list[dict]:
         if c.get("source") == "proposed":
             out.append(_line(f"Proposed: {label}. Keep or drop it under the numbers.", "info", goal=c["id"]))
             continue
+        test = now.get("strength.test") if c["metric"].startswith("strength") else None
+        if test:                                       # what a real test did, over what the check predicted
+            out.append(_line(f"{'✗' if test['status'] == 'bad' else '!'} {label}: {test['text']}", test["status"],
+                             study="load", model="scorecard"))
+            continue
         v, late = now.get(c["metric"]), False
         if v is None and c["metric"] in scored:
             v, late = scored[c["metric"]], stale
@@ -282,7 +345,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
         out.append(_line(f"{'✓' if ok else '✗'} {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}"
                          + (" (scored before the last change: score it again)." if late else "."),
                          "warn" if late else "ok" if ok else "bad",
-                         study="load" if c["metric"].startswith("strength") else None))
+                         study="load" if c["metric"].startswith("strength") else None,
+                         model=rests_on_model(c["metric"])))
     return out
 
 
@@ -291,9 +355,17 @@ def held_to(state: dict, now: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 def design(store: DesignStore, state: dict) -> list[dict]:
     parts = [p for p in state["parts"] if p.get("role") != "fixed"]
+    # a design that's one part (the stool) answers with that part's own list and plan (CALI-59)
+    solo = {c["key"]: c for c in part(store, state, parts[0]["id"])} if len(parts) == 1 else {}
     what = [_line(_sentence(state.get("prompt") or state["name"]))]
-    what.append(_line(f"{len(parts)} part{'s' if len(parts) != 1 else ''}: " + ", ".join(p["id"] for p in parts)
-                      if parts else "No parts yet: say what to build first.", "info" if parts else "warn"))
+    if solo:
+        what += solo["what"]["lines"][1:]
+    elif parts:
+        what.append(_line(f"{len(parts)} part{'s' if len(parts) != 1 else ''}: " + ", ".join(p["id"] for p in parts)))
+    elif state.get("building"):
+        what.append(_line("Building it now: these fill in as it goes.", "info"))
+    else:
+        what.append(_line("Not built yet: answer its questions and press Build it.", "warn"))
     assumed = sum(1 for r in state.get("requirements") or [] if r.get("source") == "assumed")
     if assumed:
         what.append(_line(f"{assumed} answer{'s' if assumed != 1 else ''} assumed: check them under the numbers.", "warn"))
@@ -312,27 +384,31 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     elif not work:
         work.append(_line("Nothing to hold it to yet: say what it must do.", "warn"))
 
-    buy = []
-    if now.get("cost.usd"):
+    buy = list(solo["buy"]["lines"]) if solo else []
+    if now.get("cost.usd") and not solo:
         buy.append(_line(f"About ${now['cost.usd']:,.0f} for everything"
                          + (f" (${card['cost']['waste_usd']:,.0f} of it offcut, when last scored)."
                             if card and card.get("cost", {}).get("waste_usd") else ".")))
-    if now.get("weight.total_lb") is not None:
+    if now.get("weight.total_lb") is not None and not solo:
         lb = now["weight.total_lb"]
         buy.append(_line(f"It all weighs {lb:g} lb" + (", easy for a kid to carry." if lb <= 10 else ".")))
     if not buy:
         buy.append(_line("Not known yet: no part says what it's built from.", "info"))
 
-    make = []
+    make = [ln for ln in solo["make"]["lines"]] if solo else []
     rel = (state.get("releases") or [None])[0]
     if rel:
         url = f"/api/designs/{state['slug']}/releases/{rel['id']}/files/"
         make.append(_line(f"Build package {rel['id']}: {len(rel['steps'])} steps, "
                           + ("ready to cut." if rel["ready"] else "not ready: a check fails."),
                           "ok" if rel["ready"] else "bad", action="release",
-                          links=[{"label": "Open the build book", "url": url + "index.html"}]))
-    else:
+                          links=[{"label": "Open the build book", "url": url + "index.html"}]
+                          + ([{"label": "The kids' build book", "url": url + rel["kids"]}] if rel.get("kids") else [])))
+    elif not solo:
         make.append(_line("No build package yet: make one when it's ready.", "info", action="release"))
+    else:
+        make.append(_line("Or make the whole build package: the build book, cut lists and drawings.", "info",
+                          action="release"))
     return [_card("what", "What is it?", what), _card("work", "Will it work?", work),
             _card("buy", "What do I buy?", buy), _card("make", "How do I make it?", make)]
 

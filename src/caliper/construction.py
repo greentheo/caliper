@@ -37,10 +37,12 @@ not a cut plan — that needs the joinery, and comes next.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import math
 import subprocess
 import sys
+import threading
 from typing import Optional
 
 from . import materials as M
@@ -111,6 +113,11 @@ def declared(store: DesignStore, part_id: str, build: Optional[dict] = None,
     if not declares(script) and "def keeps(" not in script and "def loads(" not in script:
         return {}
     probe = script + _PROBE.format(build=json.dumps(build or {}))
+    key = hashlib.sha256(probe.encode()).hexdigest()
+    with _SEEN_MU:
+        seen = _SEEN.get(key)
+    if seen is not None:
+        return json.loads(seen)                 # a fresh copy: callers may change what they get
     try:
         out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True,
                              timeout=timeout)
@@ -121,7 +128,20 @@ def declared(store: DesignStore, part_id: str, build: Optional[dict] = None,
         tail = [ln for ln in out.stderr.strip().splitlines() if ln.strip()]
         raise ValueError(f"couldn't read what '{part_id}' is built from: "
                          f"{tail[-1] if tail else 'no output'}")
-    return json.loads(line[len("@@BUILT@@"):])
+    text = line[len("@@BUILT@@"):]
+    with _SEEN_MU:
+        _SEEN[key] = text
+        while len(_SEEN) > _SEEN_MOST:
+            _SEEN.pop(next(iter(_SEEN)))
+    return json.loads(text)
+
+
+#: What a script declares, by the script (and its BUILD what-if) it came from: running it takes a second and a
+#: half in its own process, and one set of four cards asked nine times (CALI-59). The same text declares the same
+#: thing, so a change to the script is a new key.
+_SEEN: dict = {}
+_SEEN_MU = threading.Lock()
+_SEEN_MOST = 128
 
 
 def from_members(members: list[dict]) -> list[dict]:
@@ -707,6 +727,97 @@ def _round3(v):
     return [round(float(x), 1) for x in v]
 
 
+def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
+    """The solid a part's printed piece is: the whole part, or, for ``"rest": true`` (CALI-82: a plywood top on
+    printed sides), the part with every declared sheet and stick taken out. None if nothing's printed."""
+    d = d if d is not None else declared(store, part_id)
+    printed = next((it for it in d.get("construction") or [] if isinstance(it, dict) and it.get("kind") == "printed"),
+                   None)
+    if printed is None:
+        return None
+    mesh = store.part_geometry(part_id).require_mesh()
+    if not printed.get("rest"):
+        return mesh
+    entry = store.design.part(part_id)
+    # by the declarations it's cut from too: a what-if (another top thickness) is another printed rest (CALI-87)
+    key = (store.root, part_id, entry.version if entry else None, store.read_script(part_id),
+           json.dumps(d, sort_keys=True, default=str))
+    with _PRINTED_MU:
+        if key in _PRINTED:
+            return _PRINTED[key]
+    import trimesh
+
+    from .occt import OCCT
+
+    cutters = wood_solids(d, mesh, proud=0.5)              # half a mm proud each side: no slivers
+    if not cutters:
+        return mesh
+    with OCCT:                                             # manifold3d, one boolean at a time
+        out = mesh.difference(trimesh.util.concatenate(cutters), engine="manifold")
+    out = out if len(out.faces) else mesh
+    with _PRINTED_MU:
+        _PRINTED[key] = out
+        while len(_PRINTED) > 16:
+            _PRINTED.pop(next(iter(_PRINTED)))
+    return out
+
+
+#: The printed rest of a part, by its script: a boolean every card, plan and check asked for again.
+_PRINTED: dict = {}
+_PRINTED_MU = threading.Lock()
+
+
+def wood_solids(d: dict, mesh, proud: float = 0.0, inner: bool = True) -> list:
+    """Each declared sheet and stick as a solid (``proud`` mm bigger all round): what's taken out of a part to
+    leave its printed rest, and kept exact when the rest is carved (CALI-82). ``inner=False`` keeps a sheet's
+    inner face exact (proud only round its edges and outside), so what's under it stays joined to it."""
+    import numpy as np
+    import trimesh
+    from shapely.geometry import Polygon
+
+    from .consistency import _frame, _sides, shapes
+
+    pcs = [pc for pc in shapes(d) if pc["kind"] in ("sheet", "stick")]
+    _sides(mesh, pcs)
+    cutters = []
+    for pc in pcs:
+        if pc["kind"] == "sheet":
+            for poly, side in zip(pc["polys"], pc["sides"]):
+                o, u, v, n, flat = _frame(poly)
+                poly2 = Polygon(flat).buffer(proud, join_style=2) if proud else Polygon(flat)
+                slab = trimesh.creation.extrude_polygon(poly2, pc["thickness"] + (2 if inner else 1) * proud)
+                frame = np.eye(4)
+                frame[:3, 0], frame[:3, 1], frame[:3, 2] = u, v, n * side
+                frame[:3, 3] = o - n * side * proud
+                if np.linalg.det(frame[:3, :3]) < 0:              # keep it right-handed
+                    frame[:3, 1] = -v
+                    slab.apply_transform(np.diag([1.0, -1.0, 1.0, 1.0]))
+                slab.apply_transform(frame)
+                cutters.append(slab)
+        else:
+            half, a, b = pc["half"], pc["a"], pc["b"]
+            axis = b - a
+            length = float(np.linalg.norm(axis))
+            box = trimesh.creation.box(extents=(2 * half + 2 * proud, 2 * half + 2 * proud, length + 2 * proud))
+            z = axis / (length or 1.0)
+            x = np.cross(z, [0.0, 0.0, 1.0] if abs(z[2]) < 0.9 else [1.0, 0.0, 0.0])
+            x /= np.linalg.norm(x)
+            frame = np.eye(4)
+            frame[:3, 0], frame[:3, 1], frame[:3, 2], frame[:3, 3] = x, np.cross(z, x), z, (a + b) / 2
+            box.apply_transform(frame)
+            cutters.append(box)
+    return cutters
+
+
+def with_printed(store: DesignStore, part_id: str, items: list, d: Optional[dict] = None) -> list:
+    """The items with the printed piece measured from its own solid (:func:`printed_solid`)."""
+    if not any(it.get("kind") == "printed" for it in items):
+        return items
+    g = printed_solid(store, part_id, d)
+    return [{**it, "volume_mm3": float(abs(g.volume)), "area_mm2": float(g.area),
+             "at": [float(v) for v in g.center_mass]} if it.get("kind") == "printed" else it for it in items]
+
+
 def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> dict:
     """One part: weight, centre of gravity, what it's made of, and what to buy."""
     d = declared(store, part_id, build)
@@ -716,10 +827,7 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
     if items is None:
         raise ValueError(f"'{part_id}' doesn't say what it's built from — give its script a "
                          f"construction(params, build) (or members() for a tube frame)")
-    if any(it.get("kind") == "printed" for it in items):
-        g = store.part_geometry(part_id).require_mesh()
-        items = [{**it, "volume_mm3": float(abs(g.volume)), "area_mm2": float(g.area),
-                  "at": [float(v) for v in g.center_mass]} if it.get("kind") == "printed" else it for it in items]
+    items = with_printed(store, part_id, items, d)
     rows = takeoff(items)
     mass, cog = totals(rows)
     saved = read_build(store.read_script(part_id)) or {}
@@ -822,11 +930,14 @@ def adopt(store: DesignStore, part_id: str, values: dict) -> dict:
     for k, v in changed.items():
         if k in saved and isinstance(saved[k], (int, float)) and not isinstance(saved[k], bool):
             changed[k] = float(v)
-    script = write_build(script, changed)
+    from . import carve
+
+    script, dropped = carve.uncarve(write_build(script, changed))
     pretty = ", ".join(f"{k} {M.nominal(v) if k.endswith('_t') else v}" for k, v in changed.items())
-    version = store.write_part(part_id, script, action="build", feedback=f"built from: {pretty}",
+    note = carve.DROPPED if dropped else ""
+    version = store.write_part(part_id, script, action="build", feedback=f"built from: {pretty}" + (f". {note}" if note else ""),
                                extra={"build": changed})
-    return {"version": version, "build": read_build(script), "changed": changed}
+    return {"version": version, "build": read_build(script), "changed": changed, "note": note}
 
 
 # ---------------------------------------------------------------------------

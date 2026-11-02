@@ -1,0 +1,739 @@
+{
+  "id": "20261028-140911-1b81",
+  "part": "frame",
+  "kind": "frame",
+  "created": 1793218151.681119,
+  "params": {},
+  "build": {},
+  "walls": true,
+  "layout": "X only, spine to the back",
+  "carrying": {
+    "parts": [
+      {
+        "part": "cargo_box",
+        "mass_lb": 47.5
+      },
+      {
+        "part": "payload",
+        "mass_lb": 50.0
+      }
+    ],
+    "payload_lb": 50,
+    "mass_lb": 97.5,
+    "cog": [
+      -578.6,
+      0.0,
+      594.4
+    ],
+    "shift_in": 0.6,
+    "reach_in": 11.3,
+    "notes": [],
+    "walls": [
+      {
+        "name": "wall_front_right_0",
+        "depth_in": 24.0,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_front_right_1",
+        "depth_in": 24.0,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_front_0",
+        "depth_in": 41.0,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_front_1",
+        "depth_in": 41.0,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_front_left_0",
+        "depth_in": 24.0,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_front_left_1",
+        "depth_in": 24.0,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_back_right_0",
+        "depth_in": 20.8,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_back_right_1",
+        "depth_in": 20.8,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_back_0",
+        "depth_in": 34.7,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_back_1",
+        "depth_in": 34.7,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_back_left_0",
+        "depth_in": 20.8,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_back_left_1",
+        "depth_in": 20.8,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_left_0",
+        "depth_in": 39.3,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_left_1",
+        "depth_in": 39.3,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_left_2",
+        "depth_in": 39.3,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_right_0",
+        "depth_in": 39.3,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_right_1",
+        "depth_in": 39.3,
+        "skins": "fiberglass",
+        "core": "xps"
+      },
+      {
+        "name": "wall_right_2",
+        "depth_in": 39.3,
+        "skins": "fiberglass",
+        "core": "xps"
+      }
+    ],
+    "on_walls_lb": 51.1,
+    "fastened": [
+      [
+        -101.6,
+        0.0,
+        431.8
+      ],
+      [
+        -1066.8,
+        0.0,
+        431.8
+      ],
+      [
+        -101.6,
+        952.5,
+        444.5
+      ],
+      [
+        -101.6,
+        -952.5,
+        444.5
+      ],
+      [
+        -1066.8,
+        952.5,
+        444.5
+      ],
+      [
+        -1066.8,
+        -952.5,
+        444.5
+      ]
+    ]
+  },
+  "load_lb": 97.5,
+  "factor": 2.5,
+  "min_safety": 3.3,
+  "on_groups": [
+    "rails"
+  ],
+  "drawn": {
+    "mass_kg": 13.7,
+    "mass_lb": 30.2,
+    "safety": 3.56,
+    "governing": {
+      "case": "driving",
+      "member": "shank_in_receiver"
+    },
+    "deflection_mm": 8.8,
+    "deflection_in": 0.35,
+    "notes": [],
+    "receiver": {
+      "standing": {
+        "force_lb": 127.7,
+        "moment_lbin": 3129.0
+      },
+      "driving": {
+        "force_lb": 319.3,
+        "moment_lbin": 7822.0
+      }
+    },
+    "joints": [
+      {
+        "members": [
+          "stub_middle",
+          "x_back_left",
+          "x_back_right",
+          "x_front_left",
+          "x_front_right"
+        ],
+        "at": [
+          -584.2,
+          0.0,
+          444.5
+        ],
+        "case": "driving",
+        "worst_member": "x_front_right",
+        "bending_lbin": 235,
+        "torsion_lbin": 9
+      },
+      {
+        "members": [
+          "spine_0",
+          "spine_1",
+          "stub_middle"
+        ],
+        "at": [
+          -584.2,
+          0.0,
+          431.8
+        ],
+        "case": "driving",
+        "worst_member": "stub_middle",
+        "bending_lbin": 80,
+        "torsion_lbin": 0
+      }
+    ],
+    "walls": [
+      {
+        "name": "wall_front_right_0",
+        "skin_safety": 11436.19,
+        "foam_safety": 999.0,
+        "safety": 9247.82,
+        "case": "driving"
+      },
+      {
+        "name": "wall_front_right_1",
+        "skin_safety": 3.64,
+        "foam_safety": 16.85,
+        "safety": 3.64,
+        "case": "driving"
+      },
+      {
+        "name": "wall_front_0",
+        "skin_safety": 6.56,
+        "foam_safety": 21.71,
+        "safety": 6.56,
+        "case": "driving"
+      },
+      {
+        "name": "wall_front_1",
+        "skin_safety": 6.56,
+        "foam_safety": 21.59,
+        "safety": 6.56,
+        "case": "driving"
+      },
+      {
+        "name": "wall_front_left_0",
+        "skin_safety": 3.65,
+        "foam_safety": 16.92,
+        "safety": 3.65,
+        "case": "driving"
+      },
+      {
+        "name": "wall_front_left_1",
+        "skin_safety": 3710.73,
+        "foam_safety": 999.0,
+        "safety": 2826.0,
+        "case": "driving"
+      },
+      {
+        "name": "wall_back_right_0",
+        "skin_safety": 3703.73,
+        "foam_safety": 999.0,
+        "safety": 2941.45,
+        "case": "driving"
+      },
+      {
+        "name": "wall_back_right_1",
+        "skin_safety": 9.35,
+        "foam_safety": 44.95,
+        "safety": 9.35,
+        "case": "driving"
+      },
+      {
+        "name": "wall_back_0",
+        "skin_safety": 12.11,
+        "foam_safety": 27.8,
+        "safety": 12.11,
+        "case": "driving"
+      },
+      {
+        "name": "wall_back_1",
+        "skin_safety": 12.76,
+        "foam_safety": 35.75,
+        "safety": 12.76,
+        "case": "driving"
+      },
+      {
+        "name": "wall_back_left_0",
+        "skin_safety": 9.3,
+        "foam_safety": 44.29,
+        "safety": 9.3,
+        "case": "driving"
+      },
+      {
+        "name": "wall_back_left_1",
+        "skin_safety": 11730.2,
+        "foam_safety": 999.0,
+        "safety": 8965.5,
+        "case": "driving"
+      },
+      {
+        "name": "wall_left_0",
+        "skin_safety": 57862.97,
+        "foam_safety": 999.0,
+        "safety": 45515.51,
+        "case": "driving"
+      },
+      {
+        "name": "wall_left_1",
+        "skin_safety": 17.89,
+        "foam_safety": 43.85,
+        "safety": 17.89,
+        "case": "driving"
+      },
+      {
+        "name": "wall_left_2",
+        "skin_safety": 66257.68,
+        "foam_safety": 999.0,
+        "safety": 51175.48,
+        "case": "driving"
+      },
+      {
+        "name": "wall_right_0",
+        "skin_safety": 41688.96,
+        "foam_safety": 999.0,
+        "safety": 32813.85,
+        "case": "driving"
+      },
+      {
+        "name": "wall_right_1",
+        "skin_safety": 17.91,
+        "foam_safety": 43.85,
+        "safety": 17.91,
+        "case": "driving"
+      },
+      {
+        "name": "wall_right_2",
+        "skin_safety": 31461.77,
+        "foam_safety": 999.0,
+        "safety": 24119.83,
+        "case": "driving"
+      }
+    ],
+    "fixing": {
+      "force_lb": 110.7,
+      "case": "driving",
+      "at": [
+        -101.6,
+        0.0,
+        431.8
+      ]
+    }
+  },
+  "stations": [
+    {
+      "index": 0,
+      "design": {
+        "shank": "2x2x5/16",
+        "riser": "2x2x3/16",
+        "spine": "2x2x1/8",
+        "x": "1x1x1/16"
+      },
+      "mass_kg": 13.7,
+      "mass_lb": 30.2,
+      "safety": 3.56,
+      "governing": {
+        "case": "driving",
+        "member": "shank_in_receiver"
+      },
+      "deflection_mm": 8.8,
+      "deflection_in": 0.35,
+      "notes": [],
+      "receiver": {
+        "standing": {
+          "force_lb": 127.7,
+          "moment_lbin": 3129.0
+        },
+        "driving": {
+          "force_lb": 319.3,
+          "moment_lbin": 7822.0
+        }
+      },
+      "joints": [
+        {
+          "members": [
+            "stub_middle",
+            "x_back_left",
+            "x_back_right",
+            "x_front_left",
+            "x_front_right"
+          ],
+          "at": [
+            -584.2,
+            0.0,
+            444.5
+          ],
+          "case": "driving",
+          "worst_member": "x_front_right",
+          "bending_lbin": 235,
+          "torsion_lbin": 9
+        },
+        {
+          "members": [
+            "spine_0",
+            "spine_1",
+            "stub_middle"
+          ],
+          "at": [
+            -584.2,
+            0.0,
+            431.8
+          ],
+          "case": "driving",
+          "worst_member": "stub_middle",
+          "bending_lbin": 80,
+          "torsion_lbin": 0
+        }
+      ],
+      "walls": [
+        {
+          "name": "wall_front_right_0",
+          "skin_safety": 11436.19,
+          "foam_safety": 999.0,
+          "safety": 9247.82,
+          "case": "driving"
+        },
+        {
+          "name": "wall_front_right_1",
+          "skin_safety": 3.64,
+          "foam_safety": 16.85,
+          "safety": 3.64,
+          "case": "driving"
+        },
+        {
+          "name": "wall_front_0",
+          "skin_safety": 6.56,
+          "foam_safety": 21.71,
+          "safety": 6.56,
+          "case": "driving"
+        },
+        {
+          "name": "wall_front_1",
+          "skin_safety": 6.56,
+          "foam_safety": 21.59,
+          "safety": 6.56,
+          "case": "driving"
+        },
+        {
+          "name": "wall_front_left_0",
+          "skin_safety": 3.65,
+          "foam_safety": 16.92,
+          "safety": 3.65,
+          "case": "driving"
+        },
+        {
+          "name": "wall_front_left_1",
+          "skin_safety": 3710.73,
+          "foam_safety": 999.0,
+          "safety": 2826.0,
+          "case": "driving"
+        },
+        {
+          "name": "wall_back_right_0",
+          "skin_safety": 3703.73,
+          "foam_safety": 999.0,
+          "safety": 2941.45,
+          "case": "driving"
+        },
+        {
+          "name": "wall_back_right_1",
+          "skin_safety": 9.35,
+          "foam_safety": 44.95,
+          "safety": 9.35,
+          "case": "driving"
+        },
+        {
+          "name": "wall_back_0",
+          "skin_safety": 12.11,
+          "foam_safety": 27.8,
+          "safety": 12.11,
+          "case": "driving"
+        },
+        {
+          "name": "wall_back_1",
+          "skin_safety": 12.76,
+          "foam_safety": 35.75,
+          "safety": 12.76,
+          "case": "driving"
+        },
+        {
+          "name": "wall_back_left_0",
+          "skin_safety": 9.3,
+          "foam_safety": 44.29,
+          "safety": 9.3,
+          "case": "driving"
+        },
+        {
+          "name": "wall_back_left_1",
+          "skin_safety": 11730.2,
+          "foam_safety": 999.0,
+          "safety": 8965.5,
+          "case": "driving"
+        },
+        {
+          "name": "wall_left_0",
+          "skin_safety": 57862.97,
+          "foam_safety": 999.0,
+          "safety": 45515.51,
+          "case": "driving"
+        },
+        {
+          "name": "wall_left_1",
+          "skin_safety": 17.89,
+          "foam_safety": 43.85,
+          "safety": 17.89,
+          "case": "driving"
+        },
+        {
+          "name": "wall_left_2",
+          "skin_safety": 66257.68,
+          "foam_safety": 999.0,
+          "safety": 51175.48,
+          "case": "driving"
+        },
+        {
+          "name": "wall_right_0",
+          "skin_safety": 41688.96,
+          "foam_safety": 999.0,
+          "safety": 32813.85,
+          "case": "driving"
+        },
+        {
+          "name": "wall_right_1",
+          "skin_safety": 17.91,
+          "foam_safety": 43.85,
+          "safety": 17.91,
+          "case": "driving"
+        },
+        {
+          "name": "wall_right_2",
+          "skin_safety": 31461.77,
+          "foam_safety": 999.0,
+          "safety": 24119.83,
+          "case": "driving"
+        }
+      ],
+      "fixing": {
+        "force_lb": 110.7,
+        "case": "driving",
+        "at": [
+          -101.6,
+          0.0,
+          431.8
+        ]
+      }
+    }
+  ],
+  "note": "",
+  "size_params": {
+    "shank": [
+      "shank_w",
+      "shank_t"
+    ],
+    "riser": [
+      "riser_w",
+      "riser_t"
+    ],
+    "spine": [
+      "spine_w",
+      "spine_t"
+    ],
+    "x": [
+      "x_w",
+      "x_t"
+    ]
+  },
+  "catalogs": {
+    "shank": [
+      "2x2x5/16"
+    ],
+    "riser": [
+      "2x2x0.083",
+      "2x2x1/8",
+      "2x2x3/16",
+      "2x2x1/4",
+      "2x2x5/16",
+      "2x2xsolid"
+    ],
+    "spine": [
+      "2x2x0.083",
+      "2x2x1/8",
+      "2x2x3/16",
+      "2x2x1/4",
+      "2x2x5/16",
+      "2x2xsolid"
+    ],
+    "x": [
+      "1x1x1/16",
+      "1x1x0.083",
+      "1x1x1/8"
+    ]
+  },
+  "members": [
+    {
+      "name": "shank_in_receiver",
+      "group": "shank"
+    },
+    {
+      "name": "shank_out",
+      "group": "shank"
+    },
+    {
+      "name": "riser",
+      "group": "riser"
+    },
+    {
+      "name": "spine_0",
+      "group": "spine"
+    },
+    {
+      "name": "spine_1",
+      "group": "spine"
+    },
+    {
+      "name": "stub_middle",
+      "group": "spine"
+    },
+    {
+      "name": "x_front_left",
+      "group": "x"
+    },
+    {
+      "name": "x_front_right",
+      "group": "x"
+    },
+    {
+      "name": "x_back_left",
+      "group": "x"
+    },
+    {
+      "name": "x_back_right",
+      "group": "x"
+    },
+    {
+      "name": "wall_front_right_0",
+      "group": "walls"
+    },
+    {
+      "name": "wall_front_right_1",
+      "group": "walls"
+    },
+    {
+      "name": "wall_front_0",
+      "group": "walls"
+    },
+    {
+      "name": "wall_front_1",
+      "group": "walls"
+    },
+    {
+      "name": "wall_front_left_0",
+      "group": "walls"
+    },
+    {
+      "name": "wall_front_left_1",
+      "group": "walls"
+    },
+    {
+      "name": "wall_back_right_0",
+      "group": "walls"
+    },
+    {
+      "name": "wall_back_right_1",
+      "group": "walls"
+    },
+    {
+      "name": "wall_back_0",
+      "group": "walls"
+    },
+    {
+      "name": "wall_back_1",
+      "group": "walls"
+    },
+    {
+      "name": "wall_back_left_0",
+      "group": "walls"
+    },
+    {
+      "name": "wall_back_left_1",
+      "group": "walls"
+    },
+    {
+      "name": "wall_left_0",
+      "group": "walls"
+    },
+    {
+      "name": "wall_left_1",
+      "group": "walls"
+    },
+    {
+      "name": "wall_left_2",
+      "group": "walls"
+    },
+    {
+      "name": "wall_right_0",
+      "group": "walls"
+    },
+    {
+      "name": "wall_right_1",
+      "group": "walls"
+    },
+    {
+      "name": "wall_right_2",
+      "group": "walls"
+    }
+  ]
+}

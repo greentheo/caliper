@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Literal, Optional
 
 import numpy as np
@@ -185,6 +186,10 @@ def _build_py_local(path: str) -> Geometry:
         return cached
     with open(path) as f:
         script = f.read()
+    carved = _carved(path, script)
+    if carved is not None:                         # a printed part carved by the strength study (CALI-82)
+        _PART_CACHE[key] = carved
+        return carved
     res = sandbox.run_script(script, {})
     if not res.ok:
         # surface the traceback's LAST line — that's the actual exception; the head is boilerplate
@@ -194,6 +199,26 @@ def _build_py_local(path: str) -> Geometry:
         raise ValueError(f"failed to build part script {os.path.basename(path)}: {tail}")
     _PART_CACHE[key] = res.geometry
     return res.geometry
+
+
+_CARVED = re.compile(r"""^CARVED\s*=\s*["']([^"']+)["']""", re.M)
+
+
+def _carved(path: str, script: str) -> Optional[Geometry]:
+    """The part as carved (CALI-82): a script that says ``CARVED = "carved-….stl"`` is that mesh, kept in the
+    part's ``carved/`` folder (the script may be a version's copy, a level or two down)."""
+    m = _CARVED.search(script)
+    if not m:
+        return None
+    import trimesh
+
+    here = os.path.dirname(os.path.abspath(path))
+    for _ in range(4):
+        f = os.path.join(here, "carved", os.path.basename(m.group(1)))
+        if os.path.exists(f):
+            return Geometry.from_mesh(trimesh.load(f, force="mesh"))
+        here = os.path.dirname(here)
+    raise ValueError(f"its carved shape {m.group(1)!r} is missing: roll it back, or carve it again")
 
 
 def _build_py_part(path: str, position, rotation) -> Geometry:

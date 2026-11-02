@@ -1,0 +1,25 @@
+{
+  "all_pass": false,
+  "results": [
+    {
+      "id": "one_body",
+      "expr": "body_count == 1",
+      "status": "fail",
+      "passed": false,
+      "actual": 9,
+      "margin": -8.0,
+      "detail": "",
+      "symbol": "\u2717"
+    },
+    {
+      "id": "watertight",
+      "expr": "is_watertight",
+      "status": "pass",
+      "passed": true,
+      "actual": true,
+      "margin": null,
+      "detail": "",
+      "symbol": "\u2713"
+    }
+  ]
+}

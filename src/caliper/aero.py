@@ -561,17 +561,19 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     # 0.1 mm is finer than foam board can hold; more digits would only be noise in the script
     chosen = {k: round(float(st["design"][k]), 1) for k in rec["searched"]}
     before = store.part_geometry(pid).require_mesh().bounds
-    script = write_params(store.read_script(pid), chosen)
+    from . import carve
     from .whittle_bridge import growth
 
+    script, dropped = carve.uncarve(write_params(store.read_script(pid), chosen))
+    note = carve.DROPPED if dropped else ""
     pretty = ", ".join(f"{k} {_format(v)}" for k, v in chosen.items())
     version = store.write_part(
         pid, script, action="aero",
-        feedback=f"shaped for drag: station {index} ({pretty})",
+        feedback=f"shaped for drag: station {index} ({pretty})" + (f". {note}" if note else ""),
         extra={"aero_run": rid, "station": int(index), "params": chosen,
                "metrics": st.get("metrics", {}), "derived": st.get("derived")})
     grew = growth(before, store.part_geometry(pid).require_mesh().bounds)
     if grew:
         store.append_history(pid, {"kind": "aero", "action": "grew", "grew_mm": grew,
                                    "version": version})
-    return {"version": version, "params": chosen, "grew_mm": grew}
+    return {"version": version, "params": chosen, "grew_mm": grew, "note": note}

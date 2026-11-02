@@ -11,13 +11,15 @@ follows it on ``GET /api/jobs/{id}/events`` (Server-Sent Events, CALI-31).
 
 from __future__ import annotations
 
+import math
 import os
+import re
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
-from . import (aero, answers, chat, clarify, construction, cutplan, frame_study, goals, lighten,
-               load_study, making, patterns, promote, release, scorecard, shop, studies)
+from . import (aero, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
+               load_study, making, patterns, promote, release, samples, scorecard, shop, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -37,6 +39,27 @@ class ChatMessage(BaseModel):
 class ClarifyAnswers(BaseModel):
     answers: dict[str, str] = {}
     skip: bool = False
+    build: bool = False               # then build it, check it and plan its making (CALI-59, first run)
+
+
+class PictureRequest(BaseModel):
+    subject: str = ""                 # what to draw ("a T-rex"), or what the drawing is
+    where: str = ""                   # which panel, in words ("the side")
+    points: list[list[float]] = []    # a drawing from the pad, x right and y down
+
+
+class TrialStep(BaseModel):
+    load_lb: float
+    sag_mm: Optional[float] = None
+    broke: bool = False
+    note: str = ""
+
+    @field_validator("load_lb", "sag_mm", mode="before")
+    @classmethod
+    def _a_number(cls, v):
+        if isinstance(v, bool):                      # true isn't 1 lb (CALI-86)
+            raise ValueError("a number, not true or false")
+        return v
 
 
 class DesignSettings(BaseModel):
@@ -141,6 +164,34 @@ def _lock(slug: str) -> str:
     return f"design:{slug}"
 
 
+#: The first build each design has running (CALI-59), so a page that reloads mid-build follows it again.
+_FIRST: dict[str, str] = {}
+
+
+def first_build(slug: str):
+    """Start a design's first build (it has no parts yet): what it's held to, the part, its strength check,
+    its patterns, its score. Returns the job; one at a time per design."""
+    running = RUNNER.get(_FIRST.get(slug, ""))
+    if running is not None and not running.over:
+        return running
+
+    def work(j):
+        store = DesignStore.load(slug)
+        if store.design.parts:
+            raise ValueError("it's already built: say what to change")
+        return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d), strength=_aero_available(),
+                              cards=lambda s, pid: answers.answers(s, design_state(s), pid))
+
+    job = RUNNER.submit("firstrun", work, label="first build", lock=_lock(slug))
+    _FIRST[slug] = job.id
+    return job
+
+
+def _building(slug: str) -> Optional[str]:
+    j = RUNNER.get(_FIRST.get(slug, ""))
+    return j.id if j is not None and not j.over else None
+
+
 # --- serialising -----------------------------------------------------------------------------------
 def _bbox(store: DesignStore, pid: str) -> Optional[dict]:
     try:
@@ -177,6 +228,9 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "keeps": "def keeps(" in script,
             "shell": "def shell(" in script,      # its walls can carry load in a frame study (CALI-44)
             "loads": "def loads(" in script,      # what it must hold: a strength study (CALI-54)
+            # printed, whole or the rest beside its sheets: carved free-form, not lightened with holes (CALI-82)
+            "printed": bool(re.search(r"""["']kind["']\s*:\s*["']printed["']""", script)),
+            "carved": "CARVED" in script,
             "suggest": {k: aero.suggest(k, v, ranges) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
@@ -193,7 +247,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         except Exception as e:  # noqa: BLE001
             part_errors = {"<design>": f"{type(e).__name__}: {e}"}
     proposal = promote.pending(store)
-    runs = {"load": load_study.list_runs(store), "lighten": lighten.list_runs(store),
+    runs = {"load": load_study.list_runs(store), "lighten": lighten.list_runs(store), "carve": carve.list_runs(store),
             "frame": frame_study.list_runs(store), "patterns": patterns.list_runs(store),
             "gussets": frame_study.list_gussets(store), "aero": aero.list_runs(store),
             "whittle": wb.list_runs(store), "cutplan": cutplan.list_runs(store),
@@ -201,6 +255,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
+        "building": _building(slug),          # the first build's job, while it runs (CALI-59)
         "display_units": d.display_units,
         "requirements": [r.model_dump() for r in d.requirements],
         "parts": parts,
@@ -210,12 +265,14 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "part_errors": part_errors,
         "proposal": proposal.to_dict() if proposal else None,
         "clarify": [q.to_dict() for q in clarify.pending(store)],
-        "log": store.log(),
+        "log": store.log(skipped := []),
+        "log_skipped": len(skipped),
         "whittle_runs": [_run_summary(r) for r in runs["whittle"]],
         "aero_runs": runs["aero"],
         "frame_runs": runs["frame"],
         "load_runs": runs["load"],
         "lighten_runs": runs["lighten"],
+        "carve_runs": runs["carve"],
         "pattern_runs": runs["patterns"],
         "cutplans": runs["cutplan"],
         "gusset_runs": runs["gussets"],
@@ -310,6 +367,28 @@ def router():
         job = RUNNER.submit("clarify", ask, label="clarify", lock=f"clarify:{slug}")
         return {"slug": slug, "job_id": job.id}
 
+    # -- the sample designs (CALI-59): open a copy of one, its cards already full ----------------------
+    @r.get("/api/samples")
+    def sample_list():
+        return {"samples": samples.available()}
+
+    @r.post("/api/samples/{name}")
+    def sample_open(name: str):
+        try:
+            store = samples.open_sample(name)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"no sample {name!r}")
+        return {"slug": store.design.slug}
+
+    @r.post("/api/designs/{slug}/build")
+    def build_first(slug: str):
+        store = load(slug)
+        if store.design.parts:
+            raise HTTPException(status_code=409, detail="it's already built: say what to change")
+        if clarify.pending(store):
+            raise HTTPException(status_code=409, detail="answer its questions first (or leave them blank)")
+        return {"job_id": first_build(slug).id}
+
     @r.get("/api/designs/{slug}")
     def get_design(slug: str):
         return design_state(load(slug))
@@ -330,6 +409,9 @@ def router():
         with RUNNER.locked(_lock(slug)):
             store = load(slug)
             clarify.answer_round(store, req.answers, skip=req.skip)
+        if req.build and not store.design.parts:
+            first_build(slug)                  # it writes the checks first, then builds against them
+            return design_state(load(slug))
 
         def checks(j):                  # what it's held to, from the answers (CALI-55), off the request
             with RUNNER.locked(_lock(slug)):
@@ -347,8 +429,17 @@ def router():
 
         def work(j):
             store = DesignStore.load(slug)
-            res = chat.turn(store, req.message.strip(), scope=req.scope or None,
-                            on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            before = len(store.log())
+            try:
+                res = chat.turn(store, req.message.strip(), scope=req.scope or None,
+                                on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            except Exception as e:
+                # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87)
+                said = store.log()[before:]
+                if any(x.get("kind") == "message" for x in said) and not any(x.get("kind") == "reply" for x in said):
+                    store.append_log({"kind": "reply", "action": "error", "ok": False,
+                                      "reply": f"I couldn't do that: {type(e).__name__}: {e}"})
+                raise
             return turn_result(res)
 
         job = RUNNER.submit("chat", work, label=req.message[:60], lock=_lock(slug))
@@ -458,6 +549,75 @@ def router():
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
         return {"job_id": job.id}
 
+    # -- test it (CALI-80): the prediction, and what the real one did ----------------------------------------
+    @r.get("/api/designs/{slug}/parts/{pid}/trial")
+    def trial_get(slug: str, pid: str):
+        from . import trials
+
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+        return trials.compared(store, pid)
+
+    @r.post("/api/designs/{slug}/parts/{pid}/trial")
+    def trial_add(slug: str, pid: str, req: TrialStep):
+        from . import trials
+
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                trials.record(store, pid, req.load_lb, req.sag_mm, req.broke, req.note)
+            except KeyError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
+            return trials.compared(store, pid)
+
+    # -- a picture on it (CALI-78): drawn or said, cut out of a panel, checked it still holds -----------------
+    @r.get("/api/designs/{slug}/parts/{pid}/picture")
+    def picture_panels(slug: str, pid: str):
+        from . import pictures
+
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+        try:
+            found = pictures.panels(store, pid)
+        except Exception as e:  # noqa: BLE001 — a part with no panels: say so
+            raise HTTPException(status_code=422, detail=f"no panel to put a picture on: {e}")
+        return {"panels": [{"name": p["name"], "room_in2": round(p["room"].area / 645.16, 1)} for p in found]}
+
+    @r.post("/api/designs/{slug}/parts/{pid}/picture")
+    def picture_run(slug: str, pid: str, req: PictureRequest):
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+        if not req.points and not req.subject.strip():
+            raise HTTPException(status_code=422, detail="say what to draw, or draw it")
+        if any(len(q) != 2 or not all(math.isfinite(v) for v in q) for q in req.points):    # CALI-87
+            raise HTTPException(status_code=422, detail="the drawing has a point that isn't a place on the pad")
+
+        def work(j):
+            s = DesignStore.load(slug)
+            said = (f"(drew {req.subject or 'a picture'} to cut out" if req.points else f"(put {req.subject} on it") \
+                + (f", {req.where})" if req.where else ")")
+            s.append_log({"kind": "message", "text": said, "scope": pid, "action": "picture", "part": pid})
+            try:
+                res = chat.picture_part(s, pid, req.subject or "picture", req.where, points=req.points or None,
+                                        strength=_aero_available(),
+                                        on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
+            except Exception as e:
+                # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87)
+                s.append_log({"kind": "reply", "action": "picture", "part": pid, "ok": False,
+                              "reply": f"I couldn't put it on: {type(e).__name__}: {e}"})
+                raise
+            s.append_log({"kind": "reply", "action": "picture", "part": pid, "version": res.version, "ok": res.ok,
+                          "reply": res.reply})
+            return turn_result(res)
+
+        job = RUNNER.submit("picture", work, label=f"picture · {pid}", lock=_lock(slug))
+        return {"job_id": job.id}
+
     # -- the four questions (spec step 1): each answered in a line anyone can read --------------------------
     @r.get("/api/designs/{slug}/answers")
     def design_answers(slug: str, part: Optional[str] = None):
@@ -534,12 +694,56 @@ def router():
                 raise HTTPException(status_code=409, detail=str(e))
             return design_state(store)
 
+    # -- carve (CALI-82): a printed part carved where it isn't working, every step checked ------------------
+    @r.post("/api/designs/{slug}/carve")
+    def carve_run(slug: str, req: LoadRequest):
+        store = load(slug)
+        if store.design.part(req.part) is None:
+            raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
+        if not _aero_available():
+            raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
+
+        def work(j):
+            return carve.study(DesignStore.load(slug), req.part, min_safety=req.min_safety,
+                               emit=lambda k, t="", **d: j.emit(k, t, **d))
+
+        job = RUNNER.submit("carve", work, label=f"carve · {req.part}", lock=f"carve:{slug}")
+        return {"job_id": job.id}
+
+    @r.get("/api/designs/{slug}/carve/{rid}/stations/{index}.stl")
+    def carve_station(slug: str, rid: str, index: int):
+        store = load(slug)
+        try:
+            path = carve.station_path(store, rid, index)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        with open(path, "rb") as f:
+            return Response(f.read(), media_type="model/stl")
+
+    @r.post("/api/designs/{slug}/carve/{rid}/adopt")
+    def carve_adopt(slug: str, rid: str, req: Adopt):
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                got = carve.adopt(store, rid, req.station)
+            except FileNotFoundError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+            except carve.Stale as e:
+                raise HTTPException(status_code=409, detail=str(e))
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
+            return {**got, "design": design_state(store)}
+
     # -- lighten (CALI-71): through-cuts where the wood isn't working, every station checked in 3D --------
     @r.post("/api/designs/{slug}/lighten")
     def lighten_run(slug: str, req: LoadRequest):
         store = load(slug)
         if store.design.part(req.part) is None:
             raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
+        try:                                     # a carved part isn't lightened: said now, before any job (CALI-87)
+            carve.refuse_if_carved(store.read_script(req.part), "holes", "lighten it")
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
         if not _aero_available():
             raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
 
@@ -571,6 +775,8 @@ def router():
                 got = lighten.adopt(store, rid, req.station)
             except FileNotFoundError as e:
                 raise HTTPException(status_code=404, detail=str(e))
+            except carve.Stale as e:
+                raise HTTPException(status_code=409, detail=str(e))
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=str(e))
             store.append_log({"kind": "lighten", "action": "adopted", "run": rid, "station": req.station,

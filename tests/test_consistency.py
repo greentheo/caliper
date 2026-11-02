@@ -166,3 +166,77 @@ def test_the_prompt_carries_the_reference_and_every_material():
         assert f.read() in prompt
     for key in (*materials.SHEETS, *materials.STICKS, *materials.COVERINGS):
         assert f"  - {key}: " in prompt
+
+
+def test_a_filled_box_round_its_panels_fails_when_its_strength_is_checked_in_3d():
+    """CALI-83: Theo's stool came out as a solid block while construction() listed its panels. Every panel lies in
+    the block and covers its surface, so only the volume shows it; with loads() the strength check analyses the
+    solid, so it fails. Without loads() (the camper's lofted box, kept for drag) it's left alone."""
+    pytest.importorskip("cadquery")
+    from caliper import sandbox
+
+    from .test_load_study import BOX_STOOL
+
+    filled = BOX_STOOL.replace('''    out = None
+    for lo, hi in _boxes(p, BUILD["t"]).values():
+        b = cq.Workplane().box(*(b - a for a, b in zip(lo, hi)), centered=False).translate(lo)
+        out = b if out is None else out.union(b)
+    return out''', '''    return cq.Workplane().box(p["w"], p["d"], p["h"], centered=False)''')
+    assert filled != BOX_STOOL
+    run = sandbox.run_script(filled, timeout=120)
+    got = {r.id: r for r in consistency.check(run.declared, run.geometry)}
+    assert got["construction_inside"].passed                  # (its bare underside fails covers too: no bottom panel)
+    vol = got["construction_volume"]
+    assert not vol.passed and vol.actual < 0.67 and "build() is filled in" in vol.detail
+    # the same block without loads(): a shape kept for its outside, weighed from its pieces
+    run = sandbox.run_script(filled.split("def loads(")[0], timeout=120)
+    assert {r.id: r for r in consistency.check(run.declared, run.geometry)}["construction_volume"].passed
+
+
+#: A 4 in cube from six 3/4 in panels, with what it must hold: built hollow, as it would be, or filled solid.
+CUBE = '''import cadquery as cq
+
+S, T = 101.6, 19.05
+FILLED = False
+
+
+def build(params):
+    out = cq.Workplane().box(S, S, S, centered=False)
+    if not FILLED:
+        out = out.cut(cq.Workplane().box(S - 2 * T, S - 2 * T, S - 2 * T, centered=False).translate((T, T, T)))
+    return out
+
+
+def construction(params, build=None):
+    # butt joints: the top and bottom whole, the sides between them, the front and back between the sides
+    a, b = T, S - T
+    faces = {"bottom": [(0, 0, 0), (S, 0, 0), (S, S, 0), (0, S, 0)], "top": [(0, 0, S), (S, 0, S), (S, S, S), (0, S, S)],
+             "left": [(0, 0, a), (0, S, a), (0, S, b), (0, 0, b)], "right": [(S, 0, a), (S, S, a), (S, S, b), (S, 0, b)],
+             "front": [(a, 0, a), (b, 0, a), (b, 0, b), (a, 0, b)], "back": [(a, S, a), (b, S, a), (b, S, b), (a, S, b)]}
+    return [{"name": k, "kind": "sheet", "material": "plywood", "thickness": T, "outline": v} for k, v in faces.items()]
+
+
+def loads(params, build=None):
+    return [{"name": "a foot", "lb": 50, "lo": (30, 30, S - 2), "hi": (70, 70, S)}]
+'''
+
+
+def test_a_small_filled_box_is_caught_like_a_big_one():
+    """CALI-87 (#63, finding 11): a 4 in box's panels are most of its volume, so a filled one passed the volume
+    floor. What's filled is solid that's in no piece at all."""
+    hollow = sandbox.run_script(CUBE, timeout=120)
+    got = {r.id: r for r in consistency.check(hollow.declared, hollow.geometry)}
+    assert got["construction_volume"].passed, got["construction_volume"].detail
+    filled = sandbox.run_script(CUBE.replace("FILLED = False", "FILLED = True"), timeout=120)
+    got = {r.id: r for r in consistency.check(filled.declared, filled.geometry)}
+    assert not got["construction_volume"].passed and "filled in" in got["construction_volume"].detail
+
+
+def test_a_small_filled_box_reports_the_share_it_fails_on():
+    """CALI-87 (#75 rework, item 4): the core share failed the cube, but the result reported the volume ratio's
+    margin (which passes)."""
+    filled = sandbox.run_script(CUBE.replace("FILLED = False", "FILLED = True"), timeout=120)
+    got = {r.id: r for r in consistency.check(filled.declared, filled.geometry)}["construction_volume"]
+    assert not got.passed and "10%" in got.expr
+    assert got.actual == pytest.approx(0.187, abs=0.02) and got.margin == pytest.approx(0.1 - got.actual, abs=1e-3)
+    assert "19% of it is in no piece" in got.detail or "18% of it is in no piece" in got.detail

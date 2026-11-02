@@ -5,6 +5,369 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 
 ---
 
+### 2026-11-01 · CALI-87 (#63), #75 rework · The reviewer's review of #63, worked
+New commits only, on `cali-87-correctness`.
+1. A regression from finding 9: the kids' book crashed when certain pieces shared a name (8 of 26 ways), and
+   the package shipped without it. The chosen piece is now taken out by identity, and all 26 make a book with
+   18 screws. `edc63e0`
+2. A kids' book that fails is said in the package's notes and kept for a report. `cb45cae`
+3. Pages tell same-named pieces apart: drawings by key, "the first side" / "the other side", "touches both
+   sides". `23e9025`
+4. A filled box caught by its core reports the core share against 10%. `21cf8f3`
+5. A lightening study is adopted only onto its own version (409). `64d1b6b`
+6. A chat turn that fails still answers in the log. `d492d90`
+7. The carve refusal names "roll it back". Lightening a carved part is refused before the study runs.
+   `5314c0f`
+
+### 2026-11-01 · CALI-86 (#62), #71 rework · The reviewer's review of findings 8–13, worked
+The foreman's ten items. New commits only; the reviewed ones keep their hashes.
+- **2 (rule 6):** a live test that broke below what the part must hold, or sagged well out of the predicted
+  band, outranks the prediction. The part card loses its ✓ lines, and the design's strength checks read the
+  test: "It broke at 150 lb in your test. We predicted it would hold 400." `57e9568`
+- **3, 4, 7:** every step is judged and the worst governs (closes #70 #1). Each edge is pinned by a test. A
+  break within 10% of the prediction matches it; short of that is "our check was too hopeful"; a low sag is
+  "stiffer than our check said". `c88a047`
+- **1:** the promise follows only strength and frame verdicts (`rests_on_model`), and goes in the first-run
+  reply and `chat._facts`. `56e7eeb`
+- **5, 6:** "about" follows the printed model where it governs (`load_study.rough`); a plywood-governed verdict
+  keeps plywood's words. The top line is "Holds a foot, about 2.6 times over.", with the caveat by the promise.
+  "About" is also on the carve reply and the release table. `2f59997`
+- **8:** an old carve run says "of the whole solid (carved before CALI-86 …)", never relabelled. `a59f9f4`
+- **9, 10:** the chat turn isn't ok when the check couldn't run; each sample guard is tested alone; an unknown
+  sample is a 404 with no path.
+
+### 2026-11-01 · CALI-86 (#62), #69 rework · The reviewer's review of findings 1–7, worked
+The foreman accepted every disagreement in the reviewer's review of #69. One commit per item, new commits only
+(the reviewed ones keep their hashes).
+1. **(rule 6)** The beam now takes where the foot is. Near a free end the width is no more than half the
+   effective width plus the foot's distance from the end (BS 8110; NEEDS ENGINEER CHECK, with the DIN Heft 240
+   note): 190 mm, not 280, for a foot at the end of a 900 mm panel. The tests go through `plate_check`.
+   Centred loads are unchanged. `13460bd`
+2. The report scrubs anyone's home folder. A 500 says a plain sentence and the error id. A YAML error keeps
+   its line and column, never the excerpt (the reviewer's "a surprise stool for Emma"). Failed jobs go the same
+   way. The dialog now says what's true. `fe3c39e`
+3. Trial steps, the log and part histories are read defensively. A bad line is left out and counted, never a
+   500, and the API takes `true` as no number. `d37c422`
+4. A sample is saved beside the old one and swapped in, so a failed save leaves it whole. `1e42dfe`
+5. The pattern tests cover the front and back panels (the x-only mutant fails them). Titles print without an
+   em dash (a test renders each character). `9c6765b`
+6. The carve line names which part holds. The headline reads the step it names, and when carving makes the
+   whole part fail, the headline says so and isn't green. `02bd3d8`
+7. **(rule 6)** In the kids' book, the kid stands an arm's length behind and never in front of the saw, with
+   ear defenders. The wood is clamped with the line past the table's edge. The grown-up stands on the new stool
+   first. `95369a3`
+
+---
+
+### 2026-11-01 · CALI-87 (#63) · The reviewer's correctness findings on the open stack, fixed
+Stacked on #58 (which is on #62). One commit per finding, each with a test seen failing first.
+- **1 (#57):** the printed rest was cached per version, not per what-if, so a 3/4 in what-if left the part as
+  drawn with the what-if's sides. Now it's keyed on the declarations too. `1a8337a`
+- **2 (#57):** every script writer (BUILD what-if, frame, gussets, drag, refine) now drops a carve through
+  `carve.uncarve()` and says so. A picture or lightening on a carved part is refused, with the reason. `7c83d87`
+- **3 (#57):** a carve of an older version isn't adopted (409). `b829d70`
+- **4 (#57):** two test assertions that couldn't fail now can, and each was made to fail on purpose. `e21a9f6`
+- **5 (#50):** "the right side" cut the left. A side named outright now wins over "side". `5fe022b`
+- **6 (#50):** a NaN pad point is refused (422), and a failed picture job still logs a reply. `3bf812f`
+- **7 (#49):** the cut sheet now cuts holes before outlines, in SVG and DXF (Caliper's driver; no
+  unfold-to-sheets change). `bbd87b4`
+- **8 (#49):** a pinned size (`==`, made a band by measuring allowance) is checked for conflicts again.
+  `071a3a9`
+- **9 (#52):** joints are keyed by piece, not by name. Two pieces both called "side" were 16 screws in the BOM
+  and 22 in the kids' book; both now say 18. `720e5c7`
+- **10 (#52):** the build book lists `kids.html` only when one was made. `2d593ee`
+- **11 (#56):** a small filled box is caught by the share of solid in no piece (more than 10%), not just by
+  the volume ratio. `54c9fe5`
+
+### 2026-11-01 · CALI-84 (#58) · One rule for where a load lands
+- **Found in the walkthrough:** Theo's printed two-step stool passed `loads_land`, then its strength check said the
+  foot "pushes on thin air". The foot's box was at the top's height, 1.2 mm above the floor of the 1/8 in mat
+  recess. `loads_land` passed anything within about 2× the measuring tolerance, while the strength check reached
+  one voxel. So they disagreed, both ways, depending on the voxel size.
+- **Now one rule:** `load_study.touches(mesh, box, reach)`: the box is in the part, or within
+  `reach = max(voxel, tolerance)` of its surface, with the voxel size from `study_spacing()` exactly as the study
+  uses it. `loads_land` and `prepare` both ask it, and a miss fails both in the same words (which load, how far
+  from the nearest surface). The strength check grows a box by reach plus half a voxel, so whatever passes has
+  voxels under it. `held()` boxes use the same rule, and the authoring sandbox now reads `held()`.
+- **Verdicts unchanged** on STOOL, BOX_STOOL and MIXED at 2 and 4 voxels through. The FEA moved ≤ 2.6% in safety
+  and ≤ 4% in sag (2 vs 4 voxels through differ by 30–50%). `loads_land` on a printed part costs about 0.1 s more
+  (it measures the thinnest wall for the voxel size).
+- **On Theo's stool:** the adult's foot now lands. The child's box on the "lower step" really is in the air: the
+  script's lower step is a box inside the upper body, so it adds nothing. Both checks now say so.
+- Tests: `tests/test_load_lands.py` (12, written first and failing on the old code: the recess case passed
+  `loads_land` and then raised in `prepare`), plus the strength suites. Commit: `06bd8db`.
+
+---
+
+### 2026-11-01 · CALI-86 (#62), findings 8–13 · The reviewer's findings on the open stack, fixed (part 2)
+Stacked on findings 1–7. One commit each, each with a test seen failing first.
+- **8 (#57):** "% carved away" counted the plywood the carve keeps: 30% was 46% of the print. Now it's the
+  printed part's share, and labelled so. `663f332`
+- **9 (#57, rule 6):** a printed part's verdict now says "about … (printed parts are a rough model)". `9aacd52`
+- **10 (#50, rule 6):** with no strength check installed, a picture on a part with loads() got a ✓. Now it
+  says it couldn't check, and isn't ok. `622c402`
+- **11 (#51, rule 6):** breaking below what the part must hold is bad, breaking short of the prediction is warn,
+  and a sag more than 2× outside the predicted range is warn, with words. `2c041c2`
+- **12 (#43):** `open_sample("..")` copied the package folder. Now it takes only a listed sample's slug.
+  `258fe5e`
+- **13 (#43):** scorecard verdicts (the camper's "safe to tow" lines) now carry the promise. `0b21850`
+
+### 2026-11-01 · CALI-86 (#62), findings 1–7 · The reviewer's findings on the open stack, fixed
+The reviewer's pass over #43–#57, checked by the foreman. One commit each, each with a test seen failing first.
+- **1 (#57, rule 6):** a panel on two edges spread a foot over its whole width, so a 900 mm × 1/2 in panel over
+  300 mm read 2.72× when a plate solution says 1.11×. Now it uses BS 8110's effective width (the load's width +
+  0.6 of the span), which reads 31% high on 900 × 300 and 23% high on 450 × 300 against a Lévy plate series. That's
+  the safe side, the owner's call. Every stool fixture's verdict is unchanged. `136a5ef`
+- **2 (#57, rule 6):** the carve's headline was green ("still 8.4x") while the whole part was 0.66×. It now leads with
+  "doesn't hold as it is" and isn't ok. `8c70418`
+- **3 (#43):** a failed chat job was kept with the person's message, and a design's folder named it in tracebacks.
+  Jobs are now kept by kind, and a design's name is written `designs/<design>`. `report()` looped forever on a long
+  error; now it always stops. The dialog now says what the report really holds, and a job is marked failed only
+  after its error is kept. `cccc696`
+- **4 (#43):** `caliper sample save` with no name deleted every sample. A name must now be a plain slug. `6b998a2`
+- **5 (#51):** one NaN test step broke the design's page. Steps must be real numbers more than nothing, and a bad
+  line on file is skipped (the panel says so). `4f51df6`
+- **6 (#52, rule 6):** the kids' book had a kid holding the work while the jigsaw ran. Now the grown-up clamps,
+  cuts and drives the screws, and the kid stands back in safety glasses. `b3def7e`
+- **7 (#50):** the left side's pattern was mirrored. Patterns are now drawn from the outside face, turned rather
+  than flipped, and each page names the face. `06092c7`
+
+### 2026-10-30 · CALI-81 (#53), CALI-82 (#54) · Printed parts checked; a plywood top on printed sides, carved
+- **Theo**, mid-walkthrough: "what I was specifying was a plywood top and printed sides since the sides would work
+  in compression and we could whittle them down more interestingly". The designer had printed the whole stool, the
+  strength check couldn't analyse a print (no material), and first run hid that behind a "Check it holds" that
+  failed the same way.
+- **Printed parts (#53):** `load_study.printed_material()`, whittle's PETG/PLA at the share that's plastic (1.2 mm
+  walls + infill) and at half strength across its layers. Voxels are sized from the part's thinnest wall. Labelled
+  rough, on the safe side, until a printed test piece says (#42). A check that can't run is kept in the part's
+  history, and the card and first run's reply say why. (Theo's printed stool couldn't be checked anyway: its loads()
+  put the foot on the hand-hold slot.)
+- **Mixed construction (#54, slice 1):** `{"kind": "printed", "rest": true}` is everything in the solid that isn't a
+  declared sheet or stick. `construction.printed_solid()` is the part less its sheets and sticks (manifold), cached by
+  script; weight, shopping list and the printer (just the sides, split to fit) read it. Consistency checks only that
+  the pieces are inside the solid. The designer's reference says when to use it.
+- **Two materials (slice 2):** greentheo/whittle#4 gives `VoxelFEA` a stiffness per voxel (element stiffness,
+  preconditioner, energy and stress all scale; 189 tests pass), and `WHITTLE_REF` is pinned at its commit `65e7e59`.
+  Voxels in a sheet or stick are that material, the rest printed, each judged against its own strength; an older
+  whittle analyses at the printed stiffness throughout and says so. The plywood top's plate check uses plywood and
+  counts an edge held where the printed solid is under it.
+- **A beam check:** a panel held on two opposite edges (a top on two sides) is checked as a simply supported beam, the
+  safe side, as the plate check is for one held all round. Before, the FEA judged it alone, reading stiff (its sides
+  clamp it) and taking plywood along the grain. It says how much stronger it is with the face grain across the gap.
+  It changes one verdict in the tests: the 14 × 10 in top on two sides, 3/4 in, is 1.5x across the grain and 2.9x
+  along it, not the FEA's "over 2". A 1/2 in top over 12 in on two sides, as Theo specified, doesn't make 2x either
+  way: the weak link a carve can't fix.
+- **Carve (slice 3, `carve.py`):** whittle's sweep on the printed voxels only (the wood, where it's pushed and where
+  it's held kept; any printed surface may open), each step judged by the strength check in both materials. The chart
+  is the printed part's own safety and stops where it runs out; the whole part's is beside it, and a part that
+  already fails in its wood says so first. Using a step writes the shape as the part's: the wood exact from the
+  script, the carved rest less a lip round the wood (half a voxel proud), kept in `carved/` and named in the script
+  (`CARVED`); `assembly._build_py_local` builds the part from it, and a chat revision drops it and says so.
+  On a test stool (1/2 in plywood top on 20 mm printed sides, a kid stepping up), 3 minutes at 6 mm voxels: the sides
+  go 13.6x → 15.1x → 8.4x as 40% is carved away, 644 g less filament, then come apart. The carved legs come out as
+  arches with a foot rail along the floor, the plywood top exact, one watertight body.
+- **The page and the chat:** **Carve it** under *Will it work? → the numbers* for a printed part, the chart, a
+  preview ("Preview, not carved yet") and **Carve it like this** (then the strength check again); "carve the sides";
+  the studies page lists carves.
+- **A crash it found:** three requests for a mixed part's cards, making and balance at once ran manifold3d booleans
+  on three threads and took the server down (SIGABRT), as OCCT did before it got its lock. Every manifold boolean
+  now takes that lock.
+- Tests: `test_printed_strength.py`, `test_mixed.py` (the printed rest is the solid less the plywood; the printer gets
+  only the sides; its declarations check; two materials, with and without whittle's stiffness per voxel, and the
+  beam; the carve: a top that fails says so, the sides carve down until they don't hold, using a step rebuilds it
+  watertight with the plywood unchanged, a revision drops the carve; a sheet part can't be carved; the chat routes
+  carve to a printed part only; carving through the API), `test_load_study.py` updated for the beam.
+- Live check in a scratch app (port 8015): the carved stool in the viewport, the carve panel and its chart, a step's
+  preview and **Carve it like this**.
+- **Full suite: 543 passed** (with whittle at `65e7e59` and unfold-to-sheets at `8fc66c9`); after the lock fix, the 84
+  tests it touches pass again.
+
+### 2026-10-30 · CALI-83 (#55) · Walkthrough: a stool built as a filled box; a lightening preview read as the part
+- **Theo's walkthrough** ("let's walk through it… see if I can recreate it in the tool without you having to write
+  all kinds of scripts"), with first run, the four questions and his own words. Two things he flagged:
+  "the box is filled in instead of hollow" and "the cut plan doesn't have the holes or side cutouts removed".
+- **Filled in:** the designer's `build()` made a solid 24 × 12 × 6 in block while `construction()` listed six
+  panels. Every panel lay in the block and covered its surface, so the checks passed it, and the strength check and
+  the lightening study ran on a block. For a part with `loads()`, the solid must now be its pieces (0.67–1.25× their
+  volume): the designer is told "build() is filled in", and a part already built that way says so on *What is it?*.
+  The camper's lofted cargo box is 8.9× its pieces but has no `loads()` (it's kept for drag; weighed from its
+  pieces), so it's left alone; the sample stool and Theo's first stool are exactly 1.0.
+- **No holes on the cut plan:** the server log showed lightening step 17 previewed five times and never cut in. The
+  bar now says **Preview, not cut yet**, and while one is shown the patterns and cut plan say they're of the part as
+  it is.
+- Also from the walkthrough, filed and done on their own branch: printed parts (#53), and a plywood top on printed
+  sides, carved (#54).
+- Commit: `292d887`, PR #56.
+
+### 2026-10-30 · Decision · V1 as a hosted web app with a native wrapper, not the App Store (CALI-58, #7)
+- **Theo:** "for app store, I'm thinking that no it's probably not going to work, and honestly, trying to make it work
+  is going to add a lot of complexity. What we might be better off doing is creating this as a web app and service
+  (Railway?) and then doing a wrapper around it. Obviously needs to be more than just a wrapper to a webservice, so
+  we can add a few distinguishing features, but ultimately no code will need to be run on the user side. This of
+  course, is going to present a compute bandwidth problem since FEA can be compute intense. perhaps that would be
+  something we can keep local... dunno"
+- What it changes: generated code runs on the server, so the real sandbox (CALI-66, #26) becomes multi-tenant
+  isolation; accounts, storage and the API key move server-side; error reports (CALI-59) can go to the service with
+  the person's say-so instead of a GitHub issue. Open: where the FEA runs (a worker pool, or the wrapper's own
+  fixed, signed code on the person's machine) and what the wrapper does that the web page can't.
+- Not started: needs a spec (`specs/`), then #6 and #7 rewritten to match.
+
+### 2026-10-30 · CALI-79 (#47) · A build book a kid can follow: pictures first, one step a page
+- Showcase 1 (#10) asks for a build book a kid can read, pictures first. The shop's book had two steps for the
+  stool ("End and side panels", "Finish"), and its panel step said to "glue them to the floor's edge and the
+  skeleton with foam-safe adhesive": the camper's words, for a plywood stool.
+- **`kidbook.py`:** `kids.html` in the build package, for a build that's all wood (sheets or sticks, glued and
+  screwed; a welded frame stays in the shop's book):
+  - **Get your things:** the shopping list in a kid's words, plus the tools, as boxes to tick.
+  - **Draw the pieces:** each pattern's thumbnail and its name, and the full-size PDF.
+  - **Cut them out**, with a grown-up: for a picture or a hole, "drill a hole just inside the line first".
+  - **Sand the edges.**
+  - **One page a piece**, in the order they go together: the lowest standing piece first, then each one that
+    meets what's there (the joints the shopping list counts screws for), lowest and biggest first. Every page has
+    the same view, what's on in pale and the new piece in colour, and "Put glue on the edges where the left side
+    panel touches the front panel… put in 2 screws." The pages' screws add up to the shopping list's.
+  - **Paint it**, if it's painted.
+  - **Test it:** gently, with a grown-up holding it; how many times over it should hold; what that promises.
+  - The view looks at the side with the picture (and the front with it); the cover is the stool with its T-rex.
+- **Drawings show holes:** `release.pieces` gives a flat panel its holes, so the shop's book draws the T-rex and the
+  lightening windows too. *How do I make it?* links **The kids' build book** beside the build book.
+- Tests: `test_kidbook.py` (a wooden build gets one and a welded frame doesn't; the pages in order with the top
+  last, a kid's words, the start-hole line, the promise, a drawing per piece, the screws adding up; the drawings
+  show a panel's holes and look at the picture).
+- Commits: `14d939d`, `96584bf` (the shop book's wood panels). PR #52. **Full suite on this branch, the stack's top: 530 passed.**
+
+### 2026-10-30 · CALI-80 (#48) · Record the test: predicted against measured
+- Showcase 1 (#10): "Dad stands on it, then sandbags go on until it breaks. Record the predicted vs measured here."
+  Also the first real point for calibration (#42).
+- **`trials.py`:**
+  - **The prediction**, from the latest strength check on this version: for the worst load, the sag at the
+    middle of the panel it's put on, at each step (50 lb at a time) up to where it should break, as a range.
+    The range runs from the FEA's sag (joints solid: the stiff end) to the plate check's (edges free: the
+    flexible end), linear in the load.
+  - **What to measure it with:** the stool's top under 200 lb should sag 0.003–0.005 in (0.08–0.13 mm). A tape
+    measure won't see that, so it says to use a dial indicator, or a straightedge and feeler gauges.
+  - **The record:** each step in `trials/<part>.jsonl` (load, sag, broke, note, the version).
+  - **On the card:** "Tested: it held 400 lb, sagging 0.006 in (we predicted 0.004–0.008 in)." or "Tested: it
+    broke at 1,100 lb (we predicted about 1,240)." A test of an older version reads as stale.
+- **Test it** under *Will it work? → the numbers*: what to do and with what, a chart of the predicted band with
+  the measured points and where it should break, the step table, and a row to record a step.
+  `GET/POST /api/designs/{slug}/parts/{pid}/trial`.
+- Tests: `test_trials.py` (the prediction from the load to where it breaks, as a range, and what to measure with;
+  none without a check on this version; steps kept and compared, the card's line, where it broke, an older
+  version's test reads as stale; the API).
+- Commit: `b957193`. PR #51.
+
+### 2026-10-30 · CALI-78 (#46) · A picture on it: a T-rex cut out of the side, and it still holds Dad
+- Showcase 1 (#10): "a stool to reach the sink, with a T-rex on it". The kid's ask is the hook; the engineering
+  question it raises is the story: can you cut a T-rex out of the side and still hold Dad?
+- **`pictures.py`:** the picture comes from words or from the pad.
+  - **Words:** a hand-drawn T-rex is built in (also "dinosaur"). Anything else, Claude puts together from simple
+    shapes (ellipses, thick strokes, polygons), joined and smoothed into one silhouette. Asked to trace an outline
+    point by point, its T-rexes came out unrecognisable and one crossed itself; built from shapes, its cat and its
+    rocket came out right (its T-rex still didn't, hence the built-in one).
+  - **The pad:** a drawing, screen y down.
+  - **Where it goes:** a panel nobody stands on (the front, or the one named; "side" means left or right), upright
+    and facing the way it was drawn as you look at it from outside, centred at the room's pole of inaccessibility,
+    90% of as big as fits inside the 1.5 in rim and a web clear of any holes.
+  - **Cuttable:** closed and opened at 1/8 in radius (nothing narrower than a 1/4 in blade turns round, no gap
+    narrower), exterior only (no eye to fall out).
+  - **Checked:** the strength check is tried with its cells taken out of the voxels (as the lightening study does);
+    too weak, it shrinks by 0.8 up to five times, or says it can't and changes nothing.
+  - **Cut:** written into `HOLES` with `"picture": "T-rex"`, so the patterns, the CNC sheet (CALI-77) and the
+    rebuilt part's strength check see it. That check is the number the reply gives.
+- **Lightening leaves it alone:** `holes.merge` marks picture polygons and `lighten.panels` keeps a web of wood round
+  them, so a later study doesn't read the T-rex as a hole and redraw it as a blob; `lighten.adopt` keeps picture
+  entries and replaces only the lightening holes (`holes.read`/`holes.write`, shared now).
+- **From the chat:** a new route, `picture` ("put a T-rex on the side"). Claude routes it with the subject and the
+  panel; offline it's taken only for a shape it can draw or one called a picture, so "add a foot on the bottom" is
+  still a part. **From the page:** **🦖 Put a picture on it** under *What is it?* (a part, or a one-part design):
+  say it (or 🎤), or draw it on the pad, pick the panel, **Cut it out**.
+  `GET/POST /api/designs/{slug}/parts/{pid}/picture`.
+- **Live (the sample stool, Claude routing):** "put a T-rex on the side" → "✓ I cut a T-rex 5.2 × 5 in out of the left
+  side panel. It still holds, 3.11 times over (it needs 2)." in about 40 s. The side's pattern shows it with "drill a
+  3/8 in hole inside the line to start the jigsaw"; *How do I make it?* reads "5 pieces, 1 hole".
+- Tests: `test_pictures.py` (the built-in T-rex and Claude's shapes joined; what a jigsaw can't follow smoothed
+  out and the eye dropped; panels nobody stands on, upright as seen from outside; a T-rex on the side cut and still
+  holding, on the rebuilt part; lightening leaves it alone and adopting keeps it; too weak shrinks it, hopeless
+  changes nothing; the chat routes it and leaves parts alone; a drawing from the pad cut through the API).
+- Commit: `c2ecdc0`. PR #50. **Full suite: 523 passed.**
+
+### 2026-10-30 · CALI-76 (#44), CALI-77 (#45), CALI-68 (#28) · Three leftovers: fast cards, holes on the CNC sheet, measuring error
+- **Theo:** "Please do the seven PR merge stack. Then Showcase 1 and the three leftovers." The stack (#25, #30, #33,
+  #35, #36, #37, #41) is merged into `main` in order, each retargeted to `main` and merged with a merge commit;
+  nine issues closed with it (#1 stays open: #30 was one slice). #8 went up as PR #43 into `main`.
+- **Cards in under a second (#44):** one set of four cards ran `construction.declared()` nine times, each the part's
+  script in its own process (~1.5 s), always on the same script: 13.4 s of 13.4 s on the stool. Now cached by the
+  script's text and BUILD what-if (a change to the script is a new key; callers get a fresh copy): 0.9 s.
+  `design_state` on a warm server is 6 ms.
+- **Holes on the CNC sheet (#45):** a holed panel goes to unfold-to-sheets as triangles round its holes
+  (`cutplan.holed_face`: manifold3d triangulates it in the outline's plane, wound as the outline faces), so the
+  unfolder reads them as the piece's inner boundaries and cuts them. The note now says to cut the holes before the
+  outlines. **A bug it found in unfold-to-sheets:** a piece was lined up by the principal axes of all its points,
+  so an off-centre hole tilted it on the sheet (0.13° for a 2 in hole; a rounded window, more).
+  greentheo/unfold-to-sheets#2 lines a piece with holes up by its outline (one without holes as before; 145 tests
+  pass); `UNFOLD_REF` is pinned at its commit `8fc66c9`. Theo's own checkout (`vendor/` links to it) needs that PR
+  merged and pulled before the new cut plan test passes locally.
+- **Measuring error (#28):** a drafted rule on `min_wall` or a `bbox` size has the measurement's tolerance written
+  into it (`promote.MEASURING`: a wall 0.15 mm, a size 0.1 mm, from the 0.05 mm tessellation and the ray-cast):
+  `min_wall >= 19.05 - 0.15` holds for 3/4 in ply measured at 18.98 and still fails 5/8 in. An `==` on a size
+  becomes a band. The offer says what the allowance is; `_bounds` folds the arithmetic, so contradictions are
+  still caught.
+- **Filed for Showcase 1 (#10):** CALI-78 (#46) a picture on it (the T-rex, cut out and still holding Dad),
+  CALI-79 (#47) a build book a kid can follow, CALI-80 (#48) record the test, predicted against measured. Knock-down
+  joinery stays with #9. Next free id: CALI-81.
+- Tests: `test_answers.py` (the declarations are read once until the script changes), `test_cutplan.py` (a holed
+  panel's triangles: the panel less the hole, facing out, eight boundary edges; the stool's left wall with a 2 in
+  hole cut on its sheet), `test_promote.py` (18.98 holds a 3/4 in wall rule, 15.88 doesn't; only measured sizes
+  get the allowance; a drafted rule says so), the old exact-text expectations updated. **Full suite: 515 passed**
+  (with unfold-to-sheets at `8fc66c9`).
+- Commits: `916745e` (#44), `f3ccee0` (the pin), `2db111e` (#45), `7622e00` (#28). PR #49.
+
+### 2026-10-30 · CALI-59 (#8) · First run: one sentence in, four answers out
+- **Theo:** "let's go #8". Spec step 5: first run lands on the four questions.
+- **The first build (`firstrun.py`):** a new design used to stop after its questions at "Tell me which part to
+  build first"; the stool then took six messages and a couple of clicks before its cards said anything. Now
+  **Build it** on the questions (blanks take the grey suggestion, marked assumed) runs one job, said step by step:
+  what it's held to (`goals.update`), the part (the whole sentence as one part, named for what it is; CALI-35
+  will plan several), its description rewritten from the script, its strength check at the safety its checks
+  ask for, its patterns, and the scorecard, so no check reads "not checked yet". The reply is the four answers,
+  a line each, verdicts first. `POST /api/designs/{slug}/clarify` takes `build: true` (the page sends it; the
+  default stays false), `POST /api/designs/{slug}/build` starts it for an answered design, and `design_state`
+  says `building` so a reloaded page follows the job again. A design that's one part answers *What do I buy?*
+  and *How do I make it?* with that part's list and patterns.
+- **Live:** "A step stool so my 6-year-old can reach the bathroom sink, from 3/4 in plywood. It has to hold me
+  too, 200 lb." → named *Step stool* (`short_name`: what it is, not the sentence cut at 60 characters), four
+  questions left blank, **Build it** → 2½ minutes → holds Dad 8.07x, 1 sheet, 22 screws, about $39, 10.9 lb,
+  19 pages of patterns, every check scored.
+- **Samples (`samples.py`, `caliper/samples/`):** the stool and the camper as they are, with the newest run of
+  each study per part (10 MB: the stool's strength heat map and patterns, the camper's drag stations); build
+  packages left out. Opening one copies it into your designs (`step-stool`, `step-stool-2`…).
+  `caliper sample save <name> --slug <design>` remakes one; home folders are written `~`. Their descriptions were
+  brought up to date (the stool's still said "two-step") and their names shortened (*Step stool*, *Camper shell*).
+- **What the numbers promise (`answers.PROMISE`):** under any strength or frame verdict, and in the build book.
+  A prediction from the loads and textbook strengths, not a certificate; test it gently first.
+- **Errors you choose to report (`errors.py`):** failed jobs, crashed requests (a 500 now carries an `error_id`)
+  and errors on the page are kept in `~/.caliper/errors.jsonl` (or `$CALIPER_ERRORS`), the newest 50, home folder
+  as `~`. **Report it…** shows the whole report (what broke, where, Caliper/macOS/Python versions, nothing of the
+  design) and opens it as a new GitHub issue in the browser for the person to submit. Nothing is sent on its own;
+  there's no server to send it to, and none is needed.
+- **For a kid:** 🎤 beside both boxes uses the browser's speech recognition where it has one, else says how to
+  start the Mac's dictation (which types into any box). **Say it simpler** under the last reply. With a key, a
+  question is answered by Claude in plain words from what's measured (`chat.explain`: the four cards, the
+  strength check and its notes, the last of the conversation); offline, the facts as before. Asking for it in
+  plain words is always a question, never a change, even with a part selected (`_EXPLAIN`).
+- **Filed CALI-75 (#42):** Theo showed it to a structural engineer friend, whose one concern was whether the FEA
+  is accurate and the safety factor appropriate. #42 covers it: benchmarks with known answers at the voxel sizes
+  we use, the material values' sources, a safety factor per kind of design with its basis, joints, a sandbag test
+  of the real stool, and a range where the model is rough. Until then the cards say it's a prediction. Next free
+  id: CALI-76.
+- Tests: `test_firstrun.py` (one sentence in, four answers out: each step in order, its strength check at its
+  checks' safety, its patterns, the reply; a failed build adds nothing; no strength check without whittle; through
+  the API: answering builds it and a second build is refused; plain-words routing and the explain prompt),
+  `test_samples.py`, `test_errors.py`; `test_answers.py` updated for a one-part design; the build book's title is
+  the design's short name now. **Full suite: 509 passed** (in two runs: up to `test_release.py`, then from it).
+- Commit: `73f6499`, PR into `main` (the seven-PR stack #25 → #41 merged into `main` first, in order).
+
 ### 2026-11-01 · The firm · Caliper runs as a team of agents
 - **Theo:** "please take on the foreman role found in ~/githubrepo/the-firm, and work with caliper-reviewer to
   review current PR's and existing work… also, you will be working with caliper-nightshift as your engineer".

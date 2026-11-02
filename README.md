@@ -60,13 +60,17 @@ environment starts there. micromamba solves it in seconds; Anaconda's classic so
 make serve              # → http://127.0.0.1:8000
 ```
 
-It runs on your machine only; nothing is hosted. Start a design from the home page; the older control
-panel is at `/classic`. The command line drives the same engine:
+It runs on your machine only; nothing is hosted. The home page asks what you want to make: say it in a
+sentence, leave the questions blank if you like, and **Build it** builds it, checks it holds, draws the
+patterns and answers four questions: what is it, will it work, what do I buy, how do I make it. Or open the
+step stool or the camper as a sample. The older control panel is at `/classic`. The command line drives the
+same engine:
 
 ```bash
 caliper gen "a phone stand for a 7 mm thick phone"        # Claude writes a part, measured until it passes
 caliper run "a 60 mm corner bracket with four M5 holes" --no-llm   # the offline bracket generator
 caliper assemble examples/machine.yaml                     # measure a multi-part assembly
+caliper sample open step-stool                             # a copy of the stool in your designs
 caliper --help                                             # spec, refine, fit, insert, design, chat, serve
 ```
 

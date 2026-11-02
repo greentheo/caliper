@@ -49,6 +49,7 @@ def in_air(design, parts: list[dict], has_runs: bool = False) -> dict:
 KINDS = {
     "load": ("Strength", "Will it hold what it must carry?"),
     "lighten": ("Lighten", "Holes where the wood isn't working, cut all the way through, still holding"),
+    "carve": ("Carve", "A printed part carved free-form where it isn't working, still holding"),
     "frame": ("Frame sizing", "The lightest tubes that still hold, and what the hitch carries"),
     "gussets": ("Gusset plates", "Plates for the frame's hardest-worked joints, cut for a plasma table"),
     "aero": ("Drag shape search", "The numbers in its script that cut drag, within their ranges"),
@@ -104,6 +105,27 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         out = next((x for x in st if not x.get("holds")), None)
         return (f"up to {best['saved_lb']:g} lb lighter" + (f" in {best['label']} sheet (an estimate)" if best.get("estimate") else "")
                 + f", still {round(best['safety'], 1):g}x" + (f"; runs out at step {out['index']}" if out else "")), True
+    if kind == "carve":
+        st = r.get("stations", [])
+        best = next((x for x in st if x["index"] == r.get("best")), None)
+        from . import carve
+
+        carved = (f"{best['removed']:.0%} {carve.share(r)} carved away, {best['saved_g']} g less filament, still "
+                  f"{round(best['safety'], 1):g}x" if best and best["saved_g"] else "")
+        first = st[0] if st else {}
+        if first and not first.get("whole_holds"):
+            # the part fails where carving can't reach: that's the verdict, never a green line (CALI-86)
+            whole = first.get("whole")
+            return ("doesn't hold as it is: " + (f"{round(whole, 1):g}x" if whole is not None else "not checked")
+                    + f", needs {r.get('min_safety', 2):g}x" + (f" (the {first['weakest']})" if first.get("weakest") else "")
+                    + (f"; carving the printed part: {carved}" if carved else "")), False
+        if not carved:
+            return "nothing could come off and still hold", False
+        if not best.get("whole_holds", True):
+            # the printed part holds at this step, but carving it makes the whole part fail (CALI-86)
+            return (f"{carved}, but the whole part is then {round(best['whole'], 1):g}x, and it needs "
+                    f"{r.get('min_safety', 2):g}x"), False
+        return carved, True
     if kind == "frame":
         ok = [s for s in r.get("stations", []) if s.get("safety", 0) >= r.get("min_safety", 0)]
         if not ok:

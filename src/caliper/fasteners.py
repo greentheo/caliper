@@ -24,10 +24,23 @@ GLUE_ML_PER_IN = 0.5
 WOOD = ("plywood", "lumber")
 
 
+def keys(pieces: list[dict]) -> None:
+    """Give each piece a ``key`` of its own: its name, or its name and a number when another piece has the same
+    name. Joints are between pieces, not names (CALI-87: two pieces both called "side" were one joint to the
+    shopping list and two to the kids' book)."""
+    seen: dict = {}
+    for pc in pieces:
+        n = pc.get("name") or pc.get("kind") or "piece"
+        seen[n] = seen.get(n, 0) + 1
+        pc["key"] = n if seen[n] == 1 else f"{n} #{seen[n]}"
+
+
 def joints(pieces: list[dict], tol: float) -> dict:
-    """``{(a, b): mm}``: the length of contact between each pair of wood pieces that touch."""
+    """``{(a, b): mm}``: the length of contact between each pair of wood pieces that touch, by each piece's ``key``
+    (see :func:`keys`, which this sets)."""
     from .consistency import _frame, segment_distance, slab_distance
 
+    keys(pieces)
     wood = [pc for pc in pieces if pc.get("material") in WOOD]
     contact: dict = {}
     for i, pc in enumerate(wood):
@@ -54,9 +67,9 @@ def joints(pieces: list[dict], tol: float) -> dict:
                     else:
                         d = float((segment_distance(probes, other["a"], other["b"]) - other["half"]).min())
                     if d <= tol:
-                        key = tuple(sorted((pc["name"], other["name"])))
+                        key = tuple(sorted((pc["key"], other["key"])))
                         mine = contact.setdefault(key, {})
-                        mine[pc["name"]] = mine.get(pc["name"], 0.0) + length
+                        mine[pc["key"]] = mine.get(pc["key"], 0.0) + length
     return {key: max(by.values()) for key, by in contact.items()}
 
 

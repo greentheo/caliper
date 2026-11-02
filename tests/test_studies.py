@@ -93,3 +93,53 @@ def test_drag_studies_are_offered_only_to_what_moves_through_air():
     behind = studies.in_air(_Design("a box"), [{"id": "car", "role": "fixed"}])
     assert behind == {"yes": True, "why": "it rides behind car"}
     assert studies.in_air(_Design("a box"), [], has_runs=True)["yes"]
+
+
+def _carve(wholes, best=2, min_safety=2.0):
+    """A carve run's record, as carve.study writes it, where the whole part's safety changes from step to step: it
+    does when the FEA on the printed part governs it, not the plywood."""
+    st = [{"index": k, "removed": round(0.15 * k, 3), "safety": round(4.0 - 0.8 * k, 2), "holds": 4.0 - 0.8 * k >= 2,
+           "whole": w, "whole_holds": w >= min_safety, "weakest": "left" if k else "top",
+           "printed_g": 900 - 120 * k, "saved_g": 120 * k, "stl": f"station_{k:02d}.stl"} for k, w in enumerate(wholes)]
+    return {"kind": "carve", "min_safety": min_safety, "best": best, "stations": st}
+
+
+def test_the_carve_headline_reads_the_step_it_says():
+    """CALI-86 (#69 rework, item 6; rule 6): the headline read station 0 as "as it is" and nothing else, so the
+    mutants first = best and first = stations[-1] survived, and a carve that makes the whole part fail read green."""
+    from caliper import studies
+
+    # holds as drawn, but at the lightest step where the printed part holds, the whole part doesn't
+    text, ok = studies._headline("carve", _carve([2.5, 2.2, 1.5, 0.9]))
+    assert ok is False and text.startswith("30% ") and "carved away" in text, text
+    assert "the whole part is then 1.5x, and it needs 2x" in text
+    # doesn't hold as drawn, whatever the carve does
+    text, ok = studies._headline("carve", _carve([0.66, 2.4, 2.4, 2.4]))
+    assert ok is False and text.startswith("doesn't hold as it is: 0.7x"), text
+    # holds as drawn and at the step: green
+    text, ok = studies._headline("carve", _carve([2.5, 2.4, 2.3, 1.2]))
+    assert ok is True and text.startswith("30% ") and "still 2.4x" in text
+
+
+def test_an_old_carve_keeps_its_meaning(monkeypatch):
+    """CALI-86 (#71 rework, item 8): a carve saved before CALI-86 counted the whole solid. It says so; it's never
+    relabelled as the printed part's share. The page, the chat and the progress say what each run's share is."""
+    import os
+
+    from caliper import carve, chat, studies
+
+    old, new = _carve([2.5, 2.4, 2.3, 1.2]), {**_carve([2.5, 2.4, 2.3, 1.2]), "share": "printed"}
+    assert "of the whole solid (carved before CALI-86: carve again for the printed share)" in studies._headline("carve", old)[0]
+    assert "30% of the printed part carved away" in studies._headline("carve", new)[0]
+    # the chat's reply on a carve it just made
+    monkeypatch.setattr(carve, "study", lambda *a, **k: {**new, "id": "x", "part": "p", "notes": []})
+    from caliper.design import DesignStore
+    import tempfile
+
+    store = DesignStore.create("a stool", base=tempfile.mkdtemp())
+    store.write_part("p", "def build(params):\n    return None\n", intent="x")
+    res = chat.carve_part(store, "p")
+    assert "30% of the printed part carved away" in res.reply and "about 2.4 times over" in res.reply, res.reply
+    # the page labels every run by its own share, in all three places it says one
+    js = open(os.path.join(os.path.dirname(studies.__file__), "web", "static", "design.js")).read()
+    assert js.count("${carveShare(run)}") == 3 and "of the printed part carved away" not in js

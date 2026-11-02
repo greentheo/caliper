@@ -42,6 +42,18 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **A build book a kid can follow (CALI-79, #47).** Pictures first, one step a page, one piece at a time, for an
+  all-wood build; in the build package beside the shop's book.
+- 🆕 **Test it (CALI-80, #48).** What the strength check predicts at each load (a sag range, and where it breaks),
+  what to measure it with, and what the real one did; the card says how it went.
+- 🆕 **A picture on it (CALI-78, #46).** "Put a T-rex on the side": drawn (or drawn by you on the pad), cut out of
+  a panel nobody stands on, smooth enough for a jigsaw, and checked that it still holds; on the patterns and the
+  cut sheet.
+- 🆕 **Printed sides, carved (CALI-82, #54).** A part can be part plywood, part printed; its strength is checked
+  in both materials, and the printed part can be carved down where it isn't working, every step checked.
+- 🆕 **First run (CALI-59, #8).** One sentence, a few questions you can leave blank, **Build it**: Caliper builds
+  it, checks it holds, draws the patterns and scores it, then answers the four questions. Or open the stool or
+  the camper as a sample. Talk instead of typing; ask it to say it simpler; report what breaks if you want to.
 - 🆕 **Will it hold? (CALI-54, #1).** A part that says what it must carry (`loads()`, written by the designer
   from "it has to hold me, 200 lb") gets a strength check: whittle's FEA with a stress picture, a plate check
   for a panel pushed face-on, the verdict, and where it should break.
@@ -553,6 +565,161 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-11-01 · #75 reworked from the reviewer's review (CALI-87 #63)
+1. **Name both sides of a box stool "side" and make a build package:** the kids' book is there, with "Add the
+   first side", "Add the other side", and "touches both sides" on the top's page.
+2. **Lighten a carved part:** refused straight away, telling you to say "roll it back" first.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_kidbook.py tests/test_release.py
+   tests/test_carve_dropped.py tests/test_carve_stale.py tests/test_consistency.py tests/test_pictures.py`.
+
+### 2026-11-01 · #71 reworked from the reviewer's review (CALI-86 #62)
+1. **Record a test on the sample stool that broke at 150 lb:** both the design's and the part's *Will it work?*
+   go red with "It broke at 150 lb in your test. We predicted it would hold 400." No ✓ is left above it.
+2. **Record several steps, one sagging far more than predicted:** that step governs the line, even if a heavier
+   one has no sag.
+3. **A printed box:** "Holds a foot, about … times over." The rough-model note sits by the promise.
+4. **An old carve run:** it reads "of the whole solid (carved before CALI-86 …)".
+5. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_trials.py tests/test_answers.py
+   tests/test_printed_strength.py tests/test_studies.py tests/test_samples.py tests/test_pictures.py`.
+
+### 2026-11-01 · #69 reworked from the reviewer's review (CALI-86 #62)
+1. **A foot at the free end of a wide top on two sides:** the numbers name a narrower width ("… this near its
+   free end") and a lower safety than the same foot in the middle.
+2. **Break `design.yaml` with a line of your own words, then open the design:** the 500 says "Something went
+   wrong on Caliper's side (error …)", and the report has the line and column but none of your words.
+3. **Add a hand-written bad line to a trials file, or a NaN to `log.jsonl`:** the page loads, and says a line
+   was left out.
+4. **Patterns:** the titles read "left: 3/4 in softwood plywood (this is the outside face)", with no box
+   character.
+5. **The kids' book:** the cut page has the kid an arm's length behind with ear defenders, and the test page
+   has the grown-up go first.
+6. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_beam_width.py tests/test_errors.py tests/test_trials.py
+   tests/test_samples.py tests/test_patterns.py tests/test_studies.py tests/test_kidbook.py`.
+
+### 2026-11-01 · The reviewer's correctness findings, fixed (CALI-87 #63)
+1. **A carved part:** adopt a BUILD what-if, a frame design or a drag station, and the reply and History say
+   the carve came off. "Put a T-rex on it" says it's carved, and what to do first.
+2. **"Put a T-rex on the right side":** it goes on the right.
+3. **The CNC sheet for a stool with a lightening hole:** the hole is the first cut in the SVG and the DXF.
+4. **A build package for a crate with XPS in it:** the book doesn't list a kids' book.
+5. Offline: `PYTHONPATH=src CALIPER_UNFOLD_DIR=<unfold-to-sheets> python -m pytest tests/test_carve_dropped.py
+   tests/test_carve_stale.py tests/test_printed_cache.py tests/test_cutplan.py tests/test_consistency.py
+   tests/test_kidbook.py tests/test_pictures.py tests/test_promote.py -rs`.
+
+### 2026-11-01 · A load just above its face pushes on it; one that misses says so in both checks (CALI-84 #58)
+1. Open Theo's printed `step-stool` and **Check it holds**. Expect: the adult's foot, 1.2 mm above the recess
+   floor, now lands, and the check stops at the child's box instead, in the same words the designer's check uses:
+   it's in the air, 2.4 mm from the nearest surface, because the script's lower step is inside the upper body.
+   (Measured on the script offline; not yet clicked through in the app.)
+2. Offline: `PYTHONPATH=src python -m pytest tests/test_load_lands.py tests/test_load_study.py`.
+
+### 2026-11-01 · The reviewer's findings on the open stack, part 2 (CALI-86 #62, findings 8–13)
+1. **Carve a plywood top on printed sides:** the chart, the Studies line and the reply say "% of the printed
+   part carved away", and the share matches the filament saved.
+2. **Check a printed part holds:** *Will it work?* says "about N times over (printed parts are a rough model…)".
+3. **Without whittle installed, put a T-rex on a part that has loads():** the reply says it couldn't check it
+   still holds, with no ✓.
+4. **Record a test that broke at 150 lb on the stool** (it must hold 400): the card's line is red and says so. A
+   sag 15× the prediction is amber.
+5. `curl -X POST localhost:8016/api/samples/%2E%2E`: 404, and nothing is copied.
+6. **Open the camper sample:** *Will it work?* carries "A prediction, not a certificate …".
+7. Offline: `PYTHONPATH=src python -m pytest tests/test_mixed.py tests/test_printed_strength.py
+   tests/test_pictures.py tests/test_trials.py tests/test_samples.py -rs`.
+
+### 2026-11-01 · The reviewer's findings on the open stack, part 1 (CALI-86 #62, findings 1–7)
+1. **A wide top on two sides:** draw a 3 ft wide, 1/2 in top on two printed sides 1 ft apart and **Check it holds**.
+   The numbers say "… of it carrying the load (BS 8110's effective width …)", and it no longer reads 2.7×.
+2. **Carve a part whose top fails** (test_mixed's 1/2 in top, an adult): the Studies page's carve line starts
+   "doesn't hold as it is", and isn't green.
+3. **Report an error after a failed chat turn:** the report says "a chat turn", never your words, and
+   `designs/<design>` wherever a path had the design's name.
+4. `caliper sample save --slug <yours>` with no name: refused, and the samples are all still there.
+5. **Record a test step:** NaN, a negative or a zero sag are refused. A hand-written NaN line in the trials file
+   is skipped, and the panel says so.
+6. **Make a build package and open the kids' book:** the cut and screw pages have the grown-up clamping and
+   cutting, and you standing back in safety glasses.
+7. **Patterns for a part with a picture on its left side:** the picture faces the way it does on the model seen
+   from outside, and every page says "this is the outside face".
+8. Offline: `PYTHONPATH=src python -m pytest tests/test_beam_width.py tests/test_mixed.py tests/test_errors.py
+   tests/test_samples.py tests/test_trials.py tests/test_kidbook.py tests/test_patterns.py -rs`.
+
+### 2026-10-30 · A plywood top on printed sides, carved (CALI-81 #53, CALI-82 #54)
+1. Needs whittle at `65e7e59` (greentheo/whittle#4; `make tools`, or merge and pull your checkout). Without it the
+   two materials are analysed at the printed stiffness, and it says so.
+2. Ask for "a step stool with a 3/4 in plywood top and 3D printed sides, PETG at 40%". The part lists the top as a
+   sheet and `"kind": "printed", "rest": true`: *What do I buy?* has the plywood and the filament; with a printer in
+   **Shop**, *How do I make it?* prints only the sides.
+3. **Check it holds:** the top as a plate or (on two sides) a beam, in plywood; the sides as printed PETG.
+4. **Carve it** (a few minutes): the chart of steps down to where the sides stop holding. Click a step to see it,
+   **Carve it like this** to make it the shape, and the strength check runs again. "carve the sides" does it from
+   the chat.
+5. Offline: `python -m pytest tests/test_printed_strength.py tests/test_mixed.py`.
+
+### 2026-10-30 · A filled-in box is caught; a lightening preview says it's one (CALI-83 #55)
+1. Open a stool whose shape was built as a block (Theo's `step-stool-2`): *What is it?* says its 3D shape and its
+   pieces don't match, "build() is filled in". Say "fix its shape to match its pieces"; the designer rebuilds it
+   from its panels.
+2. Lighten it and click a step: the bar says **Preview, not cut yet**, and the patterns and cut plan say they're of
+   the stool as it is. **Cut these holes**, then make them again: the holes are on them.
+3. Offline: `python -m pytest tests/test_consistency.py tests/test_answers.py`.
+
+### 2026-10-30 · A build book a kid can follow (CALI-79 #47)
+1. On the stool (with its T-rex), **How do I make it? → Make a new build package**, then **The kids' build book**.
+2. The cover is the stool, T-rex side on. Then: get your things (boxes to tick), draw the pieces (each pattern by
+   name), cut them out with a grown-up (drill a start hole for the T-rex), sand, one page per piece with the same
+   picture growing, paint it, test it.
+3. Print it: one step a page.
+4. Offline: `python -m pytest tests/test_kidbook.py`.
+
+### 2026-10-30 · Test it: predicted against measured (CALI-80 #48)
+1. Click the stool → **Will it work? → the numbers → Test it**. It says where to put the load, what to measure
+   the sag with (a dial indicator: under Dad the top should sag only 0.003–0.005 in), and that it should break at
+   about 1,240 lb. The chart is the predicted band, with a red line where it should break.
+2. Record a step: **load** 200, **sag** 0.004, **Record**. The point lands on the chart and *Will it work?* reads
+   "Tested: it held 200 lb, sagging 0.004 in (we predicted …)". Tick **it broke** on the last one.
+3. Offline: `python -m pytest tests/test_trials.py`.
+
+### 2026-10-30 · A T-rex cut out of the side, and it still holds Dad (CALI-78 #46)
+1. Open the step stool (the sample is fine) and say **"put a T-rex on the side"**. The reply ticks through drawing,
+   fitting, checking, cutting and checking again, then: "✓ I cut a T-rex 5.2 × 5 in out of the left side panel. It
+   still holds, 3.11 times over (it needs 2)." Turn the view to see it through the wall.
+2. Or **🦖 Put a picture on it** under *What is it?*: type (or 🎤) "a cat" or "a rocket" for Claude to draw, or draw
+   it on the pad yourself, pick a panel, **Cut it out**.
+3. **How do I make it? → Make the patterns**: the side panel's page has the T-rex to trace, with where to drill the
+   start hole for the jigsaw. The cut plan's sheet cuts it too.
+4. Lighten it afterwards: the T-rex stays as it is, with wood round it.
+5. Offline: `python -m pytest tests/test_pictures.py`.
+
+### 2026-10-30 · Fast cards, holes on the CNC sheet, measuring error (CALI-76 #44, CALI-77 #45, CALI-68 #28)
+1. Click the stool: its four cards come up in about a second (they took 6–11 s).
+2. Lighten the stool and cut a step in, then **How do I make it? → the numbers → Cut plan → Make the cut plan**:
+   the sheet SVG/DXF has the holes inside each panel, square to the sheet. Needs unfold-to-sheets at `8fc66c9`
+   (`make tools`; your own checkout: merge greentheo/unfold-to-sheets#2 and pull).
+3. Say "the walls must be at least 19.05 mm" on a 3/4 in plywood part: the offer is
+   `min_wall >= 19.05 - 0.15` and says the 0.15 mm is what measuring a wall can be off by; it holds.
+4. Offline: `python -m pytest tests/test_answers.py tests/test_cutplan.py tests/test_promote.py`.
+
+### 2026-10-30 · First run: one sentence in, four answers out (CALI-59 #8)
+1. Start Caliper with no designs (or **+ New design**): *What do you want to make?* Type a sentence, e.g. "A step
+   stool so my 6-year-old can reach the bathroom sink, from 3/4 in plywood. It has to hold me too, 200 lb." →
+   **Start**. Its name is what it is ("Step stool"), not the whole sentence.
+2. Leave every question blank → **Build it**. The reply ticks off: *writing down what it has to do · building it ·
+   checking it holds · drawing the patterns · scoring it* (about 2½ minutes live; the build is most of it). Then
+   it says the four answers in a line each, and the cards on the right are full: what it is and its size, "✓ Holds
+   Dad… 8.07x", the shopping list and the patterns to print.
+3. **Say it simpler** under the reply: plain words, something like "Even if Dad stands on it, it would need to be
+   eight times heavier before it broke."
+   Ask "How was the 8x worked out?" and you get the numbers and what the model leaves out.
+4. **Or open one of ours:** *Step stool* or *Camper shell* opens a copy with its studies, so every card reads at
+   once. `caliper sample list`; `caliper sample save <name> --slug <your design>` makes one from yours.
+5. **🎤** beside the box: the browser listens where it can; otherwise it says how to start the Mac's own dictation
+   (the 🎤 key, or Fn twice), which types into any box.
+6. **Will it work?** ends with what a verdict promises and what it doesn't; so does the build book.
+7. When something breaks, **Report it…** (on the red bar, or a failed reply) shows the whole report first:
+   what broke, where, the Caliper and macOS versions, nothing of the design. **Open it as a GitHub issue** fills
+   in a new issue in your browser for you to submit. Kept on this machine in `~/.caliper/errors.jsonl`.
+8. Offline: `python -m pytest tests/test_firstrun.py tests/test_samples.py tests/test_errors.py`.
 
 ### 2026-10-30 · Lighter until it runs out; what it's held to; the view follows the card (CALI-73 #39, CALI-74 #40)
 1. Open the stool, click it, **Will it work? → the numbers → Make it lighter → Lighten it** (about 4 minutes). The

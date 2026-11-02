@@ -37,6 +37,7 @@ class Job:
         self.events: list[dict] = []
         self.result: Any = None
         self.error = ""
+        self.error_id = ""                # what it's kept as, for a report (CALI-59)
         self.created = time.time()
         self.finished: Optional[float] = None
         self._mu = threading.Lock()
@@ -58,7 +59,8 @@ class Job:
 
     def to_dict(self, after: int = 0) -> dict:
         return {"id": self.id, "kind": self.kind, "label": self.label, "status": self.status,
-                "events": self.since(after), "result": self.result, "error": self.error}
+                "events": self.since(after), "result": self.result, "error": self.error,
+                "error_id": self.error_id}
 
 
 class JobRunner:
@@ -111,6 +113,11 @@ class JobRunner:
                 # the traceback's LAST line is the actual exception (the CALI-27 discipline)
                 tail = [ln for ln in traceback.format_exc().strip().splitlines() if ln.strip()]
                 job.error = f"{type(e).__name__}: {e}"
+                from . import errors
+
+                # kept by its kind, never its label (a chat turn's label is the message, CALI-86), and before
+                # the job reads as failed, so whoever sees it fail has the error to report
+                job.error_id = errors.record_exception(errors.job_where(job.kind), e)["id"]
                 job.status = "error"
                 job.emit("error", job.error, trace=tail[-1] if tail else "")
             finally:
@@ -143,7 +150,8 @@ def stream(job: Job, after: int = 0, poll: float = 0.2, heartbeat: float = 15.0)
         if fresh:
             quiet = time.time()
         if job.over and not job.since(seq):
-            final = {"kind": "end", "status": job.status, "result": job.result, "error": job.error}
+            final = {"kind": "end", "status": job.status, "result": job.result, "error": job.error,
+                     "error_id": job.error_id}
             yield f"data: {json.dumps(final, default=str)}\n\n"
             return
         if time.time() - quiet > heartbeat:

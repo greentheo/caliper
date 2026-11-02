@@ -87,6 +87,10 @@ def panels(ctx: dict, stood_on: bool = False) -> list[dict]:
                                  (np.arange(shape[1]) + 0.5) * s + lo[1], indexing="ij"), -1).reshape(-1, 2)
         inside = _inside2d(g, flat).reshape(shape)
         rim = (_edge_dist2d(g, flat) < RIM_MM).reshape(shape)
+        for pic in pc.get("pictures") or []:     # a picture cut out (CALI-78) keeps a web of wood round it
+            rel = np.asarray(pic, float) - o
+            ring = np.stack([rel @ u, rel @ v], axis=1)
+            rim |= (_inside2d(g, ring) | (_edge_dist2d(g, ring) < MIN_WEB_MM)).reshape(shape)
         rel = centres - o
         w = (rel @ n) * side
         uv = np.stack([rel @ u, rel @ v], axis=1)
@@ -309,7 +313,10 @@ def preview(mesh, plist: list[dict], holes: dict) -> bytes:
             T[:3, 3] = p["o"] - p["n"] * 1.0             # (trimesh keeps a mirrored prism outside-out)
             pr.apply_transform(T)
             prisms.append(pr)
-    out = mesh.difference(trimesh.util.concatenate(prisms), engine="manifold") if prisms else mesh
+    from .occt import OCCT
+
+    with OCCT:                                           # manifold3d, one boolean at a time
+        out = mesh.difference(trimesh.util.concatenate(prisms), engine="manifold") if prisms else mesh
     return out.export(file_type="stl")
 
 
@@ -324,6 +331,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
           emit: Optional[Callable] = None) -> dict:
     """From the part as it is to where the safety runs out, every step checked in 3D: the walls first (holes
     where the wood isn't working), then hole-saw holes in the panel stood on, then thinner sheet (estimated)."""
+    from . import carve
+
+    carve.refuse_if_carved(store.read_script(part_id), "holes", "lighten it")   # before the study, not at adopt
     from scipy import ndimage
 
     from . import construction as C
@@ -578,9 +588,7 @@ def station_path(store: DesignStore, rid: str, index: int) -> str:
 
 def adopt(store: DesignStore, rid: str, index: int) -> dict:
     """Write a station's holes into the part's script as ``HOLES``: a new revision that cuts them."""
-    import ast
-
-    from .holes import NAME
+    from . import holes as H
 
     rec = load_run(store, rid)
     if rec is None:
@@ -591,19 +599,23 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     if st.get("estimate"):
         raise ValueError(f"step {index} is an estimate in {st['label']} sheet: rebuild it in that sheet first")
     pid = rec["part"]
+    from .carve import Stale
+
+    entry = store.design.part(pid)
+    if entry is None:
+        raise FileNotFoundError(f"no part {pid!r}")
+    if rec.get("version") != entry.version:          # its holes are where that version's walls were (CALI-87)
+        raise Stale(f"this lightening is of version {rec.get('version')} and the part is at version {entry.version}: "
+                    f"lighten it again")
     holes = [{"piece": p["name"], "normal": p["normal"], "depth": p["thickness_mm"],
               "polygons": st["panels"].get(p["name"], [])} for p in rec["panels"] if st["panels"].get(p["name"])]
     script = store.read_script(pid)
-    block = f"{NAME} = " + json.dumps(holes, indent=4) + "\n"
-    tree = ast.parse(script)
-    lines = script.splitlines(keepends=True)
-    old = next((n for n in tree.body if isinstance(n, ast.Assign) and len(n.targets) == 1
-                and isinstance(n.targets[0], ast.Name) and n.targets[0].id == NAME), None)
-    if old is not None:
-        script = "".join(lines[:old.lineno - 1]) + block + "".join(lines[old.end_lineno:])
-    else:
-        script = (script.rstrip("\n") + "\n\n\n# Lightening holes, cut all the way through (Caliper writes this "
-                  "and cuts them after build()).\n" + block)
+    from . import carve
+
+    carve.refuse_if_carved(script, "holes", "lighten it")
+    # a picture cut into a panel (CALI-78) stays; the lightening holes are this step's
+    keep = [h for h in H.read(script) if h.get("picture")]
+    script = H.write(script, keep + holes)
     version = store.write_part(pid, script, action="lighten",
                                feedback=f"lightened: {st['removed']:.0%} out of the walls, {st['holes']} holes, "
                                         f"{st['saved_lb']} lb lighter, {st['safety']}x",

@@ -12,7 +12,8 @@ every build is checked against its declarations, as measurements that fail a rou
 - ``construction_covers``: the pieces cover the solid's surface. Nothing in the shape is left out of
   the bill of materials, and no panel in the shape is thicker than the sheet it's listed as.
 - ``construction_volume``: no more material than the solid holds (a wrong thickness, a piece twice).
-- ``loads_land``: every load in ``loads()`` says how much and where, and where is on the part.
+- ``loads_land``: every load in ``loads()`` says how much and where, and where is on the part, by the strength
+  check's own rule (CALI-84); every box in ``held()`` too.
 
 A part that declares nothing gets none of these: there is nothing to disagree with.
 """
@@ -33,7 +34,13 @@ from .evaluate import AssertionResult
 INSIDE_MIN = 0.9
 COVER_MIN = 0.98
 #: The pieces may come to this much more than the solid's volume (joints counted twice, rounded corners).
+#: The pieces' volume against the solid's: much less and build() is filled in (CALI-83), much more and a
+#: piece is too thick or listed twice.
+VOLUME_MIN = 0.67
 VOLUME_MAX = 1.25
+#: Share of the solid that may lie in no piece at all before build() reads as filled in (CALI-87): a ratio of
+#: volumes misses a small filled box, whose panels are most of it; the solid outside every panel doesn't.
+SOLID_IN_NO_PIECE = 0.1
 SURFACE_SAMPLES = 1500
 GRID = 10
 
@@ -139,6 +146,7 @@ def shapes(declared: dict) -> list[dict]:
             holes = [np.asarray(h, float) for h in item.get("holes") or []] if item.get("outline") else []
             out.append({"name": name, "kind": "sheet", "polys": [np.asarray(p, float) for p in polys],
                         "thickness": t, "holes": holes, "material": item.get("material"),
+                        "pictures": [np.asarray(h, float) for h in item.get("pictures") or []],
                         "volume": (sum(C.polygon(p)[0] for p in polys)
                                    - sum(C.polygon(h.tolist())[0] for h in holes)) * t})
         elif item.get("kind") == "stick":
@@ -234,44 +242,79 @@ def _covers(mesh, pieces: list[dict], tol: float) -> AssertionResult:
         actual=round(share, 3), margin=round(share - COVER_MIN, 3), detail=detail)
 
 
-def _volume(mesh, pieces: list[dict]) -> Optional[AssertionResult]:
+def _in_no_piece(mesh, pieces: list[dict], tol: float, n: int = 14) -> float:
+    """The share of the solid (on a grid through it) that's in no piece: a sheet's slab or a stick's section."""
+    lo, hi = mesh.bounds
+    g = [np.linspace(a, b, n + 2)[1:-1] for a, b in zip(lo, hi)]
+    pts = np.stack(np.meshgrid(*g, indexing="ij"), -1).reshape(-1, 3)
+    pts = pts[mesh.contains(pts)]
+    if not len(pts):
+        return 0.0
+    near = np.full(len(pts), np.inf)
+    for pc in pieces:
+        if pc["kind"] == "sheet":
+            for p, side in zip(pc["polys"], pc["sides"]):
+                near = np.minimum(near, slab_distance(pts, p, pc["thickness"], side))
+        else:
+            near = np.minimum(near, segment_distance(pts, pc["a"], pc["b"]) - pc["reach"])
+    return float((near > tol).mean())
+
+
+def _volume(mesh, pieces: list[dict], strength: bool = False, tol: float = 2.0) -> Optional[AssertionResult]:
+    """The pieces' volume against the solid's. ``strength``: the part's strength check analyses the solid itself
+    (it declares loads()), so a solid much bigger than its pieces fails too."""
     solid = float(mesh.volume)
     if solid <= 0:
         return None
     ratio = sum(pc["volume"] for pc in pieces) / solid
-    ok = ratio <= VOLUME_MAX
     heavy = sorted(pieces, key=lambda pc: -pc["volume"])[:3]
+    loose = _in_no_piece(mesh, pieces, tol) if strength else 0.0
+    if strength and (ratio < VOLUME_MIN or loose > SOLID_IN_NO_PIECE):
+        # a solid block round its panels (CALI-83: Theo's stool was built as a filled box): every panel lies in
+        # it and covers its surface, so only the volume shows it
+        core = ratio >= VOLUME_MIN                    # the volumes pass, and the share in no piece fails (CALI-87)
+        return AssertionResult(
+            id="construction_volume",
+            expr=(f"no more than {SOLID_IN_NO_PIECE:.0%} of the solid is in no piece" if core
+                  else f"the solid is its pieces ({VOLUME_MIN:g}–{VOLUME_MAX:g}× its volume)"),
+            status="fail", passed=False, actual=round(loose if core else ratio, 3),
+            margin=round(SOLID_IN_NO_PIECE - loose if core else ratio - VOLUME_MIN, 3),
+            detail=(f"the solid ({solid / 1e6:.2f} L) is {1 / ratio:.1f}× what the pieces add up to, and "
+                    f"{loose:.0%} of it is in no piece: build() is filled in, and the strength check analyses the solid. Make build() the pieces themselves, "
+                    f"each panel as thick as its sheet and hollow between them, as it will really be built"))
+    ok = ratio <= VOLUME_MAX
     return AssertionResult(
-        id="construction_volume", expr=f"no more material than the solid holds (≤ {VOLUME_MAX:g}× its volume)",
+        id="construction_volume", expr=(f"the solid is its pieces ({VOLUME_MIN:g}–{VOLUME_MAX:g}× its volume)" if strength
+                                         else f"no more material than the solid holds (≤ {VOLUME_MAX:g}× its volume)"),
         status="pass" if ok else "fail", passed=ok, actual=round(ratio, 3), margin=round(VOLUME_MAX - ratio, 3),
         detail="" if ok else (f"the pieces add up to {ratio:.2f}× the solid ({solid / 1e6:.2f} L): check each "
                               f"sheet's thickness against build(), and that no piece is listed twice (biggest: "
                               + ", ".join(f"{pc['name']} {pc['volume'] / 1e6:.2f} L" for pc in heavy) + ")"))
 
 
-def _loads(mesh, items, tol: float) -> AssertionResult:
+def _loads(mesh, declared: dict, pieces: list[dict], tol: float) -> AssertionResult:
     """Every load says how much and where, and where is on the part: a load in thin air is a box in the
-    wrong place, and the strength study would find nothing to push on."""
-    from .load_study import parse_loads
+    wrong place, and the strength study would find nothing to push on. Asked as the strength check asks it
+    (``load_study.touches``, within one of its voxels), so the two can't disagree (CALI-84); held() too."""
+    from . import load_study as L
 
     try:
-        loads = parse_loads(items)
+        loads = L.parse_loads(declared["loads"])
+        held = L.parse_held(declared.get("held"), mesh.bounds.tolist(), 1.0) if declared.get("held") else []
     except (ValueError, TypeError) as e:
         return AssertionResult(id="loads_land", expr="every load in loads() says how much and where",
                                status="fail", passed=False, actual=None,
                                detail=f"{e} (see the loads() format)")
-    g = np.linspace(0.0, 1.0, 5)
-    cube = np.stack(np.meshgrid(g, g, g, indexing="ij"), -1).reshape(-1, 3)
+    rch = L.reach(tol, L.study_spacing(declared, mesh, pieces)[0])
     missed = []
-    for ld in loads:
-        lo, hi = np.asarray(ld["lo"]) - tol, np.asarray(ld["hi"]) + tol
-        gap = -float(_signed(mesh, lo + (hi - lo) * cube).max()) + tol      # from the box as declared
-        if gap > 2 * tol:
-            missed.append(f"'{ld['name']}' acts on {_xyz(ld['lo'])}..{_xyz(ld['hi'])}, {gap:.0f} mm from the part")
+    for item, support in [(h, True) for h in held] + [(ld, False) for ld in loads]:
+        on, gap = L.touches(mesh, (item["lo"], item["hi"]), rch)
+        if not on:
+            missed.append(L.missed(item["name"], gap, rch, support))
     ok = not missed
     return AssertionResult(id="loads_land", expr="every load in loads() pushes on the part",
-                           status="pass" if ok else "fail", passed=ok, actual=len(loads) - len(missed),
-                           detail="" if ok else "; ".join(missed) + " — put its box on the face it pushes on")
+                           status="pass" if ok else "fail", passed=ok, actual=len(loads) + len(held) - len(missed),
+                           detail="; ".join(missed))
 
 
 def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
@@ -293,11 +336,17 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
         return []
     tol = tolerance(mesh)
     out = []
+    # a printed rest (CALI-82: a plywood top on printed sides) is everything the pieces aren't, so it covers the
+    # rest of the solid by definition: only that each piece is inside it can be checked
+    rest = any(isinstance(it, dict) and it.get("kind") == "printed" and it.get("rest")
+               for it in declared.get("construction") or [])
     if pieces:
         _sides(mesh, pieces)
-        out += [_inside(mesh, pieces, tol), _covers(mesh, pieces, tol)]
-        vol = _volume(mesh, pieces)
-        out += [vol] if vol else []
+        out.append(_inside(mesh, pieces, tol))
+        if not rest:
+            out.append(_covers(mesh, pieces, tol))
+            vol = _volume(mesh, pieces, strength=bool(declared.get("loads")), tol=tol)
+            out += [vol] if vol else []
     if declared.get("loads") is not None:
-        out.append(_loads(mesh, declared["loads"], tol))
+        out.append(_loads(mesh, declared, pieces, tol))
     return out

@@ -69,7 +69,11 @@ def test_the_design_card_says_what_isnt_done_yet(store):
     cards = {c["key"]: c for c in answers.answers(store, design_api.design_state(store))}
     assert cards["what"]["lines"][0]["text"] == "A step stool so my kid can reach the sink."
     assert cards["work"]["status"] == "warn" and "say what it must do" in cards["work"]["lines"][0]["text"]
-    assert "No build package yet" in cards["make"]["lines"][0]["text"]
+    # one part: the design answers with that part's list and plan (CALI-59), then offers the build package
+    assert cards["make"]["lines"][0]["text"] == "With your jigsaw: 5 pieces."
+    assert "build package" in cards["make"]["lines"][-1]["text"]
+    assert "1 sheet of 3/4 in softwood plywood" in cards["buy"]["lines"][0]["text"]
+    assert cards["what"]["lines"][1]["text"].startswith("16 × 10 in, 9 in tall")
 
 
 def test_will_it_work_lists_what_the_design_is_held_to(store):
@@ -94,3 +98,95 @@ def test_will_it_work_lists_what_the_design_is_held_to(store):
     # a part alone in its design answers for the design too, after its own strength line
     part = {c["key"]: c for c in answers.answers(store, design_api.design_state(store), "stool")}["work"]
     assert any(t["text"].startswith("✗ Under $5") for t in part["lines"])
+
+
+def test_a_scripts_declarations_are_read_once_until_it_changes(store, monkeypatch):
+    """CALI-59: one set of cards read the script's declarations nine times, a second and a half each."""
+    import subprocess
+
+    runs = []
+    real = subprocess.run
+    def counted(cmd, *a, **k):                             # only the declaration probes, not the build
+        if "@@BUILT@@" in cmd[-1]:
+            runs.append(1)
+        return real(cmd, *a, **k)
+
+    monkeypatch.setattr(C.subprocess, "run", counted)
+    C._SEEN.clear()
+    first = C.declared(store, "stool")
+    first["construction"].clear()                         # a caller changing what it got changes nothing
+    assert C.declared(store, "stool")["construction"] and len(runs) == 1
+    answers.answers(store, design_api.design_state(store), "stool")
+    assert len(runs) == 1
+    store.write_part("stool", BOX_STOOL.replace('"t": 19.05', '"t": 15.875'), intent="5/8 in")
+    assert C.declared(store, "stool")["construction"][0]["thickness"] == 15.875 and len(runs) == 2
+
+
+def test_a_shape_that_doesnt_match_its_pieces_says_so(store):
+    """CALI-83: built as a filled box, a part's cards say so, and what to say to fix it."""
+    store.write_part("stool", BOX_STOOL.replace('''    out = None
+    for lo, hi in _boxes(p, BUILD["t"]).values():
+        b = cq.Workplane().box(*(b - a for a, b in zip(lo, hi)), centered=False).translate(lo)
+        out = b if out is None else out.union(b)
+    return out''', '''    return cq.Workplane().box(p["w"], p["d"], p["h"], centered=False)'''), intent="a filled box")
+    what = answers.answers(store, design_api.design_state(store), "stool")[0]
+    bad = [ln for ln in what["lines"] if ln["status"] == "bad"]
+    assert bad and "don't match" in bad[0]["text"] and "filled in" in bad[0]["text"] and what["status"] == "bad"
+
+
+def test_a_failed_test_overrides_the_prediction_on_both_cards(tmp_path):
+    """CALI-86 (#71 rework, item 2; rule 6): a break at 150 lb turned the test's line red, while the design's card
+    still said "✓ Holds Dad" and the part's still said "Holds …, N times over"."""
+    from caliper import answers, design_api, samples, trials
+
+    store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
+    pr = trials.predict(store, "step_stool")
+    must = pr["lb"] * pr["factor"]
+    trials.record(store, "step_stool", 150, broke=True)
+    said = f"It broke at 150 lb in your test. We predicted it would hold {must:,.0f}."
+    part = answers.answers(store, design_api.design_state(store), "step_stool")[1]
+    assert part["status"] == "bad"
+    assert not [ln for ln in part["lines"] if ln["status"] == "ok" and ln["text"].startswith("Holds")], part["lines"]
+    assert any(ln["status"] == "bad" and ln["text"] == said for ln in part["lines"]), part["lines"]
+    design = answers.answers(store, design_api.design_state(store), None)[1]
+    strength = [ln for ln in design["lines"] if ln.get("study") == "load"]
+    assert strength and all(ln["status"] == "bad" and "broke at 150 lb in your test" in ln["text"] for ln in strength)
+    assert not any(ln["text"].startswith("✓ Holds") for ln in design["lines"]), design["lines"]
+
+
+#: Two of the camper's checks, as its scorecard.yaml has them: one rests on the frame's model, one on the cut plan.
+CAMPER_FRAME = {"id": "frame_yield", "label": "the frame survives 3.5x its standing load", "metric": "frame.yield_x",
+                "op": ">=", "limit": 3.5, "source": "stated"}
+CAMPER_SHEET = {"id": "fits", "label": "every piece fits a sheet", "metric": "make.missing", "op": "<=", "limit": 0,
+                "source": "stated"}
+
+
+def _work(checks, now):
+    from caliper import answers
+
+    state = {"goals": {"checks": checks}, "scorecards": [], "parts": []}
+    return answers._card("work", "Will it work?", answers.held_to(state, now))
+
+
+def test_the_promise_follows_a_strength_or_frame_verdict_pass_or_fail():
+    """CALI-86 (#71 rework, item 1): a failing frame check carries the promise as a passing one does (the ok-only
+    mutant), and a cut-plan check doesn't."""
+    from caliper import answers
+
+    assert _work([CAMPER_FRAME], {"frame.yield_x": 4.0}).get("promise") == answers.PROMISE
+    failing = _work([CAMPER_FRAME], {"frame.yield_x": 2.0})
+    assert failing["lines"][0]["status"] == "bad" and failing.get("promise") == answers.PROMISE
+    assert "promise" not in _work([CAMPER_SHEET], {"make.missing": 0})
+    for metric in ("strength.safety", "frame.walls_safety", "snow.safety", "floor.mattress_safety"):
+        assert answers.rests_on_model(metric), metric
+    for metric in ("make.missing", "hitch.tongue_lb", "weight.total_lb", "cost.usd"):
+        assert not answers.rests_on_model(metric), metric
+
+
+def test_the_first_run_reply_and_the_chat_s_facts_carry_the_promise(tmp_path):
+    from caliper import answers, chat, design_api, firstrun, samples
+
+    store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
+    cards = answers.answers(store, design_api.design_state(store), "step_stool")
+    assert answers.PROMISE in firstrun.summary(cards)
+    assert answers.PROMISE in chat._facts(store, None)

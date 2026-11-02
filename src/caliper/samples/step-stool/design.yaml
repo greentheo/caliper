@@ -1,0 +1,36 @@
+slug: a-step-stool-so-my-6
+name: Step stool
+prompt: A step stool so my 6-year-old can reach the bathroom sink. Made from 3/4 in
+  plywood, glued and screwed. It has to hold me too (200 lb).
+units: mm
+display_units: in
+requirements:
+- question: What height does the top step surface need to be off the floor to let
+    your child comfortably reach the sink?
+  answer: 9 in
+  source: assumed
+  at: '2026-10-29T21:23:42.476515+00:00'
+- question: How wide should the stool be (left-to-right standing dimension)?
+  answer: 16 in
+  source: assumed
+  at: '2026-10-29T21:23:42.477388+00:00'
+- question: How deep (front-to-back) should the standing surface be?
+  answer: 10 in
+  source: assumed
+  at: '2026-10-29T21:23:42.478056+00:00'
+- question: Do you want a single flat platform, or two steps (a lower step to climb
+    up and an upper standing platform)?
+  answer: single platform
+  source: assumed
+  at: '2026-10-29T21:23:42.478804+00:00'
+parts:
+- id: step_stool
+  intent: A single-step stool made from 3/4 in plywood, glued and screwed, sized for
+    a 6-year-old to reach a bathroom sink and rated to hold 200 lb adult; includes
+    two side panels, a front panel, a back panel, and a top tread.
+  version: 3
+  origin: authored
+  created: '2026-10-29T21:25:31.781817+00:00'
+  updated: '2026-10-30T01:48:04.156702+00:00'
+created: '2026-10-29T21:23:24.996924+00:00'
+updated: '2026-10-30T20:47:10.320453+00:00'

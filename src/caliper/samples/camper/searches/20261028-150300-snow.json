@@ -1,0 +1,2664 @@
+{
+  "id": "20261028-150300",
+  "part": "cargo_box",
+  "created": 1793221380.4717498,
+  "psf": 20,
+  "min_safety": 2.0,
+  "options": {
+    "frame_posts": [
+      "2x2",
+      "1x2"
+    ],
+    "roof_beams": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "roof_beam": [
+      "2x2",
+      "1x2"
+    ],
+    "roof_beam_dir": [
+      "fore-aft",
+      "across"
+    ],
+    "skin_in": [
+      "none",
+      "fiberglass"
+    ]
+  },
+  "rows": [
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 0,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 59.3,
+      "cost_usd": 377.75,
+      "safety": 0.83,
+      "governing": "roof panel: xps in tension",
+      "sag_in": 6.91,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 0.83,
+          "governs": "xps in tension",
+          "stress_mpa": 0.481,
+          "sag_mm": 175.5
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "2x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 0,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 68.1,
+      "cost_usd": 494.8,
+      "safety": 1.86,
+      "governing": "front and back top rails: 2x2 in bending",
+      "sag_in": 0.46,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 2.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 16.023,
+          "sag_mm": 8.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "2x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 0,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 59.3,
+      "cost_usd": 377.75,
+      "safety": 0.83,
+      "governing": "roof panel: xps in tension",
+      "sag_in": 6.91,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 0.83,
+          "governs": "xps in tension",
+          "stress_mpa": 0.481,
+          "sag_mm": 175.5
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "2x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 0,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 68.1,
+      "cost_usd": 494.8,
+      "safety": 1.86,
+      "governing": "front and back top rails: 2x2 in bending",
+      "sag_in": 0.46,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 2.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 16.023,
+          "sag_mm": 8.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "2x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 0,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 59.3,
+      "cost_usd": 377.75,
+      "safety": 0.83,
+      "governing": "roof panel: xps in tension",
+      "sag_in": 6.91,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 0.83,
+          "governs": "xps in tension",
+          "stress_mpa": 0.481,
+          "sag_mm": 175.5
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "2x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 0,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 68.1,
+      "cost_usd": 494.8,
+      "safety": 1.86,
+      "governing": "front and back top rails: 2x2 in bending",
+      "sag_in": 0.46,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 2.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 16.023,
+          "sag_mm": 8.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "2x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 0,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 59.3,
+      "cost_usd": 377.75,
+      "safety": 0.83,
+      "governing": "roof panel: xps in tension",
+      "sag_in": 6.91,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 0.83,
+          "governs": "xps in tension",
+          "stress_mpa": 0.481,
+          "sag_mm": 175.5
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "2x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 0,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 68.1,
+      "cost_usd": 494.8,
+      "safety": 1.86,
+      "governing": "front and back top rails: 2x2 in bending",
+      "sag_in": 0.46,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 2.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 16.023,
+          "sag_mm": 8.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "2x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 1,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 60.6,
+      "cost_usd": 377.75,
+      "safety": 1.15,
+      "governing": "roof panel: xps in tension",
+      "sag_in": 3.59,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 786.6,
+          "safety": 1.15,
+          "governs": "xps in tension",
+          "stress_mpa": 0.347,
+          "sag_mm": 91.1
+        },
+        {
+          "element": "1 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 2.28,
+          "governs": "2x2 in bending",
+          "stress_mpa": 8.78,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 3.16,
+          "governs": "2x2 in bending",
+          "stress_mpa": 6.33,
+          "sag_mm": 6.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 1,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 69.4,
+      "cost_usd": 494.8,
+      "safety": 2.28,
+      "governing": "1 roof beam(s), front to back: 2x2 in bending",
+      "sag_in": 0.27,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 786.6,
+          "safety": 3.66,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 11.533,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "1 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 2.28,
+          "governs": "2x2 in bending",
+          "stress_mpa": 8.78,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 3.16,
+          "governs": "2x2 in bending",
+          "stress_mpa": 6.33,
+          "sag_mm": 6.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 1,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 61.6,
+      "cost_usd": 382.25,
+      "safety": 1.34,
+      "governing": "1 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.88,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 463.6,
+          "safety": 3.32,
+          "governs": "xps in tension",
+          "stress_mpa": 0.12,
+          "sag_mm": 11.2
+        },
+        {
+          "element": "1 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 1.34,
+          "governs": "2x2 in bending",
+          "stress_mpa": 14.9,
+          "sag_mm": 22.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 3.72,
+          "governs": "2x2 in bending",
+          "stress_mpa": 5.38,
+          "sag_mm": 5.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 1,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 70.4,
+      "cost_usd": 499.3,
+      "safety": 1.34,
+      "governing": "1 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.88,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 463.6,
+          "safety": 10.53,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 4.006,
+          "sag_mm": 0.7
+        },
+        {
+          "element": "1 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 1.34,
+          "governs": "2x2 in bending",
+          "stress_mpa": 14.9,
+          "sag_mm": 22.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 3.72,
+          "governs": "2x2 in bending",
+          "stress_mpa": 5.38,
+          "sag_mm": 5.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 1,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 59.9,
+      "cost_usd": 380.75,
+      "safety": 1.14,
+      "governing": "1 roof beam(s), front to back: 1x2 in bending",
+      "sag_in": 3.59,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 786.6,
+          "safety": 1.15,
+          "governs": "xps in tension",
+          "stress_mpa": 0.347,
+          "sag_mm": 91.1
+        },
+        {
+          "element": "1 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 1.14,
+          "governs": "1x2 in bending",
+          "stress_mpa": 17.56,
+          "sag_mm": 9.2
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 3.16,
+          "governs": "2x2 in bending",
+          "stress_mpa": 6.33,
+          "sag_mm": 6.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 1,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 68.7,
+      "cost_usd": 497.8,
+      "safety": 1.14,
+      "governing": "1 roof beam(s), front to back: 1x2 in bending",
+      "sag_in": 0.36,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 786.6,
+          "safety": 3.66,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 11.533,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "1 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 1.14,
+          "governs": "1x2 in bending",
+          "stress_mpa": 17.56,
+          "sag_mm": 9.2
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 3.16,
+          "governs": "2x2 in bending",
+          "stress_mpa": 6.33,
+          "sag_mm": 6.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 1,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 60.4,
+      "cost_usd": 380.75,
+      "safety": 0.67,
+      "governing": "1 roof beam(s), across: 1x2 in bending",
+      "sag_in": 1.76,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 463.6,
+          "safety": 3.32,
+          "governs": "xps in tension",
+          "stress_mpa": 0.12,
+          "sag_mm": 11.2
+        },
+        {
+          "element": "1 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 0.67,
+          "governs": "1x2 in bending",
+          "stress_mpa": 29.79,
+          "sag_mm": 44.8
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 3.72,
+          "governs": "2x2 in bending",
+          "stress_mpa": 5.38,
+          "sag_mm": 5.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 1,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 69.2,
+      "cost_usd": 497.8,
+      "safety": 0.67,
+      "governing": "1 roof beam(s), across: 1x2 in bending",
+      "sag_in": 1.76,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 463.6,
+          "safety": 10.53,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 4.006,
+          "sag_mm": 0.7
+        },
+        {
+          "element": "1 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 0.67,
+          "governs": "1x2 in bending",
+          "stress_mpa": 29.79,
+          "sag_mm": 44.8
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 3.72,
+          "governs": "2x2 in bending",
+          "stress_mpa": 5.38,
+          "sag_mm": 5.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 2,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 61.8,
+      "cost_usd": 382.25,
+      "safety": 2.37,
+      "governing": "front and back top rails: 2x2 in bending",
+      "sag_in": 0.72,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 524.4,
+          "safety": 2.6,
+          "governs": "xps in tension",
+          "stress_mpa": 0.154,
+          "sag_mm": 18.2
+        },
+        {
+          "element": "2 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 3.42,
+          "governs": "2x2 in bending",
+          "stress_mpa": 5.85,
+          "sag_mm": 3.1
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 2.37,
+          "governs": "2x2 in bending",
+          "stress_mpa": 8.44,
+          "sag_mm": 9.2
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 2,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 70.6,
+      "cost_usd": 499.3,
+      "safety": 2.37,
+      "governing": "front and back top rails: 2x2 in bending",
+      "sag_in": 0.36,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 524.4,
+          "safety": 8.23,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 5.126,
+          "sag_mm": 1.1
+        },
+        {
+          "element": "2 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 3.42,
+          "governs": "2x2 in bending",
+          "stress_mpa": 5.85,
+          "sag_mm": 3.1
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 2.37,
+          "governs": "2x2 in bending",
+          "stress_mpa": 8.44,
+          "sag_mm": 9.2
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 2,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 63.8,
+      "cost_usd": 386.75,
+      "safety": 2.01,
+      "governing": "2 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.59,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 309.0,
+          "safety": 7.48,
+          "governs": "xps in tension",
+          "stress_mpa": 0.053,
+          "sag_mm": 2.3
+        },
+        {
+          "element": "2 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 2.01,
+          "governs": "2x2 in bending",
+          "stress_mpa": 9.93,
+          "sag_mm": 14.9
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 5.57,
+          "governs": "2x2 in bending",
+          "stress_mpa": 3.59,
+          "sag_mm": 3.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 2,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 72.7,
+      "cost_usd": 503.8,
+      "safety": 2.01,
+      "governing": "2 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.59,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 309.0,
+          "safety": 23.69,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 1.78,
+          "sag_mm": 0.2
+        },
+        {
+          "element": "2 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 2.01,
+          "governs": "2x2 in bending",
+          "stress_mpa": 9.93,
+          "sag_mm": 14.9
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 5.57,
+          "governs": "2x2 in bending",
+          "stress_mpa": 3.59,
+          "sag_mm": 3.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 2,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 60.6,
+      "cost_usd": 380.75,
+      "safety": 1.71,
+      "governing": "2 roof beam(s), front to back: 1x2 in bending",
+      "sag_in": 0.72,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 524.4,
+          "safety": 2.6,
+          "governs": "xps in tension",
+          "stress_mpa": 0.154,
+          "sag_mm": 18.2
+        },
+        {
+          "element": "2 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 1.71,
+          "governs": "1x2 in bending",
+          "stress_mpa": 11.71,
+          "sag_mm": 6.1
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 2.37,
+          "governs": "2x2 in bending",
+          "stress_mpa": 8.44,
+          "sag_mm": 9.2
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 2,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 69.4,
+      "cost_usd": 497.8,
+      "safety": 1.71,
+      "governing": "2 roof beam(s), front to back: 1x2 in bending",
+      "sag_in": 0.36,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 524.4,
+          "safety": 8.23,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 5.126,
+          "sag_mm": 1.1
+        },
+        {
+          "element": "2 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 1.71,
+          "governs": "1x2 in bending",
+          "stress_mpa": 11.71,
+          "sag_mm": 6.1
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 2.37,
+          "governs": "2x2 in bending",
+          "stress_mpa": 8.44,
+          "sag_mm": 9.2
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 2,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 61.6,
+      "cost_usd": 383.75,
+      "safety": 1.01,
+      "governing": "2 roof beam(s), across: 1x2 in bending",
+      "sag_in": 1.18,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 309.0,
+          "safety": 7.48,
+          "governs": "xps in tension",
+          "stress_mpa": 0.053,
+          "sag_mm": 2.3
+        },
+        {
+          "element": "2 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 1.01,
+          "governs": "1x2 in bending",
+          "stress_mpa": 19.86,
+          "sag_mm": 29.9
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 5.57,
+          "governs": "2x2 in bending",
+          "stress_mpa": 3.59,
+          "sag_mm": 3.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 2,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 70.4,
+      "cost_usd": 500.8,
+      "safety": 1.01,
+      "governing": "2 roof beam(s), across: 1x2 in bending",
+      "sag_in": 1.18,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 309.0,
+          "safety": 23.69,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 1.78,
+          "sag_mm": 0.2
+        },
+        {
+          "element": "2 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 1.01,
+          "governs": "1x2 in bending",
+          "stress_mpa": 19.86,
+          "sag_mm": 29.9
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 5.57,
+          "governs": "2x2 in bending",
+          "stress_mpa": 3.59,
+          "sag_mm": 3.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 3,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 63.1,
+      "cost_usd": 382.25,
+      "safety": 2.11,
+      "governing": "front and back top rails: 2x2 in bending",
+      "sag_in": 0.41,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 393.3,
+          "safety": 4.62,
+          "governs": "xps in tension",
+          "stress_mpa": 0.087,
+          "sag_mm": 5.8
+        },
+        {
+          "element": "3 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 4.56,
+          "governs": "2x2 in bending",
+          "stress_mpa": 4.39,
+          "sag_mm": 2.3
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 2.11,
+          "governs": "2x2 in bending",
+          "stress_mpa": 9.5,
+          "sag_mm": 10.3
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 3,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 71.9,
+      "cost_usd": 499.3,
+      "safety": 2.11,
+      "governing": "front and back top rails: 2x2 in bending",
+      "sag_in": 0.41,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 393.3,
+          "safety": 14.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 2.883,
+          "sag_mm": 0.4
+        },
+        {
+          "element": "3 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 4.56,
+          "governs": "2x2 in bending",
+          "stress_mpa": 4.39,
+          "sag_mm": 2.3
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 2.11,
+          "governs": "2x2 in bending",
+          "stress_mpa": 9.5,
+          "sag_mm": 10.3
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 3,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 66.0,
+      "cost_usd": 391.25,
+      "safety": 2.69,
+      "governing": "3 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.44,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 231.8,
+          "safety": 13.29,
+          "governs": "xps in tension",
+          "stress_mpa": 0.03,
+          "sag_mm": 0.7
+        },
+        {
+          "element": "3 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 2.69,
+          "governs": "2x2 in bending",
+          "stress_mpa": 7.45,
+          "sag_mm": 11.2
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 7.43,
+          "governs": "2x2 in bending",
+          "stress_mpa": 2.69,
+          "sag_mm": 2.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 3,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 74.8,
+      "cost_usd": 508.3,
+      "safety": 2.69,
+      "governing": "3 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.44,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 231.8,
+          "safety": 42.11,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 1.001,
+          "sag_mm": 0.1
+        },
+        {
+          "element": "3 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 2.69,
+          "governs": "2x2 in bending",
+          "stress_mpa": 7.45,
+          "sag_mm": 11.2
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 7.43,
+          "governs": "2x2 in bending",
+          "stress_mpa": 2.69,
+          "sag_mm": 2.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 3,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 61.2,
+      "cost_usd": 383.75,
+      "safety": 2.11,
+      "governing": "front and back top rails: 2x2 in bending",
+      "sag_in": 0.41,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 393.3,
+          "safety": 4.62,
+          "governs": "xps in tension",
+          "stress_mpa": 0.087,
+          "sag_mm": 5.8
+        },
+        {
+          "element": "3 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 2.28,
+          "governs": "1x2 in bending",
+          "stress_mpa": 8.78,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 2.11,
+          "governs": "2x2 in bending",
+          "stress_mpa": 9.5,
+          "sag_mm": 10.3
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 3,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 70.0,
+      "cost_usd": 500.8,
+      "safety": 2.11,
+      "governing": "front and back top rails: 2x2 in bending",
+      "sag_in": 0.41,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 393.3,
+          "safety": 14.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 2.883,
+          "sag_mm": 0.4
+        },
+        {
+          "element": "3 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 2.28,
+          "governs": "1x2 in bending",
+          "stress_mpa": 8.78,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 2.11,
+          "governs": "2x2 in bending",
+          "stress_mpa": 9.5,
+          "sag_mm": 10.3
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 3,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 62.7,
+      "cost_usd": 386.75,
+      "safety": 1.34,
+      "governing": "3 roof beam(s), across: 1x2 in bending",
+      "sag_in": 0.88,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 231.8,
+          "safety": 13.29,
+          "governs": "xps in tension",
+          "stress_mpa": 0.03,
+          "sag_mm": 0.7
+        },
+        {
+          "element": "3 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 1.34,
+          "governs": "1x2 in bending",
+          "stress_mpa": 14.9,
+          "sag_mm": 22.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 7.43,
+          "governs": "2x2 in bending",
+          "stress_mpa": 2.69,
+          "sag_mm": 2.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "2x2",
+        "roof_beams": 3,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 71.5,
+      "cost_usd": 503.8,
+      "safety": 1.34,
+      "governing": "3 roof beam(s), across: 1x2 in bending",
+      "sag_in": 0.88,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 231.8,
+          "safety": 42.11,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 1.001,
+          "sag_mm": 0.1
+        },
+        {
+          "element": "3 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 1.34,
+          "governs": "1x2 in bending",
+          "stress_mpa": 14.9,
+          "sag_mm": 22.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "2x2",
+          "span_mm": 1337.4,
+          "safety": 7.43,
+          "governs": "2x2 in bending",
+          "stress_mpa": 2.69,
+          "sag_mm": 2.9
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 0,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 52.5,
+      "cost_usd": 370.25,
+      "safety": 0.83,
+      "governing": "roof panel: xps in tension",
+      "sag_in": 6.91,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 0.83,
+          "governs": "xps in tension",
+          "stress_mpa": 0.481,
+          "sag_mm": 175.5
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 0.93,
+          "governs": "1x2 in bending",
+          "stress_mpa": 21.53,
+          "sag_mm": 23.4
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 0,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 61.3,
+      "cost_usd": 487.3,
+      "safety": 0.93,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.92,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 2.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 16.023,
+          "sag_mm": 8.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 0.93,
+          "governs": "1x2 in bending",
+          "stress_mpa": 21.53,
+          "sag_mm": 23.4
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 0,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 52.5,
+      "cost_usd": 370.25,
+      "safety": 0.83,
+      "governing": "roof panel: xps in tension",
+      "sag_in": 6.91,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 0.83,
+          "governs": "xps in tension",
+          "stress_mpa": 0.481,
+          "sag_mm": 175.5
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 0.93,
+          "governs": "1x2 in bending",
+          "stress_mpa": 21.53,
+          "sag_mm": 23.4
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 0,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 61.3,
+      "cost_usd": 487.3,
+      "safety": 0.93,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.92,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 2.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 16.023,
+          "sag_mm": 8.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 0.93,
+          "governs": "1x2 in bending",
+          "stress_mpa": 21.53,
+          "sag_mm": 23.4
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 0,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 52.5,
+      "cost_usd": 370.25,
+      "safety": 0.83,
+      "governing": "roof panel: xps in tension",
+      "sag_in": 6.91,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 0.83,
+          "governs": "xps in tension",
+          "stress_mpa": 0.481,
+          "sag_mm": 175.5
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 0.93,
+          "governs": "1x2 in bending",
+          "stress_mpa": 21.53,
+          "sag_mm": 23.4
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 0,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 61.3,
+      "cost_usd": 487.3,
+      "safety": 0.93,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.92,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 2.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 16.023,
+          "sag_mm": 8.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 0.93,
+          "governs": "1x2 in bending",
+          "stress_mpa": 21.53,
+          "sag_mm": 23.4
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 0,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 52.5,
+      "cost_usd": 370.25,
+      "safety": 0.83,
+      "governing": "roof panel: xps in tension",
+      "sag_in": 6.91,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 0.83,
+          "governs": "xps in tension",
+          "stress_mpa": 0.481,
+          "sag_mm": 175.5
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 0.93,
+          "governs": "1x2 in bending",
+          "stress_mpa": 21.53,
+          "sag_mm": 23.4
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 0,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 61.3,
+      "cost_usd": 487.3,
+      "safety": 0.93,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.92,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 927.1,
+          "safety": 2.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 16.023,
+          "sag_mm": 8.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 0.93,
+          "governs": "1x2 in bending",
+          "stress_mpa": 21.53,
+          "sag_mm": 23.4
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 1,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 53.8,
+      "cost_usd": 374.75,
+      "safety": 1.15,
+      "governing": "roof panel: xps in tension",
+      "sag_in": 3.59,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 786.6,
+          "safety": 1.15,
+          "governs": "xps in tension",
+          "stress_mpa": 0.347,
+          "sag_mm": 91.1
+        },
+        {
+          "element": "1 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 2.28,
+          "governs": "2x2 in bending",
+          "stress_mpa": 8.78,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.58,
+          "governs": "1x2 in bending",
+          "stress_mpa": 12.66,
+          "sag_mm": 13.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 1,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 62.6,
+      "cost_usd": 491.8,
+      "safety": 1.58,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.54,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 786.6,
+          "safety": 3.66,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 11.533,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "1 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 2.28,
+          "governs": "2x2 in bending",
+          "stress_mpa": 8.78,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.58,
+          "governs": "1x2 in bending",
+          "stress_mpa": 12.66,
+          "sag_mm": 13.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 1,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 54.8,
+      "cost_usd": 374.75,
+      "safety": 1.34,
+      "governing": "1 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.88,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 463.6,
+          "safety": 3.32,
+          "governs": "xps in tension",
+          "stress_mpa": 0.12,
+          "sag_mm": 11.2
+        },
+        {
+          "element": "1 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 1.34,
+          "governs": "2x2 in bending",
+          "stress_mpa": 14.9,
+          "sag_mm": 22.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "1x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 1,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 63.6,
+      "cost_usd": 491.8,
+      "safety": 1.34,
+      "governing": "1 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.88,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 463.6,
+          "safety": 10.53,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 4.006,
+          "sag_mm": 0.7
+        },
+        {
+          "element": "1 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 1.34,
+          "governs": "2x2 in bending",
+          "stress_mpa": 14.9,
+          "sag_mm": 22.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "1x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 1,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 53.2,
+      "cost_usd": 370.25,
+      "safety": 1.14,
+      "governing": "1 roof beam(s), front to back: 1x2 in bending",
+      "sag_in": 3.59,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 786.6,
+          "safety": 1.15,
+          "governs": "xps in tension",
+          "stress_mpa": 0.347,
+          "sag_mm": 91.1
+        },
+        {
+          "element": "1 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 1.14,
+          "governs": "1x2 in bending",
+          "stress_mpa": 17.56,
+          "sag_mm": 9.2
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.58,
+          "governs": "1x2 in bending",
+          "stress_mpa": 12.66,
+          "sag_mm": 13.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 1,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 62.0,
+      "cost_usd": 487.3,
+      "safety": 1.14,
+      "governing": "1 roof beam(s), front to back: 1x2 in bending",
+      "sag_in": 0.54,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 786.6,
+          "safety": 3.66,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 11.533,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "1 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 1.14,
+          "governs": "1x2 in bending",
+          "stress_mpa": 17.56,
+          "sag_mm": 9.2
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.58,
+          "governs": "1x2 in bending",
+          "stress_mpa": 12.66,
+          "sag_mm": 13.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 1,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 53.7,
+      "cost_usd": 373.25,
+      "safety": 0.67,
+      "governing": "1 roof beam(s), across: 1x2 in bending",
+      "sag_in": 1.76,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 463.6,
+          "safety": 3.32,
+          "governs": "xps in tension",
+          "stress_mpa": 0.12,
+          "sag_mm": 11.2
+        },
+        {
+          "element": "1 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 0.67,
+          "governs": "1x2 in bending",
+          "stress_mpa": 29.79,
+          "sag_mm": 44.8
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "1x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 1,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 62.5,
+      "cost_usd": 490.3,
+      "safety": 0.67,
+      "governing": "1 roof beam(s), across: 1x2 in bending",
+      "sag_in": 1.76,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 463.6,
+          "safety": 10.53,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 4.006,
+          "sag_mm": 0.7
+        },
+        {
+          "element": "1 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 0.67,
+          "governs": "1x2 in bending",
+          "stress_mpa": 29.79,
+          "sag_mm": 44.8
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.86,
+          "governs": "1x2 in bending",
+          "stress_mpa": 10.77,
+          "sag_mm": 11.7
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 2,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 55.1,
+      "cost_usd": 374.75,
+      "safety": 1.18,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.72,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 524.4,
+          "safety": 2.6,
+          "governs": "xps in tension",
+          "stress_mpa": 0.154,
+          "sag_mm": 18.2
+        },
+        {
+          "element": "2 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 3.42,
+          "governs": "2x2 in bending",
+          "stress_mpa": 5.85,
+          "sag_mm": 3.1
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.18,
+          "governs": "1x2 in bending",
+          "stress_mpa": 16.89,
+          "sag_mm": 18.3
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 2,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 63.9,
+      "cost_usd": 491.8,
+      "safety": 1.18,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.72,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 524.4,
+          "safety": 8.23,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 5.126,
+          "sag_mm": 1.1
+        },
+        {
+          "element": "2 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 3.42,
+          "governs": "2x2 in bending",
+          "stress_mpa": 5.85,
+          "sag_mm": 3.1
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.18,
+          "governs": "1x2 in bending",
+          "stress_mpa": 16.89,
+          "sag_mm": 18.3
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 2,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 57.1,
+      "cost_usd": 379.25,
+      "safety": 2.01,
+      "governing": "2 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.59,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 309.0,
+          "safety": 7.48,
+          "governs": "xps in tension",
+          "stress_mpa": 0.053,
+          "sag_mm": 2.3
+        },
+        {
+          "element": "2 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 2.01,
+          "governs": "2x2 in bending",
+          "stress_mpa": 9.93,
+          "sag_mm": 14.9
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 2.79,
+          "governs": "1x2 in bending",
+          "stress_mpa": 7.18,
+          "sag_mm": 7.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 2,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 65.9,
+      "cost_usd": 496.3,
+      "safety": 2.01,
+      "governing": "2 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.59,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 309.0,
+          "safety": 23.69,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 1.78,
+          "sag_mm": 0.2
+        },
+        {
+          "element": "2 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 2.01,
+          "governs": "2x2 in bending",
+          "stress_mpa": 9.93,
+          "sag_mm": 14.9
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 2.79,
+          "governs": "1x2 in bending",
+          "stress_mpa": 7.18,
+          "sag_mm": 7.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 2,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 53.8,
+      "cost_usd": 373.25,
+      "safety": 1.18,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.72,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 524.4,
+          "safety": 2.6,
+          "governs": "xps in tension",
+          "stress_mpa": 0.154,
+          "sag_mm": 18.2
+        },
+        {
+          "element": "2 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 1.71,
+          "governs": "1x2 in bending",
+          "stress_mpa": 11.71,
+          "sag_mm": 6.1
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.18,
+          "governs": "1x2 in bending",
+          "stress_mpa": 16.89,
+          "sag_mm": 18.3
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 2,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 62.6,
+      "cost_usd": 490.3,
+      "safety": 1.18,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.72,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 524.4,
+          "safety": 8.23,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 5.126,
+          "sag_mm": 1.1
+        },
+        {
+          "element": "2 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 1.71,
+          "governs": "1x2 in bending",
+          "stress_mpa": 11.71,
+          "sag_mm": 6.1
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.18,
+          "governs": "1x2 in bending",
+          "stress_mpa": 16.89,
+          "sag_mm": 18.3
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 2,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 54.8,
+      "cost_usd": 376.25,
+      "safety": 1.01,
+      "governing": "2 roof beam(s), across: 1x2 in bending",
+      "sag_in": 1.18,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 309.0,
+          "safety": 7.48,
+          "governs": "xps in tension",
+          "stress_mpa": 0.053,
+          "sag_mm": 2.3
+        },
+        {
+          "element": "2 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 1.01,
+          "governs": "1x2 in bending",
+          "stress_mpa": 19.86,
+          "sag_mm": 29.9
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 2.79,
+          "governs": "1x2 in bending",
+          "stress_mpa": 7.18,
+          "sag_mm": 7.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 2,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 63.6,
+      "cost_usd": 493.3,
+      "safety": 1.01,
+      "governing": "2 roof beam(s), across: 1x2 in bending",
+      "sag_in": 1.18,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 309.0,
+          "safety": 23.69,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 1.78,
+          "sag_mm": 0.2
+        },
+        {
+          "element": "2 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 1.01,
+          "governs": "1x2 in bending",
+          "stress_mpa": 19.86,
+          "sag_mm": 29.9
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 2.79,
+          "governs": "1x2 in bending",
+          "stress_mpa": 7.18,
+          "sag_mm": 7.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 3,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 56.3,
+      "cost_usd": 379.25,
+      "safety": 1.05,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.81,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 393.3,
+          "safety": 4.62,
+          "governs": "xps in tension",
+          "stress_mpa": 0.087,
+          "sag_mm": 5.8
+        },
+        {
+          "element": "3 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 4.56,
+          "governs": "2x2 in bending",
+          "stress_mpa": 4.39,
+          "sag_mm": 2.3
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.05,
+          "governs": "1x2 in bending",
+          "stress_mpa": 19.0,
+          "sag_mm": 20.6
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 3,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 65.1,
+      "cost_usd": 496.3,
+      "safety": 1.05,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.81,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 393.3,
+          "safety": 14.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 2.883,
+          "sag_mm": 0.4
+        },
+        {
+          "element": "3 roof beam(s), front to back",
+          "size": "2x2",
+          "span_mm": 927.1,
+          "safety": 4.56,
+          "governs": "2x2 in bending",
+          "stress_mpa": 4.39,
+          "sag_mm": 2.3
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.05,
+          "governs": "1x2 in bending",
+          "stress_mpa": 19.0,
+          "sag_mm": 20.6
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 3,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 59.2,
+      "cost_usd": 383.75,
+      "safety": 2.69,
+      "governing": "3 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.44,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 231.8,
+          "safety": 13.29,
+          "governs": "xps in tension",
+          "stress_mpa": 0.03,
+          "sag_mm": 0.7
+        },
+        {
+          "element": "3 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 2.69,
+          "governs": "2x2 in bending",
+          "stress_mpa": 7.45,
+          "sag_mm": 11.2
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 3.72,
+          "governs": "1x2 in bending",
+          "stress_mpa": 5.38,
+          "sag_mm": 5.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 3,
+        "roof_beam": "2x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 68.1,
+      "cost_usd": 500.8,
+      "safety": 2.69,
+      "governing": "3 roof beam(s), across: 2x2 in bending",
+      "sag_in": 0.44,
+      "holds": true,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 231.8,
+          "safety": 42.11,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 1.001,
+          "sag_mm": 0.1
+        },
+        {
+          "element": "3 roof beam(s), across",
+          "size": "2x2",
+          "span_mm": 1573.1,
+          "safety": 2.69,
+          "governs": "2x2 in bending",
+          "stress_mpa": 7.45,
+          "sag_mm": 11.2
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 3.72,
+          "governs": "1x2 in bending",
+          "stress_mpa": 5.38,
+          "sag_mm": 5.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 3,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "none"
+      },
+      "mass_lb": 54.4,
+      "cost_usd": 373.25,
+      "safety": 1.05,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.81,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 393.3,
+          "safety": 4.62,
+          "governs": "xps in tension",
+          "stress_mpa": 0.087,
+          "sag_mm": 5.8
+        },
+        {
+          "element": "3 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 2.28,
+          "governs": "1x2 in bending",
+          "stress_mpa": 8.78,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.05,
+          "governs": "1x2 in bending",
+          "stress_mpa": 19.0,
+          "sag_mm": 20.6
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 3,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "fore-aft",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 63.2,
+      "cost_usd": 490.3,
+      "safety": 1.05,
+      "governing": "front and back top rails: 1x2 in bending",
+      "sag_in": 0.81,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 393.3,
+          "safety": 14.63,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 2.883,
+          "sag_mm": 0.4
+        },
+        {
+          "element": "3 roof beam(s), front to back",
+          "size": "1x2",
+          "span_mm": 927.1,
+          "safety": 2.28,
+          "governs": "1x2 in bending",
+          "stress_mpa": 8.78,
+          "sag_mm": 4.6
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 1.05,
+          "governs": "1x2 in bending",
+          "stress_mpa": 19.0,
+          "sag_mm": 20.6
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 3,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "none"
+      },
+      "mass_lb": 55.9,
+      "cost_usd": 379.25,
+      "safety": 1.34,
+      "governing": "3 roof beam(s), across: 1x2 in bending",
+      "sag_in": 0.88,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 231.8,
+          "safety": 13.29,
+          "governs": "xps in tension",
+          "stress_mpa": 0.03,
+          "sag_mm": 0.7
+        },
+        {
+          "element": "3 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 1.34,
+          "governs": "1x2 in bending",
+          "stress_mpa": 14.9,
+          "sag_mm": 22.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 3.72,
+          "governs": "1x2 in bending",
+          "stress_mpa": 5.38,
+          "sag_mm": 5.8
+        }
+      ]
+    },
+    {
+      "build": {
+        "frame_posts": "1x2",
+        "roof_beams": 3,
+        "roof_beam": "1x2",
+        "roof_beam_dir": "across",
+        "skin_in": "fiberglass"
+      },
+      "mass_lb": 64.7,
+      "cost_usd": 496.3,
+      "safety": 1.34,
+      "governing": "3 roof beam(s), across: 1x2 in bending",
+      "sag_in": 0.88,
+      "holds": false,
+      "elements": [
+        {
+          "element": "roof panel",
+          "span_mm": 231.8,
+          "safety": 42.11,
+          "governs": "fiberglass (outside) in compression",
+          "stress_mpa": 1.001,
+          "sag_mm": 0.1
+        },
+        {
+          "element": "3 roof beam(s), across",
+          "size": "1x2",
+          "span_mm": 1573.1,
+          "safety": 1.34,
+          "governs": "1x2 in bending",
+          "stress_mpa": 14.9,
+          "sag_mm": 22.4
+        },
+        {
+          "element": "front and back top rails",
+          "size": "1x2",
+          "span_mm": 1337.4,
+          "safety": 3.72,
+          "governs": "1x2 in bending",
+          "stress_mpa": 5.38,
+          "sag_mm": 5.8
+        }
+      ]
+    }
+  ],
+  "best": {
+    "frame_posts": "1x2",
+    "roof_beams": 2,
+    "roof_beam": "2x2",
+    "roof_beam_dir": "across",
+    "skin_in": "none"
+  },
+  "cheapest": {
+    "frame_posts": "1x2",
+    "roof_beams": 2,
+    "roof_beam": "2x2",
+    "roof_beam_dir": "across",
+    "skin_in": "none"
+  },
+  "frontier": [
+    {
+      "frame_posts": "1x2",
+      "roof_beams": 2,
+      "roof_beam": "2x2",
+      "roof_beam_dir": "across",
+      "skin_in": "none"
+    }
+  ]
+}

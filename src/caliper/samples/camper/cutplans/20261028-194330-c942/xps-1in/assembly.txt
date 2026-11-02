@@ -1,0 +1,284 @@
+21 pieces, 256 seams (233 mountain, 23 valley).
+On the sheets: mountain folds are dash-dot, valley folds are plain dashed.
+Marked side faces OUT; mountain and valley are named as seen from it. Glue tabs fold under, to the inside. This is an open surface, so which face is out comes from the model's own winding and cannot be checked — a bowl and a dome are the same triangles. If it is inverted, every fold is inverted together: hold one panel against the model before creasing the rest.
+
+piece   faces  size                seams
+front      18  1955.8 x 1006.5     
+back       18  1957.5 x 847.4      
+side_left     2  965.2 x 166.8       
+side_right     2  965.2 x 166.8       
+band_left_1    32  1016.9 x 86.3       A01 A02 A03 A04 A05 A06 A07 A08 A09 A10 A11 A12 A13 A14 A15 A16
+band_right_1    32  1016.9 x 86.4       A17 A18 A19 A20 A21 A22 A23 A24 A25 A26 A27 A28 A29 A30 A31 A32
+band_left_2    32  1023.8 x 144.5      A01 A02 A03 A04 A05 A06 A07 A08 A09 A10 A11 A12 A13 A14 A15 A16 A33 A34 A35 A36 A37 A38 A39 A40 A41 A42 A43 A44 A45 A46 A47 A48
+band_right_2    32  1023.8 x 144.6      A17 A18 A19 A20 A21 A22 A23 A24 A25 A26 A27 A28 A29 A30 A31 A32 A49 A50 A51 A52 A53 A54 A55 A56 A57 A58 A59 A60 A61 A62 A63 A64
+band_left_3    32  1041.2 x 170.5      A33 A34 A35 A36 A37 A38 A39 A40 A41 A42 A43 A44 A45 A46 A47 A48 A65 A66 A67 A68 A69 A70 A71 A72 A73 A74 A75 A76 A77 A78 A79 A80
+band_right_3    32  1041.1 x 170.7      A49 A50 A51 A52 A53 A54 A55 A56 A57 A58 A59 A60 A61 A62 A63 A64 A81 A82 A83 A84 A85 A86 A87 A88 A89 A90 A91 A92 A93 A94 A95 A96
+band_left_4    32  1069.8 x 176.2      A65 A66 A67 A68 A69 A70 A71 A72 A73 A74 A75 A76 A77 A78 A79 A80 A97 A98 A99 B01 B02 B03 B04 B05 B06 B07 B08 B09 B10 B11 B12 B13
+band_right_4    32  1069.7 x 176.4      A81 A82 A83 A84 A85 A86 A87 A88 A89 A90 A91 A92 A93 A94 A95 A96 B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B26 B27 B28 B29
+band_left_5    32  1107.1 x 163.9      A97 A98 A99 B01 B02 B03 B04 B05 B06 B07 B08 B09 B10 B11 B12 B13 B30 B31 B32 B33 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45
+band_right_5    32  1106.9 x 164.0      B14 B15 B16 B17 B18 B19 B20 B21 B22 B23 B24 B25 B26 B27 B28 B29 B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61
+band_left_6    32  1148.5 x 135.5      B30 B31 B32 B33 B34 B35 B36 B37 B38 B39 B40 B41 B42 B43 B44 B45 B62 B63 B64 B65 B66 B67 B68 B69 B70 B71 B72 B73 B74 B75 B76 B77
+band_right_6    32  1148.4 x 135.7      B46 B47 B48 B49 B50 B51 B52 B53 B54 B55 B56 B57 B58 B59 B60 B61 B78 B79 B80 B81 B82 B83 B84 B85 B86 B87 B88 B89 B90 B91 B92 B93
+band_left_7    32  1189.2 x 93.6       B62 B63 B64 B65 B66 B67 B68 B69 B70 B71 B72 B73 B74 B75 B76 B77 B94 B95 B96 B97 B98 B99 C01 C02 C03 C04 C05 C06 C07 C08 C09 C10
+band_right_7    32  1189.2 x 93.6       B78 B79 B80 B81 B82 B83 B84 B85 B86 B87 B88 B89 B90 B91 B92 B93 C11 C12 C13 C14 C15 C16 C17 C18 C19 C20 C21 C22 C23 C24 C25 C26
+band_left_8    32  1211.3 x 81.9       B94 B95 B96 B97 B98 B99 C01 C02 C03 C04 C05 C06 C07 C08 C09 C10 C27 C28 C29 C30 C31 C32 C33 C34 C35 C36 C37 C38 C39 C40 C41 C42
+band_right_8    32  1211.3 x 81.8       C11 C12 C13 C14 C15 C16 C17 C18 C19 C20 C21 C22 C23 C24 C25 C26 C43 C44 C45 C46 C47 C48 C49 C50 C51 C52 C53 C54 C55 C56 C57 C58
+roof       32  1840.8 x 1034.4     C27 C28 C29 C30 C31 C32 C33 C34 C35 C36 C37 C38 C39 C40 C41 C42 C43 C44 C45 C46 C47 C48 C49 C50 C51 C52 C53 C54 C55 C56 C57 C58
+
+token  joins            length   fold
+A01    band_left_1 - band_left_2     7.8  3° mountain
+A02    band_left_1 - band_left_2    22.8  2° mountain
+A03    band_left_1 - band_left_2    37.0  2° mountain
+A04    band_left_1 - band_left_2    49.7  1° mountain
+A05    band_left_1 - band_left_2    60.6  1° mountain
+A06    band_left_1 - band_left_2    69.1  1° mountain
+A07    band_left_1 - band_left_2    75.0  1° mountain
+A08    band_left_1 - band_left_2    78.0  1° mountain
+A09    band_left_1 - band_left_2    37.1  1° mountain
+A10    band_left_1 - band_left_2    82.8  2° mountain
+A11    band_left_1 - band_left_2    82.8  3° mountain
+A12    band_left_1 - band_left_2    82.8  3° mountain
+A13    band_left_1 - band_left_2    82.8  4° mountain
+A14    band_left_1 - band_left_2    82.8  5° mountain
+A15    band_left_1 - band_left_2    82.8  5° mountain
+A16    band_left_1 - band_left_2    82.8  6° mountain
+A17    band_right_1 - band_right_2     7.8  6° mountain
+A18    band_right_1 - band_right_2    22.8  5° mountain
+A19    band_right_1 - band_right_2    37.0  4° mountain
+A20    band_right_1 - band_right_2    49.7  4° mountain
+A21    band_right_1 - band_right_2    60.6  3° mountain
+A22    band_right_1 - band_right_2    69.1  2° mountain
+A23    band_right_1 - band_right_2    75.0  1° mountain
+A24    band_right_1 - band_right_2    78.0  1° mountain
+A25    band_right_1 - band_right_2    37.1  1° mountain
+A26    band_right_1 - band_right_2    82.8  1° mountain
+A27    band_right_1 - band_right_2    82.8  1° mountain
+A28    band_right_1 - band_right_2    82.8  2° mountain
+A29    band_right_1 - band_right_2    82.8  2° mountain
+A30    band_right_1 - band_right_2    82.8  3° mountain
+A31    band_right_1 - band_right_2    82.8  3° mountain
+A32    band_right_1 - band_right_2    82.8  4° mountain
+A33    band_left_2 - band_left_3     9.9  1° mountain
+A34    band_left_2 - band_left_3    23.5  1° mountain
+A35    band_left_2 - band_left_3    37.3  1° mountain
+A36    band_left_2 - band_left_3    49.9  0° mountain
+A37    band_left_2 - band_left_3    60.7  0° mountain
+A38    band_left_2 - band_left_3    69.1  0° mountain
+A39    band_left_2 - band_left_3    75.0  0° mountain
+A40    band_left_2 - band_left_3    78.0  1° mountain
+A41    band_left_2 - band_left_3    37.2  2° mountain
+A42    band_left_2 - band_left_3    83.0  3° mountain
+A43    band_left_2 - band_left_3    83.0  3° mountain
+A44    band_left_2 - band_left_3    83.0  3° mountain
+A45    band_left_2 - band_left_3    83.0  4° mountain
+A46    band_left_2 - band_left_3    83.0  4° mountain
+A47    band_left_2 - band_left_3    83.0  5° mountain
+A48    band_left_2 - band_left_3    83.0  6° mountain
+A49    band_right_2 - band_right_3     9.9  5° mountain
+A50    band_right_2 - band_right_3    23.5  5° mountain
+A51    band_right_2 - band_right_3    37.3  5° mountain
+A52    band_right_2 - band_right_3    49.9  4° mountain
+A53    band_right_2 - band_right_3    60.7  3° mountain
+A54    band_right_2 - band_right_3    69.1  2° mountain
+A55    band_right_2 - band_right_3    75.0  2° mountain
+A56    band_right_2 - band_right_3    78.0  0° mountain
+A57    band_right_2 - band_right_3    37.2  0° mountain
+A58    band_right_2 - band_right_3    83.0  0° valley
+A59    band_right_2 - band_right_3    83.0  0° mountain
+A60    band_right_2 - band_right_3    83.0  1° mountain
+A61    band_right_2 - band_right_3    83.0  1° mountain
+A62    band_right_2 - band_right_3    83.0  1° mountain
+A63    band_right_2 - band_right_3    83.0  2° mountain
+A64    band_right_2 - band_right_3    83.0  2° mountain
+A65    band_left_3 - band_left_4    15.5  1° mountain
+A66    band_left_3 - band_left_4    26.2  0° mountain
+A67    band_left_3 - band_left_4    38.8  0° valley
+A68    band_left_3 - band_left_4    50.8  0° valley
+A69    band_left_3 - band_left_4    61.2  0° valley
+A70    band_left_3 - band_left_4    69.4  0° valley
+A71    band_left_3 - band_left_4    75.1  0° valley
+A72    band_left_3 - band_left_4    78.1  1° mountain
+A73    band_left_3 - band_left_4    37.4  2° mountain
+A74    band_left_3 - band_left_4    83.5  3° mountain
+A75    band_left_3 - band_left_4    83.5  3° mountain
+A76    band_left_3 - band_left_4    83.5  4° mountain
+A77    band_left_3 - band_left_4    83.5  4° mountain
+A78    band_left_3 - band_left_4    83.5  5° mountain
+A79    band_left_3 - band_left_4    83.5  5° mountain
+A80    band_left_3 - band_left_4    83.5  6° mountain
+A81    band_right_3 - band_right_4    15.5  3° mountain
+A82    band_right_3 - band_right_4    26.2  5° mountain
+A83    band_right_3 - band_right_4    38.8  5° mountain
+A84    band_right_3 - band_right_4    50.8  4° mountain
+A85    band_right_3 - band_right_4    61.2  3° mountain
+A86    band_right_3 - band_right_4    69.4  3° mountain
+A87    band_right_3 - band_right_4    75.1  2° mountain
+A88    band_right_3 - band_right_4    78.1  0° mountain
+A89    band_right_3 - band_right_4    37.4  0° mountain
+A90    band_right_3 - band_right_4    83.5  0° valley
+A91    band_right_3 - band_right_4    83.5  0° valley
+A92    band_right_3 - band_right_4    83.5  0° mountain
+A93    band_right_3 - band_right_4    83.5  1° mountain
+A94    band_right_3 - band_right_4    83.5  1° mountain
+A95    band_right_3 - band_right_4    83.5  1° mountain
+A96    band_right_3 - band_right_4    83.5  2° mountain
+A97    band_left_4 - band_left_5    23.9  0° mountain
+A98    band_left_4 - band_left_5    31.5  0° mountain
+A99    band_left_4 - band_left_5    42.0  0° valley
+B01    band_left_4 - band_left_5    52.7  1° valley
+B02    band_left_4 - band_left_5    62.3  1° valley
+B03    band_left_4 - band_left_5    69.9  1° valley
+B04    band_left_4 - band_left_5    75.3  0° valley
+B05    band_left_4 - band_left_5    78.3  2° mountain
+B06    band_left_4 - band_left_5    37.8  2° mountain
+B07    band_left_4 - band_left_5    84.4  4° mountain
+B08    band_left_4 - band_left_5    84.4  4° mountain
+B09    band_left_4 - band_left_5    84.4  5° mountain
+B10    band_left_4 - band_left_5    84.4  5° mountain
+B11    band_left_4 - band_left_5    84.4  6° mountain
+B12    band_left_4 - band_left_5    84.4  6° mountain
+B13    band_left_4 - band_left_5    84.4  7° mountain
+B14    band_right_4 - band_right_5    23.9  3° mountain
+B15    band_right_4 - band_right_5    31.5  5° mountain
+B16    band_right_4 - band_right_5    42.0  6° mountain
+B17    band_right_4 - band_right_5    52.7  5° mountain
+B18    band_right_4 - band_right_5    62.3  4° mountain
+B19    band_right_4 - band_right_5    69.9  3° mountain
+B20    band_right_4 - band_right_5    75.3  2° mountain
+B21    band_right_4 - band_right_5    78.3  0° mountain
+B22    band_right_4 - band_right_5    37.8  0° mountain
+B23    band_right_4 - band_right_5    84.4  1° valley
+B24    band_right_4 - band_right_5    84.4  0° valley
+B25    band_right_4 - band_right_5    84.4  0° mountain
+B26    band_right_4 - band_right_5    84.4  1° mountain
+B27    band_right_4 - band_right_5    84.4  1° mountain
+B28    band_right_4 - band_right_5    84.4  1° mountain
+B29    band_right_4 - band_right_5    84.4  2° mountain
+B30    band_left_5 - band_left_6    33.9  0° mountain
+B31    band_left_5 - band_left_6    39.0  0° mountain
+B32    band_left_5 - band_left_6    47.1  0° valley
+B33    band_left_5 - band_left_6    55.9  0° valley
+B34    band_left_5 - band_left_6    64.1  1° valley
+B35    band_left_5 - band_left_6    70.8  0° valley
+B36    band_left_5 - band_left_6    75.6  0° valley
+B37    band_left_5 - band_left_6    78.6  2° mountain
+B38    band_left_5 - band_left_6    38.4  3° mountain
+B39    band_left_5 - band_left_6    85.7  5° mountain
+B40    band_left_5 - band_left_6    85.7  5° mountain
+B41    band_left_5 - band_left_6    85.7  6° mountain
+B42    band_left_5 - band_left_6    85.7  7° mountain
+B43    band_left_5 - band_left_6    85.7  7° mountain
+B44    band_left_5 - band_left_6    85.7  8° mountain
+B45    band_left_5 - band_left_6    85.7  8° mountain
+B46    band_right_5 - band_right_6    33.9  3° mountain
+B47    band_right_5 - band_right_6    39.0  6° mountain
+B48    band_right_5 - band_right_6    47.1  6° mountain
+B49    band_right_5 - band_right_6    55.9  6° mountain
+B50    band_right_5 - band_right_6    64.1  5° mountain
+B51    band_right_5 - band_right_6    70.8  4° mountain
+B52    band_right_5 - band_right_6    75.6  3° mountain
+B53    band_right_5 - band_right_6    78.6  0° mountain
+B54    band_right_5 - band_right_6    38.4  0° mountain
+B55    band_right_5 - band_right_6    85.7  1° valley
+B56    band_right_5 - band_right_6    85.7  0° valley
+B57    band_right_5 - band_right_6    85.7  0° mountain
+B58    band_right_5 - band_right_6    85.7  1° mountain
+B59    band_right_5 - band_right_6    85.7  1° mountain
+B60    band_right_5 - band_right_6    85.7  2° mountain
+B61    band_right_5 - band_right_6    85.7  2° mountain
+B62    band_left_6 - band_left_7    44.0  1° mountain
+B63    band_left_6 - band_left_7    47.5  1° mountain
+B64    band_left_6 - band_left_7    53.3  1° mountain
+B65    band_left_6 - band_left_7    60.0  1° mountain
+B66    band_left_6 - band_left_7    66.6  0° mountain
+B67    band_left_6 - band_left_7    72.1  0° mountain
+B68    band_left_6 - band_left_7    76.0  0° mountain
+B69    band_left_6 - band_left_7    78.9  3° mountain
+B70    band_left_6 - band_left_7    39.1  4° mountain
+B71    band_left_6 - band_left_7    87.3  7° mountain
+B72    band_left_6 - band_left_7    87.3  8° mountain
+B73    band_left_6 - band_left_7    87.3  9° mountain
+B74    band_left_6 - band_left_7    87.3  9° mountain
+B75    band_left_6 - band_left_7    87.3  10° mountain
+B76    band_left_6 - band_left_7    87.3  11° mountain
+B77    band_left_6 - band_left_7    87.3  11° mountain
+B78    band_right_6 - band_right_7    44.0  3° mountain
+B79    band_right_6 - band_right_7    47.5  7° mountain
+B80    band_right_6 - band_right_7    53.3  8° mountain
+B81    band_right_6 - band_right_7    60.0  8° mountain
+B82    band_right_6 - band_right_7    66.6  7° mountain
+B83    band_right_6 - band_right_7    72.1  6° mountain
+B84    band_right_6 - band_right_7    76.0  4° mountain
+B85    band_right_6 - band_right_7    78.9  1° mountain
+B86    band_right_6 - band_right_7    39.1  1° mountain
+B87    band_right_6 - band_right_7    87.3  0° valley
+B88    band_right_6 - band_right_7    87.3  1° mountain
+B89    band_right_6 - band_right_7    87.3  2° mountain
+B90    band_right_6 - band_right_7    87.3  3° mountain
+B91    band_right_6 - band_right_7    87.3  3° mountain
+B92    band_right_6 - band_right_7    87.3  4° mountain
+B93    band_right_6 - band_right_7    87.3  5° mountain
+B94    band_left_7 - band_left_8    53.0  3° mountain
+B95    band_left_7 - band_left_8    55.3  6° mountain
+B96    band_left_7 - band_left_8    59.4  7° mountain
+B97    band_left_7 - band_left_8    64.3  6° mountain
+B98    band_left_7 - band_left_8    69.2  5° mountain
+B99    band_left_7 - band_left_8    73.4  4° mountain
+C01    band_left_7 - band_left_8    76.5  4° mountain
+C02    band_left_7 - band_left_8    79.2  8° mountain
+C03    band_left_7 - band_left_8    39.8  9° mountain
+C04    band_left_7 - band_left_8    88.8  14° mountain
+C05    band_left_7 - band_left_8    88.8  16° mountain
+C06    band_left_7 - band_left_8    88.8  17° mountain
+C07    band_left_7 - band_left_8    88.8  18° mountain
+C08    band_left_7 - band_left_8    88.8  19° mountain
+C09    band_left_7 - band_left_8    88.8  19° mountain
+C10    band_left_7 - band_left_8    88.8  19° mountain
+C11    band_right_7 - band_right_8    53.0  6° mountain
+C12    band_right_7 - band_right_8    55.3  14° mountain
+C13    band_right_7 - band_right_8    59.4  16° mountain
+C14    band_right_7 - band_right_8    64.3  16° mountain
+C15    band_right_7 - band_right_8    69.2  15° mountain
+C16    band_right_7 - band_right_8    73.4  12° mountain
+C17    band_right_7 - band_right_8    76.5  9° mountain
+C18    band_right_7 - band_right_8    79.2  4° mountain
+C19    band_right_7 - band_right_8    39.8  5° mountain
+C20    band_right_7 - band_right_8    88.8  4° mountain
+C21    band_right_7 - band_right_8    88.8  6° mountain
+C22    band_right_7 - band_right_8    88.8  8° mountain
+C23    band_right_7 - band_right_8    88.8  10° mountain
+C24    band_right_7 - band_right_8    88.8  11° mountain
+C25    band_right_7 - band_right_8    88.8  12° mountain
+C26    band_right_7 - band_right_8    88.8  12° mountain
+C27    band_left_8 - roof    58.6  79° mountain
+C28    band_left_8 - roof    60.3  66° mountain
+C29    band_left_8 - roof    63.3  61° mountain
+C30    band_left_8 - roof    67.1  61° mountain
+C31    band_left_8 - roof    71.0  64° mountain
+C32    band_left_8 - roof    74.4  69° mountain
+C33    band_left_8 - roof    76.9  73° mountain
+C34    band_left_8 - roof    79.4  76° mountain
+C35    band_left_8 - roof    40.2  71° mountain
+C36    band_left_8 - roof    89.8  68° mountain
+C37    band_left_8 - roof    89.8  62° mountain
+C38    band_left_8 - roof    89.8  56° mountain
+C39    band_left_8 - roof    89.8  51° mountain
+C40    band_left_8 - roof    89.8  46° mountain
+C41    band_left_8 - roof    89.8  42° mountain
+C42    band_left_8 - roof    89.8  38° mountain
+C43    band_right_8 - roof    58.6  81° mountain
+C44    band_right_8 - roof    60.3  70° mountain
+C45    band_right_8 - roof    63.3  66° mountain
+C46    band_right_8 - roof    67.1  67° mountain
+C47    band_right_8 - roof    71.0  70° mountain
+C48    band_right_8 - roof    74.4  74° mountain
+C49    band_right_8 - roof    76.9  77° mountain
+C50    band_right_8 - roof    79.4  73° mountain
+C51    band_right_8 - roof    40.2  68° mountain
+C52    band_right_8 - roof    89.8  62° mountain
+C53    band_right_8 - roof    89.8  56° mountain
+C54    band_right_8 - roof    89.8  51° mountain
+C55    band_right_8 - roof    89.8  46° mountain
+C56    band_right_8 - roof    89.8  42° mountain
+C57    band_right_8 - roof    89.8  38° mountain
+C58    band_right_8 - roof    89.8  35° mountain
