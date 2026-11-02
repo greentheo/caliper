@@ -82,8 +82,10 @@ def record(store: DesignStore, part_id: str, load_lb: float, sag_mm: Optional[fl
     entry = store.design.part(part_id)
     if entry is None:
         raise KeyError(f"no part {part_id!r}")
-    if not load_lb or load_lb <= 0:
-        raise ValueError("how much was on it? (in lb)")
+    if not _real(load_lb):
+        raise ValueError("how much was on it? (a number of lb, more than nothing)")
+    if sag_mm is not None and not _real(sag_mm):
+        raise ValueError("how far did it sag? (a number of mm, more than nothing; leave it out if you didn't measure)")
     row = {"at": time.time(), "version": entry.version, "load_lb": float(load_lb),
            "sag_mm": None if sag_mm is None else float(sag_mm), "broke": bool(broke), "note": note.strip()}
     p = path(store, part_id)
@@ -95,12 +97,40 @@ def record(store: DesignStore, part_id: str, load_lb: float, sag_mm: Optional[fl
     return row
 
 
-def rows(store: DesignStore, part_id: str) -> list[dict]:
+def _real(x) -> bool:
+    """A measurement: a finite number more than nothing (NaN gets past ``x <= 0``; a string or true isn't a
+    number, CALI-86)."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and x > 0
+
+
+def _row(line: str) -> Optional[dict]:
+    """One step from the file, or None if it isn't one (a hand-edited line, a NaN)."""
+    try:
+        r = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(r, dict) or not _real(r.get("load_lb")) or (r.get("sag_mm") is not None
+                                                                  and not _real(r["sag_mm"])):
+        return None
+    if not isinstance(r.get("version"), int) or isinstance(r.get("version"), bool) \
+            or not isinstance(r.get("broke", False), bool):
+        return None                                 # every field a step is read by, as record() writes it
+    return r
+
+
+def _read(store: DesignStore, part_id: str) -> tuple[list[dict], int]:
+    """The steps on file, and how many lines were skipped as not steps."""
     try:
         with open(path(store, part_id)) as f:
-            return [json.loads(line) for line in f if line.strip()]
-    except (OSError, ValueError):
-        return []
+            lines = [line for line in f if line.strip()]
+    except OSError:
+        return [], 0
+    got = [_row(line) for line in lines]
+    return [r for r in got if r is not None], sum(r is None for r in got)
+
+
+def rows(store: DesignStore, part_id: str) -> list[dict]:
+    return _read(store, part_id)[0]
 
 
 def compared(store: DesignStore, part_id: str) -> dict:
@@ -108,7 +138,8 @@ def compared(store: DesignStore, part_id: str) -> dict:
     pred = predict(store, part_id)
     entry = store.design.part(part_id)
     out = []
-    for r in rows(store, part_id):
+    kept, skipped = _read(store, part_id)
+    for r in kept:
         row = {**r, "stale": entry is not None and r["version"] != entry.version}
         if pred and not row["stale"]:
             lo, hi = pred["per_lb_mm"]
@@ -117,7 +148,11 @@ def compared(store: DesignStore, part_id: str) -> dict:
                 mid = math.sqrt(lo * hi) * r["load_lb"] if lo > 0 else hi * r["load_lb"]
                 row["ratio"] = round(r["sag_mm"] / mid, 2)          # against the middle of the range
         out.append(row)
-    return {"prediction": pred, "rows": out}
+    got = {"prediction": pred, "rows": out, "skipped": skipped}
+    if skipped:
+        got["skipped_note"] = (f"{skipped} line{'s' if skipped > 1 else ''} in {os.path.basename(path(store, part_id))} "
+                               f"weren't a test step (a number that isn't one, or not JSON) and were left out")
+    return got
 
 
 def summary(store: DesignStore, part_id: str, inches: bool = True) -> Optional[dict]:

@@ -58,7 +58,8 @@ async function reportError(errorId, message) {
     if (!dlg) { dlg = document.createElement('dialog'); dlg.id = 'reportDlg'; dlg.className = 'report'; document.body.append(dlg); }
     dlg.innerHTML = `<h3>Report what broke</h3>
       <p class="small">Nothing has been sent. This is everything the report holds: what broke, where, and which
-        Caliper and Mac it was. Nothing of your design is in it. Add what you were doing if you like.</p>
+        Caliper and computer it was. It doesn't name your design. The error's own words can quote what you typed or
+        name a part, so read it before you send it. Add what you were doing if you like.</p>
       <textarea id="reportBody" rows="12">${esc(rep.body)}</textarea>
       <div class="actions"><button class="primary" id="reportSend">Open it as a GitHub issue</button>
         <button id="reportCopy">Copy</button><button class="ghost" id="reportClose">Not now</button></div>
@@ -495,6 +496,8 @@ function renderThread() {
   const d = S.design;
   if (!d) return;
   const html = [];
+  // a line of the log that isn't a record (torn, or a NaN from before CALI-86) is left out, and said
+  if (d.log_skipped) html.push(`<div class="muted small">${d.log_skipped} line${d.log_skipped > 1 ? 's' : ''} of this design's log couldn't be read and ${d.log_skipped > 1 ? 'are' : 'is'} left out.</div>`);
   for (const e of d.log) {
     if (e.kind === 'created') {
       html.push(`<div class="note">Started <b>${esc(d.name)}</b> — ${esc(e.prompt)}</div>`);
@@ -946,7 +949,8 @@ function trialView(p) {
       <label>sag <input id="trSag" type="number" min="0" step="0.001" placeholder="${inches() ? '0.004' : '0.10'}"> ${inches() ? 'in' : 'mm'}</label>
       <label><input id="trBroke" type="checkbox"> it broke</label>
       <button class="small" id="trAdd">Record</button></div>
-    <div class="muted small">${esc(pr.basis)}. Every step is kept with the design for calibrating the check.</div>`;
+    <div class="muted small">${esc(pr.basis)}. Every step is kept with the design for calibrating the check.</div>
+    ${t.skipped_note ? `<div class="small"><b class="bad">Left out:</b> ${esc(t.skipped_note)}.</div>` : ''}`;
 }
 function trialChart(pr, rows) {
   // load across, sag up: the predicted band, and what was measured
@@ -1788,8 +1792,10 @@ function carveView(p) {
       <text x="${W - 10}" y="${y(run.min_safety) - 3}" text-anchor="end">needs ${run.min_safety}x</text>
       <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>${dots}
       <text x="24" y="${H - 3}">as drawn</text><text x="${W - 10}" y="${H - 3}" text-anchor="end">carved away →</text></svg>
-    <div class="small">${best && best.saved_g ? `The lightest that holds: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% of the printed part
-      carved away, <b>${best.saved_g} g</b> less filament, ${best.safety}x.` : 'Nothing could come off and still hold.'}
+    <div class="small">${best && best.saved_g ? `The lightest step where the printed part holds: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% of the printed part
+      carved away, <b>${best.saved_g} g</b> less filament, the printed part ${best.safety}x;
+      ${best.whole_holds ? `the whole part ${best.whole}x` : `<b class="bad">the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold</b>`}.`
+      : 'Nothing could come off and still hold.'}
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
     <div class="muted small">Click a step to see it; <b>Carve it like this</b> makes it the part's shape and checks it again.</div>`;
 }

@@ -157,6 +157,22 @@ def test_the_printed_sides_carve_down_until_it_doesnt_hold(stool, monkeypatch):
     assert "CARVED" not in stool.read_script("stool") and "carve it again" in res.reply
 
 
+def test_the_carve_headline_leads_with_the_whole_part_when_it_doesnt_hold(stool, monkeypatch):
+    """CALI-86 (#62, finding 2; rule 6): the studies page read "carved away, still 8.4x" in green while the whole part
+    was 0.66x (its 1/2 in top fails as a beam). A verdict is never greener than its check."""
+    pytest.importorskip("whittle")
+    from caliper import carve, load_study, studies
+
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    rec = carve.study(stool, "stool", stations=2, remove_up_to=0.4)
+    first = rec["stations"][0]
+    assert not first["whole_holds"] and first["holds"]           # the fixture: the sides hold, the whole doesn't
+    text, ok = studies._headline("carve", rec)
+    assert ok is False
+    assert text.startswith(f"doesn't hold as it is: {round(first['whole'], 1):g}x"), text
+    assert "needs 2x" in text and "the top" in text
+
+
 def test_a_sheet_part_cant_be_carved(tmp_path):
     pytest.importorskip("whittle")
     from caliper import carve
