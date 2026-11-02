@@ -188,6 +188,51 @@ def spacing_for(pieces: list[dict], volume: float, longest: float, walls: Option
                    f"piece ({min(thin):.1f} mm), to keep the study quick: read the FEA as a picture.")
 
 
+def study_spacing(declared: dict, mesh, pieces: list[dict]) -> tuple[float, Optional[str]]:
+    """The voxel size the strength check analyses this part at (:func:`spacing_for`), from what it declares."""
+    walls = None
+    if any(isinstance(it, dict) and it.get("kind") == "printed" for it in declared.get("construction") or []):
+        from .measure import Geometry, min_wall_thickness
+
+        walls = min_wall_thickness(Geometry.from_mesh(mesh))
+    return spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)), walls)
+
+
+# ---------------------------------------------------------------------------
+# Where a load lands (CALI-84): one rule for the designer's check and the strength check
+# ---------------------------------------------------------------------------
+def reach(tol: float, spacing: float) -> float:
+    """How far off the part a load or support box may be and still push on it (or hold it): the measuring
+    tolerance, or one voxel of the strength check, whichever is more."""
+    return max(spacing, tol)
+
+
+def touches(mesh, box, reach: float) -> tuple[bool, float]:
+    """Whether a box (lo, hi) is on the part: in it, or within ``reach`` of its surface. Also how far it is from
+    the nearest surface (0 when it's in the part): from the surface points nearest to points spread through the
+    box, back to the box itself. Exact for a box facing a surface; otherwise a little long, never short, so a box
+    this passes, grown by ``reach`` and half a voxel, takes voxels in."""
+    import trimesh
+
+    lo, hi = (np.asarray(v, float) for v in box)
+    axes = [np.linspace(a, b, int(min(8, max(2, math.ceil((b - a) / max(reach, 0.5)) + 1)))) for a, b in zip(lo, hi)]
+    pts = np.stack(np.meshgrid(*axes, indexing="ij"), -1).reshape(-1, 3)
+    near, _, _ = trimesh.proximity.closest_point(mesh, pts)
+    gap = float(np.linalg.norm(near - np.clip(near, lo, hi), axis=1).min())
+    if gap > reach and mesh.contains(pts).any():           # a box inside the solid, far from its surface
+        gap = 0.0
+    return gap <= reach, round(gap, 2)
+
+
+def missed(name: str, gap: float, reach: float, support: bool = False) -> str:
+    """What both checks say when a box isn't on the part."""
+    if support:
+        return (f"'{name}' doesn't touch the part — nothing holds it there, {gap:.1f} mm from its nearest surface "
+                f"(a support may be up to {reach:.1f} mm off it): put its box where the part rests")
+    return (f"'{name}' doesn't touch the part — it pushes on thin air, {gap:.1f} mm from its nearest surface "
+            f"(a load may be up to {reach:.1f} mm off it): put its box on the face it pushes on")
+
+
 # ---------------------------------------------------------------------------
 # The plate check
 # ---------------------------------------------------------------------------
@@ -434,25 +479,30 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None) -
     mat = printed or sheet_mat or material(pieces)
     _sides(mesh, pieces)
     tol = tolerance(mesh)
-    walls = None
-    if printed:
-        from .measure import Geometry, min_wall_thickness
-
-        walls = min_wall_thickness(Geometry.from_mesh(mesh))
-    spacing, coarse = spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)), walls)
+    spacing, coarse = study_spacing(declared, mesh, pieces)
     held = parse_held(declared.get("held"), mesh.bounds.tolist(), max(spacing * 0.6, 1.0))
+    # the designer's check (loads_land) asks the same question, so the two never disagree (CALI-84)
+    rch = reach(tol, spacing)
+    for item, support in [(h, True) for h in held] + [(ld, False) for ld in loads]:
+        on, gap = touches(mesh, (item["lo"], item["hi"]), rch)
+        if not on:
+            raise ValueError(missed(item["name"], gap, rch, support))
 
     emit("voxels", f"voxelizing '{part_id}' at {spacing:.1f} mm in {mat['name']}")
     wmat = Material(name=mat["name"], youngs_modulus=mat["E"], poisson_ratio=POISSON,
                     strength=mat["strength"], density=mat["density"])
     ls = LoadStudy(Mesh(np.asarray(mesh.vertices, float), np.asarray(mesh.faces)), material=wmat,
                    spacing=spacing)
-    grow = spacing                        # a box on the surface still takes the voxels just under it
+    # a box within reach of a face takes the voxels just under it: half a voxel more, so the layer under even a
+    # thin box can't fall between voxel centres
+    grow = rch + spacing / 2
+    thin = (f"' touches the part only where it's thinner than a voxel ({spacing:.1f} mm), so the strength check "
+            f"has nothing there to work with")
     try:
         for h in held:
             ls.support(box=_grow(h["lo"], h["hi"], grow))
     except ValueError:
-        raise ValueError(f"'{h['name']}' doesn't touch the part — nothing holds it there")
+        raise ValueError(f"'{h['name']}" + thin)
     attach = np.zeros(ls.grid.shape, dtype=bool)
     for h in held:
         attach |= ls.region(box=_grow(h["lo"], h["hi"], grow))
@@ -462,7 +512,7 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None) -
         try:
             attach |= ls.region(box=box)
         except ValueError:
-            raise ValueError(f"'{load['name']}' doesn't touch the part — it pushes on thin air")
+            raise ValueError(f"'{load['name']}" + thin)
         boxes.append(box)
     ctx = {"declared": declared, "loads": loads, "boxes": boxes, "mesh": mesh, "pieces": pieces,
            "mat": mat, "tol": tol, "spacing": spacing, "coarse": coarse, "held": held, "ls": ls,
