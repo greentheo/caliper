@@ -132,6 +132,18 @@ The reviewer's pass over #43–#57, checked by the foreman. One commit each, eac
 - **7 (#50):** the left side's pattern was mirrored. Patterns are now drawn from the outside face, turned rather
   than flipped, and each page names the face. `06092c7`
 
+### 2026-11-01 · The firm · Caliper runs as a team of agents
+- **Theo:** "please take on the foreman role found in ~/githubrepo/the-firm, and work with caliper-reviewer to
+  review current PR's and existing work… also, you will be working with caliper-nightshift as your engineer".
+- `firm/`: the roster (foreman, night shift, reviewer staffed; Socrates and marketing not yet), the stages
+  (`stage: design → questions → ready → review`, now labels on the board with `in-progress`, `needs-owner`,
+  `background`, `size:`), the seven rules with a draft rule 6 for Theo to decide (#60), one checkout per seat
+  (the owner's checkout runs the live app on :8011; night shift 8016, reviewer 8017, each with a scratch designs
+  folder), and Theo's conventions (CALI-N titles, LOG and DEMO entries) winning over the firm's defaults.
+- First work through it: the open stack (#43 → #57, plus whittle#4 and unfold-to-sheets#2) routed to the
+  reviewer; #58 (CALI-84, a load that passes loads_land and pushes on nothing) and #59 (CALI-85, the strength
+  check's benchmarks, #42's first slice) designed and ready for night shift.
+
 ### 2026-10-30 · CALI-81 (#53), CALI-82 (#54) · Printed parts checked; a plywood top on printed sides, carved
 - **Theo**, mid-walkthrough: "what I was specifying was a plywood top and printed sides since the sides would work
   in compression and we could whittle them down more interestingly". The designer had printed the whole stool, the
@@ -367,18 +379,6 @@ The reviewer's pass over #43–#57, checked by the foreman. One commit each, eac
   `test_samples.py`, `test_errors.py`; `test_answers.py` updated for a one-part design; the build book's title is
   the design's short name now. **Full suite: 509 passed** (in two runs: up to `test_release.py`, then from it).
 - Commit: `73f6499`, PR into `main` (the seven-PR stack #25 → #41 merged into `main` first, in order).
-
-### 2026-11-01 · The firm · Caliper runs as a team of agents
-- **Theo:** "please take on the foreman role found in ~/githubrepo/the-firm, and work with caliper-reviewer to
-  review current PR's and existing work… also, you will be working with caliper-nightshift as your engineer".
-- `firm/`: the roster (foreman, night shift, reviewer staffed; Socrates and marketing not yet), the stages
-  (`stage: design → questions → ready → review`, now labels on the board with `in-progress`, `needs-owner`,
-  `background`, `size:`), the seven rules with a draft rule 6 for Theo to decide (#60), one checkout per seat
-  (the owner's checkout runs the live app on :8011; night shift 8016, reviewer 8017, each with a scratch designs
-  folder), and Theo's conventions (CALI-N titles, LOG and DEMO entries) winning over the firm's defaults.
-- First work through it: the open stack (#43 → #57, plus whittle#4 and unfold-to-sheets#2) routed to the
-  reviewer; #58 (CALI-84, a load that passes loads_land and pushes on nothing) and #59 (CALI-85, the strength
-  check's benchmarks, #42's first slice) designed and ready for night shift.
 
 ### 2026-10-30 · CALI-73 (#39), CALI-74 (#40) · Lighter until the safety runs out; the four questions, steps 2–4
 - **Theo:** "it seems that we've hit an artificial limit… still 3.1X safe even though we removed 3.3 pounds,
