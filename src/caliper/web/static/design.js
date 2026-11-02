@@ -858,7 +858,7 @@ function designView(d) {
 // today's panels for that question, and once someone opens it, it stays open for them.
 const QUESTIONS = [['what', 'What is it?'], ['work', 'Will it work?'], ['buy', 'What do I buy?'], ['make', 'How do I make it?']];
 const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' };
-const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox' };
+const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox', trial: 'trialBox' };
 function numbersOpen(k) { try { return localStorage.getItem(`caliper.numbers.${k}`) === '1'; } catch (e) { return false; } }
 function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${k}`, on ? '1' : '0'); } catch (e) { /* private window */ } }
 
@@ -916,6 +916,80 @@ function cardsView(groups) {
     </section>`;
   }).join('');
 }
+// ------------------------------------------------------------------- test it (CALI-80)
+// What the strength check predicts at each load step, what to measure the sag with, and what the real one did.
+const sagText = (mm) => (inches() ? `${(mm / IN).toFixed(3)} in` : `${mm.toFixed(2)} mm`);
+function trialView(p) {
+  const t = S.trial && S.trial.part === p.id && S.trial.key === p.version ? S.trial.data : null;
+  if (!t) { setTimeout(() => loadTrial(p), 0); return '<div class="muted small"><span class="spin"></span>working out what to expect…</div>'; }
+  const pr = t.prediction;
+  if (!pr) return '<div class="empty">Check it holds first: the test is set beside what that predicts.</div>';
+  const rows = t.rows.filter((r) => !r.stale);
+  const show = pr.steps.filter((st, i) => i < 3 || st.lb === pr.lb || i === pr.steps.length - 1
+    || st.lb % (pr.steps.length > 20 ? 200 : 100) === 0);
+  const chart = trialChart(pr, rows);
+  return `<p class="small">Put the load where <b>${esc(pr.case)}</b> goes, in steps, and measure how far the middle of
+      the ${esc(pr.where || 'top')} sags. Measure it with ${esc(pr.measure_with)}.
+      It should break at about <b>${(pr.breaks_lb || 0).toLocaleString()} lb</b>.</p>
+    ${chart}
+    <table class="st"><tr><th>load</th><th>should sag</th><th>sagged</th><th></th></tr>
+      ${show.map((st) => {
+        const got = rows.filter((r) => r.load_lb === st.lb).slice(-1)[0];
+        return `<tr><td>${st.lb.toLocaleString()} lb</td><td>${sagText(st.sag_mm[0])}–${sagText(st.sag_mm[1])}</td>
+          <td>${got ? (got.broke ? '<b class="bad">broke</b>' : got.sag_mm != null ? sagText(got.sag_mm) : 'held') : ''}</td>
+          <td class="muted">${got && got.ratio ? `${got.ratio}×` : ''}</td></tr>`;
+      }).join('')}
+    </table>
+    ${rows.filter((r) => !show.some((st) => st.lb === r.load_lb)).length ? `<div class="muted small">and ${rows.filter((r) => !show.some((st) => st.lb === r.load_lb)).map((r) => `${r.load_lb} lb${r.broke ? ' (broke)' : ''}`).join(', ')}</div>` : ''}
+    <div class="trial-add">
+      <label>load <input id="trLoad" type="number" min="1" step="10" placeholder="200"> lb</label>
+      <label>sag <input id="trSag" type="number" min="0" step="0.001" placeholder="${inches() ? '0.004' : '0.10'}"> ${inches() ? 'in' : 'mm'}</label>
+      <label><input id="trBroke" type="checkbox"> it broke</label>
+      <button class="small" id="trAdd">Record</button></div>
+    <div class="muted small">${esc(pr.basis)}. Every step is kept with the design for calibrating the check.</div>`;
+}
+function trialChart(pr, rows) {
+  // load across, sag up: the predicted band, and what was measured
+  const W = 300, H = 120, maxLb = Math.max(pr.breaks_lb || 0, ...rows.map((r) => r.load_lb), pr.lb);
+  const maxSag = Math.max(pr.per_lb_mm[1] * maxLb, ...rows.map((r) => r.sag_mm || 0)) || 1;
+  const x = (lb) => 30 + (W - 40) * lb / maxLb, y = (mm) => H - 18 - (H - 28) * mm / maxSag;
+  const band = `M${x(0)},${y(0)} L${x(maxLb)},${y(pr.per_lb_mm[1] * maxLb)} L${x(maxLb)},${y(pr.per_lb_mm[0] * maxLb)} Z`;
+  const dots = rows.filter((r) => r.sag_mm != null).map((r) => `<circle cx="${x(r.load_lb)}" cy="${y(r.sag_mm)}" r="3.5"
+    class="${r.broke ? 'bad' : 'ok'}"/>`).join('');
+  const breaks = pr.breaks_lb ? `<line x1="${x(pr.breaks_lb)}" x2="${x(pr.breaks_lb)}" y1="8" y2="${H - 18}" class="brk"/>
+    <text x="${x(pr.breaks_lb) - 4}" y="16" text-anchor="end">breaks ~${pr.breaks_lb.toLocaleString()} lb</text>` : '';
+  return `<svg class="trial-chart" viewBox="0 0 ${W} ${H}"><path d="${band}" class="band"/>${breaks}${dots}
+    <line x1="30" x2="${W - 10}" y1="${H - 18}" y2="${H - 18}" class="axis"/><text x="${W - 10}" y="${H - 4}" text-anchor="end">load (lb)</text>
+    <text x="30" y="${H - 4}">0</text><text x="4" y="12">sag</text></svg>`;
+}
+async function loadTrial(p) {
+  if (S.trialLoading === p.id + p.version) return;
+  S.trialLoading = p.id + p.version;
+  try {
+    S.trial = { part: p.id, key: p.version, data: await api('GET', `/api/designs/${S.slug}/parts/${encodeURIComponent(p.id)}/trial`) };
+    const box = $('trialBox');
+    if (box) { box.innerHTML = trialView(p); wireTrial(p); }
+  } catch (e) { const box = $('trialBox'); if (box) box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  finally { S.trialLoading = null; }
+}
+function wireTrial(p) {
+  const add = $('trAdd');
+  if (!add) return;
+  add.onclick = async () => {
+    const load = +$('trLoad').value, sag = $('trSag').value;
+    if (!load) { $('trLoad').focus(); return; }
+    add.disabled = true;
+    try {
+      const body = { load_lb: load, broke: $('trBroke').checked,
+        sag_mm: sag === '' ? null : (+sag) * (inches() ? IN : 1) };
+      S.trial = { part: p.id, key: p.version,
+        data: await api('POST', `/api/designs/${S.slug}/parts/${encodeURIComponent(p.id)}/trial`, body) };
+      S.answers = null;                          // the card says what the test found
+      await refresh();
+    } catch (e) { showErr(e.message); add.disabled = false; }
+  };
+}
+
 // ------------------------------------------------------------------- a picture on it (CALI-78)
 // Say what it is or draw it; it's cut out of a panel nobody stands on, smooth enough for a jigsaw, and the
 // strength check says whether it still holds (it's made smaller until it does).
@@ -1193,6 +1267,8 @@ function partView(p) {
     <details id="adv"><summary>Advanced — script &amp; spec</summary><div id="advBody" class="small muted">loading…</div></details>`;
   const work = `${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
     <div id="loadBox">${loadView(p)}</div>` : ''}
+    ${p.loads && p.role !== 'fixed' ? `<h4>Test it <span class="badge">the real one</span></h4>
+    <div id="trialBox">${trialView(p)}</div>` : ''}
     ${p.framed ? `<h4>Size the frame <span class="badge">tubes back</span></h4>
     <div id="frameBox">${frameView(p)}</div>` : ''}
     ${!p.framed && (S.design.in_air.yes || aeroRuns(p.id).length || runsFor(p.id).length) ? `<h4>Shape it for drag <span class="badge">numbers back</span></h4>
@@ -1216,6 +1292,7 @@ function wireInspector(p) {
   if (!p) { wireBalance(); wireScore(); wireRelease(); return; }
   wireBuilt(p);
   wireCutplan(p);
+  wireTrial(p);
   const role = $('roleRef');
   if (role) role.onchange = async () => {
     S.design = await api('PATCH', `/api/designs/${S.slug}/parts/${p.id}`, { role: role.checked ? 'fixed' : 'movable' });

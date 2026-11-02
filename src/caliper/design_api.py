@@ -46,6 +46,13 @@ class PictureRequest(BaseModel):
     points: list[list[float]] = []    # a drawing from the pad, x right and y down
 
 
+class TrialStep(BaseModel):
+    load_lb: float
+    sag_mm: Optional[float] = None
+    broke: bool = False
+    note: str = ""
+
+
 class DesignSettings(BaseModel):
     display_units: Optional[str] = None
 
@@ -518,6 +525,30 @@ def router():
 
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
         return {"job_id": job.id}
+
+    # -- test it (CALI-80): the prediction, and what the real one did ----------------------------------------
+    @r.get("/api/designs/{slug}/parts/{pid}/trial")
+    def trial_get(slug: str, pid: str):
+        from . import trials
+
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+        return trials.compared(store, pid)
+
+    @r.post("/api/designs/{slug}/parts/{pid}/trial")
+    def trial_add(slug: str, pid: str, req: TrialStep):
+        from . import trials
+
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                trials.record(store, pid, req.load_lb, req.sag_mm, req.broke, req.note)
+            except KeyError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
+            return trials.compared(store, pid)
 
     # -- a picture on it (CALI-78): drawn or said, cut out of a panel, checked it still holds -----------------
     @r.get("/api/designs/{slug}/parts/{pid}/picture")

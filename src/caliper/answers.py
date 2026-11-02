@@ -112,6 +112,12 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     elif p.get("built") and p.get("role") != "fixed" and not p.get("framed"):
         work.append(_line("Not checked yet: say what it has to hold (\"it has to hold me, 200 lb\").", "warn",
                           study="load"))
+    if p.get("loads") and p.get("role") != "fixed":
+        from . import trials
+
+        tried = trials.summary(store, pid, inches)            # what the real one did (CALI-80)
+        if tried:
+            work.append(_line(tried["text"], tried["status"], study="trial"))
     frames = [r for r in state.get("frame_runs") or [] if r["part"] == pid]
     if frames:
         d = frames[0].get("drawn") or {}
