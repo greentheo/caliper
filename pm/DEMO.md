@@ -42,6 +42,8 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **A build book a kid can follow (CALI-79, #47).** Pictures first, one step a page, one piece at a time, for an
+  all-wood build; in the build package beside the shop's book.
 - 🆕 **Test it (CALI-80, #48).** What the strength check predicts at each load (a sag range, and where it breaks),
   what to measure it with, and what the real one did; the card says how it went.
 - 🆕 **A picture on it (CALI-78, #46).** "Put a T-rex on the side": drawn (or drawn by you on the pad), cut out of
@@ -561,6 +563,14 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-30 · A build book a kid can follow (CALI-79 #47)
+1. On the stool (with its T-rex), **How do I make it? → Make a new build package**, then **The kids' build book**.
+2. The cover is the stool, T-rex side on. Then: get your things (boxes to tick), draw the pieces (each pattern by
+   name), cut them out with a grown-up (drill a start hole for the T-rex), sand, one page per piece with the same
+   picture growing, paint it, test it.
+3. Print it: one step a page.
+4. Offline: `python -m pytest tests/test_kidbook.py`.
 
 ### 2026-10-30 · Test it: predicted against measured (CALI-80 #48)
 1. Click the stool → **Will it work? → the numbers → Test it**. It says where to put the load, what to measure

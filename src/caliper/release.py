@@ -179,9 +179,11 @@ def pieces(store: DesignStore, part_id: str, jacks: Optional[list] = None) -> li
             polys = [it["outline"]] if it.get("outline") else list(it.get("facets") or [])
             if not polys:
                 continue
+            # a flat panel with holes (lightening, a picture: CALI-78) is drawn with them
+            holes = [[list(map(float, q)) for q in h] for h in it.get("holes") or []] if it.get("outline") else []
             out.append({"name": it.get("name"), "layer": layer, "kind": kind, "material": it.get("material"),
                         "covers": list(it.get("covers") or []),
-                        "polys": [([list(map(float, p)) for p in poly], []) for poly in polys]})
+                        "polys": [([list(map(float, p)) for p in poly], holes) for poly in polys]})
         elif kind == "stick":
             if "size" in it:
                 w, h = M.STICKS[it.get("material", "lumber")]["sizes"][it["size"]]
@@ -462,8 +464,13 @@ def _say_stage(pid: str, layer: str, pcs: list[dict], plan: dict, ctx: dict) -> 
             do.append(f"Cut the {', '.join(n.replace('_', ' ') for n in names if n in g['panels'])} from "
                       f"{g['label']} — {_router(pid, g)}/ (or by hand from the 1:1 pattern.pdf).")
             files.append(f"{_router(pid, g)}/")
-        do.append("Glue them to the floor's edge and the skeleton with foam-safe adhesive; they're cut to the "
-                  "outside surface, so trim the inside corners to suit as they go on.")
+        if all(p.get("material") in ("plywood", "lumber") for p in pcs):
+            # wood: glued and screwed where they meet (CALI-79: the stool was told to use foam-safe adhesive)
+            do.append("Glue and screw them together where they meet, a screw every 6 in along each joint (pilot "
+                      "holes first); they're cut to the outside surface, so check each corner square as it goes on.")
+        else:
+            do.append("Glue them to the floor's edge and the skeleton with foam-safe adhesive; they're cut to the "
+                      "outside surface, so trim the inside corners to suit as they go on.")
     elif layer == "shell":
         title = "The shell: bands and roof"
         n_bent = sum(1 for p in pcs if len(p["polys"]) > 1)
@@ -933,7 +940,9 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
     out.append("</table>")
     # what's in the package
     out.append("<h2>What's in the package</h2><table>")
-    for folder, what in (("hand/", "patterns for hand tools, per part: measure-and-mark.pdf, print-full-size.pdf "
+    for folder, what in (("kids.html", "the build book for a kid: pictures first, one step a page (an all-wood "
+                                       "build)"),
+                         ("hand/", "patterns for hand tools, per part: measure-and-mark.pdf, print-full-size.pdf "
                                    "(letter pages, print at 100%), and a pattern per piece to project and trace"),
                          ("printer/", "printed parts as STL, split to fit your printer where they had to be"),
                          ("plasma/", "gusset plates — DXF (R12, mm) and SVG, for the plasma table"),
@@ -952,6 +961,19 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
 # ---------------------------------------------------------------------------
 # Making a release
 # ---------------------------------------------------------------------------
+def _strength(store: DesignStore, versions: dict) -> dict:
+    """Each part's strength check on the version released: its loads, safety and where it should break."""
+    from . import load_study
+
+    out = {}
+    for pid, v in versions.items():
+        run = next((r for r in load_study.list_runs(store, pid) if r.get("version") == v), None)
+        if run:
+            out[pid] = [{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")}
+                        for c in run["cases"]]
+    return out
+
+
 def _next_id(store: DesignStore) -> str:
     root = releases_dir(store)
     have = [int(n) for n in os.listdir(root) if n.isdigit()] if os.path.isdir(root) else []
@@ -1091,25 +1113,29 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     with open(os.path.join(root, "shopping.csv"), "w") as f:
         f.write(shopping_csv(shop))
 
+    # a book a kid can follow, for an all-wood build (CALI-79)
+    from . import kidbook
+
+    try:
+        kids = kidbook.make(store, root, {"design": store.design.name, "strength": _strength(store, versions)},
+                            [p.id for p in built if p.id in versions], shop)
+    except Exception as e:  # noqa: BLE001 — the shop's book stands without it
+        kids = None
+        emit("error", f"couldn't make the kids' book: {e}")
+
     notes = list(card.get("notes") or [])
     for plan in plans.values():
         notes += [n for n in plan.get("notes") or [] if n not in notes]
     notes.append("Print the pattern PDFs at 100% (no fit-to-page) and put a ruler on the scale bar before cutting "
                  "from them.")
-    from . import load_study
-
-    strength = {}
-    for pid, v in versions.items():
-        run = next((r for r in load_study.list_runs(store, pid) if r.get("version") == v), None)
-        if run:
-            strength[pid] = [{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")}
-                             for c in run["cases"]]
+    strength = _strength(store, versions)
     rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength, "making": made,
            "slug": os.path.basename(store.root), "versions": versions,
            "card": {"created": card["created"], "summary": card["summary"]},
            "ready": card["summary"]["fail"] == 0 and card["summary"]["unknown"] == 0,
            "cutplans": {pid: plan["id"] for pid, plan in plans.items()},
            "shopping_usd": shop["usd"], "steps": [{"n": s["n"], "title": s["title"], "img": s["img"]} for s in st],
+           "kids": kids,
            "sheets": sum(g["sheets"] for plan in plans.values() for g in plan.get("sheets") or []),
            "notes": notes}
     with open(os.path.join(root, BOOK), "w") as f:
