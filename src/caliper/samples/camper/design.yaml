@@ -1,0 +1,122 @@
+slug: a-cargo-box-on-the-trailer
+name: Camper shell
+prompt: 'A cargo box on the trailer hitch behind my Nissan Leaf. The box is 74 in
+  wide, 41 in high and 39 in deep, with its front face 18 in behind the rear bumper.
+  It sits on a frame of 2 in square steel tube whose shank slides into the hitch receiver.
+  The receiver is a Class II hitch, about 9 in off the ground and 3 in forward of
+  the rear bumper (the bumper sticks out 3 in behind it). The Leaf is about 70.5 in
+  wide with its roof about 60 in off the ground, and its back is a teardrop / hatchback
+  shape. The hatch must still open: its swing reaches about 14 in behind the bumper
+  at its furthest. The box is XPS foam covered in poor man''s fiberglass, with a door
+  and a roof fan. I want to shape it for less drag.'
+units: mm
+display_units: in
+requirements:
+- question: How long is the hitch shank (the horizontal tube from the receiver face
+    to where the box frame begins), and what is the receiver drop/rise needed to set
+    the box at your target height?
+  answer: 21 in from the receiver mouth back to the box's front edge (3 in to the
+    bumper + the 18 in gap); straight, no riser for now
+  source: answered
+  at: '2026-10-27T21:37:43.209331+00:00'
+- question: What height off the ground do you want the bottom of the box to sit?
+  answer: '18 in off the ground: a riser on the shank lifts the frame''s ladder to
+    16-18 in (better ground clearance; the top stays under the 60 in roof)'
+  source: answered
+  at: '2026-10-28T02:54:47.088025+00:00'
+- question: Is the access door on the rear face, one of the sides, or the top of the
+    box?
+  answer: "Not decided yet \u2014 leaving the door for later"
+  source: answered
+  at: '2026-10-28T02:54:40.419515+00:00'
+- question: What is the diameter and intended position (centered, offset toward rear,
+    etc.) of the roof fan cutout?
+  answer: 6 in diameter, centered on the roof panel
+  source: assumed
+  at: '2026-10-27T21:37:43.215962+00:00'
+- question: What is the maximum total depth (front-to-rear) you can accept for the
+    whole unit, including any boat-tail taper added behind the 39 in box?
+  answer: 39 in total; drag shaping stays within the 39 in depth (a longer box also
+    lengthens the lever on the hitch)
+  source: answered
+  at: '2026-10-27T21:37:43.217563+00:00'
+- question: What has to fit inside? (camper box)
+  answer: 'A mattress on the floor: the floor must stay a flat 74 x 39 in rectangle
+    at 18 in, with straight side walls up to at least 12 in above it. Everything above
+    may change.'
+  source: answered
+  at: '2026-10-28T02:54:40.424450+00:00'
+- question: What loads does the frame carry? (load cases)
+  answer: 'Driving: the box + gear, about 100 lb total, on the platform, x2.5 for
+    bumps, carried by the hitch receiver alone (no legs yet). Sleeping (300 lb, parked)
+    comes later, with legs.'
+  source: answered
+  at: '2026-10-28T03:29:28.525515+00:00'
+- question: Does the hatch need to open with the box on?
+  answer: "No \u2014 the trunk is reached from inside, through the fold-down rear\
+    \ seat. The box can sit a few inches behind the bumper: 3 in, with at least 2\
+    \ in kept clear."
+  source: answered
+  at: '2026-10-28T17:46:58.446672+00:00'
+- question: What's in the box when driving?
+  answer: About 50 lb of gear on the floor.
+  source: answered
+  at: '2026-10-28T17:46:58.449059+00:00'
+- question: What is the hitch rated for?
+  answer: "350 lb tongue weight (a Class III option does 800 lb). Keep dynamic loads\
+    \ under ~3.5x the standing load; the lever-arm (moment) limit is set aside for\
+    \ now \u2014 Theo will test the spine."
+  source: answered
+  at: '2026-10-28T20:59:02.619633+00:00'
+- question: What does the frame have to hold when parked?
+  answer: Jacks at the back carry the back when parked; under 350 lb total with Theo
+    in it.
+  source: answered
+  at: '2026-10-28T20:59:02.622325+00:00'
+- question: How much snow must the roof carry?
+  answer: "20 lb/ft\xB2 (about 20 in of snow at 1 lb/ft\xB2 per inch) \u2014 he won't\
+    \ let more pile up."
+  source: answered
+  at: '2026-10-28T20:59:02.625343+00:00'
+- question: How much can the hitch's tongue take?
+  answer: "Rated 350 lb, set conservatively (likely safe at 2x); use 420 lb \u2014\
+    \ the rating + 20%. No front jacks: the back jacks are already a bit overkill."
+  source: answered
+  at: '2026-10-28T22:22:57.259146+00:00'
+parts:
+- id: leaf_rear
+  intent: 'Reference solid representing the back of the Nissan Leaf: a side-profile
+    polygon extruded across the car''s full 70.5 in (1790.7 mm) width, with (x,z)
+    corners at (0,12),(0,26),(3,30),(28,60),(60,60),(60,12) in inches, car drives
+    +X, x=0 is rear bumper face, y=0 centreline, z=0 ground.'
+  version: 1
+  origin: authored
+  created: '2026-10-27T21:38:43.584683+00:00'
+  updated: '2026-10-27T21:38:43.584692+00:00'
+- id: frame
+  intent: "Weld-up trailer hitch frame: a 2-in square steel shank running from inside\
+    \ the receiver to a vertical riser, a 2-in square spine from the riser back under\
+    \ the floor, an X of 1-in square arms from the spine's midpoint to the floor's\
+    \ four corners, optional 1-in edge tubes along the front, back, and/or sides,\
+    \ and gusset plates at the riser's two corners \u2014 all sized for a tow-behind\
+    \ utility box trailer."
+  version: 26
+  origin: authored
+  created: '2026-10-27T21:41:37.629039+00:00'
+  updated: '2026-10-28T22:23:25.577437+00:00'
+- id: cargo_box
+  intent: "A cargo box (named box) standing in for a foam sandwich camping enclosure:\
+    \ 77 in wide (centred on y = 0), 40 in deep and 41 in high, its front face at\
+    \ x = \u22123 in (3 in behind the bumper), its flat floor at z = 18 in; the section\
+    \ has a full-width lower wall (wall_h tall) with the sides leaning inward above\
+    \ it to the roof, tunable via tumble, shoulder, nose_len, nose_pinch, tail_len,\
+    \ tail_drop, tail_pinch and tail_curve for drag studies, lofted as ruled panels\
+    \ with a plywood floor, XPS foam walls and roof skinned in fibreglass, an optional\
+    \ internal lumber frame with roof beams, and corner patches at the front, sized\
+    \ to hold a 75 \xD7 38 \xD7 6 in twin mattress on"
+  version: 14
+  origin: authored
+  created: '2026-10-27T21:48:24.489848+00:00'
+  updated: '2026-10-28T21:24:41.653751+00:00'
+created: '2026-10-27T21:36:46.684803+00:00'
+updated: '2026-10-30T20:47:23.347961+00:00'

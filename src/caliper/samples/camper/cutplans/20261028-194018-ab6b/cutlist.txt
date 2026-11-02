@@ -1,0 +1,33 @@
+CUT LIST — frame (20261028-194018-ab6b)
+
+1/8 in steel plate, plasma: 2 x jog_low  (9.0 x 8.0 in, 0.69 kg each, 5.94x; takes 90% off the riser / shank_out weld)  plates/jog_low.dxf
+    - the plates run 100% of the way along riser: if the joint at its other end has plates too, cut each side as one plate over both
+    - the plates run 100% of the way along shank: if the joint at its other end has plates too, cut each side as one plate over both
+1/8 in steel plate, plasma: 2 x jog_high  (9.0 x 9.0 in, 0.65 kg each, 3.77x; takes 82% off the riser / spine_0 weld)  plates/jog_high.dxf
+    - the plates run 100% of the way along riser: if the joint at its other end has plates too, cut each side as one plate over both
+
+2x2x1/8 steel tube: 1 x 20 ft
+     39.00 in  (991 mm)  spine
+        end a: square, runs 1.00 in past the joint to close the corner
+        end b: square
+     14.00 in  (356 mm)  shank
+        end a: square
+        end b: square, runs 1.00 in past the joint to close the corner
+     10.00 in  (254 mm)  riser
+        end a: square, runs 1.00 in past the joint to close the corner
+        end b: square, runs 1.00 in past the joint to close the corner
+
+1x1x1/16 steel tube: 1 x 20 ft
+     40.92 in  (1039 mm)  x_front_left
+        end a: mitred 27°, butts the side of the 2x2x1/8 steel tube (spine)
+        end b: square
+     40.92 in  (1039 mm)  x_front_right
+        end a: mitred 27°, butts the side of the 2x2x1/8 steel tube (spine)
+        end b: square
+     40.92 in  (1039 mm)  x_back_left
+        end a: mitred 27°, butts the side of the 2x2x1/8 steel tube (spine)
+        end b: square
+     40.92 in  (1039 mm)  x_back_right
+        end a: mitred 27°, butts the side of the 2x2x1/8 steel tube (spine)
+        end b: square
+

@@ -67,6 +67,24 @@ def slugify(text: str, fallback: str = "design") -> str:
     return s[:48] or fallback
 
 
+#: Where a sentence stops saying what the thing is and starts saying what it's for (CALI-59).
+_NAME_STOP = re.compile(r"\s(?:so|for|that|which|who|to|with|on|behind|from|made|using|in|at|under|over|and)\s"
+                        r"|[,.;:!?(]", re.I)
+_NAME_LEAD = re.compile(r"^(?:i\s+(?:want|need|would like|'d like)\s+(?:to\s+(?:build|make)\s+)?"
+                        r"|(?:please\s+)?(?:build|make|design)\s+(?:me\s+)?)?(?:a|an|the|some|my|our)\s+", re.I)
+
+
+def short_name(prompt: str, most: int = 40) -> str:
+    """A design's name from its sentence: what it is, not the whole sentence ("A step stool so my 6-year-old
+    can reach the sink…" -> "Step stool")."""
+    first = (prompt or "").strip().splitlines()[0].strip() if (prompt or "").strip() else ""
+    head = _NAME_STOP.split(f" {first} ", 1)[0].strip()
+    head = _NAME_LEAD.sub("", head).strip() or first
+    if len(head) > most:
+        head = head[:most].rsplit(" ", 1)[0]
+    return (head[:1].upper() + head[1:]) if head else "Untitled design"
+
+
 def _write_atomic(path: str, text: str) -> None:
     """Write via a temp file + replace, so a crash mid-write can't truncate a design's state."""
     tmp = path + ".tmp"
@@ -253,7 +271,7 @@ class DesignStore:
                machine: Optional[str] = None) -> "DesignStore":
         """Start a new design from its root prompt. Slug collisions get a deterministic ``-2`` suffix."""
         base = base or designs_dir()
-        name = name or (prompt.strip().splitlines()[0][:60] if prompt.strip() else "untitled design")
+        name = name or short_name(prompt)
         slug = slugify(slug or name)
         os.makedirs(base, exist_ok=True)
         unique, n = slug, 1

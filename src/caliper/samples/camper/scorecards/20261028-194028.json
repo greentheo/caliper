@@ -1,0 +1,599 @@
+{
+  "created": 1793238028.6425622,
+  "versions": {
+    "leaf_rear": 1,
+    "frame": 26,
+    "cargo_box": 14
+  },
+  "settings": {
+    "payload_lb": 50,
+    "walls": true,
+    "snow_psf": 20,
+    "drag": {
+      "part": "cargo_box",
+      "obstacles": [
+        "leaf_rear"
+      ],
+      "speed_mph": 65
+    },
+    "parked": {
+      "person_lb": 200,
+      "gear_lb": 50,
+      "knee_lb": 150,
+      "factor": 1.5
+    }
+  },
+  "checks": [
+    {
+      "id": "rule:bumper_clearance",
+      "label": "min_clearance(cargo_box, leaf_rear) >= 50.8",
+      "status": "pass",
+      "value": 76.2,
+      "margin": 25.400000000000006,
+      "trust": "measured",
+      "kind": "design",
+      "auto": true
+    },
+    {
+      "id": "keeps:cargo_box.mattress",
+      "label": "cargo_box holds the mattress",
+      "status": "pass",
+      "value": 0.0,
+      "margin": -0.0,
+      "trust": "measured",
+      "kind": "design",
+      "auto": true,
+      "note": "a 75 x 38 x 6 in twin on the floor, and the 1 in walls around it"
+    },
+    {
+      "id": "tongue",
+      "label": "under 420 lb on the tongue (Theo: the 350 lb rating is conservative \u2014 20% over it is safe)",
+      "metric": "hitch.tongue_lb",
+      "op": "<=",
+      "limit": 420,
+      "status": "pass",
+      "value": 141.3,
+      "unit": "lb",
+      "margin": 278.7,
+      "trust": "model"
+    },
+    {
+      "id": "frame_survives",
+      "label": "the frame survives 3.5x its standing load (Theo: steer clear of dynamic loads over ~3.5x)",
+      "metric": "frame.yield_x",
+      "op": ">=",
+      "limit": 3.5,
+      "status": "pass",
+      "value": 4.83,
+      "unit": "\u00d7",
+      "margin": 1.33,
+      "trust": "model"
+    },
+    {
+      "id": "walls_safety",
+      "label": "the box's walls hold a bump at 3.5x",
+      "metric": "frame.walls_safety",
+      "op": ">=",
+      "limit": 3.5,
+      "status": "pass",
+      "value": 4.98,
+      "unit": "\u00d7",
+      "margin": 1.48,
+      "trust": "rough"
+    },
+    {
+      "id": "gussets_safety",
+      "label": "the gusset plates hold a bump at 3.5x",
+      "metric": "frame.gussets_safety",
+      "op": ">=",
+      "limit": 3.5,
+      "status": "pass",
+      "value": 3.77,
+      "unit": "\u00d7",
+      "margin": 0.27,
+      "trust": "model"
+    },
+    {
+      "id": "snow",
+      "label": "the roof holds 20 lb/ft\u00b2 of snow at 2x",
+      "metric": "snow.safety",
+      "op": ">=",
+      "limit": 2.0,
+      "status": "pass",
+      "value": 2.69,
+      "unit": "\u00d7",
+      "margin": 0.69,
+      "trust": "rough"
+    },
+    {
+      "id": "parked_frame",
+      "label": "parked on the jacks, the frame holds someone kneeling anywhere at 2x",
+      "metric": "parked.frame_safety",
+      "op": ">=",
+      "limit": 2.0,
+      "status": "pass",
+      "value": 2.24,
+      "unit": "\u00d7",
+      "margin": 0.24,
+      "trust": "model"
+    },
+    {
+      "id": "parked_hitch",
+      "label": "parked, the hitch stays under 420 lb (the 350 lb rating + 20%)",
+      "metric": "parked.hitch_lb",
+      "op": "<=",
+      "limit": 420,
+      "status": "pass",
+      "value": 355.8,
+      "unit": "lb",
+      "margin": 64.2,
+      "trust": "model"
+    },
+    {
+      "id": "floor_mattress",
+      "label": "the floor holds a knee on the mattress at 2x",
+      "metric": "floor.mattress_safety",
+      "op": ">=",
+      "limit": 2.0,
+      "status": "pass",
+      "value": 3.3,
+      "unit": "\u00d7",
+      "margin": 1.3,
+      "trust": "rough"
+    },
+    {
+      "id": "cut_plan_complete",
+      "label": "every piece fits a sheet",
+      "metric": "make.missing",
+      "op": "<=",
+      "limit": 0,
+      "status": "pass",
+      "value": 0,
+      "unit": "pieces",
+      "margin": 0.0,
+      "trust": "measured"
+    }
+  ],
+  "notes": [
+    "The 1/8 in tang: in the receiver the shank is held by bearing at the mouth and at its inner end \u2014 roughly 1,300 lbf at the mouth on a 2.5x bump, on a 1/8 in wall. Watch for dents and ovaling there; a 1/4 in wall (or a sleeve) for the 13 in shank adds ~2 lb.",
+    "Under 3.5x on a bump, welded steel can crack at its welds over road miles before it would ever bend \u2014 the gusset plates take 82\u201390% of the moment off the riser's two corner welds."
+  ],
+  "objectives": [
+    {
+      "id": "drag",
+      "label": "drag",
+      "metric": "drag.lbf",
+      "direction": "min",
+      "value": 48.4,
+      "unit": "lbf",
+      "trust": "rough",
+      "was": 48.4,
+      "change": 0.0
+    },
+    {
+      "id": "weight",
+      "label": "total weight",
+      "metric": "weight.total_lb",
+      "direction": "min",
+      "value": 141.3,
+      "unit": "lb",
+      "trust": "model",
+      "was": 141.3,
+      "change": 0.0
+    },
+    {
+      "id": "hitch",
+      "label": "lever on the hitch (set aside as a check \u2014 Theo will test the spine)",
+      "metric": "hitch.moment_lbin",
+      "direction": "min",
+      "value": 3403,
+      "unit": "lb\u00b7in",
+      "trust": "model",
+      "was": 3403,
+      "change": 0
+    },
+    {
+      "id": "frame",
+      "label": "frame strength on a bump",
+      "metric": "frame.safety",
+      "direction": "max",
+      "value": 1.93,
+      "unit": "\u00d7",
+      "trust": "model",
+      "was": 1.93,
+      "change": 0.0
+    },
+    {
+      "id": "steel",
+      "label": "steel in the frame",
+      "metric": "frame.steel_lb",
+      "direction": "min",
+      "value": 25.8,
+      "unit": "lb",
+      "trust": "model",
+      "was": 25.8,
+      "change": 0.0
+    },
+    {
+      "id": "cost",
+      "label": "stock to buy",
+      "metric": "cost.usd",
+      "direction": "min",
+      "value": 451.27,
+      "unit": "$",
+      "trust": "guess",
+      "was": 451.27,
+      "change": 0.0
+    },
+    {
+      "id": "waste",
+      "label": "offcut",
+      "metric": "waste.pct",
+      "direction": "min",
+      "value": 20.0,
+      "unit": "%",
+      "trust": "measured",
+      "was": 20.0,
+      "change": 0.0
+    },
+    {
+      "id": "sheets",
+      "label": "sheets to cut",
+      "metric": "make.sheets",
+      "direction": "min",
+      "value": 5,
+      "unit": "sheets",
+      "trust": "measured",
+      "was": 5,
+      "change": 0
+    },
+    {
+      "id": "floor_bare",
+      "label": "floor under a knee on bare plywood",
+      "metric": "floor.bare_safety",
+      "direction": "max",
+      "value": 1.84,
+      "unit": "\u00d7",
+      "trust": "rough",
+      "was": 1.84,
+      "change": 0.0
+    },
+    {
+      "id": "jacks",
+      "label": "the most a jack carries, parked",
+      "metric": "parked.jack_lb",
+      "direction": "min",
+      "value": 287.7,
+      "unit": "lb",
+      "trust": "model",
+      "was": 287.7,
+      "change": 0.0
+    }
+  ],
+  "metrics": {
+    "weight.frame": {
+      "value": 31.6,
+      "unit": "lb",
+      "label": "frame weighs",
+      "trust": "model",
+      "source": "construction"
+    },
+    "weight.cargo_box": {
+      "value": 59.7,
+      "unit": "lb",
+      "label": "cargo_box weighs",
+      "trust": "model",
+      "source": "construction"
+    },
+    "weight.total_lb": {
+      "value": 141.3,
+      "unit": "lb",
+      "label": "everything, with 50 lb aboard",
+      "trust": "model",
+      "source": "balance"
+    },
+    "hitch.tongue_lb": {
+      "value": 141.3,
+      "unit": "lb",
+      "label": "on the hitch's tongue, standing still",
+      "trust": "model",
+      "source": "balance"
+    },
+    "hitch.moment_lbin": {
+      "value": 3403,
+      "unit": "lb\u00b7in",
+      "label": "the hitch carries, standing still",
+      "trust": "model",
+      "source": "balance"
+    },
+    "hitch.arm_in": {
+      "value": 24.1,
+      "unit": "in",
+      "label": "centre of gravity behind the hitch",
+      "trust": "model",
+      "source": "balance"
+    },
+    "frame.safety": {
+      "value": 1.93,
+      "unit": "\u00d7",
+      "label": "frame's weakest member on a \u00d72.5 bump (shank_in_receiver)",
+      "trust": "model",
+      "source": "frame study"
+    },
+    "frame.yield_x": {
+      "value": 4.83,
+      "unit": "\u00d7",
+      "label": "frame yields at this many times its standing load",
+      "trust": "model",
+      "source": "frame study"
+    },
+    "frame.sag_in": {
+      "value": 0.49,
+      "unit": "in",
+      "label": "frame sags on a bump",
+      "trust": "model",
+      "source": "frame study"
+    },
+    "frame.steel_lb": {
+      "value": 25.8,
+      "unit": "lb",
+      "label": "frame's tubes",
+      "trust": "model",
+      "source": "frame study"
+    },
+    "frame.walls_safety": {
+      "value": 4.98,
+      "unit": "\u00d7",
+      "label": "weakest wall (wall_front_0)",
+      "trust": "rough",
+      "source": "frame study",
+      "note": "skin and foam data are rough; PMF's a guess"
+    },
+    "frame.fixing_lbf": {
+      "value": 140.7,
+      "unit": "lbf",
+      "label": "the hardest-working fixing",
+      "trust": "model",
+      "source": "frame study"
+    },
+    "frame.gussets_safety": {
+      "value": 3.77,
+      "unit": "\u00d7",
+      "label": "weakest gusset (jog_high)",
+      "trust": "model",
+      "source": "plate mode"
+    },
+    "frame.weld_relief": {
+      "value": 0.82,
+      "unit": "",
+      "label": "least of a corner weld's moment the plates take",
+      "trust": "model",
+      "source": "plate mode"
+    },
+    "parked.frame_safety": {
+      "value": 2.24,
+      "unit": "\u00d7",
+      "label": "frame parked, worst kneeling at the front left (150 lb a knee) (x_front_left)",
+      "trust": "model",
+      "source": "parked"
+    },
+    "parked.walls_safety": {
+      "value": 2.45,
+      "unit": "\u00d7",
+      "label": "weakest wall, parked",
+      "trust": "rough",
+      "source": "parked"
+    },
+    "parked.jack_lb": {
+      "value": 287.7,
+      "unit": "lb",
+      "label": "the most a jack carries",
+      "trust": "model",
+      "source": "parked"
+    },
+    "parked.hitch_lb": {
+      "value": 355.8,
+      "unit": "lb",
+      "label": "the most the hitch carries, parked",
+      "trust": "model",
+      "source": "parked"
+    },
+    "floor.mattress_safety": {
+      "value": 3.3,
+      "unit": "\u00d7",
+      "label": "the floor under a 150 lb knee on the mattress (22.6 in clear span)",
+      "trust": "rough",
+      "source": "napkin",
+      "note": "the mattress spreads a knee to ~10 in"
+    },
+    "floor.bare_safety": {
+      "value": 1.84,
+      "unit": "\u00d7",
+      "label": "the floor under a knee on bare 3/8 in plywood",
+      "trust": "rough",
+      "source": "napkin"
+    },
+    "floor.clear_span_in": {
+      "value": 22.6,
+      "unit": "in",
+      "label": "the floor's widest clear span",
+      "trust": "measured",
+      "source": "parked"
+    },
+    "snow.safety": {
+      "value": 2.69,
+      "unit": "\u00d7",
+      "label": "cargo_box's roof under 20 lb/ft\u00b2 of snow (3 roof beam(s), across: 2x2 in bending)",
+      "trust": "rough",
+      "source": "snow check",
+      "note": "napkin mechanics, on the safe side"
+    },
+    "snow.sag_in": {
+      "value": 0.44,
+      "unit": "in",
+      "label": "the roof sags under it",
+      "trust": "rough",
+      "source": "snow check"
+    },
+    "drag.lbf": {
+      "value": 48.4,
+      "unit": "lbf",
+      "label": "cargo_box's drag at 65 mph",
+      "trust": "rough",
+      "source": "whittle drag model",
+      "note": "ranks shapes well; totals \u00b130%"
+    },
+    "drag.kwh_per_100mi": {
+      "value": 9.62,
+      "unit": "kWh/100 mi",
+      "label": "energy to push it",
+      "trust": "rough",
+      "source": "whittle drag model"
+    },
+    "make.sheets": {
+      "value": 5,
+      "unit": "sheets",
+      "label": "sheets to cut (current cut plans)",
+      "trust": "measured",
+      "source": "cut plan"
+    },
+    "make.missing": {
+      "value": 0,
+      "unit": "pieces",
+      "label": "pieces that fit no sheet",
+      "trust": "measured",
+      "source": "cut plan"
+    },
+    "cost.usd": {
+      "value": 451.27,
+      "unit": "$",
+      "label": "stock to buy",
+      "trust": "guess",
+      "source": "materials.PRICES",
+      "note": "rough retail guesses (big-box / local metal supplier), 2026 \u2014 edit materials.PRICES"
+    },
+    "waste.usd": {
+      "value": 90.3,
+      "unit": "$",
+      "label": "of it left as offcut",
+      "trust": "guess",
+      "source": "cut plan + prices"
+    },
+    "waste.pct": {
+      "value": 20.0,
+      "unit": "%",
+      "label": "offcut, by cost",
+      "trust": "measured",
+      "source": "cut plan"
+    }
+  },
+  "cost": {
+    "usd": 451.27,
+    "waste_usd": 90.3,
+    "waste_pct": 0.2,
+    "lines": [
+      {
+        "part": "frame",
+        "item": "5 ft of 2x2x1/8 steel tube",
+        "usd": 29.09,
+        "waste_usd": 0.48,
+        "waste_pct": 0.017,
+        "from": "by the foot"
+      },
+      {
+        "part": "frame",
+        "item": "15 ft of 1x1x1/16 steel tube",
+        "usd": 21.81,
+        "waste_usd": 1.43,
+        "waste_pct": 0.066,
+        "from": "by the foot"
+      },
+      {
+        "part": "frame",
+        "item": "steel plate (gussets): gusset_jog_low (1.4 kg)",
+        "usd": 4.56,
+        "waste_usd": 0.0,
+        "waste_pct": 0.0,
+        "from": "by weight"
+      },
+      {
+        "part": "frame",
+        "item": "steel plate (gussets): gusset_jog_high (1.3 kg)",
+        "usd": 4.26,
+        "waste_usd": 0.0,
+        "waste_pct": 0.0,
+        "from": "by weight"
+      },
+      {
+        "part": "cargo_box",
+        "item": "1 \u00d7 3/8 in softwood plywood sheet",
+        "usd": 38.0,
+        "waste_usd": 12.6,
+        "waste_pct": 0.332,
+        "from": "cut plan"
+      },
+      {
+        "part": "cargo_box",
+        "item": "4 \u00d7 1 in XPS foam board sheet",
+        "usd": 168.0,
+        "waste_usd": 68.93,
+        "waste_pct": 0.41,
+        "from": "cut plan"
+      },
+      {
+        "part": "cargo_box",
+        "item": "5 \u00d7 1x2 SPF lumber (8 ft)",
+        "usd": 15.0,
+        "waste_usd": 2.59,
+        "waste_pct": 0.173,
+        "from": "sticks"
+      },
+      {
+        "part": "cargo_box",
+        "item": "3 \u00d7 2x2 SPF lumber (8 ft)",
+        "usd": 13.5,
+        "waste_usd": 4.27,
+        "waste_pct": 0.316,
+        "from": "sticks"
+      },
+      {
+        "part": "cargo_box",
+        "item": "exterior paint (sealer) (21.4 ft\u00b2)",
+        "usd": 8.1,
+        "waste_usd": 0.0,
+        "waste_pct": 0.0,
+        "from": "by area"
+      },
+      {
+        "part": "cargo_box",
+        "item": "fiberglass (1 layer 6 oz cloth + epoxy) (75.5 ft\u00b2)",
+        "usd": 116.15,
+        "waste_usd": 0.0,
+        "waste_pct": 0.0,
+        "from": "by area"
+      },
+      {
+        "part": "cargo_box",
+        "item": "fiberglass patch (1 more layer 6 oz + epoxy) (5.9 ft\u00b2)",
+        "usd": 7.8,
+        "waste_usd": 0.0,
+        "waste_pct": 0.0,
+        "from": "by area"
+      },
+      {
+        "part": "cargo_box",
+        "item": "glue, screws & hardware (allowance)",
+        "usd": 25.0,
+        "waste_usd": 0.0,
+        "waste_pct": 0.0,
+        "from": "allowance"
+      }
+    ],
+    "basis": "rough retail guesses (big-box / local metal supplier), 2026 \u2014 edit materials.PRICES"
+  },
+  "summary": {
+    "pass": 11,
+    "fail": 0,
+    "unknown": 0
+  }
+}

@@ -42,6 +42,9 @@ Newest demos first.
   (`hole_misalignment`). Parts build from CadQuery scripts at assemble time (CALI-23); the viewer shades
   collisions red (CALI-26). **See `TESTING.md` for the full testing walkthrough.**
 
+- 🆕 **First run (CALI-59, #8).** One sentence, a few questions you can leave blank, **Build it**: Caliper builds
+  it, checks it holds, draws the patterns and scores it, then answers the four questions. Or open the stool or
+  the camper as a sample. Talk instead of typing; ask it to say it simpler; report what breaks if you want to.
 - 🆕 **Will it hold? (CALI-54, #1).** A part that says what it must carry (`loads()`, written by the designer
   from "it has to hold me, 200 lb") gets a strength check: whittle's FEA with a stress picture, a plate check
   for a panel pushed face-on, the verdict, and where it should break.
@@ -553,6 +556,27 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
   navigation (phase 2) is pending tuning against the on-screen telemetry — paste me what it shows.
 
 ## 📓 Demo log (newest first)
+
+### 2026-10-30 · First run: one sentence in, four answers out (CALI-59 #8)
+1. Start Caliper with no designs (or **+ New design**): *What do you want to make?* Type a sentence, e.g. "A step
+   stool so my 6-year-old can reach the bathroom sink, from 3/4 in plywood. It has to hold me too, 200 lb." →
+   **Start**. Its name is what it is ("Step stool"), not the whole sentence.
+2. Leave every question blank → **Build it**. The reply ticks off: *writing down what it has to do · building it ·
+   checking it holds · drawing the patterns · scoring it* (about 2½ minutes live; the build is most of it). Then
+   it says the four answers in a line each, and the cards on the right are full: what it is and its size, "✓ Holds
+   Dad… 8.07x", the shopping list and the patterns to print.
+3. **Say it simpler** under the reply: plain words, something like "Even if Dad stands on it, it would need to be
+   eight times heavier before it broke."
+   Ask "How was the 8x worked out?" and you get the numbers and what the model leaves out.
+4. **Or open one of ours:** *Step stool* or *Camper shell* opens a copy with its studies, so every card reads at
+   once. `caliper sample list`; `caliper sample save <name> --slug <your design>` makes one from yours.
+5. **🎤** beside the box: the browser listens where it can; otherwise it says how to start the Mac's own dictation
+   (the 🎤 key, or Fn twice), which types into any box.
+6. **Will it work?** ends with what a verdict promises and what it doesn't; so does the build book.
+7. When something breaks, **Report it…** (on the red bar, or a failed reply) shows the whole report first:
+   what broke, where, the Caliper and macOS versions, nothing of the design. **Open it as a GitHub issue** fills
+   in a new issue in your browser for you to submit. Kept on this machine in `~/.caliper/errors.jsonl`.
+8. Offline: `python -m pytest tests/test_firstrun.py tests/test_samples.py tests/test_errors.py`.
 
 ### 2026-10-30 · Lighter until it runs out; what it's held to; the view follows the card (CALI-73 #39, CALI-74 #40)
 1. Open the stool, click it, **Will it work? → the numbers → Make it lighter → Lighten it** (about 4 minutes). The

@@ -1,0 +1,132 @@
+{
+  "id": "20261029-153229-0661",
+  "part": "step_stool",
+  "version": 2,
+  "created": 1793309549.994545,
+  "build": {
+    "ply_t": 19.05
+  },
+  "unfolder": "~/githubrepo/caliper/vendor/unfold-to-sheets",
+  "sheets": [
+    {
+      "key": "plywood-3_4in",
+      "material": "plywood",
+      "thickness_mm": 19.05,
+      "label": "3/4 in softwood plywood",
+      "stock": "softwood plywood 8 x 4 ft",
+      "panels": [
+        "left side panel",
+        "right side panel",
+        "front panel",
+        "back panel",
+        "top tread"
+      ],
+      "joints": [],
+      "segment": "groups",
+      "patches": 5,
+      "cuts": 20,
+      "folds": 5,
+      "scored": 0,
+      "bent_unscored": 0,
+      "min_score_deg": 0,
+      "pieces": 5,
+      "splits": 0,
+      "sheets": 1,
+      "utilisation": 0.1224500868055556,
+      "worst_edge_error": 5.684341886080802e-14,
+      "worst_spread": 0,
+      "missing": [],
+      "tokens_ok": true,
+      "files": [
+        {
+          "name": "README.txt",
+          "kind": "summary",
+          "describe": "what was made, what it cost, and what could not be done"
+        },
+        {
+          "name": "sheets/sheet-01.svg",
+          "kind": "sheet",
+          "describe": "sheet 1 for a laser or a plotter \u2014 layers cut / score-valley / score-mountain / seam / label"
+        },
+        {
+          "name": "sheets/sheet-01.dxf",
+          "kind": "sheet",
+          "describe": "sheet 1 for CAM \u2014 DXF R12, same layers"
+        },
+        {
+          "name": "assembly.svg",
+          "kind": "assembly",
+          "describe": "which piece is which, drawn on the model from four directions"
+        },
+        {
+          "name": "assembly.txt",
+          "kind": "assembly",
+          "describe": "the seam list: every token, the two pieces it joins, and the fold angle"
+        },
+        {
+          "name": "pattern.pdf",
+          "kind": "print",
+          "describe": "every sheet with a measured scale bar, plus the summary and the seam list"
+        }
+      ],
+      "piece_list": [
+        {
+          "label": "left side panel",
+          "edge_error": 2.842170943040401e-14,
+          "spread": 0,
+          "overlaps": 0,
+          "size": [
+            254.00000000000006,
+            228.60000000000005
+          ]
+        },
+        {
+          "label": "right side panel",
+          "edge_error": 2.842170943040401e-14,
+          "spread": 0,
+          "overlaps": 0,
+          "size": [
+            254.00000000000006,
+            228.60000000000005
+          ]
+        },
+        {
+          "label": "front panel",
+          "edge_error": 5.684341886080802e-14,
+          "spread": 0,
+          "overlaps": 0,
+          "size": [
+            368.30000000000007,
+            228.60000000000005
+          ]
+        },
+        {
+          "label": "back panel",
+          "edge_error": 5.684341886080802e-14,
+          "spread": 0,
+          "overlaps": 0,
+          "size": [
+            368.30000000000007,
+            228.60000000000005
+          ]
+        },
+        {
+          "label": "top tread",
+          "edge_error": 5.684341886080802e-14,
+          "spread": 0,
+          "overlaps": 0,
+          "size": [
+            368.3,
+            215.89999999999998
+          ]
+        }
+      ],
+      "bevels": []
+    }
+  ],
+  "sticks": [],
+  "tubes": [],
+  "notes": [
+    "Panels are cut to the outside surface; joints are butt joints, as construction() lays them out."
+  ]
+}

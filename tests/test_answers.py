@@ -69,7 +69,11 @@ def test_the_design_card_says_what_isnt_done_yet(store):
     cards = {c["key"]: c for c in answers.answers(store, design_api.design_state(store))}
     assert cards["what"]["lines"][0]["text"] == "A step stool so my kid can reach the sink."
     assert cards["work"]["status"] == "warn" and "say what it must do" in cards["work"]["lines"][0]["text"]
-    assert "No build package yet" in cards["make"]["lines"][0]["text"]
+    # one part: the design answers with that part's list and plan (CALI-59), then offers the build package
+    assert cards["make"]["lines"][0]["text"] == "With your jigsaw: 5 pieces."
+    assert "build package" in cards["make"]["lines"][-1]["text"]
+    assert "1 sheet of 3/4 in softwood plywood" in cards["buy"]["lines"][0]["text"]
+    assert cards["what"]["lines"][1]["text"].startswith("16 × 10 in, 9 in tall")
 
 
 def test_will_it_work_lists_what_the_design_is_held_to(store):

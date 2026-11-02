@@ -1,0 +1,84 @@
+{
+  "id": "20261030-105200-9160",
+  "part": "step_stool",
+  "version": 3,
+  "created": 1793379120.6026108,
+  "pieces": [
+    {
+      "name": "left side panel",
+      "label": "3/4 in softwood plywood",
+      "size_in": [
+        10.0,
+        9.0
+      ],
+      "holes": 0,
+      "pages": 2,
+      "project": "project-left-side-panel.svg",
+      "thumb": "left-side-panel.png"
+    },
+    {
+      "name": "right side panel",
+      "label": "3/4 in softwood plywood",
+      "size_in": [
+        10.0,
+        9.0
+      ],
+      "holes": 0,
+      "pages": 2,
+      "project": "project-right-side-panel.svg",
+      "thumb": "right-side-panel.png"
+    },
+    {
+      "name": "front panel",
+      "label": "3/4 in softwood plywood",
+      "size_in": [
+        14.5,
+        9.0
+      ],
+      "holes": 0,
+      "pages": 2,
+      "project": "project-front-panel.svg",
+      "thumb": "front-panel.png"
+    },
+    {
+      "name": "back panel",
+      "label": "3/4 in softwood plywood",
+      "size_in": [
+        14.5,
+        9.0
+      ],
+      "holes": 0,
+      "pages": 2,
+      "project": "project-back-panel.svg",
+      "thumb": "back-panel.png"
+    },
+    {
+      "name": "top tread",
+      "label": "3/4 in softwood plywood",
+      "size_in": [
+        14.5,
+        8.5
+      ],
+      "holes": 0,
+      "pages": 2,
+      "project": "project-top-tread.svg",
+      "thumb": "top-tread.png"
+    }
+  ],
+  "pages": 15,
+  "files": [
+    "left-side-panel.png",
+    "project-left-side-panel.svg",
+    "right-side-panel.png",
+    "project-right-side-panel.svg",
+    "front-panel.png",
+    "project-front-panel.svg",
+    "back-panel.png",
+    "project-back-panel.svg",
+    "top-tread.png",
+    "project-top-tread.svg",
+    "measure-and-mark.pdf",
+    "print-full-size.pdf",
+    "index.html"
+  ]
+}

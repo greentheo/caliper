@@ -813,6 +813,9 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
            f"<p>{status} <span class='muted small'>· {vers}</span></p>",
            f"<img class='draw' src='assembly/finished.png' alt='the finished build'>",
            f"<div class='nums'>{nums}</div>"]
+    from .answers import PROMISE
+
+    out.append(f"<p class='note'><b>What the numbers promise.</b> {_e(PROMISE)}</p>")       # CALI-59
     if notes:
         out.append("<h3>Before you cut</h3><ul>" + "".join(f"<li>{_e(n)}</li>" for n in notes) + "</ul>")
     # what to buy

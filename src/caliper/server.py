@@ -25,6 +25,13 @@ from .spec import Spec
 
 # Request models live at module level so FastAPI can resolve them as the request body
 # (stringized annotations from `from __future__ import annotations` resolve against module globals).
+class PageError(BaseModel):
+    """An error the page saw, kept for a report (CALI-59)."""
+    where: str = ""
+    error: str
+    trace: str = ""
+
+
 class RunRequest(BaseModel):
     intent: str
     no_llm: bool = True
@@ -225,6 +232,31 @@ def create_app():
         if p == "/" or p.endswith((".js", ".css", ".html")):
             resp.headers["Cache-Control"] = "no-store"
         return resp
+
+    @app.exception_handler(Exception)
+    async def _crashed(request, exc):
+        # kept on this machine for a report the person can choose to send (CALI-59)
+        from fastapi.responses import JSONResponse
+
+        from . import errors
+
+        e = errors.record_exception(f"{request.method} {request.url.path}", exc)
+        return JSONResponse(status_code=500, content={"detail": e["error"], "error_id": e["id"]})
+
+    @app.get("/api/errors/report")
+    def error_report(id: Optional[str] = None):
+        from . import errors
+
+        rep = errors.report(id)
+        if rep is None:
+            raise HTTPException(status_code=404, detail="nothing has gone wrong")
+        return rep
+
+    @app.post("/api/errors")
+    def error_seen(req: PageError):
+        from . import errors
+
+        return errors.record(f"the page: {req.where}", req.error, req.trace)
 
     @app.get("/api/health")
     def health():

@@ -16,8 +16,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from . import (aero, answers, chat, clarify, construction, cutplan, frame_study, goals, lighten,
-               load_study, making, patterns, promote, release, scorecard, shop, studies)
+from . import (aero, answers, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
+               load_study, making, patterns, promote, release, samples, scorecard, shop, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, stream
@@ -37,6 +37,7 @@ class ChatMessage(BaseModel):
 class ClarifyAnswers(BaseModel):
     answers: dict[str, str] = {}
     skip: bool = False
+    build: bool = False               # then build it, check it and plan its making (CALI-59, first run)
 
 
 class DesignSettings(BaseModel):
@@ -141,6 +142,34 @@ def _lock(slug: str) -> str:
     return f"design:{slug}"
 
 
+#: The first build each design has running (CALI-59), so a page that reloads mid-build follows it again.
+_FIRST: dict[str, str] = {}
+
+
+def first_build(slug: str):
+    """Start a design's first build (it has no parts yet): what it's held to, the part, its strength check,
+    its patterns, its score. Returns the job; one at a time per design."""
+    running = RUNNER.get(_FIRST.get(slug, ""))
+    if running is not None and not running.over:
+        return running
+
+    def work(j):
+        store = DesignStore.load(slug)
+        if store.design.parts:
+            raise ValueError("it's already built: say what to change")
+        return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d), strength=_aero_available(),
+                              cards=lambda s, pid: answers.answers(s, design_state(s), pid))
+
+    job = RUNNER.submit("firstrun", work, label="first build", lock=_lock(slug))
+    _FIRST[slug] = job.id
+    return job
+
+
+def _building(slug: str) -> Optional[str]:
+    j = RUNNER.get(_FIRST.get(slug, ""))
+    return j.id if j is not None and not j.over else None
+
+
 # --- serialising -----------------------------------------------------------------------------------
 def _bbox(store: DesignStore, pid: str) -> Optional[dict]:
     try:
@@ -201,6 +230,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
+        "building": _building(slug),          # the first build's job, while it runs (CALI-59)
         "display_units": d.display_units,
         "requirements": [r.model_dump() for r in d.requirements],
         "parts": parts,
@@ -310,6 +340,28 @@ def router():
         job = RUNNER.submit("clarify", ask, label="clarify", lock=f"clarify:{slug}")
         return {"slug": slug, "job_id": job.id}
 
+    # -- the sample designs (CALI-59): open a copy of one, its cards already full ----------------------
+    @r.get("/api/samples")
+    def sample_list():
+        return {"samples": samples.available()}
+
+    @r.post("/api/samples/{name}")
+    def sample_open(name: str):
+        try:
+            store = samples.open_sample(name)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"no sample {name!r}")
+        return {"slug": store.design.slug}
+
+    @r.post("/api/designs/{slug}/build")
+    def build_first(slug: str):
+        store = load(slug)
+        if store.design.parts:
+            raise HTTPException(status_code=409, detail="it's already built: say what to change")
+        if clarify.pending(store):
+            raise HTTPException(status_code=409, detail="answer its questions first (or leave them blank)")
+        return {"job_id": first_build(slug).id}
+
     @r.get("/api/designs/{slug}")
     def get_design(slug: str):
         return design_state(load(slug))
@@ -330,6 +382,9 @@ def router():
         with RUNNER.locked(_lock(slug)):
             store = load(slug)
             clarify.answer_round(store, req.answers, skip=req.skip)
+        if req.build and not store.design.parts:
+            first_build(slug)                  # it writes the checks first, then builds against them
+            return design_state(load(slug))
 
         def checks(j):                  # what it's held to, from the answers (CALI-55), off the request
             with RUNNER.locked(_lock(slug)):

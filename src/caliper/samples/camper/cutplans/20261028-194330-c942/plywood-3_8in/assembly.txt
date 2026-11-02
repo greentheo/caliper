@@ -1,0 +1,8 @@
+1 pieces, 0 seams (0 mountain, 0 valley).
+On the sheets: mountain folds are dash-dot, valley folds are plain dashed.
+Marked side faces OUT; mountain and valley are named as seen from it. Glue tabs fold under, to the inside. This is an open surface, so which face is out comes from the model's own winding and cannot be checked — a bowl and a dome are the same triangles. If it is inverted, every fold is inverted together: hold one panel against the model before creasing the rest.
+
+piece   faces  size                seams
+P1          2  1955.8 x 1016.0     
+
+token  joins            length   fold

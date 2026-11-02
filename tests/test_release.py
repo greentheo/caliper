@@ -111,7 +111,8 @@ def test_a_release_files_everything_the_shop_needs(store):
     assert "1 sheet" in shop and "1/2 in softwood plywood" in shop and "2x2 SPF lumber" in shop
     assert rec["shopping_usd"] > 0
     book = open(os.path.join(root, "index.html")).read()
-    assert "<h1>A crate for the garage</h1>" in book and "Shopping list" in book and "Assembly" in book
+    assert "<h1>Crate</h1>" in book and "Shopping list" in book and "Assembly" in book   # its name (CALI-59)
+    assert "What the numbers promise" in book
     # a scorecard as released: the design here has no goals, so only its own rules — and nothing fails
     assert rec["ready"] is True
     with zipfile.ZipFile(os.path.join(root, rec["zip"])) as z:

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2535.936mm" height="1648.9344mm" viewBox="0 0 2535.936 1648.9344">
+<title>cargo_box 3/8 in softwood plywood at 1x, mm, softwood plywood 8 x 4 ft — sheet 1</title>
+<rect width="2535.936" height="1648.9344" fill="#ffffff"/>
+<g transform="translate(48.768 1267.968) scale(1 -1)">
+<g id="sheet" stroke="#c8ccd4" stroke-width="0.6" fill="none">
+  <path d="M0 0 L2438.4 0 L2438.4 1219.2 L0 1219.2 Z"/>
+</g>
+<g id="cut" stroke="#111418" stroke-width="1.1" fill="none">
+  <path d="M16.764 1032.764 L16.764 16.764 L1972.564 16.764 L1972.564 1032.764 Z"/>
+</g>
+<g id="label" stroke="#111418" stroke-width="0.5" fill="none">
+  <text x="975.6445" y="-524.764" font-family="Helvetica, Arial, sans-serif" font-size="36.576" fill="#111418" transform="scale(1 -1)">P1</text>
+</g>
+</g>
+<g id="scalebar" font-family="Helvetica, Arial, sans-serif" font-size="24">
+  <rect x="48.768" y="1263.0912" width="200" height="21.6" fill="#111418"/>
+  <rect x="148.768" y="1263.0912" width="100" height="21.6" fill="#ffffff" stroke="#111418" stroke-width="1.296"/>
+  <text x="48.768" y="1309.8912" fill="#111418">200 mm — if this bar does not measure 200 mm, the page has been rescaled</text>
+</g>
+<g id="key" font-family="Helvetica, Arial, sans-serif" font-size="24">
+  <line x1="48.768" y1="1360.6272" x2="144.768" y2="1360.6272" stroke="#111418" stroke-width="1.1"/><text x="156.768" y="1369.0272" fill="#111418">cut</text>
+  <line x1="48.768" y1="1399.0272" x2="144.768" y2="1399.0272" stroke="#b02a8f" stroke-width="0.9" stroke-dasharray="9 2 0.6 2"/><text x="156.768" y="1407.4272" fill="#111418">mountain fold — crease towards you, panels away</text>
+  <line x1="48.768" y1="1437.4272" x2="144.768" y2="1437.4272" stroke="#3b74d6" stroke-width="0.7" stroke-dasharray="4 3"/><text x="156.768" y="1445.8272" fill="#111418">valley fold — crease away, panels towards you</text>
+  <line x1="48.768" y1="1475.8272" x2="144.768" y2="1475.8272" stroke="#c2410c" stroke-width="0.6"/><text x="156.768" y="1484.2272" fill="#111418">seam token</text>
+  <text x="48.768" y="1522.6272" fill="#5a6472">Marked side faces OUT; mountain and valley are named as seen from it. Glue tabs fold under, to the inside. This is an open surface, so which face is out comes from the model's own winding and</text>
+  <text x="48.768" y="1552.6272" fill="#5a6472">cannot be checked — a bowl and a dome are the same triangles. If it is inverted, every fold is inverted together: hold one panel against the model before creasing the rest.</text>
+</g>
+</svg>
