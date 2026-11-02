@@ -242,3 +242,9 @@ button.mic.on { border-color: var(--bad); box-shadow: 0 0 0 2px rgba(248, 81, 73
 .composer-row { flex-wrap: wrap; }
 .actions.simpler { margin-top: 0; }
 button.small { font-size: 12px; padding: 3px 9px; }
+
+/* a picture on it (CALI-78) */
+canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 22; background: var(--bg);
+  border: 1px dashed var(--line); border-radius: 8px; touch-action: none; cursor: crosshair; margin-top: 4px; }
+#pictureDlg input[type=text] { flex: 1; padding: 6px 8px; background: var(--bg); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; }

@@ -63,6 +63,9 @@ _MEASURE = re.compile(r"\d\s*(?:lb|lbs|kg|in|inch|inches|mm|cm|ft|feet|mph|%)\b|
 #: CALI-59: asking for it again in plain words is a question, never a change, even with a part selected.
 _EXPLAIN = re.compile(r"\b(explain|plain (?:words|english)|simpler words|more simply|what does .{0,40}\bmean"
                       r"|say (?:that|it) again|i don'?t (?:get|understand))\b", re.I)
+#: CALI-78: a picture cut out of a panel, for looks ("put a T-rex on the side", "cut a dinosaur into the front").
+_PICTURE = re.compile(r"\b(?:put|draw|cut|carve|add|stick)\s+(?:a|an|the|some|my)?\s*(?P<subject>[\w\-' ]{2,40}?)"
+                      r"\s+(?:on|onto|into|in|out of)\s+(?:the\s+|its\s+)?(?P<where>[\w ]{0,30})", re.I)
 #: CALI-54: feedback about what a part carries — a strength requirement, which goes into its loads().
 _CARRIES = re.compile(r"\b(hold|holds|carry|carries|support|supports|bear|weight|load|loads|lb|lbs|kg|pounds)\b")
 
@@ -76,7 +79,8 @@ class Intent:
 
     action: str                       # refine | author | revert | accept | decline | answer
     part: Optional[str] = None        # the part to revise, or the id for a new one
-    intent: str = ""                  # for `author`: what the new part is
+    intent: str = ""                  # for `author`: what the new part is; for `picture`: what to draw
+    where: str = ""                   # for `picture`: which panel, in the person's words ("on the side")
     source: str = "offline"           # "offline" | "llm" | "injected"
     note: str = ""                    # why we routed this way (surfaced when we're unsure)
 
@@ -179,6 +183,18 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
     ids = [p.id for p in store.design.parts]
     question = _is_question(message)
 
+    # a picture: offline, only one it can draw, or one that says it's a picture (Claude routes the rest)
+    pic = _PICTURE.search(message or "")
+    if pic and not question and ids:
+        from .pictures import BUILT_IN
+
+        subject = pic.group("subject").strip()
+        target = scope or named_part(message, ids) or (ids[0] if len(ids) == 1 else None)
+        if target and (any(k in subject.lower() for k in BUILT_IN)
+                       or re.search(r"\b(picture|drawing|silhouette|cut-?out|shape)\b", subject, re.I)):
+            return Intent(action="picture", part=target, intent=subject, where=pic.group("where").strip(),
+                          note="a picture to cut out of a panel")
+
     if _REVERT.search((message or "").lower()) and not question:
         target = scope or named_part(message, ids) or last_touched(store)
         if target:
@@ -206,8 +222,11 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
 
 _CLASSIFY_SYSTEM = """You route a message in a CAD design conversation. Reply with ONLY a JSON object:
 
-{"action": "refine" | "author" | "revert" | "answer", "part": "<existing part id, a new snake_case id, or null>",
- "intent": "<for author: a one-line description of the part to build; else empty>"}
+{"action": "refine" | "author" | "revert" | "answer" | "picture",
+ "part": "<existing part id, a new snake_case id, or null>",
+ "intent": "<for author: a one-line description of the part to build; for picture: just the thing to draw, in
+            a word or two (\"T-rex\", \"heart\"); else empty>",
+ "where": "<for picture: which panel, in their words (\"the side\", \"the front\"), or empty>"}
 
 - "refine": change an EXISTING part: its shape, or what its script says about it (what it's built
   from, what it must hold or carry, what it must keep clear). `part` must be one of the design's part
@@ -215,6 +234,8 @@ _CLASSIFY_SYSTEM = """You route a message in a CAD design conversation. Reply wi
 - "author": build a NEW part. `part` is a new snake_case identifier; `intent` describes it, as the
   design's requirements have it: never a choice they don't make or one that contradicts them.
 - "revert": undo the last change to a part ("roll it back", "undo that"). `part` is that part.
+- "picture": cut a picture or shape out of a panel for looks ("put a T-rex on the side", "cut a heart
+  into the back"), not a new working part. `part` is the existing part it goes on.
 - "answer": the user asked a question, asked for something to be explained or said more simply, or said
   something that changes nothing about any part.
 If the message is ambiguous about WHICH part, use "answer" — do not guess."""
@@ -248,16 +269,20 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
     m = re.search(r"\{.*\}", text, re.S)
     data = json.loads(m.group(0) if m else text)
     action = str(data.get("action", "")).strip()
-    if action not in ("refine", "author", "revert", "answer"):
+    if action not in ("refine", "author", "revert", "answer", "picture"):
         raise ValueError(f"unusable action {action!r}")
     part = data.get("part") or None
     ids = {p.id for p in store.design.parts}
+    if action == "picture" and part not in ids:
+        part = scope if scope in ids else (next(iter(ids)) if len(ids) == 1 else None)
+        if part is None:
+            raise ValueError("a picture on which part?")
     if action in ("refine", "revert") and part not in ids:
         raise ValueError(f"{action} targets unknown part {part!r}")
     if action == "author":
         part = part if part and part not in ids else part_id_from(message, ids)
     return Intent(action=action, part=part, intent=str(data.get("intent") or message).strip(),
-                  source="llm", note="routed by Claude")
+                  where=str(data.get("where") or "").strip(), source="llm", note="routed by Claude")
 
 
 Classifier = Callable[[DesignStore, str, Optional[str]], Intent]
@@ -581,6 +606,31 @@ def _decline(store: DesignStore, proposal, events: list[Event], on_event) -> Tur
                              f"so a later revision may undo it."))
 
 
+def picture_part(store: DesignStore, part_id: str, subject: str, where: str = "", *, points=None, events=None,
+                 on_event=None, use_llm: bool = True, client=None, strength: bool = True) -> TurnResult:
+    """CALI-78: a picture cut out of one of the part's panels, checked it still holds (``pictures.put``)."""
+    from . import pictures
+
+    events = events if events is not None else []
+    subject = re.sub(r"^(?:a|an|the|some)\s+", "", (subject or "picture").strip(), flags=re.I) or "picture"
+    # just the thing: "T-rex silhouette cut into the side panel" -> "T-rex"
+    subject = re.split(r"\s+(?:silhouette|cut|cutout|cut-out|shape|picture|drawing|on|onto|into|out of|in)\b",
+                       subject, maxsplit=1, flags=re.I)[0].strip() or "picture"
+    try:
+        if points:
+            shape = pictures.from_drawing(points)
+        else:
+            _emit(events, on_event, "step", f"Drawing a {subject}", step="draw", part=part_id)
+            shape = pictures.draw(subject, use_llm=use_llm, client=client)
+        got = pictures.put(store, part_id, shape, subject=subject, where=where, strength=strength,
+                           emit=lambda k, t="", **d: _emit(events, on_event, k, t, part=part_id, **d))
+    except (ValueError, ImportError) as e:
+        return TurnResult(action="picture", ok=False, part=part_id, events=events, error=str(e),
+                          reply=f"I couldn't put a {subject} on it: {e}.")
+    return TurnResult(action="picture", ok=got["ok"] and got.get("holds", True) is not False, part=part_id,
+                      version=got.get("version"), events=events, reply=got["reply"])
+
+
 def revert_part(store: DesignStore, part_id: str, *, events=None, on_event=None) -> TurnResult:
     """Roll a part back one revision and re-measure — so the rollback the reply offers is real.
 
@@ -806,6 +856,9 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
                              use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
     elif intent.action == "revert" and intent.part:
         result = revert_part(store, intent.part, events=events, on_event=on_event)
+    elif intent.action == "picture" and intent.part:
+        result = picture_part(store, intent.part, intent.intent, intent.where, events=events,
+                              on_event=on_event, use_llm=use_llm, client=client)
     elif intent.action == "author" and intent.part:
         result = author_part(store, intent.part, intent.intent or message, author=author,
                              client=client, max_rounds=max_rounds, events=events, on_event=on_event,
