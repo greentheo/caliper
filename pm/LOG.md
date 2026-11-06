@@ -10,6 +10,7 @@ Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book n
   resolved: too coarse to see its walls". The Studies scorecard row isn't green ("· 1 not resolved"), and the
   release row says "not ready: a strength check isn't resolved". The page's scorecard shows "!" and "(1 not
   resolved)".
+- **The design card's scorecard line** (#103's) names it "N not resolved", apart from "not checked yet".
 - **The kid's book promises nothing on it:** no "It should hold…"; "Don't stand on it yet", for a grown-up.
 - **The audit** (every reader of a strength run's verdict), each handling `unresolved`:
   - `answers`: both cards (#100);

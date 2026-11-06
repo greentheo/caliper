@@ -112,3 +112,16 @@ def test_the_test_it_panel_and_the_chat_say_the_number_isn_t_resolved(tmp_path, 
     assert "NOT RESOLVED: the voxels were too coarse to see its walls" in chat._facts(store, None)
     fine, _ = _store(tmp_path, monkeypatch, TUBE, "tube", 4, GOALS)
     assert not trials.predict(fine, "tube")["basis"].startswith("from an FEA too coarse")
+
+
+
+def test_the_design_card_s_scorecard_line_names_it(tmp_path):
+    """Merged with #103's card line: an unresolved check reads "not resolved", apart from "not checked yet"."""
+    from caliper import answers
+
+    store = DesignStore.create("a tube", base=str(tmp_path / "designs"))
+    state = {"parts": [{"id": "tube", "version": 1, "role": "movable"}], "prompt": "a tube", "name": "t",
+             "scorecards": [{"summary": {"pass": 1, "fail": 0, "unknown": 2, "untrusted": 0, "unresolved": 1},
+                             "checks": [], "versions": {}}], "goals": {"checks": []}, "load_runs": []}
+    (line,) = [c for c in answers.design(store, state) if c["key"] == "work"][0]["lines"][:1]
+    assert line == {**line, "text": "1 check pass, 1 not resolved, 1 not checked yet.", "status": "warn"}

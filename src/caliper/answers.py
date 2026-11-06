@@ -470,11 +470,12 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         fails = [c for c in card["checks"] if c["status"] == "fail"]
         stale = any(card.get("versions", {}).get(p["id"]) not in (None, p["version"]) for p in parts)
         # never a pass: a check that couldn't run (#103 review), nor one measured on a filled-in shape (CALI-96)
-        untrusted = s.get("untrusted") or 0
-        waits = (s.get("unknown") or 0) - untrusted
+        untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0     # never a pass (CALI-110)
+        waits = (s.get("unknown") or 0) - untrusted - unresolved
         said = (f"{s['pass']} check{'s' if s['pass'] != 1 else ''} pass" if s["pass"] or fails
-                else "No check has run yet" if waits and not untrusted else "No check passes yet")
-        rest = [f"{untrusted} not trusted"] * bool(untrusted) + [f"{waits} not checked yet"] * bool(waits)
+                else "No check has run yet" if waits and not untrusted and not unresolved else "No check passes yet")
+        rest = ([f"{untrusted} not trusted"] * bool(untrusted) + [f"{unresolved} not resolved"] * bool(unresolved)
+                + [f"{waits} not checked yet"] * bool(waits))
         work.append(_line(said + (
             f", {s['fail']} fail: " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")
             + (f"{',' if s['pass'] or fails else ':'} " + ", ".join(rest) if rest else "") + "."
