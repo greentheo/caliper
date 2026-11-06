@@ -188,6 +188,28 @@ def first_build(slug: str):
     return job
 
 
+def _plan(store: DesignStore) -> Optional[dict]:
+    """The design's plan as the page shows it: the review line, the parts in build order, the numbers (in the
+    person's units) and the checks between the parts (CALI-35, #3a)."""
+    from . import plan as P
+
+    try:
+        pl = P.load(store)
+    except Exception:  # noqa: BLE001 — a plan on file that no longer reads: the design still opens
+        return None
+    if pl is None:
+        return None
+    inches = store.design.display_units == "in"
+    by = {p.id: p for p in pl.parts}
+    return {"status": (store.design.plan or {}).get("status", "review"), "headline": P.headline(pl, store.design.name),
+            "parts": [{**by[i].model_dump(), "built": bool(store.design.part(i) and store.design.part(i).version)}
+                      for i in P.order(pl)],
+            "numbers": [f"{s.name.replace('_', ' ')}: {P.number(s, inches)}" + (f" ({s.why})" if s.why else "")
+                        for s in pl.skeleton],
+            "checks": [{"id": r.id, "expr": r.expr} for r in pl.rules]
+                      + [{"id": f"{m.kind}", "expr": f"{m.between[0]} and {m.between[1]}"} for m in pl.mates]}
+
+
 def _building(slug: str) -> Optional[str]:
     j = RUNNER.get(_FIRST.get(slug, ""))
     return j.id if j is not None and not j.over else None
@@ -282,6 +304,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
         "building": _building(slug),          # the first build's job, while it runs (CALI-59)
+        "plan": _plan(store),                 # its parts, numbers and checks, before they're built (CALI-35)
         "carving": _carving(slug),            # the carve's job, while it runs (CALI-101)
         "display_units": d.display_units,
         "requirements": [r.model_dump() for r in d.requirements],

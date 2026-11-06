@@ -451,6 +451,11 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         what.append(_line(f"{len(parts)} part{'s' if len(parts) != 1 else ''}: " + ", ".join(p["id"] for p in parts)))
     elif state.get("building"):
         what.append(_line("Building it now: these fill in as it goes.", "info"))
+    elif state.get("plan"):                   # planned, not built: the person reviews it first (CALI-35, #3a)
+        pl = state["plan"]
+        what.append(_line(pl["headline"], "warn"))
+        what.append(_line("That's the plan, before anything's drawn: its numbers and the checks between the parts are "
+                          "under the numbers. Say what to change, or press Build it.", "info"))
     else:
         what.append(_line("Not built yet: answer its questions and press Build it.", "warn"))
     assumed = sum(1 for r in state.get("requirements") or [] if r.get("source") == "assumed")
@@ -464,10 +469,17 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         s = card["summary"]
         fails = [c for c in card["checks"] if c["status"] == "fail"]
         stale = any(card.get("versions", {}).get(p["id"]) not in (None, p["version"]) for p in parts)
-        work.append(_line(f"{s['pass']} check{'s' if s['pass'] != 1 else ''} pass" + (
-            f", {s['fail']} fail: " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else ".")
+        # never a pass: a check that couldn't run (#103 review), nor one measured on a filled-in shape (CALI-96)
+        untrusted = s.get("untrusted") or 0
+        waits = (s.get("unknown") or 0) - untrusted
+        said = (f"{s['pass']} check{'s' if s['pass'] != 1 else ''} pass" if s["pass"] or fails
+                else "No check has run yet" if waits and not untrusted else "No check passes yet")
+        rest = [f"{untrusted} not trusted"] * bool(untrusted) + [f"{waits} not checked yet"] * bool(waits)
+        work.append(_line(said + (
+            f", {s['fail']} fail: " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")
+            + (f"{',' if s['pass'] or fails else ':'} " + ", ".join(rest) if rest else "") + "."
             + (" (A part has changed since: score it again.)" if stale else ""),
-            "bad" if fails else "warn" if stale else "ok"))
+            "bad" if fails else "warn" if stale or rest or not s["pass"] else "ok"))
     elif not work:
         work.append(_line("Nothing to hold it to yet: say what it must do.", "warn"))
 

@@ -834,19 +834,39 @@ function checks(report, only) {
   return '<ul class="list">' + rows.map((r) => `<li class="check ${r.status}">
     <span class="s">${r.status === 'pass' ? '✓' : r.status === 'deferred' ? '·' : '✗'}</span>
     <span><b>${esc(r.id)}</b> <code>${esc(r.expr)}</code>${r.actual != null && r.status !== 'pass'
-      ? ` <span class="muted">→ ${esc(typeof r.actual === 'number' ? r.actual.toFixed(3) : r.actual)}</span>` : ''}</span>
+      ? ` <span class="muted">→ ${esc(typeof r.actual === 'number' ? r.actual.toFixed(3) : r.actual)}</span>` : ''}${r.status === 'deferred' && r.detail
+      ? ` <span class="muted">· ${esc(r.detail)}</span>` : ''}</span>
     </li>`).join('') + '</ul>';
 }
 
+// the design's checks in one badge (CALI-35, #103 review): a check that's only waiting (deferred) is never red, and
+// never green either: "all checks pass" only when every check ran and passed
+function reportBadge(rep) {
+  if (!rep || !rep.results.length) return '';
+  const waiting = rep.results.filter((r) => r.status === 'deferred').length;
+  const passed = rep.results.filter((r) => r.status === 'pass').length;
+  if (rep.results.some((r) => r.status === 'fail' || r.status === 'error')) return '<span class="badge bad">checks failing</span>';
+  if (waiting === rep.results.length) return '<span class="badge">checks wait for its parts</span>';
+  if (waiting) return `<span class="badge">${passed} pass · ${waiting} not checked yet</span>`;
+  return '<span class="badge ok">all checks pass</span>';
+}
 function designView(d) {
   const rep = d.report;
-  const status = rep ? (rep.all_pass ? '<span class="badge ok">all checks pass</span>'
-    : '<span class="badge bad">checks failing</span>') : '';
+  const status = reportBadge(rep);
   const what = `<div class="muted small">${esc(d.prompt)}</div>
     <h4>Requirements</h4>
     ${d.requirements.length ? '<ul class="list">' + d.requirements.map((r) => `<li>${esc(r.question)}
       <div><b>${esc(r.answer)}</b>${r.source === 'assumed' ? ' <span class="badge">assumed</span>' : ''}</div></li>`).join('') + '</ul>'
     : '<div class="empty">None yet.</div>'}
+    ${d.plan ? `<h4>The plan <span class="badge">${d.plan.status === 'review' ? 'to review' : 'saved'}</span></h4>
+      <ol class="list">${d.plan.parts.map((x) => `<li><b>${esc(x.id.replace(/_/g, ' '))}</b>
+        ${x.role === 'fixed' ? '<span class="badge ref">you have it</span>' : ''}${x.built ? '<span class="badge ok">built</span>' : ''}
+        <div class="muted small">${esc(x.what)}${x.made ? ` · ${esc(x.made)}` : ''}${x.mounts_on.length
+          ? ` · on the ${x.mounts_on.map((m) => esc(m.replace(/_/g, ' '))).join(' and the ')}` : ''}</div></li>`).join('')}</ol>
+      ${d.plan.numbers.length ? '<div class="small"><b>The numbers they share</b></div><ul class="list">'
+        + d.plan.numbers.map((n) => `<li class="small">${esc(n)}</li>`).join('') + '</ul>' : ''}
+      ${d.plan.checks.length ? '<div class="small"><b>Checked between them</b></div><ul class="list">'
+        + d.plan.checks.map((c) => `<li class="small"><b>${esc(c.id)}</b> <code>${esc(c.expr)}</code></li>`).join('') + '</ul>' : ''}` : ''}
     <h4>Parts</h4>
     ${d.parts.length ? '<ul class="list">' + d.parts.map((p) => `<li><span class="partlink" data-part="${esc(p.id)}">${esc(p.id)}</span>
       <span class="muted small">v${p.version}</span>
