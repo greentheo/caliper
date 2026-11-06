@@ -1145,11 +1145,12 @@ function scoreView(d) {
     const better = o.direction === 'max' ? o.change > 0 : o.change < 0;
     return ` <span class="small" style="color:var(${better ? '--ok' : '--bad'})">${o.change > 0 ? '+' : ''}${num(o.change)}</span>`;
   };
-  return `<div class="small">${card.summary.pass} pass · <b style="color:var(--bad)">${card.summary.fail} fail</b>${card.summary.unknown ? ` · ${card.summary.unknown} unknown` : ''}${card.summary.proposed ? ` · ${card.summary.proposed} proposed` : ''}
+  return `<div class="small">${card.summary.pass} pass · <b style="color:var(--bad)">${card.summary.fail} fail</b>${card.summary.unknown ? ` · ${card.summary.unknown} unknown` : ''}${card.summary.unresolved ? ` (${card.summary.unresolved} not resolved)` : ''}${card.summary.proposed ? ` · ${card.summary.proposed} proposed` : ''}
       <span class="muted">· scored ${new Date(card.created * 1000).toLocaleString()}</span>
       ${stale ? '<span class="badge bad">a part has changed since</span>' : ''}</div>
     <ul class="list small" style="margin-top:6px">${card.checks.map((c) => { const now = held.find((x) => x.id === c.id) || c;
-      return `<li>${c.status === 'pass' ? '✓' : c.status === 'fail' ? '<span style="color:var(--bad)">✗</span>' : c.status === 'proposed' ? '◇' : '?'}
+      return `<li>${c.status === 'pass' ? '✓' : c.status === 'fail' ? '<span style="color:var(--bad)">✗</span>' : c.status === 'proposed' ? '◇'
+        : c.status === 'unresolved' || c.status === 'untrusted' ? '<span style="color:var(--amber)">!</span>' : '?'}
       ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
       ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}</li>`; }).join('')}
       ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${esc(c.label || c.id)} ${from(c)}

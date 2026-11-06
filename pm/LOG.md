@@ -1,7 +1,26 @@
 # Caliper work log
 
 Append-only. Newest first. One entry per shipped task or notable decision.
-Format: `### 2026-11-06 · CALI-97 (#100, merged with main after #96) · "Not trusted" wins over "not resolved"; a ✗ stays a ✗
+Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
+- **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
+  `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its
+  note. A ✗ by its number stays a fail. `untrusted` (#96, a filled-in shape) is as it was.
+- **So nothing downstream calls it ready:** the release isn't ready (`unknown` > 0). The book's header reads "Not
+  ready — 1 not resolved", its scorecard table marks it "not resolved", and its *Will it hold?* row reads "not
+  resolved: too coarse to see its walls". The Studies scorecard row isn't green ("· 1 not resolved"), and the
+  release row says "not ready: a strength check isn't resolved". The page's scorecard shows "!" and "(1 not
+  resolved)".
+- **The kid's book promises nothing on it:** no "It should hold…"; "Don't stand on it yet", for a grown-up.
+- **The audit** (every reader of a strength run's verdict), each handling `unresolved`:
+  - `answers`: both cards (#100);
+  - `studies`: the load row (#100), the scorecard row and the release row (here);
+  - `scorecard`, `release`, `kidbook` (here);
+  - `chat._facts`: the raw numbers say "NOT RESOLVED…" (here);
+  - `trials.predict`: the "Test it" prediction's basis says it's a rough guess (here);
+  - `lighten` and `carve`: their own runs, which this doesn't touch (#100's noted follow-up).
+- Tests: `tests/test_unresolved_score.py` (main fails 4 of the first 6). `design.js?v=48`.
+
+### 2026-11-06 · CALI-97 (#100, merged with main after #96) · "Not trusted" wins over "not resolved"; a ✗ stays a ✗
 - **Merged `main` (with #96) into #100.** Where both reword one strength verdict:
   - the filled-in shape's "not trusted" comes first, because the check ran on a block, the more basic problem;
   - "not resolved" or "not checked" comes next;
