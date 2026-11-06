@@ -169,6 +169,16 @@ def _lock(slug: str) -> str:
 _FIRST: dict[str, str] = {}
 
 
+#: What a new design's first build needs and nothing else here can do: Claude (CALI-91). Said, not failed.
+NEEDS_KEY = "Building a new design needs a Claude key (see .env.example). Until then, open one of ours."
+
+
+def _claude() -> bool:
+    """Whether Claude can be asked: a key is set (the CLI loads .env). Without one nothing is sent anywhere, and a
+    first build can't run, so it isn't started (CALI-91)."""
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
 def first_build(slug: str):
     """Start a design's first build (it has no parts yet): what it's held to, the part, its strength check,
     its patterns, its score. Returns the job; one at a time per design."""
@@ -186,6 +196,28 @@ def first_build(slug: str):
     job = RUNNER.submit("firstrun", work, label="first build", lock=_lock(slug))
     _FIRST[slug] = job.id
     return job
+
+
+def _plan(store: DesignStore) -> Optional[dict]:
+    """The design's plan as the page shows it: the review line, the parts in build order, the numbers (in the
+    person's units) and the checks between the parts (CALI-35, #3a)."""
+    from . import plan as P
+
+    try:
+        pl = P.load(store)
+    except Exception:  # noqa: BLE001 — a plan on file that no longer reads: the design still opens
+        return None
+    if pl is None:
+        return None
+    inches = store.design.display_units == "in"
+    by = {p.id: p for p in pl.parts}
+    return {"status": (store.design.plan or {}).get("status", "review"), "headline": P.headline(pl, store.design.name),
+            "parts": [{**by[i].model_dump(), "built": bool(store.design.part(i) and store.design.part(i).version)}
+                      for i in P.order(pl)],
+            "numbers": [f"{s.name.replace('_', ' ')}: {P.number(s, inches)}" + (f" ({s.why})" if s.why else "")
+                        for s in pl.skeleton],
+            "checks": [{"id": r.id, "expr": r.expr} for r in pl.rules]
+                      + [{"id": f"{m.kind}", "expr": f"{m.between[0]} and {m.between[1]}"} for m in pl.mates]}
 
 
 def _building(slug: str) -> Optional[str]:
@@ -282,6 +314,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
         "building": _building(slug),          # the first build's job, while it runs (CALI-59)
+        "claude": _claude(),                  # whether what's typed goes to Claude, and a build can run (CALI-91)
+        "plan": _plan(store),                 # its parts, numbers and checks, before they're built (CALI-35)
         "carving": _carving(slug),            # the carve's job, while it runs (CALI-101)
         "display_units": d.display_units,
         "requirements": [r.model_dump() for r in d.requirements],
@@ -380,7 +414,7 @@ def router():
     # -- designs -------------------------------------------------------------------------------------
     @r.get("/api/designs")
     def designs():
-        return {"designs": DesignStore.list_designs()}
+        return {"designs": DesignStore.list_designs(), "claude": _claude()}
 
     @r.post("/api/designs")
     def new_design(req: NewDesign):
@@ -422,6 +456,8 @@ def router():
             raise HTTPException(status_code=409, detail="it's already built: say what to change")
         if clarify.pending(store):
             raise HTTPException(status_code=409, detail="answer its questions first (or leave them blank)")
+        if not _claude():                       # a job bound to fail with the SDK's own words (CALI-91)
+            raise HTTPException(status_code=409, detail=NEEDS_KEY)
         return {"job_id": first_build(slug).id}
 
     @r.get("/api/designs/{slug}")
@@ -444,7 +480,7 @@ def router():
         with RUNNER.locked(_lock(slug)):
             store = load(slug)
             clarify.answer_round(store, req.answers, skip=req.skip)
-        if req.build and not store.design.parts:
+        if req.build and not store.design.parts and _claude():
             first_build(slug)                  # it writes the checks first, then builds against them
             return design_state(load(slug))
 

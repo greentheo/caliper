@@ -566,6 +566,22 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-06 · Nothing leaves the machine unsaid (CALI-91 #68)
+1. **Press 🎤:** it asks first, "Your browser turns speech into words by sending it to its maker (Google, in Chrome).
+   Talk anyway?". **Type instead** doesn't listen. **Talk** does, and the next press doesn't ask again.
+2. **With a key set:** under the "What do you want to make?" box, and under the chat box until you send something:
+   "What you type goes to Claude (Anthropic's AI) to design it."
+3. **With no key:** the box says "Building a new design needs a Claude key (see .env.example). Until then, open one of
+   ours below", and a new design's Build it is replaced by that line. No job starts.
+4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_privacy.py`.
+### 2026-11-06 · A design of several parts is planned, and you see the plan first (CALI-35 #3a)
+1. **With a key, a new design from the turbine sentence:** **Build it** plans before it draws. "A wind turbine in 4
+   parts: …" is on *What is it?*, with the parts in build order, the numbers they share and the checks between them
+   under *the numbers*.
+2. **Say "make the mast 10 ft":** "Changed the plan: mast top z: 7 ft → 10 ft." Nothing is drawn.
+3. **Build it again:** "The plan's saved: 4 parts. Building them one by one, in order, comes next (#3b)."
+4. **The stool's sentence** still builds as one part, as before.
+5. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_plan.py`.
 ### 2026-11-06 · Carve it: one click, its progress, and Cancel (CALI-101 #93)
 1. **On a printed part with a strength check, the button says how long:** "at least about N min at this size" (after a carve has finished: "about N min …, as its last carve took").
 2. **Click Carve it once:** one `POST /carve`. The button stays off. The panel shows "step k of 7: …", the bar, and

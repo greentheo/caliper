@@ -35,6 +35,71 @@ Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book n
 
 ---
 
+### 2026-11-06 · CALI-91 (#68) · Words leave the machine only when the person sends them
+- **The 🎤 asks first** (rule 6). A browser's speech recognition sends the audio to its maker. On the first press:
+  "Your browser turns speech into words by sending it to its maker (Google, in Chrome). Talk anyway?", with **Talk**
+  and **Type instead**. The answer is kept in that browser's `localStorage`, every read and write in try/catch; if
+  it's forgotten, it asks again. After Type instead, the next press offers the computer's dictation and a Talk button,
+  and never listens unasked.
+- **On the device, it doesn't ask:** where `SpeechRecognition.available({processLocally: true})` says "available", it
+  listens with `processLocally` and nothing leaves. Checked on this machine: the app's browser pane (Chrome/152) has
+  the API and reports on-device "unavailable", so it asks. Chrome and Safari themselves weren't checked.
+- **The fallback names no machine it can't see:** "Use your computer's dictation: on a Mac, press the 🎤 key (or Fn
+  twice)."
+- **What's typed goes to Claude, said:** under the first-run box, and under the chat box until the first message is
+  sent, when a key is set.
+- **With no key, Build it says what's missing instead of failing:** "Building a new design needs a Claude key (see
+  .env.example). Until then, open one of ours below." The API refuses a first build with a 409 in those words, the
+  questions' Build it records the answers and starts nothing, and the page shows the line instead of the button.
+- Tests: `tests/test_privacy.py` (node: `rec.start()` only after a yes or on the device; Type instead; the second
+  press; cleared storage; blocked storage); `test_firstrun` (no key: no job, the 409). `?v=44`.
+### 2026-11-06 · CALI-35 (#103 review) · A rule can't freeze the app, and a check that hasn't run is never a pass
+- **A rule Claude writes can't run away** (blocker 1: `9 ** 9 ** 8 > 0` ran over 60 s under OCCT on every design
+  load). The plan's validator allows arithmetic, comparisons, and/or/not, the measures, names and numbers. It refuses
+  `**`, strings, lists, subscripts, keywords, any attribute but a box's sizes and corners, rules over 300 characters,
+  and a rule that doesn't answer yes or no (`rotor_d`, `1`). The evaluator refuses the same, as a second guard:
+  powers above 4, a repeated string or list, ints past 256 bits, private attributes, and over 2,000 steps, each
+  checked before it's done. So no rule can hold the lock.
+- **`bbox()` has named corners** (`max_z` and the rest). The planner had been told `.max.z`, which a bounding box
+  didn't have, so every such rule would have errored. Now it's tested on a real box against the skeleton.
+- **A check that hasn't run is never a pass** (blocker 2, rule 6). `Report.said()` and `waiting` are used by the
+  header badge ("1 pass · 5 not checked yet", never "all checks pass"), the chat ("No design check has run yet: 3 not
+  checked yet.") and the card ("No check has run yet: 3 not checked yet.", warn). `all_pass` keeps its meaning,
+  because the authoring loop stops on it and a part spec's deferred check (a print time with no slicer) must not hold
+  it forever. Nothing a person reads uses it alone.
+- **The planner's fallback reason is plain words** ("skeleton 1 unit is missing"), never pydantic's text and URL.
+- Tests: the reviewer's runaway rules (the validator and the evaluator), the box rule, `said()` cases, the header
+  badge (node), the card, and a "?" that's actually sent during review.
+
+### 2026-11-06 · CALI-35 (#3a) · The plan: parts, the numbers they share, the checks between them, reviewed first
+- **`plan.py`:** a plan is parts (what each is, how it's made, `role: fixed` for what the person has, what it mounts
+  on), the skeleton (named numbers with a unit and why), mates, and rules over part ids and skeleton names.
+  - **Validation refuses, with the reason:** a cycle ("base → mast → hub → rotor → base"), a part, mate or rule
+    naming something the plan hasn't, a skeleton number with no unit or a unit Caliper doesn't measure in, a rule
+    calling anything but the assembly's measures, two things with one name.
+  - **The build order:** mounted-on first, the plan's own order otherwise.
+- **The planner:** one Claude call with the plan's schema as its only tool. The system prompt carries the spec's rule:
+  separate parts are made separately or move; pieces of one sheet or printed part stay one part.
+- **The first run plans first** (with Claude):
+  - a plan of several parts is saved and the run stops for review: "A wind turbine in 4 parts: the rotor (…), the
+    hub, the mast (…) and the base (…)";
+  - a one-part plan (the stool) builds as today;
+  - a plan that can't be used is refused, and it builds as one part, saying why;
+  - with no key it builds one part, as today, and says planning needs Claude.
+- **Build it on a reviewed plan:** "The plan's saved: 4 parts. Building them one by one, in order, comes next (#3b)."
+  Nothing is authored (the foreman's call: 3a builds nothing past today's one part).
+- **Saved** in `assembly.yaml` (the planned parts at their script paths, the mates as `plan_*`, the rules) and
+  `design.yaml` (`skeleton:`, and `plan:` with its parts, order and status).
+  - Evaluation skips planned parts that aren't built yet, and a rule naming one is deferred: "waits for mast to be
+    built". Every other part loads as ever.
+  - A rule can read skeleton names (lengths in mm) and `abs`/`min`/`max`.
+- **The review:** the plan on *What is it?*, and the parts in build order, the numbers in the person's units and the
+  checks under *the numbers*.
+- **The chat edits the plan during review,** never the geometry: "make the mast 10 ft" → "Changed the plan: mast top
+  z: 7 ft → 10 ft." A question is still answered.
+- **Not done: the live run** of the three sentences (turbine, camper, stool). It spends Theo's key, so it needs his
+  word in the session that runs it.
+- Tests: `tests/test_plan.py` (a stubbed client throughout).
 ### 2026-11-06 · CALI-101 (#93) · Carve it: one click, one carve, its progress, and a cancel
 - **The page error on Theo's run** ("Cannot read properties of undefined (reading 'ok')"): `makingView` read
   `m.data` while the shop plan was still loading. It says "planning…" until it's back.

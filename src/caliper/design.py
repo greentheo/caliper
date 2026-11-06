@@ -176,6 +176,10 @@ class Design(_Base):
     machine: Optional[str] = None
     requirements: list[Requirement] = Field(default_factory=list)
     parts: list[DesignPart] = Field(default_factory=list)
+    #: CALI-35 (#3a): the numbers the parts share (name, value, unit, why), and the plan they were planned in
+    #: (its parts, build order and status). The plan's mates and rules live in assembly.yaml with the rest.
+    skeleton: Optional[list[dict]] = None
+    plan: Optional[dict] = None
     created: str = Field(default_factory=_now)
     updated: str = Field(default_factory=_now)
 
@@ -583,11 +587,20 @@ class DesignStore:
         """
         from .assembly import evaluate_assembly, load_parts_tolerant
 
+        from .plan import skeleton_values
+
+        built = {p.id for p in self.design.parts if p.version}
+        planned = {p["id"] for p in (self.design.plan or {}).get("parts") or []}
+        unbuilt = planned - built              # planned, not built yet (CALI-35); every other part loads as ever
+        values = skeleton_values(self.design.skeleton or [])
         with OCCT:
             if not tolerant:
-                return evaluate_assembly(self.assembly, base_dir=self.root)
-            geoms, errors = load_parts_tolerant(self.assembly, base_dir=self.root)
-            return evaluate_assembly(self.assembly, base_dir=self.root, parts=geoms), errors
+                return evaluate_assembly(self.assembly, base_dir=self.root, values=values, unbuilt=unbuilt,
+                                         parts=load_parts_tolerant(self.assembly, self.root, skip=unbuilt)[0]
+                                         if unbuilt else None)
+            geoms, errors = load_parts_tolerant(self.assembly, base_dir=self.root, skip=unbuilt)
+            return evaluate_assembly(self.assembly, base_dir=self.root, parts=geoms, values=values,
+                                     unbuilt=unbuilt), errors
 
     # --- prompt context ----------------------------------------------------
     def prompt_context(self, part_id: Optional[str] = None, history_limit: int = 8) -> str:
