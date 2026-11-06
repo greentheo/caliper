@@ -355,7 +355,8 @@ def _fail_lines(report, only: Optional[list[str]] = None, limit: int = 6) -> lis
         if only is not None and r.id not in only:
             continue
         margin = "" if r.margin is None else f" (margin {r.margin:+.3g})"
-        out.append(f"  • {r.id}: {r.expr} → actual={r.actual}{margin}")
+        # the reason, where the check gives one: the line a fallback hides a feature on (CALI-107)
+        out.append(f"  • {r.id}: {r.expr} → actual={r.actual}{margin}" + (f". {r.detail}" if r.detail else ""))
     return out[:limit]
 
 
@@ -436,6 +437,8 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     before, _ = _measure_design(store)
     spec = _working_spec(store, part_id, entry.intent)
     script = store.read_script(part_id)
+    prior = script                                 # what the request changes, as it was (CALI-107)
+    was = _volume(store, part_id)
 
     _emit(events, on_event, "authoring", f"revising {part_id}…", part=part_id)
     res = authoring.refine_authored(spec, script, message, max_rounds=max_rounds,
@@ -464,7 +467,9 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     _emit(events, on_event, "measured", "measured the whole design", part=part_id)
     broke, fixed = _delta(before, after)
 
-    reply = _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb="revised")
+    reply = _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb="revised",
+                     asked=message, prior=prior, new=script,
+                     volumes=(was, _volume(store, part_id)))
     if uncarved:
         reply += "\n\n" + carve.DROPPED
     proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
@@ -828,10 +833,50 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
                       part_errors=part_errors, events=events, reply="\n".join(lines))
 
 
-def _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb: str) -> str:
-    """The chat reply: what happened, what it measures, and — critically — what it broke."""
+def _volume(store: DesignStore, part_id: str):
+    """The part's volume now, in mm³, or None (CALI-107: whether a request changed the shape at all)."""
+    try:
+        return float(abs(store.part_geometry(part_id).require_mesh().volume))
+    except Exception:  # noqa: BLE001 — not measurable is said, not hidden
+        return None
+
+
+def _asked(store: DesignStore, asked: str, prior: str, new: str, volumes) -> list[str]:
+    """What was asked for, what changed, what the build shows, and what nothing measures (CALI-107, rule 6): a
+    reply never lets "the checks pass" stand for "what you asked for happened"."""
+    from . import answers, fallbacks
+
+    inches = store.design.display_units == "in"
+
+    def said(v):
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return repr(v) if v is not None else "none"
+        if isinstance(v, int):                       # a count
+            return f"{v}"
+        return f"{v:g} mm" + (f" ({answers._wall(v, True)})" if inches and v > 0 else "")
+
+    out = [f"Asked for: {asked.strip()}"]
+    moved = fallbacks.changed(prior or "", new or "")
+    out.append("Changed: " + (", ".join(f"{k} {said(a)} → {said(b)}" for k, a, b in moved) if moved
+                              else "no number in its PARAMS; the change is in how it's built"))
+    was, now = volumes or (None, None)
+    if was is not None and now is not None:
+        out.append(f"Its shape didn't change (the same volume, {was / 1000:,.0f} cm³): what you asked for may not have "
+                   f"happened. Look at it, and say so if it didn't." if abs(now - was) <= 1e-6 * max(was, 1.0) else
+                   f"Measured: its volume went from {was / 1000:,.0f} to {now / 1000:,.0f} cm³.")
+    out.append("Not measured: whether that's what you meant. The checks below are the part's own rules, not your "
+               "request; look at it to see it's right.")
+    return out
+
+
+def _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb: str, *, asked: str = "",
+             prior: str = "", new: str = "", volumes=None) -> str:
+    """The chat reply: what happened, what it measures, and — critically — what it broke. For a request, what was
+    asked for and what changed come first, and nothing below stands for it (CALI-107)."""
     head = "✓" if (res.ok and not broke) else "✗"
     lines = [f"{head} {verb} **{part_id}** → v{version} ({res.rounds} round(s))"]
+    if asked:
+        lines += _asked(store, asked, prior, new, volumes)
 
     if res.report is not None:
         part_fails = _fail_lines(res.report)
@@ -839,7 +884,7 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
             lines.append(f"{len(part_fails)} check(s) on this part still failing:")
             lines.extend(part_fails)
         else:
-            lines.append("Every check on this part passes.")
+            lines.append("The part's own checks pass." if asked else "Every check on this part passes.")
 
     if broke:
         lines.append("")
