@@ -20,7 +20,8 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   boundary (in the sweep, or between steps) and keeps what it finished: #99's record, marked `cancelled`, with the
   best of its steps. The panel and the Studies row say "cancelled after k of n steps".
 - **The label before you press:** from the part's last finished carve, or its strength check's time × the measured
-  carve-to-check ratio, "about N min at this size". Never "a few minutes" for an hour.
+  carve-to-check ratio (65: measured 47 on the printed box, 67 on the mixed stool, about 60 to 70 on the bar stool's
+  sweep), "about N min at this size". Never "a few minutes" for an hour.
 - Tests: `tests/test_carve_click.py` (main fails 7 of the 9; the makingView one with Theo's exact error).
 
 ### 2026-11-05 · CALI-103 (#95) · The app no longer crashes when the page and a study query one mesh at once

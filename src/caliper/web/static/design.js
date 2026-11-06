@@ -1901,7 +1901,10 @@ function paintCarve(pid) {
 }
 // what the button says before it's pressed: from the last carve of this part, or its strength check (a carve is
 // one sweep and a check per step), never "a few minutes" for an hour's work
-const CARVE_PER_CHECK = 40;                         // a carve's time over its strength check's: MEASURED BELOW
+// a carve's time over its strength check's, measured: 47 on the printed box, 67 on the mixed stool (2 voxels
+// through), about 60 to 70 from the bar stool's sweep (Theo's run and night shift's). The long side, so the label
+// never undersells it.
+const CARVE_PER_CHECK = 65;
 function carveTime(p) {
   const done = carveRuns(p.id).find((r) => r.status === 'done' && r.seconds);
   const check = loadRuns(p.id)[0];
