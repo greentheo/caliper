@@ -11,14 +11,17 @@ from .test_consistency import STOOL
 
 pytest.importorskip("cadquery")
 
-#: The test stool with what it must carry: one foot in the middle of the top, and a shove on the top's
-#: front edge (side-on to every panel, so there's no plate check for it).
+#: The test stool with what it must carry: a foot at the top's free front edge (CALI-94: it rests on two sides,
+#: so that's where it's weakest and where people stand), one in the middle, and a shove on the front edge
+#: (side-on to every panel, so there's no plate check for it).
 LOADS = '''
 
 def loads(params, build=None):
     p = {**PARAMS, **(params or {})}
     h, d = p["height"], p["depth"]
-    return [{"name": "an adult stepping up", "lb": 200, "factor": 2.0,
+    return [{"name": "stepping on the front edge", "lb": 200, "factor": 2.0,
+             "lo": (-50, -d / 2, h - 2), "hi": (50, -d / 2 + 100, h)},
+            {"name": "an adult stepping up", "lb": 200, "factor": 2.0,
              "lo": (-50, -50, h - 2), "hi": (50, 50, h)},
             {"name": "a shove from the front", "force": (0, 300, 0),
              "lo": (-40, -d / 2 - 2, h - 15), "hi": (40, -d / 2, h - 4)}]
@@ -69,7 +72,7 @@ def test_the_stool_holds_and_says_which_check_governs(tmp_path, monkeypatch):
     store.write_part("stool", STOOL + LOADS, intent="a step stool")
     events = []
     rec = load_study.study(store, "stool", emit=lambda k, t="", **d: events.append(k))
-    step, shove = rec["cases"]
+    edge, step, shove = rec["cases"]
     # the top is 14 x 10 in and rests on its two sides (an inch in from its ends), not all round: a beam
     # across them (CALI-82), the safe side, and plywood across its grain. 3/4 in over 14 in under 400 lb isn't
     # 2 times over that way, and it says which way to cut it to get there.
@@ -80,6 +83,9 @@ def test_the_stool_holds_and_says_which_check_governs(tmp_path, monkeypatch):
     assert step["governs"] == "plate" and step["safety"] == pl["safety_across"] < step["fea"]["safety"]
     assert not step["holds"] and pl["safety"] > 2               # grain along the span: it would
     assert shove["plate"] is None                                 # pushed side-on: no plate it lands face-on
+    # CALI-94: at the free front edge the foot spreads over less of the top (BS 8110's edge width): it governs
+    assert edge["governs"] == "plate" and edge["plate"]["as"] == "beam" and edge["safety"] < step["safety"]
+    assert rec["safety"] == edge["safety"]
     assert shove["fea"]["supported"] and shove["holds"]
     assert rec["material"]["key"] == "plywood" and rec["version"] == 1
     assert events[-1] == "done"

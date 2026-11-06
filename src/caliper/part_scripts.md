@@ -140,8 +140,12 @@ Each load is `name`; how much, as `lb` or `kg` (straight down) or `force` (`(fx,
 `factor`, what it's multiplied by for the check (2 for someone stepping or jumping onto it, 1 for
 a load that just sits there); and `lo`/`hi`, the corners of the box it pushes on, which must sit on
 the part's surface (a box 2 mm deep on the face). Put a person's weight where it's hardest to carry:
-one foot (about 4 x 4 in) in the middle of the widest span. List more than one when they're
-different situations (standing on the top, sitting on the edge); each is checked on its own. Like
+one foot (about 4 x 4 in) in the middle of the widest span. A top or tread that rests on only two
+sides (not held all round) is also stood on at its free front edge, where it's weakest: give it a
+second load, "stepping on the front edge", the same foot mid-span with its edge on the free edge,
+listed first (that's where people stand). A top held all round keeps the one centred foot. List more
+than one when they're different situations (standing on the top, sitting on the edge); each is
+checked on its own. Like
 the pieces, the loads are checked after every revision: a load whose box doesn't touch the part fails
 the round.
 

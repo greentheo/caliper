@@ -319,6 +319,35 @@ def _loads(mesh, declared: dict, pieces: list[dict], tol: float) -> AssertionRes
                            detail="; ".join(missed))
 
 
+def _edge_foot(mesh, declared: dict, pieces: list[dict], tol: float, rest: bool = False) -> Optional[AssertionResult]:
+    """CALI-94 (#73): a top or tread held on just two sides is stood on at its free front edge, where it's weakest
+    (BS 8110 cl. 3.5.2.2's edge width, NEEDS ENGINEER CHECK). If no load puts a foot there, say so: a warning, not
+    a fail (the round still passes). None when there's no two-sided top to ask about."""
+    from . import load_study as L
+
+    try:
+        loads = L.parse_loads(declared["loads"])
+    except (ValueError, TypeError, KeyError):
+        return None                                        # _loads says what's wrong with them
+    from . import spatial
+
+    # a top on printed sides (a printed rest, CALI-82) rests on the solid under it, as the plate check reads it
+    under = (lambda pts: spatial.contains(mesh, pts)) if rest else None
+    tops: dict = {}
+    for ld in loads:
+        got = L.two_sided(pieces, ld, tol, under)
+        if got:
+            tops.setdefault(got["piece"], []).append(got["free"])
+    if not tops:
+        return None
+    bare = [name for name, gaps in tops.items() if min(gaps) > L.AT_EDGE_MM]
+    detail = "; ".join(f"the {name} is held on two sides, and no load stands on its free edge, where it's weakest: "
+                       f"add a case, the same foot mid-span with its edge on the free edge (\"stepping on the front "
+                       f"edge\")" for name in bare)
+    return AssertionResult(id="loads_edge", expr="a top held on two sides is stood on at its free edge too",
+                           status="pass", passed=True, actual=len(tops) - len(bare), detail=detail)
+
+
 def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
     """The declarations measured against the built solid: [] when the part declares nothing."""
     if not declared:
@@ -351,4 +380,7 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
             out += [vol] if vol else []
     if declared.get("loads") is not None:
         out.append(_loads(mesh, declared, pieces, tol))
+        if pieces:
+            edge = _edge_foot(mesh, declared, pieces, tol, rest)  # a warning, said in its detail (CALI-94)
+            out += [edge] if edge else []
     return out

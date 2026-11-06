@@ -103,13 +103,16 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         try:
             from . import consistency
 
-            off = sorted((r for r in consistency.check(C.declared(store, pid), store.part_geometry(pid))
-                          if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
+            said = consistency.check(C.declared(store, pid), store.part_geometry(pid))
+            off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
+            edge = next((r.detail for r in said if r.id == "loads_edge" and r.detail), "")
         except Exception:  # noqa: BLE001 — the card says what it can
-            off = []
+            off, edge = [], ""
         if off:
             what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"fix its shape to "
                               f"match its pieces\" and I'll revise it.", "bad"))
+        if edge:                               # a load case it's missing: a warning, the round passed (CALI-94)
+            what.append(_line(edge[0].upper() + edge[1:] + ".", "warn", study="load"))
 
     # Will it work?
     work = []

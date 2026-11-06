@@ -36,7 +36,9 @@ def construction(params, build=None):
 def loads(params, build=None):
     p = {**PARAMS, **(params or {})}
     cx, cy, h = p["w"] / 2, p["d"] / 2, p["h"]
-    return [{"name": "an adult stepping up", "lb": 200, "factor": 2.0,
+    return [{"name": "stepping on the front edge", "lb": 200, "factor": 2.0,
+             "lo": (cx - 50, 0, h - 2), "hi": (cx + 50, 100, h)},
+            {"name": "an adult stepping up", "lb": 200, "factor": 2.0,
              "lo": (cx - 50, cy - 50, h - 2), "hi": (cx + 50, cy + 50, h)}]
 '''
 
@@ -99,7 +101,7 @@ def test_two_materials_each_judged_against_its_own_strength(stool, monkeypatch, 
     assert set(np.unique(sm[ctx["ls"].solid]).round(3)) == {round(ctx["mat"]["strength"], 3),
                                                            round(ctx["plate_mat"]["strength"], 3)}
     rec = load_study.study(stool, "stool")
-    (case,) = rec["cases"]
+    edge, case = rec["cases"]                    # CALI-94: the front edge first, where people stand, then the middle
     # the case's safety is the lower of the FEA's and the plate check's: what governs, as stated (CALI-87)
     assert case["fea"]["safety"] is not None and case["plate"]["safety_across"] is not None
     assert case["safety"] == min(case["fea"]["safety"], case["plate"]["safety_across"])
@@ -111,6 +113,9 @@ def test_two_materials_each_judged_against_its_own_strength(stool, monkeypatch, 
     assert pl["stress_mpa"] == pytest.approx(force * pl["span_mm"] / 4 / (220 * 12.7 ** 2 / 6), rel=0.02)
     assert case["governs"] == "plate" and case["safety"] == pl["safety_across"]       # plywood across its grain
     assert any(n.startswith("Two materials") for n in rec["notes"])
+    # at the free edge the foot spreads over less of the top, so it's worse there, and it governs the part
+    assert edge["plate"]["as"] == "beam" and edge["plate"]["stress_mpa"] > pl["stress_mpa"]
+    assert edge["safety"] < case["safety"] and rec["safety"] == edge["safety"]
     if not per_voxel:
         assert any("stiffness throughout" in n for n in rec["notes"])
 
