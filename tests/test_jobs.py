@@ -1,10 +1,13 @@
 """CALI-31 — background jobs and their event stream."""
 
 import json
+import os
 import threading
 import time
 
 from caliper.jobs import JobRunner, stream
+
+pytest_plugins = ["pytester"]             # runs a small test file of its own (CALI-97)
 
 
 def _data(frames):
@@ -149,3 +152,44 @@ def test_a_job_left_running_is_seen_and_waited_for():
     assert [j.id for j in left] == [job.id]
     gate.set()
     assert jobs.wait_idle(10) == []
+
+
+#: The reviewer's proof on #100 (item 3): a test leaves a long job running; the test after it is innocent.
+LEAKY = '''
+import time
+
+from caliper import jobs
+
+
+def test_a_leaves_a_job():
+    jobs.RUNNER.submit("carve", lambda j: time.sleep(4), label="a carve left behind")
+
+
+def test_b_innocent():
+    pass
+
+
+def test_c_innocent():
+    pass
+'''
+
+
+def test_the_teardown_blames_only_the_test_that_left_the_job(pytester, monkeypatch):
+    """CALI-97 (#100 item 3): the teardown judged every runner's jobs, so the tests after a leak were blamed for it,
+    one by one, each waiting out the grace. It judges only the jobs its own test started."""
+    from caliper import jobs
+
+    here = os.path.dirname(__file__)
+    with open(os.path.join(here, "conftest.py")) as f:
+        pytester.makeconftest(f.read().replace("FIXTURES = os.path.join(os.path.dirname(__file__), \"fixtures\")",
+                                               f"FIXTURES = {os.path.join(here, 'fixtures')!r}"))
+    pytester.makepyfile(test_leaky=LEAKY)
+    monkeypatch.setenv("CALIPER_JOB_GRACE", "1")          # wait 1 s for a job, not 3 min
+    try:
+        got = pytester.runpytest_inprocess("-p", "no:cacheprovider")
+        got.assert_outcomes(passed=3, errors=1)           # test_a's teardown, and only its
+        text = got.stdout.str()
+        assert "test_a_leaves_a_job left 1 job(s) running" in text
+        assert "test_b_innocent" not in text and "test_c_innocent" not in text, text
+    finally:
+        assert jobs.wait_idle(10) == []                    # the leaked job, so it leaves this test too

@@ -45,15 +45,18 @@ def _no_personal_shop(tmp_path_factory, monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_job_outlives_its_test(request):
     """CALI-97: a job a test starts (a carve through the API, say) and leaves running carries on into the tests after
-    it, and races their meshes. After each test, wait for every runner's jobs, and fail the test that left one."""
-    yield
+    it, and races their meshes. After each test, wait for the jobs it started, and fail it if one's still going. A job
+    an earlier test left is that test's to answer for, not this one's (#100 item 3)."""
     import warnings
 
     from caliper import jobs
 
-    if jobs.wait_idle(0):                  # still going as the test ends: say which test, then wait for it
+    before = jobs.active_ids()
+    yield
+    grace = float(os.environ.get("CALIPER_JOB_GRACE") or 180)
+    if jobs.wait_idle(0, ignore=before):   # still going as the test ends: say which test, then wait for it
         warnings.warn(f"{request.node.nodeid} ended with a job still running; waiting for it", stacklevel=1)
-    left = jobs.wait_idle(180)
+    left = jobs.wait_idle(grace, ignore=before)
     if left:
         pytest.fail(f"{request.node.nodeid} left {len(left)} job(s) running: "
                     + ", ".join(f"{j.kind} {j.id} ({j.status})" for j in left), pytrace=False)

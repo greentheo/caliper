@@ -52,10 +52,34 @@ def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
 
 
-def coarse(run: dict, inches: bool = True) -> str:
-    """What a verdict says when the FEA that governs it couldn't see the wall it's checking (CALI-97)."""
-    return (f"Not resolved yet: the check was too coarse to see its {_len(run.get('thinnest_mm') or 0, inches)} walls. "
-            f"Check it again finer.")
+def _wall(mm: float, inches: bool) -> str:
+    """A wall's thickness: in inches to the nearest 1/32 (5/32 in), and in mm where that would round to nothing,
+    never "0 in" (CALI-97, #100 item 5)."""
+    from math import gcd
+
+    if inches and mm >= IN:
+        return _len(mm, True)
+    n = round(mm / IN * 32)
+    if inches and n >= 1:
+        g = gcd(n, 32)
+        return f"{n // g}/{32 // g} in"
+    return (f"{mm:.1f}".removesuffix(".0") if mm < 10 else f"{mm:.0f}") + " mm"
+
+
+def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
+    """What a verdict says when the FEA that governs it couldn't see the wall it's checking (CALI-97). A ✓ is no
+    verdict then: not resolved yet (a finer run can see it) or not checked (none a study may make can). A ✗ stays a
+    ✗, and says the fail may be the model's."""
+    from . import load_study as L
+
+    wall = _wall(run.get("thinnest_mm") or 0, inches)
+    if not holds:
+        return (f"The fail may be the model's: the voxels can't see its {wall} walls. "
+                + ("Check it again finer." if run.get("finer") else
+                   "A hand check or a printed test piece is the way to know."))
+    if run.get("finer"):
+        return f"Not resolved yet: the check was too coarse to see its {wall} walls. Check it again finer."
+    return L.NOT_CHECKED
 
 
 def rests_on_model(metric: str) -> bool:
@@ -129,9 +153,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         for c in run["cases"]:
             if c.get("safety") is None:
                 continue
-            if L.unresolved(run, c):                         # an FEA that can't see the wall is no verdict (CALI-97)
-                work.append(_line(coarse(run, inches), "warn", study="load",
-                                  numbers=f"At {run['spacing_mm']:g} mm voxels the FEA read {c['safety']:g}x."))
+            if L.unresolved(run, c) and c.get("holds"):      # an FEA that can't see the wall is no ✓ (CALI-97)
+                work.append(_line(coarse(run, inches) + (" (Checked on an older version: check again.)" if stale else ""),
+                                  "warn", study="load"))
                 continue
             # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
             rough = L.rough(run, c)
@@ -140,6 +164,8 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                 text = f"Holds {c['name'].lower()}, {about}{_times(c['safety'])}."
             else:
                 text = f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs {run['min_safety']:g}."
+                if L.unresolved(run, c):                     # a ✗ stays a ✗, and says why it may be wrong (CALI-97)
+                    text += " " + coarse(run, inches, holds=False)
             work.append(_line(text + (" (Checked on an older version: check again.)" if stale else ""),
                               "warn" if stale else "ok" if c.get("holds") else "bad", study="load",
                               **({"rough": L.ROUGH} if rough else {})))
@@ -276,11 +302,17 @@ def measured(store: DesignStore, state: dict) -> dict:
             breaks += [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
     from . import load_study as L
 
-    cases = [(r, c) for r in state.get("load_runs") or [] if r.get("version") == current.get(r["part"])
+    latest = [next((r for r in state.get("load_runs") or [] if r["part"] == pid), None) for pid in current]
+    cases = [(r, c) for r in latest if r and r.get("version") == current.get(r["part"])
              for c in r.get("cases") or [] if c.get("safety") is not None]
-    if any(L.unresolved(r, c) for r, c in cases):      # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
-        out["strength.unresolved"] = coarse(next(r for r, c in cases if L.unresolved(r, c)),
-                                            (state.get("display_units") or "in") == "in")
+    inches = (state.get("display_units") or "in") == "in"
+    off = [(r, c) for r, c in cases if L.unresolved(r, c)]
+    held = [r for r, c in off if c.get("holds")]
+    if held:                                           # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
+        out["strength.unresolved"] = coarse(held[0], inches)
+    failed = [r for r, c in off if not c.get("holds")]
+    if failed:                                         # ...and a ✗ on one says the fail may be the model's
+        out["strength.coarse_fail"] = coarse(failed[0], inches, holds=False)
     if any(L.rough(r, c) for r, c in cases):
         out["strength.rough"] = True                   # the printed model's number: "about", as the part card says
     if safeties:
@@ -351,11 +383,6 @@ def held_to(state: dict, now: dict) -> list[dict]:
             out.append(_line(f"{'✗' if test['status'] == 'bad' else '!'} {label}: {test['text']}", test["status"],
                              study="load", model="scorecard"))
             continue
-        untrue = now.get("strength.unresolved") if c["metric"].startswith("strength") else None
-        if untrue:
-            out.append(_line(f"! {label}{' (assumed)' if c.get('source') == 'assumed' else ''}: {untrue}", "warn",
-                             study="load", model=rests_on_model(c["metric"])))
-            continue
         v, late = now.get(c["metric"]), False
         if v is None and c["metric"] in scored:
             v, late = scored[c["metric"]], stale
@@ -366,11 +393,17 @@ def held_to(state: dict, now: dict) -> list[dict]:
                              study="load" if c["metric"].startswith("strength") else None))
             continue
         ok = v >= c["limit"] if c.get("op", ">=") == ">=" else v <= c["limit"]
+        strength = c["metric"].startswith("strength")
+        if ok and strength and now.get("strength.unresolved"):     # no ✓ on an FEA that can't see the wall (CALI-97)
+            out.append(_line(f"! {label}{assumed}: {now['strength.unresolved']}", "warn",
+                             study="load", model=rests_on_model(c["metric"])))
+            continue
         num = _num(c['metric'], v, units.get(c['metric'], ''))
-        if c["metric"].startswith("strength") and now.get("strength.rough"):
+        if strength and now.get("strength.rough"):
             num = "about " + num                       # the printed model's number, as the part card says (CALI-97)
+        why = f" {now['strength.coarse_fail']}" if not ok and strength and now.get("strength.coarse_fail") else ""
         out.append(_line(f"{'✓' if ok else '✗'} {label}{assumed}: {num}"
-                         + (" (scored before the last change: score it again)." if late else "."),
+                         + (" (scored before the last change: score it again)." if late else "." + why),
                          "warn" if late else "ok" if ok else "bad",
                          study="load" if c["metric"].startswith("strength") else None,
                          model=rests_on_model(c["metric"])))

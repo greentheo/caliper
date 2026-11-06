@@ -43,6 +43,7 @@ import uuid
 from typing import Callable, Optional
 
 from .design import DesignStore
+from .runs import newest_first
 
 WHITTLE_URL = os.environ.get("WHITTLE_URL", "http://127.0.0.1:8765")
 
@@ -323,7 +324,7 @@ def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
         rec = load_run(store, wid)
         if rec and (part_id is None or rec.get("part") == part_id):
             out.append(rec)
-    return out
+    return newest_first(out)          # made last first, not by id (CALI-97)
 
 
 def load_run(store: DesignStore, wid: str) -> Optional[dict]:

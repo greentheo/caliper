@@ -33,6 +33,7 @@ import numpy as np
 from . import construction as C
 from . import materials as M
 from .design import DesignStore
+from .runs import newest_first
 
 LB = 4.4482216152605          # newtons per pound-force
 GRAVITY = 9.80665
@@ -173,15 +174,21 @@ def printed_material(declared: dict, mesh, printed_mesh=None) -> Optional[dict]:
                     "to printer; a printed test piece loaded to breaking is the way to know."}
 
 
+def finest(volume: float, longest: float, budget: float = 1.0) -> float:
+    """The finest voxels a study may use on a part this size: no more than MAX_VOXELS in it and 160 along it, each
+    times ``budget`` (in voxels, so 8 is twice as fine). Nothing, an asked-for size included, goes finer (CALI-97)."""
+    return max((volume / (MAX_VOXELS * budget)) ** (1 / 3), longest / (160 * budget ** (1 / 3)))
+
+
 def spacing_for(pieces: list[dict], volume: float, longest: float, walls: Optional[float] = None) -> tuple[float, Optional[str]]:
-    """Voxel size: VOXELS_THROUGH across the thinnest piece (or, printed, its thinnest wall), unless that's more
-    voxels than a study should take; then as fine as MAX_VOXELS allows, and a note saying so."""
+    """Voxel size: VOXELS_THROUGH across the thinnest piece (or, printed, its walls), unless that's more voxels
+    than a study should take; then as fine as MAX_VOXELS allows, and a note saying so."""
     thin = [pc["thickness"] for pc in pieces if pc["kind"] == "sheet"]
     thin += [2 * pc["half"] for pc in pieces if pc["kind"] == "stick"]
     if walls and walls > 0:
         thin.append(walls)
     want = min(thin) / VOXELS_THROUGH if thin else longest / 48
-    floor = max((volume / MAX_VOXELS) ** (1 / 3), longest / 160)
+    floor = finest(volume, longest)
     if want >= floor:
         return want, None
     return floor, (f"The voxels are {floor:.1f} mm, coarser than {VOXELS_THROUGH} across its thinnest "
@@ -189,17 +196,28 @@ def spacing_for(pieces: list[dict], volume: float, longest: float, walls: Option
 
 
 #: Voxels the FEA needs across the thinnest wall before its number can carry a verdict (CALI-97). NEEDS ENGINEER
-#: CHECK: 2 is the floor until #42's convergence study sets it.
-RESOLVE_MIN = 2.0
+#: CHECK: 4 until #42's convergence study sets it from data. At 2, the printed box read ✓ 2.7x, and ✗ 1.9x at 4: a
+#: ✓ that a finer check overturns (the foreman's call on #100, the safe side).
+RESOLVE_MIN = 4.0
+#: A finer run, offered when the default's voxels can't see a wall, may use this many times the default's voxel
+#: budget and no more (8: twice as fine each way), so no click asks for 10^10 voxels on a shared machine.
+FINER_BUDGET = 8.0
+#: The printed wall the voxels must see: this low percentile of the wall measured all over the part, not its
+#: thinnest spot, so a feathered lip (the bar stool's 0.3 mm, beside its 3.9 mm walls) doesn't set it. NEEDS
+#: ENGINEER CHECK.
+WALL_PERCENTILE = 10.0
+#: The verdict where even the finest run a study may make can't see the walls.
+NOT_CHECKED = ("Not checked: its walls are too thin for the voxel check at this size. A hand check or a printed "
+               "test piece is the way to know.")
 
 
 def _thin(declared: dict, mesh, pieces: list[dict]) -> tuple[list, Optional[float]]:
-    """Every piece's thinnest dimension, and a printed part's thinnest wall (measured)."""
+    """Every piece's thinnest dimension, and a printed part's walls (measured: WALL_PERCENTILE of them)."""
     walls = None
     if any(isinstance(it, dict) and it.get("kind") == "printed" for it in declared.get("construction") or []):
-        from .measure import Geometry, min_wall_thickness
+        from .measure import Geometry, wall_thickness
 
-        walls = min_wall_thickness(Geometry.from_mesh(mesh))
+        walls = wall_thickness(Geometry.from_mesh(mesh), WALL_PERCENTILE)
     thin = [pc["thickness"] for pc in pieces if pc["kind"] == "sheet"] + [2 * pc["half"] for pc in pieces
                                                                            if pc["kind"] == "stick"]
     return thin + ([walls] if walls and walls > 0 else []), walls
@@ -211,10 +229,23 @@ def study_spacing(declared: dict, mesh, pieces: list[dict]) -> tuple[float, Opti
     return spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)), walls)
 
 
+def _sees(across: float) -> bool:
+    """Enough voxels across to see a wall: RESOLVE_MIN, give or take a voxel size's rounding (a default run sized at
+    exactly RESOLVE_MIN across reads 3.99999)."""
+    return across >= RESOLVE_MIN * (1 - 1e-3)
+
+
 def unresolved(run: dict, case: dict) -> bool:
     """A verdict the FEA governs at fewer than RESOLVE_MIN voxels across the thinnest wall: too coarse to see it."""
     thin, s = run.get("thinnest_mm"), run.get("spacing_mm")
-    return bool(case.get("governs") == "fea" and thin and s and thin / s < RESOLVE_MIN)
+    if case.get("governs") != "fea" or not (thin and s):
+        return False
+    return not _sees(run.get("across") or thin / s)    # as the run counted it, not from its rounded sizes
+
+
+def unchecked(run: dict, case: dict) -> bool:
+    """Unresolved, and no run a study may make is fine enough to resolve it: not checked (CALI-97)."""
+    return unresolved(run, case) and not run.get("finer")
 
 
 # ---------------------------------------------------------------------------
@@ -500,8 +531,14 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     _sides(mesh, pieces)
     tol = tolerance(mesh)
     thins, walls = _thin(declared, mesh, pieces)
+    volume, longest = float(abs(mesh.volume)), float(max(mesh.extents))
+    least = finest(volume, longest, FINER_BUDGET)       # as fine as any run of it may go (CALI-97)
     if spacing is None:
-        spacing, coarse = spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)), walls)
+        spacing, coarse = spacing_for(pieces, volume, longest, walls)
+    elif spacing < least:                               # asked for finer than a study may take: as fine as it may
+        coarse = (f"Asked for {spacing:g} mm voxels, finer than a study of a part this size may take: it ran at "
+                  f"{least:.2f} mm.")
+        spacing = least
     else:                                               # asked for: a finer run (CALI-97)
         coarse = None
     held = parse_held(declared.get("held"), mesh.bounds.tolist(), max(spacing * 0.6, 1.0))
@@ -540,7 +577,7 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
         boxes.append(box)
     ctx = {"declared": declared, "loads": loads, "boxes": boxes, "mesh": mesh, "pieces": pieces,
            "mat": mat, "tol": tol, "spacing": spacing, "coarse": coarse, "held": held, "ls": ls,
-           "thinnest": min(thins) if thins else None,
+           "thinnest": min(thins) if thins else None, "finest": least,
            "attach": attach, "plate_mat": sheet_mat or mat}
     if printed and wood:
         _two_materials(ctx, wood, sheet_mat, rest)
@@ -675,6 +712,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     out_dir = os.path.join(runs_dir(store), rid)
     os.makedirs(out_dir, exist_ok=True)
     cases = []
+    t1 = time.time()                                  # the FEA's own time, for the finer run's estimate (CALI-97)
     for i, load in enumerate(loads):
         emit("case", f"{load['name']}: {load['lb']:g} lb × {load['factor']:g}", progress=i / len(loads))
         case, r = check_load(ctx, i, min_safety)
@@ -684,6 +722,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
             case["heat"] = f"case_{i:02d}.json"
         cases.append(case)
 
+    fea_seconds = time.time() - t1
     notes = [f"{mat['name']}: E {mat['E']:g} MPa, strength {mat['strength']:g} MPa — {mat['basis']}.", *NOTES]
     if mat.get("note"):
         notes.append(mat["note"])
@@ -704,22 +743,43 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     thin = ctx.get("thinnest")
     if thin:                                          # can the FEA see its thinnest wall? (CALI-97)
         record["thinnest_mm"] = round(thin, 2)
-        record["resolved"] = thin / ctx["spacing"] >= RESOLVE_MIN
+        record["across"] = round(thin / ctx["spacing"], 3)
+        record["resolved"] = _sees(thin / ctx["spacing"])
         if not record["resolved"]:
-            finer = round(thin / RESOLVE_MIN * 0.98, 2)
-            minutes = record["seconds"] * (ctx["spacing"] / finer) ** 3 / 60      # voxels go as the cube; rough
-            record["finer"] = {"spacing_mm": finer, "minutes": max(1, round(minutes))}
-            notes.append(f"The FEA ran at {ctx['spacing']:.1f} mm voxels across a {thin:.1f} mm wall: too coarse to "
-                         f"see it. Check it again at {finer:.1f} mm (about {record['finer']['minutes']} min).")
+            seen = (f"The FEA ran at {ctx['spacing']:.2g} mm voxels across a {thin:.2g} mm wall: too coarse to see "
+                    f"it (it takes {RESOLVE_MIN:g} across).")
+            want = math.floor(thin / RESOLVE_MIN * 100) / 100
+            if want >= ctx["finest"]:
+                minutes = finer_minutes(record["voxels"], ctx["spacing"], want, fea_seconds,
+                                        record["seconds"] - fea_seconds)
+                record["finer"] = {"spacing_mm": want, "minutes": minutes}
+                notes.append(f"{seen} Check it again at {want:g} mm (about {minutes} min).")
+            else:
+                record["too_thin"] = True
+                notes.append(f"{seen} {RESOLVE_MIN:g} across would take more voxels than a study of a part this "
+                             f"size may: {NOT_CHECKED}")
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
     store.append_history(part_id, {"kind": "load", "action": "studied", "run": rid,
                                    "cases": len(cases), "safety": worst, "holds": record["holds"]})
     store.append_log({"kind": "load", "action": "studied", "part": part_id, "run": rid})
-    emit("done", f"{len(cases)} load(s) checked: "
-         + ("it holds" if record["holds"] else "it doesn't hold") + (f", {worst:g}x" if worst else ""),
+    said = "it holds" if record["holds"] else "it doesn't hold"
+    if record["holds"] and any(unresolved(record, c) for c in cases):      # never greener than its check (CALI-97)
+        said = "not checked: its walls are too thin for the voxels" if record.get("too_thin") else \
+            "not resolved yet: check it again finer"
+    emit("done", f"{len(cases)} load(s) checked: " + said + (f", {worst:g}x" if worst else ""),
          run=rid, progress=1.0)
     return record
+
+
+def finer_minutes(voxels: int, spacing: float, finer: float, fea_seconds: float, setup_seconds: float) -> int:
+    """About how long a run at ``finer`` mm takes, from this run's own time per voxel (CALI-97, #100 item 10).
+
+    A finer grid has (spacing / finer)³ the voxels, and each takes longer: the solver's iterations grow with the grid
+    (measured on the tube and the box stool, time per voxel went as about the cube root of the voxel count). So the
+    FEA's time goes as the voxels to the 4/3. A guess from one run, said as "about"."""
+    more = (spacing / finer) ** 3
+    return max(1, round((setup_seconds + fea_seconds * more ** (4 / 3)) / 60))
 
 
 def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
@@ -731,7 +791,7 @@ def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
         rec = load_run(store, rid)
         if rec and (part_id is None or rec.get("part") == part_id):
             out.append(rec)
-    return out
+    return newest_first(out)          # made last first, not by id (CALI-97)
 
 
 def load_run(store: DesignStore, rid: str) -> Optional[dict]:

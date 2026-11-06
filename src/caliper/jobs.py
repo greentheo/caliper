@@ -143,11 +143,18 @@ class JobRunner:
 RUNNER = JobRunner()
 
 
-def wait_idle(timeout: float, poll: float = 0.2) -> list:
-    """Wait up to ``timeout`` s for every runner's jobs to finish; the ones still queued or running."""
+def active_ids() -> set:
+    """The ids of every runner's queued or running jobs."""
+    return {j.id for r in list(RUNNERS) for j in r.active()}
+
+
+def wait_idle(timeout: float, poll: float = 0.2, ignore=()) -> list:
+    """Wait up to ``timeout`` s for every runner's jobs to finish, but those in ``ignore`` (ids: what was running
+    before, so a test is judged by its own jobs, #100 item 3); the ones still queued or running."""
     end = time.time() + timeout
+    ignore = set(ignore)
     while True:
-        left = [j for r in list(RUNNERS) for j in r.active()]
+        left = [j for r in list(RUNNERS) for j in r.active() if j.id not in ignore]
         if not left or time.time() >= end:
             return left
         time.sleep(poll)
