@@ -566,6 +566,11 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-05 · A ✓ needs an FEA fine enough to see the wall (CALI-97 #80)
+1. **On a thin printed part (the bar stool's 4 mm cone):** *Will it work?* reads "Not resolved yet: the check was too
+   coarse …". Under *the numbers*, **Check it again finer (about N min)** runs it at a spacing that sees the wall.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_resolved.py`.
+
 ### 2026-11-01 · #75 reworked from the reviewer's review (CALI-87 #63)
 1. **Name both sides of a box stool "side" and make a build package:** the kids' book is there, with "Add the
    first side", "Add the other side", and "touches both sides" on the top's page.
