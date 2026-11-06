@@ -1855,7 +1855,8 @@ function lightenView(p) {
     <div class="actions"><button id="lightGo">${run ? 'Lighten it again' : 'Lighten it'}</button></div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
-      ? `The lightest that holds: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety)}.`
+      ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
+        : `The lightest that holds: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety)}.`)
       : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety)}).` : ''}
       ${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
@@ -1869,10 +1870,16 @@ function lightenView(p) {
 }
 
 const sx = (v) => (v == null ? '—' : `${+Number(v).toFixed(1)}x`);
+// a part whose strength check ran on a filled-in solid has no "holds" anywhere (CALI-96)
+// why: a filled-in shape, or a shape that couldn't be checked against its pieces at all (it fails closed)
+const notTrusted = (why) => (String(why || '').startsWith("couldn't") ? "not trusted: its shape couldn't be checked"
+  : 'not trusted: a filled-in shape');
+const untrustedBadge = (p) => `<span class="badge bad">${notTrusted(p.untrusted)}</span>`;
+const partOf = (pid) => (S.design && S.design.parts.find((x) => x.id === pid)) || {};
 function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
   const pl = c.plate, f = c.fea || {};
-  const holds = c.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>';
+  const holds = p.untrusted ? untrustedBadge(p) : c.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>';
   const plate = !pl ? '' : pl.done
     ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
@@ -1910,9 +1917,9 @@ function loadResults(p, run, runs) {
   const stale = run.version !== p.version;
   return `<div class="small" style="margin-top:12px">${runs.length > 1 ? `<select id="lRun">${runs.map((r, k) =>
       `<option value="${k}" ${r.id === run.id ? 'selected' : ''}>${esc(new Date(r.created * 1000).toLocaleString())} · v${r.version}
-        · ${r.holds ? 'holds' : 'doesn\'t hold'}</option>`).join('')}</select>`
+        · ${p.untrusted ? 'not trusted' : r.holds ? 'holds' : 'doesn\'t hold'}</option>`).join('')}</select>`
       : `<b>Last check</b> · v${run.version} · ${new Date(run.created * 1000).toLocaleString()}`}
-      ${run.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>'}
+      ${p.untrusted ? untrustedBadge(p) : run.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>'}
       ${stale ? '<span class="badge bad">the part has changed since</span>' : ''}</div>
     ${run.cases.map((c, i) => loadCase(p, run, c, i)).join('')}
     <div class="muted small" style="margin-top:6px">In ${esc(run.material.name)}, voxels of ${len(run.spacing_mm, 1)}
@@ -2040,7 +2047,8 @@ async function showHeat(pid, run, index) {
     const bar = $('stationBar');
     bar.hidden = false;
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →
-        <b style="color:var(${c.holds ? '--ok' : '--bad'})">${c.holds ? 'holds' : 'doesn\'t hold'}, ${sx(c.safety)}</b>
+        ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>`
+          : `<b style="color:var(${c.holds ? '--ok' : '--bad'})">${c.holds ? 'holds' : 'doesn\'t hold'}, ${sx(c.safety)}</b>`}
         ${c.breaks_lb ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
       <div class="small muted" style="margin-top:2px">Colours: whittle's FEA <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span>
         0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${run.material.strength}). Decided by ${decided}.</div></div>
@@ -2461,10 +2469,10 @@ async function showStation(pid, run, index) {
     const removed = parametric ? st.removed : st.removed_part;
     const what = carved
       ? `<span><b>Preview, not carved yet:</b> step <b>${index}</b> · ${pct(st.removed)} ${carveShare(run)} carved away ·
-        ${st.saved_g} g less filament · <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
+        ${st.saved_g} g less filament · ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b>`}</span>`
       : lightened
       ? `<span><b>Preview, not cut yet:</b> step <b>${index}</b> · ${pct(st.removed)} out of the walls${st.top_holes ? ` and ${st.top_holes} hole${st.top_holes === 1 ? '' : 's'} in the top` : ''} · ${lbs(st.saved_lb)} lighter ·
-        <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
+        ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b>`}</span>`
       : framed
       ? `<span>design <b>${index}</b> · ${st.mass_lb} lb of steel · weakest ${st.safety}x · sags ${len(st.deflection_mm, 2)}</span>`
       : `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume

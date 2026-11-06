@@ -5,6 +5,31 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 
 ---
 
+### 2026-11-05 · CALI-96 (#78), #96 rework · "Not trusted yet" everywhere a filled part's strength shows
+The foreman's six items. The rule: wherever a strength verdict rests on the filled solid, it never reads holding.
+- **The scorecard** grades it "untrusted", so the build package isn't "ready to cut". `d5a66fd`
+- **The numbers layer and the 3D view** say "not trusted: a filled-in shape": the panel header, the case badges,
+  the heat callout, the lightening line and the step previews. `b3adda5`
+- **The cache fails closed:** "couldn't check its shape" is never holding, and isn't kept. `79fe045`
+- **The kids' book:** no stand-on-it page; "Don't stand on it yet: a grown-up checks it first". `c349f75`
+- **The design card** leads with the verdict, with the check's name after. `85bc844`
+- **Studies and Lighten** read the part as it is now, so old runs say so too. `be73bd1`
+
+---
+
+### 2026-11-05 · CALI-96 (#78) · A strength verdict on a filled-in solid reads "not trusted yet"
+- **Rule 6, found on the owner's step-stool-2 after the ship.** *What is it?* said `build()` was filled in, while
+  *Will it work?* read "✓ Holds kid + dad (250 lb), 2 times over" from a check that ran on that block.
+- `consistency.filled(store, pid)` (cached per version and script) now says when a part with `loads()` fails the
+  volume check by being filled in. When it does:
+  - both cards' strength lines read warn: "Not trusted yet: the strength check ran on a filled-in shape, not the
+    step stool as built. Fix its shape first …";
+  - the build book and the kids' book don't print a holding line;
+  - a study on it says, in its record, notes and headline, that the number is the block's.
+- Tests: `tests/test_filled_verdict.py`, written first and failing on main (the filled box read "Holds …, 3.1
+  times over"). On the owner's design, read on a copy: main shows ✓, this branch shows warn on both cards.
+  Commit: `53f1067`.
+
 ### 2026-11-05 · CALI-103 (#95) · The app no longer crashes when the page and a study query one mesh at once
 - **The owner's app died three times (exit 134/139) in libspatialindex:** two threads in one cached mesh's R-tree,
   once with no study running (just the page's burst after a revision).

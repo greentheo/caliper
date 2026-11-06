@@ -18,7 +18,7 @@ from typing import Optional
 
 from pydantic import BaseModel, field_validator
 
-from . import (aero, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
+from . import (aero, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
                load_study, making, patterns, promote, release, samples, scorecard, shop, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
@@ -231,6 +231,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             # printed, whole or the rest beside its sheets: carved free-form, not lightened with holes (CALI-82)
             "printed": bool(re.search(r"""["']kind["']\s*:\s*["']printed["']""", script)),
             "carved": "CARVED" in script,
+            # its strength rests on a filled-in solid (or a shape that couldn't be checked): no "holds" (CALI-96)
+            "untrusted": consistency.filled(store, p.id) if "def loads(" in script else None,
             "suggest": {k: aero.suggest(k, v, ranges) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
