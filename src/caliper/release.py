@@ -918,8 +918,12 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
         for pid, cases in rec["strength"].items():
             for c in cases:
                 breaks = f"about {c['breaks_lb']:,.0f} lb" if c.get("breaks_lb") else "—"
+                if c.get("filled"):                          # the check ran on a block: no number to build on
+                    safety, breaks = "not trusted: checked on a filled-in shape", "—"
+                else:
+                    safety = f"{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x"
                 out.append(f"<tr><td>{_e(pid)}</td><td>{_e(c['name'])}, {c['lb']:g} lb × {c['factor']:g}</td>"
-                           f"<td class='n'>{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x</td><td class='n'>{breaks}</td>"
+                           f"<td class='n'>{safety}</td><td class='n'>{breaks}</td>"
                            f"<td class='n'>______ lb</td></tr>")
         out.append("</table><p class='note'>The prediction is for the load placed the same way. To test it, load it "
                    "there a little at a time and write down where it gave. The glue and screws aren't modelled, "
@@ -971,8 +975,11 @@ def _strength(store: DesignStore, versions: dict) -> dict:
     for pid, v in versions.items():
         run = next((r for r in load_study.list_runs(store, pid) if r.get("version") == v), None)
         if run:
+            from .consistency import filled
+
+            untrue = bool(filled(store, pid))                # on a filled-in solid: not this part's (CALI-96)
             out[pid] = [{**{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")},
-                         "rough": load_study.rough(run, c)} for c in run["cases"]]
+                         "rough": load_study.rough(run, c), "filled": untrue} for c in run["cases"]]
     return out
 
 

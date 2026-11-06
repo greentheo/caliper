@@ -676,6 +676,11 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "min_safety": min_safety, "held": held, "cases": cases, "notes": notes,
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),
     }
+    from .consistency import filled
+
+    if filled(store, part_id):                        # what this number rests on (CALI-96)
+        record["filled"] = True
+        notes.append("This ran on a filled-in shape, not the part as built: its numbers are the block's.")
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
     store.append_history(part_id, {"kind": "load", "action": "studied", "run": rid,

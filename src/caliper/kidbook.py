@@ -245,6 +245,9 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
                                                    "Two coats, and let the first one dry.", "img": img})
     held = []
     for cases in (rec.get("strength") or {}).values():
+        if any(c.get("filled") for c in cases):              # checked on a block: nothing to promise (CALI-96)
+            held.append("We haven't checked it holds yet: a grown-up needs to fix its shape first.")
+            continue
         for c in cases:
             if c.get("safety"):
                 held.append(f"It should hold {c['name'].lower()}, {answers._times(c['safety'])}.")

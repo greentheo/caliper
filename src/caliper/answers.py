@@ -52,6 +52,12 @@ def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
 
 
+def untrusted(pid: str) -> str:
+    """What a strength verdict on a filled-in solid says instead of holding (CALI-96)."""
+    return (f"Not trusted yet: the strength check ran on a filled-in shape, not the {pid.replace('_', ' ')} as built. "
+            f"Fix its shape first (say \"fix its shape to match its pieces\").")
+
+
 def rests_on_model(metric: str) -> bool:
     """Whether a scorecard check's number comes from a strength or frame model (and so carries the promise): not a
     weight, a cost, or whether the pieces fit a sheet (CALI-86)."""
@@ -118,10 +124,16 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     runs = [r for r in state.get("load_runs") or [] if r["part"] == pid]
     if runs:
         run, stale = runs[0], runs[0].get("version") != p["version"]
+        from . import consistency
         from . import load_study as L
 
+        filled = consistency.filled(store, pid)              # the check ran on a block, not the part (CALI-96)
         for c in run["cases"]:
             if c.get("safety") is None:
+                continue
+            if filled:
+                work.append(_line(untrusted(pid), "warn", study="load",
+                                  numbers=f"On the filled-in solid the check read {c['safety']:g}x: not this part's."))
                 continue
             # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
             rough = L.rough(run, c)
@@ -264,6 +276,12 @@ def measured(store: DesignStore, state: dict) -> dict:
         if run and run.get("version") == current[pid] and run.get("safety") is not None:
             safeties.append(run["safety"])
             breaks += [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
+    from . import consistency
+
+    filled = [pid for pid in current if any(r["part"] == pid and r.get("version") == current[pid]
+                                            for r in state.get("load_runs") or []) and consistency.filled(store, pid)]
+    if filled:                                         # a verdict measured on a filled-in solid isn't one (CALI-96)
+        out["strength.filled"] = untrusted(filled[0])
     if safeties:
         out["strength.safety"] = min(safeties)
     if breaks:
@@ -331,6 +349,11 @@ def held_to(state: dict, now: dict) -> list[dict]:
         if test:                                       # what a real test did, over what the check predicted
             out.append(_line(f"{'✗' if test['status'] == 'bad' else '!'} {label}: {test['text']}", test["status"],
                              study="load", model="scorecard"))
+            continue
+        untrue = now.get("strength.filled") if c["metric"].startswith("strength") else None
+        if untrue:
+            out.append(_line(f"! {label}{' (assumed)' if c.get('source') == 'assumed' else ''}: {untrue}", "warn",
+                             study="load", model=rests_on_model(c["metric"])))
             continue
         v, late = now.get(c["metric"]), False
         if v is None and c["metric"] in scored:

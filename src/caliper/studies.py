@@ -88,6 +88,9 @@ def _lb(v) -> str:
 
 def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     """What a run came to, in one line, and whether that's good news (None: neither)."""
+    if kind == "load" and r.get("filled"):
+        text, _ = _headline("load", {k: v for k, v in r.items() if k != "filled"})
+        return "on a filled-in shape: " + text, None             # a block's number, not the part's (CALI-96)
     if kind == "load":
         cases = r.get("cases") or []
         worst = min(cases, key=lambda c: c.get("safety") if c.get("safety") is not None else 1e9, default=None)
