@@ -231,14 +231,15 @@ def touches(mesh, box, reach: float) -> tuple[bool, float]:
     the nearest surface (0 when it's in the part): from the surface points nearest to points spread through the
     box, back to the box itself. Exact for a box facing a surface; otherwise a little long, never short, so a box
     this passes, grown by ``reach`` and half a voxel, takes voxels in."""
-    import trimesh
+    from . import spatial
 
     lo, hi = (np.asarray(v, float) for v in box)
     axes = [np.linspace(a, b, int(min(8, max(2, math.ceil((b - a) / max(reach, 0.5)) + 1)))) for a, b in zip(lo, hi)]
     pts = np.stack(np.meshgrid(*axes, indexing="ij"), -1).reshape(-1, 3)
-    near, _, _ = trimesh.proximity.closest_point(mesh, pts)
+
+    near, _, _ = spatial.closest_point(mesh, pts)
     gap = float(np.linalg.norm(near - np.clip(near, lo, hi), axis=1).min())
-    if gap > reach and mesh.contains(pts).any():           # a box inside the solid, far from its surface
+    if gap > reach and spatial.contains(mesh, pts).any():           # a box inside the solid, far from its surface
         gap = 0.0
     return gap <= reach, round(gap, 2)
 
@@ -581,9 +582,9 @@ def _two_materials(ctx: dict, wood: list[dict], sheet_mat: dict, rest) -> None:
                        f"{sheet_mat['name']} reads softer than it is.")
     ctx["strength_map"] = strength
     if rest is not None:
-        import trimesh
+        from . import spatial
 
-        near = trimesh.proximity.ProximityQuery(rest)
+        near = spatial.Proximity(rest)
         # inside the printed solid (trimesh: positive inside), or within tolerance of it
         ctx["under"] = lambda pts, tol=ctx["tol"]: near.signed_distance(np.asarray(pts, float)) >= -tol
 

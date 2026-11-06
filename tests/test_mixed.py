@@ -245,3 +245,69 @@ def test_carving_through_the_api(stool, monkeypatch):
     got = c.post(f"/api/designs/{slug}/carve/{run['id']}/adopt", json={"station": run["best"] or 0}).json()
     assert got["design"]["parts"][0]["carved"]
     assert c.post(f"/api/designs/{slug}/carve/nope/adopt", json={"station": 0}).status_code == 404
+
+
+def test_a_carve_that_dies_partway_leaves_what_it_finished(stool, monkeypatch):
+    """CALI-103 (#95): a crash mid-carve left nothing; the run is on disk from the start and after every step, so a
+    restart shows how far it got."""
+    pytest.importorskip("whittle")
+    import json
+    import os
+
+    from caliper import carve, load_study, studies
+
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60'), intent="kid")
+    real, calls = load_study.check_load, []
+
+    def dies(ctx, i, min_safety, solid=None):
+        calls.append(1)
+        if len(calls) > 1:                                # the second step: the app goes down here
+            raise RuntimeError("the app died")
+        return real(ctx, i, min_safety, solid=solid)
+
+    monkeypatch.setattr(load_study, "check_load", dies)
+    with pytest.raises(RuntimeError):
+        carve.study(stool, "stool", stations=3, remove_up_to=0.4)
+    (rid,) = os.listdir(carve.runs_dir(stool))
+    with open(os.path.join(carve.runs_dir(stool), rid, "run.json")) as f:
+        rec = json.load(f)
+    # an error is written as one, with the steps it finished (a hard crash leaves "running": the next test)
+    assert rec["status"] == "failed" and len(rec["stations"]) == 1 and rec["steps"] == 3
+    assert rec["error"] == "RuntimeError: the app died"
+    text, ok = studies._headline("carve", rec)
+    assert text == "failed after 1 of 3 steps: RuntimeError: the app died" and ok is False
+    assert studies._headline("carve", {**rec, "status": "running"})[0] == "not finished: 1 of 3 steps checked"
+
+
+def test_a_carve_whose_sweep_fails_says_so_and_reads_running_while_it_works(stool, monkeypatch):
+    """CALI-103 (#99 review): the bar stool's carve raised "doesn't connect every load to a support" in the sweep
+    and read "Not finished: 0 of 7" forever. While the sweep works, the run on disk reads running (what a hard crash
+    leaves); when it raises, failed, with the error."""
+    pytest.importorskip("whittle")
+    import json
+    import os
+
+    import whittle
+
+    from caliper import carve, load_study, studies
+
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60'), intent="kid")
+    seen = {}
+
+    def sweep(self, **k):
+        (rid,) = os.listdir(carve.runs_dir(stool))
+        with open(os.path.join(carve.runs_dir(stool), rid, "run.json")) as f:
+            seen.update(json.load(f))
+        raise ValueError("the original part does not connect every load to a support")
+
+    monkeypatch.setattr(whittle.LoadStudy, "sweep", sweep)
+    with pytest.raises(ValueError):
+        carve.study(stool, "stool", stations=7)
+    assert seen["status"] == "running" and seen["stations"] == []
+    (rid,) = os.listdir(carve.runs_dir(stool))
+    with open(os.path.join(carve.runs_dir(stool), rid, "run.json")) as f:
+        rec = json.load(f)
+    assert rec["status"] == "failed" and "does not connect every load to a support" in rec["error"]
+    assert studies._headline("carve", rec)[0].startswith("failed after 0 of 7 steps: ValueError")

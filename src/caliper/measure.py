@@ -169,9 +169,9 @@ def min_wall_thickness(g: Geometry, samples: int = 2000, seed: int = 0) -> float
     eps = max(m.scale * 1e-4, 1e-6)
     origins = pts - normals * eps          # nudge just inside the surface
     directions = -normals                  # cast inward
-    locations, index_ray, _ = m.ray.intersects_location(
-        ray_origins=origins, ray_directions=directions, multiple_hits=False
-    )
+    from . import spatial
+
+    locations, index_ray, _ = spatial.intersects_location(m, origins, directions, multiple_hits=False)
     if len(locations) == 0:
         return float("nan")
     dists = np.linalg.norm(locations - origins[index_ray], axis=1)
@@ -456,9 +456,11 @@ def _boolean_intersection_volume(a: trimesh.Trimesh, b: trimesh.Trimesh) -> Opti
 def _meshes_overlap(a: trimesh.Trimesh, b: trimesh.Trimesh, n: int = _FIT_SAMPLES) -> bool:
     """Containment-sampling overlap test — the boolean-free fallback for detecting interference."""
     try:
-        if b.contains(_sample(a, n, seed=1)).any():
+        from . import spatial
+
+        if spatial.contains(b, _sample(a, n, seed=1)).any():
             return True
-        if a.contains(_sample(b, n, seed=2)).any():
+        if spatial.contains(a, _sample(b, n, seed=2)).any():
             return True
     except Exception:
         return False
@@ -488,9 +490,11 @@ def _penetration_depth(a: trimesh.Trimesh, b: trimesh.Trimesh, n: int = _FIT_SAM
     for first, second, seed in ((a, b, 1), (b, a, 2)):
         try:
             pts = _sample(first, n, seed=seed)
-            inside = second.contains(pts)
+            from . import spatial
+
+            inside = spatial.contains(second, pts)
             if inside.any():
-                _, dist, _ = second.nearest.on_surface(pts[inside])
+                _, dist, _ = spatial.on_surface(second, pts[inside])
                 depth = max(depth, float(np.max(dist)))
         except Exception:
             continue
@@ -499,8 +503,10 @@ def _penetration_depth(a: trimesh.Trimesh, b: trimesh.Trimesh, n: int = _FIT_SAM
 
 def _surface_gap(a: trimesh.Trimesh, b: trimesh.Trimesh, n: int = _FIT_SAMPLES) -> float:
     """Smallest distance between the two surfaces (assumes they don't intersect)."""
-    _, d_ab, _ = b.nearest.on_surface(_sample(a, n, seed=1))
-    _, d_ba, _ = a.nearest.on_surface(_sample(b, n, seed=2))
+    from . import spatial
+
+    _, d_ab, _ = spatial.on_surface(b, _sample(a, n, seed=1))
+    _, d_ba, _ = spatial.on_surface(a, _sample(b, n, seed=2))
     return float(min(np.min(d_ab), np.min(d_ba)))
 
 

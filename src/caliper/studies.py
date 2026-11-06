@@ -105,6 +105,10 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         out = next((x for x in st if not x.get("holds")), None)
         return (f"up to {best['saved_lb']:g} lb lighter" + (f" in {best['label']} sheet (an estimate)" if best.get("estimate") else "")
                 + f", still {round(best['safety'], 1):g}x" + (f"; runs out at step {out['index']}" if out else "")), True
+    if kind == "carve" and r.get("status") == "failed":    # it stopped on an error, and says which (CALI-103)
+        return f"failed after {len(r.get('stations') or [])} of {r.get('steps', '?')} steps: {r.get('error', '')}", False
+    if kind == "carve" and r.get("status") == "running":   # still going, or it died partway (CALI-103)
+        return f"not finished: {len(r.get('stations') or [])} of {r.get('steps', '?')} steps checked", None
     if kind == "carve":
         st = r.get("stations", [])
         best = next((x for x in st if x["index"] == r.get("best")), None)
