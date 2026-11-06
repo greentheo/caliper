@@ -566,6 +566,14 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-06 · Carve it: one click, its progress, and Cancel (CALI-101 #93)
+1. **On a printed part with a strength check, the button says how long:** "about N min at this size".
+2. **Click Carve it once:** one `POST /carve`. The button stays off. The panel shows "step k of n: …", the bar, and
+   "about N min left" once it has a pace. Click around the cards, or reload the page: the panel stays.
+3. **Click Cancel:** "stopping at the next step…", then "Cancelled after k of n steps: what it finished is below",
+   with the chart of the steps it finished. The Studies row says the same.
+4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_carve_click.py`.
+
 ### 2026-11-05 · The page and a study can query one part at once (CALI-103 #95)
 1. **Start a carve, then revise the part and click around the cards while it runs:** the app stays up, and a card
    comes back in about a second.

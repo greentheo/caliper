@@ -22,6 +22,7 @@ const S = {
   aeroRun: {}, frameRun: {},         // part id -> which parametric study the inspector shows
   loadRun: {},         // part id -> which strength check the inspector shows (CALI-54)
   making: {},          // part id -> {key, data}: how it's made in your shop (CALI-48)
+  carveJob: {},        // part id -> the carve running for it: {job, text, progress, ...}; a redraw keeps it (CALI-101)
   shop: null, shopOpen: false, shopKey: 0,
   studies: false,      // the studies page is open (CALI-70)
   built: {},           // part id -> {version, tried, report, balance}: what it's built from (CALI-41)
@@ -99,7 +100,8 @@ function follow(jobId, onEvent) {
     const finish = (p) => {
       if (done) return; done = true; if (es) es.close();
       p.status === 'done' ? resolve(p.result)
-        : reject(Object.assign(new Error(p.error || 'the job failed'), { errorId: p.error_id || '' }));
+        : reject(Object.assign(new Error(p.error || (p.status === 'cancelled' ? 'cancelled' : 'the job failed')),
+          { errorId: p.error_id || '', status: p.status }));
     };
     const handle = (ev) => {
       if (ev.kind === 'end') return finish(ev);
@@ -111,7 +113,7 @@ function follow(jobId, onEvent) {
         try {
           const j = await api('GET', `/api/jobs/${jobId}?after=${seen + 1}`);
           j.events.forEach(handle);
-          if (j.status === 'done' || j.status === 'error') return finish(j);
+          if (j.status === 'done' || j.status === 'error' || j.status === 'cancelled') return finish(j);
         } catch (e) { done = true; return reject(e); }
         await new Promise((r) => setTimeout(r, 700));
       }
@@ -1427,7 +1429,9 @@ function builtResults(p, c) {
 function makingView(p) {
   const key = `${p.id}:${p.version}:${S.shopKey || 0}`;
   const m = S.making[p.id];
-  if (!m || m.key !== key) { loadMaking(p, key); return '<h5 style="margin:14px 0 4px">Made in your shop</h5><div class="small muted">planning…</div>'; }
+  const planning = '<h5 style="margin:14px 0 4px">Made in your shop</h5><div class="small muted">planning…</div>';
+  if (!m || m.key !== key) { loadMaking(p, key); return planning; }
+  if (m.loading) return planning;                  // still out: a redraw meanwhile read m.data and threw (CALI-101)
   if (m.error) return `<h5 style="margin:14px 0 4px">Made in your shop</h5><div class="small" style="color:var(--bad)">⚠ ${esc(m.error)}</div>`;
   const d = m.data;
   const notes = (how) => d.pieces.filter((x) => x.how === how && x.why).map((x) => esc(x.why));
@@ -1780,15 +1784,23 @@ function carveView(p) {
   const head = `<h5 style="margin:14px 0 4px">Carve it <span class="badge">printed, any shape</span></h5>
     <div class="muted small">A printer makes any shape, so the printed part can be carved wherever it isn't working: in steps,
       each one checked. ${p.carved ? 'It\'s carved now; carving again starts from its shape as drawn.' : ''}</div>
-    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo">${run ? 'Carve it again' : 'Carve it'}</button>
-      <span class="muted small">a few minutes</span></div><div id="carveProgress"></div>`;
+    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo" ${S.carveJob[p.id] ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
+      <span class="muted small">${esc(carveTime(p))}</span></div><div id="carveProgress">${carveProgress(p.id)}</div>`;
   if (!run) return head;
+  if (run.status === 'cancelled') {                // stopped from its panel: the steps it finished (CALI-101)
+    return `${head}<div class="small"><b>Cancelled</b> after ${run.stations.length} of ${run.steps} steps${run.stations.length
+      ? ': what it finished is below.' : ', before its first step.'}</div>${run.stations.length ? carveChart(p, run) : ''}`;
+  }
   if (run.status === 'failed') {                   // it stopped on an error, and says which (CALI-103)
     return `${head}<div class="small"><b class="bad">The carve failed</b> after ${run.stations.length} of ${run.steps} steps: ${esc(run.error || '')}</div>`;
   }
+  if (run.status === 'running' && S.carveJob[p.id]) return head;   // the live panel says where it is (CALI-101)
   if (run.status === 'running') {                  // on disk as it goes: still running, or it stopped (CALI-103)
     return `${head}<div class="small">Not finished: ${run.stations.length} of ${run.steps} steps checked.</div>`;
   }
+  return head + carveChart(p, run);
+}
+function carveChart(p, run) {
   const stale = run.version !== p.version;
   const W = 300, H = 110, top = Math.max(...run.stations.map((x) => x.safety || 0), run.min_safety * 1.5);
   const x = (r) => 24 + (W - 34) * r / Math.max(...run.stations.map((s) => s.removed), 0.01);
@@ -1797,8 +1809,7 @@ function carveView(p) {
     class="${st.holds ? 'ok' : 'bad'}${S.station && S.station.run === run.id && S.station.index === st.index ? ' on' : ''}"><title>step ${st.index}</title></circle>`).join('');
   const line = run.stations.map((st, i) => `${i ? 'L' : 'M'}${x(st.removed)},${y(st.safety || 0)}`).join(' ');
   const best = run.stations.find((st) => st.index === run.best);
-  return `${head}
-    ${run.weak ? `<div class="note-warn small">${esc(run.weak)}</div>` : ''}
+  return `${run.weak ? `<div class="note-warn small">${esc(run.weak)}</div>` : ''}
     <svg class="trial-chart" viewBox="0 0 ${W} ${H}"><line x1="24" x2="${W - 10}" y1="${y(run.min_safety)}" y2="${y(run.min_safety)}" class="brk"/>
       <text x="${W - 10}" y="${y(run.min_safety) - 3}" text-anchor="end">needs ${run.min_safety}x</text>
       <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>${dots}
@@ -1810,29 +1821,100 @@ function carveView(p) {
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
     <div class="muted small">Click a step to see it; <b>Carve it like this</b> makes it the part's shape and checks it again.</div>`;
 }
+// CALI-101: one click, one carve. The job is kept in S.carveJob[part] from the click until it ends, so the button
+// stays disabled, a redraw draws the panel again (steps, bar, time left, Cancel), and a reload finds it by
+// design.carving. The server refuses a second carve of the design (409) whatever the page does.
 async function runCarve(p) {
-  const prog = $('carveProgress'), go = $('carveGo');
-  go.disabled = true;
-  prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="carveMsg">starting…</div>';
+  if (S.carveJob[p.id]) return;                    // already asked: a second click, or a second handler, does nothing
+  S.carveJob[p.id] = { text: 'starting…', progress: 0, t0: Date.now() };
+  paintCarve(p.id);
   try {
     const runs = loadRuns(p.id);
     const { job_id } = await api('POST', `/api/designs/${S.slug}/carve`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2 });
-    await follow(job_id, (ev) => {
-      const msg = $('carveMsg'), bar = prog.querySelector('.bar > i');
-      if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
-      if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
+    await followCarve(p, job_id);
+  } catch (e) {
+    delete S.carveJob[p.id];
+    await refresh();                              // a 409: the carve that's running is in design.carving; it's followed
+    const prog = $('carveProgress');
+    if (prog && !S.carveJob[p.id]) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+  }
+}
+async function followCarve(p, jobId) {
+  const cj = S.carveJob[p.id] = { ...(S.carveJob[p.id] || { text: 'carving…', progress: 0, t0: Date.now() }), job: jobId };
+  paintCarve(p.id);
+  try {
+    await follow(jobId, (ev) => {
+      if (ev.text && ev.kind !== 'started') cj.text = ev.text;
+      const m = /^step (\d+):/.exec(ev.text || ''), n = / in (\d+) steps/.exec(ev.text || '');
+      if (m) cj.step = +m[1];
+      if (n) cj.steps = +n[1];
+      if (typeof ev.progress === 'number') {
+        if (!cj.p0t && ev.progress > 0) { cj.p0t = Date.now(); cj.p0 = ev.progress; }
+        cj.progress = ev.progress;
+      }
+      paintCarve(p.id);
     });
+    delete S.carveJob[p.id];
     clearStation();
     await refresh();
     const run = carveRuns(p.id)[0];
     if (run && run.best) showStation(p.id, run, run.best);
   } catch (e) {
-    prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
-    go.disabled = false;
+    delete S.carveJob[p.id];
+    await refresh();                              // a cancelled or failed carve: its record says how far it got
+    if (e.status !== 'cancelled') {
+      const prog = $('carveProgress');
+      if (prog) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    }
   }
+}
+// the panel while a carve runs: the step it's on, the bar, about how long is left (from its pace so far), and Cancel
+function carveProgress(pid) {
+  const cj = S.carveJob[pid];
+  if (!cj) return '';
+  const pct = Math.round((cj.progress || 0) * 100);
+  let left = '';
+  if (!cj.stopping && cj.p0t && cj.progress > cj.p0 + 0.01 && Date.now() - cj.p0t > 15000) {
+    const min = (Date.now() - cj.p0t) / (cj.progress - cj.p0) * (1 - cj.progress) / 60000;
+    left = ` · about ${min < 1.5 ? '1 min' : min < 90 ? `${Math.round(min)} min` : `${(min / 60).toFixed(1)} h`} left`;
+  }
+  const where = cj.step != null && cj.steps ? `step ${cj.step} of ${cj.steps}: ` : '';
+  return `<div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="small muted" id="carveMsg">${esc(cj.stopping ? 'stopping at the next step…'
+      : where + (where ? (cj.text || '').replace(/^step \d+: /, '') : cj.text || ''))}${left}</div>
+    ${cj.job ? `<div class="actions"><button id="carveStop" ${cj.stopping ? 'disabled' : ''}>Cancel</button></div>` : ''}`;
+}
+function paintCarve(pid) {
+  const prog = $('carveProgress'), go = $('carveGo');
+  if (S.scope !== pid) return;
+  if (go) go.disabled = !!S.carveJob[pid];
+  if (!prog) return;
+  prog.innerHTML = carveProgress(pid);
+  const stop = $('carveStop');
+  if (stop) stop.onclick = async () => {
+    const cj = S.carveJob[pid];
+    if (!cj || !cj.job) return;
+    cj.stopping = true;
+    paintCarve(pid);
+    try { await api('POST', `/api/jobs/${cj.job}/cancel`); } catch (e) { showErr(e.message); }
+  };
+}
+// what the button says before it's pressed: from the last carve of this part, or its strength check (a carve is
+// one sweep and a check per step), never "a few minutes" for an hour's work
+const CARVE_PER_CHECK = 40;                         // a carve's time over its strength check's: MEASURED BELOW
+function carveTime(p) {
+  const done = carveRuns(p.id).find((r) => r.status === 'done' && r.seconds);
+  const check = loadRuns(p.id)[0];
+  const secs = done ? done.seconds : check && check.seconds ? check.seconds * CARVE_PER_CHECK : null;
+  if (secs == null) return 'can take an hour on a big part';
+  const min = secs / 60;
+  return `about ${min < 1.5 ? '1 min' : min < 75 ? `${Math.round(min)} min` : min < 100 ? 'an hour' : `${(min / 60).toFixed(1)} hours`} at this size`;
 }
 function wireCarve(p) {
   if ($('carveGo')) $('carveGo').onclick = () => runCarve(p);
+  const on = S.design && S.design.carving;           // a carve running since before this page: follow it (CALI-101)
+  if (on && on.part === p.id && !S.carveJob[p.id]) followCarve(p, on.job);
+  paintCarve(p.id);
   document.querySelectorAll('#inspector [data-carve]').forEach((c) => {
     c.onclick = () => showStation(p.id, carveRuns(p.id)[0], +c.dataset.carve);
   });

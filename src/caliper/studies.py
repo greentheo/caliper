@@ -107,6 +107,12 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
                 + f", still {round(best['safety'], 1):g}x" + (f"; runs out at step {out['index']}" if out else "")), True
     if kind == "carve" and r.get("status") == "failed":    # it stopped on an error, and says which (CALI-103)
         return f"failed after {len(r.get('stations') or [])} of {r.get('steps', '?')} steps: {r.get('error', '')}", False
+    if kind == "carve" and r.get("status") == "cancelled":  # stopped from its panel; what it finished (CALI-101)
+        st = r.get("stations") or []
+        best = next((x for x in st if x["index"] == r.get("best")), None)
+        return (f"cancelled after {len(st)} of {r.get('steps', '?')} steps"
+                + (f": the lightest that held, step {best['index']}, {best['saved_g']} g less filament"
+                   if best and best.get("saved_g") else "")), None
     if kind == "carve" and r.get("status") == "running":   # still going, or it died partway (CALI-103)
         return f"not finished: {len(r.get('stations') or [])} of {r.get('steps', '?')} steps checked", None
     if kind == "carve":

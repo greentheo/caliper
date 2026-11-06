@@ -5,6 +5,24 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 
 ---
 
+### 2026-11-06 · CALI-101 (#93) · Carve it: one click, one carve, its progress, and a cancel
+- **The page error on Theo's run** ("Cannot read properties of undefined (reading 'ok')"): `makingView` read
+  `m.data` while the shop plan was still loading. It says "planning…" until it's back.
+- **One carve per design at a time,** checked as it's queued (`JobRunner.submit(exclusive=True)`, under the runner's
+  lock), so two requests 11 ms apart can't both get through. The second gets a 409: "a carve is already running: step
+  2 of 6". The page keeps the carve in `S.carveJob` from the click, so a second click (or a second handler) sends
+  nothing.
+  - **Why one click sent two:** not found. The page draws one Carve button and wires it once. Both guards now stop
+    a double-fire whatever its cause.
+- **The panel shows the carve as it runs:** the step it's on, the bar, "about N min left" from its pace so far, and
+  **Cancel**. A redraw draws it again from state; a reload finds it through `design.carving`.
+- **Cancel:** `POST /api/jobs/{id}/cancel`. A queued job never starts. A running carve stops at its next step
+  boundary (in the sweep, or between steps) and keeps what it finished: #99's record, marked `cancelled`, with the
+  best of its steps. The panel and the Studies row say "cancelled after k of n steps".
+- **The label before you press:** from the part's last finished carve, or its strength check's time × the measured
+  carve-to-check ratio, "about N min at this size". Never "a few minutes" for an hour.
+- Tests: `tests/test_carve_click.py` (main fails 7 of the 9; the makingView one with Theo's exact error).
+
 ### 2026-11-05 · CALI-103 (#95) · The app no longer crashes when the page and a study query one mesh at once
 - **The owner's app died three times (exit 134/139) in libspatialindex:** two threads in one cached mesh's R-tree,
   once with no study running (just the page's burst after a revision).
