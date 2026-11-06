@@ -131,6 +131,7 @@ def test_a_plan_of_four_parts_is_saved_and_stops_for_review(tmp_path):
     report, errors = again.evaluate(tolerant=True)
     assert errors == {} and {r.status for r in report.results} == {"deferred"}
     assert any(r.detail == "waits for mast to be built" for r in report.results)
+    assert "under What is it?. Say what to change" in got["reply"] and "*" not in got["reply"].split("**")[0]
     # and the page shows it: the plan on What is it?, its numbers one click down
     from caliper import answers
     from caliper.design_api import design_state

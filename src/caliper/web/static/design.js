@@ -823,13 +823,17 @@ function checks(report, only) {
   return '<ul class="list">' + rows.map((r) => `<li class="check ${r.status}">
     <span class="s">${r.status === 'pass' ? '✓' : r.status === 'deferred' ? '·' : '✗'}</span>
     <span><b>${esc(r.id)}</b> <code>${esc(r.expr)}</code>${r.actual != null && r.status !== 'pass'
-      ? ` <span class="muted">→ ${esc(typeof r.actual === 'number' ? r.actual.toFixed(3) : r.actual)}</span>` : ''}</span>
+      ? ` <span class="muted">→ ${esc(typeof r.actual === 'number' ? r.actual.toFixed(3) : r.actual)}</span>` : ''}${r.status === 'deferred' && r.detail
+      ? ` <span class="muted">· ${esc(r.detail)}</span>` : ''}</span>
     </li>`).join('') + '</ul>';
 }
 
 function designView(d) {
   const rep = d.report;
-  const status = rep ? (rep.all_pass ? '<span class="badge ok">all checks pass</span>'
+  // a check that's only waiting for its parts to be built isn't failing (CALI-35): never red for that
+  const waiting = rep && rep.results.length && rep.results.every((r) => r.status === 'deferred');
+  const status = rep ? (waiting ? '<span class="badge">checks wait for its parts</span>'
+    : rep.all_pass ? '<span class="badge ok">all checks pass</span>'
     : '<span class="badge bad">checks failing</span>') : '';
   const what = `<div class="muted small">${esc(d.prompt)}</div>
     <h4>Requirements</h4>

@@ -182,7 +182,7 @@ def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, cli
         return None
     P.save(store, plan, "review")
     reply = (P.headline(plan, store.design.name) + "\n\nThat's the plan, before anything's drawn: its numbers and the "
-             "checks between the parts are under *What is it?*. Say what to change (\"make the mast 10 ft\"), or "
+             "checks between the parts are under What is it?. Say what to change (\"make the mast 10 ft\"), or "
              "**Build it** to go on.")
     store.append_log({"kind": "reply", "action": "plan", "ok": True, "reply": reply, "firstrun": True,
                       "parts": plan.ids()})
