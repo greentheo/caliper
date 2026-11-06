@@ -52,8 +52,11 @@ def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
 
 
-def untrusted(pid: str) -> str:
-    """What a strength verdict on a filled-in solid says instead of holding (CALI-96)."""
+def untrusted(pid: str, why: str = "") -> str:
+    """What a strength verdict on a filled-in solid says instead of holding (CALI-96), or one whose shape couldn't
+    be checked against its pieces at all (which fails closed: never holding)."""
+    if why.startswith("couldn't"):
+        return f"Not trusted yet: I {why}, so I can't say the strength check ran on the part as built. Check it again."
     return (f"Not trusted yet: the strength check ran on a filled-in shape, not the {pid.replace('_', ' ')} as built. "
             f"Fix its shape first (say \"fix its shape to match its pieces\").")
 
@@ -132,7 +135,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             if c.get("safety") is None:
                 continue
             if filled:
-                work.append(_line(untrusted(pid), "warn", study="load",
+                work.append(_line(untrusted(pid, filled), "warn", study="load",
                                   numbers=f"On the filled-in solid the check read {c['safety']:g}x: not this part's."))
                 continue
             # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
@@ -281,7 +284,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     filled = [pid for pid in current if any(r["part"] == pid and r.get("version") == current[pid]
                                             for r in state.get("load_runs") or []) and consistency.filled(store, pid)]
     if filled:                                         # a verdict measured on a filled-in solid isn't one (CALI-96)
-        out["strength.filled"] = untrusted(filled[0])
+        out["strength.filled"] = untrusted(filled[0], consistency.filled(store, filled[0]) or "")
     if safeties:
         out["strength.safety"] = min(safeties)
     if breaks:

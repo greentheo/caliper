@@ -87,3 +87,24 @@ def test_the_same_box_built_hollow_still_reads_as_it_holds(tmp_path, monkeypatch
     part = answers.answers(store, design_api.design_state(store), "stool")[1]
     strength = [ln for ln in part["lines"] if ln.get("study") == "load"]
     assert strength and strength[0]["text"].startswith("Holds ") and strength[0]["status"] in ("ok", "bad")
+
+
+def test_a_check_that_raises_isnt_kept_and_never_reads_holding(tmp_path, monkeypatch):
+    """CALI-96 (#96 rework, item 3): filled() cached None when its check raised: a part whose shape couldn't be
+    checked read as trusted from then on. It fails closed now, for that render, and asks again next time."""
+    store, rec = _checked(tmp_path, monkeypatch, FILLED)
+    consistency._FILLED.clear()
+    real, calls = consistency.check, []
+
+    def flaky(*a, **k):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("the sandbox died")
+        return real(*a, **k)
+
+    monkeypatch.setattr(consistency, "check", flaky)
+    why = consistency.filled(store, "stool")
+    assert why and why.startswith("couldn't check its shape")
+    part = answers.answers(store, design_api.design_state(store), "stool")[1]
+    assert not any(ln["status"] == "ok" for ln in part["lines"] if ln.get("study") == "load")
+    assert "filled in" in consistency.filled(store, "stool")             # asked again, and this time it can tell

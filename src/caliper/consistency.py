@@ -340,8 +340,8 @@ def filled(store, part_id: str) -> Optional[str]:
                 vol = next((r for r in check(declared, store.part_geometry(part_id)) if r.id == "construction_volume"), None)
                 if vol is not None and not vol.passed and "filled in" in (vol.detail or ""):
                     out = vol.detail
-        except Exception:  # noqa: BLE001 — a part that won't build has no verdict to doubt
-            out = None
+        except Exception as e:  # noqa: BLE001 — closed, not open: a shape that couldn't be checked isn't trusted
+            return f"couldn't check its shape against its pieces ({type(e).__name__}: {e})"   # and not kept
         _FILLED[key] = out
         while len(_FILLED) > 64:
             _FILLED.pop(next(iter(_FILLED)))
