@@ -272,6 +272,42 @@ def test_a_carve_that_dies_partway_leaves_what_it_finished(stool, monkeypatch):
     (rid,) = os.listdir(carve.runs_dir(stool))
     with open(os.path.join(carve.runs_dir(stool), rid, "run.json")) as f:
         rec = json.load(f)
-    assert rec["status"] == "running" and len(rec["stations"]) == 1 and rec["steps"] == 3
+    # an error is written as one, with the steps it finished (a hard crash leaves "running": the next test)
+    assert rec["status"] == "failed" and len(rec["stations"]) == 1 and rec["steps"] == 3
+    assert rec["error"] == "RuntimeError: the app died"
     text, ok = studies._headline("carve", rec)
-    assert text == "not finished: 1 of 3 steps checked" and ok is None
+    assert text == "failed after 1 of 3 steps: RuntimeError: the app died" and ok is False
+    assert studies._headline("carve", {**rec, "status": "running"})[0] == "not finished: 1 of 3 steps checked"
+
+
+def test_a_carve_whose_sweep_fails_says_so_and_reads_running_while_it_works(stool, monkeypatch):
+    """CALI-103 (#99 review): the bar stool's carve raised "doesn't connect every load to a support" in the sweep
+    and read "Not finished: 0 of 7" forever. While the sweep works, the run on disk reads running (what a hard crash
+    leaves); when it raises, failed, with the error."""
+    pytest.importorskip("whittle")
+    import json
+    import os
+
+    import whittle
+
+    from caliper import carve, load_study, studies
+
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60'), intent="kid")
+    seen = {}
+
+    def sweep(self, **k):
+        (rid,) = os.listdir(carve.runs_dir(stool))
+        with open(os.path.join(carve.runs_dir(stool), rid, "run.json")) as f:
+            seen.update(json.load(f))
+        raise ValueError("the original part does not connect every load to a support")
+
+    monkeypatch.setattr(whittle.LoadStudy, "sweep", sweep)
+    with pytest.raises(ValueError):
+        carve.study(stool, "stool", stations=7)
+    assert seen["status"] == "running" and seen["stations"] == []
+    (rid,) = os.listdir(carve.runs_dir(stool))
+    with open(os.path.join(carve.runs_dir(stool), rid, "run.json")) as f:
+        rec = json.load(f)
+    assert rec["status"] == "failed" and "does not connect every load to a support" in rec["error"]
+    assert studies._headline("carve", rec)[0].startswith("failed after 0 of 7 steps: ValueError")
