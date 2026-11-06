@@ -22,7 +22,7 @@ from . import (aero, consistency, answers, carve, chat, clarify, construction, c
                load_study, making, patterns, promote, release, samples, scorecard, shop, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
-from .jobs import RUNNER, stream
+from .jobs import RUNNER, Busy, stream
 
 
 # --- request bodies (module level: FastAPI resolves stringized annotations against globals) -------
@@ -193,6 +193,25 @@ def _building(slug: str) -> Optional[str]:
     return j.id if j is not None and not j.over else None
 
 
+def _carving(slug: str) -> Optional[dict]:
+    """The design's carve while it's queued or running, so a redraw or a reload finds its panel again (CALI-101)."""
+    j = RUNNER.running(f"carve:{slug}")
+    return ({"job": j.id, "part": j.label.split(" · ", 1)[-1], "stopping": j.stopping}   # survives a reload (#102)
+            if j is not None else None)
+
+
+def _where(job) -> str:
+    """How far a carve has got, from what it's said: "step 2 of 6", or what it's doing before its first step."""
+    if job.status == "queued":
+        return "it's waiting to start"
+    said = [ev.get("text") or "" for ev in job.since(0)]
+    steps = next((m.group(1) for t in said if (m := re.search(r" in (\d+) steps", t))), None)
+    at = next((m.group(1) for t in reversed(said) if (m := re.match(r"step (\d+):", t))), None)
+    if at is None:
+        return "working out its steps" + (f" (it takes {steps})" if steps else "")
+    return f"step {int(at) + 1}" + (f" of {steps}" if steps else "")      # step 0 is the first of n (#102)
+
+
 # --- serialising -----------------------------------------------------------------------------------
 def _bbox(store: DesignStore, pid: str) -> Optional[dict]:
     try:
@@ -263,6 +282,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
         "building": _building(slug),          # the first build's job, while it runs (CALI-59)
+        "carving": _carving(slug),            # the carve's job, while it runs (CALI-101)
         "display_units": d.display_units,
         "requirements": [r.model_dump() for r in d.requirements],
         "parts": parts,
@@ -334,6 +354,14 @@ def router():
             raise HTTPException(status_code=404, detail=f"no design {slug!r}")
 
     # -- jobs ----------------------------------------------------------------------------------------
+    @r.post("/api/jobs/{job_id}/cancel")
+    def job_cancel(job_id: str):
+        """Stop a job (CALI-101): a queued one never starts, a running one stops at its next step."""
+        j = RUNNER.cancel(job_id)
+        if j is None:
+            raise HTTPException(status_code=404, detail="no such job (it may have expired)")
+        return j.to_dict()
+
     @r.get("/api/jobs/{job_id}")
     def job(job_id: str, after: int = 0):
         j = RUNNER.get(job_id)
@@ -718,9 +746,12 @@ def router():
 
         def work(j):
             return carve.study(DesignStore.load(slug), req.part, min_safety=req.min_safety,
-                               emit=lambda k, t="", **d: j.emit(k, t, **d))
+                               emit=lambda k, t="", **d: j.emit(k, t, **d), stop=j.check)
 
-        job = RUNNER.submit("carve", work, label=f"carve · {req.part}", lock=f"carve:{slug}")
+        try:                                  # one carve of a design at a time, checked as it's queued (CALI-101)
+            job = RUNNER.submit("carve", work, label=f"carve · {req.part}", lock=f"carve:{slug}", exclusive=True)
+        except Busy as e:
+            raise HTTPException(status_code=409, detail=f"a carve is already running: {_where(e.job)}")
         return {"job_id": job.id}
 
     @r.get("/api/designs/{slug}/carve/{rid}/stations/{index}.stl")

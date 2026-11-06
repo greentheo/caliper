@@ -37,8 +37,13 @@ def runs_dir(store: DesignStore) -> str:
 
 
 def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = None, stations: int = STATIONS,
-          remove_up_to: float = REMOVE_UP_TO, emit: Optional[Callable] = None) -> dict:
-    """Carve the printed part down in steps, checking each; returns the run record."""
+          remove_up_to: float = REMOVE_UP_TO, emit: Optional[Callable] = None,
+          stop: Optional[Callable[[], None]] = None) -> dict:
+    """Carve the printed part down in steps, checking each; returns the run record.
+
+    ``stop`` is called at every step boundary (in the sweep and between the checks) and raises
+    :class:`caliper.jobs.Cancelled` to end the carve there (CALI-101): the record keeps the steps it finished, marked
+    "cancelled"."""
     from scipy import ndimage
     from whittle import Load
 
@@ -47,7 +52,10 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     from . import load_study as L
     from . import materials as M
 
+    from .jobs import Cancelled
+
     emit = emit or (lambda *a, **k: None)
+    stop = stop or (lambda: None)
     min_safety = min_safety or firstrun._min_safety(store)
     t0 = time.time()
     ctx = L.prepare(store, part_id, emit)
@@ -84,13 +92,18 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     keep(partial)
     out: list = []
     try:
-        emit("carving", f"carving the printed {mat['name']} in {stations - 1} steps")
-        sweep = ls.sweep(remove_up_to=remove_up_to, stations=stations,
-                         progress=lambda f: emit("carving", "", progress=round(0.7 * f, 3)))
+        # one count everywhere (#102 review): n checks, as drawn and n - 1 carved; the panel says "step k of n"
+        emit("carving", f"carving the printed {mat['name']} in {stations} steps (as drawn, then {stations - 1} carved)")
+        def swept(f: float) -> None:
+            stop()                                                     # a cancel lands here too (CALI-101)
+            emit("carving", "", progress=round(0.7 * f, 3))
+
+        sweep = ls.sweep(remove_up_to=remove_up_to, stations=stations, progress=swept)
         density = M.printed(mat["key"])["density"] / 1000.0           # g/cm³, solid
         voxel_cm3 = ls.grid.voxel_volume / 1000.0
         printed0 = voxels0 = None
         for k, st in enumerate(sweep.stations):
+            stop()                                                     # between steps: what's done is kept
             # the share of the printed part: whittle's own `removed` counts the wood it keeps too (CALI-86)
             printed_voxels = float((st.design & ~wood).sum())
             voxels0 = printed_voxels if voxels0 is None else voxels0
@@ -151,6 +164,13 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g" if best and best["saved_g"]
              else f"{len(out)} steps", run=rid, progress=1.0)
         return record
+    except Cancelled:
+        # asked to stop (CALI-101): the steps it finished, and the lightest of them that holds, as a partial run
+        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)
+        keep({**partial, "stations": out, "status": "cancelled", "best": best["index"] if best else None,
+              "seconds": round(time.time() - t0, 1)})
+        store.append_history(part_id, {"kind": "carve", "action": "cancelled", "run": rid, "stations": len(out)})
+        raise
     except BaseException as e:
         # a carve that fails says so, with what it finished: it doesn't read "not finished" forever (CALI-103)
         keep({**partial, "stations": out, "status": "failed", "error": f"{type(e).__name__}: {e}"})

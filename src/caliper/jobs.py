@@ -26,6 +26,18 @@ from typing import Any, Callable, Optional
 KEEP_FINISHED_S = 60 * 60
 
 
+class Cancelled(Exception):
+    """Raised at a step boundary of a job asked to stop (CALI-101): it ends "cancelled", not "error"."""
+
+
+class Busy(Exception):
+    """An exclusive job's lock is taken: ``job`` is the one queued or running under it (CALI-101)."""
+
+    def __init__(self, job: "Job"):
+        super().__init__(f"{job.kind} {job.id} is {job.status}")
+        self.job = job
+
+
 class Job:
     """One unit of background work and everything it has said so far."""
 
@@ -34,7 +46,7 @@ class Job:
         self.kind = kind
         self.label = label
         self.lock = lock or self.id
-        self.status = "queued"            # queued | running | done | error
+        self.status = "queued"            # queued | running | done | error | cancelled
         self.events: list[dict] = []
         self.result: Any = None
         self.error = ""
@@ -42,6 +54,7 @@ class Job:
         self.created = time.time()
         self.finished: Optional[float] = None
         self._mu = threading.Lock()
+        self._stop = threading.Event()    # asked to stop (CALI-101)
 
     def emit(self, kind: str, text: str = "", **data) -> dict:
         """Record one step of progress. Safe to call from the worker thread."""
@@ -56,12 +69,22 @@ class Job:
 
     @property
     def over(self) -> bool:
-        return self.status in ("done", "error")
+        return self.status in ("done", "error", "cancelled")
+
+    @property
+    def stopping(self) -> bool:
+        return self._stop.is_set()
+
+    def check(self) -> None:
+        """A step boundary: raise :class:`Cancelled` if the job's been asked to stop. The work calls it between
+        steps, so a cancel takes effect there, with every finished step kept."""
+        if self._stop.is_set():
+            raise Cancelled()
 
     def to_dict(self, after: int = 0) -> dict:
         return {"id": self.id, "kind": self.kind, "label": self.label, "status": self.status,
                 "events": self.since(after), "result": self.result, "error": self.error,
-                "error_id": self.error_id}
+                "error_id": self.error_id, "stopping": self.stopping}
 
 
 #: Every runner made, held weakly: the app's RUNNER and any a test makes.
@@ -71,6 +94,9 @@ RUNNERS = weakref.WeakSet()
 class JobRunner:
     """A small worker pool with per-key serialization."""
 
+    #: Called between an exclusive submit's check and its queueing, for a test that the two are one step (CALI-101).
+    _between: Optional[Callable[[], None]] = None
+
     def __init__(self, workers: int = 4):
         RUNNERS.add(self)                      # so a test can wait for every runner's jobs (CALI-97)
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="caliper-job")
@@ -79,16 +105,46 @@ class JobRunner:
         self._mu = threading.Lock()
 
     def submit(self, kind: str, fn: Callable[[Job], Any], *, label: str = "",
-               lock: str = "") -> Job:
-        """Queue ``fn(job)``; its return value becomes ``job.result``. Returns immediately."""
+               lock: str = "", exclusive: bool = False) -> Job:
+        """Queue ``fn(job)``; its return value becomes ``job.result``. Returns immediately.
+
+        ``exclusive``: refuse (raise :class:`Busy`) while a job with this lock is queued or running, checked and
+        queued in one step, so two requests 11 ms apart can't both get through (CALI-101)."""
         job = Job(kind, label=label, lock=lock)
         with self._mu:
             self._prune()
+            if exclusive:
+                ahead = next((j for j in self._jobs.values() if j.lock == job.lock and not j.over), None)
+                if ahead is not None:
+                    raise Busy(ahead)
+                if self._between is not None:   # a test's hook between the check and the queueing (#102 review)
+                    self._between()
             self._jobs[job.id] = job
             key_lock = self._locks.setdefault(job.lock, threading.Lock())
         self._pool.submit(self._run, job, fn, key_lock)
         return job
 
+    def cancel(self, job_id: str) -> Optional[Job]:
+        """Ask a job to stop (CALI-101): a queued one never starts; a running one stops at its next step boundary
+        (:meth:`Job.check`). One that's over is left as it is. None if there's no such job."""
+        with self._mu:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            asked = not job._stop.is_set()
+            job._stop.set()
+            if job.status == "running" and asked:          # said, so a page that reloads hears it (#102 review)
+                job.emit("stopping", "stopping at the next step…")
+            if job.status == "queued":
+                job.status = "cancelled"
+                job.finished = time.time()
+                job.emit("cancelled", "cancelled before it started")
+        return job
+
+    def running(self, lock: str) -> Optional[Job]:
+        """The job queued or running under this lock, if any."""
+        with self._mu:
+            return next((j for j in self._jobs.values() if j.lock == lock and not j.over), None)
     def active(self) -> list[Job]:
         """Every job queued or running: what a test mustn't leave behind (CALI-97)."""
         with self._mu:
@@ -114,12 +170,18 @@ class JobRunner:
 
     def _run(self, job: Job, fn: Callable[[Job], Any], key_lock: threading.Lock) -> None:
         with key_lock:
-            job.status = "running"
+            with self._mu:
+                if job.status == "cancelled":                 # cancelled while it waited (CALI-101)
+                    return
+                job.status = "running"
             job.emit("started", job.label)
             try:
                 job.result = fn(job)
                 job.status = "done"
                 job.emit("finished", "done")
+            except Cancelled:
+                job.status = "cancelled"
+                job.emit("cancelled", "cancelled: it stopped at a step, and kept the steps it finished")
             except Exception as e:  # noqa: BLE001 — every failure must reach the page, named
                 # the traceback's LAST line is the actual exception (the CALI-27 discipline)
                 tail = [ln for ln in traceback.format_exc().strip().splitlines() if ln.strip()]
