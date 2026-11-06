@@ -795,13 +795,22 @@ def title(name: str) -> str:
     return first.rstrip(".") or name
 
 
+def _status(card: dict) -> str:
+    """The book's header: ready to cut, or why not, each reason in its own words (CALI-96: "not trusted", not
+    "unknown")."""
+    s = card["summary"]
+    if s["fail"] == 0 and s["unknown"] == 0:
+        return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass</span>'
+    untrusted = s.get("untrusted") or 0
+    why = [f"{s['fail']} check(s) fail" if s["fail"] else "", f"{untrusted} not trusted" if untrusted else "",
+           f"{s['unknown'] - untrusted} unknown" if s["unknown"] - untrusted else ""]
+    return f'<span class="status notready">Not ready — {", ".join(w for w in why if w)}</span>'
+
+
 def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], notes: list[str]) -> str:
     """The build book, as one printable page."""
     m = card.get("metrics") or {}
-    ready = card["summary"]["fail"] == 0 and card["summary"]["unknown"] == 0
-    status = (f'<span class="status ready">Ready to cut — {card["summary"]["pass"]} of {len(card["checks"])} checks pass</span>'
-              if ready else f'<span class="status notready">Not ready — {card["summary"]["fail"]} check(s) fail, '
-              f'{card["summary"]["unknown"]} unknown</span>')
+    status = _status(card)
     big = [("weight.total_lb", "all up, with the payload"), ("hitch.tongue_lb", "on the tongue"),
            ("frame.yield_x", "frame yields at × its load"), ("drag.lbf", "drag at speed")]
     nums = "".join(f"<div><b>{_num(m[k]['value'], m[k]['unit'])}</b><span>{_e(lab)}</span></div>"
@@ -918,8 +927,12 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
         for pid, cases in rec["strength"].items():
             for c in cases:
                 breaks = f"about {c['breaks_lb']:,.0f} lb" if c.get("breaks_lb") else "—"
+                if c.get("filled"):                          # the check ran on a block: no number to build on
+                    safety, breaks = "not trusted: checked on a filled-in shape", "—"
+                else:
+                    safety = f"{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x"
                 out.append(f"<tr><td>{_e(pid)}</td><td>{_e(c['name'])}, {c['lb']:g} lb × {c['factor']:g}</td>"
-                           f"<td class='n'>{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x</td><td class='n'>{breaks}</td>"
+                           f"<td class='n'>{safety}</td><td class='n'>{breaks}</td>"
                            f"<td class='n'>______ lb</td></tr>")
         out.append("</table><p class='note'>The prediction is for the load placed the same way. To test it, load it "
                    "there a little at a time and write down where it gave. The glue and screws aren't modelled, "
@@ -929,7 +942,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                "<th class='n'>margin</th><th>trust</th></tr>")
     for c in card["checks"]:
         mark = "<span class='pass'>✓</span>" if c["status"] == "pass" else "<span class='fail'>✗</span>" \
-            if c["status"] == "fail" else "?"
+            if c["status"] == "fail" else "<span class='fail'>not trusted</span>" if c["status"] == "untrusted" else "?"
         out.append(f"<tr><td>{mark}</td><td>{_e(c.get('label') or c['id'])}</td>"
                    f"<td class='n'>{_num(c.get('value'), c.get('unit', ''))}</td><td class='n'>{_num(c.get('margin'))}</td>"
                    f"<td>{'<span class=trust>' + _e(TRUST.get(c['trust'], c['trust'])) + '</span>' if c.get('trust') else ''}</td></tr>")
@@ -971,8 +984,11 @@ def _strength(store: DesignStore, versions: dict) -> dict:
     for pid, v in versions.items():
         run = next((r for r in load_study.list_runs(store, pid) if r.get("version") == v), None)
         if run:
+            from .consistency import filled
+
+            untrue = bool(filled(store, pid))                # on a filled-in solid: not this part's (CALI-96)
             out[pid] = [{**{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")},
-                         "rough": load_study.rough(run, c)} for c in run["cases"]]
+                         "rough": load_study.rough(run, c), "filled": untrue} for c in run["cases"]]
     return out
 
 
@@ -1172,5 +1188,5 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     store.append_log({"kind": "release", "action": "released", "release": rid, "versions": versions,
                       "ready": rec["ready"]})
     emit("done", f"release {rid}: {len(st)} steps, {rec['sheets']} sheets, ~${shop['usd']:.0f} to buy"
-         + ("" if rec["ready"] else " — NOT ready, a check fails"), release=rid)
+         + ("" if rec["ready"] else " — NOT ready, a check fails or isn't settled"), release=rid)
     return rec

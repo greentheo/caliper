@@ -328,3 +328,22 @@ def test_a_measure_that_says_yes_or_no_is_a_check_on_its_own(expr):
     got = P.validate(_with(x=lambda p: p["rules"].append({"id": "aligned", "expr": expr})))
     assert got.rules[-1].expr == expr
     assert "holes_aligned" in P.FUNCTIONS and "holes_aligned(a, b)" in P.SYSTEM
+
+
+
+@pytest.mark.parametrize("summary,said", [
+    ({"pass": 0, "fail": 0, "unknown": 3}, "No check has run yet: 3 not checked yet."),
+    ({"pass": 1, "fail": 0, "unknown": 1, "untrusted": 1}, "1 check pass, 1 not trusted."),
+    ({"pass": 0, "fail": 0, "unknown": 2, "untrusted": 1}, "No check passes yet: 1 not trusted, 1 not checked yet."),
+    ({"pass": 2, "fail": 0, "unknown": 0}, "2 checks pass."),
+])
+def test_the_card_never_counts_an_untrusted_or_waiting_check_as_a_pass(tmp_path, summary, said):
+    """#103 merged with #96: the scorecard counts a strength check on a filled-in shape as untrusted (in unknown)."""
+    from caliper import answers
+
+    store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
+    state = {"parts": [{"id": "mast", "version": 1, "role": "movable"}], "prompt": TURBINE_SAID, "name": "w",
+             "scorecards": [{"summary": summary, "checks": [], "versions": {}}], "goals": {"checks": []},
+             "load_runs": []}
+    (line,) = [c for c in answers.design(store, state) if c["key"] == "work"][0]["lines"][:1]
+    assert line["text"] == said and line["status"] == ("ok" if said == "2 checks pass." else "warn"), line

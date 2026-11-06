@@ -22,6 +22,7 @@ const S = {
   aeroRun: {}, frameRun: {},         // part id -> which parametric study the inspector shows
   loadRun: {},         // part id -> which strength check the inspector shows (CALI-54)
   making: {},          // part id -> {key, data}: how it's made in your shop (CALI-48)
+  carveJob: {},        // part id -> the carve running for it: {job, text, progress, ...}; a redraw keeps it (CALI-101)
   shop: null, shopOpen: false, shopKey: 0,
   studies: false,      // the studies page is open (CALI-70)
   built: {},           // part id -> {version, tried, report, balance}: what it's built from (CALI-41)
@@ -99,7 +100,8 @@ function follow(jobId, onEvent) {
     const finish = (p) => {
       if (done) return; done = true; if (es) es.close();
       p.status === 'done' ? resolve(p.result)
-        : reject(Object.assign(new Error(p.error || 'the job failed'), { errorId: p.error_id || '' }));
+        : reject(Object.assign(new Error(p.error || (p.status === 'cancelled' ? 'cancelled' : 'the job failed')),
+          { errorId: p.error_id || '', status: p.status }));
     };
     const handle = (ev) => {
       if (ev.kind === 'end') return finish(ev);
@@ -111,7 +113,7 @@ function follow(jobId, onEvent) {
         try {
           const j = await api('GET', `/api/jobs/${jobId}?after=${seen + 1}`);
           j.events.forEach(handle);
-          if (j.status === 'done' || j.status === 'error') return finish(j);
+          if (j.status === 'done' || j.status === 'error' || j.status === 'cancelled') return finish(j);
         } catch (e) { done = true; return reject(e); }
         await new Promise((r) => setTimeout(r, 700));
       }
@@ -130,6 +132,15 @@ function len(mm, digits) {
   if (mm == null || isNaN(mm)) return '—';
   return inches() ? `${(mm / IN).toFixed(digits ?? 1)}″` : `${mm.toFixed(digits ?? 0)} mm`;
 }
+// a wall or a voxel, thin: inches to the nearest 1/32 (5/32″), mm where that rounds to nothing; never "0.0″" (CALI-97)
+function wallLen(mm) {
+  if (mm == null || isNaN(mm)) return '—';
+  const n = Math.round(mm / IN * 32);
+  if (inches() && mm >= IN) return len(mm, 1);
+  if (inches() && n >= 1) { const g = gcd(n, 32); return `${n / g}/${32 / g}″`; }
+  return `${mm < 10 ? +mm.toFixed(1) : Math.round(mm)} mm`;
+}
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
 function sizeText(size) {
   // x = along travel (depth), y = across (width), z = up (height) — the vehicle convention
   return `${len(size[1])} W × ${len(size[0])} D × ${len(size[2])} H`;
@@ -1447,7 +1458,9 @@ function builtResults(p, c) {
 function makingView(p) {
   const key = `${p.id}:${p.version}:${S.shopKey || 0}`;
   const m = S.making[p.id];
-  if (!m || m.key !== key) { loadMaking(p, key); return '<h5 style="margin:14px 0 4px">Made in your shop</h5><div class="small muted">planning…</div>'; }
+  const planning = '<h5 style="margin:14px 0 4px">Made in your shop</h5><div class="small muted">planning…</div>';
+  if (!m || m.key !== key) { loadMaking(p, key); return planning; }
+  if (m.loading) return planning;                  // still out: a redraw meanwhile read m.data and threw (CALI-101)
   if (m.error) return `<h5 style="margin:14px 0 4px">Made in your shop</h5><div class="small" style="color:var(--bad)">⚠ ${esc(m.error)}</div>`;
   const d = m.data;
   const notes = (how) => d.pieces.filter((x) => x.how === how && x.why).map((x) => esc(x.why));
@@ -1782,7 +1795,9 @@ function loadView(p) {
   return `<div class="form">
       <span>least safety</span><span><input type="number" id="lSafety" value="${runs[0] ? runs[0].min_safety : 2}" min="1" max="10" step="0.5">
         × at each load times its factor</span></div>
-    <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button></div>
+    <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button>
+      ${runs[0] && runs[0].finer && runs[0].version === p.version ? `<button id="lFiner" title="voxels of ${wallLen(runs[0].finer.spacing_mm)}, enough
+        to see its ${wallLen(runs[0].thinnest_mm)} walls">Check it again finer${runs[0].finer.minutes ? ` (about ${runs[0].finer.minutes} min)` : ' (how long: unknown)'}</button>` : ''}</div>
     <div id="lProgress"></div>
     ${runs.length ? loadResults(p, runs[pick], runs) : ''}
     ${p.printed ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : (runs.length ? lightenView(p) : '')}`;
@@ -1800,15 +1815,23 @@ function carveView(p) {
   const head = `<h5 style="margin:14px 0 4px">Carve it <span class="badge">printed, any shape</span></h5>
     <div class="muted small">A printer makes any shape, so the printed part can be carved wherever it isn't working: in steps,
       each one checked. ${p.carved ? 'It\'s carved now; carving again starts from its shape as drawn.' : ''}</div>
-    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo">${run ? 'Carve it again' : 'Carve it'}</button>
-      <span class="muted small">a few minutes</span></div><div id="carveProgress"></div>`;
+    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo" ${S.carveJob[p.id] ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
+      <span class="muted small">${esc(carveTime(p))}</span></div><div id="carveProgress">${carveProgress(p.id)}</div>`;
   if (!run) return head;
+  if (run.status === 'cancelled') {                // stopped from its panel: the steps it finished (CALI-101)
+    return `${head}<div class="small"><b>Cancelled</b> after ${run.stations.length} of ${run.steps} steps${run.stations.length
+      ? ': what it finished is below.' : ', before its first step.'}</div>${run.stations.length ? carveChart(p, run) : ''}`;
+  }
   if (run.status === 'failed') {                   // it stopped on an error, and says which (CALI-103)
     return `${head}<div class="small"><b class="bad">The carve failed</b> after ${run.stations.length} of ${run.steps} steps: ${esc(run.error || '')}</div>`;
   }
+  if (run.status === 'running' && S.carveJob[p.id]) return head;   // the live panel says where it is (CALI-101)
   if (run.status === 'running') {                  // on disk as it goes: still running, or it stopped (CALI-103)
     return `${head}<div class="small">Not finished: ${run.stations.length} of ${run.steps} steps checked.</div>`;
   }
+  return head + carveChart(p, run);
+}
+function carveChart(p, run) {
   const stale = run.version !== p.version;
   const W = 300, H = 110, top = Math.max(...run.stations.map((x) => x.safety || 0), run.min_safety * 1.5);
   const x = (r) => 24 + (W - 34) * r / Math.max(...run.stations.map((s) => s.removed), 0.01);
@@ -1817,8 +1840,7 @@ function carveView(p) {
     class="${st.holds ? 'ok' : 'bad'}${S.station && S.station.run === run.id && S.station.index === st.index ? ' on' : ''}"><title>step ${st.index}</title></circle>`).join('');
   const line = run.stations.map((st, i) => `${i ? 'L' : 'M'}${x(st.removed)},${y(st.safety || 0)}`).join(' ');
   const best = run.stations.find((st) => st.index === run.best);
-  return `${head}
-    ${run.weak ? `<div class="note-warn small">${esc(run.weak)}</div>` : ''}
+  return `${run.weak ? `<div class="note-warn small">${esc(run.weak)}</div>` : ''}
     <svg class="trial-chart" viewBox="0 0 ${W} ${H}"><line x1="24" x2="${W - 10}" y1="${y(run.min_safety)}" y2="${y(run.min_safety)}" class="brk"/>
       <text x="${W - 10}" y="${y(run.min_safety) - 3}" text-anchor="end">needs ${run.min_safety}x</text>
       <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>${dots}
@@ -1830,29 +1852,115 @@ function carveView(p) {
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
     <div class="muted small">Click a step to see it; <b>Carve it like this</b> makes it the part's shape and checks it again.</div>`;
 }
+// CALI-101: one click, one carve. The job is kept in S.carveJob[part] from the click until it ends, so the button
+// stays disabled, a redraw draws the panel again (steps, bar, time left, Cancel), and a reload finds it by
+// design.carving. The server refuses a second carve of the design (409) whatever the page does.
 async function runCarve(p) {
-  const prog = $('carveProgress'), go = $('carveGo');
-  go.disabled = true;
-  prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="carveMsg">starting…</div>';
+  if (S.carveJob[p.id]) return;                    // already asked: a second click, or a second handler, does nothing
+  S.carveJob[p.id] = { text: 'starting…', progress: 0, t0: Date.now() };
+  paintCarve(p.id);
   try {
     const runs = loadRuns(p.id);
     const { job_id } = await api('POST', `/api/designs/${S.slug}/carve`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2 });
-    await follow(job_id, (ev) => {
-      const msg = $('carveMsg'), bar = prog.querySelector('.bar > i');
-      if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
-      if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
+    await followCarve(p, job_id);
+  } catch (e) {
+    delete S.carveJob[p.id];
+    await refresh();                              // a 409: the carve that's running is in design.carving; it's followed
+    const prog = $('carveProgress');
+    if (prog && !S.carveJob[p.id]) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+  }
+}
+async function followCarve(p, jobId, stopping) {
+  const cj = S.carveJob[p.id] = { ...(S.carveJob[p.id] || { text: 'carving…', progress: 0, t0: Date.now() }), job: jobId };
+  if (stopping) cj.stopping = true;                // asked to stop before this page loaded (#102 review)
+  paintCarve(p.id);
+  try {
+    await follow(jobId, (ev) => {
+      if (ev.kind === 'stopping') cj.stopping = true;
+      if (ev.text && ev.kind !== 'started') cj.text = ev.text;
+      const m = /^step (\d+):/.exec(ev.text || ''), n = / in (\d+) steps/.exec(ev.text || '');
+      if (m) cj.step = +m[1];
+      if (n) cj.steps = +n[1];
+      if (typeof ev.progress === 'number') {
+        if (!cj.p0t && ev.progress > 0) { cj.p0t = Date.now(); cj.p0 = ev.progress; }
+        cj.progress = ev.progress;
+      }
+      paintCarve(p.id);
     });
+    delete S.carveJob[p.id];
     clearStation();
     await refresh();
     const run = carveRuns(p.id)[0];
     if (run && run.best) showStation(p.id, run, run.best);
   } catch (e) {
-    prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
-    go.disabled = false;
+    delete S.carveJob[p.id];
+    await refresh();                              // a cancelled or failed carve: its record says how far it got
+    if (e.status !== 'cancelled') {
+      const prog = $('carveProgress');
+      if (prog) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    }
   }
+}
+// the panel while a carve runs: the step it's on, the bar, about how long is left (from its pace so far), and Cancel
+function carveProgress(pid) {
+  const cj = S.carveJob[pid];
+  if (!cj) return '';
+  const pct = Math.round((cj.progress || 0) * 100);
+  let left = '';
+  if (!cj.stopping && cj.p0t && cj.progress > cj.p0 + 0.01 && Date.now() - cj.p0t > 15000) {
+    const min = (Date.now() - cj.p0t) / (cj.progress - cj.p0) * (1 - cj.progress) / 60000;
+    left = ` · about ${min < 1.5 ? '1 min' : min < 90 ? `${Math.round(min)} min` : `${(min / 60).toFixed(1)} h`} left`;
+  }
+  const where = cj.step != null && cj.steps ? `step ${cj.step + 1} of ${cj.steps}: ` : '';   // one count (#102)
+  return `<div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="small muted" id="carveMsg">${esc(cj.stopping ? 'stopping at the next step…'
+      : where + (where ? (cj.text || '').replace(/^step \d+: /, '') : cj.text || ''))}${left}</div>
+    ${cj.job ? `<div class="actions"><button id="carveStop" ${cj.stopping ? 'disabled' : ''}>Cancel</button></div>` : ''}`;
+}
+function paintCarve(pid) {
+  const prog = $('carveProgress'), go = $('carveGo');
+  if (S.scope !== pid) return;
+  if (go) go.disabled = !!S.carveJob[pid];
+  if (!prog) return;
+  prog.innerHTML = carveProgress(pid);
+  const stop = $('carveStop');
+  if (stop) stop.onclick = async () => {
+    const cj = S.carveJob[pid];
+    if (!cj || !cj.job) return;
+    cj.stopping = true;
+    paintCarve(pid);
+    try { await api('POST', `/api/jobs/${cj.job}/cancel`); } catch (e) { showErr(e.message); }
+  };
+}
+// what the button says before it's pressed: from the last carve of this part, or its strength check (a carve is
+// one sweep and a check per step), never "a few minutes" for an hour's work
+// A carve's time over its strength check's isn't a constant: 47 on the printed box, 67 on the mixed stool, about 65 on
+// the bar stool's sweep, about 190 on the reviewer's tube (#102 review). So until a carve of the part has finished,
+// the label is a floor, "at least about N min", from the low end; after one, that carve's own time.
+const CARVE_PER_CHECK_AT_LEAST = 45;
+const minutesText = (min) => (min < 1.5 ? '1 min' : min < 75 ? `${Math.round(min)} min` : min < 100 ? 'an hour'
+  : `${(min / 60).toFixed(1)} hours`);
+// the check to go by: this version's at the default voxels. A finer run asked for (CALI-97) is always finer than the
+// default, so it's the coarsest at this version, never the latest whatever its voxels
+function defaultCheck(p) {
+  const at = loadRuns(p.id).filter((r) => r.version === p.version && r.seconds);
+  return at.length ? at.reduce((a, r) => (r.spacing_mm > a.spacing_mm ? r : a)) : null;
+}
+function carveTime(p) {
+  const done = carveRuns(p.id).find((r) => r.status === 'done' && r.seconds);
+  if (done) return `about ${minutesText(done.seconds / 60)} at this size, as its last carve took`;
+  const check = defaultCheck(p);
+  if (!check) return 'check it holds first: how long it takes comes from that';
+  if (check.cases.some((c) => c.fea && c.fea.supported === false)) {
+    return "its voxels don't connect the load to a support yet, so a carve can't run";
+  }
+  return `at least about ${minutesText(check.seconds * CARVE_PER_CHECK_AT_LEAST / 60)} at this size`;
 }
 function wireCarve(p) {
   if ($('carveGo')) $('carveGo').onclick = () => runCarve(p);
+  const on = S.design && S.design.carving;           // a carve running since before this page: follow it (CALI-101)
+  if (on && on.part === p.id && !S.carveJob[p.id]) followCarve(p, on.job, on.stopping);
+  paintCarve(p.id);
   document.querySelectorAll('#inspector [data-carve]').forEach((c) => {
     c.onclick = () => showStation(p.id, carveRuns(p.id)[0], +c.dataset.carve);
   });
@@ -1875,7 +1983,8 @@ function lightenView(p) {
     <div class="actions"><button id="lightGo">${run ? 'Lighten it again' : 'Lighten it'}</button></div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
-      ? `The lightest that holds: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety)}.`
+      ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
+        : `The lightest that holds: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety)}.`)
       : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety)}).` : ''}
       ${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
@@ -1889,10 +1998,26 @@ function lightenView(p) {
 }
 
 const sx = (v) => (v == null ? '—' : `${+Number(v).toFixed(1)}x`);
+// a part whose strength check ran on a filled-in solid has no "holds" anywhere (CALI-96)
+// why: a filled-in shape, or a shape that couldn't be checked against its pieces at all (it fails closed)
+const notTrusted = (why) => (String(why || '').startsWith("couldn't") ? "not trusted: its shape couldn't be checked"
+  : 'not trusted: a filled-in shape');
+const untrustedBadge = (p) => `<span class="badge bad">${notTrusted(p.untrusted)}</span>`;
+const partOf = (pid) => (S.design && S.design.parts.find((x) => x.id === pid)) || {};
+// CALI-97: a ✓ on an FEA too coarse to see its walls is no ✓. The server marks such a case (c.unresolved:
+// 'unresolved' when a finer run can see them, 'unchecked' when none a study may make can); its badge says so, and
+// no green "holds" sits under the card's warn. A ✗ stays a ✗.
+const coarseWord = (c) => (c.unresolved === 'unchecked' ? 'not checked' : 'not resolved');
+const caseBadge = (c) => (c.unresolved && c.holds ? `<span class="badge warn">${coarseWord(c)}</span>`
+  : c.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>');
+const runCoarse = (run) => (run.holds ? (run.cases || []).find((c) => c.unresolved && c.holds) : null);
+const runBadge = (run) => (runCoarse(run) ? `<span class="badge warn">${coarseWord(runCoarse(run))}</span>`
+  : run.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>');
+const runWord = (run) => (runCoarse(run) ? coarseWord(runCoarse(run)) : run.holds ? 'holds' : 'doesn\'t hold');
 function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
   const pl = c.plate, f = c.fea || {};
-  const holds = c.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>';
+  const holds = p.untrusted ? untrustedBadge(p) : caseBadge(c);     // a filled-in shape wins (CALI-96, then 97)
   const plate = !pl ? '' : pl.done
     ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
@@ -1918,9 +2043,12 @@ function loadCase(p, run, c, i) {
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
-      <div class="small" style="margin-top:2px">Safety <b>${sx(c.safety)}</b>
+      ${c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety)}
+        <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
+        ${c.holds ? 'no verdict' : 'the fail may be the model\'s'} (it needs ${run.min_safety}x)</span></div>`
+      : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety)}</b>
         <span class="muted">(by ${c.governs === 'plate' ? 'the plate check, with the grain the wrong way' : 'the FEA'}; it needs ${run.min_safety}x)</span>
-        ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>
+        ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>`}
       ${plate}${fea}${by}
       ${c.heat ? `<div class="actions"><button data-heat="${i}" class="${on ? 'primary' : ''}">${on ? 'Showing the stress' : 'Show the stress'}</button></div>` : ''}
     </div>`;
@@ -1930,9 +2058,9 @@ function loadResults(p, run, runs) {
   const stale = run.version !== p.version;
   return `<div class="small" style="margin-top:12px">${runs.length > 1 ? `<select id="lRun">${runs.map((r, k) =>
       `<option value="${k}" ${r.id === run.id ? 'selected' : ''}>${esc(new Date(r.created * 1000).toLocaleString())} · v${r.version}
-        · ${r.holds ? 'holds' : 'doesn\'t hold'}</option>`).join('')}</select>`
+        · ${p.untrusted ? 'not trusted' : runWord(r)}</option>`).join('')}</select>`
       : `<b>Last check</b> · v${run.version} · ${new Date(run.created * 1000).toLocaleString()}`}
-      ${run.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>'}
+      ${p.untrusted ? untrustedBadge(p) : runBadge(run)}
       ${stale ? '<span class="badge bad">the part has changed since</span>' : ''}</div>
     ${run.cases.map((c, i) => loadCase(p, run, c, i)).join('')}
     <div class="muted small" style="margin-top:6px">In ${esc(run.material.name)}, voxels of ${len(run.spacing_mm, 1)}
@@ -1945,6 +2073,8 @@ function wireLoad(p) {
   if (ask) ask.onclick = () => { $('msg').value = 'It has to hold '; $('msg').focus(); };
   const go = $('lGo');
   if (go) go.onclick = () => runLoad(p);
+  const finer = $('lFiner');                       // a run too coarse to see its walls: again, finer (CALI-97)
+  if (finer) finer.onclick = () => runLoad(p, loadRuns(p.id)[0].finer.spacing_mm);
   const sel = $('lRun');
   if (sel) sel.onchange = () => { S.loadRun[p.id] = +sel.value; clearStation(); renderInspector(); };
   const lg = $('lightGo');
@@ -1987,12 +2117,14 @@ async function runLighten(p) {
   }
 }
 
-async function runLoad(p) {
+async function runLoad(p, spacing) {
   const prog = $('lProgress'), go = $('lGo');
   go.disabled = true;
+  if ($('lFiner')) $('lFiner').disabled = true;
   prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="lMsg">starting…</div>';
   try {
-    const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`, { part: p.id, min_safety: +$('lSafety').value || 2 });
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`,
+      { part: p.id, min_safety: +$('lSafety').value || 2, ...(spacing ? { spacing_mm: spacing } : {}) });
     await follow(job_id, (ev) => {
       const msg = $('lMsg'), bar = prog.querySelector('.bar > i');
       if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
@@ -2060,7 +2192,8 @@ async function showHeat(pid, run, index) {
     const bar = $('stationBar');
     bar.hidden = false;
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →
-        <b style="color:var(${c.holds ? '--ok' : '--bad'})">${c.holds ? 'holds' : 'doesn\'t hold'}, ${sx(c.safety)}</b>
+        ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>`
+          : `<b style="color:var(${c.holds ? '--ok' : '--bad'})">${c.holds ? 'holds' : 'doesn\'t hold'}, ${sx(c.safety)}</b>`}
         ${c.breaks_lb ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
       <div class="small muted" style="margin-top:2px">Colours: whittle's FEA <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span>
         0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${run.material.strength}). Decided by ${decided}.</div></div>
@@ -2481,10 +2614,10 @@ async function showStation(pid, run, index) {
     const removed = parametric ? st.removed : st.removed_part;
     const what = carved
       ? `<span><b>Preview, not carved yet:</b> step <b>${index}</b> · ${pct(st.removed)} ${carveShare(run)} carved away ·
-        ${st.saved_g} g less filament · <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
+        ${st.saved_g} g less filament · ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b>`}</span>`
       : lightened
       ? `<span><b>Preview, not cut yet:</b> step <b>${index}</b> · ${pct(st.removed)} out of the walls${st.top_holes ? ` and ${st.top_holes} hole${st.top_holes === 1 ? '' : 's'} in the top` : ''} · ${lbs(st.saved_lb)} lighter ·
-        <b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b></span>`
+        ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b>`}</span>`
       : framed
       ? `<span>design <b>${index}</b> · ${st.mass_lb} lb of steel · weakest ${st.safety}x · sags ${len(st.deflection_mm, 2)}</span>`
       : `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume
