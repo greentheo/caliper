@@ -117,6 +117,9 @@ def client(tmp_path, monkeypatch, quick):
     monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(authoring, "author_script", lambda s, feedback=None, prior=None, client=None: BOX_STOOL)
+    from caliper import design_api
+
+    monkeypatch.setattr(design_api, "_claude", lambda: True)    # the stub author stands in for Claude (CALI-91)
     return TestClient(create_app())
 
 
@@ -153,3 +156,28 @@ def test_answering_without_build_still_only_records_them(client):
     _follow(client, body["job_id"])
     state = client.post(f"/api/designs/{body['slug']}/clarify", json={"skip": True}).json()
     assert state["building"] is None and not state["parts"]
+
+
+
+# --- with no key, Build it says what's missing instead of failing (CALI-91, #68 item 5) ------------------------
+def test_with_no_key_build_it_starts_no_job_and_says_why(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper import design_api, jobs
+    from caliper.server import create_app
+
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    c = TestClient(create_app())
+    assert c.get("/api/designs").json()["claude"] is False
+    body = c.post("/api/designs", json={"prompt": PROMPT}).json()
+    _follow(c, body["job_id"])
+    before = {j.id for r in [jobs.RUNNER] for j in r._jobs.values()}
+    state = c.post(f"/api/designs/{body['slug']}/clarify", json={"skip": True, "build": True}).json()
+    assert state["building"] is None and state["claude"] is False
+    got = c.post(f"/api/designs/{body['slug']}/build")
+    assert got.status_code == 409 and got.json()["detail"] == design_api.NEEDS_KEY
+    assert not [j for j in jobs.RUNNER._jobs.values() if j.id not in before and j.kind == "firstrun"]
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")       # a key set: it says so, and builds
+    assert c.get("/api/designs").json()["claude"] is True
