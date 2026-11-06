@@ -426,7 +426,7 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     if rel:
         url = f"/api/designs/{state['slug']}/releases/{rel['id']}/files/"
         make.append(_line(f"Build package {rel['id']}: {len(rel['steps'])} steps, "
-                          + ("ready to cut." if rel["ready"] else "not ready: a check fails."),
+                          + ("ready to cut." if rel["ready"] else "not ready: a check fails or isn't trusted yet."),
                           "ok" if rel["ready"] else "bad", action="release",
                           links=[{"label": "Open the build book", "url": url + "index.html"}]
                           + ([{"label": "The kids' build book", "url": url + rel["kids"]}] if rel.get("kids") else [])))

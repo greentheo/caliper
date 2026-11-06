@@ -108,3 +108,24 @@ def test_a_check_that_raises_isnt_kept_and_never_reads_holding(tmp_path, monkeyp
     part = answers.answers(store, design_api.design_state(store), "stool")[1]
     assert not any(ln["status"] == "ok" for ln in part["lines"] if ln.get("study") == "load")
     assert "filled in" in consistency.filled(store, "stool")             # asked again, and this time it can tell
+
+
+def test_the_scorecard_doesnt_pass_it_and_the_package_isnt_ready_to_cut(tmp_path, monkeypatch):
+    """CALI-96 (#96 rework, item 1): the scorecard scored the filled block's strength as a pass, so the build book
+    said "ready to cut"."""
+    from caliper import cutplan, scorecard
+
+    if cutplan.available() is not None:
+        pytest.skip(cutplan.available())
+    store, rec = _checked(tmp_path, monkeypatch, FILLED)
+    card = scorecard.compute(store)
+    (check,) = [c for c in card["checks"] if c["id"] == "strength_adult"]
+    assert check["status"] == "untrusted" and card["summary"]["untrusted"] == 1
+    assert card["summary"]["pass"] == sum(c["status"] == "pass" for c in card["checks"])     # not counted as one
+    made = release.make(store, pdf=False)
+    assert made["ready"] is False
+    root = os.path.join(release.releases_dir(store), made["id"])
+    row = open(os.path.join(root, "index.html")).read().split("Scorecard, as released")[1].split("</table>")[0]
+    assert "not trusted" in row
+    make = answers.answers(store, design_api.design_state(store), None)[3]
+    assert not any("ready to cut" in ln["text"] for ln in make["lines"]), make["lines"]

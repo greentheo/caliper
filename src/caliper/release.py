@@ -933,7 +933,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                "<th class='n'>margin</th><th>trust</th></tr>")
     for c in card["checks"]:
         mark = "<span class='pass'>✓</span>" if c["status"] == "pass" else "<span class='fail'>✗</span>" \
-            if c["status"] == "fail" else "?"
+            if c["status"] == "fail" else "<span class='fail'>not trusted</span>" if c["status"] == "untrusted" else "?"
         out.append(f"<tr><td>{mark}</td><td>{_e(c.get('label') or c['id'])}</td>"
                    f"<td class='n'>{_num(c.get('value'), c.get('unit', ''))}</td><td class='n'>{_num(c.get('margin'))}</td>"
                    f"<td>{'<span class=trust>' + _e(TRUST.get(c['trust'], c['trust'])) + '</span>' if c.get('trust') else ''}</td></tr>")
@@ -1179,5 +1179,5 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     store.append_log({"kind": "release", "action": "released", "release": rid, "versions": versions,
                       "ready": rec["ready"]})
     emit("done", f"release {rid}: {len(st)} steps, {rec['sheets']} sheets, ~${shop['usd']:.0f} to buy"
-         + ("" if rec["ready"] else " — NOT ready, a check fails"), release=rid)
+         + ("" if rec["ready"] else " — NOT ready, a check fails or isn't settled"), release=rid)
     return rec
