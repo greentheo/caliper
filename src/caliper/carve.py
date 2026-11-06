@@ -68,73 +68,92 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     out_dir = os.path.join(runs_dir(store), rid)
     os.makedirs(out_dir, exist_ok=True)
-    emit("carving", f"carving the printed {mat['name']} in {stations - 1} steps")
-    sweep = ls.sweep(remove_up_to=remove_up_to, stations=stations,
-                     progress=lambda f: emit("carving", "", progress=round(0.7 * f, 3)))
-    density = M.printed(mat["key"])["density"] / 1000.0           # g/cm³, solid
-    voxel_cm3 = ls.grid.voxel_volume / 1000.0
-    printed0 = voxels0 = None
-    out = []
-    for k, st in enumerate(sweep.stations):
-        # the share of the printed part: whittle's own `removed` counts the wood it keeps too (CALI-86)
-        printed_voxels = float((st.design & ~wood).sum())
-        voxels0 = printed_voxels if voxels0 is None else voxels0
-        removed = 1.0 - printed_voxels / voxels0 if voxels0 else 0.0
-        emit("checking", f"step {k}: {removed:.0%} of the printed part carved away",
-             progress=0.7 + 0.3 * k / len(sweep.stations))
-        worst, sides, weak = None, None, None
-        for i in range(len(ctx["loads"])):
-            case, r = L.check_load(ctx, i, min_safety, solid=st.design)
-            if case.get("safety") is not None and (worst is None or case["safety"] < worst):
-                worst, weak = case["safety"], (case.get("plate") or {}).get("piece") if case["governs"] == "plate" \
-                    else case["fea"].get("in")
-            if r.supported:                                    # the printed part's own: what the carve changes
-                judged = r.solid & ~wood & ~ndimage.binary_dilation(ctx["attach"], iterations=1)
-                worked = float((r.von_mises[judged] / printed_strength).max()) if judged.any() else 0.0
-                mine = round(1.0 / worked, 2) if worked > 0 else None
-                sides = mine if sides is None or (mine is not None and mine < sides) else sides
-            else:
-                sides = 0.0
-        grams = printed_voxels * voxel_cm3 * density * mat["solid"]
-        printed0 = grams if printed0 is None else printed0
-        mesh = st.build()
-        import trimesh
+    # on disk from the start and after every step, so a run that dies (a crash, a restart) says how far it got
+    # (CALI-103); it's marked done at the end
+    partial = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(), "status": "running",
+               "version": store.design.part(part_id).version, "min_safety": min_safety, "material": mat["name"],
+               "spacing_mm": round(s, 2), "steps": stations, "stations": [], "best": None, "weak": "",
+               "share": "printed", "notes": []}
 
-        tm = trimesh.Trimesh(np.asarray(mesh.vertices, float), np.asarray(mesh.faces, int), process=True)
-        f = f"station_{k:02d}.stl"
-        tm.export(os.path.join(out_dir, f))
-        holds = sides is not None and sides >= min_safety         # the printed part, carved: what this is about
-        out.append({"index": k, "removed": round(removed, 3), "safety": sides, "holds": holds,
-                    "whole": worst, "whole_holds": worst is not None and worst >= min_safety, "weakest": weak,
-                    "printed_g": round(grams), "saved_g": round(printed0 - grams), "stl": f})
-        if not holds and k > 0:
-            break                                                  # the chart stops where it runs out
-    best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)
-    first = out[0]
-    if not first["whole_holds"] and first["holds"]:
-        # the part fails where the carve can't reach: say so first, it's the thing to fix
-        weak_note = (f"As it is, it doesn't hold: {first['whole']:g} times over, and it needs {min_safety:g}; the "
-                     f"weak link is the {first['weakest'] or 'wood'}, which carving the printed part doesn't change.")
-    else:
-        weak_note = ""
-    record = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(),
-              "version": store.design.part(part_id).version, "min_safety": min_safety,
-              "material": mat["name"], "spacing_mm": round(s, 2), "seconds": round(time.time() - t0, 1),
-              "stations": out, "best": best["index"] if best else None, "weak": weak_note,
-              "share": "printed",                     # removed is the printed part's share (CALI-86); older runs: the solid's
-              "notes": [*([weak_note] if weak_note else []),
-                        "The safety on the chart is the printed part's own; the whole part's is beside it.",
-                        f"Carved by whittle's sweep, {mat['name']} only: the "
-                        + ("wood, " if wood.any() else "") + "where it's pushed and where it's held are kept.",
-                        "Each step is checked by the strength check; using one rebuilds the part with that shape "
-                        "and checks it again: that's the number to go by.", *([mat["note"]] if mat.get("note") else [])]}
-    with open(os.path.join(out_dir, "run.json"), "w") as fh:
-        json.dump(record, fh, indent=2, default=str)
-    store.append_history(part_id, {"kind": "carve", "action": "studied", "run": rid, "stations": len(out)})
-    store.append_log({"kind": "carve", "action": "studied", "part": part_id, "run": rid})
-    emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g" if best and best["saved_g"]
-         else f"{len(out)} steps", run=rid, progress=1.0)
-    return record
+    def keep(rec: dict) -> None:
+        with open(os.path.join(out_dir, "run.json.tmp"), "w") as fh:
+            json.dump(rec, fh, indent=2, default=str)
+        os.replace(os.path.join(out_dir, "run.json.tmp"), os.path.join(out_dir, "run.json"))
+
+    keep(partial)
+    out: list = []
+    try:
+        emit("carving", f"carving the printed {mat['name']} in {stations - 1} steps")
+        sweep = ls.sweep(remove_up_to=remove_up_to, stations=stations,
+                         progress=lambda f: emit("carving", "", progress=round(0.7 * f, 3)))
+        density = M.printed(mat["key"])["density"] / 1000.0           # g/cm³, solid
+        voxel_cm3 = ls.grid.voxel_volume / 1000.0
+        printed0 = voxels0 = None
+        for k, st in enumerate(sweep.stations):
+            # the share of the printed part: whittle's own `removed` counts the wood it keeps too (CALI-86)
+            printed_voxels = float((st.design & ~wood).sum())
+            voxels0 = printed_voxels if voxels0 is None else voxels0
+            removed = 1.0 - printed_voxels / voxels0 if voxels0 else 0.0
+            emit("checking", f"step {k}: {removed:.0%} of the printed part carved away",
+                 progress=0.7 + 0.3 * k / len(sweep.stations))
+            worst, sides, weak = None, None, None
+            for i in range(len(ctx["loads"])):
+                case, r = L.check_load(ctx, i, min_safety, solid=st.design)
+                if case.get("safety") is not None and (worst is None or case["safety"] < worst):
+                    worst, weak = case["safety"], (case.get("plate") or {}).get("piece") if case["governs"] == "plate" \
+                        else case["fea"].get("in")
+                if r.supported:                                    # the printed part's own: what the carve changes
+                    judged = r.solid & ~wood & ~ndimage.binary_dilation(ctx["attach"], iterations=1)
+                    worked = float((r.von_mises[judged] / printed_strength).max()) if judged.any() else 0.0
+                    mine = round(1.0 / worked, 2) if worked > 0 else None
+                    sides = mine if sides is None or (mine is not None and mine < sides) else sides
+                else:
+                    sides = 0.0
+            grams = printed_voxels * voxel_cm3 * density * mat["solid"]
+            printed0 = grams if printed0 is None else printed0
+            mesh = st.build()
+            import trimesh
+
+            tm = trimesh.Trimesh(np.asarray(mesh.vertices, float), np.asarray(mesh.faces, int), process=True)
+            f = f"station_{k:02d}.stl"
+            tm.export(os.path.join(out_dir, f))
+            holds = sides is not None and sides >= min_safety         # the printed part, carved: what this is about
+            out.append({"index": k, "removed": round(removed, 3), "safety": sides, "holds": holds,
+                        "whole": worst, "whole_holds": worst is not None and worst >= min_safety, "weakest": weak,
+                        "printed_g": round(grams), "saved_g": round(printed0 - grams), "stl": f})
+            keep({**partial, "stations": out})
+            if not holds and k > 0:
+                break                                                  # the chart stops where it runs out
+        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)
+        first = out[0]
+        if not first["whole_holds"] and first["holds"]:
+            # the part fails where the carve can't reach: say so first, it's the thing to fix
+            weak_note = (f"As it is, it doesn't hold: {first['whole']:g} times over, and it needs {min_safety:g}; the "
+                         f"weak link is the {first['weakest'] or 'wood'}, which carving the printed part doesn't change.")
+        else:
+            weak_note = ""
+        record = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(),
+                  "version": store.design.part(part_id).version, "min_safety": min_safety,
+                  "material": mat["name"], "spacing_mm": round(s, 2), "seconds": round(time.time() - t0, 1),
+                  "stations": out, "best": best["index"] if best else None, "weak": weak_note,
+                  "share": "printed",                     # removed is the printed part's share (CALI-86); older runs: the solid's
+                  "status": "done", "steps": stations,
+                  "notes": [*([weak_note] if weak_note else []),
+                            "The safety on the chart is the printed part's own; the whole part's is beside it.",
+                            f"Carved by whittle's sweep, {mat['name']} only: the "
+                            + ("wood, " if wood.any() else "") + "where it's pushed and where it's held are kept.",
+                            "Each step is checked by the strength check; using one rebuilds the part with that shape "
+                            "and checks it again: that's the number to go by.", *([mat["note"]] if mat.get("note") else [])]}
+        keep(record)
+        store.append_history(part_id, {"kind": "carve", "action": "studied", "run": rid, "stations": len(out)})
+        store.append_log({"kind": "carve", "action": "studied", "part": part_id, "run": rid})
+        emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g" if best and best["saved_g"]
+             else f"{len(out)} steps", run=rid, progress=1.0)
+        return record
+    except BaseException as e:
+        # a carve that fails says so, with what it finished: it doesn't read "not finished" forever (CALI-103)
+        keep({**partial, "stations": out, "status": "failed", "error": f"{type(e).__name__}: {e}"})
+        raise
 
 
 def share(rec: dict) -> str:

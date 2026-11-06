@@ -307,3 +307,34 @@ def test_bad_build_choices_are_a_409(client, crate):
     assert r.status_code == 409 and "balsa" in r.json()["detail"]
     r = client.post("/api/designs/crate/parts/crate/construction/use", json={"build": {"glitter": 1}})
     assert r.status_code == 409
+
+
+def test_a_chat_message_is_in_the_log_before_its_job_runs(client, monkeypatch):
+    """CALI-103 (#95): the owner's app crashed with a chat job queued; the message was never logged, because a turn
+    logs it only after routing it. It's logged when it arrives now, once."""
+    import threading
+    import time
+
+    from caliper import chat
+
+    c = client
+    slug = _new(c, "a step stool")
+    gate, started = threading.Event(), threading.Event()
+    real = chat.turn
+
+    def slow(*a, **k):
+        started.set()
+        gate.wait(10)                                    # the job is running, or the app is about to die
+        return real(*a, **k)
+
+    monkeypatch.setattr(chat, "turn", slow)
+    job = c.post(f"/api/designs/{slug}/chat", json={"message": "what is it made of?"}).json()
+    started.wait(10)
+    said = [e for e in c.get(f"/api/designs/{slug}").json()["log"] if e["kind"] == "message"]
+    assert [e["text"] for e in said] == ["what is it made of?"]          # there before the turn does anything
+    gate.set()
+    end = time.time() + 60
+    while time.time() < end and c.get(f"/api/jobs/{job['job_id']}").json()["status"] not in ("done", "error"):
+        time.sleep(0.05)
+    said = [e for e in c.get(f"/api/designs/{slug}").json()["log"] if e["kind"] == "message"]
+    assert [e["text"] for e in said] == ["what is it made of?"]          # and once, not twice
