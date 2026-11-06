@@ -135,8 +135,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             if c.get("safety") is None:
                 continue
             if filled:
-                work.append(_line(untrusted(pid, filled), "warn", study="load",
-                                  numbers=f"On the filled-in solid the check read {c['safety']:g}x: not this part's."))
+                work.append(_line(untrusted(pid, filled), "warn", study="load"))   # the number: the panel, badged
                 continue
             # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
             rough = L.rough(run, c)
