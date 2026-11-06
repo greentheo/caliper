@@ -355,7 +355,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
             continue
         untrue = now.get("strength.filled") if c["metric"].startswith("strength") else None
         if untrue:
-            out.append(_line(f"! {label}{' (assumed)' if c.get('source') == 'assumed' else ''}: {untrue}", "warn",
+            # the verdict first; which check it is follows (#96 rework, item 5)
+            out.append(_line(f"{untrue} ({label[:1].lower() + label[1:]}{', assumed' if c.get('source') == 'assumed' else ''})", "warn",
                              study="load", model=rests_on_model(c["metric"])))
             continue
         v, late = now.get(c["metric"]), False

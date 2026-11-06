@@ -56,7 +56,8 @@ def test_a_filled_part_s_strength_reads_warn_on_both_cards(tmp_path, monkeypatch
     assert not any(ln["status"] == "ok" for ln in strength)
     design = answers.answers(store, state, None)[1]
     held = [ln for ln in design["lines"] if ln.get("study") == "load"]
-    assert held and all(ln["status"] == "warn" and UNTRUSTED in ln["text"] for ln in held), held
+    assert held and all(ln["status"] == "warn" and ln["text"].startswith(UNTRUSTED) for ln in held), held   # leads
+    assert held[0]["text"] == UNTRUSTED + " (holds Dad (200 lb), 2 times over, assumed)"
     assert not any(ln["text"].startswith("✓") for ln in held)
     # the number is still there, one click down, labelled as the filled solid's
     assert consistency.filled(store, "stool") and "filled in" in consistency.filled(store, "stool")
