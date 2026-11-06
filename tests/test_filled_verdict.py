@@ -77,9 +77,13 @@ def test_the_books_dont_print_a_holding_line_for_it(tmp_path, monkeypatch):
     root = os.path.join(release.releases_dir(store), made["id"])
     row = open(os.path.join(root, "index.html")).read().split("Will it hold?")[1].split("</table>")[0]
     assert "not trusted" in row and "x</td>" not in row, row
-    book = open(os.path.join(root, "kids.html")).read()
+    import html
+
+    book = html.unescape(open(os.path.join(root, "kids.html")).read())
     assert "It should hold" not in book and "times over" not in book
-    assert "We haven&#x27;t checked it holds yet" in book or "We haven't checked it holds yet" in book
+    # no stand-on-it steps at all: a grown-up checks it first (#96 rework, item 4)
+    assert "stands on it first" not in book and "your turn" not in book and "Test it" not in book
+    assert "Don't stand on it yet" in book and "a grown-up checks it first" in book
 
 
 def test_the_same_box_built_hollow_still_reads_as_it_holds(tmp_path, monkeypatch):
