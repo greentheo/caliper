@@ -100,6 +100,9 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
                 else worst["name"])
         return (("holds" if r.get("holds") else "doesn't hold") + f" — weakest {what}"
                 + (f" (needs {r.get('min_safety', 2):g}x)" if not r.get("holds") else ""), bool(r.get("holds")))
+    if kind == "lighten" and r.get("filled"):
+        text, _ = _headline("lighten", {k: v for k, v in r.items() if k != "filled"})
+        return "not trusted, on a filled-in shape: " + text, None              # no step of it holds (CALI-96)
     if kind == "lighten":
         st = r.get("stations", [])
         best = max((x for x in st if x.get("holds")), key=lambda x: x["saved_lb"], default=None)
@@ -193,6 +196,11 @@ def index(store, runs: dict[str, list[dict]], parts: list[dict], air: Optional[d
             elif part in current:
                 v = r.get("version") or version_at(history[part], created)
                 row.update({"version": v, "current": current[part], "stale": v != current[part]})
+            if kind in ("load", "lighten") and part in current and row.get("version") == current[part]:
+                from .consistency import filled
+
+                if filled(store, part):                   # the part as it is now, not a flag the run kept (CALI-96)
+                    r = {**r, "filled": True}
             row["headline"], row["ok"] = _headline(kind, r)
             rows.append(row)
     rows.sort(key=lambda x: x["created"] or 0, reverse=True)

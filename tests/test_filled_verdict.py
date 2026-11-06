@@ -134,3 +134,25 @@ def test_the_scorecard_doesnt_pass_it_and_the_package_isnt_ready_to_cut(tmp_path
     assert "not trusted" in row
     make = answers.answers(store, design_api.design_state(store), None)[3]
     assert not any("ready to cut" in ln["text"] for ln in make["lines"]), make["lines"]
+
+
+def test_studies_and_the_page_read_the_part_as_it_is_now(tmp_path, monkeypatch):
+    """CALI-96 (#96 rework, items 2 and 6): Studies read the flag a run kept, so a run from before CALI-96 on a filled
+    part read "holds"; the page's badges and callout had no word to go on. Both read the part as it is now."""
+    import json
+
+    store, rec = _checked(tmp_path, monkeypatch, FILLED)
+    path = os.path.join(load_study.runs_dir(store), rec["id"], "run.json")
+    old = {k: v for k, v in rec.items() if k != "filled"}                  # a run saved before the flag existed
+    with open(path, "w") as f:
+        json.dump(old, f)
+    state = design_api.design_state(store)
+    assert next(p for p in state["parts"] if p["id"] == "stool")["untrusted"]
+    rows = [r for r in state["studies"]["runs"] if r["kind"] == "load"]
+    assert rows and rows[0]["headline"].startswith("on a filled-in shape:") and rows[0]["ok"] is not True
+    text, ok = studies._headline("lighten", {"filled": True, "stations": [
+        {"index": 0, "holds": True, "saved_lb": 0.0, "safety": 3.0}, {"index": 1, "holds": True, "saved_lb": 1.2, "safety": 2.5}]})
+    assert text.startswith("not trusted, on a filled-in shape:") and ok is None
+    # the hollow box isn't flagged
+    hollow, _ = _checked(tmp_path / "h", monkeypatch, BOX_STOOL)
+    assert not next(p for p in design_api.design_state(hollow)["parts"] if p["id"] == "stool")["untrusted"]
