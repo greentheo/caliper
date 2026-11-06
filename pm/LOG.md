@@ -1,7 +1,18 @@
 # Caliper work log
 
 Append-only. Newest first. One entry per shipped task or notable decision.
-Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
+Format: `### 2026-11-06 · CALI-97 (#100, merged with main after #96) · "Not trusted" wins over "not resolved"; a ✗ stays a ✗
+- **Merged `main` (with #96) into #100.** Where both reword one strength verdict:
+  - the filled-in shape's "not trusted" comes first, because the check ran on a block, the more basic problem;
+  - "not resolved" or "not checked" comes next;
+  - a fail stays a ✗ under both.
+- **A filled-in part that fails** now reads ✗ on the part card, the design card and the Studies row, with "It ran on a
+  filled-in shape, so the part as built is weaker still". The block is stronger than the hollow part, so a fail on it
+  is certain. #96 alone had read every filled-in verdict as a warn.
+- **Page:** "not trusted" first, then "not resolved", then holds or doesn't. `design.js?v=45`.
+- Tests: `test_filled_verdict` (both together on the design card and in Studies).
+
+### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
 ---
 
@@ -50,6 +61,30 @@ The reviewer's 5 findings and the foreman's 10 items on #100.
 - **Before and after, on the printed fixtures:** only the 1-voxel-across verdicts change (✓ → warn).
 - **For #42:** the printed box reads ✓ 2.7× at 2 voxels across and ✗ 1.9× at 4, so 2 is too few to trust a verdict.
 - Tests: `tests/test_resolved.py` (main reads ✓ on both cards for the coarse tube). Commit: `caf174e`.
+### 2026-11-05 · CALI-96 (#78), #96 rework · "Not trusted yet" everywhere a filled part's strength shows
+The foreman's six items. The rule: wherever a strength verdict rests on the filled solid, it never reads holding.
+- **The scorecard** grades it "untrusted", so the build package isn't "ready to cut". `d5a66fd`
+- **The numbers layer and the 3D view** say "not trusted: a filled-in shape": the panel header, the case badges,
+  the heat callout, the lightening line and the step previews. `b3adda5`
+- **The cache fails closed:** "couldn't check its shape" is never holding, and isn't kept. `79fe045`
+- **The kids' book:** no stand-on-it page; "Don't stand on it yet: a grown-up checks it first". `c349f75`
+- **The design card** leads with the verdict, with the check's name after. `85bc844`
+- **Studies and Lighten** read the part as it is now, so old runs say so too. `be73bd1`
+
+---
+
+### 2026-11-05 · CALI-96 (#78) · A strength verdict on a filled-in solid reads "not trusted yet"
+- **Rule 6, found on the owner's step-stool-2 after the ship.** *What is it?* said `build()` was filled in, while
+  *Will it work?* read "✓ Holds kid + dad (250 lb), 2 times over" from a check that ran on that block.
+- `consistency.filled(store, pid)` (cached per version and script) now says when a part with `loads()` fails the
+  volume check by being filled in. When it does:
+  - both cards' strength lines read warn: "Not trusted yet: the strength check ran on a filled-in shape, not the
+    step stool as built. Fix its shape first …";
+  - the build book and the kids' book don't print a holding line;
+  - a study on it says, in its record, notes and headline, that the number is the block's.
+- Tests: `tests/test_filled_verdict.py`, written first and failing on main (the filled box read "Holds …, 3.1
+  times over"). On the owner's design, read on a copy: main shows ✓, this branch shows warn on both cards.
+  Commit: `53f1067`.
 
 ### 2026-11-05 · CALI-103 (#95) · The app no longer crashes when the page and a study query one mesh at once
 - **The owner's app died three times (exit 134/139) in libspatialindex:** two threads in one cached mesh's R-tree,

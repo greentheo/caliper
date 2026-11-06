@@ -88,6 +88,9 @@ def _lb(v) -> str:
 
 def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     """What a run came to, in one line, and whether that's good news (None: neither)."""
+    if kind == "load" and r.get("filled") and r.get("holds"):   # a block's number, not the part's: no "holds"
+        return (f"not trusted: it ran on a filled-in shape"
+                + (f" (the block read {round(r['safety'], 1):g}x)" if r.get("safety") is not None else "")), None
     if kind == "load":
         cases = r.get("cases") or []
         worst = min(cases, key=lambda c: c.get("safety") if c.get("safety") is not None else 1e9, default=None)
@@ -102,10 +105,15 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
             word = "not checked: its walls are too thin for the voxels" if L.unchecked(r, coarse[0]) else \
                 "not resolved yet: too coarse to see its walls"
             return f"{word} (the FEA read {round(coarse[0]['safety'], 1):g}x)", None
-        if worst in coarse:
+        if r.get("filled"):                     # a ✗ on the block stays a ✗: the part as built is weaker still
+            what += ", on a filled-in shape: the part as built is weaker still"
+        elif worst in coarse:
             what += ", and the fail may be the model's: the voxels can't see its walls"
         return (("holds" if r.get("holds") else "doesn't hold") + f" — weakest {what}"
                 + (f" (needs {r.get('min_safety', 2):g}x)" if not r.get("holds") else ""), bool(r.get("holds")))
+    if kind == "lighten" and r.get("filled"):
+        text, _ = _headline("lighten", {k: v for k, v in r.items() if k != "filled"})
+        return "not trusted, on a filled-in shape: " + text, None              # no step of it holds (CALI-96)
     if kind == "lighten":
         st = r.get("stations", [])
         best = max((x for x in st if x.get("holds")), key=lambda x: x["saved_lb"], default=None)
@@ -178,9 +186,14 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         return " · ".join(bits) or "; ".join((r.get("notes") or ["nothing to cut"])[:1]), None
     if kind == "scorecard":
         s = r.get("summary") or {}
-        return f"{s.get('pass', 0)} pass · {s.get('fail', 0)} fail", not s.get("fail")
+        untrusted = s.get("untrusted") or 0                         # not trusted is never green (CALI-96)
+        return (f"{s.get('pass', 0)} pass · {s.get('fail', 0)} fail" + (f" · {untrusted} not trusted" if untrusted else ""),
+                not s.get("fail") and not untrusted)
     if kind == "release":
-        return (f"release {r.get('id')} · {'ready to cut' if r.get('ready') else 'not ready: a check fails'}"
+        s = (r.get("card") or {}).get("summary") or {}
+        why = ("a check fails" if s.get("fail") or not s else "a check isn't trusted yet" if s.get("untrusted")
+               else "a check isn't settled")
+        return (f"release {r.get('id')} · {'ready to cut' if r.get('ready') else 'not ready: ' + why}"
                 f" · ~${round(r.get('shopping_usd') or 0)} to buy"), bool(r.get("ready"))
     return "", None
 
@@ -203,6 +216,11 @@ def index(store, runs: dict[str, list[dict]], parts: list[dict], air: Optional[d
             elif part in current:
                 v = r.get("version") or version_at(history[part], created)
                 row.update({"version": v, "current": current[part], "stale": v != current[part]})
+            if kind in ("load", "lighten") and part in current and row.get("version") == current[part]:
+                from .consistency import filled
+
+                if filled(store, part):                   # the part as it is now, not a flag the run kept (CALI-96)
+                    r = {**r, "filled": True}
             row["headline"], row["ok"] = _headline(kind, r)
             rows.append(row)
     rows.sort(key=lambda x: x["created"] or 0, reverse=True)

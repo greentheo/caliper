@@ -762,6 +762,11 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
                 record["too_thin"] = True
                 notes.append(f"{seen} {RESOLVE_MIN:g} across would take more voxels than a study of a part this "
                              f"size may: {NOT_CHECKED}")
+    from .consistency import filled
+
+    if filled(store, part_id):                        # what this number rests on (CALI-96)
+        record["filled"] = True
+        notes.append("This ran on a filled-in shape, not the part as built: its numbers are the block's.")
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
     store.append_history(part_id, {"kind": "load", "action": "studied", "run": rid,

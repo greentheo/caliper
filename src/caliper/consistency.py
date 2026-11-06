@@ -319,6 +319,37 @@ def _loads(mesh, declared: dict, pieces: list[dict], tol: float) -> AssertionRes
                            detail="; ".join(missed))
 
 
+_FILLED: dict = {}
+
+
+def filled(store, part_id: str) -> Optional[str]:
+    """CALI-96: why a part's strength check isn't trusted, or None: a part with loads() whose build() is filled in
+    round its pieces (the volume check fails that way), so the check analysed a block, not the part as built.
+    Kept per version and script, as a card asks again on every redraw."""
+    from . import construction as C
+
+    entry = store.design.part(part_id)
+    try:
+        script = store.read_script(part_id)
+    except (OSError, KeyError, ValueError):
+        return None
+    key = (store.root, part_id, entry.version if entry else None, hash(script))
+    if key not in _FILLED:
+        out = None
+        try:
+            declared = C.declared(store, part_id)
+            if declared.get("loads"):
+                vol = next((r for r in check(declared, store.part_geometry(part_id)) if r.id == "construction_volume"), None)
+                if vol is not None and not vol.passed and "filled in" in (vol.detail or ""):
+                    out = vol.detail
+        except Exception as e:  # noqa: BLE001 — closed, not open: a shape that couldn't be checked isn't trusted
+            return f"couldn't check its shape against its pieces ({type(e).__name__}: {e})"   # and not kept
+        _FILLED[key] = out
+        while len(_FILLED) > 64:
+            _FILLED.pop(next(iter(_FILLED)))
+    return _FILLED[key]
+
+
 def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
     """The declarations measured against the built solid: [] when the part declares nothing."""
     if not declared:

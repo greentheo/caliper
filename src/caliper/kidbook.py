@@ -244,17 +244,26 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
         pages.append({"title": "Paint it", "say": "Let the glue dry overnight, then paint it any colour you like. "
                                                    "Two coats, and let the first one dry.", "img": img})
     held = []
+    untrusted = any(c.get("filled") for cases in (rec.get("strength") or {}).values() for c in cases)
     for cases in (rec.get("strength") or {}).values():
+        if untrusted:                                    # checked on a block: nothing to promise (CALI-96)
+            break
         for c in cases:
             if c.get("safety"):
                 held.append(f"It should hold {c['name'].lower()}, {answers._times(c['safety'])}.")
     with open(os.path.join(root, "kids", "finished.png"), "wb") as f:
         f.write(release.draw(view, [(every, "now")]))
-    pages.append({"title": "Test it", "img": "kids/finished.png",
-                  # trying a new stool is a grown-up's step (rule 6): they go first, the kid watches
-                  "say": "A grown-up stands on it first, gently, while you watch. Then it's your turn, with the "
-                         "grown-up right beside you. " + " ".join(held),
-                  "note": answers.PROMISE, "grownup": True})
+    if untrusted:
+        # its strength hasn't been checked on the stool as built: no standing on it at all (#96 rework, item 4)
+        pages.append({"title": "Don't stand on it yet", "img": "kids/finished.png",
+                      "say": "Don't stand on it yet. Its strength hasn't been checked on it as it's built, so a "
+                             "grown-up checks it first, before anyone stands on it.", "grownup": True})
+    else:
+        pages.append({"title": "Test it", "img": "kids/finished.png",
+                      # trying a new stool is a grown-up's step (rule 6): they go first, the kid watches
+                      "say": "A grown-up stands on it first, gently, while you watch. Then it's your turn, with the "
+                             "grown-up right beside you. " + " ".join(held),
+                      "note": answers.PROMISE, "grownup": True})
     with open(os.path.join(root, "kids.html"), "w") as f:
         f.write(page(release.title(rec["design"]), pages))
     return "kids.html"

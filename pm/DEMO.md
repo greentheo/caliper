@@ -576,6 +576,10 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 3. **A fail on coarse voxels stays a ✗:** "Doesn't hold …, and it needs 2. The fail may be the model's: the voxels
    can't see its … walls."
 4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_resolved.py tests/test_run_order.py tests/test_jobs.py`.
+### 2026-11-05 · A filled-in part isn't trusted to hold (CALI-96 #78)
+1. **Open a copy of `step-stool-2`:** *Will it work?* reads "Not trusted yet: the strength check ran on a
+   filled-in shape …" on the design and on the part. Say "fix its shape to match its pieces" and it clears.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_filled_verdict.py`.
 
 ### 2026-11-05 · The page and a study can query one part at once (CALI-103 #95)
 1. **Start a carve, then revise the part and click around the cards while it runs:** the app stays up, and a card
