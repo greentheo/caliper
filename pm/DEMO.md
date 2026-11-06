@@ -566,6 +566,11 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-05 · A filled-in part isn't trusted to hold (CALI-96 #78)
+1. **Open a copy of `step-stool-2`:** *Will it work?* reads "Not trusted yet: the strength check ran on a
+   filled-in shape …" on the design and on the part. Say "fix its shape to match its pieces" and it clears.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_filled_verdict.py`.
+
 ### 2026-11-01 · #75 reworked from the reviewer's review (CALI-87 #63)
 1. **Name both sides of a box stool "side" and make a build package:** the kids' book is there, with "Add the
    first side", "Add the other side", and "touches both sides" on the top's page.
