@@ -26,7 +26,7 @@ Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book n
   - `trials.predict`: the "Test it" prediction's basis says it's a rough guess (here);
   - the 3D callout, the history line, `pictures.reply`, `chat.picture`'s ok, the make card (#111 review);
   - not a strength-FEA verdict: the frame study and snow (beam models), goal labels, design-rule promotion;
-  - `lighten` and `carve` stations: their own FEA runs, which this doesn't touch; filed as #113.
+  - `lighten` and `carve` stations: their own FEA runs, which this doesn't touch: #101 (CALI-106).
 - Tests: `tests/test_unresolved_score.py` (main fails 4 of the first 6). `design.js?v=48`.
 
 ### 2026-11-06 · CALI-97 (#100, merged with main after #96) · "Not trusted" wins over "not resolved"; a ✗ stays a ✗
