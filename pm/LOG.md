@@ -12,13 +12,21 @@ Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book n
   resolved)".
 - **The design card's scorecard line** (#103's) names it "N not resolved", apart from "not checked yet".
 - **The kid's book promises nothing on it:** no "It should hold…"; "Don't stand on it yet", for a grown-up.
+- **From #111's review, four more places that said "holds"** on it, now fixed:
+  - the 3D stress callout reads "not resolved: the FEA read 3.5x, too coarse to see its walls", with no breaking load;
+  - `pictures.reply` (kid-facing) says a grown-up checks it again before anyone stands on it, and the turn isn't ok;
+  - the history line reads "strength check: not resolved", because the study now records `unresolved` in the
+    part's history;
+  - the make card reads "not ready: a strength check isn't resolved".
 - **The audit** (every reader of a strength run's verdict), each handling `unresolved`:
   - `answers`: both cards (#100);
   - `studies`: the load row (#100), the scorecard row and the release row (here);
   - `scorecard`, `release`, `kidbook` (here);
   - `chat._facts`: the raw numbers say "NOT RESOLVED…" (here);
   - `trials.predict`: the "Test it" prediction's basis says it's a rough guess (here);
-  - `lighten` and `carve`: their own runs, which this doesn't touch (#100's noted follow-up).
+  - the 3D callout, the history line, `pictures.reply`, `chat.picture`'s ok, the make card (#111 review);
+  - not a strength-FEA verdict: the frame study and snow (beam models), goal labels, design-rule promotion;
+  - `lighten` and `carve` stations: their own FEA runs, which this doesn't touch; filed as #113.
 - Tests: `tests/test_unresolved_score.py` (main fails 4 of the first 6). `design.js?v=48`.
 
 ### 2026-11-06 · CALI-97 (#100, merged with main after #96) · "Not trusted" wins over "not resolved"; a ✗ stays a ✗

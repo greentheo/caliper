@@ -1316,7 +1316,7 @@ function historyItem(h) {
   if (h.kind === 'whittle') return `<li class="hist">studied in whittle (${esc(h.study)}, ${h.stations} stations)</li>`;
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
-  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${h.holds ? 'holds' : 'doesn\'t hold'}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${h.unresolved && h.holds ? 'not resolved' : h.holds ? 'holds' : 'doesn\'t hold'}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
   if (h.kind === 'patterns' && h.action === 'made') return `<li class="hist">patterns for hand tools (${h.pieces} pieces)</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
@@ -2238,8 +2238,10 @@ async function showHeat(pid, run, index) {
     bar.hidden = false;
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →
         ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>`
-          : `<b style="color:var(${c.holds ? '--ok' : '--bad'})">${c.holds ? 'holds' : 'doesn\'t hold'}, ${sx(c.safety)}</b>`}
-        ${c.breaks_lb ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
+          : c.unresolved && c.holds        // no "holds" from voxels too coarse to see its walls (CALI-110)
+            ? `<b style="color:var(--amber)">${coarseWord(c)}: the FEA read ${sx(c.safety)}, too coarse to see its walls</b>`
+            : `<b style="color:var(${c.holds ? '--ok' : '--bad'})">${c.holds ? 'holds' : 'doesn\'t hold'}, ${sx(c.safety)}</b>`}
+        ${c.breaks_lb && !(c.unresolved && c.holds) ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
       <div class="small muted" style="margin-top:2px">Colours: whittle's FEA <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span>
         0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${run.material.strength}). Decided by ${decided}.</div></div>
       <button id="stationClose" class="ghost">×</button>`;

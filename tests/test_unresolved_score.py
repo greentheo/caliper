@@ -125,3 +125,63 @@ def test_the_design_card_s_scorecard_line_names_it(tmp_path):
                              "checks": [], "versions": {}}], "goals": {"checks": []}, "load_runs": []}
     (line,) = [c for c in answers.design(store, state) if c["key"] == "work"][0]["lines"][:1]
     assert line == {**line, "text": "1 check pass, 1 not resolved, 1 not checked yet.", "status": "warn"}
+
+
+# --- the four places the reviewer found still saying "holds" (#111 review) ---------------------------------------
+JS = os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")
+
+
+def _fn(src, name):
+    import re
+
+    m = re.search(rf"^(async )?function {name}\(.*?^}}\n", src, re.S | re.M)
+    assert m, name
+    return m.group(0)
+
+
+def test_the_picture_reply_never_says_it_still_holds_on_an_unresolved_check():
+    from caliper import pictures
+
+    got = {"subject": "T. rex", "size_in": [6.0, 4.0], "panel": "front", "safety": 3.5, "min_safety": 2,
+           "holds": True, "unresolved": True, "too_thin": False}
+    text = pictures.reply(got)
+    assert "still holds" not in text and "times over" not in text
+    assert text.endswith("so a grown-up checks it again finer before anyone stands on it.")
+    assert pictures.reply({**got, "too_thin": True}).endswith(
+        "a grown-up checks it again by hand or with a printed test piece before anyone stands on it.")
+    assert "It still holds, 3.5 times over" in pictures.reply({**got, "unresolved": False})
+
+
+def test_the_make_card_names_why_a_book_isn_t_ready():
+    from caliper import answers
+
+    def why(**s):
+        return answers._why_not({"card": {"summary": {"fail": 0, "untrusted": 0, "unresolved": 0, **s}}})
+    assert why(unresolved=1) == "a strength check isn't resolved"
+    assert why(untrusted=1) == "a check isn't trusted yet" and why(fail=1) == "a check fails"
+
+
+def test_the_history_line_says_not_resolved(tmp_path, monkeypatch):
+    import json
+    import shutil
+    import subprocess
+
+    store, rec = _store(tmp_path, monkeypatch, TUBE, "tube", 1, GOALS)
+    h = store.history("tube")[-1]
+    assert h["kind"] == "load" and h["holds"] and h["unresolved"] is True
+    fine, _ = _store(tmp_path, monkeypatch, TUBE, "tube", 4, GOALS)
+    assert "unresolved" not in fine.history("tube")[-1]
+    node = shutil.which("node") or os.path.expanduser("~/.nvm/versions/node/v22.17.1/bin/node")
+    if not os.path.exists(node):
+        pytest.skip("no node")
+    script = "const esc = (s) => String(s);\n" + _fn(open(JS).read(), "historyItem") + (
+        f"console.log(JSON.stringify([historyItem({json.dumps(h)}), historyItem({json.dumps(fine.history('tube')[-1])})]));")
+    got = json.loads(subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30, check=True).stdout)
+    assert "strength check: not resolved" in got[0] and "holds" not in got[0]
+    assert "strength check: holds" in got[1]
+
+
+def test_the_stress_callout_has_no_holds_or_breaking_load_for_it():
+    src = _fn(open(JS).read(), "showHeat")
+    assert "c.unresolved && c.holds        // no \"holds\" from voxels too coarse" in src
+    assert "${c.breaks_lb && !(c.unresolved && c.holds) ?" in src

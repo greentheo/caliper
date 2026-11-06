@@ -672,7 +672,8 @@ def picture_part(store: DesignStore, part_id: str, subject: str, where: str = ""
     except (ValueError, ImportError) as e:
         return TurnResult(action="picture", ok=False, part=part_id, events=events, error=str(e),
                           reply=f"I couldn't put a {subject} on it: {e}.")
-    return TurnResult(action="picture", ok=got["ok"] and got.get("holds", True) is not False, part=part_id,
+    return TurnResult(action="picture", ok=got["ok"] and got.get("holds", True) is not False
+                      and not got.get("unresolved"), part=part_id,
                       version=got.get("version"), events=events, reply=got["reply"])
 
 
