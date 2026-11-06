@@ -1839,11 +1839,13 @@ async function runCarve(p) {
     if (prog && !S.carveJob[p.id]) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
   }
 }
-async function followCarve(p, jobId) {
+async function followCarve(p, jobId, stopping) {
   const cj = S.carveJob[p.id] = { ...(S.carveJob[p.id] || { text: 'carving…', progress: 0, t0: Date.now() }), job: jobId };
+  if (stopping) cj.stopping = true;                // asked to stop before this page loaded (#102 review)
   paintCarve(p.id);
   try {
     await follow(jobId, (ev) => {
+      if (ev.kind === 'stopping') cj.stopping = true;
       if (ev.text && ev.kind !== 'started') cj.text = ev.text;
       const m = /^step (\d+):/.exec(ev.text || ''), n = / in (\d+) steps/.exec(ev.text || '');
       if (m) cj.step = +m[1];
@@ -1878,7 +1880,7 @@ function carveProgress(pid) {
     const min = (Date.now() - cj.p0t) / (cj.progress - cj.p0) * (1 - cj.progress) / 60000;
     left = ` · about ${min < 1.5 ? '1 min' : min < 90 ? `${Math.round(min)} min` : `${(min / 60).toFixed(1)} h`} left`;
   }
-  const where = cj.step != null && cj.steps ? `step ${cj.step} of ${cj.steps}: ` : '';
+  const where = cj.step != null && cj.steps ? `step ${cj.step + 1} of ${cj.steps}: ` : '';   // one count (#102)
   return `<div class="bar"><i style="width:${pct}%"></i></div>
     <div class="small muted" id="carveMsg">${esc(cj.stopping ? 'stopping at the next step…'
       : where + (where ? (cj.text || '').replace(/^step \d+: /, '') : cj.text || ''))}${left}</div>
@@ -1901,22 +1903,32 @@ function paintCarve(pid) {
 }
 // what the button says before it's pressed: from the last carve of this part, or its strength check (a carve is
 // one sweep and a check per step), never "a few minutes" for an hour's work
-// a carve's time over its strength check's, measured: 47 on the printed box, 67 on the mixed stool (2 voxels
-// through), about 60 to 70 from the bar stool's sweep (Theo's run and night shift's). The long side, so the label
-// never undersells it.
-const CARVE_PER_CHECK = 65;
+// A carve's time over its strength check's isn't a constant: 47 on the printed box, 67 on the mixed stool, about 65 on
+// the bar stool's sweep, about 190 on the reviewer's tube (#102 review). So until a carve of the part has finished,
+// the label is a floor, "at least about N min", from the low end; after one, that carve's own time.
+const CARVE_PER_CHECK_AT_LEAST = 45;
+const minutesText = (min) => (min < 1.5 ? '1 min' : min < 75 ? `${Math.round(min)} min` : min < 100 ? 'an hour'
+  : `${(min / 60).toFixed(1)} hours`);
+// the check to go by: this version's at the default voxels. A finer run asked for (CALI-97) is always finer than the
+// default, so it's the coarsest at this version, never the latest whatever its voxels
+function defaultCheck(p) {
+  const at = loadRuns(p.id).filter((r) => r.version === p.version && r.seconds);
+  return at.length ? at.reduce((a, r) => (r.spacing_mm > a.spacing_mm ? r : a)) : null;
+}
 function carveTime(p) {
   const done = carveRuns(p.id).find((r) => r.status === 'done' && r.seconds);
-  const check = loadRuns(p.id)[0];
-  const secs = done ? done.seconds : check && check.seconds ? check.seconds * CARVE_PER_CHECK : null;
-  if (secs == null) return 'can take an hour on a big part';
-  const min = secs / 60;
-  return `about ${min < 1.5 ? '1 min' : min < 75 ? `${Math.round(min)} min` : min < 100 ? 'an hour' : `${(min / 60).toFixed(1)} hours`} at this size`;
+  if (done) return `about ${minutesText(done.seconds / 60)} at this size, as its last carve took`;
+  const check = defaultCheck(p);
+  if (!check) return 'check it holds first: how long it takes comes from that';
+  if (check.cases.some((c) => c.fea && c.fea.supported === false)) {
+    return "its voxels don't connect the load to a support yet, so a carve can't run";
+  }
+  return `at least about ${minutesText(check.seconds * CARVE_PER_CHECK_AT_LEAST / 60)} at this size`;
 }
 function wireCarve(p) {
   if ($('carveGo')) $('carveGo').onclick = () => runCarve(p);
   const on = S.design && S.design.carving;           // a carve running since before this page: follow it (CALI-101)
-  if (on && on.part === p.id && !S.carveJob[p.id]) followCarve(p, on.job);
+  if (on && on.part === p.id && !S.carveJob[p.id]) followCarve(p, on.job, on.stopping);
   paintCarve(p.id);
   document.querySelectorAll('#inspector [data-carve]').forEach((c) => {
     c.onclick = () => showStation(p.id, carveRuns(p.id)[0], +c.dataset.carve);

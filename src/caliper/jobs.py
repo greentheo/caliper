@@ -83,11 +83,14 @@ class Job:
     def to_dict(self, after: int = 0) -> dict:
         return {"id": self.id, "kind": self.kind, "label": self.label, "status": self.status,
                 "events": self.since(after), "result": self.result, "error": self.error,
-                "error_id": self.error_id}
+                "error_id": self.error_id, "stopping": self.stopping}
 
 
 class JobRunner:
     """A small worker pool with per-key serialization."""
+
+    #: Called between an exclusive submit's check and its queueing, for a test that the two are one step (CALI-101).
+    _between: Optional[Callable[[], None]] = None
 
     def __init__(self, workers: int = 4):
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="caliper-job")
@@ -108,6 +111,8 @@ class JobRunner:
                 ahead = next((j for j in self._jobs.values() if j.lock == job.lock and not j.over), None)
                 if ahead is not None:
                     raise Busy(ahead)
+                if self._between is not None:   # a test's hook between the check and the queueing (#102 review)
+                    self._between()
             self._jobs[job.id] = job
             key_lock = self._locks.setdefault(job.lock, threading.Lock())
         self._pool.submit(self._run, job, fn, key_lock)
@@ -120,7 +125,10 @@ class JobRunner:
             job = self._jobs.get(job_id)
             if job is None:
                 return None
+            asked = not job._stop.is_set()
             job._stop.set()
+            if job.status == "running" and asked:          # said, so a page that reloads hears it (#102 review)
+                job.emit("stopping", "stopping at the next step…")
             if job.status == "queued":
                 job.status = "cancelled"
                 job.finished = time.time()

@@ -91,7 +91,8 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     keep(partial)
     out: list = []
     try:
-        emit("carving", f"carving the printed {mat['name']} in {stations - 1} steps")
+        # one count everywhere (#102 review): n checks, as drawn and n - 1 carved; the panel says "step k of n"
+        emit("carving", f"carving the printed {mat['name']} in {stations} steps (as drawn, then {stations - 1} carved)")
         def swept(f: float) -> None:
             stop()                                                     # a cancel lands here too (CALI-101)
             emit("carving", "", progress=round(0.7 * f, 3))

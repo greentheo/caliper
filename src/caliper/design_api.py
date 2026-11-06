@@ -195,7 +195,8 @@ def _building(slug: str) -> Optional[str]:
 def _carving(slug: str) -> Optional[dict]:
     """The design's carve while it's queued or running, so a redraw or a reload finds its panel again (CALI-101)."""
     j = RUNNER.running(f"carve:{slug}")
-    return {"job": j.id, "part": j.label.split(" · ", 1)[-1]} if j is not None else None
+    return ({"job": j.id, "part": j.label.split(" · ", 1)[-1], "stopping": j.stopping}   # survives a reload (#102)
+            if j is not None else None)
 
 
 def _where(job) -> str:
@@ -207,7 +208,7 @@ def _where(job) -> str:
     at = next((m.group(1) for t in reversed(said) if (m := re.match(r"step (\d+):", t))), None)
     if at is None:
         return "working out its steps" + (f" (it takes {steps})" if steps else "")
-    return f"step {at}" + (f" of {steps}" if steps else "")
+    return f"step {int(at) + 1}" + (f" of {steps}" if steps else "")      # step 0 is the first of n (#102)
 
 
 # --- serialising -----------------------------------------------------------------------------------
