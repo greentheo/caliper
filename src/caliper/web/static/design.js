@@ -433,7 +433,8 @@ function pick(e) {
 
 // ------------------------------------------------------------------------------- the session
 async function loadDesigns(select) {
-  const { designs } = await api('GET', '/api/designs');
+  const { designs, claude } = await api('GET', '/api/designs');
+  S.claude = !!claude;
   const pickEl = $('designPick');
   pickEl.innerHTML = designs.length
     ? designs.map((d) => `<option value="${esc(d.slug)}">${esc(d.name)}</option>`).join('')
@@ -551,7 +552,9 @@ function renderThread() {
   if (d.clarify && d.clarify.length) html.push(clarifyCard(d.clarify));
   // answered, nothing built, nothing building: one button (CALI-59)
   const unbuilt = !d.parts.length && !(d.clarify && d.clarify.length) && !d.building && !S.busy;
-  if (unbuilt) {
+  if (unbuilt && d.claude === false) {             // a build needs Claude: said, not a job bound to fail (CALI-91)
+    html.push('<div class="note">Building a new design needs a Claude key (see .env.example). Until then, open one of ours from New design.</div>');
+  } else if (unbuilt) {
     html.push(`<div class="actions"><button class="primary" id="buildFirst">Build it</button>
       <span class="muted small">or say what to build first</span></div>`);
   }
@@ -574,6 +577,8 @@ function renderThread() {
       catch (e) { showErr(e.message); }
     };
   }
+  if (typeof d.claude === 'boolean') S.claude = d.claude;
+  paintSendNote();
   if (S.buildBubble) t.append(S.buildBubble);          // a redraw mid-build keeps its progress
   if (d.building && S.following !== d.building) followBuild(d.building);
   t.scrollTop = t.scrollHeight;
@@ -741,6 +746,7 @@ function startNew() {
     <div class="say"><textarea id="newPrompt" rows="3"
       placeholder="a step stool so my kid can reach the sink, from 3/4 in plywood"></textarea>
       ${micButton('newPrompt')}</div>
+    <p class="small muted" id="newNote">${S.claude ? TO_CLAUDE : NEEDS_KEY}</p>
     <div class="actions"><button class="primary" id="newGo">Start</button>
       ${was ? `<button id="newBack" class="ghost">← back to ${esc(was.name)}</button>` : ''}</div>
     <div id="sampleRow" class="samples"></div></div>`;
@@ -751,6 +757,7 @@ function startNew() {
   });
   if (was) $('newBack').onclick = () => { $('designPick').value = was.slug; openDesign(was.slug); };
   wireMics($('thread'));
+  paintSendNote();
   $('newPrompt').focus();
   showSamples();
 }
@@ -787,21 +794,58 @@ function micTip(btn, text) {
   tip.textContent = text;
   clearTimeout(micTip.t); micTip.t = setTimeout(() => tip.remove(), 9000);
 }
-const MAC_DICTATION = 'Press the 🎤 key (or Fn twice) and talk: your Mac types what you say into the box. Press it again when you\'re done.';
-function dictate(box, btn) {
+// CALI-91 (rule 6): a person's words never leave the machine unless they send them. A browser's speech
+// recognition sends the audio to its maker (Google, in Chrome), so the first press asks, and the answer is kept for
+// that browser. Where the browser can recognise speech on the device itself, it listens there and doesn't ask.
+const DICTATION = "Use your computer's dictation: on a Mac, press the 🎤 key (or Fn twice).";
+const MIC_ASK = 'Your browser turns speech into words by sending it to its maker (Google, in Chrome). Talk anyway?';
+const MIC_KEY = 'caliper.mic';
+function micAnswer() { try { return localStorage.getItem(MIC_KEY); } catch (e) { return null; } }
+function micRemember(v) { try { localStorage.setItem(MIC_KEY, v); } catch (e) { /* forgotten: it asks again */ } }
+async function onDevice(lang) {
+  try { return !!(Speech && Speech.available && (await Speech.available({ langs: [lang], processLocally: true })) === 'available'); }
+  catch (e) { return false; }
+}
+async function dictate(box, btn) {
   if (listening) { listening.stop(); return; }
   box.focus();
-  if (!Speech) return micTip(btn, MAC_DICTATION);
+  if (!Speech) return micTip(btn, DICTATION);
+  const lang = navigator.language || 'en-US';
+  const local = await onDevice(lang);
+  if (!local && micAnswer() !== 'yes') return micAsk(box, btn, lang);
+  listen(box, btn, lang, local);
+}
+function micAsk(box, btn, lang) {
+  let ask = btn.parentElement.querySelector('.mic-ask');
+  if (!ask) { ask = document.createElement('div'); ask.className = 'mic-tip mic-ask'; btn.parentElement.append(ask); }
+  const no = micAnswer() === 'no';
+  ask.innerHTML = `${esc(no ? `${DICTATION} Or let the browser listen: it sends what you say to its maker.` : MIC_ASK)}
+    <button type="button" class="small" data-talk="1">Talk</button>${no ? '' : '<button type="button" class="small ghost" data-type="1">Type instead</button>'}`;
+  ask.querySelector('[data-talk]').onclick = () => { micRemember('yes'); ask.remove(); listen(box, btn, lang, false); };
+  const type = ask.querySelector('[data-type]');
+  if (type) type.onclick = () => { micRemember('no'); ask.remove(); box.focus(); };
+}
+function listen(box, btn, lang, local) {
   const rec = new Speech();
-  rec.lang = navigator.language || 'en-US'; rec.interimResults = true; rec.continuous = false;
+  rec.lang = lang; rec.interimResults = true; rec.continuous = false;
+  if (local) rec.processLocally = true;            // on this device: nothing leaves it
   const start = box.value ? box.value.replace(/\s*$/, ' ') : '';
   rec.onresult = (e) => { box.value = start + [...e.results].map((r) => r[0].transcript).join(''); };
   rec.onerror = (e) => micTip(btn, e.error === 'not-allowed' || e.error === 'service-not-allowed'
-    ? `The browser isn't allowed to listen. ${MAC_DICTATION}` : `I didn't catch that (${e.error}). Try again, or: ${MAC_DICTATION}`);
+    ? `The browser isn't allowed to listen. ${DICTATION}` : `I didn't catch that (${e.error}). Try again, or: ${DICTATION}`);
   rec.onend = () => { listening = null; btn.classList.remove('on'); };
   try { rec.start(); listening = rec; btn.classList.add('on'); micTip(btn, 'Listening… press 🎤 again to stop.'); }
-  catch (e) { micTip(btn, MAC_DICTATION); }
+  catch (e) { micTip(btn, DICTATION); }
 }
+// what's typed goes to Claude: said under the first-run box, and under the chat box until the first message
+// is sent (CALI-91). Without a key nothing is sent, and a first build can't run: that's said instead
+const TO_CLAUDE = "What you type goes to Claude (Anthropic's AI) to design it.";
+const NEEDS_KEY = 'Building a new design needs a Claude key (see .env.example). Until then, open one of ours below.';
+function sendNote(d) {
+  if (!S.claude) return '';
+  return d && (d.log || []).some((e) => e.kind === 'message') ? '' : TO_CLAUDE;
+}
+function paintSendNote() { const n = $('sendNote'); if (n) n.textContent = sendNote(S.slug ? S.design : null); }
 wireMics(document);
 async function createDesign(prompt) {
   if (!prompt.trim()) return;
