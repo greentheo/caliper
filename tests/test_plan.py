@@ -81,7 +81,7 @@ def test_parts_that_mount_on_nothing_keep_the_plan_s_order():
     (lambda p: p["rules"].append({"id": "one", "expr": "1"}), "the check 'one' doesn't say yes or no"),
     (lambda p: p["rules"].append({"id": "sum", "expr": "min_clearance(rotor, mast) + 1"}),
      "the check 'sum' doesn't say yes or no"),
-    (lambda p: p["rules"].append({"id": "kw", "expr": "holds_aligned(hub, rotor, tol=1)"}), "names an argument"),
+    (lambda p: p["rules"].append({"id": "kw", "expr": "holes_aligned(hub, rotor, tol=1)"}), "names an argument"),
     (lambda p: p["rules"].append({"id": "long", "expr": " + ".join(["rotor_d"] * 60) + " > 0"}),
      "the check 'long' is longer than a check should be"),
 ])
@@ -318,3 +318,13 @@ def test_the_card_says_a_check_that_couldn_t_run_wasn_t_checked(tmp_path):
              "goals": {"checks": []}}
     lines = [ln for ln in answers.design(store, {**state, "load_runs": []}) if ln["key"] == "work"][0]["lines"]
     assert lines[0]["text"] == "No check has run yet: 3 not checked yet." and lines[0]["status"] == "warn"
+
+
+@pytest.mark.parametrize("expr", ["holes_aligned(hub, rotor)", "not holes_aligned(hub, rotor)",
+                                  "holes_aligned(hub, rotor) and min_clearance(rotor, mast) >= 20"])
+def test_a_measure_that_says_yes_or_no_is_a_check_on_its_own(expr):
+    """#103 review: YES_NO said "holds_aligned", so a lone holes_aligned(a, b), which the planner is told it may use,
+    was refused and the whole plan fell back to one part."""
+    got = P.validate(_with(x=lambda p: p["rules"].append({"id": "aligned", "expr": expr})))
+    assert got.rules[-1].expr == expr
+    assert "holes_aligned" in P.FUNCTIONS and "holes_aligned(a, b)" in P.SYSTEM

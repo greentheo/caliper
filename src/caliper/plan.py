@@ -26,7 +26,7 @@ FUNCTIONS = {"interference", "min_clearance", "clearance", "max_interference", "
 #: nothing private: a dunder chain is refused (#103 review).
 ATTRIBUTES = {"dx", "dy", "dz", "min_x", "min_y", "min_z", "max_x", "max_y", "max_z"}
 #: The measures that answer yes or no, so a rule may be one of them alone.
-YES_NO = {"holds_aligned", "approx", "within", "fits"}
+YES_NO = {"holes_aligned", "approx", "within", "fits"}
 #: The expression a rule may be: arithmetic, comparisons, and/or/not, calls to the measures, names and numbers.
 #: No powers, no strings, no lists, no subscripts (#103 review: "9 ** 9 ** 9 > 0" and "'a' * 10 ** 10" froze the
 #: app).
