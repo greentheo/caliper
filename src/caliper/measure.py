@@ -99,6 +99,9 @@ def bounding_box(g: Geometry) -> SimpleNamespace:
     return SimpleNamespace(
         dx=float(d[0]), dy=float(d[1]), dz=float(d[2]),
         min=[float(x) for x in lo], max=[float(x) for x in hi],
+        # by name, for a rule (the evaluator reads attributes, not indexes): bbox(mast).max_z (CALI-35)
+        min_x=float(lo[0]), min_y=float(lo[1]), min_z=float(lo[2]),
+        max_x=float(hi[0]), max_y=float(hi[1]), max_z=float(hi[2]),
     )
 
 

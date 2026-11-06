@@ -69,11 +69,15 @@ def test_a_check_that_cant_run_says_why_on_the_card(store):
     assert work["lines"][0]["text"].startswith("I couldn't check it holds: 'a foot' doesn't touch the part")
 
 
-def test_a_printed_part_s_verdict_says_about(store, tmp_path):
+def test_a_printed_part_s_verdict_says_about(store, tmp_path, monkeypatch):
     """CALI-86 (#62, finding 9; rule 6): a printed part's strength model is rough, and its card said "Holds …, N
     times over" as plainly as a plywood one's."""
     from .test_load_study import BOX_STOOL
 
+    # four voxels across its 6 mm walls (CALI-97): at the fixture's two, the ✓ is "not resolved yet". Seen at four,
+    # the box under 50 lb reads ✗ 1.9x (it read ✓ 2.7x at two), so the ✓ here is under 40 lb
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 4)
+    store.write_part("box", PRINTED.replace('"lb": 50', '"lb": 40'), intent="a printed box")
     load_study.study(store, "box")
     line = next(ln for ln in answers.answers(store, design_api.design_state(store), "box")[1]["lines"]
                 if ln.get("study") == "load")

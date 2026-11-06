@@ -181,3 +181,34 @@ def test_with_no_key_build_it_starts_no_job_and_says_why(tmp_path, monkeypatch):
     assert not [j for j in jobs.RUNNER._jobs.values() if j.id not in before and j.kind == "firstrun"]
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-not-a-real-key")       # a key set: it says so, and builds
     assert c.get("/api/designs").json()["claude"] is True
+
+
+def test_with_no_key_a_reviewed_plan_isn_t_built_or_planned_again(tmp_path, monkeypatch):
+    """#104 merged with #103's plan-first first run: no key, no call to Claude, and Build it says what's missing."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper import design_api, jobs
+    from caliper import plan as P
+    from caliper.server import create_app
+
+    from .test_plan import TURBINE, TURBINE_SAID
+
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(P, "_ask", lambda *a, **k: pytest.fail("the planner was called with no key"))
+    store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
+    P.save(store, P.validate(TURBINE), "review")
+    c = TestClient(create_app())
+    state = c.get(f"/api/designs/{store.design.slug}").json()
+    assert state["plan"]["status"] == "review" and state["claude"] is False
+    before = set(jobs.RUNNER._jobs)
+    got = c.post(f"/api/designs/{store.design.slug}/build")
+    assert got.status_code == 409 and got.json()["detail"] == design_api.NEEDS_KEY
+    assert not [j for jid, j in jobs.RUNNER._jobs.items() if jid not in before and j.kind == "firstrun"]
+    # and the first run itself, if it's reached some other way, plans nothing without Claude
+    fresh = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "other"))
+    monkeypatch.setattr(firstrun.chat, "author_part", lambda *a, **k: firstrun.chat.TurnResult(
+        "author", "no", ok=False, error="stub"))
+    out = firstrun.build(fresh, use_llm=True, strength=False)
+    assert out["steps"]["plan"] == "planning it in several parts needs Claude: I built it as one"

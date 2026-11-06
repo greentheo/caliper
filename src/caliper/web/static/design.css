@@ -120,6 +120,7 @@ a.btn:hover { border-color: var(--accent); }
 .badge.ref { border-color: #5b6673; color: #b7c1cc; }
 .badge.ok { border-color: #2c6b3a; color: var(--ok); }
 .badge.bad { border-color: #6b2c2c; color: var(--bad); }
+.badge.warn { border-color: var(--amber); color: var(--amber); }   /* not resolved, not checked (CALI-97) */
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 13px; }
 .kv .k { color: var(--muted); }
 .list { margin: 0; padding: 0; list-style: none; font-size: 13px; }

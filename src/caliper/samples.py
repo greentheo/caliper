@@ -70,17 +70,20 @@ def open_sample(name: str, base: Optional[str] = None, root: Optional[str] = Non
     return store
 
 
-def _part_of(path: str) -> str:
-    """Which part a run is of (its record says), so the newest is kept for each."""
+def _part_of(path: str) -> tuple[str, float]:
+    """Which part a run is of and when it was made (its record says), so the newest is kept for each."""
+    from .runs import made
+
     files = [path] if os.path.isfile(path) else [os.path.join(path, f) for f in sorted(os.listdir(path))]
     for f in files:
         if f.endswith(".json"):
             try:
                 with open(f) as fh:
-                    return str(json.load(fh).get("part") or "")
+                    rec = json.load(fh)
+                return str(rec.get("part") or ""), made(rec)
             except (OSError, ValueError, AttributeError):
                 continue
-    return ""
+    return "", 0.0
 
 
 def save(slug: str, name: str, base: Optional[str] = None, out: Optional[str] = None) -> str:
@@ -108,9 +111,11 @@ def save(slug: str, name: str, base: Optional[str] = None, out: Optional[str] = 
             if not os.path.isdir(folder):
                 continue
             newest: dict = {}
-            for run in sorted(os.listdir(folder)):            # named by time: the last of each part is the newest
-                newest[_part_of(os.path.join(folder, run))] = run
-            for run in newest.values():
+            for run in sorted(os.listdir(folder)):            # the one made last of each part (CALI-97), not by name
+                part, when = _part_of(os.path.join(folder, run))
+                if part not in newest or (when, run) >= newest[part]:
+                    newest[part] = (when, run)
+            for _, run in newest.values():
                 a, b = os.path.join(folder, run), os.path.join(work, kind, run)
                 os.makedirs(os.path.dirname(b), exist_ok=True)
                 (shutil.copytree if os.path.isdir(a) else shutil.copy2)(a, b)
