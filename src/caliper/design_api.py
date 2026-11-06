@@ -427,16 +427,19 @@ def router():
         if not req.message.strip():
             raise HTTPException(status_code=422, detail="empty message")
 
+        # the message is kept the moment it arrives, before its job waits or runs: a crash mustn't eat it (CALI-103)
+        message = req.message.strip()
+        load(slug).append_log({"kind": "message", "text": message, "scope": req.scope or None, "queued": True})
+
         def work(j):
             store = DesignStore.load(slug)
             before = len(store.log())
             try:
-                res = chat.turn(store, req.message.strip(), scope=req.scope or None,
+                res = chat.turn(store, message, scope=req.scope or None, logged=True,
                                 on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
             except Exception as e:
                 # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87)
-                said = store.log()[before:]
-                if any(x.get("kind") == "message" for x in said) and not any(x.get("kind") == "reply" for x in said):
+                if not any(x.get("kind") == "reply" for x in store.log()[before:]):
                     store.append_log({"kind": "reply", "action": "error", "ok": False,
                                       "reply": f"I couldn't do that: {type(e).__name__}: {e}"})
                 raise
