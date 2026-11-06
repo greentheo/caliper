@@ -162,9 +162,9 @@ def shapes(declared: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 def _signed(mesh, points: np.ndarray) -> np.ndarray:
     """Signed distance to the solid's surface: positive inside."""
-    import trimesh
+    from . import spatial
 
-    return trimesh.proximity.signed_distance(mesh, points)
+    return spatial.signed_distance(mesh, points)
 
 
 def _xyz(p) -> str:
@@ -247,7 +247,9 @@ def _in_no_piece(mesh, pieces: list[dict], tol: float, n: int = 14) -> float:
     lo, hi = mesh.bounds
     g = [np.linspace(a, b, n + 2)[1:-1] for a, b in zip(lo, hi)]
     pts = np.stack(np.meshgrid(*g, indexing="ij"), -1).reshape(-1, 3)
-    pts = pts[mesh.contains(pts)]
+    from . import spatial
+
+    pts = pts[spatial.contains(mesh, pts)]
     if not len(pts):
         return 0.0
     near = np.full(len(pts), np.inf)
