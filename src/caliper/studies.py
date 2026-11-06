@@ -88,9 +88,9 @@ def _lb(v) -> str:
 
 def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     """What a run came to, in one line, and whether that's good news (None: neither)."""
-    if kind == "load" and r.get("filled"):
-        text, _ = _headline("load", {k: v for k, v in r.items() if k != "filled"})
-        return "on a filled-in shape: " + text, None             # a block's number, not the part's (CALI-96)
+    if kind == "load" and r.get("filled"):                       # a block's number, not the part's: no "holds"
+        return (f"not trusted: it ran on a filled-in shape"
+                + (f" (the block read {round(r['safety'], 1):g}x)" if r.get("safety") is not None else "")), None
     if kind == "load":
         cases = r.get("cases") or []
         worst = min(cases, key=lambda c: c.get("safety") if c.get("safety") is not None else 1e9, default=None)
@@ -175,9 +175,14 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         return " · ".join(bits) or "; ".join((r.get("notes") or ["nothing to cut"])[:1]), None
     if kind == "scorecard":
         s = r.get("summary") or {}
-        return f"{s.get('pass', 0)} pass · {s.get('fail', 0)} fail", not s.get("fail")
+        untrusted = s.get("untrusted") or 0                         # not trusted is never green (CALI-96)
+        return (f"{s.get('pass', 0)} pass · {s.get('fail', 0)} fail" + (f" · {untrusted} not trusted" if untrusted else ""),
+                not s.get("fail") and not untrusted)
     if kind == "release":
-        return (f"release {r.get('id')} · {'ready to cut' if r.get('ready') else 'not ready: a check fails'}"
+        s = (r.get("card") or {}).get("summary") or {}
+        why = ("a check fails" if s.get("fail") or not s else "a check isn't trusted yet" if s.get("untrusted")
+               else "a check isn't settled")
+        return (f"release {r.get('id')} · {'ready to cut' if r.get('ready') else 'not ready: ' + why}"
                 f" · ~${round(r.get('shopping_usd') or 0)} to buy"), bool(r.get("ready"))
     return "", None
 

@@ -795,13 +795,22 @@ def title(name: str) -> str:
     return first.rstrip(".") or name
 
 
+def _status(card: dict) -> str:
+    """The book's header: ready to cut, or why not, each reason in its own words (CALI-96: "not trusted", not
+    "unknown")."""
+    s = card["summary"]
+    if s["fail"] == 0 and s["unknown"] == 0:
+        return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass</span>'
+    untrusted = s.get("untrusted") or 0
+    why = [f"{s['fail']} check(s) fail" if s["fail"] else "", f"{untrusted} not trusted" if untrusted else "",
+           f"{s['unknown'] - untrusted} unknown" if s["unknown"] - untrusted else ""]
+    return f'<span class="status notready">Not ready — {", ".join(w for w in why if w)}</span>'
+
+
 def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], notes: list[str]) -> str:
     """The build book, as one printable page."""
     m = card.get("metrics") or {}
-    ready = card["summary"]["fail"] == 0 and card["summary"]["unknown"] == 0
-    status = (f'<span class="status ready">Ready to cut — {card["summary"]["pass"]} of {len(card["checks"])} checks pass</span>'
-              if ready else f'<span class="status notready">Not ready — {card["summary"]["fail"]} check(s) fail, '
-              f'{card["summary"]["unknown"]} unknown</span>')
+    status = _status(card)
     big = [("weight.total_lb", "all up, with the payload"), ("hitch.tongue_lb", "on the tongue"),
            ("frame.yield_x", "frame yields at × its load"), ("drag.lbf", "drag at speed")]
     nums = "".join(f"<div><b>{_num(m[k]['value'], m[k]['unit'])}</b><span>{_e(lab)}</span></div>"

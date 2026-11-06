@@ -62,7 +62,7 @@ def test_a_filled_part_s_strength_reads_warn_on_both_cards(tmp_path, monkeypatch
     # the number is still there, one click down, labelled as the filled solid's
     assert consistency.filled(store, "stool") and "filled in" in consistency.filled(store, "stool")
     text, ok = studies._headline("load", rec)
-    assert ok is not True and text.startswith("on a filled-in shape:"), text
+    assert ok is not True and text.startswith("not trusted: it ran on a filled-in shape"), text
 
 
 def test_the_books_dont_print_a_holding_line_for_it(tmp_path, monkeypatch):
@@ -149,10 +149,28 @@ def test_studies_and_the_page_read_the_part_as_it_is_now(tmp_path, monkeypatch):
     state = design_api.design_state(store)
     assert next(p for p in state["parts"] if p["id"] == "stool")["untrusted"]
     rows = [r for r in state["studies"]["runs"] if r["kind"] == "load"]
-    assert rows and rows[0]["headline"].startswith("on a filled-in shape:") and rows[0]["ok"] is not True
+    assert rows and rows[0]["headline"].startswith("not trusted: it ran on a filled-in shape") and rows[0]["ok"] is not True
     text, ok = studies._headline("lighten", {"filled": True, "stations": [
         {"index": 0, "holds": True, "saved_lb": 0.0, "safety": 3.0}, {"index": 1, "holds": True, "saved_lb": 1.2, "safety": 2.5}]})
     assert text.startswith("not trusted, on a filled-in shape:") and ok is None
     # the hollow box isn't flagged
     hollow, _ = _checked(tmp_path / "h", monkeypatch, BOX_STOOL)
     assert not next(p for p in design_api.design_state(hollow)["parts"] if p["id"] == "stool")["untrusted"]
+
+
+def test_the_studies_rows_and_the_book_say_not_trusted_in_their_own_words():
+    """CALI-96 (#96 re-review): the Studies scorecard row read "1 pass · 0 fail" in green, the strength row "on a
+    filled-in shape: holds — …", the release row "a check fails" when none did, and the book "1 unknown"."""
+    text, ok = studies._headline("scorecard", {"summary": {"pass": 1, "fail": 0, "unknown": 1, "untrusted": 1}})
+    assert text == "1 pass · 0 fail · 1 not trusted" and ok is False
+    text, ok = studies._headline("load", {"filled": True, "holds": True, "safety": 3.1, "min_safety": 2,
+                                          "cases": [{"name": "a foot", "safety": 3.1}]})
+    assert text == "not trusted: it ran on a filled-in shape (the block read 3.1x)" and ok is None
+    assert "holds" not in text
+    rec = {"id": "001", "ready": False, "shopping_usd": 40,
+           "card": {"summary": {"pass": 1, "fail": 0, "unknown": 1, "untrusted": 1}}}
+    assert studies._headline("release", rec)[0] == "release 001 · not ready: a check isn't trusted yet · ~$40 to buy"
+    rec["card"]["summary"].update({"fail": 1})
+    assert "not ready: a check fails" in studies._headline("release", rec)[0]
+    head = release._status({"summary": {"pass": 1, "fail": 0, "unknown": 1, "untrusted": 1}, "checks": [{}, {}]})
+    assert "1 not trusted" in head and "unknown" not in head
