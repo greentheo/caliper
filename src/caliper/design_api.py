@@ -123,6 +123,7 @@ class FrameRequest(BaseModel):
 class LoadRequest(BaseModel):
     part: str
     min_safety: float = load_study.MIN_SAFETY     # at each load times its factor
+    spacing_mm: Optional[float] = None            # a finer run than the default voxels (CALI-97)
 
 
 class Shop(BaseModel):
@@ -541,9 +542,12 @@ def router():
         if not _aero_available():
             raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
 
+        if req.spacing_mm is not None and not (math.isfinite(req.spacing_mm) and 0.1 <= req.spacing_mm <= 50):
+            raise HTTPException(status_code=422, detail="a voxel size is a number of mm, between 0.1 and 50")
+
         def work(j):
             s = DesignStore.load(slug)
-            return load_study.study(s, req.part, min_safety=req.min_safety,
+            return load_study.study(s, req.part, min_safety=req.min_safety, spacing=req.spacing_mm,
                                     emit=lambda k, t="", **d: j.emit(k, t, **d))
 
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")

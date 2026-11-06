@@ -52,6 +52,12 @@ def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
 
 
+def coarse(run: dict, inches: bool = True) -> str:
+    """What a verdict says when the FEA that governs it couldn't see the wall it's checking (CALI-97)."""
+    return (f"Not resolved yet: the check was too coarse to see its {_len(run.get('thinnest_mm') or 0, inches)} walls. "
+            f"Check it again finer.")
+
+
 def rests_on_model(metric: str) -> bool:
     """Whether a scorecard check's number comes from a strength or frame model (and so carries the promise): not a
     weight, a cost, or whether the pieces fit a sheet (CALI-86)."""
@@ -122,6 +128,10 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
 
         for c in run["cases"]:
             if c.get("safety") is None:
+                continue
+            if L.unresolved(run, c):                         # an FEA that can't see the wall is no verdict (CALI-97)
+                work.append(_line(coarse(run, inches), "warn", study="load",
+                                  numbers=f"At {run['spacing_mm']:g} mm voxels the FEA read {c['safety']:g}x."))
                 continue
             # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
             rough = L.rough(run, c)
@@ -264,6 +274,15 @@ def measured(store: DesignStore, state: dict) -> dict:
         if run and run.get("version") == current[pid] and run.get("safety") is not None:
             safeties.append(run["safety"])
             breaks += [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
+    from . import load_study as L
+
+    cases = [(r, c) for r in state.get("load_runs") or [] if r.get("version") == current.get(r["part"])
+             for c in r.get("cases") or [] if c.get("safety") is not None]
+    if any(L.unresolved(r, c) for r, c in cases):      # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
+        out["strength.unresolved"] = coarse(next(r for r, c in cases if L.unresolved(r, c)),
+                                            (state.get("display_units") or "in") == "in")
+    if any(L.rough(r, c) for r, c in cases):
+        out["strength.rough"] = True                   # the printed model's number: "about", as the part card says
     if safeties:
         out["strength.safety"] = min(safeties)
     if breaks:
@@ -332,6 +351,11 @@ def held_to(state: dict, now: dict) -> list[dict]:
             out.append(_line(f"{'✗' if test['status'] == 'bad' else '!'} {label}: {test['text']}", test["status"],
                              study="load", model="scorecard"))
             continue
+        untrue = now.get("strength.unresolved") if c["metric"].startswith("strength") else None
+        if untrue:
+            out.append(_line(f"! {label}{' (assumed)' if c.get('source') == 'assumed' else ''}: {untrue}", "warn",
+                             study="load", model=rests_on_model(c["metric"])))
+            continue
         v, late = now.get(c["metric"]), False
         if v is None and c["metric"] in scored:
             v, late = scored[c["metric"]], stale
@@ -342,7 +366,10 @@ def held_to(state: dict, now: dict) -> list[dict]:
                              study="load" if c["metric"].startswith("strength") else None))
             continue
         ok = v >= c["limit"] if c.get("op", ">=") == ">=" else v <= c["limit"]
-        out.append(_line(f"{'✓' if ok else '✗'} {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}"
+        num = _num(c['metric'], v, units.get(c['metric'], ''))
+        if c["metric"].startswith("strength") and now.get("strength.rough"):
+            num = "about " + num                       # the printed model's number, as the part card says (CALI-97)
+        out.append(_line(f"{'✓' if ok else '✗'} {label}{assumed}: {num}"
                          + (" (scored before the last change: score it again)." if late else "."),
                          "warn" if late else "ok" if ok else "bad",
                          study="load" if c["metric"].startswith("strength") else None,

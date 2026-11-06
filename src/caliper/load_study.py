@@ -188,14 +188,33 @@ def spacing_for(pieces: list[dict], volume: float, longest: float, walls: Option
                    f"piece ({min(thin):.1f} mm), to keep the study quick: read the FEA as a picture.")
 
 
-def study_spacing(declared: dict, mesh, pieces: list[dict]) -> tuple[float, Optional[str]]:
-    """The voxel size the strength check analyses this part at (:func:`spacing_for`), from what it declares."""
+#: Voxels the FEA needs across the thinnest wall before its number can carry a verdict (CALI-97). NEEDS ENGINEER
+#: CHECK: 2 is the floor until #42's convergence study sets it.
+RESOLVE_MIN = 2.0
+
+
+def _thin(declared: dict, mesh, pieces: list[dict]) -> tuple[list, Optional[float]]:
+    """Every piece's thinnest dimension, and a printed part's thinnest wall (measured)."""
     walls = None
     if any(isinstance(it, dict) and it.get("kind") == "printed" for it in declared.get("construction") or []):
         from .measure import Geometry, min_wall_thickness
 
         walls = min_wall_thickness(Geometry.from_mesh(mesh))
+    thin = [pc["thickness"] for pc in pieces if pc["kind"] == "sheet"] + [2 * pc["half"] for pc in pieces
+                                                                           if pc["kind"] == "stick"]
+    return thin + ([walls] if walls and walls > 0 else []), walls
+
+
+def study_spacing(declared: dict, mesh, pieces: list[dict]) -> tuple[float, Optional[str]]:
+    """The voxel size the strength check analyses this part at (:func:`spacing_for`), from what it declares."""
+    _, walls = _thin(declared, mesh, pieces)
     return spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)), walls)
+
+
+def unresolved(run: dict, case: dict) -> bool:
+    """A verdict the FEA governs at fewer than RESOLVE_MIN voxels across the thinnest wall: too coarse to see it."""
+    thin, s = run.get("thinnest_mm"), run.get("spacing_mm")
+    return bool(case.get("governs") == "fea" and thin and s and thin / s < RESOLVE_MIN)
 
 
 # ---------------------------------------------------------------------------
@@ -456,7 +475,7 @@ def runs_dir(store: DesignStore) -> str:
     return os.path.join(store.root, "loads")
 
 
-def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None) -> dict:
+def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, spacing: Optional[float] = None) -> dict:
     """Everything a strength check of this part needs, set up once: its loads, pieces and material, the
     voxels, where it's held. Shared by :func:`study` and the lightening study (``lighten.py``)."""
     from whittle import LoadStudy, Material, Mesh
@@ -479,7 +498,11 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None) -
     mat = printed or sheet_mat or material(pieces)
     _sides(mesh, pieces)
     tol = tolerance(mesh)
-    spacing, coarse = study_spacing(declared, mesh, pieces)
+    thins, walls = _thin(declared, mesh, pieces)
+    if spacing is None:
+        spacing, coarse = spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)), walls)
+    else:                                               # asked for: a finer run (CALI-97)
+        coarse = None
     held = parse_held(declared.get("held"), mesh.bounds.tolist(), max(spacing * 0.6, 1.0))
     # the designer's check (loads_land) asks the same question, so the two never disagree (CALI-84)
     rch = reach(tol, spacing)
@@ -516,6 +539,7 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None) -
         boxes.append(box)
     ctx = {"declared": declared, "loads": loads, "boxes": boxes, "mesh": mesh, "pieces": pieces,
            "mat": mat, "tol": tol, "spacing": spacing, "coarse": coarse, "held": held, "ls": ls,
+           "thinnest": min(thins) if thins else None,
            "attach": attach, "plate_mat": sheet_mat or mat}
     if printed and wood:
         _two_materials(ctx, wood, sheet_mat, rest)
@@ -633,12 +657,12 @@ NOTES = [
 
 
 def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
-          emit: Optional[Callable] = None) -> dict:
+          emit: Optional[Callable] = None, spacing: Optional[float] = None) -> dict:
     """Every load the part declares, through whittle's FEA and the plate check. Returns the run record."""
     emit = emit or (lambda *a, **k: None)
     t0 = time.time()
     try:
-        ctx = prepare(store, part_id, emit)
+        ctx = prepare(store, part_id, emit, spacing=spacing)
     except ValueError as e:
         # kept, so the card says why rather than offering a check that fails the same way (CALI-81)
         store.append_history(part_id, {"kind": "load", "action": "failed", "why": str(e),
@@ -676,6 +700,16 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "min_safety": min_safety, "held": held, "cases": cases, "notes": notes,
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),
     }
+    thin = ctx.get("thinnest")
+    if thin:                                          # can the FEA see its thinnest wall? (CALI-97)
+        record["thinnest_mm"] = round(thin, 2)
+        record["resolved"] = thin / ctx["spacing"] >= RESOLVE_MIN
+        if not record["resolved"]:
+            finer = round(thin / RESOLVE_MIN * 0.98, 2)
+            minutes = record["seconds"] * (ctx["spacing"] / finer) ** 3 / 60      # voxels go as the cube; rough
+            record["finer"] = {"spacing_mm": finer, "minutes": max(1, round(minutes))}
+            notes.append(f"The FEA ran at {ctx['spacing']:.1f} mm voxels across a {thin:.1f} mm wall: too coarse to "
+                         f"see it. Check it again at {finer:.1f} mm (about {record['finer']['minutes']} min).")
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
     store.append_history(part_id, {"kind": "load", "action": "studied", "run": rid,

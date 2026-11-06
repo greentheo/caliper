@@ -1762,7 +1762,9 @@ function loadView(p) {
   return `<div class="form">
       <span>least safety</span><span><input type="number" id="lSafety" value="${runs[0] ? runs[0].min_safety : 2}" min="1" max="10" step="0.5">
         × at each load times its factor</span></div>
-    <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button></div>
+    <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button>
+      ${runs[0] && runs[0].finer && runs[0].version === p.version ? `<button id="lFiner" title="${runs[0].finer.spacing_mm} mm voxels, at
+        least two across its ${runs[0].thinnest_mm} mm walls">Check it again finer (about ${runs[0].finer.minutes} min)</button>` : ''}</div>
     <div id="lProgress"></div>
     ${runs.length ? loadResults(p, runs[pick], runs) : ''}
     ${p.printed ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : (runs.length ? lightenView(p) : '')}`;
@@ -1919,6 +1921,8 @@ function wireLoad(p) {
   if (ask) ask.onclick = () => { $('msg').value = 'It has to hold '; $('msg').focus(); };
   const go = $('lGo');
   if (go) go.onclick = () => runLoad(p);
+  const finer = $('lFiner');                       // a run too coarse to see its walls: again, finer (CALI-97)
+  if (finer) finer.onclick = () => runLoad(p, loadRuns(p.id)[0].finer.spacing_mm);
   const sel = $('lRun');
   if (sel) sel.onchange = () => { S.loadRun[p.id] = +sel.value; clearStation(); renderInspector(); };
   const lg = $('lightGo');
@@ -1961,12 +1965,14 @@ async function runLighten(p) {
   }
 }
 
-async function runLoad(p) {
+async function runLoad(p, spacing) {
   const prog = $('lProgress'), go = $('lGo');
   go.disabled = true;
+  if ($('lFiner')) $('lFiner').disabled = true;
   prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="lMsg">starting…</div>';
   try {
-    const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`, { part: p.id, min_safety: +$('lSafety').value || 2 });
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`,
+      { part: p.id, min_safety: +$('lSafety').value || 2, ...(spacing ? { spacing_mm: spacing } : {}) });
     await follow(job_id, (ev) => {
       const msg = $('lMsg'), bar = prog.querySelector('.bar > i');
       if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
