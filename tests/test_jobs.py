@@ -133,3 +133,19 @@ def test_a_synchronous_write_waits_for_a_running_job_on_the_same_key():
         order.append("setting written")
     _wait(job)
     assert order == ["job saved", "setting written"]
+
+
+
+def test_a_job_left_running_is_seen_and_waited_for():
+    """CALI-97: the conftest teardown's check (jobs.wait_idle) sees a job a test leaves running, on any runner."""
+    import threading
+
+    from caliper import jobs
+
+    gate = threading.Event()
+    runner = jobs.JobRunner()
+    job = runner.submit("carve", lambda j: gate.wait(30), label="a carve left behind")
+    left = jobs.wait_idle(0.3)
+    assert [j.id for j in left] == [job.id]
+    gate.set()
+    assert jobs.wait_idle(10) == []

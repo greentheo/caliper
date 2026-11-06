@@ -18,6 +18,7 @@ import threading
 import time
 import traceback
 import uuid
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
@@ -63,10 +64,15 @@ class Job:
                 "error_id": self.error_id}
 
 
+#: Every runner made, held weakly: the app's RUNNER and any a test makes.
+RUNNERS = weakref.WeakSet()
+
+
 class JobRunner:
     """A small worker pool with per-key serialization."""
 
     def __init__(self, workers: int = 4):
+        RUNNERS.add(self)                      # so a test can wait for every runner's jobs (CALI-97)
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="caliper-job")
         self._jobs: dict[str, Job] = {}
         self._locks: dict[str, threading.Lock] = {}
@@ -82,6 +88,11 @@ class JobRunner:
             key_lock = self._locks.setdefault(job.lock, threading.Lock())
         self._pool.submit(self._run, job, fn, key_lock)
         return job
+
+    def active(self) -> list[Job]:
+        """Every job queued or running: what a test mustn't leave behind (CALI-97)."""
+        with self._mu:
+            return [j for j in self._jobs.values() if j.status in ("queued", "running")]
 
     def busy(self, lock: str) -> bool:
         """Is a job with this lock queued or running? (So a background job isn't queued twice.)"""
@@ -130,6 +141,16 @@ class JobRunner:
 
 
 RUNNER = JobRunner()
+
+
+def wait_idle(timeout: float, poll: float = 0.2) -> list:
+    """Wait up to ``timeout`` s for every runner's jobs to finish; the ones still queued or running."""
+    end = time.time() + timeout
+    while True:
+        left = [j for r in list(RUNNERS) for j in r.active()]
+        if not left or time.time() >= end:
+            return left
+        time.sleep(poll)
 
 
 def stream(job: Job, after: int = 0, poll: float = 0.2, heartbeat: float = 15.0):
