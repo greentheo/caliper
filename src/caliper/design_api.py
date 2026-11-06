@@ -18,7 +18,7 @@ from typing import Optional
 
 from pydantic import BaseModel, field_validator
 
-from . import (aero, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
+from . import (aero, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
                load_study, making, patterns, promote, release, samples, scorecard, shop, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
@@ -123,6 +123,7 @@ class FrameRequest(BaseModel):
 class LoadRequest(BaseModel):
     part: str
     min_safety: float = load_study.MIN_SAFETY     # at each load times its factor
+    spacing_mm: Optional[float] = None            # a finer run than the default voxels (CALI-97)
 
 
 class Shop(BaseModel):
@@ -250,6 +251,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             # printed, whole or the rest beside its sheets: carved free-form, not lightened with holes (CALI-82)
             "printed": bool(re.search(r"""["']kind["']\s*:\s*["']printed["']""", script)),
             "carved": "CARVED" in script,
+            # its strength rests on a filled-in solid (or a shape that couldn't be checked): no "holds" (CALI-96)
+            "untrusted": consistency.filled(store, p.id) if "def loads(" in script else None,
             "suggest": {k: aero.suggest(k, v, ranges) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
@@ -271,6 +274,10 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "gussets": frame_study.list_gussets(store), "aero": aero.list_runs(store),
             "whittle": wb.list_runs(store), "cutplan": cutplan.list_runs(store),
             "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
+    for r in runs["load"]:                    # what the page can't work out: a case too coarse to see its walls (CALI-97)
+        for c in r.get("cases") or []:
+            if load_study.unresolved(r, c):
+                c["unresolved"] = "unresolved" if r.get("finer") else "unchecked"
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
@@ -572,9 +579,12 @@ def router():
         if not _aero_available():
             raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
 
+        if req.spacing_mm is not None and not (math.isfinite(req.spacing_mm) and 0.1 <= req.spacing_mm <= 50):
+            raise HTTPException(status_code=422, detail="a voxel size is a number of mm, between 0.1 and 50")
+
         def work(j):
             s = DesignStore.load(slug)
-            return load_study.study(s, req.part, min_safety=req.min_safety,
+            return load_study.study(s, req.part, min_safety=req.min_safety, spacing=req.spacing_mm,
                                     emit=lambda k, t="", **d: j.emit(k, t, **d))
 
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")

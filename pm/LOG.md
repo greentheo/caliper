@@ -1,7 +1,18 @@
 # Caliper work log
 
 Append-only. Newest first. One entry per shipped task or notable decision.
-Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
+Format: `### 2026-11-06 · CALI-97 (#100, merged with main after #96) · "Not trusted" wins over "not resolved"; a ✗ stays a ✗
+- **Merged `main` (with #96) into #100.** Where both reword one strength verdict:
+  - the filled-in shape's "not trusted" comes first, because the check ran on a block, the more basic problem;
+  - "not resolved" or "not checked" comes next;
+  - a fail stays a ✗ under both.
+- **A filled-in part that fails** now reads ✗ on the part card, the design card and the Studies row, with "It ran on a
+  filled-in shape, so the part as built is weaker still". The block is stronger than the hollow part, so a fail on it
+  is certain. #96 alone had read every filled-in verdict as a warn.
+- **Page:** "not trusted" first, then "not resolved", then holds or doesn't. `design.js?v=45`.
+- Tests: `test_filled_verdict` (both together on the design card and in Studies).
+
+### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
 ---
 
@@ -33,6 +44,75 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   From #102's review, tests that can fail: a barrier hook between the check and the queueing (a check-then-queue
   split queues two); and node tests for the click guard, "stopping…" after a reload, following a running carve, and
   the label's cases. Each fails under the mutant the reviewer found surviving.
+### 2026-11-06 · CALI-97 (#100 review) · Four across, a budget for the finer run, and a ✗ stays a ✗
+The reviewer's 5 findings and the foreman's 10 items on #100.
+- **`RESOLVE_MIN` is 4** (the foreman's call from #100's own table; still NEEDS ENGINEER CHECK for #42).
+- **A finer run is capped by a voxel budget:** `finest()`, 8× the default's voxels (`FINER_BUDGET`, twice as fine
+  each way). An asked-for `spacing_mm` finer than that runs at the finest it may, and says so. Where even that can't
+  get 4 across the wall, no finer run is offered, and the card says: "Not checked: its walls are too thin for the
+  voxel check at this size. A hand check or a printed test piece is the way to know."
+  - **Judgment call:** the review said "the same budget" as the default. With `VOXELS_THROUGH` 4 = `RESOLVE_MIN` 4,
+    a default run is only unresolved when that budget already bound it, so a finer run inside the same budget could
+    never be offered. 8× keeps the button meaningful and bounded. `FINER_BUDGET = 1` is the other reading.
+- **The wall that gates a verdict is the thinnest** (the reviewer's blocker on d82c67e). A 10th percentile let 5 mm
+  voxels "see" a spool hung from a 0.6 mm neck and call it ✓ 9.7× at 10 lb (main: ✗). Back to `min_wall_thickness`;
+  where the thinnest spot is only a lip (the bar stool's 0.3 mm), the cap says "not checked", the safe side.
+- **A ✗ stays a ✗,** with "The fail may be the model's: the voxels can't see its … walls." on the part card, the
+  design card and the Studies row. Only a ✓ turns to warn.
+- **Walls in a unit that doesn't round them away:** 1/32 in fractions, or mm under 1/32 in ("0.3 mm", never "0 in").
+- **The numbers panel:** amber "not resolved" / "not checked" badges in place of a green "holds", in the case, the
+  run's header and the run picker; the case says "The FEA read Nx at voxels of …, too coarse to see its … walls".
+- **The finer run's time** comes from the run's own FEA time per voxel, scaled as voxels^(4/3): measured on the tube
+  and the box stool, time per voxel grows as about the cube root of the voxel count.
+- **No time for a finer run when the coarse run didn't connect** (the reviewer: "about 1 min" on the bar stool copy, for
+  a run that took 39): its FEA stopped at once, so its time says nothing. The button reads "(how long: unknown)".
+- **The spacing clamp is pinned by an assert:** an asked-for 0.1 mm reaches the voxelizer as the finest the budget
+  allows (whittle's LoadStudy stubbed, so a mutant fails on an assert, not by running away).
+- **Run ids sort by `created`** (`runs.newest_first`), the id as tiebreak, in every listing (loads, carve, lighten,
+  aero, frames, gussets, whittle, patterns, cut plans) and in a saved sample. This was the reviewer's
+  `test_resolved` flake.
+- **The teardown judges only its own test's jobs** (a snapshot at setup); `CALIPER_JOB_GRACE` sets the wait.
+- **The API's 0.1–50 mm bound is pinned** (the reviewer's surviving mutant now fails).
+- **On the 0.01:** the id sort can't explain it. That test reads `study()`'s return value, never a listing. See #100.
+- Tests: `tests/test_resolved.py` (the spool; the `across` allowance and an 8× budget that really binds: two
+  mutants that survived), `tests/test_run_order.py`, `tests/test_jobs.py` (the reviewer's three-test leak, under
+  pytester).
+
+### 2026-11-05 · CALI-97 (#80) · A ✓ can't rest on an FEA too coarse to see the wall
+- **Rule 6, found on Theo's bar stool:** "✓ … 2.58x", governed by the FEA at 4.6 mm voxels across a 3.9 mm printed
+  wall.
+- A study now records its thinnest wall and whether the FEA resolved it: 2 voxels across, for now (NEEDS ENGINEER
+  CHECK; #42).
+- When an unresolved FEA governs, both cards read warn: "Not resolved yet: the check was too coarse to see its 4 mm
+  walls. Check it again finer." A button runs it finer, at least 2 voxels across, and says roughly how long.
+- The design card's strength lines say "about" when the printed model governs.
+- **Before and after, on the printed fixtures:** only the 1-voxel-across verdicts change (✓ → warn).
+- **For #42:** the printed box reads ✓ 2.7× at 2 voxels across and ✗ 1.9× at 4, so 2 is too few to trust a verdict.
+- Tests: `tests/test_resolved.py` (main reads ✓ on both cards for the coarse tube). Commit: `caf174e`.
+### 2026-11-05 · CALI-96 (#78), #96 rework · "Not trusted yet" everywhere a filled part's strength shows
+The foreman's six items. The rule: wherever a strength verdict rests on the filled solid, it never reads holding.
+- **The scorecard** grades it "untrusted", so the build package isn't "ready to cut". `d5a66fd`
+- **The numbers layer and the 3D view** say "not trusted: a filled-in shape": the panel header, the case badges,
+  the heat callout, the lightening line and the step previews. `b3adda5`
+- **The cache fails closed:** "couldn't check its shape" is never holding, and isn't kept. `79fe045`
+- **The kids' book:** no stand-on-it page; "Don't stand on it yet: a grown-up checks it first". `c349f75`
+- **The design card** leads with the verdict, with the check's name after. `85bc844`
+- **Studies and Lighten** read the part as it is now, so old runs say so too. `be73bd1`
+
+---
+
+### 2026-11-05 · CALI-96 (#78) · A strength verdict on a filled-in solid reads "not trusted yet"
+- **Rule 6, found on the owner's step-stool-2 after the ship.** *What is it?* said `build()` was filled in, while
+  *Will it work?* read "✓ Holds kid + dad (250 lb), 2 times over" from a check that ran on that block.
+- `consistency.filled(store, pid)` (cached per version and script) now says when a part with `loads()` fails the
+  volume check by being filled in. When it does:
+  - both cards' strength lines read warn: "Not trusted yet: the strength check ran on a filled-in shape, not the
+    step stool as built. Fix its shape first …";
+  - the build book and the kids' book don't print a holding line;
+  - a study on it says, in its record, notes and headline, that the number is the block's.
+- Tests: `tests/test_filled_verdict.py`, written first and failing on main (the filled box read "Holds …, 3.1
+  times over"). On the owner's design, read on a copy: main shows ✓, this branch shows warn on both cards.
+  Commit: `53f1067`.
 
 ### 2026-11-05 · CALI-103 (#95) · The app no longer crashes when the page and a study query one mesh at once
 - **The owner's app died three times (exit 134/139) in libspatialindex:** two threads in one cached mesh's R-tree,
