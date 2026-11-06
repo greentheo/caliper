@@ -1783,6 +1783,9 @@ function carveView(p) {
     <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo">${run ? 'Carve it again' : 'Carve it'}</button>
       <span class="muted small">a few minutes</span></div><div id="carveProgress"></div>`;
   if (!run) return head;
+  if (run.status === 'running') {                  // on disk as it goes: still running, or it stopped (CALI-103)
+    return `${head}<div class="small">Not finished: ${run.stations.length} of ${run.steps} steps checked.</div>`;
+  }
   const stale = run.version !== p.version;
   const W = 300, H = 110, top = Math.max(...run.stations.map((x) => x.safety || 0), run.min_safety * 1.5);
   const x = (r) => 24 + (W - 34) * r / Math.max(...run.stations.map((s) => s.removed), 0.01);

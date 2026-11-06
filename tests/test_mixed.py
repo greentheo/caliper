@@ -245,3 +245,33 @@ def test_carving_through_the_api(stool, monkeypatch):
     got = c.post(f"/api/designs/{slug}/carve/{run['id']}/adopt", json={"station": run["best"] or 0}).json()
     assert got["design"]["parts"][0]["carved"]
     assert c.post(f"/api/designs/{slug}/carve/nope/adopt", json={"station": 0}).status_code == 404
+
+
+def test_a_carve_that_dies_partway_leaves_what_it_finished(stool, monkeypatch):
+    """CALI-103 (#95): a crash mid-carve left nothing; the run is on disk from the start and after every step, so a
+    restart shows how far it got."""
+    pytest.importorskip("whittle")
+    import json
+    import os
+
+    from caliper import carve, load_study, studies
+
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60'), intent="kid")
+    real, calls = load_study.check_load, []
+
+    def dies(ctx, i, min_safety, solid=None):
+        calls.append(1)
+        if len(calls) > 1:                                # the second step: the app goes down here
+            raise RuntimeError("the app died")
+        return real(ctx, i, min_safety, solid=solid)
+
+    monkeypatch.setattr(load_study, "check_load", dies)
+    with pytest.raises(RuntimeError):
+        carve.study(stool, "stool", stations=3, remove_up_to=0.4)
+    (rid,) = os.listdir(carve.runs_dir(stool))
+    with open(os.path.join(carve.runs_dir(stool), rid, "run.json")) as f:
+        rec = json.load(f)
+    assert rec["status"] == "running" and len(rec["stations"]) == 1 and rec["steps"] == 3
+    text, ok = studies._headline("carve", rec)
+    assert text == "not finished: 1 of 3 steps checked" and ok is None

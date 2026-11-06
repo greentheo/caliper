@@ -68,6 +68,19 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     out_dir = os.path.join(runs_dir(store), rid)
     os.makedirs(out_dir, exist_ok=True)
+    # on disk from the start and after every step, so a run that dies (a crash, a restart) says how far it got
+    # (CALI-103); it's marked done at the end
+    partial = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(), "status": "running",
+               "version": store.design.part(part_id).version, "min_safety": min_safety, "material": mat["name"],
+               "spacing_mm": round(s, 2), "steps": stations, "stations": [], "best": None, "weak": "",
+               "share": "printed", "notes": []}
+
+    def keep(rec: dict) -> None:
+        with open(os.path.join(out_dir, "run.json.tmp"), "w") as fh:
+            json.dump(rec, fh, indent=2, default=str)
+        os.replace(os.path.join(out_dir, "run.json.tmp"), os.path.join(out_dir, "run.json"))
+
+    keep(partial)
     emit("carving", f"carving the printed {mat['name']} in {stations - 1} steps")
     sweep = ls.sweep(remove_up_to=remove_up_to, stations=stations,
                      progress=lambda f: emit("carving", "", progress=round(0.7 * f, 3)))
@@ -107,6 +120,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         out.append({"index": k, "removed": round(removed, 3), "safety": sides, "holds": holds,
                     "whole": worst, "whole_holds": worst is not None and worst >= min_safety, "weakest": weak,
                     "printed_g": round(grams), "saved_g": round(printed0 - grams), "stl": f})
+        keep({**partial, "stations": out})
         if not holds and k > 0:
             break                                                  # the chart stops where it runs out
     best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)
@@ -122,14 +136,14 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
               "material": mat["name"], "spacing_mm": round(s, 2), "seconds": round(time.time() - t0, 1),
               "stations": out, "best": best["index"] if best else None, "weak": weak_note,
               "share": "printed",                     # removed is the printed part's share (CALI-86); older runs: the solid's
+              "status": "done", "steps": stations,
               "notes": [*([weak_note] if weak_note else []),
                         "The safety on the chart is the printed part's own; the whole part's is beside it.",
                         f"Carved by whittle's sweep, {mat['name']} only: the "
                         + ("wood, " if wood.any() else "") + "where it's pushed and where it's held are kept.",
                         "Each step is checked by the strength check; using one rebuilds the part with that shape "
                         "and checks it again: that's the number to go by.", *([mat["note"]] if mat.get("note") else [])]}
-    with open(os.path.join(out_dir, "run.json"), "w") as fh:
-        json.dump(record, fh, indent=2, default=str)
+    keep(record)
     store.append_history(part_id, {"kind": "carve", "action": "studied", "run": rid, "stations": len(out)})
     store.append_log({"kind": "carve", "action": "studied", "part": part_id, "run": rid})
     emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g" if best and best["saved_g"]
