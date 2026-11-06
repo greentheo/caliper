@@ -861,7 +861,7 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
 # ---------------------------------------------------------------------------
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
          use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
-         on_event=None, drafter=None, promote_feedback: bool = True) -> TurnResult:
+         on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False) -> TurnResult:
     """One conversational turn: route the message, make the move, measure the whole design, reply.
 
     ``scope`` is the part the user clicked (``None`` = the design). ``author``/``classifier``/
@@ -884,8 +884,9 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         if verdict is not None:
             result = (_accept(store, parked, events, on_event) if verdict
                       else _decline(store, parked, events, on_event))
-            store.append_log({"kind": "message", "text": message, "scope": scope,
-                              "action": result.action, "part": result.part, "routed_by": "pending"})
+            if not logged:                       # the page logs it when it arrives (CALI-103)
+                store.append_log({"kind": "message", "text": message, "scope": scope,
+                                  "action": result.action, "part": result.part, "routed_by": "pending"})
             store.append_log({"kind": "reply", "action": result.action, "part": result.part,
                               "ok": result.ok, "reply": result.reply})
             _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)
@@ -896,8 +897,9 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
           + (f" → {intent.part}" if intent.part else ""),
           action=intent.action, part=intent.part, source=intent.source, note=intent.note)
 
-    store.append_log({"kind": "message", "text": message, "scope": scope,
-                      "action": intent.action, "part": intent.part, "routed_by": intent.source})
+    if not logged:
+        store.append_log({"kind": "message", "text": message, "scope": scope,
+                          "action": intent.action, "part": intent.part, "routed_by": intent.source})
 
     if intent.action == "refine" and intent.part:
         result = refine_part(store, intent.part, message, author=author, client=client,
