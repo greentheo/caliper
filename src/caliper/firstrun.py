@@ -6,8 +6,10 @@ had anything to say: the stool took six messages and a couple of clicks. The fir
 row, saying each as it goes:
 
 1. **What it's held to:** the checks, from the sentence and the answers (CALI-55).
-2. **Build it:** the whole thing as one part, from the sentence and the answers. Planning several parts is
-   CALI-35's (#3). Its description is then rewritten from what was built (CALI-69).
+2. **Build it:** first the plan (CALI-35, #3a): with Claude, a planner splits the sentence into parts, the numbers
+   they share and the checks between them. A plan of several parts stops here for the person's review; the stool
+   plans as one part and goes on. Then the whole thing as one part, from the sentence and the answers. Its
+   description is then rewritten from what was built (CALI-69).
 3. **Will it work?** Its strength check, when it says what it must hold, at the safety its checks ask for.
 4. **How do I make it?** The patterns, when it has flat sheet pieces.
 5. **Scored:** what it's held to, judged (the cut plans' sheets and offcut too), so no check it was given
@@ -68,6 +70,10 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
     except Exception as e:  # noqa: BLE001 — it builds without them; the cards say nothing's checked
         steps["goals"] = f"failed: {e}"
         emit("error", f"couldn't write down what it has to do: {e}")
+
+    held = _plan(store, steps, emit, use_llm=use_llm, client=client)
+    if held is not None:                       # a plan of several parts: the person reviews it first (CALI-35)
+        return held
 
     pid, intent = first_part(store)
     emit("step", "Building it", step="build", part=pid)
@@ -133,6 +139,8 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
         steps["score"] = "nothing to hold it to"
 
     reply = summary(cards(store, pid)) if cards else res.reply
+    if steps.get("plan", "").startswith("planning"):
+        reply += f"\n\n({steps['plan'][0].upper()}{steps['plan'][1:]}.)"
     if steps.get("strength", "").startswith("failed: "):
         # said, not hidden behind a "Check it holds" that would fail the same way (CALI-81)
         reply += f"\n\n⚠ I couldn't check it holds: {steps['strength'][len('failed: '):]}."
@@ -140,6 +148,47 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
                       "ok": bool(res.ok), "reply": reply, "firstrun": True})
     emit("step", "Done", step="done", part=pid)
     return {"part": pid, "ok": bool(res.ok), "version": res.version, "steps": steps, "reply": reply}
+
+
+#: Building a reviewed plan's parts one by one, in order, is #3b's: until then it says so, never a silent no-op.
+NEXT = "The plan's saved: {n} parts. Building them one by one, in order, comes next (#3b)."
+
+
+def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, client) -> Optional[dict]:
+    """CALI-35 (#3a): plan before building. Returns the first run's result when it stops for the plan (a plan of
+    several parts, to review; or one already reviewed, whose building is #3b), else None and it builds as one part."""
+    from . import plan as P
+
+    saved = P.load(store)
+    if saved is not None and len(saved.parts) > 1:
+        store.design.plan = {**store.design.plan, "status": "saved"}
+        store.save()
+        reply = NEXT.format(n=len(saved.parts))
+        store.append_log({"kind": "reply", "action": "plan", "ok": True, "reply": reply, "firstrun": True})
+        steps["plan"] = "saved; building in order is #3b"
+        return {"part": None, "ok": True, "steps": steps, "reply": reply, "plan": "saved"}
+    if not _llm(use_llm, client):
+        steps["plan"] = "planning it in several parts needs Claude: I built it as one"
+        return None
+    emit("step", "Planning its parts", step="plan")
+    try:
+        plan = P.propose(store, client=client)
+    except Exception as e:  # noqa: BLE001 — a plan that can't be made or used: build it as one part, and say why
+        steps["plan"] = f"planning it in several parts didn't work ({e}): I built it as one"
+        emit("error", f"couldn't plan its parts: {e}")
+        return None
+    if len(plan.parts) == 1:
+        steps["plan"] = "one part"
+        return None
+    P.save(store, plan, "review")
+    reply = (P.headline(plan, store.design.name) + "\n\nThat's the plan, before anything's drawn: its numbers and the "
+             "checks between the parts are under *What is it?*. Say what to change (\"make the mast 10 ft\"), or "
+             "**Build it** to go on.")
+    store.append_log({"kind": "reply", "action": "plan", "ok": True, "reply": reply, "firstrun": True,
+                      "parts": plan.ids()})
+    steps["plan"] = f"{len(plan.parts)} parts, to review"
+    emit("step", "Done", step="done")
+    return {"part": None, "ok": True, "steps": steps, "reply": reply, "plan": "review"}
 
 
 def summary(cards: list[dict]) -> str:

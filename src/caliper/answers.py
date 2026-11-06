@@ -364,6 +364,11 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         what.append(_line(f"{len(parts)} part{'s' if len(parts) != 1 else ''}: " + ", ".join(p["id"] for p in parts)))
     elif state.get("building"):
         what.append(_line("Building it now: these fill in as it goes.", "info"))
+    elif state.get("plan"):                   # planned, not built: the person reviews it first (CALI-35, #3a)
+        pl = state["plan"]
+        what.append(_line(pl["headline"], "warn"))
+        what.append(_line("That's the plan, before anything's drawn: its numbers and the checks between the parts are "
+                          "under the numbers. Say what to change, or press Build it.", "info"))
     else:
         what.append(_line("Not built yet: answer its questions and press Build it.", "warn"))
     assumed = sum(1 for r in state.get("requirements") or [] if r.get("source") == "assumed")

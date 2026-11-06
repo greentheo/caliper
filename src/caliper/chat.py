@@ -859,6 +859,38 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
 # ---------------------------------------------------------------------------
 # The turn
 # ---------------------------------------------------------------------------
+def _reviewing(store: DesignStore) -> bool:
+    """A plan of several parts saved and none of them built: what the chat changes is the plan (CALI-35)."""
+    plan = store.design.plan or {}
+    ids = [p["id"] for p in plan.get("parts") or []]
+    return len(ids) > 1 and not any(store.design.part(i) and store.design.part(i).version for i in ids)
+
+
+def plan_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = True, events=None,
+              on_event=None) -> TurnResult:
+    """Change the plan as the person said ("make the mast 10 ft"), check it, save it, and say what changed."""
+    from . import plan as P
+
+    events = events if events is not None else []
+    if not (use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY"))):
+        return TurnResult("plan", "Changing the plan needs Claude, and it isn't set up here. Press Build it to "
+                                  "go on with the plan as it is.", ok=False, events=events)
+    _emit(events, on_event, "step", "Changing the plan")
+    try:
+        before, after = P.revise(store, message, client=client)
+    except Exception as e:  # noqa: BLE001 — a change that can't be made or used leaves the plan as it was
+        return TurnResult("plan", f"I couldn't change the plan that way: {e}. It's as it was.", ok=False,
+                          events=events, error=str(e))
+    inches = store.design.display_units == "in"
+    said = P.changes(before, after, inches)
+    if not said:
+        return TurnResult("plan", "That didn't change the plan. Say which part or number to change.", ok=False,
+                          events=events)
+    P.save(store, after, "review")
+    return TurnResult("plan", "Changed the plan: " + "; ".join(said) + ".\n\n" + P.headline(after, store.design.name),
+                      events=events)
+
+
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
          use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
          on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False) -> TurnResult:
@@ -891,6 +923,16 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
                               "ok": result.ok, "reply": result.reply})
             _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)
             return result
+
+    if scope is None and _reviewing(store) and not message.strip().endswith("?"):
+        # a plan of several parts under review (CALI-35, #3a): the chat edits the plan, never the geometry
+        result = plan_edit(store, message, client=client, use_llm=use_llm, events=events, on_event=on_event)
+        if not logged:
+            store.append_log({"kind": "message", "text": message, "scope": scope, "action": "plan",
+                              "routed_by": "review"})
+        store.append_log({"kind": "reply", "action": "plan", "ok": result.ok, "reply": result.reply})
+        _emit(events, on_event, "done", "plan", ok=result.ok)
+        return result
 
     intent = classify(store, message, scope, use_llm=use_llm, client=client, classifier=classifier)
     _emit(events, on_event, "classified", f"{intent.action}"
