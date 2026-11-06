@@ -267,3 +267,49 @@ def test_where_the_default_budget_binds_the_finer_run_is_offered_within_eight_ti
     assert rec["finer"]["spacing_mm"] == pytest.approx(rec["thinnest_mm"] / 4, abs=0.011)
     assert rec["finer"]["spacing_mm"] >= load_study.finest(rec["voxels"] * 1.25 ** 3, 200, load_study.FINER_BUDGET) - 0.05
     assert "too_thin" not in rec
+
+
+def test_a_run_that_didnt_connect_gives_no_time_for_the_finer_one(tmp_path, monkeypatch):
+    """#100 review: on the bar stool copy, finer_minutes said "about 1 min" for a run that took 39: its default run's
+    voxels didn't connect the load to a support, so its FEA stopped at once. Such a run's time says nothing."""
+    from types import SimpleNamespace
+
+    pytest.importorskip("whittle")
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 1)
+
+    def unjoined(ctx, i, min_safety, solid=None):
+        load = ctx["loads"][i]
+        return ({"name": load["name"], "lb": load["lb"], "factor": load["factor"], "holds": False, "safety": 0.0,
+                 "governs": "fea", "fea": {"supported": False}, "plate": None},
+                SimpleNamespace(supported=False))
+
+    monkeypatch.setattr(load_study, "check_load", unjoined)
+    rec = load_study.study(_store(tmp_path), "tube")
+    assert rec["finer"]["spacing_mm"] and rec["finer"]["minutes"] is None
+    assert any(n.endswith("how long it takes can't be told from this run, whose voxels didn't connect the load to "
+                          "a support.") for n in rec["notes"]), rec["notes"]
+
+
+def test_an_asked_for_spacing_below_the_finest_is_clamped_before_anything_is_voxelized(tmp_path, monkeypatch):
+    """#100 review: the clamp's mutant only failed by running away (SIGKILL). Here whittle's LoadStudy is a stub that
+    records the spacing it's given and stops, so removing the clamp fails on an assert."""
+    pytest.importorskip("whittle")
+    import whittle
+
+    got = {}
+
+    class Stop(Exception):
+        pass
+
+    class Recorded:
+        def __init__(self, mesh, material=None, spacing=None):
+            got["spacing"] = spacing
+            raise Stop()
+
+    monkeypatch.setattr(whittle, "LoadStudy", Recorded)
+    store = _store(tmp_path)
+    with pytest.raises(Stop):
+        load_study.prepare(store, "tube", spacing=0.1)
+    mesh = store.part_geometry("tube").require_mesh()
+    least = load_study.finest(float(abs(mesh.volume)), float(max(mesh.extents)), load_study.FINER_BUDGET)
+    assert got["spacing"] == pytest.approx(least) and least > 0.1

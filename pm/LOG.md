@@ -25,6 +25,10 @@ The reviewer's 5 findings and the foreman's 10 items on #100.
   run's header and the run picker; the case says "The FEA read Nx at voxels of …, too coarse to see its … walls".
 - **The finer run's time** comes from the run's own FEA time per voxel, scaled as voxels^(4/3): measured on the tube
   and the box stool, time per voxel grows as about the cube root of the voxel count.
+- **No time for a finer run when the coarse run didn't connect** (the reviewer: "about 1 min" on the bar stool copy, for
+  a run that took 39): its FEA stopped at once, so its time says nothing. The button reads "(how long: unknown)".
+- **The spacing clamp is pinned by an assert:** an asked-for 0.1 mm reaches the voxelizer as the finest the budget
+  allows (whittle's LoadStudy stubbed, so a mutant fails on an assert, not by running away).
 - **Run ids sort by `created`** (`runs.newest_first`), the id as tiebreak, in every listing (loads, carve, lighten,
   aero, frames, gussets, whittle, patterns, cut plans) and in a saved sample. This was the reviewer's
   `test_resolved` flake.

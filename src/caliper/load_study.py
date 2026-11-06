@@ -749,10 +749,15 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
                     f"it (it takes {RESOLVE_MIN:g} across).")
             want = math.floor(thin / RESOLVE_MIN * 100) / 100
             if want >= ctx["finest"]:
+                # a run whose voxels don't connect the load to a support stops at once: its time says nothing about
+                # a run that does (the bar stool: "about 1 min" for 39). Then no estimate, said so (#100 review)
+                joined = all((c.get("fea") or {}).get("supported") for c in cases)
                 minutes = finer_minutes(record["voxels"], ctx["spacing"], want, fea_seconds,
-                                        record["seconds"] - fea_seconds)
+                                        record["seconds"] - fea_seconds) if joined else None
                 record["finer"] = {"spacing_mm": want, "minutes": minutes}
-                notes.append(f"{seen} Check it again at {want:g} mm (about {minutes} min).")
+                notes.append(f"{seen} Check it again at {want:g} mm" + (f" (about {minutes} min)." if minutes else
+                             ": how long it takes can't be told from this run, whose voxels didn't connect the "
+                             "load to a support."))
             else:
                 record["too_thin"] = True
                 notes.append(f"{seen} {RESOLVE_MIN:g} across would take more voxels than a study of a part this "
