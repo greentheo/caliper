@@ -32,6 +32,7 @@ from typing import Callable, Optional
 from . import construction as C
 from . import materials as M
 from .design import DesignStore
+from .runs import newest_first
 
 DRIVER = os.path.join(os.path.dirname(__file__), "unfold_driver.mjs")
 
@@ -413,7 +414,7 @@ def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
         rec = load_run(store, rid)
         if rec and (part_id is None or rec.get("part") == part_id):
             out.append(rec)
-    return out
+    return newest_first(out)          # made last first, not by id (CALI-97)
 
 
 def load_run(store: DesignStore, rid: str) -> Optional[dict]:

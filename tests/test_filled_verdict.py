@@ -174,3 +174,30 @@ def test_the_studies_rows_and_the_book_say_not_trusted_in_their_own_words():
     assert "not ready: a check fails" in studies._headline("release", rec)[0]
     head = release._status({"summary": {"pass": 1, "fail": 0, "unknown": 1, "untrusted": 1}, "checks": [{}, {}]})
     assert "1 not trusted" in head and "unknown" not in head
+
+
+# --- #96 and #100 together (the merge): a filled-in shape wins over "not resolved", and a ✗ stays a ✗ -----------
+def _goal_state():
+    return {"goals": {"checks": [{"id": "strength_dad", "label": "holds Dad (200 lb), 2 times over",
+                                  "metric": "strength.safety", "op": ">=", "limit": 2.0, "source": "assumed"}]},
+            "parts": [], "scorecards": []}
+
+
+def test_on_the_design_card_a_filled_in_shape_wins_and_a_fail_stays_a_fail():
+    both = {"strength.filled": "Not trusted yet: the strength check ran on a filled-in shape.",
+            "strength.unresolved": "Not resolved yet: the check was too coarse to see its 4 mm walls."}
+    (line,) = answers.held_to(_goal_state(), {**both, "strength.safety": 3.0})
+    assert line["status"] == "warn" and line["text"].startswith("Not trusted yet"), line
+    (line,) = answers.held_to(_goal_state(), {**both, "strength.safety": 1.2})
+    assert line["status"] == "bad" and line["text"].startswith("✗ Holds Dad"), line
+    assert line["text"].endswith("It ran on a filled-in shape, so the part as built is weaker still."), line
+
+
+def test_on_the_studies_page_a_filled_in_fail_is_still_a_fail():
+    held = {"filled": True, "holds": True, "safety": 3.1, "min_safety": 2,
+            "cases": [{"name": "Dad", "safety": 3.1, "holds": True, "governs": "fea"}]}
+    assert studies._headline("load", held)[1] is None
+    failed = {**held, "holds": False, "safety": 1.2, "cases": [{"name": "Dad", "safety": 1.2, "holds": False,
+                                                              "governs": "fea"}]}
+    text, ok = studies._headline("load", failed)
+    assert ok is False and text.startswith("doesn't hold") and "on a filled-in shape" in text

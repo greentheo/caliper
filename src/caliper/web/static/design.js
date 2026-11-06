@@ -130,6 +130,15 @@ function len(mm, digits) {
   if (mm == null || isNaN(mm)) return '—';
   return inches() ? `${(mm / IN).toFixed(digits ?? 1)}″` : `${mm.toFixed(digits ?? 0)} mm`;
 }
+// a wall or a voxel, thin: inches to the nearest 1/32 (5/32″), mm where that rounds to nothing; never "0.0″" (CALI-97)
+function wallLen(mm) {
+  if (mm == null || isNaN(mm)) return '—';
+  const n = Math.round(mm / IN * 32);
+  if (inches() && mm >= IN) return len(mm, 1);
+  if (inches() && n >= 1) { const g = gcd(n, 32); return `${n / g}/${32 / g}″`; }
+  return `${mm < 10 ? +mm.toFixed(1) : Math.round(mm)} mm`;
+}
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
 function sizeText(size) {
   // x = along travel (depth), y = across (width), z = up (height) — the vehicle convention
   return `${len(size[1])} W × ${len(size[0])} D × ${len(size[2])} H`;
@@ -1762,7 +1771,9 @@ function loadView(p) {
   return `<div class="form">
       <span>least safety</span><span><input type="number" id="lSafety" value="${runs[0] ? runs[0].min_safety : 2}" min="1" max="10" step="0.5">
         × at each load times its factor</span></div>
-    <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button></div>
+    <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button>
+      ${runs[0] && runs[0].finer && runs[0].version === p.version ? `<button id="lFiner" title="voxels of ${wallLen(runs[0].finer.spacing_mm)}, enough
+        to see its ${wallLen(runs[0].thinnest_mm)} walls">Check it again finer${runs[0].finer.minutes ? ` (about ${runs[0].finer.minutes} min)` : ' (how long: unknown)'}</button>` : ''}</div>
     <div id="lProgress"></div>
     ${runs.length ? loadResults(p, runs[pick], runs) : ''}
     ${p.printed ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : (runs.length ? lightenView(p) : '')}`;
@@ -1876,10 +1887,20 @@ const notTrusted = (why) => (String(why || '').startsWith("couldn't") ? "not tru
   : 'not trusted: a filled-in shape');
 const untrustedBadge = (p) => `<span class="badge bad">${notTrusted(p.untrusted)}</span>`;
 const partOf = (pid) => (S.design && S.design.parts.find((x) => x.id === pid)) || {};
+// CALI-97: a ✓ on an FEA too coarse to see its walls is no ✓. The server marks such a case (c.unresolved:
+// 'unresolved' when a finer run can see them, 'unchecked' when none a study may make can); its badge says so, and
+// no green "holds" sits under the card's warn. A ✗ stays a ✗.
+const coarseWord = (c) => (c.unresolved === 'unchecked' ? 'not checked' : 'not resolved');
+const caseBadge = (c) => (c.unresolved && c.holds ? `<span class="badge warn">${coarseWord(c)}</span>`
+  : c.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>');
+const runCoarse = (run) => (run.holds ? (run.cases || []).find((c) => c.unresolved && c.holds) : null);
+const runBadge = (run) => (runCoarse(run) ? `<span class="badge warn">${coarseWord(runCoarse(run))}</span>`
+  : run.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>');
+const runWord = (run) => (runCoarse(run) ? coarseWord(runCoarse(run)) : run.holds ? 'holds' : 'doesn\'t hold');
 function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
   const pl = c.plate, f = c.fea || {};
-  const holds = p.untrusted ? untrustedBadge(p) : c.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>';
+  const holds = p.untrusted ? untrustedBadge(p) : caseBadge(c);     // a filled-in shape wins (CALI-96, then 97)
   const plate = !pl ? '' : pl.done
     ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
@@ -1905,9 +1926,12 @@ function loadCase(p, run, c, i) {
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
-      <div class="small" style="margin-top:2px">Safety <b>${sx(c.safety)}</b>
+      ${c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety)}
+        <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
+        ${c.holds ? 'no verdict' : 'the fail may be the model\'s'} (it needs ${run.min_safety}x)</span></div>`
+      : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety)}</b>
         <span class="muted">(by ${c.governs === 'plate' ? 'the plate check, with the grain the wrong way' : 'the FEA'}; it needs ${run.min_safety}x)</span>
-        ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>
+        ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>`}
       ${plate}${fea}${by}
       ${c.heat ? `<div class="actions"><button data-heat="${i}" class="${on ? 'primary' : ''}">${on ? 'Showing the stress' : 'Show the stress'}</button></div>` : ''}
     </div>`;
@@ -1917,9 +1941,9 @@ function loadResults(p, run, runs) {
   const stale = run.version !== p.version;
   return `<div class="small" style="margin-top:12px">${runs.length > 1 ? `<select id="lRun">${runs.map((r, k) =>
       `<option value="${k}" ${r.id === run.id ? 'selected' : ''}>${esc(new Date(r.created * 1000).toLocaleString())} · v${r.version}
-        · ${p.untrusted ? 'not trusted' : r.holds ? 'holds' : 'doesn\'t hold'}</option>`).join('')}</select>`
+        · ${p.untrusted ? 'not trusted' : runWord(r)}</option>`).join('')}</select>`
       : `<b>Last check</b> · v${run.version} · ${new Date(run.created * 1000).toLocaleString()}`}
-      ${p.untrusted ? untrustedBadge(p) : run.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>'}
+      ${p.untrusted ? untrustedBadge(p) : runBadge(run)}
       ${stale ? '<span class="badge bad">the part has changed since</span>' : ''}</div>
     ${run.cases.map((c, i) => loadCase(p, run, c, i)).join('')}
     <div class="muted small" style="margin-top:6px">In ${esc(run.material.name)}, voxels of ${len(run.spacing_mm, 1)}
@@ -1932,6 +1956,8 @@ function wireLoad(p) {
   if (ask) ask.onclick = () => { $('msg').value = 'It has to hold '; $('msg').focus(); };
   const go = $('lGo');
   if (go) go.onclick = () => runLoad(p);
+  const finer = $('lFiner');                       // a run too coarse to see its walls: again, finer (CALI-97)
+  if (finer) finer.onclick = () => runLoad(p, loadRuns(p.id)[0].finer.spacing_mm);
   const sel = $('lRun');
   if (sel) sel.onchange = () => { S.loadRun[p.id] = +sel.value; clearStation(); renderInspector(); };
   const lg = $('lightGo');
@@ -1974,12 +2000,14 @@ async function runLighten(p) {
   }
 }
 
-async function runLoad(p) {
+async function runLoad(p, spacing) {
   const prog = $('lProgress'), go = $('lGo');
   go.disabled = true;
+  if ($('lFiner')) $('lFiner').disabled = true;
   prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="lMsg">starting…</div>';
   try {
-    const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`, { part: p.id, min_safety: +$('lSafety').value || 2 });
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`,
+      { part: p.id, min_safety: +$('lSafety').value || 2, ...(spacing ? { spacing_mm: spacing } : {}) });
     await follow(job_id, (ev) => {
       const msg = $('lMsg'), bar = prog.querySelector('.bar > i');
       if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;

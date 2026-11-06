@@ -32,6 +32,7 @@ import numpy as np
 from . import load_study as L
 from .consistency import _frame
 from .design import DesignStore
+from .runs import newest_first
 
 IN = 25.4
 #: Solid plywood left round every lightened panel: its glue and screws are along its edges.
@@ -567,7 +568,7 @@ def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
         rec = load_run(store, rid)
         if rec and (part_id is None or rec.get("part") == part_id):
             out.append(rec)
-    return out
+    return newest_first(out)          # made last first, not by id (CALI-97)
 
 
 def load_run(store: DesignStore, rid: str) -> Optional[dict]:

@@ -88,7 +88,7 @@ def _lb(v) -> str:
 
 def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     """What a run came to, in one line, and whether that's good news (None: neither)."""
-    if kind == "load" and r.get("filled"):                       # a block's number, not the part's: no "holds"
+    if kind == "load" and r.get("filled") and r.get("holds"):   # a block's number, not the part's: no "holds"
         return (f"not trusted: it ran on a filled-in shape"
                 + (f" (the block read {round(r['safety'], 1):g}x)" if r.get("safety") is not None else "")), None
     if kind == "load":
@@ -98,6 +98,17 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
             return "no loads", None
         what = (f"{worst['name']}: {round(worst['safety'], 1):g}x" if worst.get("safety") is not None
                 else worst["name"])
+        from . import load_study as L
+
+        coarse = [c for c in cases if c.get("safety") is not None and L.unresolved(r, c)]
+        if r.get("holds") and coarse:          # a ✓ on an FEA too coarse to see its walls is no ✓ (CALI-97)
+            word = "not checked: its walls are too thin for the voxels" if L.unchecked(r, coarse[0]) else \
+                "not resolved yet: too coarse to see its walls"
+            return f"{word} (the FEA read {round(coarse[0]['safety'], 1):g}x)", None
+        if r.get("filled"):                     # a ✗ on the block stays a ✗: the part as built is weaker still
+            what += ", on a filled-in shape: the part as built is weaker still"
+        elif worst in coarse:
+            what += ", and the fail may be the model's: the voxels can't see its walls"
         return (("holds" if r.get("holds") else "doesn't hold") + f" — weakest {what}"
                 + (f" (needs {r.get('min_safety', 2):g}x)" if not r.get("holds") else ""), bool(r.get("holds")))
     if kind == "lighten" and r.get("filled"):
