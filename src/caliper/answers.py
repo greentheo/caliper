@@ -382,10 +382,14 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         s = card["summary"]
         fails = [c for c in card["checks"] if c["status"] == "fail"]
         stale = any(card.get("versions", {}).get(p["id"]) not in (None, p["version"]) for p in parts)
-        work.append(_line(f"{s['pass']} check{'s' if s['pass'] != 1 else ''} pass" + (
-            f", {s['fail']} fail: " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else ".")
+        waits = s.get("unknown") or 0              # a check that couldn't run is never a pass (#103 review)
+        said = (f"{s['pass']} check{'s' if s['pass'] != 1 else ''} pass" if s["pass"] or fails
+                else "No check has run yet")
+        work.append(_line(said + (
+            f", {s['fail']} fail: " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")
+            + (f"{',' if s['pass'] or fails else ':'} {waits} not checked yet" if waits else "") + "."
             + (" (A part has changed since: score it again.)" if stale else ""),
-            "bad" if fails else "warn" if stale else "ok"))
+            "bad" if fails else "warn" if stale or waits or not s["pass"] else "ok"))
     elif not work:
         work.append(_line("Nothing to hold it to yet: say what it must do.", "warn"))
 

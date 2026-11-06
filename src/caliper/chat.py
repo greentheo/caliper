@@ -817,8 +817,8 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
     if report is not None:
         failing = _fail_lines(report)
         lines.append("")
-        lines.append("All design checks pass." if report.all_pass
-                     else f"{len(failing)} design check(s) failing:")
+        said = report.said()                    # never "all pass" with a check that hasn't run (#103 review)
+        lines.append(said[0].upper() + said[1:] + (":" if failing else "."))
         lines.extend(failing)
     if note.startswith("ambiguous"):
         lines.append("")

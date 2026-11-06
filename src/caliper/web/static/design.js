@@ -828,13 +828,20 @@ function checks(report, only) {
     </li>`).join('') + '</ul>';
 }
 
+// the design's checks in one badge (CALI-35, #103 review): a check that's only waiting (deferred) is never red, and
+// never green either: "all checks pass" only when every check ran and passed
+function reportBadge(rep) {
+  if (!rep || !rep.results.length) return '';
+  const waiting = rep.results.filter((r) => r.status === 'deferred').length;
+  const passed = rep.results.filter((r) => r.status === 'pass').length;
+  if (rep.results.some((r) => r.status === 'fail' || r.status === 'error')) return '<span class="badge bad">checks failing</span>';
+  if (waiting === rep.results.length) return '<span class="badge">checks wait for its parts</span>';
+  if (waiting) return `<span class="badge">${passed} pass · ${waiting} not checked yet</span>`;
+  return '<span class="badge ok">all checks pass</span>';
+}
 function designView(d) {
   const rep = d.report;
-  // a check that's only waiting for its parts to be built isn't failing (CALI-35): never red for that
-  const waiting = rep && rep.results.length && rep.results.every((r) => r.status === 'deferred');
-  const status = rep ? (waiting ? '<span class="badge">checks wait for its parts</span>'
-    : rep.all_pass ? '<span class="badge ok">all checks pass</span>'
-    : '<span class="badge bad">checks failing</span>') : '';
+  const status = reportBadge(rep);
   const what = `<div class="muted small">${esc(d.prompt)}</div>
     <h4>Requirements</h4>
     ${d.requirements.length ? '<ul class="list">' + d.requirements.map((r) => `<li>${esc(r.question)}

@@ -22,6 +22,19 @@ from pydantic import BaseModel, ConfigDict, Field
 #: What a rule between parts may call: the assembly's measures (assembly.build_context) and plain arithmetic.
 FUNCTIONS = {"interference", "min_clearance", "clearance", "max_interference", "min_clearance_all",
              "hole_misalignment", "holes_aligned", "bbox", "approx", "within", "fits", "abs", "min", "max"}
+#: What a rule may read off a measure: a bounding box's sizes and corners (measure.bounding_box). Nothing else, and
+#: nothing private: a dunder chain is refused (#103 review).
+ATTRIBUTES = {"dx", "dy", "dz", "min_x", "min_y", "min_z", "max_x", "max_y", "max_z"}
+#: The measures that answer yes or no, so a rule may be one of them alone.
+YES_NO = {"holds_aligned", "approx", "within", "fits"}
+#: The expression a rule may be: arithmetic, comparisons, and/or/not, calls to the measures, names and numbers.
+#: No powers, no strings, no lists, no subscripts (#103 review: "9 ** 9 ** 9 > 0" and "'a' * 10 ** 10" froze the
+#: app).
+_NODES = (ast.Expression, ast.Compare, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not, ast.USub, ast.UAdd,
+          ast.BinOp, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Call, ast.Name, ast.Attribute, ast.Constant, ast.Load,
+          ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq)
+#: The longest a rule may be.
+MAX_RULE = 300
 #: A part id or a skeleton name: lowercase, digits and underscores, starting with a letter (a Python name, so a
 #: rule can say it).
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -83,8 +96,8 @@ def validate(data) -> Plan:
     language the assembly measures, and a build order with no cycle. Raises :class:`PlanError` with the reason."""
     try:
         plan = data if isinstance(data, Plan) else Plan.model_validate(data)
-    except Exception as e:  # noqa: BLE001 — pydantic's message, said plainly
-        raise PlanError(f"the plan isn't in the shape a plan takes: {e}") from e
+    except Exception as e:  # noqa: BLE001 — pydantic's first complaint, in words (never its raw text or its URL)
+        raise PlanError(f"the plan isn't in the shape a plan takes: {_plainly(e)}") from e
     if not plan.parts:
         raise PlanError("the plan has no parts")
     ids = plan.ids()
@@ -125,13 +138,40 @@ def validate(data) -> Plan:
     return plan
 
 
+def _plainly(e: Exception) -> str:
+    """A validation error as a person reads it: "parts 1: what is missing" (#103 review: the reason leaked pydantic's
+    whole message, with its documentation URL)."""
+    errs = getattr(e, "errors", lambda: [])()
+    if not errs:
+        return "it isn't a plan"
+    first = errs[0]
+    where = " ".join(str(x) for x in first.get("loc") or ()) or "the plan"
+    msg = {"missing": "is missing", "extra_forbidden": "isn't part of a plan"}.get(first.get("type"),
+                                                                                 str(first.get("msg", "")).lower())
+    more = f" (and {len(errs) - 1} more)" if len(errs) > 1 else ""
+    return f"{where} {msg}{more}"
+
+
 def _check_rule(rule: PlanRule, ids: set, names: set) -> None:
+    if len(rule.expr) > MAX_RULE:
+        raise PlanError(f"the check {rule.id!r} is longer than a check should be ({len(rule.expr)} characters)")
     try:
         tree = ast.parse(rule.expr, mode="eval")
     except SyntaxError as e:
         raise PlanError(f"the check {rule.id!r} isn't an expression Caliper can measure: {rule.expr!r}") from e
     called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
     for n in ast.walk(tree):
+        if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Pow):
+            raise PlanError(f"the check {rule.id!r} raises to a power, which a check never needs: {rule.expr!r}")
+        if isinstance(n, ast.Constant) and not (isinstance(n.value, (int, float)) and not isinstance(n.value, bool)):
+            raise PlanError(f"the check {rule.id!r} has {n.value!r} in it: a check is numbers and measures")
+        if not isinstance(n, _NODES):
+            raise PlanError(f"the check {rule.id!r} uses something a check can't ({type(n).__name__}): {rule.expr!r}")
+        if isinstance(n, ast.Attribute) and n.attr not in ATTRIBUTES:
+            raise PlanError(f"the check {rule.id!r} reads .{n.attr}, which isn't a size or corner of a box "
+                            f"({', '.join(sorted(ATTRIBUTES))})")
+        if isinstance(n, ast.Call) and n.keywords:
+            raise PlanError(f"the check {rule.id!r} names an argument; a check passes them in order")
         if isinstance(n, ast.Name):
             if id(n) in called:
                 if n.id not in FUNCTIONS:
@@ -141,6 +181,21 @@ def _check_rule(rule: PlanRule, ids: set, names: set) -> None:
                                 f"of the plan")
         elif isinstance(n, ast.Call) and not isinstance(n.func, ast.Name):
             raise PlanError(f"the check {rule.id!r} calls something that isn't a measure: {rule.expr!r}")
+    if not _yes_no(tree.body):
+        raise PlanError(f"the check {rule.id!r} doesn't say yes or no: compare a measure with a number "
+                        f"({rule.expr!r})")
+
+
+def _yes_no(n: ast.AST) -> bool:
+    """A comparison, and/or/not of them, or a measure that answers yes or no: never a bare number, which would
+    read as a pass (#103 review: "rotor_d" and "1" passed)."""
+    if isinstance(n, ast.Compare):
+        return True
+    if isinstance(n, ast.BoolOp):
+        return all(_yes_no(v) for v in n.values)
+    if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.Not):
+        return _yes_no(n.operand)
+    return isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in YES_NO
 
 
 def order(plan: Plan) -> list[str]:
@@ -296,8 +351,10 @@ the person already has are parts with role "fixed" (drawn from their stated size
 Name the numbers the parts share as the skeleton: each with a value, a unit (mm, in, ft, m, cm, deg, N, lb, kg or \
 count) and why. Write mates between parts (touch, clearance, fit, no_interference) and rules over part ids and \
 skeleton names, so every interface is measured. A rule may call: interference(a, b), min_clearance(a, b), \
-hole_misalignment(a, b), holes_aligned(a, b), bbox(part).min/.max/.size (.x .y .z, mm), abs, min, max. Lengths in \
-rules are mm; a skeleton name in a rule reads in mm. Each part says what it mounts on (the parts it's built onto).
+hole_misalignment(a, b), holes_aligned(a, b), bbox(part).dx/.dy/.dz (sizes) and .min_x/.min_y/.min_z/.max_x/\
+.max_y/.max_z (corners), abs, min, max. Every rule is a comparison (a measure against a number), with + - * / and \
+no powers or text. Lengths in rules are mm; a skeleton name in a rule reads in mm. Each part says what it mounts on \
+(the parts it's built onto).
 
 Ids and names are lowercase with underscores. Answer by calling the plan tool, once."""
 
