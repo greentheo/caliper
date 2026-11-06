@@ -15,8 +15,9 @@ The reviewer's 5 findings and the foreman's 10 items on #100.
   - **Judgment call:** the review said "the same budget" as the default. With `VOXELS_THROUGH` 4 = `RESOLVE_MIN` 4,
     a default run is only unresolved when that budget already bound it, so a finer run inside the same budget could
     never be offered. 8× keeps the button meaningful and bounded. `FINER_BUDGET = 1` is the other reading.
-- **The wall is measured robustly:** `measure.wall_thickness`, the 10th percentile of the inward rays by area, not
-  the min. On a copy of the bar stool v3: min 0.30 mm (the lips), 5th to 25th percentile 2.82 to 2.86 mm.
+- **The wall that gates a verdict is the thinnest** (the reviewer's blocker on d82c67e). A 10th percentile let 5 mm
+  voxels "see" a spool hung from a 0.6 mm neck and call it ✓ 9.7× at 10 lb (main: ✗). Back to `min_wall_thickness`;
+  where the thinnest spot is only a lip (the bar stool's 0.3 mm), the cap says "not checked", the safe side.
 - **A ✗ stays a ✗,** with "The fail may be the model's: the voxels can't see its … walls." on the part card, the
   design card and the Studies row. Only a ✓ turns to warn.
 - **Walls in a unit that doesn't round them away:** 1/32 in fractions, or mm under 1/32 in ("0.3 mm", never "0 in").
@@ -30,8 +31,9 @@ The reviewer's 5 findings and the foreman's 10 items on #100.
 - **The teardown judges only its own test's jobs** (a snapshot at setup); `CALIPER_JOB_GRACE` sets the wait.
 - **The API's 0.1–50 mm bound is pinned** (the reviewer's surviving mutant now fails).
 - **On the 0.01:** the id sort can't explain it. That test reads `study()`'s return value, never a listing. See #100.
-- Tests: `tests/test_resolved.py`, `tests/test_run_order.py`, `tests/test_jobs.py` (the reviewer's three-test leak,
-  under pytester).
+- Tests: `tests/test_resolved.py` (the spool; the `across` allowance and an 8× budget that really binds: two
+  mutants that survived), `tests/test_run_order.py`, `tests/test_jobs.py` (the reviewer's three-test leak, under
+  pytester).
 
 ### 2026-11-05 · CALI-97 (#80) · A ✓ can't rest on an FEA too coarse to see the wall
 - **Rule 6, found on Theo's bar stool:** "✓ … 2.58x", governed by the FEA at 4.6 mm voxels across a 3.9 mm printed

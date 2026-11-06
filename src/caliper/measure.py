@@ -154,9 +154,14 @@ def body_count(g: Geometry) -> int:
 # ---------------------------------------------------------------------------
 # Features — wall thickness (mesh, ray-cast)
 # ---------------------------------------------------------------------------
-def _wall_rays(g: Geometry, samples: int, seed: int) -> np.ndarray:
-    """Local material thickness at points sampled over the surface (area-weighted): from each, a ray cast inward
-    along the normal, to the first opposite surface it hits."""
+def min_wall_thickness(g: Geometry, samples: int = 2000, seed: int = 0) -> float:
+    """Smallest local material thickness, by ray-casting inward from the surface.
+
+    Method: sample points on the surface, step just inside along the inward normal, cast a ray
+    along the inward normal, and take the distance to the first opposite surface hit. The minimum
+    over samples approximates the thinnest wall. For a solid block this is its smallest dimension.
+    Approximate but deterministic (fixed seed); exact-enough for the printability assertion.
+    """
     m = g.require_mesh()
     rng = np.random.default_rng(seed)
     pts, face_idx = trimesh.sample.sample_surface(m, samples, seed=int(rng.integers(1 << 31)))
@@ -168,29 +173,10 @@ def _wall_rays(g: Geometry, samples: int, seed: int) -> np.ndarray:
 
     locations, index_ray, _ = spatial.intersects_location(m, origins, directions, multiple_hits=False)
     if len(locations) == 0:
-        return np.zeros(0)
+        return float("nan")
     dists = np.linalg.norm(locations - origins[index_ray], axis=1)
-    return dists[dists > eps * 2]
-
-
-def min_wall_thickness(g: Geometry, samples: int = 2000, seed: int = 0) -> float:
-    """Smallest local material thickness, by ray-casting inward from the surface.
-
-    Method: sample points on the surface, step just inside along the inward normal, cast a ray
-    along the inward normal, and take the distance to the first opposite surface hit. The minimum
-    over samples approximates the thinnest wall. For a solid block this is its smallest dimension.
-    Approximate but deterministic (fixed seed); exact-enough for the printability assertion.
-    """
-    dists = _wall_rays(g, samples, seed)
+    dists = dists[dists > eps * 2]
     return float(dists.min()) if len(dists) else float("nan")
-
-
-def wall_thickness(g: Geometry, percentile: float = 10.0, samples: int = 2000, seed: int = 0) -> float:
-    """The thickness its walls mostly are at least: ``percentile`` of the same inward rays as
-    :func:`min_wall_thickness`, over the surface by area. A feathered lip or a knife edge is a sliver of the area,
-    so it doesn't set this the way it sets the minimum (CALI-97: the bar stool's 0.3 mm lips beside 3.9 mm walls)."""
-    dists = _wall_rays(g, samples, seed)
-    return float(np.percentile(dists, percentile)) if len(dists) else float("nan")
 
 
 # ---------------------------------------------------------------------------

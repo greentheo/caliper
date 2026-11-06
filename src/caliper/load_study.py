@@ -202,22 +202,21 @@ RESOLVE_MIN = 4.0
 #: A finer run, offered when the default's voxels can't see a wall, may use this many times the default's voxel
 #: budget and no more (8: twice as fine each way), so no click asks for 10^10 voxels on a shared machine.
 FINER_BUDGET = 8.0
-#: The printed wall the voxels must see: this low percentile of the wall measured all over the part, not its
-#: thinnest spot, so a feathered lip (the bar stool's 0.3 mm, beside its 3.9 mm walls) doesn't set it. NEEDS
-#: ENGINEER CHECK.
-WALL_PERCENTILE = 10.0
 #: The verdict where even the finest run a study may make can't see the walls.
 NOT_CHECKED = ("Not checked: its walls are too thin for the voxel check at this size. A hand check or a printed "
                "test piece is the way to know.")
 
 
 def _thin(declared: dict, mesh, pieces: list[dict]) -> tuple[list, Optional[float]]:
-    """Every piece's thinnest dimension, and a printed part's walls (measured: WALL_PERCENTILE of them)."""
+    """Every piece's thinnest dimension, and a printed part's thinnest wall (measured). The thinnest, not a
+    percentile: a thin neck the load goes through is a sliver of the surface, and a percentile let 5 mm voxels
+    "see" a spool hung from a 0.6 mm neck and call it ✓ (#100, the reviewer's spool; rule 6). Where the thinnest
+    spot is only a lip, the cap says "not checked", the safe side."""
     walls = None
     if any(isinstance(it, dict) and it.get("kind") == "printed" for it in declared.get("construction") or []):
-        from .measure import Geometry, wall_thickness
+        from .measure import Geometry, min_wall_thickness
 
-        walls = wall_thickness(Geometry.from_mesh(mesh), WALL_PERCENTILE)
+        walls = min_wall_thickness(Geometry.from_mesh(mesh))
     thin = [pc["thickness"] for pc in pieces if pc["kind"] == "sheet"] + [2 * pc["half"] for pc in pieces
                                                                            if pc["kind"] == "stick"]
     return thin + ([walls] if walls and walls > 0 else []), walls

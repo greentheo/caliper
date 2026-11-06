@@ -2,7 +2,7 @@
 
 Found on Theo's bar stool: "✓ Holds a 250 lb person sitting … 2.58x", governed by the FEA, at 4.6 mm voxels across
 a 3.9 mm printed wall (about one voxel through it). Reworked from #100's review: 4 voxels across (RESOLVE_MIN), a
-finer run only within a voxel budget, else "not checked"; the wall measured robustly; a ✗ stays a ✗."""
+finer run only within a voxel budget, else "not checked"; the thinnest wall, never a percentile; a ✗ stays a ✗."""
 
 import math
 import os
@@ -12,7 +12,6 @@ import pytest
 
 from caliper import answers, design_api, load_study, studies
 from caliper.design import DesignStore
-from caliper.measure import Geometry, min_wall_thickness, wall_thickness
 
 pytest.importorskip("cadquery")
 
@@ -37,12 +36,18 @@ def loads(params, build=None):
     p = {**PARAMS, **(params or {})}
     return [{"name": "a foot", "lb": 40, "factor": 2.0, "lo": (-32, -32, p["h"] - 2), "hi": (32, 32, p["h"])}]
 '''
-#: The same tube with a 0.3 mm fin round its middle: a feathered lip, a sliver of its surface (the bar stool's
-#: mesh-opening lips read 0.30 mm beside its walls).
-FIN = TUBE.replace('''    return cq.Workplane().circle(p["r"]).circle(p["r"] - p["wall"]).extrude(p["h"])''',
-                   '''    tube = cq.Workplane().circle(p["r"]).circle(p["r"] - p["wall"]).extrude(p["h"])
-    fin = cq.Workplane().circle(p["r"] + 2).circle(p["r"] - 1).extrude(0.3).translate((0, 0, p["h"] / 2))
-    return tube.union(fin)''')
+#: The reviewer's spool (#100): two printed discs hung on a 10 mm tube neck with 0.6 mm walls, the load through the
+#: neck. The neck is a sliver of the surface, so a 10th-percentile wall read 20 mm, the voxels went to 5 mm, and the card
+#: said "✓ Holds a foot, about 2.4 times over" (9.7x at 10 lb); a hand check gives about 1.4x. main read ✗ 0.8x.
+SPOOL = TUBE.replace('''PARAMS = {"r": 30.0, "h": 80.0, "wall": 4.0}''', '''PARAMS = {"r": 30.0, "disc": 20.0, "nr": 10.0, "wall": 0.6, "neck": 10.0}''').replace(
+    '''    return cq.Workplane().circle(p["r"]).circle(p["r"] - p["wall"]).extrude(p["h"])''',
+    '''    lo = cq.Workplane().circle(p["r"]).extrude(p["disc"])
+    neck = (cq.Workplane().circle(p["nr"]).circle(p["nr"] - p["wall"]).extrude(p["neck"] + 2)
+            .translate((0, 0, p["disc"] - 1)))
+    hi = cq.Workplane().circle(p["r"]).extrude(p["disc"]).translate((0, 0, p["disc"] + p["neck"]))
+    return lo.union(neck).union(hi)''').replace(
+    '''"lo": (-32, -32, p["h"] - 2), "hi": (32, 32, p["h"])''',
+    '''"lo": (-28, -28, 2 * p["disc"] + p["neck"] - 2), "hi": (28, 28, 2 * p["disc"] + p["neck"])''')
 #: No loads(): a strength check of it stops at once ("it has no loads()").
 NO_LOADS = TUBE.split("\n\ndef loads")[0] + "\n"
 #: Fifty times the load: it fails, on the same coarse voxels.
@@ -168,19 +173,15 @@ def test_an_asked_for_voxel_size_cant_go_past_the_budget(tmp_path, monkeypatch):
                for n in rec["notes"])
 
 
-def test_a_feathered_lip_doesnt_set_the_wall(tmp_path):
-    """#100 item 3: the bar stool's thinnest spot is a 0.30 mm lip; its walls are 2.8 mm (on a copy of v3: min 0.30,
-    5th to 25th percentile 2.82 to 2.86). The wall the voxels must see is a low percentile, not the min."""
-    from caliper import construction as C
-    from caliper.consistency import shapes
-
-    store = _store(tmp_path, FIN)
-    mesh = store.part_geometry("tube").require_mesh()
-    g = Geometry.from_mesh(mesh)
-    assert min_wall_thickness(g) == pytest.approx(0.3, abs=0.05)
-    assert wall_thickness(g, load_study.WALL_PERCENTILE) == pytest.approx(4.0, abs=0.1)
-    declared = C.declared(store, "tube")
-    assert load_study._thin(declared, mesh, shapes(declared))[1] == pytest.approx(4.0, abs=0.1)
+def test_a_spool_hung_on_a_thin_neck_never_reads_holds(tmp_path, monkeypatch):
+    """The reviewer's blocker on #100: the wall that gates a verdict is the thinnest, so the 0.6 mm neck the load goes
+    through is seen (or the verdict says it isn't), never a ✓ from voxels that can't see it."""
+    assert SPOOL != TUBE and "nr" in SPOOL
+    store, rec = _studied(tmp_path, monkeypatch, 4, SPOOL)
+    lines = _work(store, "tube") + _work(store)
+    assert lines and all(ln["status"] != "ok" for ln in lines), lines
+    assert not [ln for ln in lines if ln["text"].startswith(("Holds", "✓"))], lines
+    assert rec["thinnest_mm"] == pytest.approx(0.6, abs=0.05) and rec["too_thin"]
 
 
 @pytest.mark.parametrize("mm,inches,said", [
@@ -238,3 +239,31 @@ def test_and_takes_one_at_its_ends(tmp_path, monkeypatch, mm):
     got = c.post(f"/api/designs/{store.design.slug}/load-study", json={"part": "tube", "spacing_mm": mm})
     assert got.status_code == 200, got.text
     _finish(c, got.json()["job_id"])
+
+
+def test_four_across_counted_with_a_hair_of_rounding_is_four():
+    """A default run is sized at exactly RESOLVE_MIN across, which floats to 3.9999; without the 0.1% allowance it
+    read "not resolved" on a run that is (#100, a surviving mutant)."""
+    run, case = {"thinnest_mm": 4.0, "spacing_mm": 1.0, "across": 3.9999}, {"governs": "fea"}
+    assert not load_study.unresolved(run, case)
+    assert load_study.unresolved({**run, "across": 3.99}, case)            # but 3.99 is short of four
+    assert not load_study.unresolved({**run, "across": 3.0}, {"governs": "plate"})   # and only the FEA's verdict
+
+
+#: A tube big enough that the default voxel budget can't put four voxels across its 4 mm wall (1.25 mm voxels), and
+#: the finer run's budget, 8x, can (0.625 mm): nothing patched but the part's size.
+BIG = TUBE.replace('PARAMS = {"r": 30.0, "h": 80.0, "wall": 4.0}', 'PARAMS = {"r": 60.0, "h": 200.0, "wall": 4.0}') \
+    .replace('"lo": (-32, -32, p["h"] - 2), "hi": (32, 32, p["h"])', '"lo": (-62, -62, p["h"] - 2), "hi": (62, 62, p["h"])')
+
+
+def test_where_the_default_budget_binds_the_finer_run_is_offered_within_eight_times_it(tmp_path):
+    """#100, a surviving mutant: FINER_BUDGET = 1 (the finer run in the default's own budget) went unnoticed, because
+    the tests reached a coarse run by patching VOXELS_THROUGH. Here the budget itself binds."""
+    pytest.importorskip("whittle")
+    assert BIG != TUBE
+    store = _store(tmp_path, BIG)
+    rec = load_study.study(store, "tube")
+    assert rec["spacing_mm"] == pytest.approx(1.25, abs=0.02) and not rec["resolved"]
+    assert rec["finer"]["spacing_mm"] == pytest.approx(rec["thinnest_mm"] / 4, abs=0.011)
+    assert rec["finer"]["spacing_mm"] >= load_study.finest(rec["voxels"] * 1.25 ** 3, 200, load_study.FINER_BUDGET) - 0.05
+    assert "too_thin" not in rec
