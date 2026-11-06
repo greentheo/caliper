@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import operator
+import threading
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Optional
@@ -49,7 +50,39 @@ class SafeEvalError(Exception):
     pass
 
 
+#: The most an expression may do (#103 review): a rule Claude wrote, "9 ** 9 ** 8 > 0", ran past 60 s under OCCT on
+#: every design load and stalled the app. Every rule is held to a node count, small powers, no repeated strings or
+#: lists, ints of bounded size, and no private attributes, so none can hold the lock.
+MAX_NODES = 2000
+MAX_POWER = 4
+MAX_INT_BITS = 256
+_SPENT = threading.local()
+
+
+def _spend() -> None:
+    n = getattr(_SPENT, "n", 0) + 1
+    _SPENT.n = n
+    if n > MAX_NODES:
+        raise SafeEvalError(f"the expression is too big to measure (over {MAX_NODES} steps)")
+
+
+def _arith(op, a, b):
+    """``a op b``, refused before it's done if it would run away."""
+    if isinstance(op, ast.Pow):
+        if not (isinstance(b, (int, float)) and not isinstance(b, bool) and abs(b) <= MAX_POWER):
+            raise SafeEvalError(f"a power above {MAX_POWER} isn't something a rule measures")
+    if isinstance(op, ast.Mult) and (isinstance(a, (str, bytes, list, tuple)) or isinstance(b, (str, bytes, list, tuple))):
+        raise SafeEvalError("repeating a string or a list isn't something a rule measures")
+    if isinstance(a, int) and isinstance(b, int) and not isinstance(a, bool) and not isinstance(b, bool):
+        if isinstance(op, ast.Mult) and a.bit_length() + b.bit_length() > MAX_INT_BITS:
+            raise SafeEvalError("a number too big to measure")
+        if isinstance(op, ast.Pow) and a.bit_length() * max(abs(b), 1) > MAX_INT_BITS:
+            raise SafeEvalError("a number too big to measure")
+    return _BINOPS[type(op)](a, b)
+
+
 def _eval(node: ast.AST, ctx: dict) -> Any:
+    _spend()
     if isinstance(node, ast.Expression):
         return _eval(node.body, ctx)
     if isinstance(node, ast.Constant):
@@ -59,9 +92,11 @@ def _eval(node: ast.AST, ctx: dict) -> Any:
             raise SafeEvalError(f"unknown name {node.id!r}")
         return ctx[node.id]
     if isinstance(node, ast.Attribute):
+        if node.attr.startswith("_"):                  # no way out through a dunder chain (#103 review)
+            raise SafeEvalError(f"{node.attr!r} isn't something a rule can read")
         return getattr(_eval(node.value, ctx), node.attr)
     if isinstance(node, ast.BinOp) and type(node.op) in _BINOPS:
-        return _BINOPS[type(node.op)](_eval(node.left, ctx), _eval(node.right, ctx))
+        return _arith(node.op, _eval(node.left, ctx), _eval(node.right, ctx))
     if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY:
         return _UNARY[type(node.op)](_eval(node.operand, ctx))
     if isinstance(node, ast.BoolOp):
@@ -88,6 +123,7 @@ def _eval(node: ast.AST, ctx: dict) -> Any:
 
 
 def safe_eval(expr: str, ctx: dict) -> Any:
+    _SPENT.n = 0
     return _eval(ast.parse(expr, mode="eval"), ctx)
 
 
@@ -175,11 +211,30 @@ class Report:
         return bool(considered) and all(r.status == "pass" for r in considered)
 
     @property
+    def waiting(self) -> list[AssertionResult]:
+        """The checks that couldn't run yet (deferred): never counted as passing in what a person reads, though
+        :attr:`all_pass` leaves them out so the authoring loop can finish (#103 review)."""
+        return [r for r in self.results if r.status == "deferred"]
+
+    def said(self) -> str:
+        """The report in a line a person reads: nothing that didn't run is called a pass (rule 6)."""
+        passed = sum(r.status == "pass" for r in self.results)
+        bad, wait = len(self.failures), len(self.waiting)
+        if bad:
+            return f"{bad} design check{'s' if bad != 1 else ''} failing"
+        if wait and not passed:
+            return f"no design check has run yet: {wait} not checked yet"
+        if wait:
+            return f"{passed} design check{'s' if passed != 1 else ''} pass, {wait} not checked yet"
+        return "all design checks pass" if self.all_pass else "no design checks"
+
+    @property
     def failures(self) -> list[AssertionResult]:
         return [r for r in self.results if r.status in ("fail", "error")]
 
     def to_dict(self) -> dict:
-        return {"all_pass": self.all_pass, "results": [r.to_dict() for r in self.results]}
+        return {"all_pass": self.all_pass, "waiting": len(self.waiting), "said": self.said(),
+                "results": [r.to_dict() for r in self.results]}
 
     def to_text(self) -> str:
         lines = []
@@ -270,6 +325,7 @@ def build_context(
 def evaluate_assertion(assertion, ctx: dict) -> AssertionResult:
     try:
         tree = ast.parse(assertion.expr, mode="eval")
+        _SPENT.n = 0                                   # each rule its own budget (#103 review)
         passed = bool(_eval(tree, ctx))
         margin, actual = _margin(tree, ctx)
         return AssertionResult(

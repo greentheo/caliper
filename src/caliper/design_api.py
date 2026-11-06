@@ -18,11 +18,11 @@ from typing import Optional
 
 from pydantic import BaseModel, field_validator
 
-from . import (aero, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
+from . import (aero, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
                load_study, making, patterns, promote, release, samples, scorecard, shop, studies)
 from . import whittle_bridge as wb
 from .design import DesignStore
-from .jobs import RUNNER, stream
+from .jobs import RUNNER, Busy, stream
 
 
 # --- request bodies (module level: FastAPI resolves stringized annotations against globals) -------
@@ -123,6 +123,7 @@ class FrameRequest(BaseModel):
 class LoadRequest(BaseModel):
     part: str
     min_safety: float = load_study.MIN_SAFETY     # at each load times its factor
+    spacing_mm: Optional[float] = None            # a finer run than the default voxels (CALI-97)
 
 
 class Shop(BaseModel):
@@ -168,6 +169,16 @@ def _lock(slug: str) -> str:
 _FIRST: dict[str, str] = {}
 
 
+#: What a new design's first build needs and nothing else here can do: Claude (CALI-91). Said, not failed.
+NEEDS_KEY = "Building a new design needs a Claude key (see .env.example). Until then, open one of ours."
+
+
+def _claude() -> bool:
+    """Whether Claude can be asked: a key is set (the CLI loads .env). Without one nothing is sent anywhere, and a
+    first build can't run, so it isn't started (CALI-91)."""
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+
 def first_build(slug: str):
     """Start a design's first build (it has no parts yet): what it's held to, the part, its strength check,
     its patterns, its score. Returns the job; one at a time per design."""
@@ -187,9 +198,50 @@ def first_build(slug: str):
     return job
 
 
+def _plan(store: DesignStore) -> Optional[dict]:
+    """The design's plan as the page shows it: the review line, the parts in build order, the numbers (in the
+    person's units) and the checks between the parts (CALI-35, #3a)."""
+    from . import plan as P
+
+    try:
+        pl = P.load(store)
+    except Exception:  # noqa: BLE001 — a plan on file that no longer reads: the design still opens
+        return None
+    if pl is None:
+        return None
+    inches = store.design.display_units == "in"
+    by = {p.id: p for p in pl.parts}
+    return {"status": (store.design.plan or {}).get("status", "review"), "headline": P.headline(pl, store.design.name),
+            "parts": [{**by[i].model_dump(), "built": bool(store.design.part(i) and store.design.part(i).version)}
+                      for i in P.order(pl)],
+            "numbers": [f"{s.name.replace('_', ' ')}: {P.number(s, inches)}" + (f" ({s.why})" if s.why else "")
+                        for s in pl.skeleton],
+            "checks": [{"id": r.id, "expr": r.expr} for r in pl.rules]
+                      + [{"id": f"{m.kind}", "expr": f"{m.between[0]} and {m.between[1]}"} for m in pl.mates]}
+
+
 def _building(slug: str) -> Optional[str]:
     j = RUNNER.get(_FIRST.get(slug, ""))
     return j.id if j is not None and not j.over else None
+
+
+def _carving(slug: str) -> Optional[dict]:
+    """The design's carve while it's queued or running, so a redraw or a reload finds its panel again (CALI-101)."""
+    j = RUNNER.running(f"carve:{slug}")
+    return ({"job": j.id, "part": j.label.split(" · ", 1)[-1], "stopping": j.stopping}   # survives a reload (#102)
+            if j is not None else None)
+
+
+def _where(job) -> str:
+    """How far a carve has got, from what it's said: "step 2 of 6", or what it's doing before its first step."""
+    if job.status == "queued":
+        return "it's waiting to start"
+    said = [ev.get("text") or "" for ev in job.since(0)]
+    steps = next((m.group(1) for t in said if (m := re.search(r" in (\d+) steps", t))), None)
+    at = next((m.group(1) for t in reversed(said) if (m := re.match(r"step (\d+):", t))), None)
+    if at is None:
+        return "working out its steps" + (f" (it takes {steps})" if steps else "")
+    return f"step {int(at) + 1}" + (f" of {steps}" if steps else "")      # step 0 is the first of n (#102)
 
 
 # --- serialising -----------------------------------------------------------------------------------
@@ -231,6 +283,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             # printed, whole or the rest beside its sheets: carved free-form, not lightened with holes (CALI-82)
             "printed": bool(re.search(r"""["']kind["']\s*:\s*["']printed["']""", script)),
             "carved": "CARVED" in script,
+            # its strength rests on a filled-in solid (or a shape that couldn't be checked): no "holds" (CALI-96)
+            "untrusted": consistency.filled(store, p.id) if "def loads(" in script else None,
             "suggest": {k: aero.suggest(k, v, ranges) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
@@ -252,10 +306,17 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "gussets": frame_study.list_gussets(store), "aero": aero.list_runs(store),
             "whittle": wb.list_runs(store), "cutplan": cutplan.list_runs(store),
             "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
+    for r in runs["load"]:                    # what the page can't work out: a case too coarse to see its walls (CALI-97)
+        for c in r.get("cases") or []:
+            if load_study.unresolved(r, c):
+                c["unresolved"] = "unresolved" if r.get("finer") else "unchecked"
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
         "building": _building(slug),          # the first build's job, while it runs (CALI-59)
+        "claude": _claude(),                  # whether what's typed goes to Claude, and a build can run (CALI-91)
+        "plan": _plan(store),                 # its parts, numbers and checks, before they're built (CALI-35)
+        "carving": _carving(slug),            # the carve's job, while it runs (CALI-101)
         "display_units": d.display_units,
         "requirements": [r.model_dump() for r in d.requirements],
         "parts": parts,
@@ -327,6 +388,14 @@ def router():
             raise HTTPException(status_code=404, detail=f"no design {slug!r}")
 
     # -- jobs ----------------------------------------------------------------------------------------
+    @r.post("/api/jobs/{job_id}/cancel")
+    def job_cancel(job_id: str):
+        """Stop a job (CALI-101): a queued one never starts, a running one stops at its next step."""
+        j = RUNNER.cancel(job_id)
+        if j is None:
+            raise HTTPException(status_code=404, detail="no such job (it may have expired)")
+        return j.to_dict()
+
     @r.get("/api/jobs/{job_id}")
     def job(job_id: str, after: int = 0):
         j = RUNNER.get(job_id)
@@ -345,7 +414,7 @@ def router():
     # -- designs -------------------------------------------------------------------------------------
     @r.get("/api/designs")
     def designs():
-        return {"designs": DesignStore.list_designs()}
+        return {"designs": DesignStore.list_designs(), "claude": _claude()}
 
     @r.post("/api/designs")
     def new_design(req: NewDesign):
@@ -387,6 +456,8 @@ def router():
             raise HTTPException(status_code=409, detail="it's already built: say what to change")
         if clarify.pending(store):
             raise HTTPException(status_code=409, detail="answer its questions first (or leave them blank)")
+        if not _claude():                       # a job bound to fail with the SDK's own words (CALI-91)
+            raise HTTPException(status_code=409, detail=NEEDS_KEY)
         return {"job_id": first_build(slug).id}
 
     @r.get("/api/designs/{slug}")
@@ -409,7 +480,7 @@ def router():
         with RUNNER.locked(_lock(slug)):
             store = load(slug)
             clarify.answer_round(store, req.answers, skip=req.skip)
-        if req.build and not store.design.parts:
+        if req.build and not store.design.parts and _claude():
             first_build(slug)                  # it writes the checks first, then builds against them
             return design_state(load(slug))
 
@@ -544,9 +615,12 @@ def router():
         if not _aero_available():
             raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
 
+        if req.spacing_mm is not None and not (math.isfinite(req.spacing_mm) and 0.1 <= req.spacing_mm <= 50):
+            raise HTTPException(status_code=422, detail="a voxel size is a number of mm, between 0.1 and 50")
+
         def work(j):
             s = DesignStore.load(slug)
-            return load_study.study(s, req.part, min_safety=req.min_safety,
+            return load_study.study(s, req.part, min_safety=req.min_safety, spacing=req.spacing_mm,
                                     emit=lambda k, t="", **d: j.emit(k, t, **d))
 
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
@@ -708,9 +782,12 @@ def router():
 
         def work(j):
             return carve.study(DesignStore.load(slug), req.part, min_safety=req.min_safety,
-                               emit=lambda k, t="", **d: j.emit(k, t, **d))
+                               emit=lambda k, t="", **d: j.emit(k, t, **d), stop=j.check)
 
-        job = RUNNER.submit("carve", work, label=f"carve · {req.part}", lock=f"carve:{slug}")
+        try:                                  # one carve of a design at a time, checked as it's queued (CALI-101)
+            job = RUNNER.submit("carve", work, label=f"carve · {req.part}", lock=f"carve:{slug}", exclusive=True)
+        except Busy as e:
+            raise HTTPException(status_code=409, detail=f"a carve is already running: {_where(e.job)}")
         return {"job_id": job.id}
 
     @r.get("/api/designs/{slug}/carve/{rid}/stations/{index}.stl")

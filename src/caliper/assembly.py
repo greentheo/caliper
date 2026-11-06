@@ -253,7 +253,7 @@ def load_parts(asm: Assembly, base_dir: str = ".") -> dict[str, Geometry]:
     return parts
 
 
-def load_parts_tolerant(asm: Assembly, base_dir: str = ".") -> tuple[dict[str, Geometry], dict[str, str]]:
+def load_parts_tolerant(asm: Assembly, base_dir: str = ".", skip=()) -> tuple[dict[str, Geometry], dict[str, str]]:
     """Like :func:`load_parts`, but one broken part doesn't sink the assembly (CALI-27).
 
     Returns ``(loaded, errors)`` — every part that loads, plus ``{part_id: message}`` for the ones that
@@ -263,6 +263,8 @@ def load_parts_tolerant(asm: Assembly, base_dir: str = ".") -> tuple[dict[str, G
     loaded: dict[str, Geometry] = {}
     errors: dict[str, str] = {}
     for p in asm.parts:
+        if p.id in skip:                   # planned, not built yet (CALI-35): nothing to load, nothing broken
+            continue
         try:
             path = _resolve_source(p.source, base_dir)
             if path.endswith(".py"):
@@ -302,6 +304,8 @@ def build_context(asm: Assembly, parts: dict[str, Geometry]) -> dict:
         "approx": tolerance.approx,
         "within": tolerance.within,
         "fits": tolerance.fits,
+        # plain arithmetic, for a rule over a skeleton number: abs(bbox(mast).max.z - mast_top_z) <= 1 (CALI-35)
+        "abs": abs, "min": min, "max": max,
     }
     for pid, geom in parts.items():
         ctx[pid] = geom
@@ -309,7 +313,8 @@ def build_context(asm: Assembly, parts: dict[str, Geometry]) -> dict:
 
 
 def evaluate_assembly(
-    asm: Assembly, base_dir: str = ".", parts: Optional[dict[str, Geometry]] = None
+    asm: Assembly, base_dir: str = ".", parts: Optional[dict[str, Geometry]] = None,
+    values: Optional[dict] = None, unbuilt=(),
 ):
     """Build (or accept) the part geometries, then evaluate every mate + assembly assertion → Report.
 
@@ -318,6 +323,26 @@ def evaluate_assembly(
     """
     from .evaluate import Report, evaluate_assertion
 
+    from .evaluate import AssertionResult
+
     parts = parts if parts is not None else load_parts(asm, base_dir)
     ctx = build_context(asm, parts)
-    return Report([evaluate_assertion(a, ctx) for a in derived_assertions(asm)])
+    ctx.update(values or {})               # the skeleton's numbers, by name (CALI-35)
+    out = []
+    for a in derived_assertions(asm):
+        waits = sorted(_names(a.expr) & set(unbuilt))
+        if waits:                          # a rule over a part that's planned but not built yet (CALI-35)
+            out.append(AssertionResult(a.id, a.expr, "deferred", None,
+                                       detail=f"waits for {' and '.join(waits)} to be built"))
+        else:
+            out.append(evaluate_assertion(a, ctx))
+    return Report(out)
+
+
+def _names(expr: str) -> set:
+    import ast
+
+    try:
+        return {n.id for n in ast.walk(ast.parse(expr, mode="eval")) if isinstance(n, ast.Name)}
+    except SyntaxError:
+        return set()

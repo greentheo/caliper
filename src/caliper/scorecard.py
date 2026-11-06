@@ -361,6 +361,12 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         _metric(metrics, "strength.safety", worst, "×", "the weakest load any part must carry", "model",
                 "strength check")
 
+    # a strength number from a filled-in solid (or a shape that couldn't be checked) is no verdict (CALI-96)
+    from .consistency import filled
+
+    untrue = next((why for p in store.design.parts if store.is_scripted(p.id)
+                   and "def loads(" in store.read_script(p.id) for why in [filled(store, p.id)] if why), None)
+
     # the user's checks and objectives (a proposed one is shown, and binds once it's kept: CALI-55)
     for c in g["checks"]:
         if c.get("source") == "proposed":
@@ -369,6 +375,10 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                            "trust": m["trust"] if m else None, "unit": m["unit"] if m else ""})
             continue
         m = metrics.get(c["metric"])
+        if untrue and c["metric"].startswith("strength"):        # neither passed nor failed: not trusted yet
+            checks.append({**c, "status": "untrusted", "value": m["value"] if m else None, "margin": None,
+                           "unit": m["unit"] if m else "", "trust": "not trusted: a filled-in shape", "note": untrue})
+            continue
         if m is None or not isinstance(m["value"], (int, float)):
             checks.append({**c, "status": "unknown", "value": None, "margin": None, "trust": None})
             continue
@@ -392,7 +402,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             "summary": {"pass": sum(c["status"] == "pass" for c in checks),
                         "fail": sum(c["status"] == "fail" for c in checks),
                         "unknown": sum(c["status"] not in ("pass", "fail", "proposed") for c in checks),
-                        "proposed": sum(c["status"] == "proposed" for c in checks)}}
+                        "proposed": sum(c["status"] == "proposed" for c in checks),
+                        "untrusted": sum(c["status"] == "untrusted" for c in checks)}}
     os.makedirs(cards_dir(store), exist_ok=True)
     with open(os.path.join(cards_dir(store), time.strftime("%Y%m%d-%H%M%S") + ".json"), "w") as f:
         json.dump(card, f, indent=2, default=str)

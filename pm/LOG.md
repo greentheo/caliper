@@ -1,7 +1,18 @@
 # Caliper work log
 
 Append-only. Newest first. One entry per shipped task or notable decision.
-Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
+Format: `### 2026-11-06 · CALI-97 (#100, merged with main after #96) · "Not trusted" wins over "not resolved"; a ✗ stays a ✗
+- **Merged `main` (with #96) into #100.** Where both reword one strength verdict:
+  - the filled-in shape's "not trusted" comes first, because the check ran on a block, the more basic problem;
+  - "not resolved" or "not checked" comes next;
+  - a fail stays a ✗ under both.
+- **A filled-in part that fails** now reads ✗ on the part card, the design card and the Studies row, with "It ran on a
+  filled-in shape, so the part as built is weaker still". The block is stronger than the hollow part, so a fail on it
+  is certain. #96 alone had read every filled-in verdict as a warn.
+- **Page:** "not trusted" first, then "not resolved", then holds or doesn't. `design.js?v=45`.
+- Tests: `test_filled_verdict` (both together on the design card and in Studies).
+
+### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
 ---
 
@@ -32,6 +43,168 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   with the fixture: the carve that "dies at the second step" counts a check per load, and the carve-down test uses
   `MIXED`'s middle foot only (`CENTRED`). With the front-edge foot, the carve picks a step whose adopted part isn't
   watertight, at 40 lb and at 50 lb alike; that's a carve-adopt defect of its own, #105.
+### 2026-11-06 · CALI-91 (#68) · Words leave the machine only when the person sends them
+- **The 🎤 asks first** (rule 6). A browser's speech recognition sends the audio to its maker. On the first press:
+  "Your browser turns speech into words by sending it to its maker (Google, in Chrome). Talk anyway?", with **Talk**
+  and **Type instead**. The answer is kept in that browser's `localStorage`, every read and write in try/catch; if
+  it's forgotten, it asks again. After Type instead, the next press offers the computer's dictation and a Talk button,
+  and never listens unasked.
+- **On the device, it doesn't ask:** where `SpeechRecognition.available({processLocally: true})` says "available", it
+  listens with `processLocally` and nothing leaves. Checked on this machine: the app's browser pane (Chrome/152) has
+  the API and reports on-device "unavailable", so it asks. Chrome and Safari themselves weren't checked.
+- **The fallback names no machine it can't see:** "Use your computer's dictation: on a Mac, press the 🎤 key (or Fn
+  twice)."
+- **What's typed goes to Claude, said:** under the first-run box, and under the chat box until the first message is
+  sent, when a key is set.
+- **With no key, Build it says what's missing instead of failing:** "Building a new design needs a Claude key (see
+  .env.example). Until then, open one of ours below." The API refuses a first build with a 409 in those words, the
+  questions' Build it records the answers and starts nothing, and the page shows the line instead of the button.
+- Tests: `tests/test_privacy.py` (node: `rec.start()` only after a yes or on the device; Type instead; the second
+  press; cleared storage; blocked storage); `test_firstrun` (no key: no job, the 409). `?v=44`.
+### 2026-11-06 · CALI-35 (#103 review) · A rule can't freeze the app, and a check that hasn't run is never a pass
+- **A rule Claude writes can't run away** (blocker 1: `9 ** 9 ** 8 > 0` ran over 60 s under OCCT on every design
+  load). The plan's validator allows arithmetic, comparisons, and/or/not, the measures, names and numbers. It refuses
+  `**`, strings, lists, subscripts, keywords, any attribute but a box's sizes and corners, rules over 300 characters,
+  and a rule that doesn't answer yes or no (`rotor_d`, `1`). The evaluator refuses the same, as a second guard:
+  powers above 4, a repeated string or list, ints past 256 bits, private attributes, and over 2,000 steps, each
+  checked before it's done. So no rule can hold the lock.
+- **`bbox()` has named corners** (`max_z` and the rest). The planner had been told `.max.z`, which a bounding box
+  didn't have, so every such rule would have errored. Now it's tested on a real box against the skeleton.
+- **A check that hasn't run is never a pass** (blocker 2, rule 6). `Report.said()` and `waiting` are used by the
+  header badge ("1 pass · 5 not checked yet", never "all checks pass"), the chat ("No design check has run yet: 3 not
+  checked yet.") and the card ("No check has run yet: 3 not checked yet.", warn). `all_pass` keeps its meaning,
+  because the authoring loop stops on it and a part spec's deferred check (a print time with no slicer) must not hold
+  it forever. Nothing a person reads uses it alone.
+- **The planner's fallback reason is plain words** ("skeleton 1 unit is missing"), never pydantic's text and URL.
+- Tests: the reviewer's runaway rules (the validator and the evaluator), the box rule, `said()` cases, the header
+  badge (node), the card, and a "?" that's actually sent during review.
+
+### 2026-11-06 · CALI-35 (#3a) · The plan: parts, the numbers they share, the checks between them, reviewed first
+- **`plan.py`:** a plan is parts (what each is, how it's made, `role: fixed` for what the person has, what it mounts
+  on), the skeleton (named numbers with a unit and why), mates, and rules over part ids and skeleton names.
+  - **Validation refuses, with the reason:** a cycle ("base → mast → hub → rotor → base"), a part, mate or rule
+    naming something the plan hasn't, a skeleton number with no unit or a unit Caliper doesn't measure in, a rule
+    calling anything but the assembly's measures, two things with one name.
+  - **The build order:** mounted-on first, the plan's own order otherwise.
+- **The planner:** one Claude call with the plan's schema as its only tool. The system prompt carries the spec's rule:
+  separate parts are made separately or move; pieces of one sheet or printed part stay one part.
+- **The first run plans first** (with Claude):
+  - a plan of several parts is saved and the run stops for review: "A wind turbine in 4 parts: the rotor (…), the
+    hub, the mast (…) and the base (…)";
+  - a one-part plan (the stool) builds as today;
+  - a plan that can't be used is refused, and it builds as one part, saying why;
+  - with no key it builds one part, as today, and says planning needs Claude.
+- **Build it on a reviewed plan:** "The plan's saved: 4 parts. Building them one by one, in order, comes next (#3b)."
+  Nothing is authored (the foreman's call: 3a builds nothing past today's one part).
+- **Saved** in `assembly.yaml` (the planned parts at their script paths, the mates as `plan_*`, the rules) and
+  `design.yaml` (`skeleton:`, and `plan:` with its parts, order and status).
+  - Evaluation skips planned parts that aren't built yet, and a rule naming one is deferred: "waits for mast to be
+    built". Every other part loads as ever.
+  - A rule can read skeleton names (lengths in mm) and `abs`/`min`/`max`.
+- **The review:** the plan on *What is it?*, and the parts in build order, the numbers in the person's units and the
+  checks under *the numbers*.
+- **The chat edits the plan during review,** never the geometry: "make the mast 10 ft" → "Changed the plan: mast top
+  z: 7 ft → 10 ft." A question is still answered.
+- **Not done: the live run** of the three sentences (turbine, camper, stool). It spends Theo's key, so it needs his
+  word in the session that runs it.
+- Tests: `tests/test_plan.py` (a stubbed client throughout).
+### 2026-11-06 · CALI-101 (#93) · Carve it: one click, one carve, its progress, and a cancel
+- **The page error on Theo's run** ("Cannot read properties of undefined (reading 'ok')"): `makingView` read
+  `m.data` while the shop plan was still loading. It says "planning…" until it's back.
+- **One carve per design at a time,** checked as it's queued (`JobRunner.submit(exclusive=True)`, under the runner's
+  lock), so two requests 11 ms apart can't both get through. The second gets a 409: "a carve is already running: step
+  2 of 6". The page keeps the carve in `S.carveJob` from the click, so a second click (or a second handler) sends
+  nothing.
+  - **Why one click sent two:** not found. The page draws one Carve button and wires it once. Both guards now stop
+    a double-fire whatever its cause.
+- **The panel shows the carve as it runs:** the step it's on, the bar, "about N min left" from its pace so far, and
+  **Cancel**. A redraw draws it again from state; a reload finds it through `design.carving`.
+- **Cancel:** `POST /api/jobs/{id}/cancel`. A queued job never starts. A running carve stops at its next step
+  boundary (in the sweep, or between steps) and keeps what it finished: #99's record, marked `cancelled`, with the
+  best of its steps. The panel and the Studies row say "cancelled after k of n steps".
+- **The label before you press** (reworked from #102's review). Until a carve of the part has finished, it's a floor:
+  "at least about N min at this size". That comes from this version's default-voxel strength check (the coarsest at
+  this version: a finer one asked for never sets it), × 45, the low end of what was measured: 47 on the printed box,
+  67 on the mixed stool, about 65 on the bar stool's sweep, about 190 on the reviewer's tube. A ratio isn't a
+  constant, so it never says "about" before a carve has finished. After one, it's that carve's own time. With no
+  check: "check it holds first". With a check whose voxels didn't connect: "a carve can't run".
+- **One step count:** the carve says "in 7 steps (as drawn, then 6 carved)". The panel, the 409 ("step 3 of 7"),
+  the cancelled panel and the Studies row all count the same 7.
+- **"Stopping…" survives a reload:** `stopping` is in the job's `to_dict` and in `design.carving`, and a cancel of a
+  running job emits a `stopping` event, which a page that follows the job from the start hears.
+- Tests: `tests/test_carve_click.py` (main fails 7 of the first 9; the makingView one with Theo's exact error).
+  From #102's review, tests that can fail: a barrier hook between the check and the queueing (a check-then-queue
+  split queues two); and node tests for the click guard, "stopping…" after a reload, following a running carve, and
+  the label's cases. Each fails under the mutant the reviewer found surviving.
+### 2026-11-06 · CALI-97 (#100 review) · Four across, a budget for the finer run, and a ✗ stays a ✗
+The reviewer's 5 findings and the foreman's 10 items on #100.
+- **`RESOLVE_MIN` is 4** (the foreman's call from #100's own table; still NEEDS ENGINEER CHECK for #42).
+- **A finer run is capped by a voxel budget:** `finest()`, 8× the default's voxels (`FINER_BUDGET`, twice as fine
+  each way). An asked-for `spacing_mm` finer than that runs at the finest it may, and says so. Where even that can't
+  get 4 across the wall, no finer run is offered, and the card says: "Not checked: its walls are too thin for the
+  voxel check at this size. A hand check or a printed test piece is the way to know."
+  - **Judgment call:** the review said "the same budget" as the default. With `VOXELS_THROUGH` 4 = `RESOLVE_MIN` 4,
+    a default run is only unresolved when that budget already bound it, so a finer run inside the same budget could
+    never be offered. 8× keeps the button meaningful and bounded. `FINER_BUDGET = 1` is the other reading.
+- **The wall that gates a verdict is the thinnest** (the reviewer's blocker on d82c67e). A 10th percentile let 5 mm
+  voxels "see" a spool hung from a 0.6 mm neck and call it ✓ 9.7× at 10 lb (main: ✗). Back to `min_wall_thickness`;
+  where the thinnest spot is only a lip (the bar stool's 0.3 mm), the cap says "not checked", the safe side.
+- **A ✗ stays a ✗,** with "The fail may be the model's: the voxels can't see its … walls." on the part card, the
+  design card and the Studies row. Only a ✓ turns to warn.
+- **Walls in a unit that doesn't round them away:** 1/32 in fractions, or mm under 1/32 in ("0.3 mm", never "0 in").
+- **The numbers panel:** amber "not resolved" / "not checked" badges in place of a green "holds", in the case, the
+  run's header and the run picker; the case says "The FEA read Nx at voxels of …, too coarse to see its … walls".
+- **The finer run's time** comes from the run's own FEA time per voxel, scaled as voxels^(4/3): measured on the tube
+  and the box stool, time per voxel grows as about the cube root of the voxel count.
+- **No time for a finer run when the coarse run didn't connect** (the reviewer: "about 1 min" on the bar stool copy, for
+  a run that took 39): its FEA stopped at once, so its time says nothing. The button reads "(how long: unknown)".
+- **The spacing clamp is pinned by an assert:** an asked-for 0.1 mm reaches the voxelizer as the finest the budget
+  allows (whittle's LoadStudy stubbed, so a mutant fails on an assert, not by running away).
+- **Run ids sort by `created`** (`runs.newest_first`), the id as tiebreak, in every listing (loads, carve, lighten,
+  aero, frames, gussets, whittle, patterns, cut plans) and in a saved sample. This was the reviewer's
+  `test_resolved` flake.
+- **The teardown judges only its own test's jobs** (a snapshot at setup); `CALIPER_JOB_GRACE` sets the wait.
+- **The API's 0.1–50 mm bound is pinned** (the reviewer's surviving mutant now fails).
+- **On the 0.01:** the id sort can't explain it. That test reads `study()`'s return value, never a listing. See #100.
+- Tests: `tests/test_resolved.py` (the spool; the `across` allowance and an 8× budget that really binds: two
+  mutants that survived), `tests/test_run_order.py`, `tests/test_jobs.py` (the reviewer's three-test leak, under
+  pytester).
+
+### 2026-11-05 · CALI-97 (#80) · A ✓ can't rest on an FEA too coarse to see the wall
+- **Rule 6, found on Theo's bar stool:** "✓ … 2.58x", governed by the FEA at 4.6 mm voxels across a 3.9 mm printed
+  wall.
+- A study now records its thinnest wall and whether the FEA resolved it: 2 voxels across, for now (NEEDS ENGINEER
+  CHECK; #42).
+- When an unresolved FEA governs, both cards read warn: "Not resolved yet: the check was too coarse to see its 4 mm
+  walls. Check it again finer." A button runs it finer, at least 2 voxels across, and says roughly how long.
+- The design card's strength lines say "about" when the printed model governs.
+- **Before and after, on the printed fixtures:** only the 1-voxel-across verdicts change (✓ → warn).
+- **For #42:** the printed box reads ✓ 2.7× at 2 voxels across and ✗ 1.9× at 4, so 2 is too few to trust a verdict.
+- Tests: `tests/test_resolved.py` (main reads ✓ on both cards for the coarse tube). Commit: `caf174e`.
+### 2026-11-05 · CALI-96 (#78), #96 rework · "Not trusted yet" everywhere a filled part's strength shows
+The foreman's six items. The rule: wherever a strength verdict rests on the filled solid, it never reads holding.
+- **The scorecard** grades it "untrusted", so the build package isn't "ready to cut". `d5a66fd`
+- **The numbers layer and the 3D view** say "not trusted: a filled-in shape": the panel header, the case badges,
+  the heat callout, the lightening line and the step previews. `b3adda5`
+- **The cache fails closed:** "couldn't check its shape" is never holding, and isn't kept. `79fe045`
+- **The kids' book:** no stand-on-it page; "Don't stand on it yet: a grown-up checks it first". `c349f75`
+- **The design card** leads with the verdict, with the check's name after. `85bc844`
+- **Studies and Lighten** read the part as it is now, so old runs say so too. `be73bd1`
+
+---
+
+### 2026-11-05 · CALI-96 (#78) · A strength verdict on a filled-in solid reads "not trusted yet"
+- **Rule 6, found on the owner's step-stool-2 after the ship.** *What is it?* said `build()` was filled in, while
+  *Will it work?* read "✓ Holds kid + dad (250 lb), 2 times over" from a check that ran on that block.
+- `consistency.filled(store, pid)` (cached per version and script) now says when a part with `loads()` fails the
+  volume check by being filled in. When it does:
+  - both cards' strength lines read warn: "Not trusted yet: the strength check ran on a filled-in shape, not the
+    step stool as built. Fix its shape first …";
+  - the build book and the kids' book don't print a holding line;
+  - a study on it says, in its record, notes and headline, that the number is the block's.
+- Tests: `tests/test_filled_verdict.py`, written first and failing on main (the filled box read "Holds …, 3.1
+  times over"). On the owner's design, read on a copy: main shows ✓, this branch shows warn on both cards.
+  Commit: `53f1067`.
 
 ### 2026-11-05 · CALI-103 (#95) · The app no longer crashes when the page and a study query one mesh at once
 - **The owner's app died three times (exit 134/139) in libspatialindex:** two threads in one cached mesh's R-tree,

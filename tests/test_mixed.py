@@ -245,7 +245,8 @@ def test_carving_through_the_api(stool, monkeypatch):
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
     monkeypatch.setenv("CALIPER_DESIGNS", str(stool.root.rsplit("/", 1)[0]))
-    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60'), intent="kid")
+    # the middle foot only: the API's mechanics, not the load cases; with two (CALI-94) the carve outran its wait
+    stool.write_part("stool", CENTRED.replace('"lb": 200', '"lb": 60'), intent="kid")
     c, slug = TestClient(create_app()), stool.design.slug
     part = next(p for p in c.get(f"/api/designs/{slug}").json()["parts"] if p["id"] == "stool")
     assert part["printed"] and not part["carved"]

@@ -572,6 +572,43 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 2. **Say "add the front-edge case":** the designer adds "stepping on the front edge". The warning goes, and *Will it
    work?* reads that case, the weaker one.
 3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_edge_foot.py`.
+### 2026-11-06 · Nothing leaves the machine unsaid (CALI-91 #68)
+1. **Press 🎤:** it asks first, "Your browser turns speech into words by sending it to its maker (Google, in Chrome).
+   Talk anyway?". **Type instead** doesn't listen. **Talk** does, and the next press doesn't ask again.
+2. **With a key set:** under the "What do you want to make?" box, and under the chat box until you send something:
+   "What you type goes to Claude (Anthropic's AI) to design it."
+3. **With no key:** the box says "Building a new design needs a Claude key (see .env.example). Until then, open one of
+   ours below", and a new design's Build it is replaced by that line. No job starts.
+4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_privacy.py`.
+### 2026-11-06 · A design of several parts is planned, and you see the plan first (CALI-35 #3a)
+1. **With a key, a new design from the turbine sentence:** **Build it** plans before it draws. "A wind turbine in 4
+   parts: …" is on *What is it?*, with the parts in build order, the numbers they share and the checks between them
+   under *the numbers*.
+2. **Say "make the mast 10 ft":** "Changed the plan: mast top z: 7 ft → 10 ft." Nothing is drawn.
+3. **Build it again:** "The plan's saved: 4 parts. Building them one by one, in order, comes next (#3b)."
+4. **The stool's sentence** still builds as one part, as before.
+5. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_plan.py`.
+### 2026-11-06 · Carve it: one click, its progress, and Cancel (CALI-101 #93)
+1. **On a printed part with a strength check, the button says how long:** "at least about N min at this size" (after a carve has finished: "about N min …, as its last carve took").
+2. **Click Carve it once:** one `POST /carve`. The button stays off. The panel shows "step k of 7: …", the bar, and
+   "about N min left" once it has a pace. Click around the cards, or reload the page: the panel stays.
+3. **Click Cancel:** "stopping at the next step…", then "Cancelled after k of n steps: what it finished is below",
+   with the chart of the steps it finished. The Studies row says the same.
+4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_carve_click.py`.
+### 2026-11-05 · A ✓ needs an FEA fine enough to see the wall (CALI-97 #80, reworked from #100's review)
+1. **On a printed part whose walls the default voxels can't see (4 across, RESOLVE_MIN):** *Will it work?* reads
+   "Not resolved yet: the check was too coarse to see its 5/32 in walls. Check it again finer." Under *the numbers*
+   the badge reads **not resolved** (amber), never a green *holds*, and **Check it again finer (about N min)** runs
+   it within the voxel budget.
+2. **On one too big for its walls (the bar stool):** no finer button. It reads "Not checked: its walls are too thin
+   for the voxel check at this size. A hand check or a printed test piece is the way to know."
+3. **A fail on coarse voxels stays a ✗:** "Doesn't hold …, and it needs 2. The fail may be the model's: the voxels
+   can't see its … walls."
+4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_resolved.py tests/test_run_order.py tests/test_jobs.py`.
+### 2026-11-05 · A filled-in part isn't trusted to hold (CALI-96 #78)
+1. **Open a copy of `step-stool-2`:** *Will it work?* reads "Not trusted yet: the strength check ran on a
+   filled-in shape …" on the design and on the part. Say "fix its shape to match its pieces" and it clears.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_filled_verdict.py`.
 
 ### 2026-11-05 · The page and a study can query one part at once (CALI-103 #95)
 1. **Start a carve, then revise the part and click around the cards while it runs:** the app stays up, and a card
