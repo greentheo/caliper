@@ -28,7 +28,10 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   FEA reads the edge no worse (11.3× against 11.2×; 19.1× against 16.2×).
 - NEEDS ENGINEER CHECK: BS 8110 cl. 3.5.2.2's edge width, as read; and the plate check's centred formula for a foot
   near an edge of a panel held all round.
-- Tests: `tests/test_edge_foot.py` (main fails 4 of the 6), `test_load_study`, `test_mixed`.
+- Tests: `tests/test_edge_foot.py` (main fails 4 of the 6), `test_load_study`, `test_mixed`. Two carve tests changed
+  with the fixture: the carve that "dies at the second step" counts a check per load, and the carve-down test uses
+  `MIXED`'s middle foot only (`CENTRED`). With the front-edge foot, the carve picks a step whose adopted part isn't
+  watertight, at 40 lb and at 50 lb alike; that's a carve-adopt defect of its own, #105.
 
 ### 2026-11-05 · CALI-103 (#95) · The app no longer crashes when the page and a study query one mesh at once
 - **The owner's app died three times (exit 134/139) in libspatialindex:** two threads in one cached mesh's R-tree,

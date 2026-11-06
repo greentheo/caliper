@@ -43,6 +43,13 @@ def loads(params, build=None):
 '''
 
 
+#: MIXED as it was before CALI-94: the middle foot only.
+CENTRED = MIXED.replace('''    return [{"name": "stepping on the front edge", "lb": 200, "factor": 2.0,
+             "lo": (cx - 50, 0, h - 2), "hi": (cx + 50, 100, h)},
+            {"name": "an adult stepping up"''', '''    return [{"name": "an adult stepping up"''')
+assert CENTRED != MIXED
+
+
 @pytest.fixture
 def stool(tmp_path):
     s = DesignStore.create("a stool with printed sides", base=str(tmp_path / "designs"))
@@ -130,8 +137,9 @@ def test_the_printed_sides_carve_down_until_it_doesnt_hold(stool, monkeypatch):
     rec = carve.study(stool, "stool", stations=3, remove_up_to=0.4)
     assert not rec["stations"][0]["whole_holds"] and rec["stations"][0]["weakest"] == "top"
     assert rec["weak"].startswith("As it is, it doesn't hold") and "the weak link is the top" in rec["weak"]
-    # a kid stepping up: the top holds, and the printed sides carve down until they don't
-    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
+    # a kid stepping up: the top holds, and the printed sides carve down until they don't. Its middle foot only: with
+    # the front-edge foot (CALI-94) the carve picks a step whose adopted part isn't watertight (#105)
+    stool.write_part("stool", CENTRED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
     rec = carve.study(stool, "stool", stations=4, remove_up_to=0.6)
     st = rec["stations"]
     assert st[0]["whole_holds"] and not rec["weak"]
@@ -267,7 +275,7 @@ def test_a_carve_that_dies_partway_leaves_what_it_finished(stool, monkeypatch):
 
     def dies(ctx, i, min_safety, solid=None):
         calls.append(1)
-        if len(calls) > 1:                                # the second step: the app goes down here
+        if len(calls) > len(ctx["loads"]):                # the second step (a check per load): the app goes down here
             raise RuntimeError("the app died")
         return real(ctx, i, min_safety, solid=solid)
 
