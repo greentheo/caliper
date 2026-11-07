@@ -68,10 +68,7 @@ def construction(params, build=None):
 - **sheet**: a panel cut from a sheet. `outline` is one face of the panel as it sits in the part: a
   flat polygon, its corners in order around the edge, with the panel's `thickness` behind it. A panel
   bent to a curve gives `facets` (a list of flat polygons) instead of `outline`. `covers` says what
-  goes on its faces, one entry per face covered (`["paint"]` for the outside only). Optional `"grain":
-  "along"` or `"across"`: which way a plywood panel's face grain runs relative to the gap it spans (a top
-  resting on two sides spans the gap between them). Give it when the person says how it's cut; the strength
-  check then uses that grain's number instead of the worse of the two.
+  goes on its faces, one entry per face covered (`["paint"]` for the outside only).
 - **stick**: a straight length from `a` to `b` along its centreline. Lumber by nominal `size`, or
   steel tube by `outer` (the square tube's outside width) and `wall`, with `"material": "steel"`.
 - **covering**: a covering on its own, over an `outline` or `facets`, such as a patch.

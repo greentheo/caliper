@@ -4,11 +4,6 @@ Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
 ### 2026-11-07 · CALI-125 (#148) · Follow-ups from the 11/07 reviews
-- **A sheet's grain, declared:** `construction()` takes `"grain": "along"` or `"across"` (its face grain relative to
-  the gap it spans) on a sheet; anything else is refused by the BOM's own validation. `consistency.shapes` carries it,
-  `plate_check` gives it to `beam()`, where that grain's number and sag govern (not the worse of the two, #118), by
-  thickness too, and the why says "Its face grain runs across the gap, as its script says". `trials.predict` already
-  read the plate's `grain` (#122): now a script can set it. In `part_scripts.md`.
 - **#140's survivor:** a part that builds, one rule kept and one whose probe errors: the erroring one is a fail with
   what went wrong ("lip_ratio: min_wall / 0 >= 1, not measured: ZeroDivisionError: …"), and the card leads with it.
   Pinned; the mutant (an error's own status to `verdicts.check`) fails it.
@@ -17,8 +12,9 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   carries `strength.last.edge` and the design card says "…, checked in the middle only · v2 not checked yet."; and
   `middle_only`'s fallback: an unstamped run is judged by the part as it is now (no edge foot: middle only; with
   one: not), a stamped one by its stamp. Each mutant (the edge dropped in `measured`, no fallback) fails its pin.
-- Tests: test_orthotropic (+4: each grain governs, refused grains, carried through `shapes`, the real plate path),
-  test_followups (3), test_build_plan (the logged ok). Each fails without its change.
+- The sheet's grain came out (the foreman's call: a designer could write it to get a greener verdict, and the cut
+  list never tells the maker): it's #150 (CALI-126), with an assumed grain as advice and a stated one on the cut list.
+- Tests: test_followups (3), test_build_plan (the logged ok). Each fails without its change.
 ### 2026-11-07 · CALI-94 (#106, with main's #124, #132, #136) · The middle foot only, through the one verdict
 - **Merged forward** onto main's one verdict (#132): #106's hand-written "middle only" checks become `edge=` on
   `verdicts.case` / `run` / `goal`, and each reader asks those: the part card ("A kid stepping up: checked in the middle
