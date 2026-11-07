@@ -125,6 +125,9 @@ def _pins(mesh, axis: int, at: float):
 _SLICED: dict = {}
 #: CALI-104 (#97): slices started for a card that didn't wait, by the same key; their result lands in _SLICED
 _PENDING: set = set()
+#: a background slice that failed or timed out (#152 review): the cards take its rough number, said as rough and why,
+#: and stop asking; a caller that waits (the scorecard, the release) still slices again, as #140 asked
+_GAVE_UP: dict = {}
 #: what a card shows while the slicer works: no number, never a stale or rough one as if final
 WORKING = {"pending": True, "hours": None, "filament_g": None, "usd": None, "trust": None,
            "from": "PrusaSlicer: working it out"}
@@ -142,6 +145,8 @@ def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_IN
                slicer())
     if key in _SLICED:
         return dict(_SLICED[key])
+    if not wait and key in _GAVE_UP:
+        return dict(_GAVE_UP[key])
     if not wait and slicer():
         if key not in _PENDING:
             _PENDING.add(key)
@@ -152,7 +157,9 @@ def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_IN
             def later():
                 try:
                     got = _estimate(copy, material, volume_mm, infill)
-                    if not got.pop("_retry", False):
+                    if got.pop("_retry", False):         # failed or hung: the card says so, once
+                        _GAVE_UP[key] = {**got, "slicer_failed": True}
+                    else:
                         _SLICED[key] = got
                 finally:
                     _PENDING.discard(key)

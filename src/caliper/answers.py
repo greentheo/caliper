@@ -427,7 +427,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                 n = f"{pr['pieces']} piece{'s' if pr['pieces'] != 1 else ''}"
                 how.append(_line(f"Print it in {pr['material'].upper()}: {n}; print time: working it out…", "info",
                                  working=True) if pr.get("pending") else       # the slicer's still at it (#97)
-                           _line(f"Print it in {pr['material'].upper()}: {n}, about {pr['hours']:g} h.", "ok"))
+                           _line(f"Print it in {pr['material'].upper()}: {n}, about {pr['hours']:g} h"
+                                 + (f" (a rough estimate: {pr['from'].split('(')[-1].rstrip(')')})"
+                                    if pr.get("slicer_failed") else "") + ".", "ok"))
             why: dict = {}
             for x in mk["missing"]:
                 why.setdefault(x["why"], []).append(x["name"])

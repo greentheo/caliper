@@ -174,3 +174,40 @@ def test_the_page_asks_again_while_a_print_time_is_worked_out():
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     body = src[src.index("async function loadAnswers()"):src.index("function wireCards()")]
     assert "ln.working" in body and "setTimeout" in body and "S.answers.key === key" in body
+
+
+def test_a_slicer_that_fails_or_hangs_is_said_once_and_not_asked_again(tmp_path, monkeypatch):
+    """#152 review: a timed-out slice isn't remembered (#140), so the card said "working it out" forever and sliced
+    again on each ask. In the background, a failed slice gives the card its rough number, said as rough and why."""
+    from caliper import answers, design_api, making, printing, shop
+
+    from .test_shop import PRINTED, PRINTER
+
+    calls = []
+
+    def hung(path, material, volume, infill):
+        calls.append(path)
+        return {"hours": 9.9, "filament_g": 300.0, "usd": 7.0, "trust": "rough",
+                "from": "walls + infill at rough speeds (the slicer timed out)", "_retry": True}
+
+    monkeypatch.setattr(printing, "_SLICED", {})
+    monkeypatch.setattr(printing, "_PENDING", set())
+    monkeypatch.setattr(printing, "_GAVE_UP", {})
+    monkeypatch.setattr(printing, "slicer", lambda: "/usr/bin/prusa-slicer")
+    monkeypatch.setattr(printing, "_estimate", hung)
+    shop.write({"hand": ["drill"], "machines": [PRINTER]})
+    store = DesignStore.create("a bar", base=str(tmp_path / "designs"))
+    store.write_part("bar", PRINTED, intent="a printed bar")
+    assert making.plan(store, "bar", wait=False)["pending"]
+    _sliced(0)
+    first = len(calls)
+    mk = making.plan(store, "bar", wait=False)
+    (pr,) = mk["printed"]
+    assert not mk["pending"] and pr["slicer_failed"] and pr["trust"] == "rough" and pr["hours"] == 19.8
+    how = next(c for c in answers.part(store, design_api.design_state(store), "bar") if c["key"] == "make")
+    (line,) = [ln for ln in how["lines"] if ln["text"].startswith("Print it in PETG")]
+    assert line["text"] == "Print it in PETG: 2 pieces, about 19.8 h (a rough estimate: the slicer timed out)."
+    assert not line.get("working")                                          # the page stops asking
+    assert len(calls) == first == 2                                         # not sliced again per ask
+    making.plan(store, "bar")                                               # a caller that waits still tries again
+    assert len(calls) == 4

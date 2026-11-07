@@ -67,7 +67,7 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
                         "hours": round(sum(e["hours"] for e in each), 1),
                         "filament_g": round(sum(e["filament_g"] for e in each)),
                         "usd": round(sum(e["usd"] for e in each), 2), "trust": each[0]["trust"],
-                        "from": each[0]["from"]})
+                        "from": each[0]["from"], "slicer_failed": any(e.get("slicer_failed") for e in each)})
     by_how: dict = {}
     for p in pieces:
         if p["ok"]:

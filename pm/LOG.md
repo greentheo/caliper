@@ -24,6 +24,8 @@ the shape).
 - Tests: tests/test_cards_speed.py (9: the revision's build is the cards', the same mesh as a fresh build, never
   another version's, nothing kept but a good build of the exact script, a refine builds its part once; the slicer
   never holds a card, the cards say working it out and a print goal waits, the page asks again). All fail at main.
+- **#152 review:** a background slice that fails or hangs gives the cards its rough number, said ("about 19.8 h (a
+  rough estimate: the slicer timed out)"), and the page stops asking; a caller that waits still slices again (#140).
 
 ### 2026-11-07 · CALI-125 (#148) · Follow-ups from the 11/07 reviews
 - **#140's survivor:** a part that builds, one rule kept and one whose probe errors: the erroring one is a fail with
