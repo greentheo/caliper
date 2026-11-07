@@ -62,18 +62,18 @@ HARD_HUB = HUB.replace('PARAMS = {"mast_top_z": 2133.6, "h": 100.0}', 'PARAMS = 
     '.translate((0, 0, p["mast_top_z"]))', '.translate((0, 0, 2133.6))')
 
 
-def _turbine(tmp_path, hub=HUB):
+def _turbine(tmp_path, hub=HUB, plan=PLAN):
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
     store.design.display_units = "in"
     store.save()
-    firstrun.build(store, use_llm=True, client=fake(PLAN), author=_never, strength=False)     # the plan, reviewed
+    firstrun.build(store, use_llm=True, client=fake(plan), author=_never, strength=False)     # the plan, reviewed
     for pid, script in (("base", BASE), ("mast", MAST), ("hub", hub)):                         # built, as #3b builds
         store.write_part(pid, script, intent=pid)
     return store
 
 
-def _ten_ft():
-    taller = copy.deepcopy(PLAN)
+def _ten_ft(plan=PLAN):
+    taller = copy.deepcopy(plan)
     taller["skeleton"][0]["value"] = 10
     return taller
 
@@ -146,13 +146,19 @@ def test_drive_names_an_unknown_number_and_changes_nothing(tmp_path):
 # --- #143 review: who reads a number, inches, all or nothing, and what to check again -------------------------------
 
 def test_a_params_key_that_only_shares_the_name_isn_t_driven(tmp_path):
-    """No rule names the base with mast_top_z, so its own key of that name is its own."""
+    """No rule names the base with mast_top_z, so its own key of that name is its own. The base is in a rule of its
+    own (#143's mutant: readers from any rule, not the number's, survived when the base was in none)."""
     base = BASE.replace('PARAMS = {"t": 19.0, "w": 600.0}', 'PARAMS = {"t": 19.0, "w": 600.0, "mast_top_z": 5.0}')
-    store = _turbine(tmp_path)
+    plan = copy.deepcopy(PLAN)
+    plan["rules"].append({"id": "base_flat", "expr": "bbox(base).max_z <= 1"})     # names the base, not the number
+    store = _turbine(tmp_path, plan=plan)
     store.write_part("base", base, intent="base")
+    assert skeleton.readers(store, "mast_top_z") == ["mast", "hub"]
     v = store.design.part("base").version
-    got = chat.turn(store, "make the mast 10 ft", client=fake(_ten_ft()), use_llm=True, author=_never)
-    assert got.ok and store.design.part("base").version == v and '"mast_top_z": 5.0' in store.read_script("base")
+    got = chat.turn(store, "make the mast 10 ft", client=fake(_ten_ft(plan)), use_llm=True, author=_never)
+    assert got.action == "skeleton" and got.ok, got.reply
+    assert store.design.part("base").version == v and '"mast_top_z": 5.0' in store.read_script("base")
+    assert "the base" not in got.reply.split("The design checks:")[0]
 
 
 def test_a_part_written_in_inches_is_refused_and_nothing_changes(tmp_path):
