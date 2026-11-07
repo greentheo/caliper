@@ -3,6 +3,33 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-98 (#86) · A seat's load cases, and will it tip over
+From Theo's first bar stool run: its designer wrote one case ("250 lb person seated", factor 1.5) and the card read ✓.
+- **The designer's guide gets the load cases by kind of thing** (`part_scripts.md`): a step or tread, a seat (sitting,
+  the front edge, leaning back, climbing on, tipping over), a shelf or top, a step stool; factor 2 for stepping or
+  jumping, 1 for a load that sits there or a standard's test load. With a seat's four cases as an example.
+- **The values are cited, through the engineering brief on #42 (section 2):** tipping, EN 1022:2005/2018 and BIFMA
+  X5.1's front stability (600 N placed 60 mm in from the seat's edge, 20 N sideways at seat height); the front edge and
+  leaning back, EN 12520 / EN 1728 (1,300 N 100 mm in; 1,000 N with 400 N front to back or 300 N sideways); a step
+  stool, EN 14183 (150 kg). **NEEDS ENGINEER CHECK** on every value, in the code, the guide's table and the card: these
+  can't be checked here against the standards' own texts.
+- **A tip-over check, statics, not FEA** (`tipping.py`): a load with `"tip": True` is taken about the edge of the
+  part's footprint (the convex hull of where it meets the floor) it would go over: its own weight at its centre of
+  gravity and the case's downward push against the sideways one. Its verdict is `verdicts.meets` (one verdict, #132);
+  a case that can't be checked (no weight, no base, no sideways push) is waiting, never a pass. The FEA leaves tip
+  cases out (`load_study.prepare`).
+- **The card says it:** "Won't tip when someone sits on the front edge and leans, 2.92 times over." or "Tips …: only
+  0.18 times over, and it needs 1; the load alone tips it, before any push.", then "The guide's tipping pushes are EN
+  1022 / BIFMA X5.1's, as Caliper's engineering brief cites them: not yet checked by an engineer.", and for a seat,
+  what nobody checked: "Not checked yet for a seat: leaning back …; sitting on the front edge; buckling of the legs."
+  A step stool is stood on, not sat on: its cases are a step's.
+- Hand-worked: the bar stool (18 in base, seat 29 in up, 14 in seat, 10 lb): restoring 76,648.7 N·mm, overturning
+  14,732, 5.2 times over, goes over at about 104 N (23 lb); a narrow stool (8 in base, 30 in): 0.18, the front-edge
+  load lands outside its base. A bar stool written to the guide, through a stubbed designer: its four cases declared,
+  2.92 times over.
+- Not done: the live first run of the bar stool sentence (Theo's key, one run; his word).
+- Tests: tests/test_tipping.py (10; they can't import `tipping` without it).
+
 ### 2026-11-07 · CALI-106 (#136 review, round 2) · What a refused carve asks for, said apart; the page keeps it off
 - **The line asks two things apart** (thickening to the rule's 2.85 mm doesn't unblock a carve): printing and the
   part's own rule, "too thin for a 0.4 mm nozzle to print and for your rule shell_wall_thickness (at least 2.85 mm):
