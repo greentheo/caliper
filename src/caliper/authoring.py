@@ -214,6 +214,7 @@ def improve(
     seed_script: Optional[str] = None,
     seed_feedback: Optional[str] = None,
     ref_base: str = ".",
+    interfaces=None,
 ) -> ImproveResult:
     """Author a part and drive it to green: build errors AND failing measurements both feed back.
 
@@ -263,6 +264,8 @@ def improve(
         from . import fallbacks
 
         report.results.append(fallbacks.result(script))
+        if interfaces is not None:     # CALI-35 (#3b): the rules between it and the parts already built
+            report.results.extend(interfaces(run.geometry))
         best = (run.geometry, script, report)
         if report.all_pass:
             history.append(("passed", ""))
