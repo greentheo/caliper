@@ -92,7 +92,7 @@ def test_will_it_work_lists_what_the_design_is_held_to(store):
     work = {c["key"]: c for c in answers.answers(store, design_api.design_state(store))}["work"]
     text = [ln["text"] for ln in work["lines"]]
     assert text[0] == "Holds Dad (200 lb), 2 times over (assumed): not checked yet. Check it holds."
-    assert text[1].startswith("✓ Light enough for a kid to carry:") and text[1].endswith(" lb.")
+    assert text[1].startswith("✓ Light enough for a kid to carry:") and text[1].endswith(" lb, within its 10 lb cap.")
     assert text[2].startswith("✗ Under $5: $") and work["status"] == "bad"
     assert text[3] == "Proposed: Fits on one sheet. Keep or drop it under the numbers."
     # a part alone in its design answers for the design too, after its own strength line

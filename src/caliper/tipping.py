@@ -28,7 +28,10 @@ from .design import DesignStore
 
 LB = 4.4482216152605          # N in a pound-force
 GRAVITY = 9.80665
-#: What the card says under the tipping lines: where the guide's pushes come from, and that nobody has checked them.
+#: What each tipping line says of its push, on the line itself (#141 review): where the guide's pushes come from,
+#: and that nobody has checked them.
+CAVEAT = "EN 1022's push as our brief cites it; not yet checked by an engineer"
+#: What the card said under the tipping lines, before the caveat went on each line.
 NOTE = ("The guide's tipping pushes are EN 1022 / BIFMA X5.1's, as Caliper's engineering brief cites them: not yet "
         "checked by an engineer.")
 
@@ -117,10 +120,38 @@ def line(case: dict) -> tuple[str, str]:
     if v["kind"] == "waiting":
         return f"Tipping {name}: {case.get('why') or 'not checked'}.", v["status"]
     if v["kind"] == "holds":
-        return f"Won't tip {name}, {case['safety']:g} times over.", v["status"]
-    return (f"Tips {name}: only {case['safety']:g} times over, and it needs {case['factor']:g}"
+        return f"Won't tip {name}, {case['safety']:g} times over ({CAVEAT}).", v["status"]
+    return (f"Tips {name}: only {case['safety']:g} times over, and it needs {case['factor']:g} ({CAVEAT})"
             + (f"; it goes over at about {case['tips_at_lb']} lb sideways." if case.get("tips_at_lb")
                else "; the load alone tips it, before any push." if case.get("tips_at_lb") == 0 else "."), v["status"])
+
+
+def undeclared_ways(store: DesignStore, part_id: str) -> list[str]:
+    """The ways it could tip that no declared case pushes, where its base is as narrow or narrower that way (#141
+    review): a bar stool on a square base, pushed only forward, isn't checked sideways. "tipping sideways" (across x),
+    "tipping front to back" (across y); [] when it declares none, or every way that matters."""
+    d = C.declared(store, part_id)
+    cases = [ld for ld in (d.get("loads") or []) if isinstance(ld, dict) and ld.get("tip")]
+    if not cases:
+        return []
+    try:
+        poly = footprint(store.part_geometry(part_id).require_mesh())
+    except Exception:  # noqa: BLE001 — no base: each case already says it wasn't checked
+        return []
+    wide = np.ptp(poly, axis=0)                                    # the base's width across x, and across y
+    ways = []
+    for ld in cases:
+        side = np.asarray(ld.get("force") or (0, 0, 0), float)[:2]
+        if np.linalg.norm(side):
+            ways.append(side / np.linalg.norm(side))
+    on_x = any(abs(w[0]) >= 0.7 for w in ways)
+    on_y = any(abs(w[1]) >= 0.7 for w in ways)
+    out = []
+    if on_y and not on_x and wide[0] <= wide[1] + 1.0:
+        out.append("tipping sideways")
+    if on_x and not on_y and wide[1] <= wide[0] + 1.0:
+        out.append("tipping front to back")
+    return out
 
 
 def unchecked(declared: dict, intent: str, cases: Optional[list] = None) -> list[str]:

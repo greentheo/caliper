@@ -82,14 +82,15 @@ def test_a_declared_case_on_the_built_stool_holds_and_says_so(monkeypatch):
     assert case["checked"] and case["safety"] == 5.2
     assert case["verdict"]["kind"] == "holds" and case["verdict"]["counts_as_pass"]     # one verdict (#132)
     assert case["tips_at_lb"] == 23
-    assert tipping.line(case) == ("Won't tip when someone sits on the front edge and leans, 5.2 times over.", "ok")
+    assert tipping.line(case) == ("Won't tip when someone sits on the front edge and leans, 5.2 times over "
+                                  f"({tipping.CAVEAT}).", "ok")                    # the caveat on the line (#141)
 
 
 def test_the_narrow_stool_tips_and_says_it_needs_no_push(monkeypatch):
     (case,) = _checked(monkeypatch, _stool(8, 30), [_front_edge_case(30)])
     assert case["safety"] == 0.18 and case["verdict"]["kind"] == "fails"
     assert tipping.line(case) == ("Tips when someone sits on the front edge and leans: only 0.18 times over, and it "
-                                  "needs 1; the load alone tips it, before any push.", "bad")
+                                  f"needs 1 ({tipping.CAVEAT}); the load alone tips it, before any push.", "bad")
 
 
 def test_a_case_that_can_t_be_checked_is_waiting_never_a_pass(monkeypatch):
@@ -164,11 +165,13 @@ def test_the_card_says_whether_it_tips_and_where_the_pushes_come_from(tmp_path):
     rep = C.report(store, "stool")
     own = rep["mass_kg"] * tipping.GRAVITY
     want = round((600 * 60 + own * rep["cog"][1]) / (20 * 227.6), 2)
-    assert texts[0] == f"Won't tip when someone sits on the front edge and leans, {want:g} times over."
-    assert lines[0]["status"] == "ok"
-    assert texts[1] == tipping.NOTE and "not yet checked by an engineer" in texts[1]
-    assert texts[2] == ("Not checked yet for a seat: leaning back (a sideways push at seat height); sitting on the "
-                        "front edge; buckling of the legs.") and lines[2]["status"] == "warn"
+    assert texts[0] == (f"Won't tip when someone sits on the front edge and leans, {want:g} times over "
+                        f"({tipping.CAVEAT}).")
+    assert lines[0]["status"] == "ok" and "not yet checked by an engineer" in texts[0]
+    # its base is wider side to side (16 in) than front to back (10 in): pushed forward, sideways isn't said
+    assert texts[1] == ("Not checked yet for a seat: leaning back (a sideways push at seat height); sitting on the "
+                        "front edge; buckling of the legs.") and lines[1]["status"] == "warn"
+    assert len(texts) == 2
 
 
 #: A bar stool as the guide says to write one (part_scripts.md, "The load cases, by kind of thing"): a 16 in plywood
@@ -235,6 +238,33 @@ def test_a_bar_stool_written_to_the_guide_declares_the_seat_cases(tmp_path):
     rep = C.report(store, "stool")
     want = round((600 * 60 + rep["mass_kg"] * tipping.GRAVITY * (203.2 + rep["cog"][1])) / (20 * 735.6), 2)
     assert 2 < want < 4
+    # a square base pushed only forward: sideways is said, not passed over (#141 review)
     assert [ln["text"] for ln in tip] == [
-        f"Won't tip when someone sits on the front edge and leans, {want:g} times over.", tipping.NOTE,
+        f"Won't tip when someone sits on the front edge and leans, {want:g} times over ({tipping.CAVEAT}).",
+        "Not checked yet: tipping sideways (no push is declared that way, and its base is no wider that way).",
         "Not checked yet for a seat: buckling of the legs."]
+
+
+
+# --- #141 review: the two survivors -------------------------------------------------------------------------------------
+
+def test_point_eight_against_a_factor_of_one_tips():
+    from caliper import verdicts
+
+    case = {"name": "A push", "factor": 1.0, "safety": 0.8, "checked": True, "tips_at_lb": 12,
+            "verdict": verdicts.meets(0.8, 1.0)}
+    text, status = tipping.line(case)
+    assert text.startswith("Tips a push: only 0.8 times over, and it needs 1") and status == "bad"
+    assert tipping.line({**case, "safety": 1.0, "verdict": verdicts.meets(1.0, 1.0)})[0].startswith("Won't tip")
+
+
+def test_a_stool_raised_50_mm_gives_the_same_answer(monkeypatch):
+    """The floor is where the part stands, not z 0: the same stool, its loads with it, 50 mm up, tips the same."""
+    case = _front_edge_case(29)
+    (flat,) = _checked(monkeypatch, _stool(18, 29), [case])
+    raised_mesh = _stool(18, 29)
+    raised_mesh.apply_translation((0, 0, 50))
+    up = {**case, "lo": tuple(v + (50 if i == 2 else 0) for i, v in enumerate(case["lo"])),
+          "hi": tuple(v + (50 if i == 2 else 0) for i, v in enumerate(case["hi"]))}
+    (raised,) = _checked(monkeypatch, raised_mesh, [up])
+    assert raised["safety"] == flat["safety"] == 5.2 and raised["tips_at_lb"] == flat["tips_at_lb"]
