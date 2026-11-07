@@ -75,6 +75,9 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     v = verdicts.case(run, c, filled=filled, stale=stale)   # an older run's ✓ is "older version" (#132 review)
     if v["kind"] == "untrusted":                     # ran on a block: no ✓ from it (CALI-96); this wins
         return _line(untrusted(pid, filled), "warn", study="load")   # the number: the panel, badged
+    if v["kind"] == "unchecked" and (c.get("fea") or {}).get("supported") is False:     # couldn't run (#138 item 3)
+        return _line(f"{c['name'][:1].upper() + c['name'][1:]}: not checked: {v['why']}. Check where it's held and "
+                     f"pushed, then check it again." + older, v["status"], study="load")
     if v["kind"] in ("unresolved", "unchecked"):     # an FEA that can't see the wall is no ✓ (CALI-97)
         return _line(coarse(run, inches) + older, "warn", study="load")
     # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
@@ -332,6 +335,14 @@ def _cost(store: DesignStore, pid: str, report: dict) -> Optional[float]:
 # ---------------------------------------------------------------------------
 # What it's held to (step 2): the conversation's checks, judged on what's already measured
 # ---------------------------------------------------------------------------
+def ran_safety(run: dict) -> Optional[float]:
+    """A strength run's number from the cases that ran: a case whose load never reached a support is no 0x (#138
+    item 3), and a run with none that ran has no number."""
+    got = [c["safety"] for c in run.get("cases") or []
+           if c.get("safety") is not None and (c.get("fea") or {}).get("supported") is not False]
+    return min(got) if got else None
+
+
 def measured(store: DesignStore, state: dict) -> dict:
     """What the checks can be judged by without running anything: the strength checks on each part's current
     version, its weight and cost, what the shop can't make, and print time. ``{metric: value}``."""
@@ -342,8 +353,8 @@ def measured(store: DesignStore, state: dict) -> dict:
     safeties, breaks = [], []
     for pid in current:
         run = next((r for r in state.get("load_runs") or [] if r["part"] == pid), None)
-        if run and run.get("version") == current[pid] and run.get("safety") is not None:
-            safeties.append(run["safety"])
+        if run and run.get("version") == current[pid] and ran_safety(run) is not None:
+            safeties.append(ran_safety(run))
             breaks += [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
     from . import load_study as L
 
@@ -366,8 +377,14 @@ def measured(store: DesignStore, state: dict) -> dict:
     # unchecked, or older; its number isn't in the min above, so the rest can't read as holding for it
     loaded = [p for p in state["parts"] if p.get("loads") and p.get("role") != "fixed"]
     runs = {pid: next((r for r in state.get("load_runs") or [] if r["part"] == pid), None) for pid in current}
-    unchecked = [p["id"] for p in loaded if runs.get(p["id"]) is None or runs[p["id"]].get("safety") is None]
+    unchecked = [p["id"] for p in loaded if runs.get(p["id"]) is None or ran_safety(runs[p["id"]]) is None]
     older = [p["id"] for p in loaded if p["id"] not in unchecked and runs[p["id"]].get("version") != p["version"]]
+    # the newest strength run of a part changed since, with its verdict and age: what the design card says over an
+    # older scorecard's number (#138 item 1: "2.58x" from v1 over v4's 1.7x ✗)
+    last = [{"part": pid, "version": runs[pid]["version"], "now": current[pid], "safety": ran_safety(runs[pid])}
+            for pid in older]
+    if last:
+        out["strength.last"] = min(last, key=lambda x: x["safety"])
     if unchecked:
         out["strength.unchecked"] = ("not checked yet on the " + " and the ".join(x.replace("_", " ") for x in unchecked)
                                      + ": Check it holds")
@@ -460,6 +477,16 @@ def held_to(state: dict, now: dict) -> list[dict]:
             out.append(_line(f"{label}{assumed}: {verdict.get('why') or unknown}.", "warn"))
             continue
         v, late = now.get(c["metric"]), False
+        last = now.get("strength.last") if c["metric"] == "strength.safety" and v is None else None
+        if last and (not card or last["version"] >= ((card.get("versions") or {}).get(last["part"]) or 0)):
+            # the newest run, with its age, over an older card's number: never greener than it (#138 item 1)
+            verdict = verdicts.goal(verdicts.compare(last["safety"], c.get("op", ">="), c["limit"]), stale=True)
+            out.append(_line(f"{'✗' if verdict['kind'] == 'fails' else '!'} {label}{assumed}: last checked on "
+                             f"v{last['version']}: {round(last['safety'], 1):g}x"
+                             + (f", needs {c['limit']:g}x" if verdict["kind"] == "fails" else "")
+                             + f" · v{last['now']} not checked yet.", verdict["status"], study="load",
+                             model=rests_on_model(c["metric"])))
+            continue
         if v is None and c["metric"] in scored:
             v, late = scored[c["metric"]], stale
         if v is None:

@@ -1184,6 +1184,19 @@ function goTo(id) {                   // open the card's numbers and bring that 
 // One card for the design as it stands: every check (pass/fail, margin) and every objective (value, change
 // since the last card) across design, optimization, making and cost — each with how far to trust it.
 const TRUST = { measured: 'measured', model: 'a model (on the safe side)', rough: 'rough', guess: 'a guess' };
+// which version a stale card's numbers are of: "as of v1" (#138 item 2)
+function asOf(card) {
+  const v = Object.values(card.versions || {});
+  return v.length === 1 ? `as of v${v[0]}` : 'as of an older version';
+}
+// a scorecard row's mark: a stale card's pass is no ✓ (it was the part as it was), amber, said as of when; a fail
+// stays a ✗ (#138 item 2: "✓ holds … 2.58x" from v1 beside v4's 1.7x ✗)
+function scoreMark(c, stale, when) {
+  if (c.status === 'fail') return '<span style="color:var(--bad)">✗</span>';
+  if (stale && c.status === 'pass') return `<span style="color:var(--amber)" title="${esc(when)}">·</span>`;
+  return c.status === 'pass' ? '✓' : c.status === 'proposed' ? '◇'
+    : c.status === 'unresolved' || c.status === 'untrusted' ? '<span style="color:var(--amber)">!</span>' : '?';
+}
 function scoreView(d) {
   const card = (d.scorecards || [])[0];
   const stale = card && (card.outdated     // scored the old way (CALI-111): its numbers aren't today's
@@ -1215,19 +1228,20 @@ function scoreView(d) {
     const better = o.direction === 'max' ? o.change > 0 : o.change < 0;
     return ` <span class="small" style="color:var(${better ? '--ok' : '--bad'})">${o.change > 0 ? '+' : ''}${num(o.change)}</span>`;
   };
-  return `<div class="small">${card.summary.pass} pass · <b style="color:var(--bad)">${card.summary.fail} fail</b>${card.summary.unknown ? ` · ${card.summary.unknown} unknown` : ''}${card.summary.unresolved ? ` (${card.summary.unresolved} not resolved)` : ''}${card.summary.proposed ? ` · ${card.summary.proposed} proposed` : ''}
+  const when = stale ? asOf(card) : '';
+  const old = when ? ` <span class="muted">(${esc(when)})</span>` : '';
+  return `<div class="small">${when ? `<b style="color:var(--amber)">Scored ${esc(when)}:</b> ` : ''}${card.summary.pass} pass · <b style="color:var(--bad)">${card.summary.fail} fail</b>${card.summary.unknown ? ` · ${card.summary.unknown} unknown` : ''}${card.summary.unresolved ? ` (${card.summary.unresolved} not resolved)` : ''}${card.summary.proposed ? ` · ${card.summary.proposed} proposed` : ''}
       <span class="muted">· scored ${new Date(card.created * 1000).toLocaleString()}</span>
       ${stale ? '<span class="badge bad">a part has changed since</span>' : ''}</div>
     <ul class="list small" style="margin-top:6px">${card.checks.map((c) => { const now = held.find((x) => x.id === c.id) || c;
-      return `<li>${c.status === 'pass' ? '✓' : c.status === 'fail' ? '<span style="color:var(--bad)">✗</span>' : c.status === 'proposed' ? '◇'
-        : c.status === 'unresolved' || c.status === 'untrusted' ? '<span style="color:var(--amber)">!</span>' : '?'}
-      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
+      return `<li>${scoreMark(c, stale, when)}
+      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}${old}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
       ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}</li>`; }).join('')}
       ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${esc(c.label || c.id)} ${from(c)}
         <span class="muted">— new since this card</span></li>`).join('')}</ul>
     <table class="st" style="margin-top:6px">${card.objectives.map((o) => `<tr><td style="text-align:left">${esc(o.label)}</td>
-      <td>${num(o.value, o.unit)}${delta(o)}</td><td>${tag(o.trust)}</td></tr>`).join('')}</table>
-    ${card.cost ? `<details class="small" style="margin-top:6px"><summary>Stock: $${Math.round(card.cost.usd)} · offcut $${Math.round(card.cost.waste_usd)}</summary>
+      <td>${num(o.value, o.unit)}${delta(o)}${old}</td><td>${tag(o.trust)}</td></tr>`).join('')}</table>
+    ${card.cost ? `<details class="small" style="margin-top:6px"><summary>Stock: $${Math.round(card.cost.usd)} · offcut $${Math.round(card.cost.waste_usd)}${old}</summary>
       <table class="st">${card.cost.lines.map((l) => `<tr><td style="text-align:left">${esc(l.part)}</td><td style="text-align:left">${esc(l.item)}</td>
         <td>$${l.usd.toFixed(0)}</td><td class="muted">${l.waste_usd ? `$${l.waste_usd.toFixed(0)} offcut` : ''}</td></tr>`).join('')}</table>
       <div class="muted">${esc(card.cost.basis)}</div></details>` : ''}
@@ -1324,7 +1338,8 @@ function historyItem(h) {
   if (h.kind === 'whittle') return `<li class="hist">studied in whittle (${esc(h.study)}, ${h.stations} stations)</li>`;
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
-  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  // a number only where the check gave one: a check that couldn't run says why, never "0x" (#138 item 3)
+  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.verdict && h.verdict.kind === 'unchecked' && h.verdict.why ? `: ${esc(h.verdict.why)}` : h.safety != null && h.verdict && ['holds', 'fails'].includes(h.verdict.kind) ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
   if (h.kind === 'patterns' && h.action === 'made') return `<li class="hist">patterns for hand tools (${h.pieces} pieces)</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;

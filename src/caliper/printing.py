@@ -120,8 +120,25 @@ def _pins(mesh, axis: int, at: float):
     return trimesh.util.concatenate(holes)
 
 
+#: Slicer results by what was sliced (the STL's bytes, material, printer size, infill, slicer): one /answers sliced each
+#: piece three times, 4 s each, and that was most of a 2-minute cold open (#138 item 4).
+_SLICED: dict = {}
+
+
 def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_INFILL) -> dict:
-    """Time, filament and cost for one STL: from PrusaSlicer where it's installed, else rough."""
+    """Time, filament and cost for one STL: from PrusaSlicer where it's installed, else rough. Remembered by what was
+    sliced, so the same piece isn't sliced again."""
+    import hashlib
+
+    with open(stl_path, "rb") as fh:
+        key = (hashlib.sha1(fh.read()).hexdigest(), material, tuple(float(v) for v in volume_mm), float(infill),
+               slicer())
+    if key not in _SLICED:
+        _SLICED[key] = _estimate(stl_path, material, volume_mm, infill)
+    return dict(_SLICED[key])
+
+
+def _estimate(stl_path: str, material: str, volume_mm, infill: float) -> dict:
     pm = M.printed(material)
     density = pm["density"] / 1000.0                        # g/cm³
     exe = slicer()
