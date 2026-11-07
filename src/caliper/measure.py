@@ -130,14 +130,15 @@ def clean(m: trimesh.Trimesh) -> trimesh.Trimesh:
     return m
 
 
-def closed(m: trimesh.Trimesh) -> bool:
+def closed(m: trimesh.Trimesh, volume: bool = False) -> bool:
     """Closed as it will be read back: two vertices at one point (a pinch) are watertight in memory and merge in any
-    STL round trip, after which it isn't (#124 review). Judged on a merged copy, so every reader agrees."""
+    STL round trip, after which it isn't (#124 review). Judged on a merged copy, so every reader agrees. ``volume``:
+    and a volume too (its faces wound consistently outward), as a solid to weigh or adopt needs (#134)."""
     if not m.is_watertight:  # raw: closed() itself
         return False
     merged = m.copy()
     merged.merge_vertices()
-    return bool(merged.is_watertight)  # raw: closed() itself, on the merged copy
+    return bool(merged.is_watertight) and (not volume or bool(merged.is_volume))  # raw: closed() itself, merged
 
 
 def open_near(m: trimesh.Trimesh) -> Optional[str]:
@@ -150,8 +151,10 @@ def open_near(m: trimesh.Trimesh) -> Optional[str]:
     m = m.copy()
     m.merge_vertices()
     edges = m.edges_sorted
-    lone = edges[group_rows(edges, require_count=1)]
-    pts = m.vertices[lone.reshape(-1)] if len(lone) else m.vertices
+    # an edge with other than two faces: one (an opening) or more (a pinch, four faces on an edge: #134 review)
+    rows = group_rows(edges)
+    off = np.array([edges[r[0]] for r in rows if len(r) != 2])
+    pts = m.vertices[off.reshape(-1)] if len(off) else m.vertices
     z0, z1 = float(pts[:, 2].min()), float(pts[:, 2].max())
     return "near z " + (f"{z0:.0f} mm" if z1 - z0 < 1 else f"{z0:.0f}–{z1:.0f} mm")
 

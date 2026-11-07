@@ -84,3 +84,44 @@ def test_a_face_of_no_area_goes_even_where_the_part_is_open_elsewhere():
     assert len(got.faces) == len(box.faces) - lid.sum()                  # the sliver gone, the opening kept
     assert got.metadata["strays"].startswith("left out 1 stray face from the CAD's meshing")
     assert not measure.closed(got) and measure.open_near(got) == "near z 5 mm"
+
+
+def _pinch_across():
+    """Two boxes meeting along a level edge (at z 5 mm): a pinch with a place in z, unlike ``_pinch``'s upright one."""
+    a = trimesh.creation.box((10, 10, 10))
+    b = a.copy()
+    b.apply_translation((10, 0, 10))
+    return trimesh.util.concatenate([a, b])
+
+
+def test_open_near_places_a_pinch_at_its_edge():
+    """#134 review: a pinch's edge has four faces, not one, so open_near found no lone edge and named the whole part
+    (z -5–15 mm). It takes every edge with other than two faces."""
+    assert measure.open_near(_pinch_across()) == "near z 5 mm"
+
+
+def test_the_build_reply_says_when_its_part_isn_t_closed():
+    """#134 review's survivor: the reply itself carries the ⚠ line (``_compose``), not only ``_not_closed``."""
+    from types import SimpleNamespace
+
+    from caliper import chat
+
+    res = SimpleNamespace(ok=True, rounds=1, report=None,
+                          geometry=measure.Geometry.from_mesh(_pinch_across()))
+    reply = chat._compose(None, "box", 2, res, None, [], [], {}, "Built")
+    assert "⚠ Its shape isn't closed near z 5 mm: strength, weight and carving can't be checked until it is." in reply
+    shut = SimpleNamespace(ok=True, rounds=1, report=None,
+                           geometry=measure.Geometry.from_mesh(trimesh.creation.box((10, 10, 10))))
+    assert "isn't closed" not in chat._compose(None, "box", 2, shut, None, [], [], {}, "Built")
+
+
+def test_a_pinched_printed_part_isn_t_weighed(monkeypatch):
+    """#134 review's other survivor: a pinch's is_volume is True in memory, so without closed() it was weighed."""
+    from caliper import construction as C
+
+    monkeypatch.setattr(C, "printed_solid", lambda store, pid, d=None: _pinch_across())
+    (got,) = C.with_printed(None, "cone", [{"kind": "printed", "name": "cone"}], d={})
+    assert got["unweighed"] == "not checked: its shape isn't closed near z 5 mm" and "volume_mm3" not in got
+    monkeypatch.setattr(C, "printed_solid", lambda store, pid, d=None: trimesh.creation.box((10, 10, 10)))
+    (got,) = C.with_printed(None, "cone", [{"kind": "printed", "name": "cone"}], d={})
+    assert got["volume_mm3"] == pytest.approx(1000) and "unweighed" not in got
