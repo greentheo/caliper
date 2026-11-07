@@ -138,7 +138,11 @@ def test_a_plan_of_four_parts_is_saved_and_stops_for_review(tmp_path):
     # what's on file, read back as the next load reads it
     again = DesignStore.load(store.design.slug, base=str(tmp_path / "designs"))
     assert [p.id for p in again.assembly.parts] == ["rotor", "hub", "mast", "base"]
-    assert {a.id for a in again.assembly.assertions} == {"mast_height", "hub_on_rotor", "rotor_clear"}
+    # CALI-115 (#117): only the rule over a number the person gave (the 7 ft mast) is enforced; the 0.5 mm and 20 mm
+    # the planner chose are assumed, shown in review, until the person keeps them
+    assert {a.id for a in again.assembly.assertions} == {"mast_height"}
+    assert {r["id"]: r["source"] for r in again.design.plan["rules"]} == {
+        "mast_height": "stated", "hub_on_rotor": "assumed", "rotor_clear": "assumed"}
     assert [m.kind for m in again.assembly.mates] == ["touch", "no_interference"]
     assert [s["name"] for s in again.design.skeleton] == ["mast_top_z", "shaft_d", "rotor_d"]
     assert again.design.plan["order"] == ["base", "mast", "hub", "rotor"] and again.design.plan["status"] == "review"
