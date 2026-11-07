@@ -104,7 +104,7 @@ def clean(m: trimesh.Trimesh) -> trimesh.Trimesh:
 
     What it left out is said, once, in ``m.metadata["strays"]``. A bigger open shell, or a part with no closed
     body, is left as it is: :func:`open_near` says where it's open, and a reader that needs a solid says so."""
-    if m.is_watertight or not len(m.faces):
+    if closed(m) or not len(m.faces):
         return m
     gone, where = 0, []
     flat = ~m.nondegenerate_faces(height=1e-9)
@@ -116,12 +116,12 @@ def clean(m: trimesh.Trimesh) -> trimesh.Trimesh:
         m.remove_unreferenced_vertices()
     if not m.is_watertight:
         bodies = m.split(only_watertight=False)
-        closed = [b for b in bodies if b.is_watertight]
-        strays = [b for b in bodies if not b.is_watertight and b.area <= STRAY_SHARE * m.area]
-        if closed and len(closed) + len(strays) == len(bodies) and strays:
+        whole = [b for b in bodies if closed(b)]
+        strays = [b for b in bodies if not closed(b) and b.area <= STRAY_SHARE * m.area]
+        if whole and len(whole) + len(strays) == len(bodies) and strays:
             where += [b.vertices for b in strays]
             gone += sum(len(b.faces) for b in strays)
-            m = trimesh.util.concatenate(closed) if len(closed) > 1 else closed[0]
+            m = trimesh.util.concatenate(whole) if len(whole) > 1 else whole[0]
     if gone:
         pts = np.vstack(where)
         z0, z1 = float(pts[:, 2].min()), float(pts[:, 2].max())
@@ -130,13 +130,25 @@ def clean(m: trimesh.Trimesh) -> trimesh.Trimesh:
     return m
 
 
+def closed(m: trimesh.Trimesh) -> bool:
+    """Closed as it will be read back: two vertices at one point (a pinch) are watertight in memory and merge in any
+    STL round trip, after which it isn't (#124 review). Judged on a merged copy, so every reader agrees."""
+    if not m.is_watertight:
+        return False
+    merged = m.copy()
+    merged.merge_vertices()
+    return bool(merged.is_watertight)
+
+
 def open_near(m: trimesh.Trimesh) -> Optional[str]:
     """Where a mesh isn't closed, in words ("near z 14 mm"), or None when it's one closed solid. What a reader that
     needs a solid (a boolean, a voxel check, a weight) says instead of throwing (CALI-118)."""
-    if m.is_watertight:
+    if closed(m):
         return None
     from trimesh.grouping import group_rows
 
+    m = m.copy()
+    m.merge_vertices()
     edges = m.edges_sorted
     lone = edges[group_rows(edges, require_count=1)]
     pts = m.vertices[lone.reshape(-1)] if len(lone) else m.vertices

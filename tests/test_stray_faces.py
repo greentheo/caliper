@@ -145,3 +145,18 @@ def test_the_designer_is_told_why_a_cone_can_leave_a_sliver():
 
     text = open(os.path.join(os.path.dirname(caliper.__file__), "part_scripts.md")).read()
     assert "A cone that runs to its apex" in text
+
+
+def test_closed_is_judged_as_it_reads_back():
+    """#124 review: two cubes touching along an edge are watertight in memory (the pinch: each cube's own vertices
+    at one point) and not once merged, as any STL round trip merges them: four faces on one edge. Every reader
+    judges the merged form."""
+    from caliper.measure import closed
+
+    a = trimesh.creation.box((10, 10, 10))
+    b = trimesh.creation.box((10, 10, 10))
+    b.apply_translation((10, 10, 0))
+    pinch = trimesh.util.concatenate([a, b])
+    assert pinch.is_watertight and not closed(pinch)
+    assert open_near(pinch) is not None
+    assert closed(a)

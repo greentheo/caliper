@@ -736,9 +736,9 @@ def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
     if printed is None:
         return None
     mesh = store.part_geometry(part_id).require_mesh()
-    if not mesh.is_watertight:                  # no boolean on an open mesh: said where it's open (CALI-118)
-        from .measure import open_near
+    from .measure import closed, open_near
 
+    if not closed(mesh):                        # no boolean on an open mesh: said where it's open (CALI-118)
         raise ValueError(f"its shape isn't closed {open_near(mesh)}")
     if not printed.get("rest"):
         return mesh
