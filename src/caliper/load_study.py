@@ -770,7 +770,10 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
     store.append_history(part_id, {"kind": "load", "action": "studied", "run": rid,
-                                   "cases": len(cases), "safety": worst, "holds": record["holds"]})
+                                   "cases": len(cases), "safety": worst, "holds": record["holds"],
+                                   # the history line says "not resolved", never "holds", for it (CALI-110)
+                                   **({"unresolved": True} if any(unresolved(record, c) and c.get("holds")
+                                                                  for c in cases) else {})})
     store.append_log({"kind": "load", "action": "studied", "part": part_id, "run": rid})
     said = "it holds" if record["holds"] else "it doesn't hold"
     if record["holds"] and any(unresolved(record, c) for c in cases):      # never greener than its check (CALI-97)

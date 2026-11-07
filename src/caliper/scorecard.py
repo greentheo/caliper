@@ -336,6 +336,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
     from . import load_study
 
     worst = None
+    unsure = None                     # a ✓ on an FEA too coarse to see the wall: no pass from it (CALI-110)
     for p in store.design.parts:
         if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
             continue
@@ -349,6 +350,10 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                         "model", "strength")
                 continue
         breaks = [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
+        if unsure is None and any(load_study.unresolved(run, c) and c.get("holds") for c in run["cases"]):
+            from .answers import coarse
+
+            unsure = coarse(run, store.design.display_units == "in")
         if run.get("safety") is not None:
             _metric(metrics, f"strength.{p.id}.safety", run["safety"], "×", f"{p.id}, its weakest load",
                     "model", "strength check")
@@ -384,6 +389,10 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             continue
         v, lim, op = float(m["value"]), float(c["limit"]), c.get("op", ">=")
         ok = v >= lim if op == ">=" else v <= lim if op == "<=" else abs(v - lim) < 1e-9
+        if ok and unsure and c["metric"].startswith("strength"):   # not resolved: never a pass; a fail stays one
+            checks.append({**c, "status": "unresolved", "value": m["value"], "unit": m["unit"], "margin": None,
+                           "trust": "not resolved: too coarse to see its walls", "note": unsure})
+            continue
         checks.append({**c, "status": "pass" if ok else "fail", "value": m["value"], "unit": m["unit"],
                        "margin": round(v - lim if op == ">=" else lim - v, 3), "trust": m["trust"]})
     previous = list_cards(store, 1)
@@ -403,7 +412,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                         "fail": sum(c["status"] == "fail" for c in checks),
                         "unknown": sum(c["status"] not in ("pass", "fail", "proposed") for c in checks),
                         "proposed": sum(c["status"] == "proposed" for c in checks),
-                        "untrusted": sum(c["status"] == "untrusted" for c in checks)}}
+                        "untrusted": sum(c["status"] == "untrusted" for c in checks),
+                        "unresolved": sum(c["status"] == "unresolved" for c in checks)}}
     os.makedirs(cards_dir(store), exist_ok=True)
     with open(os.path.join(cards_dir(store), time.strftime("%Y%m%d-%H%M%S") + ".json"), "w") as f:
         json.dump(card, f, indent=2, default=str)

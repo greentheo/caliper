@@ -66,6 +66,13 @@ def _wall(mm: float, inches: bool) -> str:
     return (f"{mm:.1f}".removesuffix(".0") if mm < 10 else f"{mm:.0f}") + " mm"
 
 
+def _why_not(rel: dict) -> str:
+    """Why a build package isn't ready, in its own words (CALI-96: not trusted; CALI-110: not resolved)."""
+    s = (rel.get("card") or {}).get("summary") or {}
+    return ("a check fails" if s.get("fail") or not s else "a check isn't trusted yet" if s.get("untrusted")
+            else "a strength check isn't resolved" if s.get("unresolved") else "a check isn't settled")
+
+
 def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
     """What a verdict says when the FEA that governs it couldn't see the wall it's checking (CALI-97). A ✓ is no
     verdict then: not resolved yet (a finer run can see it) or not checked (none a study may make can). A ✗ stays a
@@ -470,11 +477,12 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         fails = [c for c in card["checks"] if c["status"] == "fail"]
         stale = any(card.get("versions", {}).get(p["id"]) not in (None, p["version"]) for p in parts)
         # never a pass: a check that couldn't run (#103 review), nor one measured on a filled-in shape (CALI-96)
-        untrusted = s.get("untrusted") or 0
-        waits = (s.get("unknown") or 0) - untrusted
+        untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0     # never a pass (CALI-110)
+        waits = (s.get("unknown") or 0) - untrusted - unresolved
         said = (f"{s['pass']} check{'s' if s['pass'] != 1 else ''} pass" if s["pass"] or fails
-                else "No check has run yet" if waits and not untrusted else "No check passes yet")
-        rest = [f"{untrusted} not trusted"] * bool(untrusted) + [f"{waits} not checked yet"] * bool(waits)
+                else "No check has run yet" if waits and not untrusted and not unresolved else "No check passes yet")
+        rest = ([f"{untrusted} not trusted"] * bool(untrusted) + [f"{unresolved} not resolved"] * bool(unresolved)
+                + [f"{waits} not checked yet"] * bool(waits))
         work.append(_line(said + (
             f", {s['fail']} fail: " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")
             + (f"{',' if s['pass'] or fails else ':'} " + ", ".join(rest) if rest else "") + "."
@@ -499,7 +507,7 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     if rel:
         url = f"/api/designs/{state['slug']}/releases/{rel['id']}/files/"
         make.append(_line(f"Build package {rel['id']}: {len(rel['steps'])} steps, "
-                          + ("ready to cut." if rel["ready"] else "not ready: a check fails or isn't trusted yet."),
+                          + ("ready to cut." if rel["ready"] else f"not ready: {_why_not(rel)}."),
                           "ok" if rel["ready"] else "bad", action="release",
                           links=[{"label": "Open the build book", "url": url + "index.html"}]
                           + ([{"label": "The kids' build book", "url": url + rel["kids"]}] if rel.get("kids") else [])))
