@@ -18,7 +18,8 @@ from typing import Optional
 
 from pydantic import BaseModel, field_validator
 
-from . import (aero, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
+from . import (aero, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, grain,
+               lighten,
                load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, verdicts)
 from . import whittle_bridge as wb
 from .design import DesignStore
@@ -40,6 +41,11 @@ class ParamSet(BaseModel):
     name: str
     value: float
     unit: Optional[str] = None            # a length's unit (mm when none); no unit for a count, a ratio or an angle
+
+
+class GrainSet(BaseModel):
+    piece: str
+    grain: str                            # "along" or "across" the gap the panel spans (CALI-126)
 
 
 class ShopOffer(BaseModel):
@@ -317,6 +323,9 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "bbox": _bbox(store, p.id, geo),
             # each measured on the part as it is now, with its verdict (#137 item 1)
             "rules": part_rules.measured(store, p.id, geo),
+            # the face grain the person said for its panels, as the cut list tells the maker (CALI-126)
+            "grain": {k: {**v, "line": grain.line(k, v)} for k, v in grain.stated(store, p.id).items()},
+            "grain_notes": grain.notes(store, p.id),
             "history": store.history(p.id)[-history_limit:],
             "versions": store.versions(p.id),
         })
@@ -663,6 +672,19 @@ def router():
             except (ValueError, KeyError) as e:
                 raise HTTPException(422, str(e).strip("'\""))
             return {"version": got["version"], "said": got["said"], "warning": got["warning"], "notes": got["notes"],
+                    "design": design_state(store)}
+
+    @r.post("/api/designs/{slug}/parts/{pid}/grain")
+    def set_part_grain(slug: str, pid: str, req: GrainSet):
+        """The person keeps a panel's face grain (CALI-126): the Beam check's advice, kept. Only a grain said this way
+        (or in the chat) moves a strength verdict, at its next check; the cut list and build book say it."""
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                entry = grain.state(store, pid, req.piece, req.grain, said="kept the Beam check's advice")
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            return {"grain": entry, "said": grain.line(req.piece, entry) + " Check it holds again to use it.",
                     "design": design_state(store)}
 
     @r.get("/api/designs/{slug}/parts/{pid}/script")
