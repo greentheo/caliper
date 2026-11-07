@@ -3,6 +3,54 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-106 (#136 review, round 2) · What a refused carve asks for, said apart; the page keeps it off
+- **The line asks two things apart** (thickening to the rule's 2.85 mm doesn't unblock a carve): printing and the
+  part's own rule, "too thin for a 0.4 mm nozzle to print and for your rule shell_wall_thickness (at least 2.85 mm):
+  thicken them to that"; and the strength check, in mm, "For a strength carve, walls must be at least 9.2 mm at this
+  size, so check it by hand or with a test piece instead". With no rule and nothing printed, only the second.
+- **The page keeps a blocked Carve off** after a job ends (`paintCarve` set `disabled` from the job alone, so a cancel
+  re-enabled "Carve it again"), and a refusal reads without its exception's name (`plainly`: no "ValueError: …").
+- **Lighten on a coarse run** says "Not resolved yet: the check was too coarse to see its walls…" (or "Not checked"),
+  from the steps' `lighten_step` verdicts, as Studies does; it said "Nothing lighter still holds", a false ✗.
+- Pins for the review's survivors: a coarse fail stays a fail (`carve_step`, `lighten_step`), and Lighten's `disabled`.
+- Tests: tests/test_coarse_steps.py (16; 4 of the new fail without this, the fifth pins a fail). The review's last two
+  pins: a coarse fail stays a fail with the whole part holding (`whole_holds: True`, where the whole-holds branch can't
+  mask it), and the page's own refusal goes through `plainly()` (raw `e.message` fails it).
+
+### 2026-11-07 · CALI-106 (#101, #136 review) · A refused carve says where the thin walls are and what to change
+- **Where:** `measure.thinnest_wall` returns the thinnest wall and where it is (the middle of its ray);
+  `min_wall_thickness` is its number. `load_study._thin` says which it is: a piece by name, or a measured wall's
+  place. The strength record carries `thinnest_where`.
+- **What to change:** `load_study.thin_words`, in the design's units: the wall, where, the size the strength check
+  sees walls from at this size, a 0.4 mm nozzle where it's printed and thinner, and the part's own `min_wall >= …`
+  rule (`wall_rule`, its spec's or the design's, read with `safe_eval`); otherwise "Thicken them first."
+  `resolution()` carries it (`said`, `where`), the carve refuses with "Can't carve it by strength: …", and a too-thin
+  check stores it as `thin_said`, which the page's disabled Carve and Lighten say.
+- **One wall number** (#137 item 2, the same words): under 1 mm, two places, in `answers._wall` and the page's
+  `wallLen`. The bar stool's 0.25 mm wall read 0.2 mm on the card and 0.3 mm on the page.
+- On a copy of Theo's bar stool v7: "its 0.25 mm walls around z 16.1 in … Your rule shell_wall_thickness says at
+  least 2.85 mm: thicken them to that first." z 409 mm, r ≈ 169 mm: the webs between the openings, where the
+  foreman found them.
+- Tests: tests/test_coarse_steps.py (+5: where, the line on the spool and on the stool's numbers, the refused carve,
+  one wall number on both sides, the page's blocked carve). Touched suites: 187 passed locally; CI is the full run.
+
+### 2026-11-07 · CALI-106 (#101) · A carve or lightening step on voxels too coarse to see the wall is no "holds"
+- **Carve and lighten record whether their voxels see the walls** (`load_study.resolution`, from the same set-up the
+  strength check uses): `thinnest_mm`, `across`, `resolved`, and unresolved, `finer` or `too_thin`.
+- **A step that holds on a run that doesn't see its walls is "not resolved"** (or "not checked" where no run a study
+  may make could see them), through `verdicts.station`/`carve_step`/`lighten_step` (stacked on #132's one verdict);
+  a fail stays a fail, not trusted still ranks above it. Every reader: the chart's dots (amber), "the lightest step
+  where the printed part holds" line, the station bar and its **Carve it like this** / **Cut these holes** (off, with
+  why), the Studies rows, the carve's chat reply and its closing message.
+- **Where no run can see the walls it isn't carved:** `carve.study` stops before carving, "Its walls are too thin for
+  the voxel check at this size, so it can't be carved by strength", and the page's Carve and Lighten buttons are off
+  with that line. Also off, with its reason, where the default check's voxels don't connect (#102's note). Theo's
+  bar stool v7 (a copy): a 0.25 mm wall at 4.6 mm voxels, too thin, so Carve isn't offered.
+- `tests/test_coarse_steps.py`: the thin printed tube carved at one voxel through reads not resolved at every step that
+  holds (and in the page's state, Studies and the chat), at four it reads as its safety says; `resolution` on the bar
+  stool's numbers; a too-thin part isn't carved; lightening's coarse steps; the page's buttons.
+
+
 ### 2026-11-07 · CALI-112 (#114) · One verdict function every reader asks
 - **`verdicts.py`:** kinds worst first (`fails`, `untrusted`, `unchecked`, `unresolved`, `edge`, `stale`,
   `waiting`, `holds`), each with a status, a word and `counts_as_pass`; `case`, `run`, `goal`, `meets`, `station`,
