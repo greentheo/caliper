@@ -365,10 +365,14 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
                                 else verdicts.of(h))
             elif h.get("kind") == "revision" and h.get("result"):     # its report's verdict (#132 review)
                 h["verdict"] = verdicts.history(h)
+    for p in parts:                           # what stops a carve or a lightening: the card's offer reads it too (#144)
+        p["blocked"] = load_study.blocked(store, p["id"])
     current = {p["id"]: p["version"] for p in parts}
     for rel in runs["release"]:                # ready, as made and for the parts as they are now (#132 review)
         rel["verdict"] = verdicts.release(rel, current)
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
+    skipped: list = []
+    log = store.log(skipped)
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
         "building": _building(slug),          # the first build's job, while it runs (CALI-59)
@@ -385,7 +389,9 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "part_errors": part_errors,
         "proposal": proposal.to_dict() if proposal else None,
         "clarify": [q.to_dict() for q in clarify.pending(store)],
-        "log": store.log(skipped := []),
+        # what the chat says again: a reply's traceback to its last line, no server paths (#89)
+        "log": [{**e, "reply": chat.shown(e["reply"])} if e.get("kind") == "reply" and e.get("reply") else e
+                for e in log],
         "log_skipped": len(skipped),
         "whittle_runs": [_run_summary(r) for r in runs["whittle"]],
         "aero_runs": runs["aero"],

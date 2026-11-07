@@ -330,19 +330,27 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
     # can your shop make it (CALI-48): every piece routed to a tool or machine you have; printing costed
     from . import making
 
-    missing, hours, grams = [], 0.0, 0.0
+    missing, hours, grams, planned, unplanned = [], 0.0, 0.0, 0, []
     for pid in reports:
         try:
             mk = making.plan(store, pid)
-        except Exception:  # noqa: BLE001 — unknown is said by the check, not a crash
+        except Exception as e:  # noqa: BLE001 — unknown is said by the check, not a crash
+            unplanned.append(f"{pid}: {e}")
             continue
+        planned += 1
         missing += [f"{pid}: {m['name']} ({m['why']})" for m in mk["missing"]]
         hours += sum(x["hours"] for x in mk["printed"])
         grams += sum(x["filament_g"] for x in mk["printed"])
     if reports:
+        # a ✓ only over what was worked out (#89, #137 P2 item 10: "✓ … 0 measured" where no part's plan could be
+        # made): a part whose plan couldn't be made leaves the check waiting, said why; a missing piece is a fail
+        settled = planned and not unplanned
         checks.append({"id": "make:shop", "label": "your shop can make every piece", "kind": "make", "auto": True,
-                       "status": "pass" if not missing else "fail", "value": len(missing), "margin": -len(missing),
-                       "trust": "measured", "note": "; ".join(missing[:6])})
+                       "status": "fail" if missing else "pass" if settled else "unknown",
+                       "value": len(missing) if missing or settled else None, "unit": "pieces it can't make",
+                       "margin": -len(missing) if missing or settled else None,
+                       "trust": "measured" if missing or settled else None,
+                       "note": "; ".join((missing + [f"couldn't work out how to make {u}" for u in unplanned])[:6])})
         _metric(metrics, "make.not_in_shop", len(missing), "pieces", "pieces your shop can't make", "measured", "shop")
     if grams:
         _metric(metrics, "print.hours", round(hours, 1), "h", "printing time, every printed piece", "model", "slicer")
@@ -432,7 +440,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         status = verdicts.STATUS[verdict["kind"]]
         if status == "untrusted":
             checks.append({**c, "status": status, "value": m["value"] if m else None, "margin": None,
-                           "unit": m["unit"] if m else "", "trust": "not trusted: a filled-in shape", "note": untrue})
+                           "unit": m["unit"] if m else "", "trust": ("not trusted: its shape couldn't be checked" if str(untrue).startswith("couldn't")
+                                    else "not trusted: a filled-in shape"), "note": untrue})   # which it is (#89)
         elif status == "unresolved":
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "not resolved: too coarse to see its walls", "note": unsure})

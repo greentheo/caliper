@@ -119,7 +119,7 @@ def test_the_same_tube_seen_finely_reads_as_its_safety_says_with_about(tmp_path,
     (part,) = _work(store, "tube")
     assert part["text"].startswith(("Holds a foot, about ", "Doesn't hold a foot: only about ")), part["text"]
     (design,) = _work(store)
-    assert ": about " in design["text"] and design["text"].endswith("x."), design["text"]
+    assert ": about " in design["text"] and design["text"].endswith("times over."), design["text"]     # (#144: _times)
 
 
 def test_two_across_isnt_enough_any_more(tmp_path, monkeypatch):
