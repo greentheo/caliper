@@ -239,7 +239,10 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         usd = _cost(store, pid, report)
         buy.append(_line(", ".join(items[:5]) + (f": about ${usd:,.0f}." if usd else ".")))
         lb = report["mass_lb"]
-        buy.append(_line(f"It weighs {lb:g} lb" + (", easy for a kid to carry." if lb <= 10 else ".")))
+        if lb is None:                                   # unknown, never the rest's weight (#125 review)
+            buy.append(_line(f"Its weight isn't known: {report.get('unweighed') or C.UNWEIGHED}.", "warn"))
+        else:
+            buy.append(_line(f"It weighs {lb:g} lb" + (", easy for a kid to carry." if lb <= 10 else ".")))
     elif p.get("role") != "fixed":
         buy.append(_line("Not known yet: it doesn't say what it's built from. Ask for it from plywood, lumber "
                          "or tube and the designer lists the pieces.", "warn"))
@@ -352,7 +355,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     if tested:                                         # the worst real test, which outranks the prediction (CALI-86)
         out["strength.test"] = min(tested, key=lambda t: ORDER.index(t["status"]))
     weight = usd = missing = hours = 0.0
-    weighed = False
+    weighed, unweighed = False, None
     for p in state["parts"]:
         if not p.get("built") or p.get("role") == "fixed":
             continue
@@ -361,7 +364,10 @@ def measured(store: DesignStore, state: dict) -> dict:
         except Exception:  # noqa: BLE001
             continue
         weighed = True
-        weight += rep["mass_lb"]
+        if rep.get("mass_lb") is None:             # one part unknown: the total is too, never the rest's (#125)
+            unweighed = unweighed or rep.get("unweighed") or C.UNWEIGHED
+        else:
+            weight += rep["mass_lb"]
         usd += _cost(store, p["id"], rep) or 0.0
         try:
             mk = making.plan(store, p["id"])
@@ -370,7 +376,10 @@ def measured(store: DesignStore, state: dict) -> dict:
         except Exception:  # noqa: BLE001
             pass
     if weighed:
-        out.update({"weight.total_lb": round(weight, 1), "cost.usd": round(usd, 2), "make.not_in_shop": missing})
+        out.update({"weight.total_lb": None if unweighed else round(weight, 1), "cost.usd": round(usd, 2),
+                    "make.not_in_shop": missing})
+        if unweighed:
+            out["weight.unweighed"] = unweighed
         if hours:
             out["print.hours"] = round(hours, 1)
     return out
@@ -414,6 +423,9 @@ def held_to(state: dict, now: dict) -> list[dict]:
         if v is None and c["metric"] in scored:
             v, late = scored[c["metric"]], stale
         assumed = " (assumed)" if c.get("source") == "assumed" else ""
+        if v is None and c["metric"].startswith("weight") and now.get("weight.unweighed"):
+            out.append(_line(f"{label}{assumed}: {now['weight.unweighed']}.", "warn"))   # unknown, said (#125)
+            continue
         if v is None:
             how = ("Check it holds" if c["metric"].startswith("strength") else "Score it")
             out.append(_line(f"{label}{assumed}: not checked yet. {how}.", "warn",

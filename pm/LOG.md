@@ -15,6 +15,11 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - `tests/test_printed_release.py` (4; all fail on main): the tube's package, the total against each part's weight, the
   book's numbers equal to the live card's for the same version (a weight goal it fails is ✗ in both), and an old card
   re-scored. design.js v=61.
+- **#125 review:** a printed piece whose solid can't be made (the bar stool v7's throw, #126) fails soft: `with_printed`
+  marks it unweighed, and that part's weight, the total and the hitch's are **unknown**, never the rest's; the weight
+  check reads "not checked: the printed part's shape isn't closed (…)", the design card and the page say so, and
+  `/balance` answers 200 with the note. No `was`/change against a card from an older scorer ("scored differently
+  since"). `compute` says to bump `SCORER` when a metric's meaning changes.
 
 ### 2026-11-07 · CALI-113 (#115) · A part with loads() is held to them, goal or none
 - **Rule 6, found in #106's re-check:** a design whose parts have `loads()` but whose `scorecard.yaml` has no strength

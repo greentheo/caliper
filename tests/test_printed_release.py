@@ -102,3 +102,63 @@ def test_a_card_scored_before_this_fix_is_out_of_date_and_the_release_scores_aga
     booked = json.load(open(os.path.join(release.releases_dir(store), made["id"], "scorecard.json")))
     assert booked["metrics"]["weight.total_lb"]["value"] == pytest.approx(card["metrics"]["weight.total_lb"]["value"])
     assert booked["scorer"] == scorecard.SCORER and not scorecard.list_cards(store, 1)[0].get("outdated")
+
+
+# --- #125 review ---------------------------------------------------------------------------------------------------
+def _open_print(monkeypatch):
+    """The bar stool v7's throw (#126): the printed solid can't be made."""
+    def throws(*a, **k):
+        raise ValueError("Not all meshes are volumes!")
+    monkeypatch.setattr(construction, "printed_solid", throws)
+
+
+def test_a_printed_piece_that_can_t_be_weighed_makes_the_weight_unknown_never_lower(tmp_path, monkeypatch):
+    store = _store(tmp_path, MIXED, "stool", "open")
+    with open(os.path.join(store.root, "scorecard.yaml"), "w") as f:
+        f.write(LIGHT.replace("limit: 0.2", "limit: 10.0"))     # the bar stool's cap: the ply alone would pass it
+    _open_print(monkeypatch)
+    rep = construction.report(store, "stool")
+    assert rep["mass_lb"] is None and rep["unweighed"].startswith(construction.UNWEIGHED)
+    bal = construction.balance(store)
+    assert bal["mass_lb"] is None and any("The total isn't known" in n for n in bal["notes"])
+    card = scorecard.compute(store)
+    assert card["metrics"]["weight.total_lb"]["value"] is None
+    (light,) = [c for c in card["checks"] if c["id"] == "light"]
+    assert light["status"] == "unknown" and light["note"].startswith("stool: " + construction.UNWEIGHED)
+    state = design_api.design_state(store)
+    live = answers.measured(store, state)
+    assert live["weight.total_lb"] is None and live["weight.unweighed"].startswith(construction.UNWEIGHED)
+    line = next(ln for ln in answers.held_to(state, live) if "eeps total weight down" in ln["text"])
+    assert line["status"] == "warn" and "not checked: the printed part's shape isn't closed" in line["text"]
+    assert "✓" not in line["text"]
+
+
+def test_balance_answers_with_the_note_not_an_error(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    store = _store(tmp_path, MIXED, "stool", "designs")
+    _open_print(monkeypatch)
+    got = TestClient(create_app()).post(f"/api/designs/{store.design.slug}/balance", json={})
+    assert got.status_code == 200, got.text
+    assert got.json()["mass_lb"] is None and got.json()["unweighed"]
+
+
+def test_no_change_is_set_against_a_card_from_an_older_scorer(tmp_path):
+    store = _store(tmp_path, TUBE, "tube", "was")
+    with open(os.path.join(store.root, "scorecard.yaml"), "w") as f:
+        f.write("written_by: caliper\nchecks: []\nobjectives:\n- id: light\n  label: as light as it can be\n"
+                "  metric: weight.total_lb\n  direction: min\n")
+    first = scorecard.compute(store)
+    path = sorted(os.listdir(scorecard.cards_dir(store)))[-1]
+    old = {**first, "metrics": {**first["metrics"], "weight.total_lb": {**first["metrics"]["weight.total_lb"],
+                                                                       "value": 0.01}}}
+    old.pop("scorer")
+    with open(os.path.join(scorecard.cards_dir(store), path), "w") as f:
+        json.dump(old, f)
+    (o,) = scorecard.compute(store)["objectives"]
+    assert o["was"] is None and o["change"] is None and o["note"] == "scored differently since"
+    (o,) = scorecard.compute(store)["objectives"]                  # against a card of its own scorer: a change
+    assert o["was"] == o["value"] and o["change"] == 0 and "note" not in o

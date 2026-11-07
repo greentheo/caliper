@@ -172,7 +172,10 @@ def cost_and_waste(store: DesignStore, reports: dict, cutplans: dict) -> dict:
 # The card
 # ---------------------------------------------------------------------------
 def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
-    """Score the design as it stands, file the card, and return it."""
+    """Score the design as it stands, file the card, and return it.
+
+    Bump :data:`SCORER` whenever a metric's meaning changes (what it counts, how it's weighed): every card filed
+    before then reads out of date, the release scores again, and no "was" is set against it."""
     from . import aero, cutplan, frame_study
 
     emit = emit or (lambda *a, **k: None)
@@ -199,7 +202,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         r = C.report(store, p.id)
         r["pieces_raw"] = C.takeoff(C._items(C.declared(store, p.id)))
         reports[p.id] = r
-        _metric(metrics, f"weight.{p.id}", r["mass_lb"], "lb", f"{p.id} weighs", "model", "construction")
+        _metric(metrics, f"weight.{p.id}", r["mass_lb"], "lb", f"{p.id} weighs", "model", "construction",
+                **({"note": r["unweighed"]} if r.get("unweighed") else {}))     # unknown, said (#125 review)
         for k in r.get("keeps") or []:
             checks.append({"id": f"keeps:{p.id}.{k['name']}", "label": f"{p.id} holds the {k['name']}",
                            "status": "pass" if k["clear"] else "fail", "value": k["depth_mm"], "margin": -k["depth_mm"],
@@ -211,8 +215,11 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                 _metric(metrics, f"make.{p.id}.stale", True, "", f"{p.id}'s cut plan is for an older version",
                         "measured", "cut plan")
     b = C.balance(store, payload_lb=payload)
-    _metric(metrics, "weight.total_lb", b["mass_lb"], "lb", f"everything, with {payload:g} lb aboard", "model", "balance")
-    _metric(metrics, "hitch.tongue_lb", b["mass_lb"], "lb", "on the hitch's tongue, standing still", "model", "balance")
+    unknown = {"note": "; ".join(b["unweighed"])} if b.get("unweighed") else {}    # never a lower total (#125)
+    _metric(metrics, "weight.total_lb", b["mass_lb"], "lb", f"everything, with {payload:g} lb aboard", "model", "balance",
+            **unknown)
+    _metric(metrics, "hitch.tongue_lb", b["mass_lb"], "lb", "on the hitch's tongue, standing still", "model", "balance",
+            **unknown)
     if b.get("moment_lbin") is not None:
         _metric(metrics, "hitch.moment_lbin", b["moment_lbin"], "lb·in", "the hitch carries, standing still",
                 "model", "balance")
@@ -405,7 +412,9 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                            "unit": m["unit"] if m else "", "trust": "not trusted: a filled-in shape", "note": untrue})
             continue
         if m is None or not isinstance(m["value"], (int, float)):
-            checks.append({**c, "status": "unknown", "value": None, "margin": None, "trust": None})
+            # not checked, and why where it's known (an unweighed printed part: #125 review)
+            checks.append({**c, "status": "unknown", "value": None, "margin": None, "trust": None,
+                           **({"note": m["note"]} if m and m.get("note") else {})})
             continue
         v, lim, op = float(m["value"]), float(c["limit"]), c.get("op", ">=")
         ok = v >= lim if op == ">=" else v <= lim if op == "<=" else abs(v - lim) < 1e-9
@@ -416,7 +425,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         checks.append({**c, "status": "pass" if ok else "fail", "value": m["value"], "unit": m["unit"],
                        "margin": round(v - lim if op == ">=" else lim - v, 3), "trust": m["trust"]})
     previous = list_cards(store, 1)
-    prev = previous[0]["metrics"] if previous else {}
+    # a change is the design's, never the scorer's: against a card from an older scorer there's no "was" (#125 review)
+    prev = previous[0]["metrics"] if previous and not previous[0].get("outdated") else {}
     objectives = []
     for o in g["objectives"]:
         m = metrics.get(o["metric"])
@@ -424,7 +434,9 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         value = m["value"] if m else None
         objectives.append({**o, "value": value, "unit": m["unit"] if m else "", "trust": m["trust"] if m else None,
                            "was": was, "change": (round(value - was, 3) if isinstance(value, (int, float))
-                                                  and isinstance(was, (int, float)) else None)})
+                                                  and isinstance(was, (int, float)) else None),
+                           **({"note": "scored differently since"} if previous and previous[0].get("outdated")
+                              else {})})
     card = {"created": time.time(), "scorer": SCORER, "versions": versions, "settings": settings, "checks": checks,
             "notes": g.get("notes") or [],
             "objectives": objectives, "metrics": metrics, "cost": cw,
