@@ -324,7 +324,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             # each measured on the part as it is now, with its verdict (#137 item 1)
             "rules": part_rules.measured(store, p.id, geo),
             # the face grain the person said for its panels, as the cut list tells the maker (CALI-126)
-            "grain": grain.stated(store, p.id), "grain_notes": grain.notes(store, p.id),
+            "grain": {k: {**v, "line": grain.line(k, v)} for k, v in grain.stated(store, p.id).items()},
+            "grain_notes": grain.notes(store, p.id),
             "history": store.history(p.id)[-history_limit:],
             "versions": store.versions(p.id),
         })

@@ -25,9 +25,25 @@ reach the maker.
   one checked in the middle only, too coarse, on a filled-in shape or of an older version (`test_edge_foot`'s
   middle-only stool caught "about 4.2 times over" beside "checked in the middle only").
 - Not here: an arrow on the pattern sheets (the line is on the cut list and in the book).
-- Tests: tests/test_grain.py (7: assumed never moves it, stated does and reaches the cut list and the book, the part's
-  own directions, refused grains and panels, the card's advice then "check again", the chat, the page's line). The
-  mutant (the check taking the designer's grain) fails 3.
+- **#151 review:**
+  - **One phrase for the cut, everywhere** (`grain.phrase`), led by the part's own direction: "face grain running
+    front to back, from one support to the other" (or "…, parallel to the supports"). It's the same in the Beam
+    check's why, the card's advice, the Keep button and its reply, the chat, the cut list and the book; "along/across
+    the gap" are gone (each read both ways). Pinned across all of them.
+  - **The layout follows the grain, or says it doesn't:** `unfold_driver.mjs` finds each stated panel's grain on its
+    flat (by its faces' OBJ group: one panel alone is "P1"), turns its outline so the grain runs along the sheet's
+    length, nests turning end for end only, and puts the turn back into the placement. The bench's top went from
+    900 × 300 on the sheet to 300 × 900 (its front-to-back grain along the 8 ft length). Per piece: follows, or
+    why not ("it doesn't fit the sheet with its grain along the sheet's length", or its way isn't known before a
+    check), on the page's cut plan, `cutlist.txt` and the book, beside the line.
+  - **"cut the top with the grain"** with no way asks "which way: front to back, or side to side?"; a question about
+    the grain ("should it run front to back?") is the chat's, never kept.
+  - Pinned: advice from an unsettled case quotes no number; the book's line end to end (`release.make`); a sheet
+    named in two parts asks which. Mutants (no settled filter, no book lines, no "say which one", no turn) each fail.
+- Tests: tests/test_grain.py (14 with the review's: assumed never moves it, stated does, the part's own directions,
+  refused grains and panels, the card's advice then "check again", unsettled advice, one phrase everywhere, the chat,
+  no way asked, two parts, the page's line, the layout turned on a real cut plan, a layout that can't follow it, the
+  book end to end). The mutant (the check taking the designer's grain) fails 3.
 ### 2026-11-07 · CALI-94 (#106, with main's #124, #132, #136) · The middle foot only, through the one verdict
 - **Merged forward** onto main's one verdict (#132): #106's hand-written "middle only" checks become `edge=` on
   `verdicts.case` / `run` / `goal`, and each reader asks those: the part card ("A kid stepping up: checked in the middle

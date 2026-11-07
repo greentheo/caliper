@@ -163,10 +163,10 @@ def _grain_lines(store: DesignStore, pid: str, run: dict, stale: bool, filled: O
                              f"again to use it.", "warn", study="load"))
         elif not mine and not stale and pl.get("safety") is not None and pl.get("safety_across") is not None \
                 and pl["safety"] > pl["safety_across"]:
-            runs = G.runs(pl.get("span_axis"), "along")
-            out.append(_line(f"Cut the {piece} with its face grain running {runs or 'along the gap it spans'} and it's "
-                             f"about {_times(pl['safety'])}, not {_times(pl['safety_across'])}: keep that under Will it "
-                             f"hold? and it goes on the cut list.", "info", study="load"))
+            way = G.phrase(G.runs(pl.get("span_axis"), "along"), "along")      # the one phrase (#151 review)
+            out.append(_line(f"Cut the {piece} with its {way} and it's about {_times(pl['safety'])}, not "
+                             f"{_times(pl['safety_across'])}: keep that under Will it hold? and it goes on the cut "
+                             f"list.", "info", study="load"))
     return out
 
 

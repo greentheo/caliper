@@ -83,11 +83,23 @@ def state(store: DesignStore, pid: str, piece: str, grain: str, said: str = "") 
     return entry
 
 
+def phrase(runs: str, grain: str) -> str:
+    """The one way a cut's grain is said, everywhere (#151 review: "along the gap" and "across the gap" each read both
+    ways): the part's own direction first, then which way that is between the supports. "face grain running front to
+    back, from one support to the other" (along the span: the strong way) or "…, parallel to the supports" (across)."""
+    between = "from one support to the other" if grain == "along" else "parallel to the supports"
+    return f"face grain running {runs}, {between}" if runs else f"face grain running {between}"
+
+
+def axis(entry: dict) -> Optional[str]:
+    """The part's own axis the face grain runs along ("x", "y", "z"), from its direction words; None if not known."""
+    return _WORD_AXIS.get(entry.get("runs") or "")
+
+
 def line(piece: str, entry: dict) -> str:
-    """What the maker reads: "Cut the seat top with its face grain running front to back (along the gap it spans)."."""
-    way = f"{entry['grain']} the gap it spans"
-    return (f"Cut the {piece} with its face grain running {entry['runs']} ({way})." if entry.get("runs")
-            else f"Cut the {piece} with its face grain {way}.")
+    """What the maker reads: "Cut the seat top with its face grain running front to back, from one support to the
+    other."."""
+    return f"Cut the {piece} with its {phrase(entry.get('runs') or '', entry['grain'])}."
 
 
 def notes(store: DesignStore, pid: str) -> list[str]:
@@ -107,11 +119,9 @@ def from_chat(store: DesignStore, message: str, scope: Optional[str] = None) -> 
     ``{"why": …}`` when it can't be placed (said, never guessed), or None when the message isn't about a grain."""
     from . import construction as C
 
-    if not _SAID.search(message or ""):
-        return None
+    if not _SAID.search(message or "") or message.strip().endswith("?"):
+        return None                              # a question about the grain is the chat's to answer, never kept
     m = _WAY.search(message)
-    if m is None:
-        return None
     text = _WAY.sub(" ", message.lower())        # "front to back" names a direction, not the front or back panel
     found = []
     for p in store.design.parts:
@@ -126,6 +136,9 @@ def from_chat(store: DesignStore, message: str, scope: Optional[str] = None) -> 
             words = [w for w in re.split(r"[\s_]+", name.lower()) if w]
             if name and (name.lower().replace("_", " ") in text or (words and all(w in text for w in words))):
                 found.append((p.id, name))
+    if m is None:                                # a grain with no way: asked, never left to the designer (#151)
+        return {"why": ("which way: front to back, or side to side?" if found else
+                        "which sheet, and which way: front to back, or side to side?")}
     if not found:
         return {"why": "which sheet? Name it as its part does (its sheets are on the part's card)"}
     if len(found) > 1:

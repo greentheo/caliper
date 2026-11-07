@@ -898,8 +898,12 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                            f"({_e(pr['from'])}). STLs in <code>printer/{_e(pid)}/</code>.</p>")
     out.append("<h2 class='page'>Cut lists</h2>")
     for pid in rec.get("grain") or {}:                 # which way to cut each panel, as the person said (CALI-126)
+        laid = {g["line"]: g for g in (plans.get(pid) or {}).get("grain") or []}
         for n in rec["grain"][pid]:
-            out.append(f"<p class='note'><b>{_e(pid)}:</b> {_e(n)}</p>")
+            g = laid.get(n)
+            out.append(f"<p class='note'><b>{_e(pid)}:</b> {_e(n)}"
+                       + ("" if g is None or g["follows"] else
+                          f" <b>The layout doesn't follow it</b> ({_e(g['why'])}): lay it out by hand.") + "</p>")
     for pid, plan in plans.items():
         for g in plan.get("tubes") or []:
             out.append(f"<h3>{_e(g['label'])} <span class='muted small'>· {_e(pid)}</span></h3><table>"

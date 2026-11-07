@@ -156,13 +156,14 @@ def _material(material: str, thickness: float, cut: dict) -> dict:
 
 
 def _unfold(obj_text: str, out: str, name: str, stock: dict, material: dict, timeout: float,
-            min_score: float = 0.0) -> dict:
+            min_score: float = 0.0, grain: Optional[dict] = None) -> dict:
     os.makedirs(out, exist_ok=True)
     obj = os.path.join(out, "panels.obj")
     with open(obj, "w") as f:
         f.write(obj_text)
     job = {"obj": obj, "out": out, "name": name, "units": "mm", "stock": stock, "material": material,
-           "unfold_dir": unfold_dir(), "rotations": 8, "min_score_deg": min_score}
+           "unfold_dir": unfold_dir(), "rotations": 8, "min_score_deg": min_score,
+           "grain": grain or {}}           # {panel: its face grain's direction}: laid along the sheet (CALI-126)
     try:
         res = subprocess.run(["node", DRIVER], input=json.dumps(job), capture_output=True, text=True,
                              timeout=timeout)
@@ -331,13 +332,29 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
     pts = [q for its in groups.values() for it in its
            for poly in ([it["outline"]] if it.get("outline") else it.get("facets") or []) for q in poly]
     centre = [sum(q[k] for q in pts) / len(pts) for k in range(3)] if pts else None
+    from . import grain as G
+
+    said = G.stated(store, part_id)
+    record["grain"] = []
     for (material, thickness), its in sorted(groups.items()):
         stock, cut = _stock(material)
         mat = _material(material, thickness, cut)
         key = f"{material}-{M.nominal(thickness).replace(' ', '').replace('/', '_')}"
         emit("unfolding", f"{len(its)} {mat['name']} panel(s)")
+        # a panel whose grain the person said is laid with it along the sheet, or said not to be (#151 review)
+        mine = {it["name"]: said[it["name"]] for it in its if it["name"] in said}
+        ways = {n: [1.0 if G.axis(e) == a else 0.0 for a in "xyz"] for n, e in mine.items() if G.axis(e)}
         summary = _unfold(panels_obj(its, f"{part_id}: {mat['name']}", centre), os.path.join(root, key),
-                          f"{part_id} {mat['name']}", stock, mat, timeout, cut.get("score_min_deg", 0.0))
+                          f"{part_id} {mat['name']}", stock, mat, timeout, cut.get("score_min_deg", 0.0),
+                          grain=ways)
+        for n, e in sorted(mine.items()):
+            got = [g for g in summary.get("grain") or [] if g["name"] == n]
+            why = ("which way it runs isn't known until a strength check has measured its span" if n not in ways
+                   else next((g["why"] for g in got if not g.get("fits")), "") if got else "it wasn't laid out")
+            record["grain"].append({"piece": n, "line": G.line(n, e), "follows": not why, "why": why})
+        if ways:
+            record["notes"].append(f"{mat['name']}: laid out turning pieces end for end only, so "
+                                   f"{', '.join(sorted(ways))}' grain runs along the sheet, as the sheet's does.")
         record["sheets"].append({"key": key, "material": material, "thickness_mm": thickness,
                                  "label": mat["name"], "stock": stock["name"],
                                  "panels": [it["name"] for it in its], **summary})
@@ -361,6 +378,11 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
 def cutlist_text(record: dict) -> str:
     """The sticks as a shop cut list, inches first."""
     lines = [f"CUT LIST — {record['part']} ({record['id']})", ""]
+    for g in record.get("grain") or []:                # which way to cut a panel, as the person said (CALI-126)
+        lines.append(g["line"] + ("" if g["follows"] else f" The layout doesn't follow it ({g['why']}): lay it out "
+                                                          f"by hand."))
+    if record.get("grain"):
+        lines.append("")
     if not (record.get("plates") or record.get("tubes") or record.get("sticks") or record.get("sheets")):
         lines.append("Nothing to cut: it's all printed.")              # said, not an empty list (CALI-111)
         lines.append("")

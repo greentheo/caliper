@@ -1694,6 +1694,18 @@ function wirePatterns(p) {
 // --------------------------------------------------------------------- cut plan (CALI-45)
 // Every panel flattened and nested onto the sheets it's cut from by Theo's unfold-to-sheets — score lines
 // where a panel bends — and every stick cut-listed. Sheets as SVG (click for full size) and DXF for CAM.
+// each panel whose grain the person said, as the maker reads it, and whether the layout below follows it (CALI-126,
+// #151 review): never a "cut it front to back" line beside a layout that turned it
+function cutGrain(p, run) {
+  return Object.entries(p.grain || {}).map(([piece, g]) => {
+    const got = run && run.version === p.version ? (run.grain || []).find((x) => x.piece === piece) : null;
+    const tail = !run ? ''
+      : !got ? ' <span style="color:var(--warn)">Make the cut plan again so its layout follows it.</span>'
+        : got.follows ? ' <span class="muted">The layout below lays it that way.</span>'
+          : ` <span style="color:var(--bad)">The layout below doesn't (${esc(got.why)}): lay it out by hand.</span>`;
+    return `<div class="small" style="margin-top:4px">↔ ${esc(g.line)}${tail}</div>`;
+  }).join('');
+}
 function cutplanView(p) {
   if (S.design.cutplan_unavailable) return `<h5 style="margin:14px 0 4px">Cut plan</h5>
     <div class="muted small">Not here: ${esc(S.design.cutplan_unavailable)}.</div>`;
@@ -1736,7 +1748,7 @@ function cutplanView(p) {
   const stale = run && run.version !== p.version
     ? `<div class="small" style="color:var(--bad)">Made for v${run.version}; the part is v${p.version} now — make it again.</div>` : '';
   return `<h5 style="margin:14px 0 4px">Cut plan</h5>${note}
-    ${(p.grain_notes || []).map((n) => `<div class="small" style="margin-top:4px">↔ ${esc(n)}</div>`).join('')}
+    ${cutGrain(p, run)}
     ${run ? `${stale}${sheets}${plates}${tubes}${sticks}<div class="small"><a href="${url('cutlist.txt')}" target="_blank">cut list as text</a></div>
       ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`
       : `<div class="muted small">Flatten every panel onto the sheets it's cut from — score lines where it bends — and list every
@@ -2162,14 +2174,14 @@ const runBadge = (run) => verdictBadge(run.verdict);
 const runWord = (run) => (run.verdict ? run.verdict.word : 'not checked yet');
 // which grain the Beam check used (CALI-126): the one the person said, or the weaker way; never a hard-coded "unknown"
 function beamGrain(pl) {
-  return pl.grain ? `with the grain ${pl.grain} the span, as you said` : 'the grain unknown: the weaker way';
+  return pl.grain ? `with its ${pl.grain_phrase || 'face grain as you said'}, as you said` : 'the grain unknown: the weaker way';
 }
 // keep the advice: the grain the person keeps is the only one that moves the verdict, and it goes on the cut list
 function grainKeep(p, pl) {
   const said = (p.grain || {})[pl.piece];
-  if (said) return pl.grain === said.grain ? '' : ` · <span class="muted">you said ${esc(said.grain)} the span: check it holds again to use it</span>`;
+  if (said) return pl.grain === said.grain ? '' : ` · <span class="muted">you said: ${esc(said.line || '')} Check it holds again to use it.</span>`;
   if (!(pl.safety > pl.safety_across)) return '';
-  return ` <button class="ghost" data-grain="${esc(pl.piece)}">Keep: cut it with the grain along the span (${sx(pl.safety)})</button>`;
+  return ` <button class="ghost" data-grain="${esc(pl.piece)}">Keep: cut it with its ${esc(pl.advice_phrase || 'face grain running from one support to the other')} (${sx(pl.safety)})</button>`;
 }
 function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
@@ -2214,7 +2226,7 @@ function loadCase(p, run, c, i) {
         <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
         ${c.verdict && c.verdict.kind === 'fails' ? 'the fail may be the model\'s' : 'no verdict'} (it needs ${run.min_safety}x)</span></div>`
       : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety)}</b>
-        <span class="muted">(by ${c.governs === 'plate' ? (pl && pl.grain ? `the plate check, with the grain ${pl.grain} the span, as you said` : 'the plate check, with the grain the wrong way') : 'the FEA'}; it needs ${run.min_safety}x)</span>
+        <span class="muted">(by ${c.governs === 'plate' ? (pl && pl.grain ? `the plate check, ${beamGrain(pl)}` : 'the plate check, with the grain the wrong way') : 'the FEA'}; it needs ${run.min_safety}x)</span>
         ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>`}
       ${plate}${fea}${by}
       ${c.heat ? `<div class="actions"><button data-heat="${i}" class="${on ? 'primary' : ''}">${on ? 'Showing the stress' : 'Show the stress'}</button></div>` : ''}

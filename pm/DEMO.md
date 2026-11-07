@@ -570,12 +570,15 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 1. On a part whose top rests on two sides, **Check it holds**: the Beam check line says "the grain unknown: the weaker
    way", and *Will it work?* gives the advice ("Cut the top with its face grain running front to back and it's about
    …").
-2. Press **Keep: cut it with the grain along the span**, or say "cut the top with the grain front to back": the card
-   says "Check it holds again to use it", and the cut plan says "↔ Cut the top with its face grain running front to
-   back (along the gap it spans)."
-3. **Check it holds** again: the Beam check reads "with the grain along the span, as you said", and the build book's
-   cut lists carry the same line.
-4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_grain.py`.
+2. Press **Keep: cut it with its face grain running front to back, from one support to the other**, or say "cut the
+   top with the grain front to back": the card says "Check it holds again to use it", and the cut plan says "↔ Cut the
+   top with its face grain running front to back, from one support to the other." ("cut the top with the grain" alone
+   asks which way.)
+3. **Make the cut plan again**: the top is laid with that grain along the sheet's length ("The layout below lays it
+   that way"), or the plan says it can't be and to lay it out by hand.
+4. **Check it holds** again: the Beam check reads "with its face grain running front to back, from one support to the
+   other, as you said", and the build book's cut lists carry the same line.
+5. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_grain.py`.
 ### 2026-11-06 · A foot at the front edge of a step (CALI-94 #73)
 1. **A stool whose top rests on two sides, loaded only in the middle:** *What is it?* warns "The top is held on two
    sides, and no load stands on its free edge, where it's weakest: add a case…".
