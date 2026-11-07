@@ -4,7 +4,7 @@ Theo, driving the bar stool: "the advantage to manual cad is the ability to spec
 keeps its dimensions in ``PARAMS`` (mm, the scripts' unit), with bounds in ``RANGES``, and ``build(params)`` merges
 overrides. So an exact number needs no designer: :func:`listing` says each one in plain words (its comment), and
 :func:`set_value` sets one. It converts the person's unit to mm, refuses a value outside its range (saying the range),
-builds the part with it first, then rewrites only that ``PARAMS`` value (``aero.write_params``: by its source position,
+builds the part with it first, then rewrites only that ``PARAMS`` value (``aero.set_params``: by its source position,
 so its comment and every other line stay exactly), writes a new version whose history says "set wall_t to 5 mm by
 hand", and measures the design again. A value the build ignores or clamps is said: the part's shape didn't move, or
 ``build()`` never reads it (#107: 12.7 mm asked, 6.3 mm built).
@@ -106,8 +106,6 @@ def set_value(store: DesignStore, pid: str, name: str, value: float, unit: str =
     raises ValueError, saying why, for a name it doesn't have, a unit it can't read, a value outside its range, or a
     value the part won't build with (nothing written then)."""
     from . import sandbox
-    from .assembly import skeleton_params
-    from .plan import skeleton_values
 
     entries = {e["name"]: e for e in listing(store, pid)}
     if name not in entries:
@@ -125,10 +123,9 @@ def set_value(store: DesignStore, pid: str, name: str, value: float, unit: str =
         raise ValueError(f"{name} must be between {lo_hi[0]:g} and {lo_hi[1]:g} {unit_said}".rstrip()
                          + f": {_said(float(value), unit) if e['unit'] == 'mm' else f'{mm:g}'} is outside it")
     script = store.read_script(pid)
-    new = aero.write_params(script, {name: mm}, keep_float=True)
-    # built first, through the override path (the skeleton's numbers too): a value it won't build with isn't written
-    over = skeleton_params(new, skeleton_values(store.design.skeleton or []))
-    built = sandbox.run_script(new, over)
+    new = aero.set_params(script, {name: mm})        # the rewrite the skeleton's drive makes too (#143)
+    # built first, from its own PARAMS (builds never override, #143): a value it won't build with isn't written
+    built = sandbox.run_script(new, {})
     if not built.ok:
         tail = [ln for ln in (built.feedback or "").strip().splitlines() if ln.strip()]
         raise ValueError(f"it won't build with {name} at {_said(float(value), unit)}: "

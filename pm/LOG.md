@@ -21,7 +21,9 @@ for his look at the mockup; this is what it calls.
   v9 with `"wall_t": 5.0, # printed shell thickness mm (increased from 4mm)`, rebuilt in 20 s and the design
   measured, no API call; 20 mm refused with its 3–12 mm range.
 - Tests: tests/test_params.py (7: the listing, the rewrite, a version with no Claude call, inches, the range, ignored
-  and clamped values, the API). Stacked on #143 (#3c's override path).
+  and clamped values, the API). Stacked on #143.
+- **With #143's rework:** the by-hand edit and the skeleton's drive share one rewrite (`aero.set_params`), and the trial
+  build is from the script's own `PARAMS`: builds never override (#143, the foreman's call).
 
 ### 2026-11-07 · CALI-35c (#3c) · The skeleton's numbers drive the parts
 #3's last slice: a planned design's shared numbers (the skeleton: "mast_top_z: 7 ft") drive every part that reads them.
