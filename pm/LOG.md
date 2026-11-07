@@ -24,6 +24,14 @@ for his look at the mockup; this is what it calls.
   and clamped values, the API). Stacked on #143.
 - **With #143's rework:** the by-hand edit and the skeleton's drive share one rewrite (`aero.set_params`), and the trial
   build is from the script's own `PARAMS`: builds never override (#143, the foreman's call).
+- **#147's review:** what a number is, by what its script says (never by 6 vs 6.0): a length by a length unit in its
+  comment, a length's name (`wall_t`, `fillet_r`) or a length word in its comment ("width of the box"); a count
+  (`mesh_rows`, "how many"), a ratio (`taper`, `infill`) or an angle by theirs. Only a length converts: "mesh_rows 8 in"
+  is refused ("mesh rows is a count: give a number, no unit"); a number with no known unit is taken as it is, and said.
+  No `RANGES` for it is said ("no range is set for fillet_r in the script, so it isn't checked"). A part with strength
+  runs says "strength: check the box again". A partial clamp is measured: a fillet's or hole's radius from the built
+  solid's cylinders ("asked 3 mm, built 2 mm (the closest fillet)"), a wall's thinnest measure; elsewhere "its shape
+  changed; whether its … isn't measured". The POST answers with `notes`. Tests: 14 (5 new, 9 failing before).
 
 ### 2026-11-07 · CALI-35c (#3c) · The skeleton's numbers drive the parts
 #3's last slice: a planned design's shared numbers (the skeleton: "mast_top_z: 7 ft") drive every part that reads them.

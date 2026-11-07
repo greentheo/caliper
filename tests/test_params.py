@@ -19,6 +19,7 @@ PARAMS = {
     "h": 200.0,
     "fillet_r": 6.0,    # fillet radius at the top edges mm
     "spare": 3.0,       # a number the build never reads
+    "mesh_rows": 4,     # rows of holes
 }
 RANGES = {"h": (100.0, 300.0), "w": (100.0, 800.0)}
 
@@ -47,11 +48,13 @@ def store(tmp_path, monkeypatch):
 
 def test_the_numbers_are_listed_in_plain_words_with_their_ranges(store):
     got = {e["name"]: e for e in params.listing(store, "box")}
-    assert list(got) == ["w", "h", "fillet_r", "spare"]
+    assert list(got) == ["w", "h", "fillet_r", "spare", "mesh_rows"]
     assert got["w"] == {"name": "w", "note": "width of the box", "value": 400.0, "unit": "mm", "range": [100.0, 800.0],
                         "read": True}
     assert got["h"]["note"] == "how tall it stands"                               # the comment line just above it
     assert got["fillet_r"]["range"] is None and got["spare"]["read"] is False
+    # what each is, by what the script says (#147 review): a length by its comment or name, a count, nothing known
+    assert [got[k]["unit"] for k in ("w", "h", "fillet_r", "spare", "mesh_rows")] == ["mm", "mm", "mm", "", "count"]
 
 
 def test_only_that_params_line_is_rewritten_its_comment_kept():
@@ -111,9 +114,62 @@ def test_the_api_lists_and_sets_a_number(store, monkeypatch, tmp_path):
     monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
     c, slug = TestClient(create_app()), store.design.slug
     listed = c.get(f"/api/designs/{slug}/parts/box/params").json()
-    assert [e["name"] for e in listed["params"]] == ["w", "h", "fillet_r", "spare"]
+    assert [e["name"] for e in listed["params"]] == ["w", "h", "fillet_r", "spare", "mesh_rows"]
     got = c.post(f"/api/designs/{slug}/parts/box/params", json={"name": "w", "value": 500, "unit": "mm"})
     assert got.status_code == 200 and got.json()["said"] == "set w to 500 mm by hand"
     assert next(p for p in got.json()["design"]["parts"] if p["id"] == "box")["version"] == 2
     bad = c.post(f"/api/designs/{slug}/parts/box/params", json={"name": "w", "value": 900, "unit": "mm"})
     assert bad.status_code == 422 and "w must be between 100 and 800 mm" in bad.json()["detail"]
+
+
+
+# --- #147 review ------------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name,unit,why", [
+    ("mesh_rows", "in", "mesh rows is a count: give a number, no unit"),
+    ("mesh_rows", "mm", "mesh rows is a count: give a number, no unit"),
+    ("h", "furlongs", "h is a length: give it in mm or in, not 'furlongs'"),
+])
+def test_only_a_length_converts_and_a_unit_on_a_count_is_refused(store, name, unit, why):
+    """#147 review: "mesh_rows 8 in" was 203.2 on an inch design. A count takes a number, no unit."""
+    with pytest.raises(ValueError, match=f"^{why}$"):
+        params.set_value(store, "box", name, 8, unit)
+    assert '"mesh_rows": 4,' in store.read_script("box")
+    got = params.set_value(store, "box", "mesh_rows", 8)
+    assert '"mesh_rows": 8,' in store.read_script("box") and got["said"] == "set mesh_rows to 8 by hand"
+
+
+def test_a_number_with_no_known_unit_is_taken_as_it_is_and_said(store):
+    got = params.set_value(store, "box", "spare", 9, "in")
+    assert got["value"] == 9.0 and "spare has no unit in its script, so 9 is taken as it is, not converted" in got["notes"]
+
+
+def test_no_range_is_said_and_a_ranged_number_says_nothing_of_it(store):
+    got = params.set_value(store, "box", "fillet_r", 1.5)
+    assert "no range is set for fillet_r in the script, so it isn't checked" in got["notes"]
+    assert not [n for n in params.set_value(store, "box", "h", 250)["notes"] if "no range" in n]
+
+
+def test_a_partial_clamp_is_measured_and_said(store):
+    """#107's fillet: asked more than the build makes. The shape moves (1.5 → 2), so only a probe of the built fillet
+    says it: asked 3 mm, built 2 mm."""
+    params.set_value(store, "box", "fillet_r", 1.5)
+    exact = params.set_value(store, "box", "fillet_r", 1.8)
+    assert exact["moved"] and not [n for n in exact["notes"] if n.startswith("asked")]
+    got = params.set_value(store, "box", "fillet_r", 3)
+    assert got["moved"] and "asked 3 mm, built 2 mm (the closest fillet)" in got["notes"]
+
+
+def test_a_part_with_a_strength_check_says_check_it_again(store):
+    import json
+    import os
+
+    from caliper import load_study
+
+    run = {"id": "20261107-000000-box", "part": "box", "version": store.design.part("box").version, "created": 1.0,
+           "min_safety": 2, "safety": 3.0, "holds": True, "cases": []}
+    folder = os.path.join(load_study.runs_dir(store), run["id"])
+    os.makedirs(folder)
+    with open(os.path.join(folder, "run.json"), "w") as f:
+        json.dump(run, f)
+    assert "strength: check the box again" in params.set_value(store, "box", "h", 250)["notes"]

@@ -39,7 +39,7 @@ class ChatMessage(BaseModel):
 class ParamSet(BaseModel):
     name: str
     value: float
-    unit: str = "mm"
+    unit: Optional[str] = None            # a length's unit (mm when none); no unit for a count, a ratio or an angle
 
 
 class ClarifyAnswers(BaseModel):
@@ -630,7 +630,7 @@ def router():
                 got = params.set_value(store, pid, req.name, req.value, req.unit)
             except (ValueError, KeyError) as e:
                 raise HTTPException(422, str(e).strip("'\""))
-            return {"version": got["version"], "said": got["said"], "warning": got["warning"],
+            return {"version": got["version"], "said": got["said"], "warning": got["warning"], "notes": got["notes"],
                     "design": design_state(store)}
 
     @r.get("/api/designs/{slug}/parts/{pid}/script")
