@@ -803,9 +803,11 @@ def _status(card: dict) -> str:
     if verdicts.summary(s)["counts_as_pass"]:            # one verdict (CALI-112)
         return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass</span>'
     untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0
-    rest = s["unknown"] - untrusted - unresolved
+    edge = s.get("edge") or 0
+    rest = s["unknown"] - untrusted - unresolved - edge
     why = [f"{s['fail']} check(s) fail" if s["fail"] else "", f"{untrusted} not trusted" if untrusted else "",
            f"{unresolved} not resolved" if unresolved else "",          # an FEA too coarse to see its walls (CALI-110)
+           f"{edge} checked in the middle only, not at the front edge" if edge else "",       # (CALI-94)
            f"{rest} unknown" if rest else ""]
     return f'<span class="status notready">Not ready — {", ".join(w for w in why if w)}</span>'
 
@@ -819,6 +821,8 @@ def _safety_cell(c: dict) -> tuple[str, str]:
         return "not trusted: checked on a filled-in shape", "—"
     if kind in ("unresolved", "unchecked"):          # too coarse to see its walls: no ✓ (CALI-110)
         return "not resolved: too coarse to see its walls", "—"
+    if kind == "edge":                               # where people stand wasn't loaded (CALI-94)
+        return "checked in the middle only, not at the front edge", "—"
     if kind not in ("holds", "fails"):               # any other kind: its word, never a number to build on
         return _e((c.get("verdict") or {}).get("word") or "not checked"), "—"
     return f"{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x", breaks
@@ -1007,8 +1011,11 @@ def _strength(store: DesignStore, versions: dict) -> dict:
             from .consistency import filled
 
             why = filled(store, pid)                         # on a filled-in solid: not this part's (CALI-96)
+            from .consistency import bare_edge
+
+            edge = bool(bare_edge(store, pid))               # loaded in the middle only (CALI-94)
             out[pid] = [{**{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")},
-                         "rough": load_study.rough(run, c), "verdict": verdicts.case(run, c, filled=why)}
+                         "rough": load_study.rough(run, c), "verdict": verdicts.case(run, c, filled=why, edge=edge)}
                         for c in run["cases"]]
     return out
 

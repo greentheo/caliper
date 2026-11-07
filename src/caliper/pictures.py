@@ -307,7 +307,8 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
         run = L.study(store, part_id, min_safety=min_safety)
         from . import consistency, verdicts
 
-        v = verdicts.run(run, filled=consistency.filled(store, part_id))   # one verdict (CALI-112)
+        v = verdicts.run(run, filled=consistency.filled(store, part_id),          # one verdict (CALI-112)
+                         edge=bool(consistency.bare_edge(store, part_id)))       # the middle only (CALI-94)
         from .answers import ran_safety
 
         out.update({"safety": ran_safety(run), "run": run["id"],                     # the cases that ran (#140)
@@ -339,4 +340,7 @@ def reply(got: dict) -> str:
     if v["kind"] == "fails":
         return (said + f" ✗ Built, it reads {got['safety']:g} times over and needs {got['min_safety']:g}: "
                 f"say **roll it back**, or try a smaller one.")
+    if v["kind"] == "edge":                            # the middle only (CALI-94)
+        return said + (" Its strength was checked with a foot in the middle only, not at the front edge where people "
+                       "stand, so a grown-up checks it before anyone stands on it.")
     return said + (f" Its strength check reads {v['word']}, so a grown-up checks it before anyone stands on it.")

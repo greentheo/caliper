@@ -566,6 +566,13 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-06 · A foot at the front edge of a step (CALI-94 #73)
+1. **A stool whose top rests on two sides, loaded only in the middle:** *What is it?* warns "The top is held on two
+   sides, and no load stands on its free edge, where it's weakest: add a case…".
+2. **Say "add the front-edge case":** the designer adds "stepping on the front edge". The warning goes, and *Will it
+   work?* reads that case, the weaker one.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_edge_foot.py`.
+
 ### 2026-11-07 · A part's exact numbers, set by hand (CALI-108 #108, the backend)
 1. `curl localhost:8016/api/designs/<slug>/parts/<part>/params`: each number in plain words, with its unit and range.
 2. `curl -X POST -H 'content-type: application/json' -d '{"name": "wall_t", "value": 5, "unit": "mm"}'

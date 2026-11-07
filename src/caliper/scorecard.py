@@ -408,6 +408,11 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
 
     untrue = next((why for p in store.design.parts if store.is_scripted(p.id)
                    and "def loads(" in store.read_script(p.id) for why in [filled(store, p.id)] if why), None)
+    # loaded in the middle only, where a two-sided top is strongest: no pass from it (CALI-94, #106 review)
+    from .consistency import MIDDLE_ONLY, bare_edge
+
+    edgeless = next((why for p in store.design.parts if store.is_scripted(p.id)
+                     and "def loads(" in store.read_script(p.id) for why in [bare_edge(store, p.id)] if why), None)
 
     # CALI-113 (#115): a part that says what it must hold is held to it, goal or none. A design made without goals
     # (no key, an older one, a hand-made scorecard.yaml) released "ready to cut" on a strength ✗.
@@ -436,6 +441,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             met = None
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-110)
         verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=unsure if strength else None,
+                                edge=bool(edgeless) if strength else False,             # the middle only (CALI-94)
                                 incomplete="; ".join(left) if strength and left else None)
         status = verdicts.STATUS[verdict["kind"]]
         if status == "untrusted":
@@ -445,6 +451,9 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         elif status == "unresolved":
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "not resolved: too coarse to see its walls", "note": unsure})
+        elif status == "edge":                # loaded in the middle only (CALI-94): never a pass; a ✗ stays a fail
+            checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
+                           "trust": "checked in the middle only", "note": MIDDLE_ONLY})
         elif status == "unknown":             # not checked, or a part left out: said (#132 review)
             # why, where it's known: a part left out, or the metric's own note (an unweighed printed part: #125)
             why = verdict.get("why") or (m.get("note") if m else None)
@@ -474,7 +483,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                         "unknown": sum(c["status"] not in ("pass", "fail", "proposed") for c in checks),
                         "proposed": sum(c["status"] == "proposed" for c in checks),
                         "untrusted": sum(c["status"] == "untrusted" for c in checks),
-                        "unresolved": sum(c["status"] == "unresolved" for c in checks)}}
+                        "unresolved": sum(c["status"] == "unresolved" for c in checks),
+                        "edge": sum(c["status"] == "edge" for c in checks)}}
     os.makedirs(cards_dir(store), exist_ok=True)
     with open(os.path.join(cards_dir(store), time.strftime("%Y%m%d-%H%M%S") + ".json"), "w") as f:
         json.dump(card, f, indent=2, default=str)

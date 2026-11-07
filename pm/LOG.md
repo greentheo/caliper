@@ -3,6 +3,54 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-94 (#106, with main's #124, #132, #136) · The middle foot only, through the one verdict
+- **Merged forward** onto main's one verdict (#132): #106's hand-written "middle only" checks become `edge=` on
+  `verdicts.case` / `run` / `goal`, and each reader asks those: the part card ("A kid stepping up: checked in the middle
+  only; …", never "Holds …", which #132's guard now catches), the design card and scorecard (`edge` status, its
+  note), Studies (its count said), the chat's facts, the build book's cell and the kid's book (each case's verdict),
+  the picture's re-check, the history line (the run's verdict; `middle_only` kept for older readers) and the page
+  (the server's verdict; the callout keeps "the middle read …; the front edge, where people stand, isn't checked").
+- **The carve tests stay light** (5604868: the carve's mechanics on the middle foot alone, for CI's hour). The
+  carve-down's kid stage stays on the middle foot: at 60 lb its front-edge foot fails as drawn (1.91x), so it can't
+  carve down from holding; #105's repro on both feet (40 lb) is #124's own slow test.
+- `test_edge_foot.py` reads the verdicts (the page's helpers are main's).
+- **CI on 09cbb07:** `test_carve_closed`'s open-join test carved #106's MIXED, now with the front-edge foot: its
+  two-load carve's step 1 doesn't close (#105's kind, rightly refused: `closed: False`) and the whole part fails at
+  the edge, so there was no step 1 to force open and `best` was 0. The test means a carve whose step 1 closes: it
+  carves the middle foot only (`CENTRED`, main's MIXED), and says why.
+- **The review's sweep of every reader (with main through #144):** Studies' headline judged a run with no edge ("holds
+  — weakest a kid stepping up: 3.1x", green); it now reads "middle only — weakest …; the front edge isn't checked",
+  not green (`consistency.middle_only`: the run's own history line, else the part as it is now). The design card's
+  history line (#138 item 3's reader) and #140's "last checked on vN" line carry it too ("…: 3.1 times over, checked
+  in the middle only · v5 not checked yet."). `_times(x, about=False)` owns "about": 10 or more is "more than 10 times
+  over", never "about more than 10" (#144 review). Each pinned; the mutants (no edge to Studies, to the history line,
+  to the last-checked line; "about" before "more than") fail them.
+
+### 2026-11-06 · CALI-94 (#106 review) · A ✓ from the middle foot only isn't one
+- **The reviewer's block:** a two-sided top loaded only in the middle read a green ✓ on *Will it work?* ("Holds a kid
+  stepping up, 2.2 times over", `MIXED` at 60 lb), when with the front-edge foot the same stool reads ✗ 1.91×. The
+  warning was only on *What is it?*.
+- **Now, while `loads_edge` names a bare top** (`consistency.bare_edge`, cached per version and script like
+  `filled()`), that part's strength ✓ is a warn: "Holds a kid stepping up in the middle: checked in the middle only;
+  the front edge, where people stand, isn't checked (add a "stepping on the front edge" case)". It reads that way:
+  - on both cards;
+  - in the scorecard, as status `edge` (summary `edge`, never a pass, so the release isn't ready);
+  - in the book's header and *Will it hold?* row;
+  - in the Studies rows;
+  - in the kid's book, which makes no promise.
+- **Round 2 of the review, the readers that still said "holds":**
+  - the strength panel's badges, the run's header and its picker read "middle only";
+  - the stress callout reads "middle only: the middle read 2.2x; the front edge, where people stand, isn't
+    checked", with no breaking load;
+  - the history line reads "strength check: checked in the middle only" (the study records `middle_only`);
+  - the picture reply says a grown-up checks it before anyone stands on it, and the turn isn't ok;
+  - `chat._facts` says "CHECKED IN THE MIDDLE ONLY… no verdict".
+  - The page asks one helper, `caveat(c)`, for any ✓ that isn't one ("not resolved", "not checked", "middle only"),
+    and the design state marks each case `middle_only`: ready to fold into the one verdict function the foreman is
+    filing. The make card's `edge` branch waits for #111's `_why_not` to reach `main`. `design.js?v=51`.
+- **A ✗ stays a ✗.** The authoring round still only warns, as #73 scoped it.
+- Tests: the reviewer's case, the same stool with its edge foot (✗ 1.91×), and the printed-sides warning path (`under`).
+
 ### 2026-11-07 · CALI-108 (#108, the backend) · A part's exact numbers, set by hand, with no Claude call
 Theo, on the bar stool: "the advantage to manual cad is the ability to specify things precisely". The panel's UI waits
 for his look at the mockup; this is what it calls.
@@ -678,6 +726,33 @@ correction: the run's "seat top" was a mislabel.
 
 ---
 
+### 2026-11-06 · CALI-94 (#73) · A step is stood on at its front edge, so a load case puts a foot there
+- **The designer is told** (`part_scripts.md`): a top or tread resting on only two sides gets a second load,
+  "stepping on the front edge", the same foot mid-span with its edge on the free edge, listed first. A top held all
+  round keeps its one centred foot.
+- **The designer's check warns** (`consistency`, `loads_edge`): when a top held on two opposite edges has no load
+  within half an inch of a free edge, it says so. It's a warning, not a fail: the round passes, and the part card
+  shows it (warn). `load_study.two_sided` finds the sheet a downward load lands on, and whether it's held on two
+  opposite edges; for a top on printed sides, the solid under it counts as holding, as the plate check reads it.
+- **The suite's two-sided fixtures get the case** (the test stool's `LOADS`, `MIXED`). Before and after, at 2 voxels
+  through, both governed by the plate check (a beam across the two held edges):
+
+  | Fixture | Middle foot | Front-edge foot | The part, before → after |
+  |---|---|---|---|
+  | Test stool (3/4 in top on two sides) | 1.46× | **1.19×** | 1.46× → **1.19×** (✗ either way) |
+  | `MIXED` (1/2 in top on printed sides) | 0.66× | **0.57×** | 0.66× → **0.57×** (✗ either way) |
+
+  The FEA agrees the edge is worse (4.76× against 10.38×, and 2.19× against 3.41×).
+- **The sample stool doesn't get the case:** it's a box, its top held on all four sides (no warning). By the issue's
+  own rule it keeps its one centred foot. **The one number asked for:** on the sample and `BOX_STOOL`, a front-edge
+  foot reads 3.11× like the middle one (the plate check's formula is for a centred load; it doesn't move), and the
+  FEA reads the edge no worse (11.3× against 11.2×; 19.1× against 16.2×).
+- NEEDS ENGINEER CHECK: BS 8110 cl. 3.5.2.2's edge width, as read; and the plate check's centred formula for a foot
+  near an edge of a panel held all round.
+- Tests: `tests/test_edge_foot.py` (main fails 4 of the 6), `test_load_study`, `test_mixed`. Two carve tests changed
+  with the fixture: the carve that "dies at the second step" counts a check per load, and the carve-down test uses
+  `MIXED`'s middle foot only (`CENTRED`). With the front-edge foot, the carve picks a step whose adopted part isn't
+  watertight, at 40 lb and at 50 lb alike; that's a carve-adopt defect of its own, #105.
 ### 2026-11-06 · CALI-91 (#68) · Words leave the machine only when the person sends them
 - **The 🎤 asks first** (rule 6). A browser's speech recognition sends the audio to its maker. On the first press:
   "Your browser turns speech into words by sending it to its maker (Google, in Chrome). Talk anyway?", with **Talk**

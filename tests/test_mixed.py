@@ -36,9 +36,18 @@ def construction(params, build=None):
 def loads(params, build=None):
     p = {**PARAMS, **(params or {})}
     cx, cy, h = p["w"] / 2, p["d"] / 2, p["h"]
-    return [{"name": "an adult stepping up", "lb": 200, "factor": 2.0,
+    return [{"name": "stepping on the front edge", "lb": 200, "factor": 2.0,
+             "lo": (cx - 50, 0, h - 2), "hi": (cx + 50, 100, h)},
+            {"name": "an adult stepping up", "lb": 200, "factor": 2.0,
              "lo": (cx - 50, cy - 50, h - 2), "hi": (cx + 50, cy + 50, h)}]
 '''
+
+
+#: MIXED as it was before CALI-94: the middle foot only.
+CENTRED = MIXED.replace('''    return [{"name": "stepping on the front edge", "lb": 200, "factor": 2.0,
+             "lo": (cx - 50, 0, h - 2), "hi": (cx + 50, 100, h)},
+            {"name": "an adult stepping up"''', '''    return [{"name": "an adult stepping up"''')
+assert CENTRED != MIXED
 
 
 @pytest.fixture
@@ -99,7 +108,7 @@ def test_two_materials_each_judged_against_its_own_strength(stool, monkeypatch, 
     assert set(np.unique(sm[ctx["ls"].solid]).round(3)) == {round(ctx["mat"]["strength"], 3),
                                                            round(ctx["plate_mat"]["strength"], 3)}
     rec = load_study.study(stool, "stool")
-    (case,) = rec["cases"]
+    edge, case = rec["cases"]                    # CALI-94: the front edge first, where people stand, then the middle
     # the case's safety is the lower of the FEA's and the plate check's: what governs, as stated (CALI-87)
     assert case["fea"]["safety"] is not None and case["plate"]["safety_across"] is not None
     assert case["safety"] == min(case["fea"]["safety"], case["plate"]["safety_across"])
@@ -111,6 +120,9 @@ def test_two_materials_each_judged_against_its_own_strength(stool, monkeypatch, 
     assert pl["stress_mpa"] == pytest.approx(force * pl["span_mm"] / 4 / (220 * 12.7 ** 2 / 6), rel=0.02)
     assert case["governs"] == "plate" and case["safety"] == pl["safety_across"]       # plywood across its grain
     assert any(n.startswith("Two materials") for n in rec["notes"])
+    # at the free edge the foot spreads over less of the top, so it's worse there, and it governs the part
+    assert edge["plate"]["as"] == "beam" and edge["plate"]["stress_mpa"] > pl["stress_mpa"]
+    assert edge["safety"] < case["safety"] and rec["safety"] == edge["safety"]
     if not per_voxel:
         assert any("stiffness throughout" in n for n in rec["notes"])
 
@@ -122,12 +134,17 @@ def test_the_printed_sides_carve_down_until_it_doesnt_hold(stool, monkeypatch):
     from caliper import carve, load_study
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    # the carve's mechanics, on the middle foot alone: two loads (CALI-94) double every step's FEA, and #106's CI ran
+    # out of its hour on these; every load in each step is test_a_carve_that_dies_partway's
+    stool.write_part("stool", CENTRED, intent="a plywood top on printed sides")
     # as drawn, a 1/2 in top across 300 mm under 400 lb fails as a beam: the carve says so and carries on
     rec = carve.study(stool, "stool", stations=3, remove_up_to=0.4)
     assert not rec["stations"][0]["whole_holds"] and rec["stations"][0]["weakest"] == "top"
     assert rec["weak"].startswith("As it is, it doesn't hold") and "the weak link is the top" in rec["weak"]
-    # a kid stepping up: the top holds, and the printed sides carve down until they don't
-    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
+    # a kid stepping up: the top holds, and the printed sides carve down until they don't. The middle foot only: at
+    # 60 lb its front-edge foot already fails as drawn (1.91x, test_edge_foot); #105's repro on both feet, at 40 lb,
+    # is #124's own (test_carve_closed, slow)
+    stool.write_part("stool", CENTRED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
     rec = carve.study(stool, "stool", stations=4, remove_up_to=0.6)
     st = rec["stations"]
     assert st[0]["whole_holds"] and not rec["weak"]
@@ -140,7 +157,7 @@ def test_the_printed_sides_carve_down_until_it_doesnt_hold(stool, monkeypatch):
     before = C.report(stool, "stool")
     uncarved = abs(C.printed_solid(stool, "stool").volume)
     got = carve.adopt(stool, rec["id"], best["index"])
-    assert got["version"] == 3 and f'CARVED = "{got["file"]}"' in stool.read_script("stool")
+    assert got["version"] == 4 and f'CARVED = "{got["file"]}"' in stool.read_script("stool")   # v2: CENTRED, v3: the kid
     mesh = stool.part_geometry("stool").require_mesh()
     assert mesh.is_watertight
     sides = C.printed_solid(stool, "stool")
@@ -171,6 +188,7 @@ def test_the_carve_headline_leads_with_the_whole_part_when_it_doesnt_hold(stool,
     from caliper import carve, load_study, studies
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    stool.write_part("stool", CENTRED, intent="a plywood top on printed sides")     # the middle foot: one FEA a step
     rec = carve.study(stool, "stool", stations=2, remove_up_to=0.4)
     first = rec["stations"][0]
     assert not first["whole_holds"] and first["holds"]           # the fixture: the sides hold, the whole doesn't
@@ -187,7 +205,7 @@ def test_the_share_carved_away_is_of_the_printed_part(stool, monkeypatch):
     from caliper import carve, load_study, studies
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
-    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
+    stool.write_part("stool", CENTRED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
     heard = []
     rec = carve.study(stool, "stool", stations=3, remove_up_to=0.6, emit=lambda k, t="", **d: heard.append(t))
     st = rec["stations"]
@@ -233,7 +251,8 @@ def test_carving_through_the_api(stool, monkeypatch):
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
     monkeypatch.setenv("CALIPER_DESIGNS", str(stool.root.rsplit("/", 1)[0]))
-    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60'), intent="kid")
+    # the middle foot only: the API's mechanics, not the load cases; with two (CALI-94) the carve outran its wait
+    stool.write_part("stool", CENTRED.replace('"lb": 200', '"lb": 60'), intent="kid")
     c, slug = TestClient(create_app()), stool.design.slug
     part = next(p for p in c.get(f"/api/designs/{slug}").json()["parts"] if p["id"] == "stool")
     assert part["printed"] and not part["carved"]
@@ -265,13 +284,15 @@ def test_a_carve_that_dies_partway_leaves_what_it_finished(stool, monkeypatch):
 
     def dies(ctx, i, min_safety, solid=None):
         calls.append(1)
-        if len(calls) > 1:                                # the second step: the app goes down here
+        if len(calls) > len(ctx["loads"]):                # the second step (a check per load): the app goes down here
             raise RuntimeError("the app died")
         return real(ctx, i, min_safety, solid=solid)
 
     monkeypatch.setattr(load_study, "check_load", dies)
     with pytest.raises(RuntimeError):
         carve.study(stool, "stool", stations=3, remove_up_to=0.4)
+    # the one carve test on both loads: each step checks every load (the front edge and the middle), then dies
+    assert len(calls) == 2 + 1
     (rid,) = os.listdir(carve.runs_dir(stool))
     with open(os.path.join(carve.runs_dir(stool), rid, "run.json")) as f:
         rec = json.load(f)
@@ -296,7 +317,7 @@ def test_a_carve_whose_sweep_fails_says_so_and_reads_running_while_it_works(stoo
     from caliper import carve, load_study, studies
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
-    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60'), intent="kid")
+    stool.write_part("stool", CENTRED.replace('"lb": 200', '"lb": 60'), intent="kid")
     seen = {}
 
     def sweep(self, **k):
