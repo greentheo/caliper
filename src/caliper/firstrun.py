@@ -73,7 +73,7 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
         steps["goals"] = f"failed: {e}"
         emit("error", f"couldn't write down what it has to do: {e}")
 
-    held = _plan(store, steps, emit, use_llm=use_llm, client=client)
+    held = _plan(store, steps, emit, use_llm=use_llm, client=client, author=author)
     if held is not None:                       # a plan of several parts: the person reviews it first (CALI-35)
         return held
 
@@ -106,7 +106,12 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
         try:
             run = load_study.study(store, pid, min_safety=_min_safety(store),
                                    emit=lambda k, t="", **d: emit("strength", t, **d) if t else None)
-            steps["strength"] = f"{run['safety']}x" if run.get("safety") is not None else "no verdict"
+            from .answers import ran_safety
+
+            ran = ran_safety(run)                    # never 0x for a load that never reached a support (#140)
+            steps["strength"] = f"{ran}x" if ran is not None else next(
+                (f"not checked: {c['why']}" for c in run.get("cases") or []
+                 if (c.get("fea") or {}).get("supported") is False and c.get("why")), "no verdict")
         except Exception as e:  # noqa: BLE001 — the card says it's not checked yet, with the button
             steps["strength"] = f"failed: {e}"
             emit("error", f"couldn't check it holds: {e}")
@@ -152,23 +157,16 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
     return {"part": pid, "ok": bool(res.ok), "version": res.version, "steps": steps, "reply": reply}
 
 
-#: Building a reviewed plan's parts one by one, in order, is #3b's: until then it says so, never a silent no-op.
-NEXT = "The plan's saved: {n} parts. Building them one by one, in order, comes next (#3b)."
-
-
-def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, client) -> Optional[dict]:
+def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, client, author=None) -> Optional[dict]:
     """CALI-35 (#3a): plan before building. Returns the first run's result when it stops for the plan (a plan of
-    several parts, to review; or one already reviewed, whose building is #3b), else None and it builds as one part."""
+    several parts, to review), or when it builds a reviewed plan's parts in order (#3b); else None and it builds as
+    one part."""
+    from . import build_plan
     from . import plan as P
 
     saved = P.load(store)
-    if saved is not None and len(P.buildable(saved)) > 1:
-        store.design.plan = {**store.design.plan, "status": "saved"}
-        store.save()
-        reply = NEXT.format(n=len(saved.parts))
-        store.append_log({"kind": "reply", "action": "plan", "ok": True, "reply": reply, "firstrun": True})
-        steps["plan"] = "saved; building in order is #3b"
-        return {"part": None, "ok": True, "steps": steps, "reply": reply, "plan": "saved"}
+    if saved is not None and len(P.buildable(saved)) > 1:      # reviewed: Build it builds its parts, in order (#3b)
+        return build_plan.build(store, steps, emit, author=author, client=client, use_llm=use_llm)
     if not _llm(use_llm, client):
         steps["plan"] = "planning it in several parts needs Claude: I built it as one"
         return None
@@ -189,7 +187,7 @@ def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, cli
              + P.said_aside(plan)
              + "\n\nThat's the plan, before anything's drawn: its numbers and the "
              "checks between the parts are under What is it?. Say what to change (\"make the mast 10 ft\"), or "
-             "**Build it** to go on.")
+             "**Build it** to go on: " + build_plan.cost(plan) + ".")      # the cost, said first (#135 review)
     store.append_log({"kind": "reply", "action": "plan", "ok": True, "reply": reply, "firstrun": True,
                       "parts": plan.ids()})
     steps["plan"] = f"{len(plan.parts)} parts, to review"

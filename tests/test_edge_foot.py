@@ -150,8 +150,12 @@ def test_no_reader_says_holds_on_the_middle_only(tmp_path, monkeypatch):
 
     store, rec = _kid(tmp_path, monkeypatch, MIXED_CENTRED, "middle")
     # the page's state gives each case and the run its one verdict, and the history the study wrote says it (#132)
-    (shown,) = design_api.design_state(store)["load_runs"]
+    state = design_api.design_state(store)
+    (shown,) = state["load_runs"]
     assert all(c["verdict"]["kind"] == "edge" for c in shown["cases"]) and shown["verdict"]["kind"] == "edge"
+    # the history line as the page gets it: main's reader of the run's own verdict (#138 item 3) passes the edge too
+    (studied,) = [h for p in state["parts"] for h in p["history"] if h.get("action") == "studied"]
+    assert studied["verdict"]["kind"] == "edge"
     h = store.history("stool")[-1]
     assert h["kind"] == "load" and h["middle_only"] is True and h["verdict"]["kind"] == "edge"
     # the chat answers from facts that say so

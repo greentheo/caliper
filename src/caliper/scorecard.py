@@ -369,18 +369,24 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                         "model", "strength")
                 left.append(f"the {p.id.replace('_', ' ')}'s strength couldn't be checked ({e})")
                 continue
-        if run.get("safety") is None:
-            left.append(f"the {p.id.replace('_', ' ')}'s strength check gave no number")
+        from .answers import ran_safety
+
+        ran = ran_safety(run)                   # a load that never reached a support gives no number, not 0x (#138)
+        if ran is None:
+            left.append(f"the {p.id.replace('_', ' ')}'s strength check gave no number"
+                        + next((f": {c['why']}" for c in run["cases"]
+                                if (c.get("fea") or {}).get("supported") is False and c.get("why")), ""))
         breaks = [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
         need.append(float(run.get("min_safety") or load_study.MIN_SAFETY))
-        if unsure is None and any(verdicts.case(run, c)["kind"] in ("unresolved", "unchecked") for c in run["cases"]):
+        if unsure is None and any(verdicts.case(run, c)["kind"] in ("unresolved", "unchecked")
+                                  and (c.get("fea") or {}).get("supported") is not False for c in run["cases"]):
             from .answers import coarse
 
             unsure = coarse(run, store.design.display_units == "in")
-        if run.get("safety") is not None:
-            _metric(metrics, f"strength.{p.id}.safety", run["safety"], "×", f"{p.id}, its weakest load",
+        if ran is not None:
+            _metric(metrics, f"strength.{p.id}.safety", ran, "×", f"{p.id}, its weakest load",
                     "model", "strength check")
-            worst = run["safety"] if worst is None else min(worst, run["safety"])
+            worst = ran if worst is None else min(worst, ran)
         if breaks:
             prev = metrics.get("strength.breaks_lb", {}).get("value")
             _metric(metrics, "strength.breaks_lb", min(breaks + ([prev] if prev else [])), "lb",

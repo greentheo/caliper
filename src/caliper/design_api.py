@@ -36,6 +36,11 @@ class ChatMessage(BaseModel):
     scope: Optional[str] = None
 
 
+class ShopOffer(BaseModel):
+    index: int
+    add: bool = True
+
+
 class ClarifyAnswers(BaseModel):
     answers: dict[str, str] = {}
     skip: bool = False
@@ -339,6 +344,10 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             for b in ((c.get("plate") or {}).get("by_thickness") or []):
                 b["verdict"] = (verdicts.meets(b.get("safety_across"), r.get("min_safety"))
                                 if cv["kind"] in ("holds", "fails") else cv)
+            pl = c.get("plate") or {}
+            if pl.get("done"):                # the plate or beam check's own number, the worse grain's (#122, CALI-116)
+                pl["verdict"] = (verdicts.meets(pl.get("safety_across"), r.get("min_safety"))
+                                 if cv["kind"] in ("holds", "fails") else cv)
             if load_study.unresolved(r, c):   # which coarse it is, for the panel's FEA line (CALI-97)
                 c["unresolved"] = "unresolved" if r.get("finer") else "unchecked"
         r["verdict"] = v
@@ -348,10 +357,15 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     for r in runs["lighten"]:
         for st in r.get("stations") or []:
             st["verdict"] = verdicts.lighten_step(st, untrusted.get(r["part"]), r)
+    loads_by_id = {r["id"]: r for r in runs["load"]}
     for p in parts:                           # the history line of a strength check says the verdict it was given
         for h in p["history"]:
             if h.get("kind") == "load" and h.get("action") == "studied":
-                h["verdict"] = verdicts.of(h)
+                # the run's own verdict where it's still here: an older line kept "doesn't hold, 0x" for a check that
+                # couldn't run (#138 item 3)
+                rec = loads_by_id.get(h.get("run"))
+                h["verdict"] = ({k: x for k, x in verdicts.run(rec, edge=rec["part"] in middle).items()
+                                 if k != "cases"} if rec else verdicts.of(h))        # the middle only too (CALI-94)
             elif h.get("kind") == "revision" and h.get("result"):     # its report's verdict (#132 review)
                 h["verdict"] = verdicts.history(h)
     current = {p["id"]: p["version"] for p in parts}
@@ -366,6 +380,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "carving": _carving(slug),            # the carve's job, while it runs (CALI-101)
         "display_units": d.display_units,
         "requirements": [r.model_dump() for r in d.requirements],
+        "shop_offers": clarify.offers(store),     # what the answers offered to add to the shop (CALI-124)
         "parts": parts,
         "mates": [{"id": m.id, "between": m.between, "kind": m.kind} for m in store.assembly.mates],
         "rules": [{"id": a.id, "expr": a.expr} for a in store.assembly.assertions],
@@ -475,7 +490,9 @@ def router():
 
         def ask(j):
             j.emit("clarify", "working out what to ask…")
-            qs, source = clarify.draft_questions(req.prompt.strip())   # the slow part — unlocked
+            # the shop read first (CALI-124): no question asks what it already says
+            qs, source = clarify.draft_questions(req.prompt.strip(), shop=shop.read(),
+                                                 shop_known=os.path.exists(shop.path()))   # the slow part — unlocked
             with RUNNER.locked(_lock(slug)):
                 clarify.open_round(DesignStore.load(slug), qs, source)
             return {"questions": [q.to_dict() for q in qs], "source": source}
@@ -520,6 +537,17 @@ def router():
                     raise HTTPException(status_code=422, detail="display_units is 'mm' or 'in'")
                 store.design.display_units = req.display_units
             store.save()
+            return design_state(store)
+
+    @r.post("/api/designs/{slug}/shop-offer")
+    def take_shop_offer(slug: str, req: ShopOffer):
+        """Add what an answer offered to the shop (shop.yaml, through its own path), or turn it down (CALI-124)."""
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                clarify.take_offer(store, req.index, req.add)
+            except ValueError as e:
+                raise HTTPException(404, str(e))
             return design_state(store)
 
     @r.post("/api/designs/{slug}/clarify")

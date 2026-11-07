@@ -445,30 +445,67 @@ def beam(span: float, width: float, t: float, force: float, mat: dict, footprint
     thicknesses, all at that width."""
     spread = footprint + BEAM_SPREAD * span
     carries = min(width, spread, 0.5 * spread + (width / 2 if edge is None else max(edge, 0.0)))
+    # CALI-116 (#118): BS 8110's width is for an isotropic slab; cl. 3.5.2.2(b) takes less where the panel is less
+    # stiff across the span than along it. Plywood with its face grain along the span is: its width shrinks by
+    # (D_across / D_along)^(1/4), the panel's two moduli (about 0.84 for ply, half as stiff across). With the grain
+    # across the span the isotropic width is the safe side. NEEDS ENGINEER CHECK (#42: or an orthotropic plate's
+    # b_ef = M_beam / m_plate, or let the plate check govern).
+    # The whole effective width takes the factor (the edge's share too: the slab beside the foot spreads it by the
+    # same stiffness), still never past the panel's own width.
+    k = orthotropic(mat)
+    along = min(width, k * spread, k * (0.5 * spread + (width / 2 if edge is None else max(edge, 0.0))))
 
-    def at(tt):
-        stress = force * span / 4 / (carries * tt ** 2 / 6)
-        sag = force * span ** 3 / (48 * mat["E"] * carries * tt ** 3 / 12)
+    def at(tt, b):
+        stress = force * span / 4 / (b * tt ** 2 / 6)
+        sag = force * span ** 3 / (48 * mat["E"] * b * tt ** 3 / 12)
         return stress, sag
 
-    stress, sag = at(t)
-    safety = mat["strength"] / stress
+    def both(tt):
+        """(safety with the grain along the span, at its narrower width; with the grain across, at the slab's)."""
+        return mat["strength"] / at(tt, along)[0], mat["strength"] * mat.get("across", 1.0) / at(tt, carries)[0]
+
+    # the sag beside "grain unknown" is the worse grain's, as its safety is (#122 review): with the grain along the
+    # span, the panel's own E on the narrower width; across it, its stiffness across the face grain on the whole width
+    e_across = (mat["E_across"] / mat["E"]) if mat.get("E_across") else mat.get("across", 1.0)
+
+    def sag_worse(tt):
+        return max(at(tt, along)[1], at(tt, carries)[1] / max(min(e_across, 1.0), 1e-6))
+
+    stress, sag = at(t, carries)[0], sag_worse(t)
+    good, wrong = both(t)
     by_t = []
     for tt in C.THICKNESSES:
         if tt > 26:
             continue
-        st, sg = at(tt)
-        by_t.append({"thickness_mm": tt, "label": M.nominal(tt), "safety": round(mat["strength"] / st, 2),
-                     "safety_across": round(mat["strength"] * mat["across"] / st, 2), "deflection_mm": round(sg, 3)})
+        g, w = both(tt)
+        by_t.append({"thickness_mm": tt, "label": M.nominal(tt), "safety": round(g, 2),
+                     "safety_across": round(min(g, w), 2), "deflection_mm": round(sag_worse(tt), 3)})
     return {"done": True, "as": "beam", "span_mm": round(span, 1), "thickness_mm": t, "stress_mpa": round(stress, 2),
-            "safety": round(safety, 2), "safety_across": round(safety * mat["across"], 2),
+            # the grain's way unknown, the verdict takes the worse of the two (#118)
+            "safety": round(good, 2), "safety_across": round(min(good, wrong), 2),
             "deflection_mm": round(sag, 3), "by_thickness": by_t, "width_mm": round(carries, 1),
+            # each grain's sag, for a reader that knows which way it runs (the real test's prediction: #122 review)
+            "deflection_along_mm": round(at(t, along)[1], 3),
+            "deflection_across_mm": round(at(t, carries)[1] / max(min(e_across, 1.0), 1e-6), 3),
+            "width_along_mm": round(along, 1), "orthotropic": round(k, 3),
             "why": f"it rests on two opposite edges, {span / 25.4:.1f} in apart: a beam across them"
                    + (f", {carries / 25.4:.1f} in of it carrying the load (BS 8110's effective width for a load "
                       f"{'this near its free end' if carries < min(width, spread) else 'on a panel this wide'})"
                       if carries < width else "")
-                   + (f". Cut with its face grain running across the gap and it's about {safety:.1f} times over "
-                      f"instead of {safety * mat['across']:.1f}" if mat.get("across", 1.0) < 1.0 else "")}
+                   + (f". Cut with its face grain running across the gap and it's about {good:.1f} times over "
+                      f"instead of {wrong:.1f}" + (f" (on {along / 25.4:.1f} in: with the grain along the span it's "
+                                                    f"less stiff across, so less of it carries the load)"
+                                                    if along < carries else "")
+                      if mat.get("across", 1.0) < 1.0 else "")}
+
+
+def orthotropic(mat: dict) -> float:
+    """(D_across / D_along)^(1/4) for a sheet: its stiffness across the face grain over along it (CALI-116). The
+    material's own E_across if it gives one, else its strength ratio across (ply: about half, both ways); 1 for a
+    material the same both ways."""
+    across = mat.get("E_across")
+    ratio = (across / mat["E"]) if across else mat.get("across", 1.0)
+    return float(min(1.0, max(ratio, 0.0)) ** 0.25)
 
 
 def _held_edges(pc: dict, k: int, others: list[dict], tol: float, under=None) -> list[int]:
@@ -693,6 +730,13 @@ def plate_why(pl: Optional[dict]) -> Optional[str]:
     return pl["why"]
 
 
+def run_safety(cases: list) -> Optional[float]:
+    """A strength run's number, as ``study`` writes it: the worst of the cases that ran. A case whose load never
+    reached a support has none, so it's never a 0x (#140 review); none that ran, no number."""
+    return min((c["safety"] for c in cases if c.get("safety") is not None
+                and (c.get("fea") or {}).get("supported") is not False), default=None)
+
+
 def peak_in(fea: Optional[dict]) -> Optional[str]:
     """Where a run's hottest voxel is, by name, only from a run that recorded the wall there (``wall_mm``, #137): an
     older run named the nearest wood even for a hot spot in a printed part (the bar stool's "seat top" was the cone)."""
@@ -747,7 +791,11 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     declared = C.declared(store, part_id)
     if not declared.get("loads"):
         raise ValueError(f"'{part_id}' doesn't say what it must hold: its script has no loads()")
-    loads = parse_loads(declared["loads"])
+    # a tipping case is the tip check's (statics), not a strength case (CALI-98)
+    strength = [ld for ld in declared["loads"] if not (isinstance(ld, dict) and ld.get("tip"))]
+    if not strength:
+        raise ValueError(f"'{part_id}' only says how it might tip, not what it must hold: add a load that isn't a tip")
+    loads = parse_loads(strength)
     mesh = store.part_geometry(part_id).require_mesh()
     from .measure import closed, open_near
 
@@ -984,7 +1032,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         notes.append(ctx["coarse"])
     if any(h.get("default") for h in held):
         notes.append("Held by the floor: everything at its underside, as if it stands on a flat floor.")
-    worst = min((c["safety"] for c in cases if c.get("safety") is not None), default=None)
+    worst = run_safety(cases)            # from the cases that ran, never 0x (#140 review)
     record = {
         "id": rid, "part": part_id, "kind": "load", "created": time.time(),
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
