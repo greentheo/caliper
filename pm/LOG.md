@@ -34,6 +34,19 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   (`plNum`). The sag beside "grain unknown" is the worse grain's (`beam`'s `sag_worse`: along the span its own E on
   the narrower width, across it its stiffness across on the whole width): for ply, half as stiff across, so twice
   the isotropic sag where that governs. `test_beam_width`'s sag reads the same.
+- **The worse-grain sag moves the real test's verdict** (`trials.predict` takes the plate or beam sag as the top of
+  the predicted range, at read time, so a recorded test re-judges). Before → after, for ply on two sides (the centred
+  foot, top of range 2.62 → 5.24 mm at the check's load):
+
+  | a test's sag at that load | before | after |
+  |---|---|---|
+  | 6 mm (2.3× the old top) | "it sagged more than we predicted" (warn) | within the prediction (ok) |
+  | 12 mm (4.6× the old top) | "it sagged more than we predicted" | "it sagged more than we predicted" |
+
+  Honest while the grain is unknown: the prediction spans both grains. **Where a plate says its grain** (`"grain":
+  "along"` or `"across"`), the prediction takes that grain's sag (`deflection_along_mm` / `deflection_across_mm`, now
+  on the beam's record), pinned. Nothing declares a grain yet: a piece's `construction()` has no grain key, so today
+  it's always the worse grain's. Theo has no recorded tests.
 ### 2026-11-07 · CALI-122 (#137) · The bar stool's pre-flight: its broken rule said, where it fails, no carve on a fail
 From the reviewer's pre-flight of Theo's bar stool v7 (a copy; nothing of Theo's touched), with the foreman's
 correction: the run's "seat top" was a mislabel.

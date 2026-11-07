@@ -171,3 +171,25 @@ def test_the_sag_beside_grain_unknown_is_the_worse_grain_s():
     for b in got["by_thickness"]:
         if b["thickness_mm"] == 19.05:
             assert b["deflection_mm"] == pytest.approx(got["deflection_mm"], abs=1e-3)
+
+
+
+def test_the_real_test_s_prediction_spans_both_grains_unless_one_is_declared(monkeypatch):
+    """#122 review: the worse-grain sag is the top of the real test's predicted range. With the grain unknown the
+    prediction spans both grains; with it declared ("grain": "along"/"across" on the plate), that grain's sag."""
+    from caliper import trials
+
+    mat = {"strength": 30.0, "across": 0.5, "E": 8000.0}
+    beam = {**load_study.beam(300.0, 400.0, 19.05, 1000.0, mat, footprint=100.0), "piece": "top"}
+    assert beam["deflection_mm"] == max(beam["deflection_along_mm"], beam["deflection_across_mm"])
+
+    def predicted(plate):
+        run = {"id": "r", "version": 1, "cases": [{"name": "a foot", "lb": 200, "factor": 2.0, "safety": 3.0,
+                                                    "governs": "plate", "breaks_lb": 1200, "plate": plate,
+                                                    "fea": {"supported": True, "deflection_mm": 0.1}}]}
+        monkeypatch.setattr(trials, "_run", lambda store, pid: run)
+        return trials.predict(None, "stool")["per_lb_mm"][1] * 400                # the top of the range, at 400 lb
+
+    assert predicted(beam) == pytest.approx(beam["deflection_mm"], abs=1e-3)                       # unknown: worse
+    assert predicted({**beam, "grain": "along"}) == pytest.approx(beam["deflection_along_mm"], abs=1e-3)
+    assert predicted({**beam, "grain": "across"}) == pytest.approx(beam["deflection_across_mm"], abs=1e-3)

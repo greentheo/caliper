@@ -484,6 +484,9 @@ def beam(span: float, width: float, t: float, force: float, mat: dict, footprint
             # the grain's way unknown, the verdict takes the worse of the two (#118)
             "safety": round(good, 2), "safety_across": round(min(good, wrong), 2),
             "deflection_mm": round(sag, 3), "by_thickness": by_t, "width_mm": round(carries, 1),
+            # each grain's sag, for a reader that knows which way it runs (the real test's prediction: #122 review)
+            "deflection_along_mm": round(at(t, along)[1], 3),
+            "deflection_across_mm": round(at(t, carries)[1] / max(min(e_across, 1.0), 1e-6), 3),
             "width_along_mm": round(along, 1), "orthotropic": round(k, 3),
             "why": f"it rests on two opposite edges, {span / 25.4:.1f} in apart: a beam across them"
                    + (f", {carries / 25.4:.1f} in of it carrying the load (BS 8110's effective width for a load "
