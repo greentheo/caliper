@@ -897,6 +897,13 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                            + f"; about {pr['hours']:g} h, {pr['filament_g']:,} g, ${pr['usd']:.2f} "
                            f"({_e(pr['from'])}). STLs in <code>printer/{_e(pid)}/</code>.</p>")
     out.append("<h2 class='page'>Cut lists</h2>")
+    for pid in rec.get("grain") or {}:                 # which way to cut each panel, as the person said (CALI-126)
+        laid = {g["line"]: g for g in (plans.get(pid) or {}).get("grain") or []}
+        for n in rec["grain"][pid]:
+            g = laid.get(n)
+            out.append(f"<p class='note'><b>{_e(pid)}:</b> {_e(n)}"
+                       + ("" if g is None or g["follows"] else
+                          f" <b>The layout doesn't follow it</b> ({_e(g['why'])}): lay it out by hand.") + "</p>")
     for pid, plan in plans.items():
         for g in plan.get("tubes") or []:
             out.append(f"<h3>{_e(g['label'])} <span class='muted small'>· {_e(pid)}</span></h3><table>"
@@ -1184,7 +1191,11 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     notes.append("Print the pattern PDFs at 100% (no fit-to-page) and put a ruler on the scale bar before cutting "
                  "from them.")
     strength = _strength(store, versions)
+    from . import grain
+
+    said = {p.id: grain.notes(store, p.id) for p in store.design.parts}
     rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength, "making": made,
+           "grain": {pid: n for pid, n in said.items() if n},       # which way to cut each panel (CALI-126)
            "slug": os.path.basename(store.root), "versions": versions,
            "card": {"created": card["created"], "summary": card["summary"]},
            "ready": verdicts.summary(card["summary"])["counts_as_pass"],      # one verdict (CALI-112)

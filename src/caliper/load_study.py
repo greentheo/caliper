@@ -437,12 +437,13 @@ BEAM_SPREAD = 0.6
 
 
 def beam(span: float, width: float, t: float, force: float, mat: dict, footprint: float = 0.0,
-         edge: Optional[float] = None) -> dict:
+         edge: Optional[float] = None, grain: Optional[str] = None, span_axis: Optional[str] = None) -> dict:
     """A panel resting on two opposite edges, the load (``footprint`` mm wide along the edges, its middle ``edge`` mm
     from the nearer free end; the middle if not given) in the middle of its span: a simply supported beam (the safe
     side: the edges free to turn, the load not spread along the span), as wide as carries the load: the panel, or
     BS 8110's effective width if that's less (:data:`BEAM_SPREAD`). Stress, sag and safety, and at other
-    thicknesses, all at that width."""
+    thicknesses, all at that width. ``grain``: which way its face grain runs, "along" or "across" the span, only as
+    the person said it (CALI-126): that grain's number and sag govern; not said, the worse of the two (#118)."""
     spread = footprint + BEAM_SPREAD * span
     carries = min(width, spread, 0.5 * spread + (width / 2 if edge is None else max(edge, 0.0)))
     # CALI-116 (#118): BS 8110's width is for an isotropic slab; cl. 3.5.2.2(b) takes less where the panel is less
@@ -464,6 +465,11 @@ def beam(span: float, width: float, t: float, force: float, mat: dict, footprint
         """(safety with the grain along the span, at its narrower width; with the grain across, at the slab's)."""
         return mat["strength"] / at(tt, along)[0], mat["strength"] * mat.get("across", 1.0) / at(tt, carries)[0]
 
+    from . import grain as G
+
+    # one phrase for the cut, led by the part's own direction where the span's is known (#151 review)
+    advice = G.phrase(G.runs(span_axis, "along"), "along")
+    said = G.phrase(G.runs(span_axis, grain), grain) if grain in G.GRAINS else None
     # the sag beside "grain unknown" is the worse grain's, as its safety is (#122 review): with the grain along the
     # span, the panel's own E on the narrower width; across it, its stiffness across the face grain on the whole width
     e_across = (mat["E_across"] / mat["E"]) if mat.get("E_across") else mat.get("across", 1.0)
@@ -471,7 +477,14 @@ def beam(span: float, width: float, t: float, force: float, mat: dict, footprint
     def sag_worse(tt):
         return max(at(tt, along)[1], at(tt, carries)[1] / max(min(e_across, 1.0), 1e-6))
 
-    stress, sag = at(t, carries)[0], sag_worse(t)
+    def sag_of(tt):                          # the said grain's sag, else the worse grain's
+        return (at(tt, along)[1] if grain == "along" else
+                at(tt, carries)[1] / max(min(e_across, 1.0), 1e-6) if grain == "across" else sag_worse(tt))
+
+    def governs(g, w):                       # the said grain's safety, else the worse of the two (#118)
+        return g if grain == "along" else w if grain == "across" else min(g, w)
+
+    stress, sag = at(t, carries)[0], sag_of(t)
     good, wrong = both(t)
     by_t = []
     for tt in C.THICKNESSES:
@@ -479,10 +492,12 @@ def beam(span: float, width: float, t: float, force: float, mat: dict, footprint
             continue
         g, w = both(tt)
         by_t.append({"thickness_mm": tt, "label": M.nominal(tt), "safety": round(g, 2),
-                     "safety_across": round(min(g, w), 2), "deflection_mm": round(sag_worse(tt), 3)})
+                     "safety_across": round(governs(g, w), 2), "deflection_mm": round(sag_of(tt), 3)})
     return {"done": True, "as": "beam", "span_mm": round(span, 1), "thickness_mm": t, "stress_mpa": round(stress, 2),
-            # the grain's way unknown, the verdict takes the worse of the two (#118)
-            "safety": round(good, 2), "safety_across": round(min(good, wrong), 2),
+            # the grain's way unknown, the verdict takes the worse of the two (#118); said, that grain's (CALI-126)
+            "safety": round(good, 2), "safety_across": round(governs(good, wrong), 2),
+            "grain": grain if grain in ("along", "across") else None,
+            "grain_phrase": said, "advice_phrase": advice,
             "deflection_mm": round(sag, 3), "by_thickness": by_t, "width_mm": round(carries, 1),
             # each grain's sag, for a reader that knows which way it runs (the real test's prediction: #122 review)
             "deflection_along_mm": round(at(t, along)[1], 3),
@@ -492,10 +507,11 @@ def beam(span: float, width: float, t: float, force: float, mat: dict, footprint
                    + (f", {carries / 25.4:.1f} in of it carrying the load (BS 8110's effective width for a load "
                       f"{'this near its free end' if carries < min(width, spread) else 'on a panel this wide'})"
                       if carries < width else "")
-                   + (f". Cut with its face grain running across the gap and it's about {good:.1f} times over "
-                      f"instead of {wrong:.1f}" + (f" (on {along / 25.4:.1f} in: with the grain along the span it's "
-                                                    f"less stiff across, so less of it carries the load)"
-                                                    if along < carries else "")
+                   + (f". With its {said}, as you said: about {good if grain == 'along' else wrong:.1f} times over"
+                      if said and mat.get("across", 1.0) < 1.0
+                      else f". Cut with its {advice} and it's about {good:.1f} times over instead of {wrong:.1f}"
+                      + (f" (on {along / 25.4:.1f} in: cut that way it's less stiff across, so less of it carries "
+                         f"the load)" if along < carries else "")
                       if mat.get("across", 1.0) < 1.0 else "")}
 
 
@@ -620,9 +636,13 @@ def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=Non
                 span = float(np.linalg.norm(far - (far @ along) * along))
                 width = float(np.linalg.norm(e1 - e0))
                 at = float((c - e0) @ along)                 # where the load's middle is along the held edges
+                gap = (far - (far @ along) * along) / (span or 1.0)      # which way it spans (CALI-126)
+                axis = "xyz"[int(np.argmax(np.abs(gap)))]
                 return {**base, **beam(span, width, pc["thickness"], float(abs(f @ n)), mat,
                                        footprint=abs(float(ext @ np.abs(along))),
-                                       edge=min(at, width - at))}
+                                       edge=min(at, width - at), grain=pc.get("grain"), span_axis=axis),
+                        "span_axis": axis,
+                        **({"grain_assumed": pc["grain_assumed"]} if pc.get("grain_assumed") else {})}
             if _round(poly):                      # a disc: on a ring beneath it, or held all round (#137 item 7)
                 mid = poly.mean(axis=0)
                 ring = _ring_held(pc, k, under, tol) if under is not None else None
@@ -802,6 +822,10 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     if not closed(mesh):                       # said where, never a throw from deep in a boolean (CALI-118)
         raise ValueError(f"not checked: its shape isn't closed {open_near(mesh)}, so it can't be voxelized")
     pieces = shapes(declared)
+    said = (store.design.grain or {}).get(part_id) or {}  # the grain the person said, per panel (CALI-126)
+    for pc in pieces:
+        if pc["kind"] == "sheet":
+            pc["grain"] = (said.get(pc["name"]) or {}).get("grain")
     rest = C.printed_solid(store, part_id, declared)       # what's printed: the whole part, or the rest (CALI-82)
     printed = printed_material(declared, mesh, rest)       # a printed part (CALI-81)
     wood = [pc for pc in pieces if pc["kind"] in ("sheet", "stick")]
