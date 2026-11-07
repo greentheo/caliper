@@ -639,6 +639,13 @@ def heat_mesh(mesh, grid, von_mises: np.ndarray, solid: np.ndarray, max_edge: fl
             "heat": b64(heat.astype(np.float32)), "max": float(heat.max()) if len(heat) else 0.0}
 
 
+def peak_in(fea: Optional[dict]) -> Optional[str]:
+    """Where a run's hottest voxel is, by name, only from a run that recorded the wall there (``wall_mm``, #137): an
+    older run named the nearest wood even for a hot spot in a printed part (the bar stool's "seat top" was the cone)."""
+    fea = fea or {}
+    return fea.get("in") if "wall_mm" in fea else None
+
+
 def _printed_name(declared: dict) -> Optional[str]:
     """What the part's printed share is called in its construction() ("cone"), or None if nothing's printed."""
     for it in declared.get("construction") or []:

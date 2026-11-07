@@ -2074,6 +2074,12 @@ function lightenBlocked(p) {
   if (check && check.too_thin) return check.thin_said ? `Can't lighten it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength';
   return '';
 }
+// where a run's worst stress is: a piece by name only from a run that recorded the wall there (#137: an older run's
+// "seat top" was the nearest wood to a hot spot in the printed cone), else how high up it is
+function peakWhere(f) {
+  if (f && f.in && f.wall_mm != null) return `in ${f.in}`;
+  return f && f.at ? `around ${len(f.at[2])} up` : 'in the part';
+}
 function lightenRuns(pid) { return (S.design.lighten_runs || []).filter((r) => r.part === pid); }
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
@@ -2136,12 +2142,16 @@ function loadCase(p, run, c, i) {
   const pl = c.plate, f = c.fea || {};
   const holds = p.untrusted ? untrustedBadge(p) : caseBadge(c);     // a filled-in shape wins (CALI-96, then 97)
   const plate = !pl ? '' : pl.done
-    ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
+    ? (pl.support === 'ring'
+      ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, a round plate on its ${len(pl.ring_mm)} ring,
+        edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety_across)}</b> across the grain, ${sx(pl.safety)} along it
+        · sags ${len(pl.deflection_mm, 3)} <span class="muted">(Roark; needs an engineer's check)</span></div>`
+      : `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
-        ${sx(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`
+        ${sx(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`)
     : `<div class="muted small" style="margin-top:4px">No plate check for ${esc(pl.piece)}: ${esc(pl.why)}.</div>`;
   const fea = f.supported === false ? `<div class="small" style="color:var(--bad)">${esc(c.why)}</div>`
-    : `<div class="small" style="margin-top:4px"><b>whittle FEA</b> — works hardest in ${esc(f.in || 'the part')}
+    : `<div class="small" style="margin-top:4px"><b>whittle FEA</b> — works hardest ${esc(peakWhere(f))}
         (${fixed(f.peak_mpa, 1)} MPa → ${sx(f.safety)}) · gives ${len(f.deflection_mm, 3)}</div>`;
   const by = pl && pl.done && pl.by_thickness ? (() => {
     const ok = pl.by_thickness.filter(holdsHere);

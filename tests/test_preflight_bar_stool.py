@@ -250,3 +250,15 @@ def test_a_carved_step_that_doesn_t_close_up_is_an_amber_dot_not_a_red_one():
         f"const html = carveChart({{version: 7}}, {json.dumps(run)});\n"
         "out = [...html.matchAll(/<circle[^>]*data-carve=\"(\\d)\"\\s*class=\"(\\w+)/g)].map((m) => m[2]);")))
     assert out == ["ok", "warn", "bad"]
+
+
+def test_an_old_run_s_seat_top_label_isn_t_shown_anywhere():
+    """The foreman's re-pre-flight on main: Theo's v4 card says "works hardest in seat top", the old label, where the
+    peak is in the cone. A piece is named only from a run that recorded the wall there (new runs)."""
+    old = {"at": [133.5, 18.4, 706.7], "in": "seat top", "safety": 1.7}
+    new = {**old, "in": "cone", "wall_mm": 6.0}
+    assert load_study.peak_in(old) is None and load_study.peak_in(new) == "cone"
+    out = _run(_page(["peakWhere"], extra=(
+        "function len(mm) { return (mm / 25.4).toFixed(1) + ' in'; }\n"
+        f"out = [peakWhere({json.dumps(old)}), peakWhere({json.dumps(new)}), peakWhere({{}})];")))
+    assert out == ["around 27.8 in up", "in cone", "in the part"]
