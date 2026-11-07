@@ -21,7 +21,8 @@ SRC = os.path.join(os.path.dirname(__file__), "..", "src", "caliper")
 RAW = re.compile(r'\["holds"\]|get\("holds"|\.holds\b|\["whole_holds"\]|get\("whole_holds"|'
                  r'[<>]=?\s*[A-Za-z_.\[\]"\']*min_safety\b|min_safety\b[\]"\')]*\s*[<>]=?\s*[A-Za-z_(]|'
                  r'>=\s*[A-Za-z_.]*\[?"?limit"?\]?|<=\s*[A-Za-z_.]*\[?"?limit"?\]?|[<>]=\s*lim\b|'
-                 r'\["ready"\]|get\("ready"\)|\["best"\]|get\("best"\)|holds_now(?!\))')   # holds_now): what verdicts.rule() is handed
+                 r'\["ready"\]|get\("ready"\)|\["best"\]|get\("best"\)|holds_now(?!\))|'
+                 r'get\("all_pass"\)|\["all_pass"\]')   # holds_now): what verdicts.rule() is handed
 
 
 def test_no_module_works_a_verdict_out_for_itself():
@@ -38,7 +39,8 @@ def test_no_module_works_a_verdict_out_for_itself():
 
 
 #: What the page would work out for itself (#132 review: every step, thickness and the classic panel's badge too).
-PAGE_RAW = re.compile(r"\.holds\b|whole_holds|safety_across\s*[<>]=|[<>]=\s*run\.min_safety|\.all_pass\s*\?")
+PAGE_RAW = re.compile(r"\.holds\b|whole_holds|safety_across\s*[<>]=|[<>]=\s*run\.min_safety|\.all_pass\s*\?|"
+                      r"\b(rel|r|release)\.ready\b|'all_pass'")      # a release's ready, a revision's all_pass (#132)
 
 
 def test_the_page_never_works_a_verdict_out_either():

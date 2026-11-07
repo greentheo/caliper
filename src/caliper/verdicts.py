@@ -102,8 +102,9 @@ def check(status: str) -> dict:
 def summary(s: Optional[dict]) -> dict:
     """A scorecard's summary as one verdict: ``ok`` only when nothing fails, nothing is unsettled and something
     passed. ``why`` says the first thing in the way, in precedence order."""
-    s = s or {}
-    if not s or s.get("fail"):
+    if not s:                                   # no card: nothing checked yet, not a fail (#132 review)
+        return _make("waiting", why="nothing has been checked yet")
+    if s.get("fail"):
         return _make("fails", why="a check fails")
     if s.get("untrusted"):
         return _make("untrusted", why="a check isn't trusted yet")
@@ -159,9 +160,9 @@ def rule(holds_now: Optional[bool]) -> dict:
 def meets(safety: Optional[float], need: Optional[float], *, stale: bool = False) -> dict:
     """A number against what it needs (a frame's weakest member, a station): holds or fails, or waiting; an older
     run's holds is ``stale`` (a fail stays a fail)."""
-    if safety is None:
+    if safety is None or need is None:          # nothing to hold it to: not a pass (#132 review)
         return _make("waiting")
-    if safety < (need or 0):
+    if safety < need:
         return _make("fails", safety)
     return _make("stale" if stale else "holds", safety)
 
@@ -170,10 +171,34 @@ def release(rel: dict, current: dict) -> dict:
     """A build package: ready only as made and for the parts as they are now (#132 review: "ready to cut" on a
     package of older versions). ``current``: ``{part: version}``."""
     if not rel.get("ready"):  # producer: the release's own verdict, made with summary() at release time
-        return {**summary((rel.get("card") or {}).get("summary")), "kind": "fails", "status": "bad",
-                "counts_as_pass": False}
+        v = summary((rel.get("card") or {}).get("summary"))    # its own reason: a fail, or waiting (#132 review)
+        return v if not v["counts_as_pass"] else _make("waiting", why="it wasn't ready when it was made")
     older = any(current.get(k) not in (None, v) for k, v in (rel.get("versions") or {}).items())
     return _make("stale" if older else "holds")
+
+
+def report(rep: Optional[dict]) -> dict:
+    """A measured report (``Report.to_dict()``) as one verdict (#132 review): a fail only with a failure; passes
+    with a check still waiting is waiting ("not all checked"); only waiting, or nothing, is "nothing checked yet",
+    never red; else holds."""
+    results = (rep or {}).get("results") or []
+    statuses = [r.get("status") for r in results]
+    if any(st in ("fail", "error") for st in statuses):
+        return _make("fails", why=(rep or {}).get("said") or "a check fails")
+    if "pass" in statuses and any(st not in ("pass",) for st in statuses):
+        return {**_make("waiting", why=(rep or {}).get("said") or ""), "word": "not all checked"}
+    if "pass" not in statuses:
+        return {**_make("waiting", why="nothing checked yet"), "word": "nothing checked yet"}
+    return _make("holds", why=(rep or {}).get("said") or "")
+
+
+def history(h: dict) -> dict:
+    """A revision's history line: the verdict it stored (``result``: a verdict kind), or, from before it did, the
+    old ``all_pass``/``fail`` (single-part checks, which never waited)."""
+    result = h.get("result")
+    if result in KINDS:
+        return {**_make(result, why=h.get("said") or ""), **({"word": h["word"]} if h.get("word") else {})}
+    return _make("holds" if result == "all_pass" else "fails")  # producer: a record from before verdicts
 
 
 def carve_step(st: dict, filled: Optional[str] = None) -> dict:

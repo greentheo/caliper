@@ -195,3 +195,57 @@ def test_an_unweighed_total_is_not_checked_never_the_last_card_s_lower_number(tm
     (line,) = [ln for ln in answers.held_to(state, now) if "weight down" in ln["text"]]
     assert line["status"] == "warn" and "not checked" in line["text"] and "✓" not in line["text"], line
     assert verdicts.goal(None, incomplete="why")["why"] == "why"
+
+
+# --- #132 review, round 2: the release panel, the history badge, and the small asks -------------------------------
+def _rep(*statuses):
+    return {"results": [{"id": f"r{i}", "status": st} for i, st in enumerate(statuses)], "said": "…"}
+
+
+@pytest.mark.parametrize("statuses,kind,word", [
+    (("pass", "fail"), "fails", "doesn't hold"),
+    (("pass", "deferred"), "waiting", "not all checked"),
+    (("deferred",), "waiting", "nothing checked yet"),
+    ((), "waiting", "nothing checked yet"),
+    (("pass", "pass"), "holds", "holds"),
+])
+def test_a_report_s_verdict_fails_only_with_a_failure(statuses, kind, word):
+    v = verdicts.report(_rep(*statuses))
+    assert (v["kind"], v["word"]) == (kind, word) and (v["status"] == "bad") is (kind == "fails")
+
+
+def test_the_history_stores_the_report_s_verdict_and_the_page_reads_it(tmp_path):
+    from caliper.evaluate import AssertionResult, Report
+
+    store = _store(tmp_path, goals="written_by: caliper\nchecks: []\n")
+    rep = Report([AssertionResult("a", "x > 0", "pass", 1), AssertionResult("b", "y > 0", "deferred", None)])
+    store.write_part("tube", TUBE, intent="a printed tube", report=rep.to_dict())
+    h = store.history("tube")[-1]
+    assert h["result"] == "waiting" and h["word"] == "not all checked" and "all_pass" not in h.values()
+    only = Report([AssertionResult("b", "y > 0", "deferred", None)])
+    store.write_part("tube", TUBE.replace('"wall": 4.0', '"wall": 4.5'), intent="a printed tube", report=only.to_dict())
+    shown = [x for x in design_api.design_state(store)["parts"][0]["history"] if x.get("kind") == "revision"]
+    assert shown[-1]["verdict"]["word"] == "nothing checked yet" and shown[-1]["verdict"]["status"] != "bad"
+    assert shown[-2]["verdict"]["kind"] == "waiting"
+    assert verdicts.history({"result": "all_pass"})["kind"] == "holds"     # a record from before: single-part
+
+
+def test_the_release_panel_reads_the_release_s_verdict(tmp_path):
+    store = _store(tmp_path, goals="written_by: caliper\nchecks: []\n")
+    rel = {"id": "001", "ready": True, "versions": {"tube": 1}, "steps": [], "card": {"summary": {"pass": 1}}}
+    store.write_part("tube", TUBE.replace('"wall": 4.0', '"wall": 5.0'), intent="a printed tube")      # v2
+    assert verdicts.release(rel, {"tube": 2})["kind"] == "stale"
+    waits = {**rel, "ready": False, "card": {"summary": {"pass": 1, "fail": 0, "unknown": 1}}}
+    assert verdicts.release(waits, {"tube": 1})["kind"] == "waiting"          # its own reason, not "a check fails"
+    src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    assert "rel.verdict && rel.verdict.kind === 'holds'" in src and "rel.ready" not in src
+
+
+def test_the_small_asks():
+    from caliper.evaluate import AssertionResult, Report
+
+    assert verdicts.summary(None)["kind"] == "waiting" and verdicts.summary({})["kind"] == "waiting"
+    assert verdicts.meets(3.0, None)["kind"] == "waiting"
+    rep = Report([AssertionResult("a", "x > 0", "pass", 1), AssertionResult("b", "y > 0", "deferred", None)])
+    assert rep.to_text().startswith("Measurement report — NOT ALL CHECKED")
+    assert Report([AssertionResult("a", "x > 0", "pass", 1)]).to_text().startswith("Measurement report — ALL PASS")

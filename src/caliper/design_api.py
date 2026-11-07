@@ -336,6 +336,11 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         for h in p["history"]:
             if h.get("kind") == "load" and h.get("action") == "studied":
                 h["verdict"] = verdicts.of(h)
+            elif h.get("kind") == "revision" and h.get("result"):     # its report's verdict (#132 review)
+                h["verdict"] = verdicts.history(h)
+    current = {p["id"]: p["version"] for p in parts}
+    for rel in runs["release"]:                # ready, as made and for the parts as they are now (#132 review)
+        rel["verdict"] = verdicts.release(rel, current)
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,

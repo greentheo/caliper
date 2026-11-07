@@ -1271,7 +1271,9 @@ function releaseView(d) {
   const stale = d.parts.some((p) => rel.versions[p.id] !== undefined && rel.versions[p.id] !== p.version);
   const vers = Object.entries(rel.versions).map(([k, v]) => `${esc(k)} v${v}`).join(', ');
   return `<div class="small"><b>Release ${esc(rel.id)}</b>
-      ${rel.ready ? '<span class="badge ok">ready to cut</span>' : '<span class="badge bad">not ready — a check fails</span>'}
+      ${rel.verdict && rel.verdict.kind === 'holds' ? '<span class="badge ok">ready to cut</span>'
+        : rel.verdict && rel.verdict.kind === 'stale' ? '<span class="badge warn">ready as it was made: a part has changed since</span>'
+        : `<span class="badge ${verdictTone(rel.verdict)}">not ready — ${esc((rel.verdict && rel.verdict.why) || 'a check isn\'t settled')}</span>`}
       ${stale ? '<span class="badge bad">a part has changed since</span>' : ''}
       <div class="muted">${new Date(rel.created * 1000).toLocaleString()} · ${vers}</div>
       <div>${rel.steps.length} assembly steps · ${rel.sheets} sheets · ~$${Math.round(rel.shopping_usd)} to buy</div></div>
@@ -1312,7 +1314,7 @@ function historyItem(h) {
       : h.action === 'restore' ? `rolled back to v${h.restored_from}` : h.action;
     return `<li class="hist"><span class="v">v${h.version}</span>${esc(what)}
       ${h.feedback && h.action !== 'author' ? `<div>“${esc(h.feedback)}”</div>` : ''}
-      ${h.result ? `<span class="badge ${h.result === 'all_pass' ? 'ok' : 'bad'}">${h.result === 'all_pass' ? 'passed' : 'failing'}</span>` : ''}</li>`;
+      ${h.verdict ? `<span class="badge ${verdictTone(h.verdict)}">${esc(h.verdict.kind === 'holds' ? 'passed' : h.verdict.kind === 'fails' ? 'failing' : h.verdict.word)}</span>` : ''}</li>`;
   }
   if (h.kind === 'assertion') {
     return `<li class="hist">${h.action === 'promoted' ? '🔒 locked in' : 'declined'} <code>${esc(h.expr || h.id)}</code></li>`;
