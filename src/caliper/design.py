@@ -360,11 +360,13 @@ class DesignStore:
     def write_part(self, part_id: str, script: str, *, intent: Optional[str] = None,
                    spec: Optional[Spec] = None, report: Optional[dict] = None,
                    feedback: Optional[str] = None, action: str = "author",
-                   measured: Optional[dict] = None, extra: Optional[dict] = None) -> int:
+                   measured: Optional[dict] = None, extra: Optional[dict] = None,
+                   built: Optional[tuple] = None) -> int:
         """Write a new revision of a part: snapshot, index, assembly entry, history — atomically-ish.
 
         Returns the new version number. The canonical ``part.py`` is what the assembly builds; the
-        ``versions/vNNN/`` copy is the recoverable record of this exact revision.
+        ``versions/vNNN/`` copy is the recoverable record of this exact revision. ``built``: ``(script, params,
+        geometry)``, the revision's own successful build, kept for this version so it isn't built again (#97).
         """
         if not _ID_OK.match(part_id):
             raise ValueError(f"part id {part_id!r} must be a valid identifier (letters/digits/_)")
@@ -390,6 +392,10 @@ class DesignStore:
         # the assembly's cache keys on (path, mtime); a same-tick rewrite could otherwise serve stale
         # geometry to the very re-measure that's meant to prove the change landed.
         _invalidate_build_cache(self.script_path(part_id))
+        if built is not None:                     # only ever a build that succeeded, of this exact script (#97)
+            from .assembly import offer
+
+            offer(self.script_path(part_id), *built)
 
         if entry is None:
             entry = DesignPart(id=part_id, intent=intent or "", version=version)
