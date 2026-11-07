@@ -100,7 +100,7 @@ function follow(jobId, onEvent) {
     const finish = (p) => {
       if (done) return; done = true; if (es) es.close();
       p.status === 'done' ? resolve(p.result)
-        : reject(Object.assign(new Error(p.error || (p.status === 'cancelled' ? 'cancelled' : 'the job failed')),
+        : reject(Object.assign(new Error(plainly(p.error) || (p.status === 'cancelled' ? 'cancelled' : 'the job failed')),
           { errorId: p.error_id || '', status: p.status }));
     };
     const handle = (ev) => {
@@ -135,10 +135,7 @@ function len(mm, digits) {
 // a wall or a voxel, thin: inches to the nearest 1/32 (5/32″), mm where that rounds to nothing; never "0.0″" (CALI-97)
 function wallLen(mm) {
   if (mm == null || isNaN(mm)) return '—';
-  const n = Math.round(mm / IN * 32);
-  if (inches() && mm >= IN) return len(mm, 1);
-  if (inches() && n >= 1) { const g = gcd(n, 32); return `${n / g}/${32 / g}″`; }
-  // under 1 mm, two places, as the server says it: 0.25 mm, not 0.3 (#137 item 2)
+  // walls (and voxels) in mm, whatever the design's units (#139 review); under 1 mm, two places (#137 item 2)
   return `${mm < 1 ? +mm.toFixed(2) : mm < 10 ? +mm.toFixed(1) : Math.round(mm)} mm`;
 }
 const gcd = (a, b) => (b ? gcd(b, a % b) : a);
@@ -872,6 +869,19 @@ function renderInspector() {
   wireInspector(p);
 }
 
+// one rule on a part, with its verdict as measured on this version, and what it measured where it doesn't hold
+// (#137 item 1: the bar stool's locked shell wall broke, and this list showed no mark)
+function ruleItem(r) {
+  const v = r.verdict;
+  return `<li class="rule">🔒 ${v ? `${verdictBadge(v)} ` : ''}<b>${esc(r.id)}</b> <code>${esc(r.expr)}</code>${
+    v && v.kind !== 'holds' && r.said ? `<div class="small">${esc(r.said)}</div>` : ''}</li>`;
+}
+// the parts' own rules, measured, where the design has no checks of its own (#137 item 1: "Nothing to measure yet"
+// over a rule that fails)
+function partChecks(d) {
+  const results = d.parts.flatMap((p) => (p.rules || []).filter((r) => r.status));
+  return results.length ? { results } : null;
+}
 function checks(report, only) {
   if (!report) return '<div class="empty">Nothing to measure yet.</div>';
   const rows = report.results.filter((r) => !only || only(r));
@@ -932,7 +942,7 @@ function designView(d) {
       Object.entries(d.part_errors).map(([k, v]) => `<li><b>${esc(k)}</b> <span class="muted small">${esc(v)}</span></li>`).join('') + '</ul>' : ''}`;
   const work = `<h4>Scorecard</h4><div id="scoreBox">${scoreView(d)}</div>
     <h4>Design checks</h4>
-    ${checks(rep)}`;
+    ${checks(rep || partChecks(d))}`;
   const buy = d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : '';
   const make = `<h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>`;
   return `<h2>${esc(d.name)} ${status}</h2>
@@ -1188,15 +1198,20 @@ function goTo(id) {                   // open the card's numbers and bring that 
 // One card for the design as it stands: every check (pass/fail, margin) and every objective (value, change
 // since the last card) across design, optimization, making and cost — each with how far to trust it.
 const TRUST = { measured: 'measured', model: 'a model (on the safe side)', rough: 'rough', guess: 'a guess' };
+// a goal's own limit beside its number (#137 item 5): "13.1 lb (cap 10 lb)"
+// a scorecard number as the panel says it, at module level: goalLimit uses it too (#139 review: it called scoreView's
+// own num, so a goal with a number threw "num is not defined" and blanked the inspector)
+function scoreNum(v, u) {
+  if (v == null) return '—';
+  const n = typeof v === 'number' ? (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : `${+v.toFixed(2)}`) : esc(String(v));
+  return u === '$' ? `$${n}` : `${n}${u ? ' ' + esc(u) : ''}`;
+}
+const goalLimit = (c) => (typeof c.limit === 'number' ? ` (${c.op === '<=' || c.op === '<' ? 'cap' : 'needs'} ${scoreNum(c.limit, c.unit)})` : '');
 function scoreView(d) {
   const card = (d.scorecards || [])[0];
   const stale = card && (card.outdated     // scored the old way (CALI-111): its numbers aren't today's
     || d.parts.some((p) => card.versions && card.versions[p.id] !== undefined && card.versions[p.id] !== p.version));
-  const num = (v, u) => {
-    if (v == null) return '—';
-    const n = typeof v === 'number' ? (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : `${+v.toFixed(2)}`) : esc(String(v));
-    return u === '$' ? `$${n}` : `${n}${u ? ' ' + esc(u) : ''}`;
-  };
+  const num = scoreNum;
   const tag = (t) => t ? `<span class="badge" title="how far to trust it">${esc(TRUST[t] || t)}</span>` : '';
   // where a check came from (CALI-55): the person's words, an assumption, kept, or only proposed so far
   const from = (c) => c.source === 'stated' ? `<span class="badge ok" title="${esc(c.quote || '')}">you said</span>`
@@ -1225,7 +1240,7 @@ function scoreView(d) {
     <ul class="list small" style="margin-top:6px">${card.checks.map((c) => { const now = held.find((x) => x.id === c.id) || c;
       return `<li>${c.status === 'pass' ? '✓' : c.status === 'fail' ? '<span style="color:var(--bad)">✗</span>' : c.status === 'proposed' ? '◇'
         : c.status === 'unresolved' || c.status === 'untrusted' ? '<span style="color:var(--amber)">!</span>' : '?'}
-      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
+      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}${goalLimit(c)}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
       ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}</li>`; }).join('')}
       ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${esc(c.label || c.id)} ${from(c)}
         <span class="muted">— new since this card</span></li>`).join('')}</ul>
@@ -1352,7 +1367,7 @@ function partView(p) {
       <input type="checkbox" id="roleRef" ${p.role === 'fixed' ? 'checked' : ''}> treat as a reference (context, e.g. the car)</label>
     <h4>Rules on this part</h4>
     ${p.rules.length || designRules.length ? '<ul class="list">' +
-      [...p.rules, ...designRules].map((r) => `<li class="rule">🔒 <b>${esc(r.id)}</b> <code>${esc(r.expr)}</code></li>`).join('') + '</ul>'
+      [...p.rules, ...designRules].map(ruleItem).join('') + '</ul>'
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
     <h4>History</h4>
     <ul class="list">${p.history.slice().reverse().map(historyItem).join('')}</ul>
@@ -1984,6 +1999,10 @@ async function followCarve(p, jobId, stopping) {
   }
 }
 // the panel while a carve runs: the step it's on, the bar, about how long is left (from its pace so far), and Cancel
+// how long a carve has run, from its start, always shown: 9.5 min of a sweep said nothing (#137 item 4)
+const ran = (cj) => (cj && cj.t0 && !cj.stopping ? ` · running for ${minutesText((Date.now() - cj.t0) / 60000)}` : '');
+// the panel's time moves while nothing else does: the sweep before step 1 reports little
+setInterval(() => { for (const pid of Object.keys(S.carveJob || {})) paintCarve(pid); }, 30000);
 function carveProgress(pid) {
   const cj = S.carveJob[pid];
   if (!cj) return '';
@@ -1996,7 +2015,7 @@ function carveProgress(pid) {
   const where = cj.step != null && cj.steps ? `step ${cj.step + 1} of ${cj.steps}: ` : '';   // one count (#102)
   return `<div class="bar"><i style="width:${pct}%"></i></div>
     <div class="small muted" id="carveMsg">${esc(cj.stopping ? 'stopping at the next step…'
-      : where + (where ? (cj.text || '').replace(/^step \d+: /, '') : cj.text || ''))}${left}</div>
+      : where + (where ? (cj.text || '').replace(/^step \d+: /, '') : cj.text || ''))}${left}${ran(cj)}</div>
     ${cj.job ? `<div class="actions"><button id="carveStop" ${cj.stopping ? 'disabled' : ''}>Cancel</button></div>` : ''}`;
 }
 function paintCarve(pid) {
@@ -2033,6 +2052,8 @@ function defaultCheck(p) {
 // what stops a carve (or a lightening) before it starts, in words, or '' (CALI-106, #101; #102's note)
 function carveBlocked(p) {
   const check = defaultCheck(p);
+  // carving only takes material away: not on a part that already fails as drawn (#137 item 3)
+  if (check && check.verdict && check.verdict.kind === 'fails') return `it already fails (${sx(check.safety)}): make it hold first, then carve`;
   // where the walls are, and what to change, as the check said it (#136 review)
   if (check && check.too_thin) return check.thin_said ? `Can't carve it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be carved by strength';
   if (check && check.cases.some((c) => c.fea && c.fea.supported === false)) {
@@ -2059,6 +2080,20 @@ function wireCarve(p) {
 }
 
 // make it lighter (CALI-71): holes where the wood isn't working, through the thickness, each step re-checked
+// what stops a lightening before it starts, in words, or '': a part that already fails as drawn (#137 item 3), or
+// walls too thin for any check a study may make (#101, #136)
+function lightenBlocked(p) {
+  const check = defaultCheck(p);
+  if (check && check.verdict && check.verdict.kind === 'fails') return `It already fails (${sx(check.safety)}): make it hold first, then lighten it`;
+  if (check && check.too_thin) return check.thin_said ? `Can't lighten it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength';
+  return '';
+}
+// where a run's worst stress is: a piece by name only from a run that recorded the wall there (#137: an older run's
+// "seat top" was the nearest wood to a hot spot in the printed cone), else how high up it is
+function peakWhere(f) {
+  if (f && f.in && f.wall_mm != null) return `in ${f.in}`;
+  return f && f.at ? `around ${len(f.at[2])} up` : 'in the part';
+}
 function lightenRuns(pid) { return (S.design.lighten_runs || []).filter((r) => r.part === pid); }
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
@@ -2074,8 +2109,8 @@ function lightenView(p) {
     <div class="muted small">Down until the safety runs out: holes in the walls where the wood isn't working (a jigsaw cuts
       them, a solid rim where it's glued and screwed), then hole-saw holes in the panel you stand on, one at a time,
       then thinner sheet. Every step is checked again.</div>
-    <div class="actions"><button id="lightGo" ${defaultCheck(p) && defaultCheck(p).too_thin ? 'disabled' : ''}>${run ? 'Lighten it again' : 'Lighten it'}</button>
-      ${defaultCheck(p) && defaultCheck(p).too_thin ? `<span class="muted small">${defaultCheck(p).thin_said ? `Can't lighten it by strength: ${esc(defaultCheck(p).thin_said)}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength'}</span>` : ''}</div>
+    <div class="actions"><button id="lightGo" ${lightenBlocked(p) ? 'disabled' : ''}>${run ? 'Lighten it again' : 'Lighten it'}</button>
+      ${lightenBlocked(p) ? `<span class="muted small">${esc(lightenBlocked(p))}</span>` : ''}</div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
@@ -2121,12 +2156,16 @@ function loadCase(p, run, c, i) {
   const pl = c.plate, f = c.fea || {};
   const holds = p.untrusted ? untrustedBadge(p) : caseBadge(c);     // a filled-in shape wins (CALI-96, then 97)
   const plate = !pl ? '' : pl.done
-    ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
+    ? (pl.support === 'ring'
+      ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, a round plate held at its ring's outer edge (${len(pl.ring_mm)} across),
+        edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety_across)}</b> across the grain, ${sx(pl.safety)} along it
+        · sags ${len(pl.deflection_mm, 3)} <span class="muted">(Roark; needs an engineer's check)</span></div>`
+      : `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
-        ${sx(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`
+        ${sx(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`)
     : `<div class="muted small" style="margin-top:4px">No plate check for ${esc(pl.piece)}: ${esc(pl.why)}.</div>`;
   const fea = f.supported === false ? `<div class="small" style="color:var(--bad)">${esc(c.why)}</div>`
-    : `<div class="small" style="margin-top:4px"><b>whittle FEA</b> — works hardest in ${esc(f.in || 'the part')}
+    : `<div class="small" style="margin-top:4px"><b>whittle FEA</b> — works hardest ${esc(peakWhere(f))}
         (${fixed(f.peak_mpa, 1)} MPa → ${sx(f.safety)}) · gives ${len(f.deflection_mm, 3)}</div>`;
   const by = pl && pl.done && pl.by_thickness ? (() => {
     const ok = pl.by_thickness.filter(holdsHere);
@@ -2290,7 +2329,7 @@ async function showHeat(pid, run, index) {
     const pl = c.plate && c.plate.done ? c.plate : null, f = c.fea || {};
     const decided = c.governs === 'plate' && pl
       ? `the plate check on the ${esc(pl.piece)}: ${fixed(pl.stress_mpa, 1)} MPa, with the grain the wrong way`
-      : `the FEA's peak: ${fixed(f.peak_mpa, 1)} MPa in the ${esc(f.in || 'part')}`;
+      : `the FEA's peak: ${fixed(f.peak_mpa, 1)} MPa ${esc(peakWhere(f))}`;   // never an old run's label (#139 review)
     const bar = $('stationBar');
     bar.hidden = false;
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →

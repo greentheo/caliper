@@ -19,7 +19,7 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 
 from . import (aero, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
-               load_study, making, patterns, promote, release, samples, scorecard, shop, studies, verdicts)
+               load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, verdicts)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, Busy, stream
@@ -255,9 +255,17 @@ def _where(job) -> str:
 
 
 # --- serialising -----------------------------------------------------------------------------------
-def _bbox(store: DesignStore, pid: str) -> Optional[dict]:
+def _geometry(store: DesignStore, pid: str):
+    """The part as built, once per page state (its size and its rules both read it), or None if it won't build."""
     try:
-        lo, hi = store.part_geometry(pid).require_mesh().bounds
+        return store.part_geometry(pid)
+    except Exception:  # noqa: BLE001 — a part that won't build is reported by the measurement
+        return None
+
+
+def _bbox(store: DesignStore, pid: str, g=None) -> Optional[dict]:
+    try:
+        lo, hi = (g if g is not None else store.part_geometry(pid)).require_mesh().bounds
     except Exception:  # noqa: BLE001 — a part that won't build is reported by the measurement
         return None
     return {"min": [round(float(v), 2) for v in lo], "max": [round(float(v), 2) for v in hi],
@@ -278,6 +286,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         script = store.read_script(p.id) if store.is_scripted(p.id) else ""
         params = aero.read_params(script) if script else None
         ranges = aero.read_ranges(script) if script else {}
+        geo = _geometry(store, p.id)
         parts.append({
             "params": params,
             # a part that declares its tubes is a frame: it gets sized, not shaped for drag
@@ -299,8 +308,9 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
             "stl_url": f"/api/designs/{slug}/parts/{p.id}.stl?v={p.version}",
-            "bbox": _bbox(store, p.id),
-            "rules": [{"id": a.id, "expr": a.expr} for a in (spec.assertions if spec else [])],
+            "bbox": _bbox(store, p.id, geo),
+            # each measured on the part as it is now, with its verdict (#137 item 1)
+            "rules": part_rules.measured(store, p.id, geo),
             "history": store.history(p.id)[-history_limit:],
             "versions": store.versions(p.id),
         })
@@ -324,6 +334,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
                          stale=part is None or r.get("version") != part["version"])   # never green on an older run
         for c, cv in zip(r.get("cases") or [], v.pop("cases", [])):
             c["verdict"] = cv
+            if c.get("plate") and not c["plate"].get("done"):      # never an older run's "16 of its 16" (#139)
+                c["plate"]["why"] = load_study.plate_why(c["plate"])
             # each thickness the plate check tried: its number against what it needs, and only where the case is
             # settled (it holds or fails): never green on a not-trusted, unresolved or older case (#132 review)
             for b in ((c.get("plate") or {}).get("by_thickness") or []):

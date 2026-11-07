@@ -72,7 +72,7 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     steps = [{"lb": lb, "sag_mm": [round(lo * lb, 3), round(hi * lb, 3)]} for lb in loads]
     return {"part": part_id, "version": run["version"], "run": run["id"], "case": case["name"], "lb": case["lb"],
             "factor": case["factor"],
-            "where": plate.get("piece") if plate.get("done") else case["fea"].get("in"),
+            "where": plate.get("piece") if plate.get("done") else L.peak_in(case["fea"]),   # not an old label
             "breaks_lb": breaks, "steps": steps, "per_lb_mm": [round(lo, 6), round(hi, 6)],
             "measure_with": measure_with(hi * case["lb"]),
             "basis": ("from an FEA too coarse to see its walls, so a rough guess until it's checked finer: "
