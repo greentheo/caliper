@@ -733,7 +733,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         notes.append(ctx["coarse"])
     if any(h.get("default") for h in held):
         notes.append("Held by the floor: everything at its underside, as if it stands on a flat floor.")
-    worst = min((c["safety"] for c in cases if c.get("safety") is not None), default=None)
+    # the number from the cases that ran: one whose load never reached a support has none, never 0x (#140 review)
+    worst = min((c["safety"] for c in cases if c.get("safety") is not None
+                 and (c.get("fea") or {}).get("supported") is not False), default=None)
     record = {
         "id": rid, "part": part_id, "kind": "load", "created": time.time(),
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),

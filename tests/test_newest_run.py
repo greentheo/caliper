@@ -108,3 +108,85 @@ def test_a_piece_is_sliced_once(tmp_path, monkeypatch):
     printing.estimate(str(stl), "petg", (220, 220, 250))
     printing.estimate(str(stl), "pla", (220, 220, 250))                         # another plastic: sliced
     assert len(calls) == 3
+
+
+# --- #140 review: the survivors pinned, and the number written where it's made ----------------------------------------
+
+def _tube_with_an_unjoined_check(tmp_path, monkeypatch):
+    import os
+
+    from caliper import load_study
+    from caliper.design import DesignStore
+
+    from .test_resolved import TUBE
+
+    pytest.importorskip("cadquery")
+    monkeypatch.setenv("CALIPER_SLICER", "")                        # rough print times: no slicer in a test
+    store = DesignStore.create("a printed tube", base=str(tmp_path / "designs"))
+    store.write_part("tube", TUBE, intent="a printed tube")
+    run, case = _unjoined()
+    run.update({"id": "20261105-204152-4419", "part": "tube", "version": store.design.part("tube").version,
+                "created": 1.0, "spacing_mm": 3.0})
+    folder = os.path.join(load_study.runs_dir(store), run["id"])
+    os.makedirs(folder)
+    with open(os.path.join(folder, "run.json"), "w") as f:
+        json.dump(run, f)
+    # as an older run stored it: holds False and 0.0, and a verdict that said "doesn't hold"
+    store.append_history("tube", {"kind": "load", "action": "studied", "run": run["id"], "cases": 1, "safety": 0.0,
+                                  "holds": False, "verdict": {"kind": "fails", "word": "doesn't hold"}})
+    return store
+
+
+def test_studies_says_why_a_check_couldn_t_run_with_no_number():
+    from caliper import studies
+
+    run, _ = _unjoined()
+    assert studies._headline("load", run) == ("not checked: nothing connects where it's pushed to where it's held", None)
+
+
+def test_an_older_history_line_reads_its_run_s_verdict_through_the_page_state(tmp_path, monkeypatch):
+    from caliper import design_api
+
+    store = _tube_with_an_unjoined_check(tmp_path, monkeypatch)
+    (p,) = design_api.design_state(store)["parts"]
+    (h,) = [h for h in p["history"] if h.get("kind") == "load"]
+    assert h["verdict"]["kind"] == "unchecked" and "nothing connects" in h["verdict"]["why"]
+
+
+def test_the_scorecard_gives_no_number_for_a_check_that_couldn_t_run(tmp_path, monkeypatch):
+    from caliper import scorecard
+
+    store = _tube_with_an_unjoined_check(tmp_path, monkeypatch)
+    card = scorecard.compute(store)
+    assert "strength.safety" not in card["metrics"] and "strength.tube.safety" not in card["metrics"]
+    assert any("nothing connects" in (c.get("note") or "") for c in card["checks"] if c.get("metric") == "strength.safety"), card["checks"]
+
+
+def test_the_slicer_key_holds_its_infill_and_a_timeout_isn_t_remembered(tmp_path, monkeypatch):
+    import subprocess
+
+    calls = []
+    monkeypatch.setattr(printing, "_SLICED", {})
+    monkeypatch.setattr(printing, "_estimate", lambda *a: calls.append(a) or {"hours": 1.0})
+    stl = tmp_path / "a.stl"
+    stl.write_bytes(b"solid a\nendsolid a\n")
+    printing.estimate(str(stl), "petg", (220, 220, 250), infill=0.2)
+    printing.estimate(str(stl), "petg", (220, 220, 250), infill=0.4)               # another infill: sliced again
+    assert len(calls) == 2
+    # a slicer that times out: said so, and sliced again next time
+    monkeypatch.undo()
+    monkeypatch.setattr(printing, "_SLICED", {})
+    monkeypatch.setattr(printing, "slicer", lambda: "/usr/bin/true")
+    ran = []
+
+    def times_out(*a, **k):
+        ran.append(a)
+        raise subprocess.TimeoutExpired(a[0], 600)
+
+    monkeypatch.setattr(printing.subprocess, "run", times_out)
+    box = pytest.importorskip("trimesh").creation.box((10, 10, 10))
+    box.export(str(stl))
+    got = printing.estimate(str(stl), "petg", (220, 220, 250))
+    assert got["trust"] == "rough" and "the slicer timed out" in got["from"] and "_retry" not in got
+    printing.estimate(str(stl), "petg", (220, 220, 250))
+    assert len(ran) == 2

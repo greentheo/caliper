@@ -25,7 +25,13 @@ v3 twice "0x", v4 1.7x ✗, and no v7 run).
    card, its weight and print time). `printing.estimate` now remembers what it sliced by the STL's bytes, material,
    printer size, infill and slicer: on the copy, 45 s for the first design cards (each piece sliced once, the rest is
    the state's builds) and 3 s for the part cards after.
-- Tests: tests/test_newest_run.py (8; 7 fail without this, the eighth pins a card newer than the run).
+- **#140 review:** the run's `safety` is written from the cases that ran, at the source (`load_study`), so the first
+  run's step, the picture's re-check and Studies can't print 0.0x; an older record reads unchecked. Studies says an
+  unsupported case's own reason, with no number ("not checked: nothing connects where it's pushed to where it's
+  held"). A slicer that timed out (or wouldn't run) says so, not "no slicer installed", and isn't remembered. Pinned:
+  the history's verdicts through `design_state`, `scorecard.compute` with an unsupported case, and the infill in the
+  slicer's key.
+- Tests: tests/test_newest_run.py (12; 7 + 2 fail without this, the rest pin what it keeps).
 
 ### 2026-11-07 · CALI-112 (#114) · One verdict function every reader asks
 - **`verdicts.py`:** kinds worst first (`fails`, `untrusted`, `unchecked`, `unresolved`, `edge`, `stale`,

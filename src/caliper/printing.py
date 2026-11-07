@@ -133,9 +133,12 @@ def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_IN
     with open(stl_path, "rb") as fh:
         key = (hashlib.sha1(fh.read()).hexdigest(), material, tuple(float(v) for v in volume_mm), float(infill),
                slicer())
-    if key not in _SLICED:
-        _SLICED[key] = _estimate(stl_path, material, volume_mm, infill)
-    return dict(_SLICED[key])
+    if key in _SLICED:
+        return dict(_SLICED[key])
+    got = _estimate(stl_path, material, volume_mm, infill)
+    if not got.pop("_retry", False):                  # a slicer that timed out isn't remembered (#140 review)
+        _SLICED[key] = got
+    return dict(got)
 
 
 def _estimate(stl_path: str, material: str, volume_mm, infill: float) -> dict:
@@ -150,11 +153,14 @@ def _estimate(stl_path: str, material: str, volume_mm, infill: float) -> dict:
                    "--max-print-height", f"{z:g}", "--center", f"{x / 2:g},{y / 2:g}",
                    "--fill-density", f"{round(infill * 100)}%", "--filament-density", f"{density:g}",
                    "--filament-diameter", f"{FILAMENT_D_MM:g}", stl_path]
+            failed = ""
             try:
                 subprocess.run(cmd, capture_output=True, text=True, timeout=600)
                 text = open(out, errors="ignore").read() if os.path.exists(out) else ""
-            except (subprocess.TimeoutExpired, OSError):
-                text = ""
+            except subprocess.TimeoutExpired:
+                text, failed = "", "the slicer timed out"
+            except OSError as e:
+                text, failed = "", f"the slicer wouldn't run ({e.strerror or e})"
         t = re.search(r"estimated printing time \(normal mode\) = ([^\n]+)", text)
         mm = re.search(r"filament used \[mm\] = ([\d.]+)", text)
         if t and mm:
@@ -169,9 +175,11 @@ def _estimate(stl_path: str, material: str, volume_mm, infill: float) -> dict:
     shell = min(vol, area * M.PRINT_SHELL_MM)
     plastic = shell + infill * (vol - shell)
     grams = plastic / 1000 * density
+    why = (failed if exe and failed else "the slicer gave no estimate" if exe else "no slicer installed")
     return {"hours": round(plastic / ROUGH_MM3_PER_S / 3600, 2), "filament_g": round(grams, 1),
             "usd": round(grams / 1000 * pm["usd_per_kg"], 2), "trust": "rough",
-            "from": "walls + infill at rough speeds (no slicer installed)"}
+            "from": f"walls + infill at rough speeds ({why})",
+            **({"_retry": True} if exe else {})}
 
 
 def _hours(text: str) -> float:
