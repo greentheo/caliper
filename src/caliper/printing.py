@@ -123,18 +123,43 @@ def _pins(mesh, axis: int, at: float):
 #: Slicer results by what was sliced (the STL's bytes, material, printer size, infill, slicer): one /answers sliced each
 #: piece three times, 4 s each, and that was most of a 2-minute cold open (#138 item 4).
 _SLICED: dict = {}
+#: CALI-104 (#97): slices started for a card that didn't wait, by the same key; their result lands in _SLICED
+_PENDING: set = set()
+#: what a card shows while the slicer works: no number, never a stale or rough one as if final
+WORKING = {"pending": True, "hours": None, "filament_g": None, "usd": None, "trust": None,
+           "from": "PrusaSlicer: working it out"}
 
 
-def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_INFILL) -> dict:
+def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_INFILL, wait: bool = True) -> dict:
     """Time, filament and cost for one STL: from PrusaSlicer where it's installed, else rough. Remembered by what was
-    sliced, so the same piece isn't sliced again."""
+    sliced, so the same piece isn't sliced again. ``wait=False`` (the cards, #97: 10 s of the bar stool's 20 s): a
+    piece not sliced yet is started in the background and :data:`WORKING` comes back; the next ask has the number."""
     import hashlib
+    import threading
 
     with open(stl_path, "rb") as fh:
         key = (hashlib.sha1(fh.read()).hexdigest(), material, tuple(float(v) for v in volume_mm), float(infill),
                slicer())
     if key in _SLICED:
         return dict(_SLICED[key])
+    if not wait and slicer():
+        if key not in _PENDING:
+            _PENDING.add(key)
+            keep = tempfile.mkdtemp(prefix="caliper-slice-")
+            copy = os.path.join(keep, os.path.basename(stl_path))
+            shutil.copyfile(stl_path, copy)          # the card's own file may be gone before the slicer's done
+
+            def later():
+                try:
+                    got = _estimate(copy, material, volume_mm, infill)
+                    if not got.pop("_retry", False):
+                        _SLICED[key] = got
+                finally:
+                    _PENDING.discard(key)
+                    shutil.rmtree(keep, ignore_errors=True)
+
+            threading.Thread(target=later, daemon=True, name="caliper-slice").start()
+        return dict(WORKING)
     got = _estimate(stl_path, material, volume_mm, infill)
     if not got.pop("_retry", False):                  # a slicer that timed out isn't remembered (#140 review)
         _SLICED[key] = got

@@ -27,8 +27,10 @@ def rows(store: DesignStore, part_id: str) -> list[dict]:
     return C.takeoff(items) if items else []
 
 
-def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_dir: Optional[str] = None) -> dict:
-    """How this part is made in the shop. ``out_dir`` keeps a printed part's pieces as STLs there."""
+def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_dir: Optional[str] = None,
+         wait: bool = True) -> dict:
+    """How this part is made in the shop. ``out_dir`` keeps a printed part's pieces as STLs there. ``wait=False``
+    (the cards, #97): a printed part not sliced yet says its print time is being worked out (``pending``), no number."""
     from . import printing
 
     shop = shop or S.read()
@@ -54,7 +56,12 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
             name = f"{part_id}-{i + 1}-of-{len(parts)}.stl" if len(parts) > 1 else f"{part_id}.stl"
             path = os.path.join(keep, name)
             m.export(path)
-            each.append({"file": name, **printing.estimate(path, pc["material"], volume)})
+            each.append({"file": name, **printing.estimate(path, pc["material"], volume, wait=wait)})
+        if any(e.get("pending") for e in each):     # one piece still slicing: no total, never a part of one
+            printed.append({"name": pc["name"], "material": pc["material"], "pieces": len(parts),
+                            "pinned": len(parts) > 1, "files": each, "pending": True, "hours": None,
+                            "filament_g": None, "usd": None, "trust": None, "from": printing.WORKING["from"]})
+            continue
         printed.append({"name": pc["name"], "material": pc["material"], "pieces": len(parts),
                         "pinned": len(parts) > 1, "files": each,
                         "hours": round(sum(e["hours"] for e in each), 1),
@@ -67,4 +74,5 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
             by_how.setdefault(p["how"], []).append(p["name"])
     missing = [p for p in pieces if not p["ok"]]
     return {"part": part_id, "shop_default": bool(shop.get("default")), "pieces": pieces, "by_how": by_how,
-            "printed": printed, "missing": missing, "ok": not missing}
+            "printed": printed, "missing": missing, "ok": not missing,
+            "pending": any(pr.get("pending") for pr in printed)}

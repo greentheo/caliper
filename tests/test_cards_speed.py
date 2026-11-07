@@ -88,3 +88,89 @@ def test_a_refine_builds_its_part_once(store, monkeypatch):
 
     answers.answers(store, design_api.design_state(store), "box")
     assert n["builds"] == builds == 1, n
+
+
+# --- the slicer off the card's path: "working it out", then the number; never a stale or rough one as final ----------
+
+@pytest.fixture
+def slow_slicer(monkeypatch):
+    """A slicer that answers only when let go, as PrusaSlicer takes 10 s of the bar stool's card."""
+    import threading
+
+    from caliper import printing
+
+    go, calls = threading.Event(), []
+
+    def estimate(path, material, volume, infill):
+        calls.append(path)
+        go.wait(10)
+        return {"hours": 3.5, "filament_g": 120.0, "usd": 3.0, "trust": "model", "from": "PrusaSlicer"}
+
+    monkeypatch.setattr(printing, "_SLICED", {})
+    monkeypatch.setattr(printing, "_PENDING", set())
+    monkeypatch.setattr(printing, "slicer", lambda: "/usr/bin/prusa-slicer")
+    monkeypatch.setattr(printing, "_estimate", estimate)
+    return go, calls
+
+
+def _sliced(key_count, timeout=5.0):
+    import time
+
+    from caliper import printing
+
+    t = time.time()
+    while (len(printing._SLICED) < key_count or printing._PENDING) and time.time() - t < timeout:
+        time.sleep(0.02)
+
+
+def test_a_card_never_waits_for_the_slicer_and_says_it_s_working(tmp_path, slow_slicer):
+    from caliper import printing
+
+    go, calls = slow_slicer
+    stl = tmp_path / "a.stl"
+    stl.write_bytes(b"solid a\nendsolid a\n")
+    first = printing.estimate(str(stl), "petg", (220, 220, 250), wait=False)
+    assert first == printing.WORKING and first["hours"] is None                      # no number, said so
+    assert printing.estimate(str(stl), "petg", (220, 220, 250), wait=False)["pending"]
+    go.set()
+    _sliced(1)
+    assert len(calls) == 1                                                            # sliced once, not per ask
+    assert printing.estimate(str(stl), "petg", (220, 220, 250), wait=False)["hours"] == 3.5
+
+
+def test_the_cards_say_print_time_working_it_out_and_a_print_goal_waits(tmp_path, slow_slicer):
+    from caliper import answers, design_api, goals, making, shop
+
+    from .test_shop import PRINTED, PRINTER
+
+    go, _ = slow_slicer
+    shop.write({"hand": ["drill"], "machines": [PRINTER]})
+    store = DesignStore.create("a bar", base=str(tmp_path / "designs"))
+    store.write_part("bar", PRINTED, intent="a printed bar")
+    goals.write(store, {"checks": [{"id": "fast", "label": "prints in a day", "metric": "print.hours", "op": "<=",
+                                    "limit": 24, "source": "answered"}]})
+    mk = making.plan(store, "bar", wait=False)
+    (pr,) = mk["printed"]
+    assert mk["pending"] and pr["pending"] and pr["hours"] is None and pr["usd"] is None
+    state = design_api.design_state(store)
+    how = next(c for c in answers.part(store, state, "bar") if c["key"] == "make")
+    (line,) = [ln for ln in how["lines"] if ln["text"].startswith("Print it in PETG")]
+    assert line["text"] == "Print it in PETG: 2 pieces; print time: working it out…" and line["working"]
+    now = answers.measured(store, state)
+    assert "print.hours" not in now and now["print.pending"] == "print time: working it out…"
+    (goal,) = [ln for ln in answers.held_to(state, now) if "prints in a day" in ln["text"].lower()]
+    assert goal["text"] == "Prints in a day: print time: working it out…" and goal["status"] == "info"
+    go.set()
+    _sliced(2)
+    now = answers.measured(store, design_api.design_state(store))
+    assert now["print.hours"] == 7.0 and "print.pending" not in now                    # two pieces, 3.5 h each
+    # the scorecard, the release and the making panel wait for the real number: never "working"
+    assert making.plan(store, "bar")["printed"][0]["hours"] == 7.0
+
+
+def test_the_page_asks_again_while_a_print_time_is_worked_out():
+    import os
+
+    src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    body = src[src.index("async function loadAnswers()"):src.index("function wireCards()")]
+    assert "ln.working" in body and "setTimeout" in body and "S.answers.key === key" in body
