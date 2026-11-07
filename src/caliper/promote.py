@@ -88,7 +88,7 @@ class Proposal:
     level: str                     # "part" | "design"
     part: Optional[str] = None     # the part it constrains (and where a part-level one is stored)
     why: str = ""                  # the feedback it came from, in the user's words
-    holds_now: bool = True         # does the current geometry satisfy it?
+    holds_now: Optional[bool] = None   # producer: does the current geometry satisfy it? None: not known (#132 review)
     actual: object = None          # what it measured when validated
     source: str = "offline"        # "offline" | "llm"
     #: Enforced rules this proposal cannot co-exist with — accepting it replaces them (CALI-30).
@@ -96,13 +96,13 @@ class Proposal:
 
     def to_dict(self) -> dict:
         return {"id": self.id, "expr": self.expr, "level": self.level, "part": self.part,
-                "why": self.why, "holds_now": self.holds_now, "actual": _plain(self.actual),
+                "why": self.why, "holds_now": self.holds_now, "actual": _plain(self.actual),  # producer
                 "source": self.source, "conflicts": [list(c) for c in self.conflicts]}
 
     @classmethod
     def from_dict(cls, d: dict) -> "Proposal":
         return cls(id=d["id"], expr=d["expr"], level=d.get("level", "part"), part=d.get("part"),
-                   why=d.get("why", ""), holds_now=bool(d.get("holds_now", True)),
+                   why=d.get("why", ""), holds_now=d.get("holds_now"),  # producer: None when not said
                    actual=d.get("actual"), source=d.get("source", "offline"),
                    conflicts=[tuple(c) for c in d.get("conflicts", [])])
 
@@ -114,7 +114,12 @@ class Proposal:
         allowed = re.search(r" [-+] (\d+(?:\.\d+)?)\b", self.expr)
         if allowed and any(k.split(".")[-1] in self.expr for k in MEASURING):
             lines.append(f"    (the {allowed.group(1)} mm is what measuring it can be off by, on a part that's right)")
-        if self.holds_now:
+        from . import verdicts
+
+        now = verdicts.rule(self.holds_now)["kind"]
+        if now == "waiting":
+            lines.append("    · whether it holds now isn't known yet: accepting it checks it.")
+        elif now == "holds":
             lines.append(f"    ✓ it holds now{actual}. Every future revision would be checked "
                          f"against it.")
         else:
@@ -558,7 +563,7 @@ def accept(store: DesignStore, proposal: Proposal) -> str:
     if proposal.part:
         store.append_history(proposal.part, {
             "kind": "assertion", "action": "promoted", "id": proposal.id, "expr": proposal.expr,
-            "level": proposal.level, "from_feedback": proposal.why, "holds_now": proposal.holds_now,
+            "level": proposal.level, "from_feedback": proposal.why, "holds_now": proposal.holds_now,  # producer
             **({"replaced": sorted(retired)} if retired else {}),
         })
     store.append_log({"kind": "assertion", "action": "promoted", "id": proposal.id,

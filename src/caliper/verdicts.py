@@ -23,6 +23,7 @@ KINDS = {
     "unresolved": ("warn", "not resolved", False),
     "edge": ("warn", "middle only", False),
     "stale": ("warn", "older version", False),
+    "estimate": ("warn", "an estimate", False),
     "waiting": ("unknown", "not checked yet", False),
     "holds": ("ok", "holds", True),
 }
@@ -122,10 +123,12 @@ STATUS = {"holds": "pass", "fails": "fail", "untrusted": "untrusted", "unresolve
 
 
 def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Optional[str] = None,
-         edge: bool = False, stale: bool = False) -> dict:
+         edge: bool = False, stale: bool = False, incomplete: Optional[str] = None) -> dict:
     """A goal on a metric: ``met`` (None when there's no number). A ✗ stays a ✗ (a fail on a filled-in block is
     certain: the part as built is weaker still); then not trusted, not resolved, middle only, scored before the last
-    change. ``untrusted``/``unresolved`` are the words that say why, carried as ``why``."""
+    change, a part left out. ``untrusted``/``unresolved``/``incomplete`` are the words that say why, as ``why``:
+    a design's verdict never leaves a part out (#132 review: a part unchecked, older or errored is that, so the
+    rest can't read as holding for it)."""
     if met is None:
         return _make("waiting")
     if not met:
@@ -138,14 +141,64 @@ def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Op
         return _make("edge")
     if stale:
         return _make("stale")
+    if incomplete:
+        return _make("waiting", why=incomplete)
     return _make("holds")
 
 
-def meets(safety: Optional[float], need: Optional[float]) -> dict:
-    """A number against what it needs (a frame's weakest member, a station): holds or fails, or waiting."""
+def compare(value: float, op: str, limit: float) -> bool:
+    """A goal's number against its limit, as the goal says (``>=``, ``<=``, ``==``): the one place it's compared."""
+    return value >= limit if op == ">=" else value <= limit if op == "<=" else abs(value - limit) < 1e-9
+
+
+def rule(holds_now: Optional[bool]) -> dict:
+    """A proposed rule on the part as it is: holds, fails, or not known yet (None: never a ✓, #132 review)."""
+    return _make("waiting" if holds_now is None else "holds" if holds_now else "fails")
+
+
+def meets(safety: Optional[float], need: Optional[float], *, stale: bool = False) -> dict:
+    """A number against what it needs (a frame's weakest member, a station): holds or fails, or waiting; an older
+    run's holds is ``stale`` (a fail stays a fail)."""
     if safety is None:
         return _make("waiting")
-    return _make("holds" if safety >= (need or 0) else "fails", safety)
+    if safety < (need or 0):
+        return _make("fails", safety)
+    return _make("stale" if stale else "holds", safety)
+
+
+def release(rel: dict, current: dict) -> dict:
+    """A build package: ready only as made and for the parts as they are now (#132 review: "ready to cut" on a
+    package of older versions). ``current``: ``{part: version}``."""
+    if not rel.get("ready"):  # producer: the release's own verdict, made with summary() at release time
+        return {**summary((rel.get("card") or {}).get("summary")), "kind": "fails", "status": "bad",
+                "counts_as_pass": False}
+    older = any(current.get(k) not in (None, v) for k, v in (rel.get("versions") or {}).items())
+    return _make("stale" if older else "holds")
+
+
+def carve_step(st: dict, filled: Optional[str] = None) -> dict:
+    """A carve step as a person reads it (#132 review): it holds only if the printed part holds there AND the whole
+    part does (``whole_holds``), on a shape that isn't a filled-in block."""
+    if not station(st)["counts_as_pass"]:
+        return _make("fails", st.get("safety"))
+    if st.get("whole_holds") is False:  # producer: the study's own number, judged here
+        return _make("fails", st.get("whole"), why="the whole part doesn't hold there")
+    if filled:
+        return _make("untrusted", st.get("safety"), why=filled)
+    return _make("holds", st.get("safety"))
+
+
+def lighten_step(st: dict, filled: Optional[str] = None) -> dict:
+    """A lightening step as a person reads it (#132 review): a thinner sheet's number is an estimate, never "holds";
+    on a filled-in block, not trusted."""
+    v = station(st)
+    if v["kind"] == "fails":
+        return v
+    if st.get("estimate"):
+        return _make("estimate", st.get("safety"))
+    if filled:
+        return _make("untrusted", st.get("safety"), why=filled)
+    return v
 
 
 def station(st: dict, *, whole: bool = False) -> dict:

@@ -20,6 +20,15 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - `tests/test_verdicts.py` (37; can't import on main): two grep guards (Python and the page), every kind through
   every reader (cards, book row, kids' book, Studies, picture reply, page badges in node), the precedence, the summary,
   `goal`. Tests that read the old fields read the verdict now. design.js v=67.
+- **#132 review (the foreman's sweep), A–D:** a design's verdict never leaves a part out (a part unchecked, older or
+  errored is that: `measured()`, the scorecard, the kids' book, frame runs now record their version); `stale` is
+  produced wherever a run isn't the part's version (badges, the part card, the chat's facts, the make card, Studies
+  rows, releases via `verdicts.release`); carve steps (`carve_step`: the whole part and filled-in too), lightening
+  steps (`lighten_step`: an estimate is its own kind), the plate check's rows, the first reply (worst first), a part's
+  rules (`_rules_line`), trials (held but short), `promote`'s `holds_now` (unknown by default, `verdicts.rule`) and
+  app.js's badge all ask the verdict; goals compare in `verdicts.compare`. Both guards widened (`< min_safety`,
+  `>= limit`/`lim`, `ready`, `best`, `holds_now`; every `.holds`, `whole_holds`, `safety_across >=` in design.js and
+  app.js): on the pre-rework head both fail, with all 13 of `tests/test_verdicts_sweep.py`.
 
 ### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
 - **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to

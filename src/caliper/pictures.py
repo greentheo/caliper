@@ -284,7 +284,7 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
             poly = fit(shape, panel, scale=SHRINK ** (k + 1))
             if poly is None:
                 break
-        if predicted is not None and predicted < min_safety:
+        if predicted is not None and predicted < min_safety:  # search
             return {"ok": False, "panel": panel["name"], "subject": subject, "predicted": predicted,
                     "min_safety": min_safety, "reply": (
                         f"A {subject} on the {panel['name']} would make it too weak: {predicted:g} times over at "

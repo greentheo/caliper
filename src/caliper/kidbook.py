@@ -245,20 +245,24 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
                                                    "Two coats, and let the first one dry.", "img": img})
     with open(os.path.join(root, "kids", "finished.png"), "wb") as f:
         f.write(release.draw(view, [(every, "now")]))
-    pages.append(_strength_page(rec.get("strength") or {}))
+    pages.append(_strength_page(rec.get("strength") or {}, part_ids))
     with open(os.path.join(root, "kids.html"), "w") as f:
         f.write(page(release.title(rec["design"]), pages))
     return "kids.html"
 
 
 
-def _strength_page(strength: dict) -> dict:
+def _strength_page(strength: dict, parts: Optional[list] = None) -> dict:
     """The kid's book's last page, from each case's one verdict (CALI-112): a promise only from a case that holds,
-    nothing over it; any other case, no standing on it."""
+    nothing over it; any other case, no standing on it. Every part the book covers must hold: one with no check at
+    the released version (none run, an error, no loads()) is "not checked", so never "your turn" (#132 review)."""
     from . import answers
 
     cases = [c for cs in strength.values() for c in cs]
     kinds = [(c.get("verdict") or {}).get("kind", "waiting") for c in cases]
+    kinds += ["waiting" for pid in (parts or []) if not strength.get(pid)]      # a part left out: not checked
+    if not kinds:
+        kinds = ["waiting"]                              # nothing checked at all: not checked
     held = [f"It should hold {c['name'].lower()}, {answers._times(c['safety'])}." for c, k in zip(cases, kinds)
             if k == "holds"]
     if "fails" in kinds:

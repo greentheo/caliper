@@ -120,25 +120,28 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         return "not trusted, on a filled-in shape: " + text, None              # no step of it holds (CALI-96)
     if kind == "lighten":
         st = r.get("stations", [])
-        best = max((x for x in st if verdicts.station(x)["counts_as_pass"]), key=lambda x: x["saved_lb"], default=None)
+        # a thinner sheet's number is an estimate: never the lightest that holds (#132 review)
+        best = max((x for x in st if verdicts.lighten_step(x)["counts_as_pass"]), key=lambda x: x["saved_lb"],
+                   default=None)
         if best is None or not best["saved_lb"]:
             return "nothing lighter holds", False
         out = next((x for x in st if verdicts.station(x)["kind"] == "fails"), None)
-        return (f"up to {best['saved_lb']:g} lb lighter" + (f" in {best['label']} sheet (an estimate)" if best.get("estimate") else "")
-                + f", still {round(best['safety'], 1):g}x" + (f"; runs out at step {out['index']}" if out else "")), True
+        return (f"up to {best['saved_lb']:g} lb lighter, still {round(best['safety'], 1):g}x"
+                + (f"; runs out at step {out['index']}" if out else "")), True
     if kind == "carve" and r.get("status") == "failed":    # it stopped on an error, and says which (CALI-103)
         return f"failed after {len(r.get('stations') or [])} of {r.get('steps', '?')} steps: {r.get('error', '')}", False
     if kind == "carve" and r.get("status") == "cancelled":  # stopped from its panel; what it finished (CALI-101)
         st = r.get("stations") or []
-        best = next((x for x in st if x["index"] == r.get("best")), None)
+        best = next((x for x in st if x["index"] == r.get("best")), None)  # search: the printed part's lightest
+        held = best is not None and verdicts.carve_step(best, r.get("filled"))["counts_as_pass"]   # #132 review
         return (f"cancelled after {len(st)} of {r.get('steps', '?')} steps"
                 + (f": the lightest that held, step {best['index']}, {best['saved_g']} g less filament"
-                   if best and best.get("saved_g") else "")), None
+                   if held and best.get("saved_g") else "")), None
     if kind == "carve" and r.get("status") == "running":   # still going, or it died partway (CALI-103)
         return f"not finished: {len(r.get('stations') or [])} of {r.get('steps', '?')} steps checked", None
     if kind == "carve":
         st = r.get("stations", [])
-        best = next((x for x in st if x["index"] == r.get("best")), None)
+        best = next((x for x in st if x["index"] == r.get("best")), None)  # search: judged below, whole and all
         from . import carve
 
         carved = (f"{best['removed']:.0%} {carve.share(r)} carved away, {best['saved_g']} g less filament, still "
@@ -203,8 +206,9 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
                 verdicts.summary(s)["counts_as_pass"])              # one verdict (CALI-112)
     if kind == "release":
         why = verdicts.summary((r.get("card") or {}).get("summary"))["why"] or "a check isn't settled"
-        return (f"release {r.get('id')} · {'ready to cut' if r.get('ready') else 'not ready: ' + why}"
-                f" · ~${round(r.get('shopping_usd') or 0)} to buy"), bool(r.get("ready"))
+        ready = verdicts.release(r, {})["kind"] == "holds"      # the row's own staleness is index()'s (above)
+        return (f"release {r.get('id')} · {'ready to cut' if ready else 'not ready: ' + why}"
+                f" · ~${round(r.get('shopping_usd') or 0)} to buy"), ready
     return "", None
 
 
@@ -232,6 +236,8 @@ def index(store, runs: dict[str, list[dict]], parts: list[dict], air: Optional[d
                 if filled(store, part):                   # the part as it is now, not a flag the run kept (CALI-96)
                     r = {**r, "filled": True}
             row["headline"], row["ok"] = _headline(kind, r)
+            if row.get("stale") and row["ok"]:        # an older version's green isn't the part as it is (#132 review)
+                row["ok"] = None
             rows.append(row)
     rows.sort(key=lambda x: x["created"] or 0, reverse=True)
     whole = [{"kind": k, "label": KINDS[k][0], "what": KINDS[k][1], "ready": bool(parts), "why": "no parts yet"}

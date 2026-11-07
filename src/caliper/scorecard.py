@@ -338,6 +338,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
     worst = None
     unsure = None                     # a ✓ on an FEA too coarse to see the wall: no pass from it (CALI-110)
     loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
+    left = []                         # parts whose strength isn't known: never left out of the verdict (#132 review)
     for p in store.design.parts:
         if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
             continue
@@ -350,7 +351,10 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             except Exception as e:  # noqa: BLE001 — a check that can't run is unknown, not a crash
                 _metric(metrics, f"strength.{p.id}.error", str(e), "", f"{p.id}'s strength couldn't be checked",
                         "model", "strength")
+                left.append(f"the {p.id.replace('_', ' ')}'s strength couldn't be checked ({e})")
                 continue
+        if run.get("safety") is None:
+            left.append(f"the {p.id.replace('_', ' ')}'s strength check gave no number")
         breaks = [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
         need.append(float(run.get("min_safety") or load_study.MIN_SAFETY))
         if unsure is None and any(verdicts.case(run, c)["kind"] in ("unresolved", "unchecked") for c in run["cases"]):
@@ -395,13 +399,14 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         number = m is not None and isinstance(m["value"], (int, float))
         if number:
             v, lim, op = float(m["value"]), float(c["limit"]), c.get("op", ">=")
-            met = v >= lim if op == ">=" else v <= lim if op == "<=" else abs(v - lim) < 1e-9
+            met = verdicts.compare(v, op, lim)
         elif untrue and strength:             # no number, on a filled-in shape: not trusted, not merely unknown
             met = True
         else:
             met = None
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-110)
-        verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=unsure if strength else None)
+        verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=unsure if strength else None,
+                                incomplete="; ".join(left) if strength and left else None)
         status = verdicts.STATUS[verdict["kind"]]
         if status == "untrusted":
             checks.append({**c, "status": status, "value": m["value"] if m else None, "margin": None,
@@ -409,8 +414,9 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         elif status == "unresolved":
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "not resolved: too coarse to see its walls", "note": unsure})
-        elif status == "unknown":
-            checks.append({**c, "status": status, "value": None, "margin": None, "trust": None})
+        elif status == "unknown":             # not checked, or a part left out: said (#132 review)
+            checks.append({**c, "status": status, "value": m["value"] if m and number else None, "margin": None,
+                           "trust": None, **({"note": verdict["why"]} if verdict.get("why") else {})})
         else:
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"],
                            "margin": round(v - lim if op == ">=" else lim - v, 3), "trust": m["trust"]})

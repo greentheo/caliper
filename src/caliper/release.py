@@ -1207,7 +1207,7 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
         store.append_history(pid, {"kind": "release", "action": "released", "release": rid,
                                    "version": versions[pid]})
     store.append_log({"kind": "release", "action": "released", "release": rid, "versions": versions,
-                      "ready": rec["ready"]})
+                      "ready": rec["ready"]})  # producer: the release's own verdict, made just above
     emit("done", f"release {rid}: {len(st)} steps, {rec['sheets']} sheets, ~${shop['usd']:.0f} to buy"
-         + ("" if rec["ready"] else " — NOT ready, a check fails or isn't settled"), release=rid)
+         + ("" if rec["ready"] else " — NOT ready, a check fails or isn't settled"), release=rid)  # producer
     return rec

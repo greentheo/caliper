@@ -16,9 +16,12 @@ import pytest
 from caliper import answers, kidbook, pictures, release, studies, verdicts
 
 SRC = os.path.join(os.path.dirname(__file__), "..", "src", "caliper")
-#: What re-derives a verdict: the study's own flag, or the safety against what it needs.
+#: What re-derives a verdict: the study's own flag, a safety or a goal's number against what it needs (either way
+#: round), a release's ready, a study's best, a rule's holds_now (#132 review: widened so each of its findings fails).
 RAW = re.compile(r'\["holds"\]|get\("holds"|\.holds\b|\["whole_holds"\]|get\("whole_holds"|'
-                 r'>=\s*[a-z_.\[\]"\']*min_safety')
+                 r'[<>]=?\s*[A-Za-z_.\[\]"\']*min_safety\b|min_safety\b[\]"\')]*\s*[<>]=?\s*[A-Za-z_(]|'
+                 r'>=\s*[A-Za-z_.]*\[?"?limit"?\]?|<=\s*[A-Za-z_.]*\[?"?limit"?\]?|[<>]=\s*lim\b|'
+                 r'\["ready"\]|get\("ready"\)|\["best"\]|get\("best"\)|holds_now(?!\))')   # holds_now): what verdicts.rule() is handed
 
 
 def test_no_module_works_a_verdict_out_for_itself():
@@ -34,12 +37,18 @@ def test_no_module_works_a_verdict_out_for_itself():
     assert not bad, "\n".join(bad)
 
 
-def test_the_page_never_works_a_load_verdict_out_either():
-    """The page reads the server's verdict on every run, case and history line. (A lighten or carve step's
-    ``st.holds`` is #101's, which moves it onto ``verdicts.station``.)"""
-    src = open(os.path.join(SRC, "web", "static", "design.js")).read()
-    assert not re.findall(r"\b(c|run|r|h)\.holds\b", src)
-    assert not re.findall(r"\b(c|run|r|h)\.unresolved && \1\.holds", src)
+#: What the page would work out for itself (#132 review: every step, thickness and the classic panel's badge too).
+PAGE_RAW = re.compile(r"\.holds\b|whole_holds|safety_across\s*[<>]=|[<>]=\s*run\.min_safety|\.all_pass\s*\?")
+
+
+def test_the_page_never_works_a_verdict_out_either():
+    """design.js and app.js read the server's verdict on every run, case, step, thickness and history line."""
+    bad = []
+    for name in ("design.js", "app.js"):
+        for n, line in enumerate(open(os.path.join(SRC, "web", "static", name)), 1):
+            if PAGE_RAW.search(line):
+                bad.append(f"{name}:{n}: {line.strip()[:120]}")
+    assert not bad, "\n".join(bad)
 
 
 # --- every kind through every reader -------------------------------------------------------------------------------

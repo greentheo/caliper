@@ -313,12 +313,25 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     # one verdict per run and case, for the page to read and never work out (CALI-112): its badges, words and colours
     untrusted = {p["id"]: p.get("untrusted") for p in parts}
     for r in runs["load"]:
-        v = verdicts.run(r, filled=untrusted.get(r["part"]))
+        part = next((p for p in parts if p["id"] == r["part"]), None)
+        v = verdicts.run(r, filled=untrusted.get(r["part"]),
+                         stale=part is None or r.get("version") != part["version"])   # never green on an older run
         for c, cv in zip(r.get("cases") or [], v.pop("cases", [])):
             c["verdict"] = cv
+            # each thickness the plate check tried: its number against what it needs, and only where the case is
+            # settled (it holds or fails): never green on a not-trusted, unresolved or older case (#132 review)
+            for b in ((c.get("plate") or {}).get("by_thickness") or []):
+                b["verdict"] = (verdicts.meets(b.get("safety_across"), r.get("min_safety"))
+                                if cv["kind"] in ("holds", "fails") else cv)
             if load_study.unresolved(r, c):   # which coarse it is, for the panel's FEA line (CALI-97)
                 c["unresolved"] = "unresolved" if r.get("finer") else "unchecked"
         r["verdict"] = v
+    for r in runs["carve"]:                   # a carve or lightening step, as the page shows it (#132 review)
+        for st in r.get("stations") or []:
+            st["verdict"] = verdicts.carve_step(st, untrusted.get(r["part"]))
+    for r in runs["lighten"]:
+        for st in r.get("stations") or []:
+            st["verdict"] = verdicts.lighten_step(st, untrusted.get(r["part"]))
     for p in parts:                           # the history line of a strength check says the verdict it was given
         for h in p["history"]:
             if h.get("kind") == "load" and h.get("action") == "studied":

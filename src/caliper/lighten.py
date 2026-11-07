@@ -545,7 +545,7 @@ def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
                     "removed": base["removed"], "holes": base["holes"], "top_holes": base.get("top_holes", 0),
                     "safety": round(worst, 2), "holds": worst >= min_safety, "saved_lb": round(saved, 2),  # producer
                     "from_step": base["index"], "cases": [], "panels": base["panels"]})
-        if worst < min_safety:
+        if worst < min_safety:  # search
             break
     return out
 

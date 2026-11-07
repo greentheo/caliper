@@ -492,6 +492,8 @@ def study(store: DesignStore, part_id: str, *, load_lb: float = 100.0, factor: f
                     "fastened": [[round(v, 1) for v in n] for n in built["fastened"]]}
     record = {
         "id": rid, "part": part_id, "kind": "frame", "created": time.time(), "params": params or {},
+        # the version it ran on: an older run isn't the frame as it is (#132 review)
+        "version": store.design.part(part_id).version if store.design.part(part_id) else None,
         "build": build or {}, "walls": bool(carried and carried["shell"]),
         "layout": layout_name(store.read_script(part_id), params),
         "carrying": carrying,

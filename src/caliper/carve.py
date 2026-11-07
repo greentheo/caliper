@@ -138,7 +138,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             keep({**partial, "stations": out})
             if not holds and k > 0:
                 break                                                  # the chart stops where it runs out
-        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)  # producer
+        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)  # search
         first = out[0]
         from . import verdicts
 
@@ -163,12 +163,16 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         keep(record)
         store.append_history(part_id, {"kind": "carve", "action": "studied", "run": rid, "stations": len(out)})
         store.append_log({"kind": "carve", "action": "studied", "part": part_id, "run": rid})
-        emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g" if best and best["saved_g"]
-             else f"{len(out)} steps", run=rid, progress=1.0)
+        from . import consistency, verdicts
+
+        held = best is not None and verdicts.carve_step(best, consistency.filled(store, part_id))["counts_as_pass"]
+        emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g" if held and best["saved_g"]
+             else f"{len(out)} steps: the printed part comes off, but the whole part doesn't hold"   # #132 review
+             if best is not None and best["saved_g"] else f"{len(out)} steps", run=rid, progress=1.0)
         return record
     except Cancelled:
         # asked to stop (CALI-101): the steps it finished, and the lightest of them that holds, as a partial run
-        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)  # producer
+        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)  # search
         keep({**partial, "stations": out, "status": "cancelled", "best": best["index"] if best else None,
               "seconds": round(time.time() - t0, 1)})
         store.append_history(part_id, {"kind": "carve", "action": "cancelled", "run": rid, "stations": len(out)})
