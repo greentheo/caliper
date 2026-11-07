@@ -372,6 +372,52 @@ def plate(a: float, b: float, t: float, force: float, footprint: float, E: float
     return {"stress_mpa": stress, "deflection_mm": alpha * force * b ** 2 / (E * t ** 3)}
 
 
+def ring_plate(a: float, t: float, force: float, footprint: float, E: float) -> dict:
+    """A round plate simply supported on a ring of radius ``a`` (mm), ``t`` thick, a load ``force`` (N) over a central
+    ``footprint`` (mm²): the peak stress (MPa, at the middle) and the deflection (mm) there. Roark (7th ed.) Table 11.2
+    case 16, uniform load over a central circle r0 (with Table 11.4's equivalent radius for a small spot):
+    σ = 3W/(2πt²)·[(1+ν)·ln(a/r0) + 1 − (1−ν)·r0²/(4a²)], y = W·a²/(16πD)·[(3+ν)/(1+ν)] at most. A disc that runs on
+    past its ring is stiffer than this: the safe side. NEEDS ENGINEER CHECK (#137 item 7, against the foreman's hand
+    check of the bar stool's seat: 4.5 MPa)."""
+    r0 = min(math.sqrt(max(footprint, 1.0) / math.pi), a)
+    if r0 < 0.5 * t:                        # the equivalent radius for a load on a small spot
+        r0 = math.sqrt(1.6 * r0 ** 2 + t ** 2) - 0.675 * t
+    nu = POISSON
+    stress = 3 * force / (2 * math.pi * t ** 2) * ((1 + nu) * math.log(a / r0) + 1 - (1 - nu) * r0 ** 2 / (4 * a ** 2))
+    D = E * t ** 3 / (12 * (1 - nu ** 2))
+    return {"stress_mpa": stress, "deflection_mm": force * a ** 2 / (16 * math.pi * D) * (3 + nu) / (1 + nu)}
+
+
+def _ring_held(pc: dict, k: int, under, tol: float) -> Optional[float]:
+    """The radius (mm) of the widest ring under a round panel that the part beneath holds all the way round (90% of
+    it), measured from the panel's middle: a disc on a cone's top ring. The widest: a longer span bends more, the safe
+    side. None where nothing beneath holds a ring."""
+    from .consistency import _frame
+
+    poly, side, t = pc["polys"][k], pc["sides"][k], pc["thickness"]
+    o, u, v, n, flat = _frame(poly)
+    mid = poly.mean(axis=0)
+    rim = float(np.linalg.norm(poly - mid, axis=1).max())
+    ang = np.linspace(0, 2 * np.pi, 72, endpoint=False)
+    held = None
+    for r in np.arange(max(t, 2.0), rim + 1e-6, 2.0):
+        # just under the panel, and only what touches it: a cone flares below its top ring, so a deeper or looser probe
+        # reads the ring wider than where it meets the seat (the bar stool: 282 mm, against its 266 mm ring)
+        pts = (mid + r * (np.cos(ang)[:, None] * u + np.sin(ang)[:, None] * v)
+               + side * n * (t + 1.0))
+        if float(np.mean(under(pts, 1.0))) >= 0.9:
+            held = float(r)
+    return held
+
+
+def _round(poly: np.ndarray) -> bool:
+    """A panel drawn as a disc: eight or more sides, every corner within a tenth of the same radius."""
+    if len(poly) < 8:
+        return False
+    r = np.linalg.norm(poly - poly.mean(axis=0), axis=1)
+    return float(r.min()) >= 0.9 * float(r.max())
+
+
 #: How far either side of a load a panel on two edges carries it, as a share of the span: BS 8110-1:1997 clause
 #: 3.5.2.2 (a concentrated load on a slab spanning one way) gives the load's width + 2.4·x·(1 - x/L) for a load x
 #: from a support, so 0.6·L at mid-span; near an unsupported edge, no more than half that plus the load's distance
@@ -491,10 +537,41 @@ def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=Non
                 return {**base, **beam(span, width, pc["thickness"], float(abs(f @ n)), mat,
                                        footprint=abs(float(ext @ np.abs(along))),
                                        edge=min(at, width - at))}
+            if _round(poly):                      # a disc: on a ring beneath it, or held all round (#137 item 7)
+                mid = poly.mean(axis=0)
+                ring = _ring_held(pc, k, under, tol) if under is not None else None
+                if ring is None and edges == len(poly):
+                    ring = float(np.linalg.norm(poly - mid, axis=1).max())
+                off = float(np.linalg.norm((c - mid) - ((c - mid) @ n) * n))
+                if ring is not None and off <= 0.25 * ring:
+                    t = pc["thickness"]
+                    # the pad's own area in the panel's plane: a disc's frame runs diagonal to the load's box, and
+                    # measured along it the bar stool's 4 in pad read 119.5 mm across (larger, so less stress)
+                    flat_ext = [float(ext[i]) for i in range(3) if i != int(np.argmax(np.abs(n)))]
+                    W, foot = float(abs(f @ n)), max(abs(flat_ext[0] * flat_ext[1]), 1.0)
+                    got = ring_plate(ring, t, W, foot, mat["E"])
+                    safety = mat["strength"] / got["stress_mpa"]
+                    by_t = [{"thickness_mm": tt, "label": M.nominal(tt),
+                             "safety": round(mat["strength"] / g["stress_mpa"], 2),
+                             "safety_across": round(mat["strength"] * mat["across"] / g["stress_mpa"], 2),
+                             "deflection_mm": round(g["deflection_mm"], 3)}
+                            for tt in C.THICKNESSES if tt <= 26
+                            for g in [ring_plate(ring, tt, W, foot, mat["E"])]]
+                    return {**base, "done": True, "support": "ring", "ring_mm": round(2 * ring, 1),
+                            "thickness_mm": t, "stress_mpa": round(got["stress_mpa"], 2),
+                            "safety": round(safety, 2), "safety_across": round(safety * mat["across"], 2),
+                            "deflection_mm": round(got["deflection_mm"], 3), "by_thickness": by_t}
+                return {**base, "done": False,
+                        "why": ("the load is off its middle; the round-plate check covers a load near the middle"
+                                if ring is not None else "nothing beneath holds it in a ring all the way round")
+                               + ", so the FEA is the number for it"}
             if edges < len(poly) or len(poly) != 4:
                 return {**base, "done": False,
-                        "why": f"only {edges} of its {len(poly)} edges rest on another piece; the plate "
-                               f"check covers a panel held all round, so the FEA is the number for it"}
+                        "why": (f"only {edges} of its {len(poly)} edges rest on another piece; the plate check covers "
+                                f"a panel held all round" if edges < len(poly) else
+                                f"it's held all round, but its {len(poly)}-sided outline isn't a rectangle or a disc, "
+                                f"which the plate check covers")  # never "16 of its 16 edges" (#137 item 7)
+                               + ", so the FEA is the number for it"}
             t = pc["thickness"]
             got = plate(a, b, t, float(abs(f @ n)), max(fu * fv, 1.0), mat["E"])
             safety = mat["strength"] / got["stress_mpa"]

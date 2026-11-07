@@ -103,6 +103,11 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
                              f"are too thin for the voxels to see.")
             elif v.get("coarse"):                    # an older run: where isn't known (CALI-97's words)
                 text += " " + coarse(run, inches, holds=False)
+        pl = c.get("plate") or {}
+        if pl.get("done") and c.get("governs") != "plate" and pl.get("safety_across") is not None:
+            # a second opinion by hand on the panel it lands on (#137 item 7: the seat on its ring)
+            how = f", as a round plate on its {_len(pl['ring_mm'], inches)} ring" if pl.get("support") == "ring" else ""
+            text += f" By hand, the {pl['piece']} on its own{how}: {_times(pl['safety_across'])}."
     else:                                            # any other kind: its word, never a ✓ (CALI-112)
         text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {about}{_times(c['safety'])}."
     return _line(text + older, v["status"], study="load",
@@ -153,13 +158,13 @@ def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
     ✗, and says the fail may be the model's."""
     from . import load_study as L
 
-    wall = _wall(run.get("thinnest_mm") or 0, inches) + _thin_at(run, inches)
+    walls = f"{_wall(run.get('thinnest_mm') or 0, inches)} walls{_thin_at(run, inches)}"   # where, too (#136)
     if not holds:
-        return (f"The fail may be the model's: the voxels can't see its {wall} walls. "
+        return (f"The fail may be the model's: the voxels can't see its {walls}. "
                 + ("Check it again finer." if run.get("finer") else
                    "A hand check or a printed test piece is the way to know."))
     if run.get("finer"):
-        return f"Not resolved yet: the check was too coarse to see its {wall} walls. Check it again finer."
+        return f"Not resolved yet: the check was too coarse to see its {walls}. Check it again finer."
     return L.NOT_CHECKED
 def untrusted(pid: str, why: str = "") -> str:
     """What a strength verdict on a filled-in solid says instead of holding (CALI-96), or one whose shape couldn't
