@@ -32,6 +32,14 @@ for his look at the mockup; this is what it calls.
   runs says "strength: check the box again". A partial clamp is measured: a fillet's or hole's radius from the built
   solid's cylinders ("asked 3 mm, built 2 mm (the closest fillet)"), a wall's thinnest measure; elsewhere "its shape
   changed; whether its … isn't measured". The POST answers with `notes`. Tests: 14 (5 new, 9 failing before).
+- **#147 re-review, on Theo's own scripts (the foreman's order):** a length unit in the comment wins (`rib_v`, "vertical
+  rib between rows mm", is a width, not a count); a comment that lists choices ("1 = straight, 2 = round") is a
+  `choice`, no unit (`shoulder`, `tail_curve`, `edges`, `spine_back`); then an angle, a count or ratio, a length by its
+  name or words. **A number of no known kind refuses a unit:** "set p1z to 26 in" (leaf_rear, no comment) is "I don't
+  know if p1z is a length: give it in mm, without a unit", never 26 written as mm; without a unit it's taken as it
+  is, said. Tests: 30 (Theo's names and comments as the review quotes them, read-only; a count by its comment alone;
+  p1z refused; a choice takes no unit). Mutants caught: count words in the comment ignored, the unit's order, a unit
+  dropped.
 
 ### 2026-11-07 · CALI-35c (#3c) · The skeleton's numbers drive the parts
 #3's last slice: a planned design's shared numbers (the skeleton: "mast_top_z: 7 ft") drive every part that reads them.

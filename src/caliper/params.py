@@ -58,19 +58,28 @@ _LENGTH_WORD = re.compile(r"\b(?:width|wide|height|tall|depth|deep|radius|diamet
 _COUNT = re.compile(r"rows|cols|columns|segments|holes|facets|teeth|steps|slats|^n_|_count$|\bcount\b|number of|"
                     r"how many", re.I)
 _RATIO = re.compile(r"taper|infill|ratio|frac|percent|share", re.I)
+#: A choice, as its comment lists it: "1 = straight, 2 = round", "0: no edges; 1: front and back edges".
+_CHOICE = re.compile(r"(?:^|[\s,;(])\d+\s*[=:]\s*[a-z]", re.I)
 
 
 def unit_of(name: str, note: str) -> str:
-    """What a number is, as the script says it: "deg" (an angle), "count", "ratio", "mm" (a length: a length unit in
-    its comment, or a length's name: wall_t, fillet_r, width, …), or "" (none of these: taken as it is)."""
-    text = f"{name} {note}"
-    if re.search(r"\bdeg|degree|angle|°", text, re.I):
+    """What a number is, as the script says it (#147 review, the foreman's order, on Theo's own scripts):
+    1. a length unit in its comment wins: "mm" (``rib_v``, "vertical rib between rows mm", is a rib's width);
+    2. a comment that lists choices ("1 = straight, 2 = round") is a "choice" (``shoulder``), no unit;
+    3. an angle ("deg"), then a count or a ratio by its name or comment, then a length by its name or a length word
+       in its comment ("mm");
+    4. otherwise "": not known, so a unit given with it is refused (``set_value``), never dropped."""
+    if _LENGTH_UNIT.search(note):
+        return "mm"
+    if len(_CHOICE.findall(note)) >= 2:
+        return "choice"
+    if re.search(r"\bdeg|degree|angle|°", f"{name} {note}", re.I):
         return "deg"
     if _COUNT.search(name) or _COUNT.search(note):
         return "count"
-    if _RATIO.search(name) or (_RATIO.search(note) and not _LENGTH_UNIT.search(note)):
+    if _RATIO.search(name) or _RATIO.search(note):
         return "ratio"
-    if _LENGTH_UNIT.search(note) or _LENGTH_NAME.search(name) or _LENGTH_WORD.search(note):
+    if _LENGTH_NAME.search(name) or _LENGTH_WORD.search(note):
         return "mm"
     return ""
 
@@ -169,7 +178,7 @@ def set_value(store: DesignStore, pid: str, name: str, value: float, unit: Optio
         if unit not in TO_MM:
             raise ValueError(f"{plain} is a length: give it in mm or in, not {unit!r}")
         mm = float(value) * TO_MM[unit]
-    elif e["unit"] in ("count", "ratio"):
+    elif e["unit"] in ("count", "ratio", "choice"):
         if unit not in (None, "", e["unit"]):
             raise ValueError(f"{plain} is a {e['unit']}: give a number, no unit")
         mm = float(value)
@@ -177,10 +186,11 @@ def set_value(store: DesignStore, pid: str, name: str, value: float, unit: Optio
         if unit not in (None, "", "deg"):
             raise ValueError(f"{plain} is an angle: give it in degrees")
         mm = float(value)
-    else:
-        mm = float(value)                         # none of these: taken as it is, said so
+    else:                                         # not known: a unit given is refused, never dropped (#147 review)
+        if unit not in (None, ""):
+            raise ValueError(f"I don't know if {name} is a length: give it in mm, without a unit")
+        mm = float(value)                         # taken as it is, said so
         notes.append(f"{name} has no unit in its script, so {mm:g} is taken as it is, not converted")
-        unit = None
     lo_hi = e["range"]
     if not lo_hi:                                 # allowed, but said (#147 review)
         notes.append(f"no range is set for {name} in the script, so it isn't checked")

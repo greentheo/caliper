@@ -101,7 +101,7 @@ def test_a_value_the_build_ignores_or_clamps_is_said(store):
     clamped = params.set_value(store, "box", "fillet_r", 8, "mm")
     assert clamped["moved"] is False
     assert clamped["warning"] == "the part's shape didn't change: its build clamps or ignores fillet_r at 8 mm"
-    unread = params.set_value(store, "box", "spare", 9, "mm")
+    unread = params.set_value(store, "box", "spare", 9)
     assert unread["warning"] == "spare isn't used by the part's build, so setting it changed nothing"
 
 
@@ -140,8 +140,53 @@ def test_only_a_length_converts_and_a_unit_on_a_count_is_refused(store, name, un
 
 
 def test_a_number_with_no_known_unit_is_taken_as_it_is_and_said(store):
-    got = params.set_value(store, "box", "spare", 9, "in")
+    got = params.set_value(store, "box", "spare", 9)
     assert got["value"] == 9.0 and "spare has no unit in its script, so 9 is taken as it is, not converted" in got["notes"]
+
+
+def test_a_unit_on_a_number_of_no_known_kind_is_refused_never_dropped(store):
+    """#147 review, blocking: "set p1z to 26 in" (Theo's leaf_rear: no comment) wrote 26, as mm, with a note."""
+    leaf = BOX.replace('    "mesh_rows": 4,     # rows of holes\n', '    "mesh_rows": 4,     # rows of holes\n    "p1z": 660.4,\n')
+    store.write_part("leaf", leaf, intent="a leaf")
+    v = store.design.part("leaf").version
+    for unit in ("in", "mm"):
+        with pytest.raises(ValueError, match="^I don't know if p1z is a length: give it in mm, without a unit$"):
+            params.set_value(store, "leaf", "p1z", 26, unit)
+    assert store.design.part("leaf").version == v and '"p1z": 660.4,' in store.read_script("leaf")
+
+
+#: Theo's own PARAMS lines (read-only from his designs; the names and comments the review quotes), with what each is.
+THEOS = [
+    ("rib_v", "vertical rib between rows mm", "mm"),                      # i-want: a unit in the comment wins
+    ("rib_h", "circumferential rib between cols mm", "mm"),
+    ("mesh_rows", "number of vertical rows of mesh openings", "count"),
+    ("wall_t", "printed shell thickness mm (increased from 4mm)", "mm"),
+    ("foot_fillet_r", "", "mm"),
+    ("shoulder", "side from wall top to roof edge: 1 = straight, 2 = round", "choice"),   # the cargo box
+    ("tail_curve", "1 = straight panels; 2 = teardrop curve", "choice"),
+    ("edges", "0: no edges; 1: front and back edges; 2: all four sides", "choice"),
+    ("spine_back", "1: the spine runs to the back of the floor; 0: it stops under the X's middle", "choice"),
+    ("edge_w", '1 in: edges under the walls (see "edges")', "mm"),
+    ("p1z", "", ""),                                                        # leaf_rear: not known, a unit refused
+    ("p1x", "", ""),
+    ("recess_margin", "border left around recess", ""),                     # step-stool
+    ("ribs", "how many ribs around the cone", "count"),                     # not Theo's: a count by its comment alone
+]
+
+
+@pytest.mark.parametrize("name,note,unit", THEOS)
+def test_what_each_of_theo_s_numbers_is(name, note, unit):
+    assert params.unit_of(name, note) == unit
+
+
+def test_a_choice_takes_no_unit(store):
+    shaped = BOX.replace('    "mesh_rows": 4,     # rows of holes\n',
+                         '    "mesh_rows": 4,     # rows of holes\n    "shoulder": 1.4,   # side from wall top to roof '
+                         'edge: 1 = straight, 2 = round\n')
+    store.write_part("box", shaped, intent="a box")
+    assert {e["name"]: e["unit"] for e in params.listing(store, "box")}["shoulder"] == "choice"
+    with pytest.raises(ValueError, match="^shoulder is a choice: give a number, no unit$"):
+        params.set_value(store, "box", "shoulder", 2, "in")
 
 
 def test_no_range_is_said_and_a_ranged_number_says_nothing_of_it(store):
