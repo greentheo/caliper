@@ -569,8 +569,10 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 ### 2026-11-07 · A carve on voxels too coarse to see its walls says so (CALI-106 #101)
 1. Carve a thin printed part (**Carve it**): where the check couldn't see its walls, the steps that hold are amber dots
    reading "not resolved", and **Carve it like this** is off, saying why.
-2. Theo's bar stool (a copy): **Carve it** is off, "Its walls are too thin for the voxel check at this size, so it
-   can't be carved by strength".
+2. Theo's bar stool (a copy): **Carve it** is off, saying where and what to change: "Can't carve it by strength: its
+   0.25 mm walls around z 16.1 in are too thin for the strength check to see (at this size it sees walls from 3/8 in
+   on) and for a 0.4 mm nozzle to print. Your rule shell_wall_thickness says at least 2.85 mm: thicken them to that
+   first." The card and the page give the same wall number (0.25 mm, not 0.2 on one and 0.3 on the other).
 3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_coarse_steps.py`.
 ### 2026-11-07 · One verdict, everywhere (CALI-112 #114)
 1. Open a design whose strength check is a ✗, not trusted, not resolved or middle only: the card, the Score panel, the

@@ -62,7 +62,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     mat = ctx["mat"]
     seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)
     if seen.get("too_thin"):                     # none a study may make can: not carved by strength
-        raise ValueError(L.TOO_THIN)
+        raise ValueError(f"Can't carve it by strength: {seen['said']}" if seen.get("said") else L.TOO_THIN)
     if not mat.get("printed"):
         raise ValueError(f"'{part_id}' isn't printed: only a printed part (or the printed rest of one) can be "
                          f"carved free-form; a sheet is lightened with holes a saw can cut")

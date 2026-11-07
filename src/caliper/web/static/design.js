@@ -138,7 +138,8 @@ function wallLen(mm) {
   const n = Math.round(mm / IN * 32);
   if (inches() && mm >= IN) return len(mm, 1);
   if (inches() && n >= 1) { const g = gcd(n, 32); return `${n / g}/${32 / g}″`; }
-  return `${mm < 10 ? +mm.toFixed(1) : Math.round(mm)} mm`;
+  // under 1 mm, two places, as the server says it: 0.25 mm, not 0.3 (#137 item 2)
+  return `${mm < 1 ? +mm.toFixed(2) : mm < 10 ? +mm.toFixed(1) : Math.round(mm)} mm`;
 }
 const gcd = (a, b) => (b ? gcd(b, a % b) : a);
 function sizeText(size) {
@@ -2014,7 +2015,8 @@ function defaultCheck(p) {
 // what stops a carve (or a lightening) before it starts, in words, or '' (CALI-106, #101; #102's note)
 function carveBlocked(p) {
   const check = defaultCheck(p);
-  if (check && check.too_thin) return 'Its walls are too thin for the voxel check at this size, so it can\'t be carved by strength';
+  // where the walls are, and what to change, as the check said it (#136 review)
+  if (check && check.too_thin) return check.thin_said ? `Can't carve it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be carved by strength';
   if (check && check.cases.some((c) => c.fea && c.fea.supported === false)) {
     return "its voxels don't connect the load to a support yet, so a carve can't run";
   }
@@ -2053,7 +2055,7 @@ function lightenView(p) {
       them, a solid rim where it's glued and screwed), then hole-saw holes in the panel you stand on, one at a time,
       then thinner sheet. Every step is checked again.</div>
     <div class="actions"><button id="lightGo" ${defaultCheck(p) && defaultCheck(p).too_thin ? 'disabled' : ''}>${run ? 'Lighten it again' : 'Lighten it'}</button>
-      ${defaultCheck(p) && defaultCheck(p).too_thin ? '<span class="muted small">Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength</span>' : ''}</div>
+      ${defaultCheck(p) && defaultCheck(p).too_thin ? `<span class="muted small">${defaultCheck(p).thin_said ? `Can't lighten it by strength: ${esc(defaultCheck(p).thin_said)}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength'}</span>` : ''}</div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
