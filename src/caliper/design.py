@@ -564,9 +564,12 @@ class DesignStore:
         if part is None:
             raise KeyError(f"unknown part {part_id!r}")
         path = _resolve_source(part.source, self.root)
+        from .plan import skeleton_values
+
         with OCCT:
-            if path.endswith(".py"):
-                return _build_py_part(path, part.position, part.rotation)
+            if path.endswith(".py"):           # the skeleton's numbers drive it (CALI-35c)
+                return _build_py_part(path, part.position, part.rotation,
+                                      skeleton_values(self.design.skeleton or []))
             return Geometry.from_stl_posed(path, part.position, part.rotation)
 
     def part_stl(self, part_id: str) -> bytes:
@@ -596,9 +599,10 @@ class DesignStore:
         with OCCT:
             if not tolerant:
                 return evaluate_assembly(self.assembly, base_dir=self.root, values=values, unbuilt=unbuilt,
-                                         parts=load_parts_tolerant(self.assembly, self.root, skip=unbuilt)[0]
+                                         parts=load_parts_tolerant(self.assembly, self.root, skip=unbuilt,
+                                                                   values=values)[0]
                                          if unbuilt else None)
-            geoms, errors = load_parts_tolerant(self.assembly, base_dir=self.root, skip=unbuilt)
+            geoms, errors = load_parts_tolerant(self.assembly, base_dir=self.root, skip=unbuilt, values=values)
             return evaluate_assembly(self.assembly, base_dir=self.root, parts=geoms, values=values,
                                      unbuilt=unbuilt), errors
 

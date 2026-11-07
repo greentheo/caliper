@@ -62,10 +62,11 @@ _PROBE = """
 
 import json as _json, inspect as _inspect
 _b = _json.loads({build!r})
+_p = _json.loads({params!r})
 _out = {{}}
 if callable(globals().get('construction')):
     _f = construction
-    _out['construction'] = _f({{}}, _b) if len(_inspect.signature(_f).parameters) > 1 else _f({{}})
+    _out['construction'] = _f(_p, _b) if len(_inspect.signature(_f).parameters) > 1 else _f(_p)
     if isinstance(globals().get('HOLES'), list):
         from caliper.holes import merge as _merge
         _out['construction'] = _merge(_out['construction'], HOLES)
@@ -75,23 +76,23 @@ if isinstance(globals().get('BUILD_OPTIONS'), dict):
     _out['build_options'] = BUILD_OPTIONS
 if callable(globals().get('roof')):
     _r = roof
-    _out['roof'] = _r({{}}, _b) if len(_inspect.signature(_r).parameters) > 1 else _r({{}})
+    _out['roof'] = _r(_p, _b) if len(_inspect.signature(_r).parameters) > 1 else _r(_p)
 if callable(globals().get('shell')):
     _w = shell
-    _out['shell'] = _w({{}}, _b) if len(_inspect.signature(_w).parameters) > 1 else _w({{}})
+    _out['shell'] = _w(_p, _b) if len(_inspect.signature(_w).parameters) > 1 else _w(_p)
 if callable(globals().get('keeps')):
     _k = keeps
-    _out['keeps'] = _k({{}}, _b) if len(_inspect.signature(_k).parameters) > 1 else _k({{}})
+    _out['keeps'] = _k(_p, _b) if len(_inspect.signature(_k).parameters) > 1 else _k(_p)
 if isinstance(globals().get('PLATES'), dict):
     _out['plates'] = PLATES
 for _name in ('loads', 'held'):
     if callable(globals().get(_name)):
         _decl = globals()[_name]
-        _out[_name] = _decl({{}}, _b) if len(_inspect.signature(_decl).parameters) > 1 else _decl({{}})
+        _out[_name] = _decl(_p, _b) if len(_inspect.signature(_decl).parameters) > 1 else _decl(_p)
 if callable(globals().get('members')):
-    _out['members'] = members({{}})
+    _out['members'] = members(_p)
 if callable(globals().get('supports')):
-    _out['supports'] = supports({{}})
+    _out['supports'] = supports(_p)
 print('@@BUILT@@' + _json.dumps(_out, default=list))
 """
 
@@ -112,7 +113,12 @@ def declared(store: DesignStore, part_id: str, build: Optional[dict] = None,
     script = store.read_script(part_id)
     if not declares(script) and "def keeps(" not in script and "def loads(" not in script:
         return {}
-    probe = script + _PROBE.format(build=json.dumps(build or {}))
+    from .assembly import skeleton_params
+    from .plan import skeleton_values
+
+    # the skeleton's numbers it reads, as its geometry is built with them (CALI-35c): its pieces move with its shape
+    params = skeleton_params(script, skeleton_values(store.design.skeleton or []))
+    probe = script + _PROBE.format(build=json.dumps(build or {}), params=json.dumps(params))
     key = hashlib.sha256(probe.encode()).hexdigest()
     with _SEEN_MU:
         seen = _SEEN.get(key)
