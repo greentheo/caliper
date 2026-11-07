@@ -246,7 +246,7 @@ def test_a_cancelled_carve_keeps_the_steps_it_finished(tmp_path, monkeypatch):
         carve.study(store, "stool", stations=4, remove_up_to=0.4, stop=stop, emit=lambda k, t="", **d: said.append(t))
     (rec,) = carve.list_runs(store)
     assert rec["status"] == "cancelled" and len(rec["stations"]) == 2 and rec["steps"] == 4
-    assert "carving the printed PETG (printed) in 4 steps (as drawn, then 3 carved)" in said
+    assert "carving the printed PETG in 4 steps (as drawn, then 3 carved)" in said             # one "printed" (#137)
     holding = [s for s in rec["stations"] if s["holds"]]
     assert rec["best"] == (max(holding, key=lambda s: s["saved_g"])["index"] if holding else None)
     text, ok = studies._headline("carve", rec)
@@ -310,8 +310,8 @@ console.log(JSON.stringify({ first, again, asked }));
 
 def test_a_redraw_while_a_carve_runs_keeps_its_panel_and_the_button_stays_off():
     """#93 item 3: a redraw replaced the progress panel with an empty one, and the button came back enabled."""
-    out = _run(_page(["carveView", "carveChart", "carveProgress", "carveTime", "defaultCheck"],
-                     ["CARVE_PER_CHECK_AT_LEAST", "minutesText"], """
+    out = _run(_page(["carveView", "carveChart", "carveProgress", "carveTime", "carveBlocked", "defaultCheck"],
+                     ["CARVE_PER_CHECK_AT_LEAST", "minutesText", "ran", "verdictTone", "holdsHere"], """
 const esc = (s) => String(s);
 const S = { carveJob: {}, station: null };
 const carveRuns = () => [];
@@ -349,7 +349,7 @@ def test_the_label_goes_by_this_version_s_default_check_and_never_promises_a_tim
     """#102 review, the blocker: "about 10 min" for a tube whose sweep alone took 30; "3 min" or "42 h" on the bar stool,
     from whichever check was latest. It goes by this version's default-voxel check (a finer one asked for is always
     finer), says "at least" until a carve has finished, and says nothing when the check didn't connect."""
-    out = _run(_page(["carveTime", "defaultCheck"], ["CARVE_PER_CHECK_AT_LEAST", "minutesText"], """
+    out = _run(_page(["carveTime", "carveBlocked", "defaultCheck"], ["CARVE_PER_CHECK_AT_LEAST", "minutesText"], """
 const S = {};
 const p = { id: 'stool', version: 3 };
 let carves = [], checks = [];
@@ -364,16 +364,23 @@ out.floor = carveTime(p);
 checks[1].cases = cut;
 out.cut = carveTime(p);
 carves = [{ status: 'cancelled', seconds: 60 }, { status: 'done', seconds: 1800 }];
+out.blocked = carveTime(p);                    // still not connected: why it can't run wins over a past carve's time
+checks[1].cases = joined;
 out.done = carveTime(p);
+checks[1].too_thin = true;
+out.thin = carveTime(p);
 """))
     assert out["none"] == "check it holds first: how long it takes comes from that"
     assert out["floor"] == "at least about 15 min at this size"                 # 20 s x 45, never 2350 s x anything
     assert out["cut"] == "its voxels don't connect the load to a support yet, so a carve can't run"
     assert out["done"] == "about 30 min at this size, as its last carve took"
+    assert out["blocked"] == out["cut"]                                       # #102's note: the reason, not a time
+    assert out["thin"] == "Its walls are too thin for the voxel check at this size, so it can't be carved by strength"
 
 
 PANEL = ["runCarve", "followCarve", "carveProgress", "paintCarve", "wireCarve"]
 STUBS = """
+const ran = () => '';
 const S = { carveJob: {}, scope: 'stool', design: {} };
 const esc = (s) => String(s), $ = () => null, showErr = () => {}, clearStation = () => {}, showStation = () => {};
 const document = { querySelectorAll: () => [] };

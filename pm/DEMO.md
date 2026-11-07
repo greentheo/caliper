@@ -575,6 +575,33 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 4. The first open of the cards takes about 45 s on the stool (each printed piece sliced once), the next a few seconds.
 5. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_newest_run.py`.
 
+### 2026-11-07 · Theo's bar stool, as its cards should read it (CALI-122 #137)
+1. Open the bar stool (a copy) and press **Check it holds** on v7. *Will it work?* leads with "✗ Breaks its rule
+   shell_wall_thickness: its walls are 0.25 mm around z 16.1 in; it says at least 2.85 mm", and *Rules on this part*
+   marks each rule with its verdict.
+2. The strength line says where its worst stress is ("in the cone skirt around z 15.3 in, among 7/32 in walls the
+   voxels can't see"), and gives the seat its own number by hand: "as a round plate on its 10.6 in ring: 3.3 times
+   over". Nothing says "seat top" for a hot spot in the cone.
+3. **Carve it** and **Lighten it** are off: "it already fails (0.53x): make it hold first, then carve".
+4. The weight goal reads "13.1 lb, over its 10 lb cap"; the Score panel says "(cap 10 lb)".
+5. Start a carve on a part that holds: its panel says "· running for N min" from the start.
+6. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_preflight_bar_stool.py`.
+
+### 2026-11-07 · The carve-through-the-API test allows a slow runner (CALI-121, #134 follow-up)
+1. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_mixed.py -k carving_through_the_api` waits up to 25 min
+   for its carve job (it took 13 on a loaded machine). Nothing to see in the app.
+
+### 2026-11-07 · A carve on voxels too coarse to see its walls says so (CALI-106 #101)
+1. Carve a thin printed part (**Carve it**): where the check couldn't see its walls, the steps that hold are amber dots
+   reading "not resolved", and **Carve it like this** is off, saying why.
+2. Theo's bar stool (a copy): **Carve it** is off, saying where and what to change: "Can't carve it by strength: its
+   0.25 mm walls around z 16.1 in are too thin for a 0.4 mm nozzle to print and for your rule shell_wall_thickness
+   (at least 2.85 mm): thicken them to that. For a strength carve, walls must be at least 9.2 mm at this size, so
+   check it by hand or with a test piece instead." It stays off after a carve is cancelled, and a refusal never
+   reads "ValueError: …". The card and the page give the same wall number (0.25 mm, not 0.2 and 0.3).
+   **Lighten it** on a run too coarse to see the walls says "Not resolved yet…", as Studies does, not "Nothing
+   lighter still holds".
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_coarse_steps.py`.
 ### 2026-11-07 · One verdict, everywhere (CALI-112 #114)
 1. Open a design whose strength check is a ✗, not trusted, not resolved or middle only: the card, the Score panel, the
    Studies row, the history line, the build book and the kids' book all say the same word, and none says "holds" or

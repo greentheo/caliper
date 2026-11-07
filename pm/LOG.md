@@ -32,6 +32,117 @@ v3 twice "0x", v4 1.7x ✗, and no v7 run).
   the history's verdicts through `design_state`, `scorecard.compute` with an unsupported case, and the infill in the
   slicer's key.
 - Tests: tests/test_newest_run.py (12; 7 + 2 fail without this, the rest pin what it keeps).
+- **Merged with main's #139,** with the reviewer's asks from #139's pass: the scorecard row keeps both (`scoreMark` with
+  "as of v1", and `goalLimit` through `scoreNum`); the page's blocked Carve and Lighten hedge on a coarse run, as the
+  strength line does; the design card's hedge is the part card's (`fail_hedge`: the same wall, the 5.2 mm at the
+  peak, not the 0.25 mm webs); pinned: a rule whose measurement errors is a fail (as `verdicts.report` reads an
+  error, never a pass), `_peak_in` keeps `within`, `design_state` calls `plate_why`, and `study()` writes `safety`
+  through `load_study.run_safety`.
+### 2026-11-07 · CALI-122 (#137) · The bar stool's pre-flight: its broken rule said, where it fails, no carve on a fail
+From the reviewer's pre-flight of Theo's bar stool v7 (a copy; nothing of Theo's touched), with the foreman's
+correction: the run's "seat top" was a mislabel.
+1. **A part's own rules, measured, with their verdicts** (`part_rules.measured`: once per version, in memory, nothing
+   written). The page's *Rules on this part* shows each rule's verdict, and what it measured where it doesn't hold;
+   *Design checks* falls back to the parts' rules. A rule it breaks leads *Will it work?*, on the part and the design:
+   "✗ Breaks its rule shell_wall_thickness: its walls are 0.25 mm around z 16.1 in; it says at least 2.85 mm."
+2. **Where it fails, and how sure.** The FEA's hottest voxel was named after the nearest *wood* piece even in the
+   printed part: v7's "seat top" was at z 389 mm, in the cone's 0.25 mm webs (the foreman's v1 run too). `in` now
+   names a piece only within a voxel of it, else the printed part, and the run records the wall there (`wall_mm`,
+   measured within two voxels; a piece's own thickness). The line says where the worst stress is, in one run at its
+   voxel size; the coarse caveat only where the walls there are too thin to see, otherwise the thin walls are said
+   apart. An older run (no `wall_mm`) keeps the old words, and its label is never shown: the page's "works hardest
+   in seat top" (Theo's v4 card on main) and a trial's "where" name a piece only from a run that recorded its wall
+   (`peak_in`; the page says "around 27.8 in up" instead). One wall number, with where.
+3. **No Carve, no Lighten, on a part that already fails as drawn** (`load_study.already_fails`, from this version's
+   own check's one verdict): "Can't carve it: it already fails (0.5 times over, in …): make it hold first, then
+   carve." The page's Carve and Lighten are off and say the same (`carveBlocked`, `lightenBlocked`).
+4. **A carve says how long it has run** ("· running for 6 min"), repainted every 30 s: its sweep reports little before
+   step 1. "the printed PETG (printed)" (P2 item 8) reads "the printed PETG".
+5. **A goal says its limit:** "✗ Mesh cone keeps total weight down (assumed): 13.1 lb, over its 10 lb cap" on the
+   card (`_against`), and "(cap 10 lb)" in the Score panel.
+7. **A disc on a ring gets its own plate check** (Roark Table 11.2 case 16, `ring_plate`; the ring is the widest one
+   the part beneath holds 90% of the way round, probed just under the panel). The bar stool's seat: ring 270 mm,
+   4 in pad, 3/4 in ply: 4.57 MPa, 3.3x across the grain; the foreman's hand check gave about 4.5 MPa. A failing line gives it as a second opinion
+   ("By hand, the seat top on its own, as a round plate on its 10.6 in ring: …"). The pad is measured in the panel's
+   plane (the disc's frame ran diagonal, and read the 4 in pad as 119.5 mm). Never "only 16 of its 16 edges rest".
+   NEEDS ENGINEER CHECK: the round-plate formula and the ring as its support.
+- **The pre-flight again, on a fresh copy of the stool** (its strength check re-run, no live calls): "✗ Breaks its rule
+  shell_wall_thickness: its walls are 0.25 mm around z 16.1 in; it says at least 2.85 mm." / "Doesn't hold 250 lb
+  person seated: only about 0.5 times over, and it needs 2. Its worst stress, in one run at 3/16 in voxels, is in the
+  cone skirt around z 15.3 in, among 7/32 in walls the voxels can't see: the fail may be the model's. … By hand, the
+  seat top on its own, as a round plate on its 10.6 in ring: 3.3 times over." / "✗ … 13.1 lb, over its 10 lb cap."
+  Carve and Lighten refused. Theo's own folder has no v7 strength run (its newest is v4): these read after he checks
+  v7 again.
+- The reviewer's nit on #132: a carved step that doesn't close up is an amber dot (#136 draws dots by verdict), pinned.
+- Not here: P2 items 6, 9–12 (#89's wording pass), and a live first run (no key).
+- **#139 review, the blocker:** `goalLimit` called `scoreView`'s own `num`, so a goal with a number threw "num is not
+  defined" and blanked the inspector (a global stub in the test hid it). It's `scoreNum`, at module level, tested
+  unstubbed with `scoreView` itself. A refused job reads without its exception's name: `follow()` passes the job's
+  error through `plainly()` (main said "⚠ ValueError: Can't carve it…" since #136). *Show the stress* names the peak
+  by `peakWhere`, never an old run's "seat top".
+- **#139 review, items 4–7:** each wall number says which wall ("its thinnest walls, 0.25 mm around z 16.1 in"; "the
+  worst stress is in the cone skirt around z 15.3 in, where its wall is 5.2 mm"), and walls and voxels are in mm
+  everywhere, heights and positions in the design's units (`_wall`; the chat's small lengths keep their fractions,
+  `_small_len`). The seat's ring is probed 1 mm under it in 1 mm steps and said as its outer edge ("held at its ring's
+  outer edge (10.6 in across)": the cone flares to r 135 mm there). An older run's stored "only 16 of its 16 edges"
+  is rebuilt from its numbers (`load_study.plate_why`). A refusal on a coarse run hedges as the strength line does:
+  "its check says it fails (0.5 times over, a coarse run: the fail may be the model's; …): make it hold first".
+- Tests: tests/test_preflight_bar_stool.py (17), and touched suites' expectations for the new words. Stacked on #136
+  (its too-thin words), on #132's one verdict.
+
+### 2026-11-07 · CALI-121 (#134 follow-up) · The carve-through-the-API test waits 1,500 s for its job, not 900
+- `test_mixed::test_carving_through_the_api` waits for its carve job before it reads the run. On a loaded machine the
+  job took 790 s on its own and over 900 s twice beside two other test runs (#134's merge-forward), so the test timed
+  out with the job still running. A CI runner varies as much: the wait is 1,500 s, which a carve that hangs still
+  fails. No code changed.
+
+### 2026-11-07 · CALI-106 (#136 review, round 2) · What a refused carve asks for, said apart; the page keeps it off
+- **The line asks two things apart** (thickening to the rule's 2.85 mm doesn't unblock a carve): printing and the
+  part's own rule, "too thin for a 0.4 mm nozzle to print and for your rule shell_wall_thickness (at least 2.85 mm):
+  thicken them to that"; and the strength check, in mm, "For a strength carve, walls must be at least 9.2 mm at this
+  size, so check it by hand or with a test piece instead". With no rule and nothing printed, only the second.
+- **The page keeps a blocked Carve off** after a job ends (`paintCarve` set `disabled` from the job alone, so a cancel
+  re-enabled "Carve it again"), and a refusal reads without its exception's name (`plainly`: no "ValueError: …").
+- **Lighten on a coarse run** says "Not resolved yet: the check was too coarse to see its walls…" (or "Not checked"),
+  from the steps' `lighten_step` verdicts, as Studies does; it said "Nothing lighter still holds", a false ✗.
+- Pins for the review's survivors: a coarse fail stays a fail (`carve_step`, `lighten_step`), and Lighten's `disabled`.
+- Tests: tests/test_coarse_steps.py (16; 4 of the new fail without this, the fifth pins a fail). The review's last two
+  pins: a coarse fail stays a fail with the whole part holding (`whole_holds: True`, where the whole-holds branch can't
+  mask it), and the page's own refusal goes through `plainly()` (raw `e.message` fails it).
+
+### 2026-11-07 · CALI-106 (#101, #136 review) · A refused carve says where the thin walls are and what to change
+- **Where:** `measure.thinnest_wall` returns the thinnest wall and where it is (the middle of its ray);
+  `min_wall_thickness` is its number. `load_study._thin` says which it is: a piece by name, or a measured wall's
+  place. The strength record carries `thinnest_where`.
+- **What to change:** `load_study.thin_words`, in the design's units: the wall, where, the size the strength check
+  sees walls from at this size, a 0.4 mm nozzle where it's printed and thinner, and the part's own `min_wall >= …`
+  rule (`wall_rule`, its spec's or the design's, read with `safe_eval`); otherwise "Thicken them first."
+  `resolution()` carries it (`said`, `where`), the carve refuses with "Can't carve it by strength: …", and a too-thin
+  check stores it as `thin_said`, which the page's disabled Carve and Lighten say.
+- **One wall number** (#137 item 2, the same words): under 1 mm, two places, in `answers._wall` and the page's
+  `wallLen`. The bar stool's 0.25 mm wall read 0.2 mm on the card and 0.3 mm on the page.
+- On a copy of Theo's bar stool v7: "its 0.25 mm walls around z 16.1 in … Your rule shell_wall_thickness says at
+  least 2.85 mm: thicken them to that first." z 409 mm, r ≈ 169 mm: the webs between the openings, where the
+  foreman found them.
+- Tests: tests/test_coarse_steps.py (+5: where, the line on the spool and on the stool's numbers, the refused carve,
+  one wall number on both sides, the page's blocked carve). Touched suites: 187 passed locally; CI is the full run.
+
+### 2026-11-07 · CALI-106 (#101) · A carve or lightening step on voxels too coarse to see the wall is no "holds"
+- **Carve and lighten record whether their voxels see the walls** (`load_study.resolution`, from the same set-up the
+  strength check uses): `thinnest_mm`, `across`, `resolved`, and unresolved, `finer` or `too_thin`.
+- **A step that holds on a run that doesn't see its walls is "not resolved"** (or "not checked" where no run a study
+  may make could see them), through `verdicts.station`/`carve_step`/`lighten_step` (stacked on #132's one verdict);
+  a fail stays a fail, not trusted still ranks above it. Every reader: the chart's dots (amber), "the lightest step
+  where the printed part holds" line, the station bar and its **Carve it like this** / **Cut these holes** (off, with
+  why), the Studies rows, the carve's chat reply and its closing message.
+- **Where no run can see the walls it isn't carved:** `carve.study` stops before carving, "Its walls are too thin for
+  the voxel check at this size, so it can't be carved by strength", and the page's Carve and Lighten buttons are off
+  with that line. Also off, with its reason, where the default check's voxels don't connect (#102's note). Theo's
+  bar stool v7 (a copy): a 0.25 mm wall at 4.6 mm voxels, too thin, so Carve isn't offered.
+- `tests/test_coarse_steps.py`: the thin printed tube carved at one voxel through reads not resolved at every step that
+  holds (and in the page's state, Studies and the chat), at four it reads as its safety says; `resolution` on the bar
+  stool's numbers; a too-thin part isn't carved; lightening's coarse steps; the page's buttons.
+
 
 ### 2026-11-07 · CALI-112 (#114) · One verdict function every reader asks
 - **`verdicts.py`:** kinds worst first (`fails`, `untrusted`, `unchecked`, `unresolved`, `edge`, `stale`,

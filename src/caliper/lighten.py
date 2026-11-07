@@ -342,8 +342,12 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
 
     emit = emit or (lambda *a, **k: None)
     t0 = time.time()
+    fails = L.already_fails(store, part_id)        # lightening only takes material away (#137 item 3)
+    if fails:
+        raise ValueError(f"Can't lighten it: {fails}, then lighten it.")
     ctx = L.prepare(store, part_id, emit)
     s, mat = ctx["spacing"], ctx["mat"]
+    seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)
     plist, tops = panels(ctx), panels(ctx, stood_on=True)
     # a panel stood on that already has holes is judged as it is (judge_holed), and gets no more
     tops = [p for p in tops if not any(pc["name"] == p["name"] and pc.get("holes") for pc in ctx["pieces"])]
@@ -466,7 +470,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     stations += [dict(t, index=len(stations) + i) for i, t in enumerate(thinner)]
 
     record = {
-        "id": rid, "part": part_id, "kind": "lighten", "created": time.time(),
+        "id": rid, "part": part_id, "kind": "lighten", "created": time.time(), **seen,
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
         "min_safety": min_safety, "material": mat["name"], "spacing_mm": round(s, 2),
         "panels": [{"name": p["name"], "thickness_mm": p["t"], "normal": [round(float(c), 6) for c in p["n"]],
