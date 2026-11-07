@@ -892,8 +892,9 @@ def plan_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = 
         return TurnResult("plan", "That didn't change the plan. Say which part or number to change.", ok=False,
                           events=events)
     P.save(store, after, "review")
-    return TurnResult("plan", "Changed the plan: " + "; ".join(said) + ".\n\n" + P.headline(after, store.design.name),
-                      events=events)
+    gone = P.dropped_line(after)
+    return TurnResult("plan", "Changed the plan: " + "; ".join(said) + ".\n\n" + P.headline(after, store.design.name)
+                      + (f" ({gone[0].upper() + gone[1:]}.)" if gone else ""), events=events)
 
 
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,

@@ -178,11 +178,13 @@ def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, cli
         emit("error", f"couldn't plan its parts: {e}")
         return None
     if len(P.buildable(plan)) <= 1:            # what it stands on, or what you have, doesn't stop it for review (#117)
-        gone = " and the ".join(d.replace("_", " ") for d in plan.dropped)
-        steps["plan"] = "one part" + (f" (the {gone} is what it stands on, not a part)" if gone else "")
+        gone = P.dropped_line(plan)
+        steps["plan"] = "one part" + (f" ({gone})" if gone else "")
         return None
     P.save(store, plan, "review")
-    reply = (P.headline(plan, store.design.name) + "\n\nThat's the plan, before anything's drawn: its numbers and the "
+    gone = P.dropped_line(plan)                # never dropped without a word (#123 review)
+    reply = (P.headline(plan, store.design.name) + (f" ({gone[0].upper() + gone[1:]}.)" if gone else "")
+             + "\n\nThat's the plan, before anything's drawn: its numbers and the "
              "checks between the parts are under What is it?. Say what to change (\"make the mast 10 ft\"), or "
              "**Build it** to go on.")
     store.append_log({"kind": "reply", "action": "plan", "ok": True, "reply": reply, "firstrun": True,

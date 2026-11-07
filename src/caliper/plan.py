@@ -43,15 +43,20 @@ UNITS = {"mm", "in", "ft", "m", "cm", "deg", "N", "lb", "kg", "count"}
 #: The measures that read a part. A rule that calls none of them, and names no part, reads only the plan's own numbers:
 #: it always says the same thing (CALI-115, #117: "generator_shaft_dia == 25.4").
 MEASURES = FUNCTIONS - {"abs", "min", "max", "approx", "within"}
-#: Words that say a part is to be made, so it can't be one the person has (#117: a "welded 7 ft mast" came back
-#: fixed, "which you have").
+#: Words in a part's ``made`` that say it's to be made, so it can't be one the person has (#117: a "welded 7 ft mast"
+#: came back fixed, "which you have"). Never read from ``what``: an existing thing was once built or cut (#123 review).
 MAKING = re.compile(r"(?i)\b(weld(ed|ing)?|print(ed|ing)?|3d[- ]print\w*|(plasma|laser|water ?jet|cnc)[- ]?cut\w*|cut|"
                     r"routed|milled|machined|turned|bent|glued|sewn|to (build|make)|built|fabricated|assembled)\b")
-#: Words in what the person said that say they have something already.
-HAVE = re.compile(r"(?i)\b(i|we)('ve| have| already have| own| got)\b|\b(my|our|existing|already)\b|\bi have\b")
+#: Possession, near the part's own noun in what the person said (#123 review: "my kid's science fair" isn't having a
+#: generator): before it ("my", "our", "the existing", "I've got a"), or after it ("I have", "I pulled", "from my").
+HAVE = re.compile(r"(?i)\b(i|we)\s*('ve got|'ve| have| already have| own| already own| got| pulled| salvaged| "
+                  r"bought| kept)\b")
+HAVE_BEFORE = re.compile(r"(?i)\b(my|our|existing|spare)\b")
+HAVE_AFTER = re.compile(r"(?i)\bfrom (my|our)\b")
 #: What a design stands on or is in: never a part (#117: "the bathroom floor" made the stool a plan of two). Supports
 #: are held(), the floor the default.
 GROUND = {"floor", "ground", "room", "wall", "walls", "earth", "soil", "ceiling", "terrain", "yard", "lawn"}
+_WORD = re.compile(r"[a-z0-9']+")
 #: Where a skeleton number or a rule came from (CALI-115, as goals' are): ``stated`` (the person's number),
 #: ``assumed`` (the planner's: shown, not enforced) or ``kept`` (assumed, then kept by the person).
 SOURCES = ("stated", "assumed", "kept")
@@ -71,6 +76,8 @@ class PlanPart(_Base):
     made: str = ""                              # how it's made: printed, sheet, welded tube, foam…
     role: Literal["fixed", "movable"] = "movable"   # fixed: the person already has it; drawn as a reference
     mounts_on: list[str] = Field(default_factory=list)
+    #: for a fixed part: "stated" when the person's words say they have it, else "assumed" ("you have it? say if not")
+    source: Literal["stated", "assumed"] = "stated"
 
 
 class SkeletonValue(_Base):
@@ -113,12 +120,12 @@ class Plan(_Base):
         return next((s for s in self.skeleton if s.name == name), None)
 
 
-def validate(data, said: Optional[str] = None) -> Plan:
+def validate(data) -> Plan:
     """A plan from the planner's JSON (or a :class:`Plan`), checked: every name well formed and used once, every
     skeleton number with a unit, every mate and rule over parts and numbers the plan has, the rules in the
-    language the assembly measures and each measuring a part, a part you have that isn't one to be made (and, given
-    what the person ``said``, only when they said they have something), and a build order with no cycle. The ground,
-    the floor or the room is dropped, with what names it. Raises :class:`PlanError` with the reason."""
+    language the assembly measures and each measuring a part, a part you have that isn't one to be made, and a build
+    order with no cycle. What it stands on (the bathroom floor, the garage wall) is dropped, with what names it, and
+    said (:func:`dropped_line`). Raises :class:`PlanError` with the reason."""
     try:
         plan = data if isinstance(data, Plan) else Plan.model_validate(data)
     except Exception as e:  # noqa: BLE001 — pydantic's first complaint, in words (never its raw text or its URL)
@@ -127,15 +134,10 @@ def validate(data, said: Optional[str] = None) -> Plan:
     if not plan.parts:
         raise PlanError("the plan has no parts")
     for p in plan.parts:
-        if p.role != "fixed":
-            continue
-        made = MAKING.search(f"{p.what} {p.made}")
+        made = MAKING.search(p.made) if p.role == "fixed" else None
         if made:
             raise PlanError(f"{p.id!r} is marked as something you have, but it's to be made ({made.group(0).lower()}): "
                             f"only what the person said they have is fixed")
-        if said is not None and not HAVE.search(said):
-            raise PlanError(f"nothing you said says you have the {p.id.replace('_', ' ')}: only what the person "
-                            f"said they have is fixed")
     ids = plan.ids()
     names = [s.name for s in plan.skeleton]
     for kind, seen in (("part", ids), ("skeleton number", names)):
@@ -174,13 +176,38 @@ def validate(data, said: Optional[str] = None) -> Plan:
     return plan
 
 
-def _ground(pid: str) -> bool:
-    return bool(set(pid.split("_")) & GROUND)
+def _ground(p: PlanPart) -> bool:
+    """What it stands on, not a part: the id's LAST word is a ground word and it isn't made (#123 review:
+    "floor_lamp", "wall_shelf" and "ground_stake" are parts; "bathroom_floor" and "garage_wall" aren't; a
+    "retaining_wall" that's built is)."""
+    return p.id.split("_")[-1] in GROUND and not p.made.strip()
+
+
+def dropped_line(plan: Plan) -> str:
+    """"the bathroom floor is what it stands on, not a part", or "" (never dropped without a word)."""
+    gone = [f"the {d.replace('_', ' ')}" for d in plan.dropped]
+    if not gone:
+        return ""
+    return (" and ".join(gone) + (" is what it stands on, not a part" if len(gone) == 1
+                                  else " are what it stands on, not parts"))
+
+
+def _have(said: str, p: PlanPart) -> bool:
+    """The person's words say they have this part: a possession phrase within a few words of its noun."""
+    words = _WORD.findall((said or "").lower())
+    nouns = {w for w in p.id.lower().split("_") if len(w) > 2}
+    for i, w in enumerate(words):
+        if w.rstrip("s") not in {n.rstrip("s") for n in nouns}:
+            continue
+        before, after = " ".join(words[max(0, i - 4):i]), " ".join(words[i + 1:i + 8])
+        if HAVE.search(before) or HAVE_BEFORE.search(before) or HAVE.search(after) or HAVE_AFTER.search(after):
+            return True
+    return False
 
 
 def _drop_ground(plan: Plan) -> Plan:
     """The plan without the floor, the ground or the room, and without the mates and rules that name them (#117)."""
-    gone = [p.id for p in plan.parts if _ground(p.id)]
+    gone = [p.id for p in plan.parts if _ground(p)]
     if not gone:
         return plan
 
@@ -360,7 +387,11 @@ def classify(plan: Plan, said: str, prior: Optional[Plan] = None) -> Plan:
         read = {n.id for n in ast.walk(ast.parse(r.expr, mode="eval")) if isinstance(n, ast.Name)} & names
         src = "kept" if (r.id, r.expr) in kept_r else "stated" if read and read <= given else "assumed"
         rules.append(r.model_copy(update={"source": src}))
-    out = plan.model_copy(update={"skeleton": skel, "rules": rules})
+    # a part you have: "stated" when your words say so, else assumed and asked, never the whole plan refused (#123)
+    kept_p = {p.id for p in (prior.parts if prior else []) if p.role == "fixed" and p.source == "stated"}
+    parts = [p.model_copy(update={"source": "stated" if p.role != "fixed" or p.id in kept_p or _have(said, p)
+                                  else "assumed"}) for p in plan.parts]
+    out = plan.model_copy(update={"skeleton": skel, "rules": rules, "parts": parts})
     out._dropped = plan.dropped
     return out
 
@@ -420,7 +451,8 @@ def save(store, plan: Plan, status: str = "review") -> None:
         Assertion(id=r.id, expr=r.expr) for r in binding(plan)]          # an assumed rule is shown, not enforced
     store.design.skeleton = [s.model_dump() for s in plan.skeleton]
     store.design.plan = {"status": status, "parts": [p.model_dump() for p in plan.parts], "order": order(plan),
-                         "rules": [r.model_dump() for r in plan.rules]}
+                         "rules": [r.model_dump() for r in plan.rules],
+                         **({"dropped": plan.dropped} if plan.dropped else {})}
     store.save()
 
 
@@ -431,8 +463,10 @@ def load(store) -> Optional[Plan]:
         return None
     mates = [{"between": m.between, "kind": m.kind, "value": m.value} for m in store.assembly.mates
              if m.id.startswith("plan_")]
-    return Plan.model_validate({"parts": rec["parts"], "skeleton": store.design.skeleton or [], "mates": mates,
+    plan = Plan.model_validate({"parts": rec["parts"], "skeleton": store.design.skeleton or [], "mates": mates,
                                 "rules": rec.get("rules") or []})
+    plan._dropped = list(rec.get("dropped") or [])
+    return plan
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +480,9 @@ def headline(plan: Plan, name: str) -> str:
         said = p.id.replace("_", " ")
         what = p.what.strip().rstrip(".")
         extra = f" ({what})" if what and what.lower() != said and not what.lower().startswith(f"the {said}") else ""
-        return f"the {said}{extra}" + (", which you have" if p.role == "fixed" else "")
+        have = "" if p.role != "fixed" else (", which you have" if p.source == "stated"
+                                              else " (you have it? say if not)")
+        return f"the {said}{extra}{have}"
     names = [one(p) for p in plan.parts]
     listed = ", ".join(names[:-1]) + f" and {names[-1]}" if len(names) > 1 else names[0]
     a = name.strip().rstrip(".")
@@ -548,7 +584,7 @@ def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[
         try:
             if got is None:
                 raise PlanError("the planner didn't answer with a plan")
-            return classify(validate(got, said=said), said, prior)
+            return classify(validate(got), said, prior)
         except PlanError as e:
             if attempt == 2:
                 raise

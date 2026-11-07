@@ -904,9 +904,10 @@ function designView(d) {
     : '<div class="empty">None yet.</div>'}
     ${d.plan ? `<h4>The plan <span class="badge">${d.plan.status === 'review' ? 'to review' : 'saved'}</span></h4>
       <ol class="list">${d.plan.parts.map((x) => `<li><b>${esc(x.id.replace(/_/g, ' '))}</b>
-        ${x.role === 'fixed' ? '<span class="badge ref">you have it</span>' : ''}${x.built ? '<span class="badge ok">built</span>' : ''}
+        ${x.role === 'fixed' ? (x.source === 'assumed' ? '<span class="badge">assumed: you have it? say if not</span>' : '<span class="badge ref">you have it</span>') : ''}${x.built ? '<span class="badge ok">built</span>' : ''}
         <div class="muted small">${esc(x.what)}${x.made ? ` · ${esc(x.made)}` : ''}${x.mounts_on.length
           ? ` · on the ${x.mounts_on.map((m) => esc(m.replace(/_/g, ' '))).join(' and the ')}` : ''}</div></li>`).join('')}</ol>
+      ${d.plan.dropped ? `<div class="small muted">${esc(d.plan.dropped[0].toUpperCase() + d.plan.dropped.slice(1))}.</div>` : ''}
       ${d.plan.numbers.length ? '<div class="small"><b>The numbers they share</b></div><ul class="list">'
         + d.plan.numbers.map((n) => `<li class="small">${esc(n)}</li>`).join('') + '</ul>' : ''}
       ${d.plan.checks.length ? '<div class="small"><b>Checked between them</b></div><ul class="list">'

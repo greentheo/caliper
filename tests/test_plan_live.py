@@ -84,9 +84,9 @@ def _never(*a, **k):
 # --- 1. fixed only for what the person has ------------------------------------------------------------------------
 def test_a_part_to_be_made_is_never_one_you_have():
     with pytest.raises(P.PlanError) as e:
-        P.validate(TURBINE, said=TURBINE_SAID)
+        P.validate(TURBINE)
     assert "'base' is marked as something you have, but it's to be made (welded)" in str(e.value), str(e.value)
-    plan = P.validate(_fixed_ok(TURBINE), said=TURBINE_SAID)
+    plan = P.classify(P.validate(_fixed_ok(TURBINE)), TURBINE_SAID)
     assert [p.id for p in plan.parts if p.role == "fixed"] == ["generator"]
     assert "the generator, which you have" in P.headline(plan, "a turbine")
     assert "the mast (a welded 7 ft mast), which you have" not in P.headline(plan, "a turbine")
@@ -100,9 +100,37 @@ def test_each_way_of_making_it_says_it_isn_t_yours(made):
         P.validate(plan)
 
 
-def test_a_fixed_part_needs_words_that_say_you_have_something():
-    with pytest.raises(P.PlanError, match="nothing you said says you have the generator"):
-        P.validate(_fixed_ok(TURBINE), said="A Savonius wind turbine on a 7 ft mast.")
+def test_with_no_words_that_you_have_it_a_fixed_part_is_assumed_and_asked_not_refused():
+    """#123 review: refusing cost the person their plan; it's asked instead, as an assumed number is."""
+    plan = P.classify(P.validate(_fixed_ok(TURBINE)), "A Savonius wind turbine on a 7 ft mast.")
+    (gen,) = [p for p in plan.parts if p.id == "generator"]
+    assert gen.role == "fixed" and gen.source == "assumed"
+    assert "the generator (you have it? say if not)" in P.headline(plan, "a turbine")
+
+
+def _gen(what="the generator", made=""):
+    return P.validate({"parts": [{"id": "rotor", "what": "a printed rotor", "made": "printed"},
+                                 {"id": "generator", "what": what, "made": made, "role": "fixed"}]})
+
+
+@pytest.mark.parametrize("said,source", [
+    ("A wind turbine for my kid's science fair, with a generator.", "assumed"),       # "my" isn't near it
+    ("A wind turbine to drive a 12V generator.", "assumed"),
+    ("I've got a generator; make a wind turbine for it.", "stated"),
+    ("A wind turbine using the generator from my old treadmill.", "stated"),
+    ("A wind turbine for the generator I pulled last week.", "stated"),
+    ("A wind turbine on my existing generator.", "stated"),
+    ("A wind turbine for a generator I already have, with a 1 in shaft.", "stated"),
+])
+def test_you_have_it_is_read_near_the_part_s_own_word(said, source):
+    (gen,) = [p for p in P.classify(_gen(), said).parts if p.id == "generator"]
+    assert gen.source == source, said
+
+
+@pytest.mark.parametrize("what", ["a Honda generator, built in 2019", "the car's tow bar, cut down by the dealer"])
+def test_what_it_is_isn_t_read_for_making(what):
+    """An existing thing was once built or cut: only ``made`` says it's to be made."""
+    assert _gen(what=what).parts[1].role == "fixed"
 
 
 # --- 2. the floor isn't a part; one part to build builds at once -----------------------------------------------------
@@ -117,13 +145,42 @@ STOOL = {
 }
 
 
-@pytest.mark.parametrize("pid", ["bathroom_floor", "floor", "ground", "the_ground", "garage_wall", "room"])
+@pytest.mark.parametrize("pid", ["bathroom_floor", "floor", "ground", "the_ground", "garage_wall", "room", "back_yard"])
 def test_the_ground_the_floor_or_the_room_is_dropped_with_what_names_it(pid):
     plan = json.loads(json.dumps(STOOL).replace("bathroom_floor", pid))
     got = P.validate(plan)
     assert got.ids() == ["step_stool"] and not got.mates
     assert [r.id for r in got.rules] == ["stable_base"]
     assert got.dropped == [pid]
+    assert P.dropped_line(got) == f"the {pid.replace('_', ' ')} is what it stands on, not a part"
+
+
+@pytest.mark.parametrize("pid", ["floor_lamp", "wall_shelf", "wall_bracket", "lawn_chair", "ground_stake", "yard_sign",
+                                 "room_divider"])
+def test_a_part_named_for_where_it_goes_is_kept(pid):
+    """#123 review: these were dropped, the very part the design is about, without a word."""
+    plan = json.loads(json.dumps(STOOL).replace("bathroom_floor", pid))
+    got = P.validate(plan)
+    assert pid in got.ids() and not got.dropped and P.dropped_line(got) == ""
+
+
+def test_a_wall_that_s_built_is_a_part():
+    plan = json.loads(json.dumps(STOOL).replace("bathroom_floor", "retaining_wall"))
+    plan["parts"][1].update({"made": "stacked block", "role": "movable"})
+    assert "retaining_wall" in P.validate(plan).ids()
+
+
+def test_a_plan_of_several_parts_says_what_it_dropped(tmp_path):
+    plan = _fixed_ok(TURBINE)
+    plan["parts"].append({"id": "yard_ground", "what": "the ground it's staked into", "role": "fixed"})
+    plan["mates"].append({"between": ["base", "yard_ground"], "kind": "touch"})
+    store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
+    got = firstrun.build(store, use_llm=True, client=fake(plan), author=_never, strength=False)
+    assert got["plan"] == "review" and "yard_ground" not in P.load(store).ids()
+    assert "(The yard ground is what it stands on, not a part.)" in got["reply"], got["reply"]
+    from caliper import design_api
+
+    assert design_api.design_state(store)["plan"]["dropped"] == "the yard ground is what it stands on, not a part"
 
 
 def test_the_stool_plans_one_part_and_its_first_run_doesn_t_stop(tmp_path, monkeypatch):
@@ -233,8 +290,10 @@ def test_what_the_person_didn_t_say_is_assumed_and_not_enforced(tmp_path):
 def test_keeping_an_assumed_check_enforces_it_and_a_revision_keeps_it_kept(tmp_path):
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
     firstrun.build(store, use_llm=True, client=fake(_fixed_ok(TURBINE)), author=_never, strength=False)
+    P.keep(store, "rotor_size")                         # reads rotor_d, assumed: keeping the check keeps it too
+    assert {s.name: s.source for s in P.load(store).skeleton}["rotor_d"] == "kept"
     P.keep(store, "base_stable")
-    assert {a.id for a in store.assembly.assertions} == {"mast_height", "base_stable"}
+    assert {a.id for a in store.assembly.assertions} == {"mast_height", "rotor_size", "base_stable"}
     assert {r.id: r.source for r in P.load(store).rules}["base_stable"] == "kept"
     with pytest.raises(KeyError):
         P.keep(store, "no_such_check")
@@ -244,7 +303,7 @@ def test_keeping_an_assumed_check_enforces_it_and_a_revision_keeps_it_kept(tmp_p
     got = chat.turn(store, "make the mast 10 ft", client=fake(taller), use_llm=True)
     assert got.action == "plan" and got.ok, got.reply
     assert {r.id: r.source for r in P.load(store).rules}["base_stable"] == "kept"
-    assert {a.id for a in store.assembly.assertions} == {"mast_height", "base_stable"}
+    assert {a.id for a in store.assembly.assertions} == {"mast_height", "rotor_size", "base_stable"}
 
 
 def test_the_planner_is_told_all_five():
