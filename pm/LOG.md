@@ -17,6 +17,14 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - `tests/test_carve_closed.py`: a small hole filled and a big one not; every carved step forced to leak (not offered,
   adopt refused, nothing written); a join with the wood forced to leak (a small gap repaired and adopted watertight,
   a big one refused) and the study not offering it.
+- **#124 review, the cause:** a **pinch**. Where two surfaces of the carved part meet along an edge, the adopted
+  shape keeps two vertices at one point apart by index: watertight in memory, and once merged (any STL round trip)
+  four faces share an edge and it isn't (#105's 6,011 vertices, 12,060 faces). `_closed` judged the in-memory form,
+  so the study offered step 2 and `adopt` refused it. Now `_closed` judges a merged copy, as it reads back, so offer
+  and adopt agree; a pinch isn't something a fill mends, so that step is marked. `_offer` builds the script once.
+  Tests: a pinch along an edge (closed in memory, refused merged; one meeting only at a corner reads back closed),
+  and #105's repro (MIXED with its edge foot, 40 lb, 4 steps to 0.6): the step offered adopts, watertight
+  (`slow`: several minutes).
 
 ### 2026-11-07 · CALI-113 (#115) · A part with loads() is held to them, goal or none
 - **Rule 6, found in #106's re-check:** a design whose parts have `loads()` but whose `scorecard.yaml` has no strength

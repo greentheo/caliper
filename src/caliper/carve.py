@@ -41,13 +41,19 @@ class NotClosed(ValueError):
 
 
 def _closed(mesh):
-    """The mesh, its holes filled if that closes it (trimesh's repair: small gaps, flipped faces), or None."""
+    """The mesh as it will be read back, closed: its holes filled if that closes it (trimesh's repair: small gaps,
+    flipped faces), or None.
+
+    Judged after merging its vertices, as any STL round trip does (#124 review, #105's cause): where two surfaces
+    meet along an edge the carve leaves a pinch, two vertices at one point kept apart by index. That's watertight
+    in memory, and once merged it isn't (four faces on one edge), so the study offered a step adopt then refused.
+    A pinch isn't something a fill can mend: such a step is marked, not repaired."""
     import trimesh
 
-    if mesh.is_watertight:
-        return mesh
     m = mesh.copy()
     m.merge_vertices()
+    if m.is_watertight and m.is_volume:
+        return m
     m.update_faces(m.nondegenerate_faces())
     m.remove_unreferenced_vertices()
     trimesh.repair.fill_holes(m)
@@ -211,10 +217,18 @@ def _station_mesh(mesh):
 
 def _offer(store: DesignStore, part_id: str, out: list, out_dir: str, spacing: float) -> Optional[dict]:
     """The step to offer: the lightest that holds and whose part, as adopting it would build it, closes up. One that
-    doesn't is marked (``closed: False``, with why) and the next lightest is tried."""
+    doesn't is marked (``closed: False``, with why) and the next lightest is tried. The part's script is built
+    once for all of them (#124 review)."""
+    from . import sandbox
+
+    built = None
     for x in sorted((x for x in out if x["holds"] and x.get("closed", True)), key=lambda x: -x["saved_g"]):
+        if built is None:
+            built = sandbox.run_script(strip(store.read_script(part_id)), timeout=120)
+            if not built.ok:
+                raise ValueError(f"'{part_id}' won't build to carve: {built.error}")
         try:
-            _adopted(store, part_id, os.path.join(out_dir, x["stl"]), spacing)
+            _adopted(store, part_id, os.path.join(out_dir, x["stl"]), spacing, built=built)
             return x
         except NotClosed:
             x.update({"closed": False, "why": OPEN})

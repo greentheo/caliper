@@ -35,6 +35,7 @@ caliper = ["web/static/*", "web/static/**/*", "part_scripts.md", "samples/**/*"]
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["src"]
+markers = ["slow: takes minutes (a full carve); CI runs it, `-m \"not slow\"` skips it locally (CALI-117)"]
 
 [tool.ruff]
 line-length = 100
