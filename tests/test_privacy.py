@@ -164,7 +164,12 @@ def test_rec_start_is_only_in_listen_and_listen_only_after_a_yes_or_on_the_devic
 def test_the_page_says_what_goes_to_claude_and_the_script_is_new():
     src = open(JS).read()
     assert "What you type goes to Claude (Anthropic's AI) to design it." in src
-    assert re.search(r'design\.js\?v=(\d+)', open(HTML).read()).group(1) != "43"
+    # the script is new to the browser: its key is design.js's own content now (CALI-120), set by the server
+    from caliper.server import cache_key, keyed_page
+
+    assert "design.js?v=dev" in open(HTML).read()
+    assert f"design.js?v={cache_key('design.js')}" in keyed_page("index.html").body.decode()
+    assert cache_key("design.js") not in ("43", "dev")
     out = subprocess.run([_node(), "--input-type=module", "-e", _const(src, "TO_CLAUDE") + _fn(src, "sendNote") + """
 const S = { claude: true };
 const out = { fresh: sendNote(null), none: sendNote({ log: [] }), sent: sendNote({ log: [{ kind: 'message' }] }) };

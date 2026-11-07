@@ -1186,7 +1186,8 @@ function goTo(id) {                   // open the card's numbers and bring that 
 const TRUST = { measured: 'measured', model: 'a model (on the safe side)', rough: 'rough', guess: 'a guess' };
 function scoreView(d) {
   const card = (d.scorecards || [])[0];
-  const stale = card && d.parts.some((p) => card.versions && card.versions[p.id] !== undefined && card.versions[p.id] !== p.version);
+  const stale = card && (card.outdated     // scored the old way (CALI-111): its numbers aren't today's
+    || d.parts.some((p) => card.versions && card.versions[p.id] !== undefined && card.versions[p.id] !== p.version));
   const num = (v, u) => {
     if (v == null) return '—';
     const n = typeof v === 'number' ? (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : `${+v.toFixed(2)}`) : esc(String(v));
@@ -1473,7 +1474,8 @@ function builtResults(p, c) {
   return `<div class="card">
       <button class="ghost" id="b3d" style="float:right">${built3d.has(p.id) ? 'Back to the solid' : 'Show how it\'s built'}</button>
       <b style="font-size:1.3em">${lbs(r.mass_lb)}</b> ${changed ? '<span class="badge">trying — not saved</span>' : ''}
-      <div class="small">centre of gravity ${cogText(p, r.cog)} <span class="muted">(the red dot)</span></div>
+      ${r.unweighed ? `<div class="small" style="color:var(--amber)">Its weight isn't known: ${esc(r.unweighed)}.</div>`   // never the rest's (#125)
+        : `<div class="small">centre of gravity ${cogText(p, r.cog)} <span class="muted">(the red dot)</span></div>`}
       ${(r.keeps || []).map((k) => `<div class="small" style="margin-top:4px">${k.clear
         ? `✓ holds the <b>${esc(k.name)}</b>`
         : `<span style="color:var(--bad)">✗ the <b>${esc(k.name)}</b> doesn't fit — the outside cuts ${len(k.depth_mm, 1)} into it</span>`}
@@ -1764,6 +1766,7 @@ function balanceView() {
   const hitch = b.moment_lbin != null;           // only when a part declares where it's held (a hitch)
   const part = (x) => (x.part === 'payload' ? 'payload' : `<span class="partlink" data-part="${esc(x.part)}">${esc(x.part)}</span>`);
   return `<div class="card"><b style="font-size:1.3em">${lbs(b.mass_lb)}</b> ${tried ? '<span class="badge">with what-ifs</span>' : ''}
+      ${b.unweighed ? `<div class="small" style="color:var(--amber)">The total isn't known: ${esc(b.unweighed.join('; '))}.</div>` : ''}
       ${hitch ? `<div class="small">The hitch carries <b>${lbs(b.force_lb)}</b> with its centre of gravity
         ${len(b.arm_in * IN, 1)} behind it: <b>${lbin(b.moment_lbin)}</b> standing still.</div>
       <div class="muted small" style="margin-top:4px">${HITCH_NOTE}</div>` : ''}</div>
@@ -2684,7 +2687,8 @@ async function showStation(pid, run, index) {
       : `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume
       ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>`;
     bar.innerHTML = `${what}
-      ${(lightened || carved) && !index ? '' : `<button class="primary" id="adoptBtn" ${(lightened || carved) && !st.holds ? 'disabled' : ''}>${lightened ? 'Cut these holes in '
+      ${carved && st.closed === false ? `<span class="small" style="color:var(--bad)">Can't use this step: ${esc(st.why)}.</span>` : ''}
+      ${(lightened || carved) && !index ? '' : `<button class="primary" id="adoptBtn" ${(lightened || carved) && (!st.holds || st.closed === false) ? 'disabled' : ''}>${lightened ? 'Cut these holes in '
         : carved ? 'Carve it like this: ' : framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`}
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };
