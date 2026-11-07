@@ -113,11 +113,12 @@ def _format(value: float) -> str:
     return text if text not in ("", "-0") else "0"
 
 
-def write_params(script: str, values: dict[str, float]) -> str:
+def write_params(script: str, values: dict[str, float], keep_float: bool = False) -> str:
     """The script with these ``PARAMS`` entries set to new numbers — nothing else touched.
 
     Replaces each value by its source position (not by re-printing the module), so comments, layout
     and every other line survive exactly. Raises ``KeyError`` naming any value it can't place.
+    ``keep_float``: a value written with a decimal point keeps one ("6.0" set to 5 is "5.0", CALI-108).
     """
     node = _params_node(ast.parse(script))
     if node is None:
@@ -138,8 +139,17 @@ def write_params(script: str, values: dict[str, float]) -> str:
     for name in sorted(values, key=lambda n: spans[n][:2], reverse=True):
         l0, c0, l1, c1 = spans[name]
         start, end = offsets[l0 - 1] + c0, offsets[l1 - 1] + c1
-        data = data[:start] + _format(values[name]).encode() + data[end:]
+        text = _format(values[name])
+        if keep_float and b"." in data[start:end] and "." not in text and "e" not in text:
+            text += ".0"
+        data = data[:start] + text.encode() + data[end:]
     return data.decode()
+
+
+def set_params(script: str, values: dict[str, float]) -> str:
+    """A part's numbers set in its script, as a person or the skeleton sets them (#143, #147: one rewrite for both):
+    each ``PARAMS`` value by its source position, its comment and every other line kept, a float kept a float."""
+    return write_params(script, values, keep_float=True)
 
 
 RANGES_NAME = "RANGES"
