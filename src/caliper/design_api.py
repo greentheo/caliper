@@ -345,10 +345,15 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     for r in runs["lighten"]:
         for st in r.get("stations") or []:
             st["verdict"] = verdicts.lighten_step(st, untrusted.get(r["part"]), r)
+    loads_by_id = {r["id"]: r for r in runs["load"]}
     for p in parts:                           # the history line of a strength check says the verdict it was given
         for h in p["history"]:
             if h.get("kind") == "load" and h.get("action") == "studied":
-                h["verdict"] = verdicts.of(h)
+                # the run's own verdict where it's still here: an older line kept "doesn't hold, 0x" for a check that
+                # couldn't run (#138 item 3)
+                rec = loads_by_id.get(h.get("run"))
+                h["verdict"] = ({k: x for k, x in verdicts.run(rec).items() if k != "cases"} if rec
+                                else verdicts.of(h))
             elif h.get("kind") == "revision" and h.get("result"):     # its report's verdict (#132 review)
                 h["verdict"] = verdicts.history(h)
     current = {p["id"]: p["version"] for p in parts}
