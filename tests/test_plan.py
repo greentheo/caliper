@@ -162,14 +162,19 @@ def test_a_plan_of_four_parts_is_saved_and_stops_for_review(tmp_path):
     assert what["lines"][1]["text"] == state["plan"]["headline"] and what["lines"][1]["status"] == "warn"
 
 
-def test_build_it_on_a_reviewed_plan_says_what_comes_next_and_authors_nothing(tmp_path):
-    """#3a builds nothing past today's one part: a second Build it is never a silent no-op."""
+def test_build_it_on_a_reviewed_plan_builds_its_parts_in_order(tmp_path):
+    """#3a said "comes next (#3b)" here; #3b builds the parts, mounted-on first (the base), and a part that won't
+    build is said by name. (test_build_plan.py builds a whole plan.)"""
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
     firstrun.build(store, use_llm=True, client=fake(TURBINE), author=_never, strength=False)
-    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=_never, strength=False)
-    assert got["reply"] == "The plan's saved: 4 parts. Building them one by one, in order, comes next (#3b)."
-    assert not store.design.parts and store.design.plan["status"] == "saved"
-    assert store.log()[-1]["reply"] == got["reply"]
+    asked = []
+
+    def broken(spec, feedback, prior):
+        asked.append(spec.part)
+        return "def build(params):\n    raise ValueError('no base yet')\n"
+    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=broken, strength=False)
+    assert set(asked) == {"base"} and got["plan"] == "stopped" and got["part"] == "base"
+    assert got["reply"].startswith("I couldn't build the base:") and not store.design.parts
 
 
 def test_make_the_mast_10_ft_changes_that_number_and_nothing_else(tmp_path):
