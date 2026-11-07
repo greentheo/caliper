@@ -243,35 +243,44 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
             f.write(release.draw(view, [(every, "now")]))
         pages.append({"title": "Paint it", "say": "Let the glue dry overnight, then paint it any colour you like. "
                                                    "Two coats, and let the first one dry.", "img": img})
-    held = []
-    untrusted = any(c.get("filled") for cases in (rec.get("strength") or {}).values() for c in cases)
-    # a ✓ from an FEA too coarse to see its walls is no promise either (CALI-110)
-    unsettled = any(c.get("unresolved") and c.get("holds") for cases in (rec.get("strength") or {}).values()
-                    for c in cases)
-    for cases in (rec.get("strength") or {}).values():
-        if untrusted or unsettled:                       # checked on a block, or too coarsely: nothing to promise
-            break
-        for c in cases:
-            if c.get("safety"):
-                held.append(f"It should hold {c['name'].lower()}, {answers._times(c['safety'])}.")
     with open(os.path.join(root, "kids", "finished.png"), "wb") as f:
         f.write(release.draw(view, [(every, "now")]))
-    if untrusted or unsettled:
-        # its strength hasn't been checked on the stool as built: no standing on it at all (#96 rework, item 4;
-        # CALI-110: nor where the check was too coarse to see its walls)
-        pages.append({"title": "Don't stand on it yet", "img": "kids/finished.png",
-                      "say": "Don't stand on it yet. Its strength hasn't been checked on it as it's built, so a "
-                             "grown-up checks it first, before anyone stands on it.", "grownup": True})
-    else:
-        pages.append({"title": "Test it", "img": "kids/finished.png",
-                      # trying a new stool is a grown-up's step (rule 6): they go first, the kid watches
-                      "say": "A grown-up stands on it first, gently, while you watch. Then it's your turn, with the "
-                             "grown-up right beside you. " + " ".join(held),
-                      "note": answers.PROMISE, "grownup": True})
+    pages.append(_strength_page(rec.get("strength") or {}, part_ids))
     with open(os.path.join(root, "kids.html"), "w") as f:
         f.write(page(release.title(rec["design"]), pages))
     return "kids.html"
 
+
+
+def _strength_page(strength: dict, parts: Optional[list] = None) -> dict:
+    """The kid's book's last page, from each case's one verdict (CALI-112): a promise only from a case that holds,
+    nothing over it; any other case, no standing on it. Every part the book covers must hold: one with no check at
+    the released version (none run, an error, no loads()) is "not checked", so never "your turn" (#132 review)."""
+    from . import answers
+
+    cases = [c for cs in strength.values() for c in cs]
+    kinds = [(c.get("verdict") or {}).get("kind", "waiting") for c in cases]
+    kinds += ["waiting" for pid in (parts or []) if not strength.get(pid)]      # a part left out: not checked
+    if not kinds:
+        kinds = ["waiting"]                              # nothing checked at all: not checked
+    held = [f"It should hold {c['name'].lower()}, {answers._times(c['safety'])}." for c, k in zip(cases, kinds)
+            if k == "holds"]
+    if "fails" in kinds:
+        # it failed its check: not a kid's to try at all (rule 6), and not "it should hold" (CALI-112's audit)
+        return {"title": "Don't stand on it yet", "img": "kids/finished.png",
+                "say": "Don't stand on it yet. It isn't strong enough yet, so a grown-up makes it stronger first and "
+                       "checks it again, before anyone stands on it.", "grownup": True}
+    if any(k != "holds" for k in kinds):
+        # its strength hasn't been checked on the stool as built: no standing on it at all (#96 rework, item 4;
+        # CALI-110: nor where the check was too coarse to see its walls)
+        return {"title": "Don't stand on it yet", "img": "kids/finished.png",
+                "say": "Don't stand on it yet. Its strength hasn't been checked on it as it's built, so a grown-up "
+                       "checks it first, before anyone stands on it.", "grownup": True}
+    return {"title": "Test it", "img": "kids/finished.png",
+            # trying a new stool is a grown-up's step (rule 6): they go first, the kid watches
+            "say": "A grown-up stands on it first, gently, while you watch. Then it's your turn, with the grown-up "
+                   "right beside you. " + " ".join(held),
+            "note": answers.PROMISE, "grownup": True}
 
 CSS = """
 :root { color-scheme: light; }

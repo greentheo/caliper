@@ -566,6 +566,12 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · One verdict, everywhere (CALI-112 #114)
+1. Open a design whose strength check is a ✗, not trusted, not resolved or middle only: the card, the Score panel, the
+   Studies row, the history line, the build book and the kids' book all say the same word, and none says "holds" or
+   shows green unless it holds.
+2. A stool that fails: its kids' book ends "Don't stand on it yet. It isn't strong enough yet…".
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_verdicts.py`.
 ### 2026-11-07 · A changed design.js is picked up on reload, with no ?v= to bump (CALI-120 #128)
 1. View the page's source: `design.js?v=` is a hash of the file. Change `design.js` and reload: a new key, and the
    new script. `index.html` still says `?v=dev`.
