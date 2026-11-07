@@ -14,6 +14,10 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   carve-down's kid stage stays on the middle foot: at 60 lb its front-edge foot fails as drawn (1.91x), so it can't
   carve down from holding; #105's repro on both feet (40 lb) is #124's own slow test.
 - `test_edge_foot.py` reads the verdicts (the page's helpers are main's).
+- **CI on 09cbb07:** `test_carve_closed`'s open-join test carved #106's MIXED, now with the front-edge foot: its
+  two-load carve's step 1 doesn't close (#105's kind, rightly refused: `closed: False`) and the whole part fails at
+  the edge, so there was no step 1 to force open and `best` was 0. The test means a carve whose step 1 closes: it
+  carves the middle foot only (`CENTRED`, main's MIXED), and says why.
 
 ### 2026-11-06 · CALI-94 (#106 review) · A ✓ from the middle foot only isn't one
 - **The reviewer's block:** a two-sided top loaded only in the middle read a green ✓ on *Will it work?* ("Holds a kid
