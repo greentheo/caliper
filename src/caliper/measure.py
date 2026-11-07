@@ -114,7 +114,7 @@ def clean(m: trimesh.Trimesh) -> trimesh.Trimesh:
         m = m.copy()
         m.update_faces(~flat)
         m.remove_unreferenced_vertices()
-    if not m.is_watertight:
+    if not closed(m):
         bodies = m.split(only_watertight=False)
         whole = [b for b in bodies if closed(b)]
         strays = [b for b in bodies if not closed(b) and b.area <= STRAY_SHARE * m.area]
@@ -131,14 +131,15 @@ def clean(m: trimesh.Trimesh) -> trimesh.Trimesh:
     return m
 
 
-def closed(m: trimesh.Trimesh) -> bool:
+def closed(m: trimesh.Trimesh, volume: bool = False) -> bool:
     """Closed as it will be read back: two vertices at one point (a pinch) are watertight in memory and merge in any
-    STL round trip, after which it isn't (#124 review). Judged on a merged copy, so every reader agrees."""
-    if not m.is_watertight:
+    STL round trip, after which it isn't (#124 review). Judged on a merged copy, so every reader agrees. ``volume``:
+    and a volume too (its faces wound consistently outward), as a solid to weigh or adopt needs (#134)."""
+    if not m.is_watertight:  # raw: closed() itself
         return False
     merged = m.copy()
     merged.merge_vertices()
-    return bool(merged.is_watertight)
+    return bool(merged.is_watertight) and (not volume or bool(merged.is_volume))  # raw: closed() itself, merged
 
 
 def open_near(m: trimesh.Trimesh) -> Optional[str]:
@@ -151,8 +152,10 @@ def open_near(m: trimesh.Trimesh) -> Optional[str]:
     m = m.copy()
     m.merge_vertices()
     edges = m.edges_sorted
-    lone = edges[group_rows(edges, require_count=1)]
-    pts = m.vertices[lone.reshape(-1)] if len(lone) else m.vertices
+    # an edge with other than two faces: one (an opening) or more (a pinch, four faces on an edge: #134 review)
+    rows = group_rows(edges)
+    off = np.array([edges[r[0]] for r in rows if len(r) != 2])
+    pts = m.vertices[off.reshape(-1)] if len(off) else m.vertices
     z0, z1 = float(pts[:, 2].min()), float(pts[:, 2].max())
     return "near z " + (f"{z0:.0f} mm" if z1 - z0 < 1 else f"{z0:.0f}–{z1:.0f} mm")
 
@@ -192,12 +195,13 @@ def center_of_mass(g: Geometry) -> list[float]:
 # Topological (mesh)
 # ---------------------------------------------------------------------------
 def is_watertight(g: Geometry) -> bool:
-    return bool(g.require_mesh().is_watertight)
+    """Closed as it reads back (:func:`closed`, CALI-121): a pinch isn't, whatever trimesh says in memory."""
+    return closed(g.require_mesh())
 
 
 def is_manifold(g: Geometry) -> bool:
     m = g.require_mesh()
-    return bool(m.is_watertight and m.is_winding_consistent)
+    return bool(closed(m) and m.is_winding_consistent)
 
 
 def body_count(g: Geometry) -> int:
@@ -220,7 +224,7 @@ def body_count(g: Geometry) -> int:
             pass
     m = g.require_mesh()
     shells = m.split(only_watertight=False)
-    return int(sum(1 for s in shells if not s.is_watertight or s.volume > 0))
+    return int(sum(1 for s in shells if not closed(s) or s.volume > 0))
 
 
 # ---------------------------------------------------------------------------

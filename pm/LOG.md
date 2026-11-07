@@ -42,6 +42,171 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   held for it (its holes are checked as it goes). The design card's strength goal reads as the part card does: "0.5
   times over" (`_times`), not "0.53x", and "last checked on v4: 1.7 times over, needs 2". Pinned with an older-run-only
   part and a part with no run; the mutant (no check = not blocked) fails 4.
+### 2026-11-07 · CALI-35c (#3c) · The skeleton's numbers drive the parts
+#3's last slice: a planned design's shared numbers (the skeleton: "mast_top_z: 7 ft") drive every part that reads them.
+- **The params override** (`assembly.skeleton_params`): a part's `PARAMS` key the skeleton names is built at the
+  skeleton's value (`_build_py_local`, `part_geometry`, `evaluate`, `load_parts`; cached by the numbers it reads), and
+  what it declares (`construction.declared`'s probe) gets the same numbers, so its pieces and loads move with its shape.
+- **Changing one after the build** (`skeleton.drive`): the skeleton takes it, every part that reads it is written again
+  as a new version (the same script, `action: skeleton`, the change in its history: no call to Claude), and the whole
+  design is measured again. Its strength check, weight and score are then of the older shape, said as for any change.
+- **In the chat:** after the build, "make the mast 10 ft" (a message that names a number) is the plan's revision
+  (`P.revise`, one call); if only shared numbers changed, they drive the parts: "Changed mast top z from 7 to 10 ft.
+  Rebuilt from it, with no new design: the mast, the hub. The design checks: …". A change to more than the numbers (a
+  part, a check), or none, goes to the chat as ever.
+- **A part that hard-codes a shared number** instead of reading it doesn't move, and the plan's rule pinning that
+  interface fails, said (the drive isn't ok).
+- Tests: tests/test_skeleton_drives.py (6, stubbed: the fake planner answers the plan and its revision; the parts are
+  boxes that read the skeleton). No live runs.
+- **#143 review (the foreman's call): no override at build time.** A drive writes each changed number into every part
+  that reads it (`aero.set_params`, the same rewrite #147's by-hand edit makes) and saves that as a new version
+  ("mast_top_z set to 10 ft (3048 mm) by the skeleton"); builds always use a script's own `PARAMS`, so nothing changes
+  shape at the same version, and older runs go stale through the new version. (`assembly`, `design` and
+  `construction` are back to main's: no `skeleton_params`.) A part reads a number only where the plan's rules name
+  both (`skeleton.readers`), never by a key that only shares the name; one the plan says reads it but whose `PARAMS`
+  hasn't got it is said and doesn't move. The inches guard: a default equal to the skeleton's old mm ÷ 25.4 is
+  refused, with why. All or nothing: every part is built with its new numbers first; one refused or that won't build
+  leaves the skeleton and every part as they were, and the reply says which and why. The reply names each part and
+  the key it set, and "Strength: check it again on the mast" for each driven part with a strength run.
+- **The name-collision pin:** the base, named in a rule of its own (`bbox(base).max_z <= 1`) but in none with
+  `mast_top_z`, keeps its own `mast_top_z` key: not a reader, not rebuilt. Readers from any rule (the mutant that
+  survived with the base in none) now fail it.
+
+### 2026-11-07 · CALI-116 (#118) · Plywood's beam width takes its orthotropy, the safe side
+- **`load_study.beam()`** scales the effective width under a foot by `orthotropic(mat)` = (D_across / D_along)^¼ (the
+  material's `E_across` if given, else its strength ratio across; 0.841 for ply) when the face grain runs along the
+  span, the edge's share too, never past the panel's width (BS 8110 cl. 3.5.2.2(b)). `width_along_mm` and
+  `orthotropic` are on the record. The grain's way unknown, `safety_across` (the verdict) is the worse of the two.
+- **The `why` says so,** and the page's Load panel shows a two-sided top as a **Beam check** with its `why`, not "held all
+  round, edges free to turn" (design.js v=53).
+- **Before → after** (the plate numbers; the FEA and every verdict unchanged, since the verdict already took the grain
+  across the gap at half strength):
+
+  | fixture · case | width (mm) | grain along the span | verdict |
+  |---|---|---|---|
+  | test stool · front edge | 206.7 → 173.8 | 2.37 → 1.99 | 1.19 ✗ → 1.19 ✗ |
+  | test stool · middle | 254.0 → 238.5 | 2.91 → 2.74 | 1.46 ✗ → 1.46 ✗ |
+  | MIXED · front edge | 190.0 → 159.8 | 1.15 → 0.97 | 0.57 ✗ → 0.57 ✗ |
+  | MIXED · middle | 220.0 → 210.2 | 1.33 → 1.27 | 0.66 ✗ → 0.66 ✗ |
+
+  The greener number was the advice: "cut with its face grain running across the gap and it's about 2.4 times over"
+  for the test stool's front edge is now 2.0.
+- **NEEDS ENGINEER CHECK:** the factor (#42: or b_ef = M_beam / m_plate, or let the plate check govern).
+- `tests/test_orthotropic.py` (7; six fail on main).
+- **Merged forward onto main's one verdict (#132):** the plate or beam check gets its own verdict on the server
+  (`verdicts.meets` of its worse-grain number against the run's need, only where the case is settled: never green on
+  a not-trusted, unresolved or older case), and the Beam check panel takes its colour and word from it. Before, the
+  panel's number was plain bold. No number moves. Both guards pass.
+- **#122 review:** pinned that no plate or beam number reads green on a case that isn't settled (too coarse, or an
+  older version): it reads as its case does, and dropping the guard fails the test. Merged main (#139): the panel's
+  plate line is one expression with the beam, the ring and the rectangle, each with its number in its verdict's colour
+  (`plNum`). The sag beside "grain unknown" is the worse grain's (`beam`'s `sag_worse`: along the span its own E on
+  the narrower width, across it its stiffness across on the whole width): for ply, half as stiff across, so twice
+  the isotropic sag where that governs. `test_beam_width`'s sag reads the same.
+- **The worse-grain sag moves the real test's verdict** (`trials.predict` takes the plate or beam sag as the top of
+  the predicted range, at read time, so a recorded test re-judges). Before → after, for ply on two sides (the centred
+  foot, top of range 2.62 → 5.24 mm at the check's load):
+
+  | a test's sag at that load | before | after |
+  |---|---|---|
+  | 6 mm (2.3× the old top) | "it sagged more than we predicted" (warn) | within the prediction (ok) |
+  | 12 mm (4.6× the old top) | "it sagged more than we predicted" | "it sagged more than we predicted" |
+
+  Honest while the grain is unknown: the prediction spans both grains. **Where a plate says its grain** (`"grain":
+  "along"` or `"across"`), the prediction takes that grain's sag (`deflection_along_mm` / `deflection_across_mm`, now
+  on the beam's record), pinned. Nothing declares a grain yet: a piece's `construction()` has no grain key, so today
+  it's always the worse grain's. Theo has no recorded tests.
+- **#122 review, round 3:** `plNum`'s "(word)" pinned: an unsettled plate or beam number says its verdict's word ("3x (not resolved)"), a settled one never does.
+
+### 2026-11-07 · CALI-121 (#134 review, with main's #124) · #124's own closed reads, and a pinch said where it is
+- **#124's three reads in `carve.py`** (`_closed`'s two, and `adopt`'s check of the STL as it reads back) go through
+  `measure.closed()`; `closed(m, volume=True)` adds the winding (`is_volume`), so `with_printed`'s raw `is_volume`
+  goes too. The guard passes with no new `# raw:`.
+- **`open_near` places a pinch:** it takes every edge with other than two faces (an opening has one, a pinch four),
+  so a pinch reads "near z 5 mm", not the part's whole height. `with_printed` says where: "not checked: its shape
+  isn't closed near z …".
+- **The whittle bridge already merged on load:** `_mesh_of` reads the STL with trimesh's default `process=True`,
+  which merges vertices, so a pinch already read open there. Its switch to `closed()` is belt and braces, not a fix.
+- **The review's two survivors are pinned:** the build reply carries the ⚠ line (through `_compose`), and a pinched
+  printed part isn't weighed. Fail-first: 4 of the 8 fail without this (the guard, the pinch's place, the reply, the
+  weight).
+- **`test_mixed`'s carve-down runs in parallel again:** its `serial` mark (CALI-114) waited on #105's watertight adopt,
+  which #124 landed. CI's serial step allows none (`|| test $? -eq 5`).
+- **#134 review, round 2:** `closed(volume=True)` pinned with an inside-out box: watertight and closed, but its volume reads negative, so it's no solid to weigh (`with_printed` says so).
+
+### 2026-11-07 · CALI-121 (#133) · Every judgment of "closed" is made as the mesh reads back
+- `measure.is_watertight`, `is_manifold`, `body_count`, `clean`'s own check, the weight's solid check and the
+  whittle bridge go through `measure.closed()` (a merged copy, as any STL round trip): a pinch, watertight in memory,
+  isn't closed for any of them. The bridge says where: "'box' isn't closed (near z …): whittle can't voxelize or
+  carve it". A raw read is `closed()` itself or says why (`# raw:`), and a guard test holds every other line to it.
+- **The build says once when its part isn't closed** (`chat._not_closed`, in the round's reply): "⚠ Its shape isn't
+  closed near z … mm: strength, weight and carving can't be checked until it is."
+- **#129's surviving mutant, pinned:** on a closed part the stray step drops a zero-area face anyway (it's a loose
+  shell of its own); only on a part open elsewhere does the zero-area step alone take it out. The test is that case,
+  and it's the one that fails with the step off.
+- `tests/test_closed_everywhere.py` (5; 4 fail on main, the fifth pins the existing step).
+
+### 2026-11-07 · CALI-98 (#86) · A seat's load cases, and will it tip over
+From Theo's first bar stool run: its designer wrote one case ("250 lb person seated", factor 1.5) and the card read ✓.
+- **The designer's guide gets the load cases by kind of thing** (`part_scripts.md`): a step or tread, a seat (sitting,
+  the front edge, leaning back, climbing on, tipping over), a shelf or top, a step stool; factor 2 for stepping or
+  jumping, 1 for a load that sits there or a standard's test load. With a seat's four cases as an example.
+- **The values are cited, through the engineering brief on #42 (section 2):** tipping, EN 1022:2005/2018 and BIFMA
+  X5.1's front stability (600 N placed 60 mm in from the seat's edge, 20 N sideways at seat height); the front edge and
+  leaning back, EN 12520 / EN 1728 (1,300 N 100 mm in; 1,000 N with 400 N front to back or 300 N sideways); a step
+  stool, EN 14183 (150 kg). **NEEDS ENGINEER CHECK** on every value, in the code, the guide's table and the card: these
+  can't be checked here against the standards' own texts.
+- **A tip-over check, statics, not FEA** (`tipping.py`): a load with `"tip": True` is taken about the edge of the
+  part's footprint (the convex hull of where it meets the floor) it would go over: its own weight at its centre of
+  gravity and the case's downward push against the sideways one. Its verdict is `verdicts.meets` (one verdict, #132);
+  a case that can't be checked (no weight, no base, no sideways push) is waiting, never a pass. The FEA leaves tip
+  cases out (`load_study.prepare`).
+- **The card says it:** "Won't tip when someone sits on the front edge and leans, 2.92 times over." or "Tips …: only
+  0.18 times over, and it needs 1; the load alone tips it, before any push.", then "The guide's tipping pushes are EN
+  1022 / BIFMA X5.1's, as Caliper's engineering brief cites them: not yet checked by an engineer.", and for a seat,
+  what nobody checked: "Not checked yet for a seat: leaning back …; sitting on the front edge; buckling of the legs."
+  A step stool is stood on, not sat on: its cases are a step's.
+- Hand-worked: the bar stool (18 in base, seat 29 in up, 14 in seat, 10 lb): restoring 76,648.7 N·mm, overturning
+  14,732, 5.2 times over, goes over at about 104 N (23 lb); a narrow stool (8 in base, 30 in): 0.18, the front-edge
+  load lands outside its base. A bar stool written to the guide, through a stubbed designer: its four cases declared,
+  2.92 times over.
+- Not done: the live first run of the bar stool sentence (Theo's key, one run; his word).
+- Tests: tests/test_tipping.py (10; they can't import `tipping` without it).
+- **#141 review:** the caveat is on each tipping line itself ("…2.92 times over (EN 1022's push as our brief cites
+  it; not yet checked by an engineer)"), not a line apart. A way it could tip that no case pushes, where its base is no
+  wider, is said (`tipping.undeclared_ways`): the guide's bar stool, on a square base and pushed only forward, reads
+  "Not checked yet: tipping sideways (no push is declared that way, and its base is no wider that way)"; the box stool,
+  wider side to side, doesn't. Pinned: 0.8 against a factor of 1 tips, and the same stool raised 50 mm (its loads
+  with it) tips the same (the floor is where it stands; a floor at z 0 fails it). Merged main (#139).
+- **#141 review, round 2:** `check()`'s own factor is pinned (a base 10.13 in wide, about 0.8 times over: it tips against a factor of 1 and holds against 0.7, from `check()` itself), and so is "tipping front to back" (a sideways push on a square base).
+
+### 2026-11-07 · CALI-124 (#145) · The questions read the shop, and an answer about the shop goes to the shop
+From Theo's bar stool run: the questions asked for the printer's bed size, which is the shop's, and his answer went
+into the design's requirements, where *How do I make it?* couldn't use it.
+- **The questions read the shop first** (`clarify.draft_questions(…, shop=)`): Claude is told the shop ("never ask
+  about it"), and any question about a machine the shop knows states it instead (`with_shop`): "Your printer: 256 ×
+  256 × 256 mm build volume, PLA, PETG. If this one's to be made on something else, say what." A question about the
+  shop is tagged (`about: shop:printer`, from its words where Claude doesn't tag it).
+- **A shop answer goes to the shop, on a yes** (`shop_offer`, `offers`, `take_offer`): it's never a design
+  requirement; an answer the shop can take ("256 x 256 x 256 mm, PETG", "10 in", "4 x 8 ft", "a jigsaw and a drill")
+  is offered under *Requirements*: "Add a 256 × 256 × 256 mm printer (PETG) to your shop?" with Add it / No. A yes
+  writes `shop.yaml` through `shop.write` (the shop's own path; the same kind of machine is replaced); a no leaves the
+  shop alone.
+- **The design's requirements keep only design facts.** An old design's shop fact is left where it is; *How do I make
+  it?* already reads the shop (`making.plan` → `shop.read()`), never the requirements.
+- Tests: tests/test_shop_questions.py (8, stubbed: a fake asker or client, the shop a file in a temp folder; 7 fail
+  without this).
+- **#146 review:** only a question about *your* machine is the shop's ("your printer", "do you have a CNC router",
+  "what tools do you have"), the machine it names first; a design question that names one ("How tall is the plasma
+  cutter the cart carries?", "What nozzle diameter should the hose fitting take?", "Which router bit profile?") keeps
+  its answer as a requirement: the reviewer's 5 probes, none lost. A shop answer that offers nothing is said ("I
+  couldn't read a printer from 'Bambu X1C': add it to your shop by hand, or give its build volume with its units"),
+  its answer kept as a requirement, and the note only dismissed. Only sizes said with their units make an offer ("X1C",
+  "0.4 nozzle, 256 bed" don't; "150 x 150 mm" is mm, not inches); a bare "4x8" table is feet; the offer says its
+  numbers and units. The first yes with no shop.yaml writes only the machine offered: the hand tools stay unsaid
+  (`shop.read` assumes the default for a file with no `hand`, `hand_default`), never written as yours.
+- **#146 review, round 2 (the foreman's call):** an offer never removes an answer. A "your …" answer that becomes a shop offer is kept as a requirement too ("your plasma cutter" still sizes the cart), and a no to the shop keeps it.
+
 ### 2026-11-07 · CALI-35 (#3b) · A reviewed plan's parts are built one by one, in order
 - **Build it on a reviewed plan** (`build_plan.build`, from `firstrun`): each part to be made is authored in the plan's
   build order, mounted-on first, narrated ("Building the mast", "The mast: built (mast_height ✓, …)"). A part the

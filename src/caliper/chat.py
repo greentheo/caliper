@@ -948,6 +948,20 @@ def _asked(store: DesignStore, asked: str, prior: str, new: str, volumes) -> lis
     return out
 
 
+def _not_closed(res) -> str:
+    """The build's own line when :func:`measure.clean` couldn't close the part (CALI-121), else ""."""
+    from .measure import closed, open_near
+
+    try:
+        mesh = res.geometry.require_mesh() if res.geometry is not None else None
+    except Exception:  # noqa: BLE001 — no mesh to judge: the build says what it can
+        return ""
+    if mesh is None or closed(mesh):
+        return ""
+    return (f"⚠ Its shape isn't closed {open_near(mesh)}: strength, weight and carving can't be checked until it "
+            f"is.")
+
+
 def _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb: str, *, asked: str = "",
              prior: str = "", new: str = "", volumes=None) -> str:
     """The chat reply: what happened, what it measures, and — critically — what it broke. For a request, what was
@@ -957,6 +971,9 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     if asked:
         lines += _asked(store, asked, prior, new, volumes)
 
+    shut = _not_closed(res)
+    if shut:                                    # said once, by the build itself (CALI-121)
+        lines.append(shut)
     if res.report is not None:
         part_fails = _fail_lines(res.report)
         if part_fails:
@@ -989,6 +1006,42 @@ def _reviewing(store: DesignStore) -> bool:
     ids = [p["id"] for p in plan.get("parts") or []]
     made = [p["id"] for p in plan.get("parts") or [] if p.get("role") != "fixed"]
     return len(made) > 1 and not any(store.design.part(i) and store.design.part(i).version for i in ids)
+
+
+def _built_plan(store: DesignStore) -> bool:
+    """A plan of several parts with a skeleton, and a part of it built: its numbers now drive the parts (CALI-35c)."""
+    plan = store.design.plan or {}
+    ids = [p["id"] for p in plan.get("parts") or []]
+    return (len(ids) > 1 and bool(store.design.skeleton)
+            and any(store.design.part(i) and store.design.part(i).version for i in ids))
+
+
+def skeleton_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = True, events=None,
+                  on_event=None) -> Optional[TurnResult]:
+    """After the build, a message that changes only shared numbers ("make the mast 10 ft"): the skeleton takes them
+    and every part that reads one rebuilds, with no new design, and the whole design is measured again (CALI-35c).
+    None when it names no number, or changes more than the numbers (a part, a check): the chat takes it as ever."""
+    from . import plan as P
+    from . import skeleton as S
+    from . import verdicts
+
+    events = events if events is not None else []
+    if not P._said_numbers(message) or not (use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY"))):
+        return None
+    try:
+        before, after = P.revise(store, message, client=client)
+    except Exception:  # noqa: BLE001 — not a change to the plan's numbers: the chat takes it as ever
+        return None
+    same = lambda p: {**p.model_dump(), "skeleton": None}   # noqa: E731 — the plan but its numbers
+    if same(before) != same(after) or before.skeleton == after.skeleton:
+        return None                                   # more than a shared number, or none: not a drive
+    _emit(events, on_event, "step", "Changing a shared number and rebuilding what reads it")
+    got = S.drive(store, [s.model_dump() for s in after.skeleton], said=message)
+    rep = got.get("report")
+    # it worked if nothing it rebuilt or measured fails: a check still waiting on an unbuilt part is said, not a fail
+    ok = (not got.get("failed") and not got.get("refused") and not got.get("unmoved")
+          and (rep is None or verdicts.report(rep.to_dict())["kind"] != "fails"))
+    return TurnResult("skeleton", S.said(got), ok=ok, events=events)
 
 
 def plan_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = True, events=None,
@@ -1059,6 +1112,17 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         store.append_log({"kind": "reply", "action": "plan", "ok": result.ok, "reply": result.reply})
         _emit(events, on_event, "done", "plan", ok=result.ok)
         return result
+
+    if scope is None and _built_plan(store) and not message.strip().endswith("?"):
+        # a planned design, built: a shared number changed drives every part that reads it (CALI-35c, #3c)
+        result = skeleton_edit(store, message, client=client, use_llm=use_llm, events=events, on_event=on_event)
+        if result is not None:
+            if not logged:
+                store.append_log({"kind": "message", "text": message, "scope": scope, "action": "skeleton",
+                                  "routed_by": "skeleton"})
+            store.append_log({"kind": "reply", "action": "skeleton", "ok": result.ok, "reply": result.reply})
+            _emit(events, on_event, "done", "skeleton", ok=result.ok)
+            return result
 
     intent = classify(store, message, scope, use_llm=use_llm, client=client, classifier=classifier)
     _emit(events, on_event, "classified", f"{intent.action}"
