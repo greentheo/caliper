@@ -121,8 +121,11 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     if kind == "lighten":
         st = r.get("stations", [])
         # a thinner sheet's number is an estimate: never the lightest that holds (#132 review)
-        best = max((x for x in st if verdicts.lighten_step(x)["counts_as_pass"]), key=lambda x: x["saved_lb"],
+        best = max((x for x in st if verdicts.lighten_step(x, run=r)["counts_as_pass"]), key=lambda x: x["saved_lb"],
                    default=None)
+        if best is None and verdicts.coarse(r) and any(verdicts.station(x)["counts_as_pass"] for x in st):
+            # its steps hold on voxels too coarse to see the walls: not resolved, never "nothing holds" (#101)
+            return "not resolved: too coarse to see its walls, so no step can be said to hold yet", None
         if best is None or not best["saved_lb"]:
             return "nothing lighter holds", False
         out = next((x for x in st if verdicts.station(x)["kind"] == "fails"), None)
@@ -133,7 +136,7 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     if kind == "carve" and r.get("status") == "cancelled":  # stopped from its panel; what it finished (CALI-101)
         st = r.get("stations") or []
         best = next((x for x in st if x["index"] == r.get("best")), None)  # search: the printed part's lightest
-        held = best is not None and verdicts.carve_step(best, r.get("filled"))["counts_as_pass"]   # #132 review
+        held = best is not None and verdicts.carve_step(best, r.get("filled"), r)["counts_as_pass"]   # #132, #101
         return (f"cancelled after {len(st)} of {r.get('steps', '?')} steps"
                 + (f": the lightest that held, step {best['index']}, {best['saved_g']} g less filament"
                    if held and best.get("saved_g") else "")), None
@@ -147,7 +150,7 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         carved = (f"{best['removed']:.0%} {carve.share(r)} carved away, {best['saved_g']} g less filament, still "
                   f"{round(best['safety'], 1):g}x" if best and best["saved_g"] else "")
         first = st[0] if st else {}
-        if first and not verdicts.station(first, whole=True)["counts_as_pass"]:
+        if first and verdicts.station(first, whole=True)["kind"] == "fails":
             # the part fails where carving can't reach: that's the verdict, never a green line (CALI-86)
             whole = first.get("whole")
             return ("doesn't hold as it is: " + (f"{round(whole, 1):g}x" if whole is not None else "not checked")
@@ -155,10 +158,13 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
                     + (f"; carving the printed part: {carved}" if carved else "")), False
         if not carved:
             return "nothing could come off and still hold", False
-        if "whole_holds" in best and not verdicts.station(best, whole=True)["counts_as_pass"]:
+        if "whole_holds" in best and verdicts.station(best, whole=True)["kind"] == "fails":
             # the printed part holds at this step, but carving it makes the whole part fail (CALI-86)
             return (f"{carved}, but the whole part is then {round(best['whole'], 1):g}x, and it needs "
                     f"{r.get('min_safety', 2):g}x"), False
+        v = verdicts.carve_step(best, r.get("filled"), r)     # on voxels too coarse to see its walls: no ✓ (#101)
+        if not v["counts_as_pass"]:
+            return f"{carved.replace(', still', ', reads')}; {v['word']}: too coarse to see its walls", None
         return carved, True
     if kind == "frame":
         ok = [s for s in r.get("stations", []) if verdicts.meets(s.get("safety"), r.get("min_safety"))["counts_as_pass"]]

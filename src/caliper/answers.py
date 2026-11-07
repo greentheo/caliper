@@ -64,7 +64,9 @@ def _wall(mm: float, inches: bool) -> str:
     if inches and n >= 1:
         g = gcd(n, 32)
         return f"{n // g}/{32 // g} in"
-    return (f"{mm:.1f}".removesuffix(".0") if mm < 10 else f"{mm:.0f}") + " mm"
+    # under 1 mm, two places: a 0.25 mm wall is that, not "0.2" here and "0.3" on the page (#137 item 2)
+    return (f"{mm:.2f}".rstrip("0").rstrip(".") if mm < 1 else
+            f"{mm:.1f}".removesuffix(".0") if mm < 10 else f"{mm:.0f}") + " mm"
 
 
 def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool, inches: bool) -> dict:
