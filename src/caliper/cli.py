@@ -121,7 +121,9 @@ def _emit_authored(spec, res) -> int:
     revs = sum(1 for k, _ in res.history if k == "measurement_fail")
     notes = ", ".join(p for p in (f"{builds} build-error heal(s)" if builds else "",
                                   f"{revs} revision(s)" if revs else "") if p)
-    verdict = "✓ all checks pass" if res.ok else "△ best effort (some checks still fail)"
+    waiting = len(res.report.waiting) if res.report is not None else 0
+    verdict = ("✓ all checks pass" if res.ok and not waiting else            # never with a check waiting (#132)
+               f"△ {waiting} check(s) not checked yet" if res.ok else "△ best effort (some checks still fail)")
     print(f"{verdict} after {res.rounds} round(s)" + (f" ({notes})" if notes else "") + "\n")
     print(res.report.to_text())
 

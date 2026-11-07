@@ -664,7 +664,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     governs, safety = min(((k, s) for k, s in options if s is not None), key=lambda x: x[1],
                           default=("fea", None))
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
-                 "holds": bool(safety is not None and safety >= min_safety),
+                 "holds": bool(safety is not None and safety >= min_safety),  # producer
                  # where it's predicted to break, placed the same way: linear to failure, as wood is
                  # close to; the joints aren't modelled and may go first
                  "breaks_lb": round(load["lb"] * load["factor"] * safety, -1) if safety else None})
@@ -739,7 +739,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
         "material": mat, "spacing_mm": round(ctx["spacing"], 2), "voxels": int(ctx["ls"].solid.sum()),
         "min_safety": min_safety, "held": held, "cases": cases, "notes": notes,
-        "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),
+        "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
     }
     thin = ctx.get("thinnest")
     if thin:                                          # can the FEA see its thinnest wall? (CALI-97)
@@ -771,16 +771,20 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         notes.append("This ran on a filled-in shape, not the part as built: its numbers are the block's.")
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
+    from . import verdicts
+
+    v = verdicts.run(record)                  # one verdict (CALI-112): the history line and the message say it
     store.append_history(part_id, {"kind": "load", "action": "studied", "run": rid,
-                                   "cases": len(cases), "safety": worst, "holds": record["holds"],
+                                   "cases": len(cases), "safety": worst,
+                                   "holds": record["holds"],  # producer: the study's number, kept for older readers
+                                   "verdict": {k: x for k, x in v.items() if k != "cases"},
                                    # the history line says "not resolved", never "holds", for it (CALI-110)
-                                   **({"unresolved": True} if any(unresolved(record, c) and c.get("holds")
-                                                                  for c in cases) else {})})
+                                   **({"unresolved": True} if v["kind"] in ("unresolved", "unchecked") else {})})
     store.append_log({"kind": "load", "action": "studied", "part": part_id, "run": rid})
-    said = "it holds" if record["holds"] else "it doesn't hold"
-    if record["holds"] and any(unresolved(record, c) for c in cases):      # never greener than its check (CALI-97)
-        said = "not checked: its walls are too thin for the voxels" if record.get("too_thin") else \
-            "not resolved yet: check it again finer"
+    said = {"holds": "it holds", "fails": "it doesn't hold",
+            "unchecked": "not checked: its walls are too thin for the voxels",
+            "unresolved": "not resolved yet: check it again finer",
+            "untrusted": "not trusted: it ran on a filled-in shape"}.get(v["kind"], v["word"])
     emit("done", f"{len(cases)} load(s) checked: " + said + (f", {worst:g}x" if worst else ""),
          run=rid, progress=1.0)
     return record

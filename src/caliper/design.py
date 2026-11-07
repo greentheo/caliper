@@ -406,7 +406,7 @@ class DesignStore:
             **({"feedback": feedback} if feedback else {}),
             **({"intent": intent} if intent else {}),
             **({"measured": measured} if measured else {}),
-            **({"result": ("all_pass" if report.get("all_pass") else "fail")} if report else {}),
+            **(_result(report) if report else {}),
             **(extra or {}),
         })
         return version
@@ -445,7 +445,7 @@ class DesignStore:
         self.append_history(part_id, {
             "kind": "revision", "action": action, "version": version, "geometry": "mesh",
             **({"feedback": feedback} if feedback else {}),
-            **({"result": ("all_pass" if report.get("all_pass") else "fail")} if report else {}),
+            **(_result(report) if report else {}),
             **(extra or {}),
         })
         return version
@@ -654,6 +654,15 @@ class DesignStore:
                     lines.append(f"  - \"{h['feedback']}\" -> v{h.get('version', '?')} "
                                  f"({h.get('result', 'unknown')})")
         return "\n".join(lines)
+
+
+def _result(report: dict) -> dict:
+    """A revision's result for its history line (#103, #132 review): the report's one verdict, stored, never
+    ``all_pass`` (which counts a waiting check as a pass): ``result`` is its kind, with its word and ``said``."""
+    from . import verdicts
+
+    v = verdicts.report(report)
+    return {"result": v["kind"], "word": v["word"], **({"said": v["why"]} if v.get("why") else {})}
 
 
 def _invalidate_build_cache(script_path: str) -> None:

@@ -28,7 +28,9 @@ from . import chat, goals, load_study, patterns
 from .design import DesignStore
 
 #: A reply leads with what fails, then what holds, then what's still to check.
-VERDICT_FIRST = ("bad", "ok", "warn", "info")
+#: Worst first (#132 review): a fail, then a warning, then what holds, so the first reply's two lines never drop a
+#: "not trusted" or "not resolved" under two "Holds…".
+VERDICT_FIRST = ("bad", "warn", "ok", "info")
 #: What the goals are written from, when it's the design's sentence and its answers that say it.
 SAID = "(the design's goal and the answers to its questions)"
 

@@ -566,6 +566,13 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · One verdict, everywhere (CALI-112 #114)
+1. Open a design whose strength check is a ✗, not trusted, not resolved or middle only: the card, the Score panel, the
+   Studies row, the history line, the build book and the kids' book all say the same word, and none says "holds" or
+   shows green unless it holds.
+2. A stool that fails: its kids' book ends "Don't stand on it yet. It isn't strong enough yet…".
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_verdicts.py`.
+
 ### 2026-11-07 · The camper plans: a rule over its own numbers is a note, and no rule sinks the plan (CALI-119 #127)
 1. With a key: "A camper: a plywood cargo box on a welded frame that slides into my 2 in hitch receiver." It plans in
    parts. Under **The plan**, a rule that holds by the numbers reads "By the numbers: …"; one the planner got wrong

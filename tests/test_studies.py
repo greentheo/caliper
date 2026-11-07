@@ -29,7 +29,8 @@ def test_every_run_is_listed_newest_first_with_what_it_came_to(tmp_path):
     parts = [{"id": "stool", "version": 2, "scripted": True, "built": True, "loads": True}]
     runs = {
         "load": [{"id": "L1", "part": "stool", "created": 300, "version": 2, "holds": True, "min_safety": 2,
-                  "cases": [{"name": "me stepping up", "safety": 3.1}, {"name": "sitting", "safety": 8}]}],
+                  "cases": [{"name": "me stepping up", "safety": 3.1, "holds": True},
+                            {"name": "sitting", "safety": 8, "holds": True}]}],
         "cutplan": [{"id": "C1", "part": "stool", "created": 200, "version": 1,
                      "sheets": [{"sheets": 1, "utilisation": 0.12}]}],
         "scorecard": [{"created": 100, "versions": {"stool": 1}, "summary": {"pass": 3, "fail": 1}}],
