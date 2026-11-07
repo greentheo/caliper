@@ -138,7 +138,8 @@ function wallLen(mm) {
   const n = Math.round(mm / IN * 32);
   if (inches() && mm >= IN) return len(mm, 1);
   if (inches() && n >= 1) { const g = gcd(n, 32); return `${n / g}/${32 / g}″`; }
-  return `${mm < 10 ? +mm.toFixed(1) : Math.round(mm)} mm`;
+  // under 1 mm, two places, as the server says it: 0.25 mm, not 0.3 (#137 item 2)
+  return `${mm < 1 ? +mm.toFixed(2) : mm < 10 ? +mm.toFixed(1) : Math.round(mm)} mm`;
 }
 const gcd = (a, b) => (b ? gcd(b, a % b) : a);
 function sizeText(size) {
@@ -908,6 +909,8 @@ function designView(d) {
         <div class="muted small">${esc(x.what)}${x.made ? ` · ${esc(x.made)}` : ''}${x.mounts_on.length
           ? ` · on the ${x.mounts_on.map((m) => esc(m.replace(/_/g, ' '))).join(' and the ')}` : ''}</div></li>`).join('')}</ol>
       ${d.plan.dropped ? `<div class="small muted">${esc(d.plan.dropped[0].toUpperCase() + d.plan.dropped.slice(1))}.</div>` : ''}
+      ${(d.plan.dropped_rules || []).map((x) => `<div class="small" style="color:var(--amber)">Left out ${esc(x)}.</div>`).join('')}
+      ${(d.plan.notes || []).length ? `<div class="small muted">By the numbers: ${esc(d.plan.notes.join('; '))}.</div>` : ''}
       ${d.plan.numbers.length ? '<div class="small"><b>The numbers they share</b></div><ul class="list">'
         + d.plan.numbers.map((n) => `<li class="small">${esc(n)}</li>`).join('') + '</ul>' : ''}
       ${d.plan.checks.length ? '<div class="small"><b>Checked between them</b></div><ul class="list">'
@@ -1877,7 +1880,7 @@ function carveView(p) {
   const head = `<h5 style="margin:14px 0 4px">Carve it <span class="badge">printed, any shape</span></h5>
     <div class="muted small">A printer makes any shape, so the printed part can be carved wherever it isn't working: in steps,
       each one checked. ${p.carved ? 'It\'s carved now; carving again starts from its shape as drawn.' : ''}</div>
-    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo" ${S.carveJob[p.id] ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
+    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo" ${S.carveJob[p.id] || carveBlocked(p) ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
       <span class="muted small">${esc(carveTime(p))}</span></div><div id="carveProgress">${carveProgress(p.id)}</div>`;
   if (!run) return head;
   if (run.status === 'cancelled') {                // stopped from its panel: the steps it finished (CALI-101)
@@ -1899,7 +1902,7 @@ function carveChart(p, run) {
   const x = (r) => 24 + (W - 34) * r / Math.max(...run.stations.map((s) => s.removed), 0.01);
   const y = (sf) => H - 16 - (H - 26) * Math.min(sf, top) / top;
   const dots = run.stations.map((st) => `<circle cx="${x(st.removed)}" cy="${y(st.safety || 0)}" r="5" data-carve="${st.index}"
-    class="${holdsHere(st) ? 'ok' : 'bad'}${S.station && S.station.run === run.id && S.station.index === st.index ? ' on' : ''}"><title>step ${st.index}</title></circle>`).join('');
+    class="${verdictTone(st.verdict)}${S.station && S.station.run === run.id && S.station.index === st.index ? ' on' : ''}"><title>step ${st.index}: ${esc(st.verdict ? st.verdict.word : '')}</title></circle>`).join('');
   const line = run.stations.map((st, i) => `${i ? 'L' : 'M'}${x(st.removed)},${y(st.safety || 0)}`).join(' ');
   const best = run.stations.find((st) => st.index === run.best);
   return `${run.weak ? `<div class="note-warn small">${esc(run.weak)}</div>` : ''}
@@ -1909,11 +1912,16 @@ function carveChart(p, run) {
       <text x="24" y="${H - 3}">as drawn</text><text x="${W - 10}" y="${H - 3}" text-anchor="end">${carveShare(run)} carved away →</text></svg>
     <div class="small">${best && best.saved_g ? `The lightest step where the printed part holds: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% ${carveShare(run)}
       carved away, <b>${best.saved_g} g</b> less filament, the printed part ${best.safety}x;
-      ${holdsHere(best) ? `the whole part ${best.whole}x` : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a filled-in shape' : `the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
+      ${holdsHere(best) ? `the whole part ${best.whole}x`
+        : best.verdict && (best.verdict.kind === 'unresolved' || best.verdict.kind === 'unchecked')    // #101
+          ? `<b style="color:var(--amber)">${esc(best.verdict.word)}: the voxels were too coarse to see its walls, so no step can be said to hold yet</b>`
+        : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a filled-in shape' : `the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
       : 'Nothing could come off and still hold.'}
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
     <div class="muted small">Click a step to see it; <b>Carve it like this</b> makes it the part's shape and checks it again.</div>`;
 }
+// a refusal as a person reads it: the server's reason without the exception's name ("ValueError: …", #136 review)
+const plainly = (msg) => String(msg ?? '').replace(/^[A-Za-z_.]*(Error|Exception):\s*/, '');
 // CALI-101: one click, one carve. The job is kept in S.carveJob[part] from the click until it ends, so the button
 // stays disabled, a redraw draws the panel again (steps, bar, time left, Cancel), and a reload finds it by
 // design.carving. The server refuses a second carve of the design (409) whatever the page does.
@@ -1929,7 +1937,7 @@ async function runCarve(p) {
     delete S.carveJob[p.id];
     await refresh();                              // a 409: the carve that's running is in design.carving; it's followed
     const prog = $('carveProgress');
-    if (prog && !S.carveJob[p.id]) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    if (prog && !S.carveJob[p.id]) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(plainly(e.message))}</div>`;
   }
 }
 async function followCarve(p, jobId, stopping) {
@@ -1982,7 +1990,9 @@ function carveProgress(pid) {
 function paintCarve(pid) {
   const prog = $('carveProgress'), go = $('carveGo');
   if (S.scope !== pid) return;
-  if (go) go.disabled = !!S.carveJob[pid];
+  const part = ((S.design && S.design.parts) || []).find((x) => x.id === pid);
+  // a carve its check blocks stays off after a job ends (#136 review: Cancel re-enabled "Carve it again")
+  if (go) go.disabled = !!S.carveJob[pid] || !!(part && carveBlocked(part));
   if (!prog) return;
   prog.innerHTML = carveProgress(pid);
   const stop = $('carveStop');
@@ -2008,14 +2018,22 @@ function defaultCheck(p) {
   const at = loadRuns(p.id).filter((r) => r.version === p.version && r.seconds);
   return at.length ? at.reduce((a, r) => (r.spacing_mm > a.spacing_mm ? r : a)) : null;
 }
+// what stops a carve (or a lightening) before it starts, in words, or '' (CALI-106, #101; #102's note)
+function carveBlocked(p) {
+  const check = defaultCheck(p);
+  // where the walls are, and what to change, as the check said it (#136 review)
+  if (check && check.too_thin) return check.thin_said ? `Can't carve it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be carved by strength';
+  if (check && check.cases.some((c) => c.fea && c.fea.supported === false)) {
+    return "its voxels don't connect the load to a support yet, so a carve can't run";
+  }
+  return '';
+}
 function carveTime(p) {
+  if (carveBlocked(p)) return carveBlocked(p);
   const done = carveRuns(p.id).find((r) => r.status === 'done' && r.seconds);
   if (done) return `about ${minutesText(done.seconds / 60)} at this size, as its last carve took`;
   const check = defaultCheck(p);
   if (!check) return 'check it holds first: how long it takes comes from that';
-  if (check.cases.some((c) => c.fea && c.fea.supported === false)) {
-    return "its voxels don't connect the load to a support yet, so a carve can't run";
-  }
   return `at least about ${minutesText(check.seconds * CARVE_PER_CHECK_AT_LEAST / 60)} at this size`;
 }
 function wireCarve(p) {
@@ -2035,6 +2053,8 @@ function lightenView(p) {
   const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
   const best = run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
   const out = run && run.stations.find((x) => x.verdict && x.verdict.kind === 'fails');
+  // steps the check was too coarse to call: their verdict's word, never "nothing lighter holds" (#136 review)
+  const unsure = run && !best && run.stations.find((x) => x.index && x.verdict && ['unresolved', 'unchecked'].includes(x.verdict.kind));
   const what = (x) => x.phase === 'thinner' ? `in ${esc(x.label)} sheet <span class="badge">estimate</span>`
     : x.phase === 'top' ? `${pct(x.removed)} of the walls + ${x.top_holes} hole${x.top_holes === 1 ? '' : 's'} in the top`
     : x.index ? `${pct(x.removed)} of the walls` : 'as it is';
@@ -2042,11 +2062,14 @@ function lightenView(p) {
     <div class="muted small">Down until the safety runs out: holes in the walls where the wood isn't working (a jigsaw cuts
       them, a solid rim where it's glued and screwed), then hole-saw holes in the panel you stand on, one at a time,
       then thinner sheet. Every step is checked again.</div>
-    <div class="actions"><button id="lightGo">${run ? 'Lighten it again' : 'Lighten it'}</button></div>
+    <div class="actions"><button id="lightGo" ${defaultCheck(p) && defaultCheck(p).too_thin ? 'disabled' : ''}>${run ? 'Lighten it again' : 'Lighten it'}</button>
+      ${defaultCheck(p) && defaultCheck(p).too_thin ? `<span class="muted small">${defaultCheck(p).thin_said ? `Can't lighten it by strength: ${esc(defaultCheck(p).thin_said)}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength'}</span>` : ''}</div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
         : `The lightest that holds: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety)}.`)
+      : unsure ? (unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
+        : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.')
       : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety)}).` : ''}
       ${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
@@ -2694,7 +2717,8 @@ async function showStation(pid, run, index) {
       : `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume
       ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>`;
     bar.innerHTML = `${what}
-      ${(lightened || carved) && !index ? '' : `<button class="primary" id="adoptBtn" ${(lightened || carved) && !holdsHere(st) ? 'disabled' : ''}>${lightened ? 'Cut these holes in '
+      ${carved && st.closed === false ? `<span class="small" style="color:var(--bad)">Can't use this step: ${esc(st.why)}.</span>` : ''}
+      ${(lightened || carved) && !index ? '' : `<button class="primary" id="adoptBtn" ${(lightened || carved) && !holdsHere(st) ? `disabled title="${esc(st.verdict ? `It can't be used: ${st.verdict.word}` : '')}"` : ''}>${lightened ? 'Cut these holes in '
         : carved ? 'Carve it like this: ' : framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`}
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };

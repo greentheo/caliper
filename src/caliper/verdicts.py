@@ -201,21 +201,35 @@ def history(h: dict) -> dict:
     return _make("holds" if result == "all_pass" else "fails")  # producer: a record from before verdicts
 
 
-def carve_step(st: dict, filled: Optional[str] = None) -> dict:
+def coarse(run: Optional[dict]) -> Optional[str]:
+    """The kind a study's ✓ is when its voxels couldn't see the walls (CALI-106, #101: #100's rule for carve and
+    lighten): ``unresolved`` (a finer run can), ``unchecked`` (none a study may make can), or None."""
+    if not run or run.get("resolved") is not False:
+        return None
+    return "unchecked" if run.get("too_thin") else "unresolved"
+
+
+def carve_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = None) -> dict:
     """A carve step as a person reads it (#132 review): it holds only if the printed part holds there AND the whole
-    part does (``whole_holds``), on a shape that isn't a filled-in block."""
-    if not station(st)["counts_as_pass"]:
+    part does (``whole_holds``), on a shape that isn't a filled-in block, at voxels that can see its walls (#101),
+    and whose part closes up (#124). A fail stays a fail."""
+    v = station(st)
+    if v["kind"] == "unchecked":                # its part doesn't close up (#124): said, not a fail
+        return v
+    if not v["counts_as_pass"]:
         return _make("fails", st.get("safety"))
     if st.get("whole_holds") is False:  # producer: the study's own number, judged here
         return _make("fails", st.get("whole"), why="the whole part doesn't hold there")
     if filled:
         return _make("untrusted", st.get("safety"), why=filled)
+    if coarse(run):
+        return _make(coarse(run), st.get("safety"))
     return _make("holds", st.get("safety"))
 
 
-def lighten_step(st: dict, filled: Optional[str] = None) -> dict:
+def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = None) -> dict:
     """A lightening step as a person reads it (#132 review): a thinner sheet's number is an estimate, never "holds";
-    on a filled-in block, not trusted."""
+    on a filled-in block, not trusted; on voxels that can't see the walls, not resolved (#101)."""
     v = station(st)
     if v["kind"] == "fails":
         return v
@@ -223,16 +237,22 @@ def lighten_step(st: dict, filled: Optional[str] = None) -> dict:
         return _make("estimate", st.get("safety"))
     if filled:
         return _make("untrusted", st.get("safety"), why=filled)
+    if coarse(run):
+        return _make(coarse(run), st.get("safety"))
     return v
 
 
-def station(st: dict, *, whole: bool = False) -> dict:
-    """A lighten or carve step: the carved part (or, ``whole``, the whole part at that step) holds or doesn't.
-    #101 adds its own kinds here (a step on voxels too coarse to see the wall)."""
+def station(st: dict, *, whole: bool = False, run: Optional[dict] = None) -> dict:
+    """A lighten or carve step: the carved part (or, ``whole``, the whole part at that step) holds or doesn't; a
+    hold on voxels too coarse to see its walls is ``unresolved``/``unchecked`` (#101), and a fail stays a fail."""
     held = st.get("whole_holds" if whole else "holds")  # producer: the study's own number, judged here
     safety = st.get("whole" if whole else "safety")
+    if held and st.get("closed") is False:     # a carved step whose part doesn't close up can't be adopted (#124)
+        return _make("unchecked", safety, why=st.get("why") or "its shape doesn't close up")
     if held is None:
         return _make("waiting")
+    if held and coarse(run):
+        return _make(coarse(run), safety)
     return _make("holds" if held else "fails", safety)
 
 
