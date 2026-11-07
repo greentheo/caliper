@@ -872,6 +872,19 @@ function renderInspector() {
   wireInspector(p);
 }
 
+// one rule on a part, with its verdict as measured on this version, and what it measured where it doesn't hold
+// (#137 item 1: the bar stool's locked shell wall broke, and this list showed no mark)
+function ruleItem(r) {
+  const v = r.verdict;
+  return `<li class="rule">🔒 ${v ? `${verdictBadge(v)} ` : ''}<b>${esc(r.id)}</b> <code>${esc(r.expr)}</code>${
+    v && v.kind !== 'holds' && r.said ? `<div class="small">${esc(r.said)}</div>` : ''}</li>`;
+}
+// the parts' own rules, measured, where the design has no checks of its own (#137 item 1: "Nothing to measure yet"
+// over a rule that fails)
+function partChecks(d) {
+  const results = d.parts.flatMap((p) => (p.rules || []).filter((r) => r.status));
+  return results.length ? { results } : null;
+}
 function checks(report, only) {
   if (!report) return '<div class="empty">Nothing to measure yet.</div>';
   const rows = report.results.filter((r) => !only || only(r));
@@ -927,7 +940,7 @@ function designView(d) {
       Object.entries(d.part_errors).map(([k, v]) => `<li><b>${esc(k)}</b> <span class="muted small">${esc(v)}</span></li>`).join('') + '</ul>' : ''}`;
   const work = `<h4>Scorecard</h4><div id="scoreBox">${scoreView(d)}</div>
     <h4>Design checks</h4>
-    ${checks(rep)}`;
+    ${checks(rep || partChecks(d))}`;
   const buy = d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : '';
   const make = `<h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>`;
   return `<h2>${esc(d.name)} ${status}</h2>
@@ -1347,7 +1360,7 @@ function partView(p) {
       <input type="checkbox" id="roleRef" ${p.role === 'fixed' ? 'checked' : ''}> treat as a reference (context, e.g. the car)</label>
     <h4>Rules on this part</h4>
     ${p.rules.length || designRules.length ? '<ul class="list">' +
-      [...p.rules, ...designRules].map((r) => `<li class="rule">🔒 <b>${esc(r.id)}</b> <code>${esc(r.expr)}</code></li>`).join('') + '</ul>'
+      [...p.rules, ...designRules].map(ruleItem).join('') + '</ul>'
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
     <h4>History</h4>
     <ul class="list">${p.history.slice().reverse().map(historyItem).join('')}</ul>

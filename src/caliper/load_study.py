@@ -554,7 +554,19 @@ def heat_mesh(mesh, grid, von_mises: np.ndarray, solid: np.ndarray, max_edge: fl
             "heat": b64(heat.astype(np.float32)), "max": float(heat.max()) if len(heat) else 0.0}
 
 
-def _nearest_piece(point: np.ndarray, pieces: list[dict]) -> Optional[str]:
+def _printed_name(declared: dict) -> Optional[str]:
+    """What the part's printed share is called in its construction() ("cone"), or None if nothing's printed."""
+    for it in declared.get("construction") or []:
+        if isinstance(it, dict) and it.get("kind") == "printed":
+            return str(it.get("name") or "printed part")
+    return None
+
+
+def _nearest_piece(point: np.ndarray, pieces: list[dict], within: Optional[float] = None,
+                   otherwise: Optional[str] = None) -> Optional[str]:
+    """The sheet or stick a point is in. With ``within``, only one it's in or that near, else ``otherwise``: a printed
+    part isn't a piece, so its hot voxel took the nearest wood's name, 330 mm away (#137: the bar stool's "seat top"
+    at z 389 mm, in the cone's webs)."""
     from .consistency import segment_distance, slab_distance
 
     best = None
@@ -566,7 +578,9 @@ def _nearest_piece(point: np.ndarray, pieces: list[dict]) -> Optional[str]:
             d = float(segment_distance(point[None], pc["a"], pc["b"])[0]) - pc["half"]
         if best is None or d < best[0]:
             best = (d, pc["name"])
-    return best[1] if best else None
+    if within is not None and (best is None or best[0] > within):
+        return otherwise
+    return best[1] if best else otherwise
 
 
 # ---------------------------------------------------------------------------
@@ -698,6 +712,26 @@ def _two_materials(ctx: dict, wood: list[dict], sheet_mat: dict, rest) -> None:
         ctx["under"] = lambda pts, tol=ctx["tol"]: near.signed_distance(np.asarray(pts, float)) >= -tol
 
 
+def _peak_in(ctx: dict, at: np.ndarray, spacing: float) -> dict:
+    """Where the hottest voxel is (``in``: a piece, or the printed part) and the wall it's in (``wall_mm``): a printed
+    one measured near it, within two voxels; a piece's own thickness. So a line can say whether the worst stress is
+    among walls too thin for the voxels to see (#137 item 2)."""
+    printed = _printed_name(ctx["declared"])
+    name = _nearest_piece(at, ctx["pieces"], within=spacing if printed else None, otherwise=printed)
+    pc = next((p for p in ctx["pieces"] if p["name"] == name), None)
+    if pc is not None:
+        wall = pc["thickness"] if pc["kind"] == "sheet" else 2 * pc["half"]
+    elif printed:
+        from .measure import Geometry, wall_near, wall_samples
+
+        if "_walls" not in ctx:                   # sampled once per set-up: every case and carve step shares it
+            ctx["_walls"] = wall_samples(Geometry.from_mesh(ctx["mesh"]), samples=20000)
+        wall = wall_near(None, at, 2 * spacing, walls=ctx["_walls"])
+    else:
+        wall = None
+    return {"in": name, **({"wall_mm": round(float(wall), 2)} if wall is not None else {})}
+
+
 def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     """One load through the FEA (on ``solid``, the part's voxels unless given) and the plate check.
     Returns ``(case, result)``; the case is the record's entry for it."""
@@ -727,7 +761,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     fea = {"supported": True, "peak_mpa": round(peak, 2), "robust_mpa": round(float(r.peak_stress), 2),
            "safety": round(1.0 / float(worked[hot]), 2) if worked[hot] > 0 else None,
            "deflection_mm": round(float(r.max_displacement), 3),
-           "at": [round(float(x), 1) for x in at], "in": _nearest_piece(at, ctx["pieces"])}
+           "at": [round(float(x), 1) for x in at], **_peak_in(ctx, at, ls.grid.spacing)}
     pl = plate_check(ctx["pieces"], load, ctx.get("plate_mat") or mat, ctx["tol"], under=ctx.get("under"))
     options = [("fea", fea["safety"])]
     if pl and pl.get("done"):
