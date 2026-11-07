@@ -572,6 +572,11 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
    shows green unless it holds.
 2. A stool that fails: its kids' book ends "Don't stand on it yet. It isn't strong enough yet…".
 3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_verdicts.py`.
+### 2026-11-07 · A carved step that doesn't close up isn't offered (CALI-117 #105)
+1. Carve a printed part (**Carve it**). Every step offered rebuilds into a closed solid; one that wouldn't reads
+   "Can't use this step: its carved shape doesn't close up into a solid…", and its Carve button is off.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_carve_closed.py`.
+
 ### 2026-11-07 · A changed design.js is picked up on reload, with no ?v= to bump (CALI-120 #128)
 1. View the page's source: `design.js?v=` is a hash of the file. Change `design.js` and reload: a new key, and the
    new script. `index.html` still says `?v=dev`.

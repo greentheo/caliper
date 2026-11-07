@@ -204,7 +204,10 @@ def history(h: dict) -> dict:
 def carve_step(st: dict, filled: Optional[str] = None) -> dict:
     """A carve step as a person reads it (#132 review): it holds only if the printed part holds there AND the whole
     part does (``whole_holds``), on a shape that isn't a filled-in block."""
-    if not station(st)["counts_as_pass"]:
+    v = station(st)
+    if v["kind"] == "unchecked":                # its part doesn't close up (#124): said, not a fail
+        return v
+    if not v["counts_as_pass"]:
         return _make("fails", st.get("safety"))
     if st.get("whole_holds") is False:  # producer: the study's own number, judged here
         return _make("fails", st.get("whole"), why="the whole part doesn't hold there")
@@ -231,6 +234,8 @@ def station(st: dict, *, whole: bool = False) -> dict:
     #101 adds its own kinds here (a step on voxels too coarse to see the wall)."""
     held = st.get("whole_holds" if whole else "holds")  # producer: the study's own number, judged here
     safety = st.get("whole" if whole else "safety")
+    if held and st.get("closed") is False:     # a carved step whose part doesn't close up can't be adopted (#124)
+        return _make("unchecked", safety, why=st.get("why") or "its shape doesn't close up")
     if held is None:
         return _make("waiting")
     return _make("holds" if held else "fails", safety)
