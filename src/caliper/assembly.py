@@ -329,11 +329,14 @@ def evaluate_assembly(
     ctx = build_context(asm, parts)
     ctx.update(values or {})               # the skeleton's numbers, by name (CALI-35)
     out = []
+    fixed = {p.id for p in asm.parts if p.role == "fixed"}
     for a in derived_assertions(asm):
         waits = sorted(_names(a.expr) & set(unbuilt))
         if waits:                          # a rule over a part that's planned but not built yet (CALI-35)
-            out.append(AssertionResult(a.id, a.expr, "deferred", None,
-                                       detail=f"waits for {' and '.join(waits)} to be built"))
+            yours = [w for w in waits if w in fixed]       # the person's: never built, so its size is asked (#135)
+            out.append(AssertionResult(a.id, a.expr, "deferred", None, detail=(
+                f"needs the {' and the '.join(w.replace('_', ' ') for w in yours)}'s size: say it, or keep it off"
+                if yours else f"waits for {' and '.join(waits)} to be built")))
         else:
             out.append(evaluate_assertion(a, ctx))
     return Report(out)
