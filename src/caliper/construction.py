@@ -310,6 +310,8 @@ def piece(item: dict) -> list[dict]:
         polys = [item["outline"]] if item.get("outline") else list(item.get("facets") or [])
         if not polys:
             raise ValueError(f"sheet {name!r} has no outline")
+        if item.get("grain") not in (None, "along", "across"):     # which way its face grain runs (CALI-125)
+            raise ValueError(f"sheet {name!r}: \"grain\" is \"along\" or \"across\" its span, not {item['grain']!r}")
         parts = [polygon(p) for p in polys]
         gone = [polygon(h) for h in item.get("holes") or []]      # lightening cut-outs (CALI-71)
         outline = sum(a for a, _, _ in parts)

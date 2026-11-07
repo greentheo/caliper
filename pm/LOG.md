@@ -3,6 +3,20 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-125 (#148) · Follow-ups from the 11/07 reviews
+- **A sheet's grain, declared:** `construction()` takes `"grain": "along"` or `"across"` (its face grain relative to
+  the gap it spans) on a sheet; anything else is refused by the BOM's own validation. `consistency.shapes` carries it,
+  `plate_check` gives it to `beam()`, where that grain's number and sag govern (not the worse of the two, #118), by
+  thickness too, and the why says "Its face grain runs across the gap, as its script says". `trials.predict` already
+  read the plate's `grain` (#122): now a script can set it. In `part_scripts.md`.
+- **#140's survivor:** a part that builds, one rule kept and one whose probe errors: the erroring one is a fail with
+  what went wrong ("lip_ratio: min_wall / 0 >= 1, not measured: ZeroDivisionError: …"), and the card leads with it.
+  Pinned; the mutant (an error's own status to `verdicts.check`) fails it.
+- **#135's nit:** Build it's reply log line logs the result's `ok` (a measurement that threw: False), not `not failed`.
+- Not here yet: `measured` filling `strength.last.edge` from a real older middle-only run (#106's own gap): it needs
+  #106 on main.
+- Tests: test_orthotropic (+4: each grain governs, refused grains, carried through `shapes`, the real plate path),
+  test_followups (1), test_build_plan (the logged ok). Each fails without its change.
 ### 2026-11-07 · CALI-99 (#89) · The wording pass: the bar stool walkthrough's smaller findings and the reviews' nits
 - **Named for what it is** (item 1): "I want to make a bar stool…" was "I want" (the stop words split at "to" before
   the request's lead came off). The lead comes off first, and it knows "Can you design…", "I'd like…", "Make me…".

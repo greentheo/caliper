@@ -146,6 +146,7 @@ def shapes(declared: dict) -> list[dict]:
             holes = [np.asarray(h, float) for h in item.get("holes") or []] if item.get("outline") else []
             out.append({"name": name, "kind": "sheet", "polys": [np.asarray(p, float) for p in polys],
                         "thickness": t, "holes": holes, "material": item.get("material"),
+                        "grain": item.get("grain"),           # along or across its span, if the script says (CALI-125)
                         "pictures": [np.asarray(h, float) for h in item.get("pictures") or []],
                         "volume": (sum(C.polygon(p)[0] for p in polys)
                                    - sum(C.polygon(h.tolist())[0] for h in holes)) * t})

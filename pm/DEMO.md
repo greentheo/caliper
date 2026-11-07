@@ -566,6 +566,14 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · Follow-ups from the 11/07 reviews (CALI-125 #148)
+1. In a part's script, give the top sheet `"grain": "across"` (its face grain across the gap between its sides) and
+   **Check it holds**: the plate check's line takes that grain's number, and its why says "as its script says".
+   `"grain": "sideways"` is refused with what it takes.
+2. Give a part a rule whose probe can't be measured: *Will it work?* leads with "✗ Breaks its rule …, not measured:
+   …", never a ✓.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_followups.py tests/test_orthotropic.py`.
+
 ### 2026-11-07 · The wording pass (CALI-99 #89)
 1. New design: "I want to make a bar stool to hold up to a 250 lb person, sitting." It's named "Bar stool", not
    "I want"; once built, *What is it?* opens with the part's own description.
