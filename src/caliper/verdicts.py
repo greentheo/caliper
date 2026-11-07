@@ -50,6 +50,9 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
     safety = c.get("safety")
     if safety is None:
         return _make("waiting", why=c.get("why") or "")
+    if (c.get("fea") or {}).get("supported") is False and c.get("governs", "fea") == "fea":
+        # the FEA couldn't connect the load to a support: a check that couldn't run, not a ✗ at 0x (#138 item 3)
+        return _make("unchecked", why=c.get("why") or "nothing connects where it's pushed to where it's held")
     held = c.get("holds")  # producer: the study's own number, judged here
     off = _unresolved(run, c)
     if not held:                                       # a ✗ stays a ✗ (CALI-97): its words say if the model may be wrong
