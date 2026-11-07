@@ -3,6 +3,67 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-98 (#86) · A seat's load cases, and will it tip over
+From Theo's first bar stool run: its designer wrote one case ("250 lb person seated", factor 1.5) and the card read ✓.
+- **The designer's guide gets the load cases by kind of thing** (`part_scripts.md`): a step or tread, a seat (sitting,
+  the front edge, leaning back, climbing on, tipping over), a shelf or top, a step stool; factor 2 for stepping or
+  jumping, 1 for a load that sits there or a standard's test load. With a seat's four cases as an example.
+- **The values are cited, through the engineering brief on #42 (section 2):** tipping, EN 1022:2005/2018 and BIFMA
+  X5.1's front stability (600 N placed 60 mm in from the seat's edge, 20 N sideways at seat height); the front edge and
+  leaning back, EN 12520 / EN 1728 (1,300 N 100 mm in; 1,000 N with 400 N front to back or 300 N sideways); a step
+  stool, EN 14183 (150 kg). **NEEDS ENGINEER CHECK** on every value, in the code, the guide's table and the card: these
+  can't be checked here against the standards' own texts.
+- **A tip-over check, statics, not FEA** (`tipping.py`): a load with `"tip": True` is taken about the edge of the
+  part's footprint (the convex hull of where it meets the floor) it would go over: its own weight at its centre of
+  gravity and the case's downward push against the sideways one. Its verdict is `verdicts.meets` (one verdict, #132);
+  a case that can't be checked (no weight, no base, no sideways push) is waiting, never a pass. The FEA leaves tip
+  cases out (`load_study.prepare`).
+- **The card says it:** "Won't tip when someone sits on the front edge and leans, 2.92 times over." or "Tips …: only
+  0.18 times over, and it needs 1; the load alone tips it, before any push.", then "The guide's tipping pushes are EN
+  1022 / BIFMA X5.1's, as Caliper's engineering brief cites them: not yet checked by an engineer.", and for a seat,
+  what nobody checked: "Not checked yet for a seat: leaning back …; sitting on the front edge; buckling of the legs."
+  A step stool is stood on, not sat on: its cases are a step's.
+- Hand-worked: the bar stool (18 in base, seat 29 in up, 14 in seat, 10 lb): restoring 76,648.7 N·mm, overturning
+  14,732, 5.2 times over, goes over at about 104 N (23 lb); a narrow stool (8 in base, 30 in): 0.18, the front-edge
+  load lands outside its base. A bar stool written to the guide, through a stubbed designer: its four cases declared,
+  2.92 times over.
+- Not done: the live first run of the bar stool sentence (Theo's key, one run; his word).
+- Tests: tests/test_tipping.py (10; they can't import `tipping` without it).
+- **#141 review:** the caveat is on each tipping line itself ("…2.92 times over (EN 1022's push as our brief cites
+  it; not yet checked by an engineer)"), not a line apart. A way it could tip that no case pushes, where its base is no
+  wider, is said (`tipping.undeclared_ways`): the guide's bar stool, on a square base and pushed only forward, reads
+  "Not checked yet: tipping sideways (no push is declared that way, and its base is no wider that way)"; the box stool,
+  wider side to side, doesn't. Pinned: 0.8 against a factor of 1 tips, and the same stool raised 50 mm (its loads
+  with it) tips the same (the floor is where it stands; a floor at z 0 fails it). Merged main (#139).
+- **#141 review, round 2:** `check()`'s own factor is pinned (a base 10.13 in wide, about 0.8 times over: it tips against a factor of 1 and holds against 0.7, from `check()` itself), and so is "tipping front to back" (a sideways push on a square base).
+
+### 2026-11-07 · CALI-124 (#145) · The questions read the shop, and an answer about the shop goes to the shop
+From Theo's bar stool run: the questions asked for the printer's bed size, which is the shop's, and his answer went
+into the design's requirements, where *How do I make it?* couldn't use it.
+- **The questions read the shop first** (`clarify.draft_questions(…, shop=)`): Claude is told the shop ("never ask
+  about it"), and any question about a machine the shop knows states it instead (`with_shop`): "Your printer: 256 ×
+  256 × 256 mm build volume, PLA, PETG. If this one's to be made on something else, say what." A question about the
+  shop is tagged (`about: shop:printer`, from its words where Claude doesn't tag it).
+- **A shop answer goes to the shop, on a yes** (`shop_offer`, `offers`, `take_offer`): it's never a design
+  requirement; an answer the shop can take ("256 x 256 x 256 mm, PETG", "10 in", "4 x 8 ft", "a jigsaw and a drill")
+  is offered under *Requirements*: "Add a 256 × 256 × 256 mm printer (PETG) to your shop?" with Add it / No. A yes
+  writes `shop.yaml` through `shop.write` (the shop's own path; the same kind of machine is replaced); a no leaves the
+  shop alone.
+- **The design's requirements keep only design facts.** An old design's shop fact is left where it is; *How do I make
+  it?* already reads the shop (`making.plan` → `shop.read()`), never the requirements.
+- Tests: tests/test_shop_questions.py (8, stubbed: a fake asker or client, the shop a file in a temp folder; 7 fail
+  without this).
+- **#146 review:** only a question about *your* machine is the shop's ("your printer", "do you have a CNC router",
+  "what tools do you have"), the machine it names first; a design question that names one ("How tall is the plasma
+  cutter the cart carries?", "What nozzle diameter should the hose fitting take?", "Which router bit profile?") keeps
+  its answer as a requirement: the reviewer's 5 probes, none lost. A shop answer that offers nothing is said ("I
+  couldn't read a printer from 'Bambu X1C': add it to your shop by hand, or give its build volume with its units"),
+  its answer kept as a requirement, and the note only dismissed. Only sizes said with their units make an offer ("X1C",
+  "0.4 nozzle, 256 bed" don't; "150 x 150 mm" is mm, not inches); a bare "4x8" table is feet; the offer says its
+  numbers and units. The first yes with no shop.yaml writes only the machine offered: the hand tools stay unsaid
+  (`shop.read` assumes the default for a file with no `hand`, `hand_default`), never written as yours.
+- **#146 review, round 2 (the foreman's call):** an offer never removes an answer. A "your …" answer that becomes a shop offer is kept as a requirement too ("your plasma cutter" still sizes the cart), and a no to the shop keeps it.
+
 ### 2026-11-07 · CALI-35 (#3b) · A reviewed plan's parts are built one by one, in order
 - **Build it on a reviewed plan** (`build_plan.build`, from `firstrun`): each part to be made is authored in the plan's
   build order, mounted-on first, narrated ("Building the mast", "The mast: built (mast_height ✓, …)"). A part the
