@@ -444,3 +444,15 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
             edge = _edge_foot(mesh, declared, pieces, tol, rest)  # a warning, said in its detail (CALI-94)
             out += [edge] if edge else []
     return out
+
+
+def middle_only(store, part_id: str, run: dict, history: Optional[list] = None) -> bool:
+    """Whether a strength run's ✓ is the middle only (CALI-94): its own history line says so, or the part as it is
+    now has a two-sided top with no foot at its free edge (as the design state judges its runs). For the readers that
+    judge a run away from the design state: Studies, the design card's last-checked line (#106 review sweep)."""
+    for h in history if history is not None else store.history(part_id):
+        if h.get("kind") == "load" and h.get("action") == "studied" and h.get("run") == run.get("id"):
+            if h.get("middle_only"):
+                return True
+            break
+    return bool(bare_edge(store, part_id))

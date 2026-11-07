@@ -156,6 +156,10 @@ def test_no_reader_says_holds_on_the_middle_only(tmp_path, monkeypatch):
     # the history line as the page gets it: main's reader of the run's own verdict (#138 item 3) passes the edge too
     (studied,) = [h for p in state["parts"] for h in p["history"] if h.get("action") == "studied"]
     assert studied["verdict"]["kind"] == "edge"
+    # Studies' row for it (#106 review sweep: "holds — weakest a kid stepping up: 3.1x", green)
+    (row,) = [x for x in state["studies"]["runs"] if x["kind"] == "load"]
+    assert row["headline"].startswith("middle only — weakest ") and "front edge isn't checked" in row["headline"]
+    assert row["ok"] is None and "holds" not in row["headline"]
     h = store.history("stool")[-1]
     assert h["kind"] == "load" and h["middle_only"] is True and h["verdict"]["kind"] == "edge"
     # the chat answers from facts that say so
