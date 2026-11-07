@@ -133,6 +133,9 @@ def test_the_printed_sides_carve_down_until_it_doesnt_hold(stool, monkeypatch):
     from caliper import carve, load_study
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    # the carve's mechanics, on the middle foot alone: two loads (CALI-94) double every step's FEA, and #106's CI ran
+    # out of its hour on these; every load in each step is test_a_carve_that_dies_partway's
+    stool.write_part("stool", CENTRED, intent="a plywood top on printed sides")
     # as drawn, a 1/2 in top across 300 mm under 400 lb fails as a beam: the carve says so and carries on
     rec = carve.study(stool, "stool", stations=3, remove_up_to=0.4)
     assert not rec["stations"][0]["whole_holds"] and rec["stations"][0]["weakest"] == "top"
@@ -152,7 +155,7 @@ def test_the_printed_sides_carve_down_until_it_doesnt_hold(stool, monkeypatch):
     before = C.report(stool, "stool")
     uncarved = abs(C.printed_solid(stool, "stool").volume)
     got = carve.adopt(stool, rec["id"], best["index"])
-    assert got["version"] == 3 and f'CARVED = "{got["file"]}"' in stool.read_script("stool")
+    assert got["version"] == 4 and f'CARVED = "{got["file"]}"' in stool.read_script("stool")   # v2: CENTRED, v3: the kid
     mesh = stool.part_geometry("stool").require_mesh()
     assert mesh.is_watertight
     sides = C.printed_solid(stool, "stool")
@@ -183,6 +186,7 @@ def test_the_carve_headline_leads_with_the_whole_part_when_it_doesnt_hold(stool,
     from caliper import carve, load_study, studies
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    stool.write_part("stool", CENTRED, intent="a plywood top on printed sides")     # the middle foot: one FEA a step
     rec = carve.study(stool, "stool", stations=2, remove_up_to=0.4)
     first = rec["stations"][0]
     assert not first["whole_holds"] and first["holds"]           # the fixture: the sides hold, the whole doesn't
@@ -199,7 +203,7 @@ def test_the_share_carved_away_is_of_the_printed_part(stool, monkeypatch):
     from caliper import carve, load_study, studies
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
-    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
+    stool.write_part("stool", CENTRED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
     heard = []
     rec = carve.study(stool, "stool", stations=3, remove_up_to=0.6, emit=lambda k, t="", **d: heard.append(t))
     st = rec["stations"]
@@ -283,6 +287,8 @@ def test_a_carve_that_dies_partway_leaves_what_it_finished(stool, monkeypatch):
     monkeypatch.setattr(load_study, "check_load", dies)
     with pytest.raises(RuntimeError):
         carve.study(stool, "stool", stations=3, remove_up_to=0.4)
+    # the one carve test on both loads: each step checks every load (the front edge and the middle), then dies
+    assert len(calls) == 2 + 1
     (rid,) = os.listdir(carve.runs_dir(stool))
     with open(os.path.join(carve.runs_dir(stool), rid, "run.json")) as f:
         rec = json.load(f)
@@ -307,7 +313,7 @@ def test_a_carve_whose_sweep_fails_says_so_and_reads_running_while_it_works(stoo
     from caliper import carve, load_study, studies
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
-    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60'), intent="kid")
+    stool.write_part("stool", CENTRED.replace('"lb": 200', '"lb": 60'), intent="kid")
     seen = {}
 
     def sweep(self, **k):

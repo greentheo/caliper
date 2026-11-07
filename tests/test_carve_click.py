@@ -16,7 +16,7 @@ import pytest
 
 from caliper import jobs
 
-from .test_mixed import MIXED
+from .test_mixed import CENTRED, MIXED
 
 JS = os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")
 
@@ -228,7 +228,8 @@ def test_a_cancelled_carve_keeps_the_steps_it_finished(tmp_path, monkeypatch):
 
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
     store = DesignStore.create("a stool with printed sides", base=str(tmp_path / "designs"))
-    store.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60'), intent="kid")
+    # the middle foot only: one check a step (two loads doubled the FEA; #106's CI ran out of its hour)
+    store.write_part("stool", CENTRED.replace('"lb": 200', '"lb": 60'), intent="kid")
     checked = []
     real = load_study.check_load
 
@@ -237,8 +238,7 @@ def test_a_cancelled_carve_keeps_the_steps_it_finished(tmp_path, monkeypatch):
         return real(ctx, i, min_safety, solid=solid)
 
     def stop():
-        if len(checked) >= 2 * 2:                      # asked to stop after two steps were checked (MIXED has two
-            # loads since CALI-94, the front edge and the middle: a check of each per step)
+        if len(checked) >= 2:                          # asked to stop after two steps were checked
             raise jobs.Cancelled()
 
     monkeypatch.setattr(load_study, "check_load", counts)
