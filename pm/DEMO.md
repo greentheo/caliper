@@ -572,6 +572,14 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 2. **Say "add the front-edge case":** the designer adds "stepping on the front edge". The warning goes, and *Will it
    work?* reads that case, the weaker one.
 3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_edge_foot.py`.
+### 2026-11-07 · A shared number drives the parts that read it (CALI-35c #3c)
+1. With a key: plan a design of several parts (the turbine sentence), Build it, then say "make the mast 10 ft". The
+   reply says "Changed mast top z from 7 to 10 ft. Rebuilt from it, with no new design: the mast, the hub." and what
+   the design's checks measure now; the viewport shows the taller mast with the hub on it.
+2. Each rebuilt part's history says "skeleton" with the change; its strength check reads "older version" until it's
+   checked again.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_skeleton_drives.py` (stubbed: no key needed).
+
 ### 2026-11-07 · A top on two sides is a beam, and ply's grain narrows it (CALI-116 #118)
 1. Open a stool whose top rests on its two sides, run **Will it hold?**, and open a case.
 2. **Beam check** — "it rests on two opposite edges, 14.0 in apart: a beam across them … Cut with its face grain running
