@@ -566,6 +566,10 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · A changed design.js is picked up on reload, with no ?v= to bump (CALI-120 #128)
+1. View the page's source: `design.js?v=` is a hash of the file. Change `design.js` and reload: a new key, and the
+   new script. `index.html` still says `?v=dev`.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_cache_key.py`.
 ### 2026-11-07 · A plan says what you said apart from what it assumed (CALI-115 #117)
 1. With a key, new design: "A Savonius wind turbine: printed buckets, plasma-cut end plates, a welded 7 ft mast on a
    staked base, for a generator I already have with a 1 in shaft." Only the generator says "you have it".
