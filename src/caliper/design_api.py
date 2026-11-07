@@ -36,6 +36,12 @@ class ChatMessage(BaseModel):
     scope: Optional[str] = None
 
 
+class ParamSet(BaseModel):
+    name: str
+    value: float
+    unit: Optional[str] = None            # a length's unit (mm when none); no unit for a count, a ratio or an angle
+
+
 class ShopOffer(BaseModel):
     index: int
     add: bool = True
@@ -623,6 +629,38 @@ def router():
                 store.append_history(pid, {"kind": "setting", "role": req.role})
             store.save()
             return design_state(store)
+
+    @r.get("/api/designs/{slug}/parts/{pid}/params")
+    def part_params(slug: str, pid: str):
+        """The part's exact numbers (CALI-108): each PARAMS entry in plain words, its value (mm for a length), its
+        unit and its RANGES bounds, and whether its build reads it."""
+        from . import params
+
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(404, f"no part {pid!r}")
+        try:
+            return {"part": pid, "units": store.design.display_units, "params": params.listing(store, pid)}
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+
+    @r.post("/api/designs/{slug}/parts/{pid}/params")
+    def set_part_param(slug: str, pid: str, req: ParamSet):
+        """Set one of a part's numbers by hand (CALI-108): no Claude call. A new version with that PARAMS line
+        rewritten, rebuilt and the design measured again; refused (422, saying why) outside its range or if it won't
+        build. A value its build ignores or clamps comes back as ``warning``."""
+        from . import params
+
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None:
+                raise HTTPException(404, f"no part {pid!r}")
+            try:
+                got = params.set_value(store, pid, req.name, req.value, req.unit)
+            except (ValueError, KeyError) as e:
+                raise HTTPException(422, str(e).strip("'\""))
+            return {"version": got["version"], "said": got["said"], "warning": got["warning"], "notes": got["notes"],
+                    "design": design_state(store)}
 
     @r.get("/api/designs/{slug}/parts/{pid}/script")
     def part_script(slug: str, pid: str):
