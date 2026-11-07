@@ -24,8 +24,12 @@ the shape).
 - Tests: tests/test_cards_speed.py (9: the revision's build is the cards', the same mesh as a fresh build, never
   another version's, nothing kept but a good build of the exact script, a refine builds its part once; the slicer
   never holds a card, the cards say working it out and a print goal waits, the page asks again). All fail at main.
-- **#152 review:** a background slice that fails or hangs gives the cards its rough number, said ("about 19.8 h (a
-  rough estimate: the slicer timed out)"), and the page stops asking; a caller that waits still slices again (#140).
+- **#152 review:** a background slice that fails or hangs is remembered per piece and said once: the rough number
+  marked "(a rough guess; the slicer couldn't work it out: the slicer timed out)", or, if it crashed, "print time: the
+  slicer couldn't work it out: …" with no total (a print goal says so, never a number); the page stops asking. It
+  starts once however often the page asks (pinned: 5 asks, 1 start). One slicer worker, so a part's pieces slice in
+  turn; a background slice gives up at 180 s (a waiting caller keeps 600 s, and still slices again, #140). An offer
+  whose file was rewritten in the same tick with other text is never taken (pinned).
 
 ### 2026-11-07 · CALI-125 (#148) · Follow-ups from the 11/07 reviews
 - **#140's survivor:** a part that builds, one rule kept and one whose probe errors: the erroring one is a fail with
