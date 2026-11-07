@@ -76,16 +76,22 @@ def _small_len(mm: float, inches: bool) -> str:
             f"{mm:.1f}".removesuffix(".0") if mm < 10 else f"{mm:.0f}") + " mm"
 
 
-def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool, inches: bool) -> dict:
+def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool, inches: bool,
+               edge: bool = False) -> dict:
     """The part card's line for one load case: its words from its one verdict (CALI-112)."""
     from . import load_study as L
 
     older = " (Checked on an older version: check again.)" if stale else ""
-    v = verdicts.case(run, c, filled=filled, stale=stale)   # an older run's ✓ is "older version" (#132 review)
+    v = verdicts.case(run, c, filled=filled, stale=stale, edge=edge)   # an older run's ✓ is "older version" (#132)
     if v["kind"] == "untrusted":                     # ran on a block: no ✓ from it (CALI-96); this wins
         return _line(untrusted(pid, filled), "warn", study="load")   # the number: the panel, badged
     if v["kind"] in ("unresolved", "unchecked"):     # an FEA that can't see the wall is no ✓ (CALI-97)
         return _line(coarse(run, inches) + older, "warn", study="load")
+    if v["kind"] == "edge":                          # the middle only: no ✓ for where people stand (CALI-94)
+        from .consistency import MIDDLE_ONLY
+
+        # never "holds" for it (#132's guard): the case, then what was and wasn't checked
+        return _line(f"{c['name'][:1].upper() + c['name'][1:]}: {MIDDLE_ONLY}." + older, "warn", study="load")
     # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
     rough = L.rough(run, c)
     about = "about " if rough else ""
@@ -235,16 +241,19 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             from . import consistency
 
             geom = store.part_geometry(pid)                  # cached by the assembly (path, mtime)
-            off = sorted((r for r in consistency.check(C.declared(store, pid), geom)
-                          if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
+            said = consistency.check(C.declared(store, pid), geom)
+            off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
+            edge = next((r.detail for r in said if r.id == "loads_edge" and r.detail), "")   # (CALI-94)
             strays = geom.require_mesh().metadata.get("strays")
         except Exception:  # noqa: BLE001 — the card says what it can
-            off, strays = [], None
+            off, strays, edge = [], None, ""
         if strays:                                   # what the mesh left out, said once (CALI-118)
             what.append(_line(f"I {strays}: it enclosed nothing and weighs nothing.", "info"))
         if off:
             what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"fix its shape to "
                               f"match its pieces\" and I'll revise it.", "bad"))
+        if edge:                               # a load case it's missing: a warning, the round passed (CALI-94)
+            what.append(_line(edge[0].upper() + edge[1:] + ".", "warn", study="load"))
 
     # Will it work?
     work = []
@@ -258,9 +267,10 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         from . import load_study as L
 
         filled = consistency.filled(store, pid)              # the check ran on a block, not the part (CALI-96)
+        edge = consistency.bare_edge(store, pid)             # where people stand wasn't loaded (CALI-94)
         for c in run["cases"]:
             if c.get("safety") is not None:
-                work.append(_case_line(pid, run, c, filled, stale, inches))
+                work.append(_case_line(pid, run, c, filled, stale, inches, edge=bool(edge)))
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
                        and h.get("action") == "failed" and h.get("version") == p["version"]), None)
@@ -428,6 +438,10 @@ def measured(store: DesignStore, state: dict) -> dict:
                                             for r in state.get("load_runs") or []) and consistency.filled(store, pid)]
     if filled:                                         # a verdict measured on a filled-in solid isn't one (CALI-96)
         out["strength.filled"] = untrusted(filled[0], consistency.filled(store, filled[0]) or "")
+    edged = [pid for pid in current if any(r["part"] == pid and r.get("version") == current[pid]
+                                           for r in state.get("load_runs") or []) and consistency.bare_edge(store, pid)]
+    if edged:                                          # loaded in the middle only (CALI-94, #106 review)
+        out["strength.edge"] = consistency.MIDDLE_ONLY[0].upper() + consistency.MIDDLE_ONLY[1:] + "."
     if safeties:
         out["strength.safety"] = min(safeties)
     if breaks:
@@ -534,11 +548,16 @@ def held_to(state: dict, now: dict) -> list[dict]:
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-97)
         older = now.get("strength.stale") if strength else None
         verdict = verdicts.goal(met, untrusted=untrue, unresolved=now.get("strength.unresolved") if strength else None,
+                                edge=bool(now.get("strength.edge")) if strength else False,       # (CALI-94)
                                 stale=late or bool(older),
                                 incomplete=now.get("strength.unchecked") if strength else None)
         if verdict["kind"] == "untrusted":             # the verdict first; which check it is follows (#96 item 5)
             out.append(_line(f"{untrue} ({label[:1].lower() + label[1:]}{', assumed' if c.get('source') == 'assumed' else ''})", "warn",
                              study="load", model=rests_on_model(c["metric"])))
+            continue
+        if verdict["kind"] == "edge":                  # the middle only: no ✓ for where people stand (CALI-94)
+            out.append(_line(f"! {label}{assumed}: {now['strength.edge']}", "warn", study="load",
+                             model=rests_on_model(c["metric"])))
             continue
         if verdict["kind"] == "unresolved":            # no ✓ on an FEA that can't see the wall (CALI-97)
             out.append(_line(f"! {label}{assumed}: {now['strength.unresolved']}", "warn",
@@ -612,11 +631,13 @@ def design(store: DesignStore, state: dict) -> list[dict]:
                                                   for p in parts)
         # never a pass: a check that couldn't run (#103 review), nor one measured on a filled-in shape (CALI-96)
         untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0     # never a pass (CALI-110)
-        waits = (s.get("unknown") or 0) - untrusted - unresolved
+        edge = s.get("edge") or 0                                                      # nor middle only (CALI-94)
+        waits = (s.get("unknown") or 0) - untrusted - unresolved - edge
         said = (f"{s['pass']} check{'s' if s['pass'] != 1 else ''} pass" if s["pass"] or fails
-                else "No check has run yet" if waits and not untrusted and not unresolved else "No check passes yet")
+                else "No check has run yet" if waits and not untrusted and not unresolved and not edge
+                else "No check passes yet")
         rest = ([f"{untrusted} not trusted"] * bool(untrusted) + [f"{unresolved} not resolved"] * bool(unresolved)
-                + [f"{waits} not checked yet"] * bool(waits))
+                + [f"{edge} middle only"] * bool(edge) + [f"{waits} not checked yet"] * bool(waits))
         work.append(_line(said + (
             f", {s['fail']} fail: " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")
             + (f"{',' if s['pass'] or fails else ':'} " + ", ".join(rest) if rest else "") + "."

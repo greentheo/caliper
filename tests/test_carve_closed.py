@@ -13,7 +13,7 @@ import trimesh
 
 from caliper import carve, load_study
 
-from .test_mixed import MIXED
+from .test_mixed import CENTRED, MIXED
 from .test_resolved import TUBE
 
 pytest.importorskip("cadquery")
@@ -69,7 +69,9 @@ def test_an_open_join_with_the_wood_isn_t_offered_and_is_repaired_or_refused(tmp
     import copy
 
     real = carve._join
-    kid = MIXED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid")
+    # the middle foot only, as main's MIXED was: with #106's front-edge foot the two-load carve's step 1 doesn't close
+    # (#105's kind of step, rightly refused) and the whole part fails at the edge, so there's no step 1 to force open
+    kid = CENTRED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid")
     store, rec = _carve(tmp_path, monkeypatch, kid, "stool", 2)
     assert rec["best"] == 1, rec["stations"]
     folder, spacing = os.path.join(carve.runs_dir(store), rec["id"]), rec["spacing_mm"]

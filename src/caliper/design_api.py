@@ -323,9 +323,12 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
     # one verdict per run and case, for the page to read and never work out (CALI-112): its badges, words and colours
     untrusted = {p["id"]: p.get("untrusted") for p in parts}
+    from .consistency import bare_edge
+
+    middle = {p["id"] for p in parts if p.get("loads") and bare_edge(store, p["id"])}   # the middle only (CALI-94)
     for r in runs["load"]:
         part = next((p for p in parts if p["id"] == r["part"]), None)
-        v = verdicts.run(r, filled=untrusted.get(r["part"]),
+        v = verdicts.run(r, filled=untrusted.get(r["part"]), edge=r["part"] in middle,
                          stale=part is None or r.get("version") != part["version"])   # never green on an older run
         for c, cv in zip(r.get("cases") or [], v.pop("cases", [])):
             c["verdict"] = cv

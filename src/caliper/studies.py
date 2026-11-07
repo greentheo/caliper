@@ -207,8 +207,9 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         s = r.get("summary") or {}
         untrusted = s.get("untrusted") or 0                         # not trusted is never green (CALI-96)
         unresolved = s.get("unresolved") or 0                       # nor is not resolved (CALI-110)
+        edge = s.get("edge") or 0                                   # nor middle-only (CALI-94)
         return (f"{s.get('pass', 0)} pass · {s.get('fail', 0)} fail" + (f" · {untrusted} not trusted" if untrusted else "")
-                + (f" · {unresolved} not resolved" if unresolved else ""),
+                + (f" · {unresolved} not resolved" if unresolved else "") + (f" · {edge} middle only" if edge else ""),
                 verdicts.summary(s)["counts_as_pass"])              # one verdict (CALI-112)
     if kind == "release":
         why = verdicts.summary((r.get("card") or {}).get("summary"))["why"] or "a check isn't settled"

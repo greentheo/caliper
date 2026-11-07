@@ -506,6 +506,47 @@ def _held_edges(pc: dict, k: int, others: list[dict], tol: float, under=None) ->
     return held
 
 
+#: How near a free edge a foot's box must come to count as standing at that edge (CALI-94): half an inch.
+AT_EDGE_MM = 12.7
+
+
+def two_sided(pieces: list[dict], load: dict, tol: float, under=None) -> Optional[dict]:
+    """The sheet a downward load lands on face-on, if it's held on just two opposite edges (a top on two sides,
+    CALI-82): ``{"piece", "free": how far the load's box is from the nearer free edge, mm}``. None otherwise."""
+    from .consistency import _frame, _inside2d
+
+    lo, hi = np.asarray(load["lo"], float), np.asarray(load["hi"], float)
+    c = (lo + hi) / 2
+    f = np.asarray(load["force"], float)
+    fmag = float(np.linalg.norm(f)) or 1.0
+    corners = np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+    for pc in pieces:
+        if pc["kind"] != "sheet":
+            continue
+        for k, poly in enumerate(pc["polys"]):
+            o, u, v, n, flat = _frame(poly)
+            rel = c - o
+            depth = abs(float((hi - lo) @ np.abs(n))) / 2
+            if (abs(float(rel @ n)) > pc["thickness"] + depth + tol
+                    or not _inside2d(np.array([[rel @ u, rel @ v]]), flat)[0]
+                    or abs(float(f @ n)) < 0.7 * fmag):
+                continue
+            which = _held_edges(pc, k, [x for x in pieces if x is not pc], tol, under)
+            if len(poly) != 4 or sorted(which) not in ([0, 2], [1, 3]):
+                return None
+            box = np.array([[(p - o) @ u, (p - o) @ v] for p in corners])
+            umin, vmin = box.min(axis=0)
+            umax, vmax = box.max(axis=0)
+            gaps = []
+            for i in (j for j in range(4) if j not in which):
+                a, b = poly[i], poly[(i + 1) % 4]
+                pts = [((a + (b - a) * s) - o) for s in np.linspace(0, 1, 65)]
+                gaps.append(min(float(np.hypot(max(umin - p @ u, 0, p @ u - umax), max(vmin - p @ v, 0, p @ v - vmax)))
+                                for p in pts))
+            return {"piece": pc["name"], "free": round(min(gaps), 1)}
+    return None
+
+
 def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=None) -> Optional[dict]:
     """The sheet a load pushes on face-on, checked as a plate — or None if it lands on no sheet, or on
     one that isn't held all round (the FEA is the number for that one)."""
@@ -987,13 +1028,17 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         json.dump(record, f, indent=2, default=str)
     from . import verdicts
 
-    v = verdicts.run(record)                  # one verdict (CALI-112): the history line and the message say it
+    from .consistency import bare_edge
+
+    # one verdict (CALI-112): the history line and the message say it; loaded in the middle only (CALI-94) too
+    v = verdicts.run(record, edge=bool(bare_edge(store, part_id)))
     store.append_history(part_id, {"kind": "load", "action": "studied", "run": rid,
                                    "cases": len(cases), "safety": worst,
                                    "holds": record["holds"],  # producer: the study's number, kept for older readers
                                    "verdict": {k: x for k, x in v.items() if k != "cases"},
                                    # the history line says "not resolved", never "holds", for it (CALI-110)
-                                   **({"unresolved": True} if v["kind"] in ("unresolved", "unchecked") else {})})
+                                   **({"unresolved": True} if v["kind"] in ("unresolved", "unchecked") else {}),
+                                   **({"middle_only": True} if v["kind"] == "edge" else {})})
     store.append_log({"kind": "load", "action": "studied", "part": part_id, "run": rid})
     said = {"holds": "it holds", "fails": "it doesn't hold",
             "unchecked": "not checked: its walls are too thin for the voxels",

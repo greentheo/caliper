@@ -566,6 +566,12 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-06 · A foot at the front edge of a step (CALI-94 #73)
+1. **A stool whose top rests on two sides, loaded only in the middle:** *What is it?* warns "The top is held on two
+   sides, and no load stands on its free edge, where it's weakest: add a case…".
+2. **Say "add the front-edge case":** the designer adds "stepping on the front edge". The warning goes, and *Will it
+   work?* reads that case, the weaker one.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_edge_foot.py`.
 ### 2026-11-07 · Theo's bar stool, as its cards should read it (CALI-122 #137)
 1. Open the bar stool (a copy) and press **Check it holds** on v7. *Will it work?* leads with "✗ Breaks its rule
    shell_wall_thickness: its walls are 0.25 mm around z 16.1 in; it says at least 2.85 mm", and *Rules on this part*
