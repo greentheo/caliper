@@ -566,6 +566,12 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · An all-printed part gets its book; the book weighs what the card does (CALI-111 #112)
+1. Open a design that's all printed (a tube, a printed box) and press **Make the build package**: it's made, and its
+   cut list says "Nothing to cut: it's all printed."
+2. On a design with a printed part and plywood: the build book's scorecard and the design card give the same total
+   weight. A card scored before this reads "score it again" until it's re-scored.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_printed_release.py`.
 ### 2026-11-06 · Nothing leaves the machine unsaid (CALI-91 #68)
 1. **Press 🎤:** it asks first, "Your browser turns speech into words by sending it to its maker (Google, in Chrome).
    Talk anyway?". **Type instead** doesn't listen. **Talk** does, and the next press doesn't ask again.

@@ -885,7 +885,9 @@ def balance(store: DesignStore, build: Optional[dict] = None, payload_lb: float 
         d = declared(store, p.id, build.get(p.id))
         items = _items(d)
         if items:
-            rows = takeoff(items)
+            # printed pieces weighed from their solid, as report() does: without it the bar stool's total read
+            # 1.6 lb (its plywood seat) while its part weighed 10.9 (CALI-111)
+            rows = takeoff(with_printed(store, p.id, items, d))
             mass, cog = totals(rows)
             parts.append({"part": p.id, "mass_kg": round(mass, 2), "mass_lb": round(mass * M.LB_KG, 1),
                           "cog": _round3(cog)})

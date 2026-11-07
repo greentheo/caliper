@@ -396,8 +396,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
     scored = {k: m.get("value") for k, m in ((card or {}).get("metrics") or {}).items()
               if isinstance(m.get("value"), (int, float)) and not isinstance(m.get("value"), bool)}
     units = {k: m.get("unit", "") for k, m in ((card or {}).get("metrics") or {}).items()}
-    stale = bool(card) and any(card.get("versions", {}).get(p["id"]) not in (None, p["version"])
-                               for p in state["parts"])
+    stale = bool(card) and (bool(card.get("outdated")) or any(
+        card.get("versions", {}).get(p["id"]) not in (None, p["version"]) for p in state["parts"]))
     out = []
     for c in (state.get("goals") or {}).get("checks") or []:
         label = c.get("label") or c["id"]
@@ -475,7 +475,8 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     if card and not work:
         s = card["summary"]
         fails = [c for c in card["checks"] if c["status"] == "fail"]
-        stale = any(card.get("versions", {}).get(p["id"]) not in (None, p["version"]) for p in parts)
+        stale = bool(card.get("outdated")) or any(card.get("versions", {}).get(p["id"]) not in (None, p["version"])
+                                                  for p in parts)
         # never a pass: a check that couldn't run (#103 review), nor one measured on a filled-in shape (CALI-96)
         untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0     # never a pass (CALI-110)
         waits = (s.get("unknown") or 0) - untrusted - unresolved

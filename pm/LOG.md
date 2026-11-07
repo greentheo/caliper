@@ -1,7 +1,22 @@
 # Caliper work log
 
 Append-only. Newest first. One entry per shipped task or notable decision.
-Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
+Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
+
+### 2026-11-07 · CALI-111 (#112) · An all-printed design gets a build package, and the book weighs what the card does
+- **`cutplan.run`** makes its run folder whatever the materials. An all-printed part's cut list says "Nothing to cut:
+  it's all printed." (The release raised FileNotFoundError on the tube.)
+- **The 1.6 lb vs 10.9 lb:** the same card on the bar stool's copy said `weight.i_want` 10.9 lb and `weight.total_lb`
+  1.6 lb. `construction.balance()` left out every printed piece; `report()` weighs them (`with_printed`). So the
+  book's ✓ was wrong and the design card's ✗ 10.9 lb right. `balance()` now weighs printed pieces too.
+- **A card from the old scorer is out of date:** cards carry `scorer: 2`. `list_cards` marks an older one `outdated`,
+  the release scores again rather than reuse it, and the page and design card say "score it again". The camper
+  sample's shipped card is re-scored (its verdicts the same; waste $90.30 → $90.24 from older drift).
+- `tests/test_printed_release.py` (4; all fail on main): the tube's package, the total against each part's weight, the
+  book's numbers equal to the live card's for the same version (a weight goal it fails is ✗ in both), and an old card
+  re-scored. design.js v=55.
+
+### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
 - **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
   `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its
   note. A ✗ by its number stays a fail. `untrusted` (#96, a filled-in shape) is as it was.
@@ -40,7 +55,6 @@ Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book n
 - **Page:** "not trusted" first, then "not resolved", then holds or doesn't. `design.js?v=45`.
 - Tests: `test_filled_verdict` (both together on the design card and in Studies).
 
-### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
 ---
 

@@ -1181,7 +1181,8 @@ function goTo(id) {                   // open the card's numbers and bring that 
 const TRUST = { measured: 'measured', model: 'a model (on the safe side)', rough: 'rough', guess: 'a guess' };
 function scoreView(d) {
   const card = (d.scorecards || [])[0];
-  const stale = card && d.parts.some((p) => card.versions && card.versions[p.id] !== undefined && card.versions[p.id] !== p.version);
+  const stale = card && (card.outdated     // scored the old way (CALI-111): its numbers aren't today's
+    || d.parts.some((p) => card.versions && card.versions[p.id] !== undefined && card.versions[p.id] !== p.version));
   const num = (v, u) => {
     if (v == null) return '—';
     const n = typeof v === 'number' ? (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : `${+v.toFixed(2)}`) : esc(String(v));

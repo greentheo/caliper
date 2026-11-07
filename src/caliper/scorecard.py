@@ -52,14 +52,23 @@ def cards_dir(store: DesignStore) -> str:
     return os.path.join(store.root, "scorecards")
 
 
+#: How the card weighs and scores. A card filed by an older scorer is out of date even at the same versions: the
+#: release scores again, the page says so (CALI-111: cards before 2 left printed pieces out of weight.total_lb).
+SCORER = 2
+
+
 def list_cards(store: DesignStore, limit: int = 20) -> list[dict]:
+    """The filed cards, newest first; each from an older scorer marked ``outdated``."""
     root = cards_dir(store)
     if not os.path.isdir(root):
         return []
     out = []
     for name in sorted(os.listdir(root), reverse=True)[:limit]:
         with open(os.path.join(root, name)) as f:
-            out.append(json.load(f))
+            card = json.load(f)
+        if card.get("scorer") != SCORER:
+            card["outdated"] = True
+        out.append(card)
     return out
 
 
@@ -405,7 +414,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         objectives.append({**o, "value": value, "unit": m["unit"] if m else "", "trust": m["trust"] if m else None,
                            "was": was, "change": (round(value - was, 3) if isinstance(value, (int, float))
                                                   and isinstance(was, (int, float)) else None)})
-    card = {"created": time.time(), "versions": versions, "settings": settings, "checks": checks,
+    card = {"created": time.time(), "scorer": SCORER, "versions": versions, "settings": settings, "checks": checks,
             "notes": g.get("notes") or [],
             "objectives": objectives, "metrics": metrics, "cost": cw,
             "summary": {"pass": sum(c["status"] == "pass" for c in checks),
