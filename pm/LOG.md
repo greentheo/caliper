@@ -35,6 +35,9 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   `_result`; #135's own copy goes), and the build's marks come from verdicts: each rule's from `verdicts.check` (a rule
   that waits reads "·", an error "✗"), the part's from `verdicts.report`, and the build's `ok` from its
   `counts_as_pass`, not `all_pass`.
+- **#135 review, round 3:** the marks are `_marks(mine)` (what `build()` uses, tested with erroring and failing rules,
+  not a copy of it), and a design whose measurement throws (`_measure_design`'s `(None, {"<design>": …})`) says "The
+  design checks: not checked: …" and isn't ok: it read `report is None` as ok (rule 6).
 
 ### 2026-11-07 · CALI-106 (#136 review, round 2) · What a refused carve asks for, said apart; the page keeps it off
 - **The line asks two things apart** (thickening to the rule's 2.85 mm doesn't unblock a carve): printing and the

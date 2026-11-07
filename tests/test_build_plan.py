@@ -228,3 +228,30 @@ def test_the_build_s_marks_come_from_the_one_verdict():
     head = lambda *st: build_plan._mark(verdicts.report({"results": [{"status": s} for s in st]}))   # noqa: E731
     assert head("pass", "pass") == "✓" and head("pass", "deferred") == "·" and head("pass", "error") == "✗"
     assert head("deferred") == "·"                                                # nothing measured yet: never red
+
+
+
+def test_the_build_s_own_marks_an_error_is_a_fail_and_a_waiting_rule_a_dot():
+    """#135 review: the marks test rebuilt the head with its own lambda, so build()'s head and its error→fail mapping
+    went untested. _marks is what build() uses."""
+    from types import SimpleNamespace as R
+
+    from caliper import build_plan
+
+    assert build_plan._marks([R(id="a", status="pass"), R(id="b", status="pass")]) == ("a ✓, b ✓", "✓")
+    assert build_plan._marks([R(id="a", status="pass"), R(id="b", status="error")]) == ("a ✓, b ✗", "✗")
+    assert build_plan._marks([R(id="a", status="fail"), R(id="b", status="deferred")]) == ("a ✗, b ·", "✗")
+    assert build_plan._marks([R(id="a", status="pass"), R(id="b", status="deferred")]) == ("a ✓, b ·", "·")
+    assert build_plan._marks([]) == ("", "")
+
+
+def test_a_design_whose_measurement_throws_is_not_checked_never_ok(tmp_path, monkeypatch):
+    """#135 review, rule 6: _measure_design returns (None, {"<design>": …}) when evaluate throws, and build() read
+    report None as ok."""
+    from caliper import chat
+
+    store = _reviewed(tmp_path)
+    monkeypatch.setattr(chat, "_measure_design", lambda s: (None, {"<design>": "ValueError: the rotor's mesh broke"}))
+    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=Stub(), strength=False)
+    assert got["plan"] == "built" and got["ok"] is False
+    assert "The design checks: not checked: the rotor's mesh broke." in got["reply"]

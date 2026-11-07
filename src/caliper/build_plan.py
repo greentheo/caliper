@@ -65,6 +65,16 @@ def plainly(error: str) -> str:
     return last if not re.search(r"(/|\\)[\w.-]+(/|\\)", last) else "it raised an error while building"
 
 
+def _marks(mine: list) -> tuple[str, str]:
+    """A built part's rules as the reply marks them, from the one verdict (#132): each rule's mark ("✓", "✗", or "·"
+    for one that waits; an error is a fail), and the part's own mark from its report's verdict. A mark only for what
+    was measured (#135 review): nothing measured, no head mark."""
+    statuses = ["fail" if r.status == "error" else r.status for r in mine]
+    marks = ", ".join(f"{r.id} {_mark(verdicts.check(s))}" for r, s in zip(mine, statuses))
+    head = _mark(verdicts.report({"results": [{"status": s} for s in statuses]})) if mine else ""
+    return marks, head
+
+
 def _mark(v: dict) -> str:
     """A verdict as the build's reply marks it: ✓ holds, ✗ fails, · anything not yet settled (a rule that waits)."""
     return "✓" if v["kind"] == "holds" else "✗" if v["kind"] == "fails" else "·"
@@ -126,10 +136,7 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
         built[pid] = store.part_geometry(pid)
         store.append_log({"kind": "firstrun", "action": "built", "part": pid, "version": res.version})
         mine = [r for r in check(built[pid])] if res.part_report is not None else []
-        # each mark from its one verdict (#132): a rule that waits reads "·", an error is a fail
-        marks = ", ".join(f"{r.id} {_mark(verdicts.check('fail' if r.status == 'error' else r.status))}" for r in mine)
-        # a mark only for what was measured (#135 review): nothing measured, no mark; the parts' report's one verdict
-        head = _mark(verdicts.report({"results": [{"status": r.status} for r in mine]})) if mine else ""
+        marks, head = _marks(mine)
         said.append(f"- the {name}: built" + (f" {head}" if head else "") + (f" ({marks})" if marks else ""))
         emit("step", f"The {name}: built" + (f" ({marks})" if marks else ""), step="built", part=pid)
 
@@ -137,7 +144,9 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
     status = "stopped" if failed else "built"
     store.design.plan = {**store.design.plan, "status": status}
     store.save()
-    report, _ = chat._measure_design(store)
+    report, errors = chat._measure_design(store)
+    # a measurement that threw is no pass (rule 6, #135 review): "not checked", with why, and the build isn't ok
+    unmeasured = plainly(errors.get("<design>")) if report is None and errors.get("<design>") else ""
     whole = (report.said()[:1].upper() + report.said()[1:] + ".") if report is not None else ""
     if failed:
         pid, why = failed
@@ -150,11 +159,12 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
         unchecked = [x for x in ("whether it holds (Check it holds)" if _unheld(store, built) else "",
                                  "the scorecard" if _unscored(store) else "") if x]
         reply = (f"I built the plan's {len(made)} parts, in order:\n" + "\n".join(said)
-                 + (f"\n\nThe design checks: {report.said()}." if report is not None else "")
+                 + (f"\n\nThe design checks: {report.said()}." if report is not None else
+                    f"\n\nThe design checks: not checked: {unmeasured}." if unmeasured else "")
                  + (f"\n\nNot checked yet: {' and '.join(unchecked)}. Run *Will it work?* next." if unchecked else ""))
     steps["plan"] = f"{status}: {len(built)} of {len(made)} parts"
     store.append_log({"kind": "reply", "action": "plan", "ok": not failed, "reply": reply, "firstrun": True})
     emit("step", "Done", step="done")
-    ok = not failed and (report is None or verdicts.report(report.to_dict())["counts_as_pass"])
+    ok = not failed and not unmeasured and (report is None or verdicts.report(report.to_dict())["counts_as_pass"])
     return {"part": failed[0] if failed else (made[-1] if made else None), "ok": ok, "steps": steps,
             "reply": reply, "plan": status, "built": list(built)}
