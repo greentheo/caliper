@@ -163,5 +163,8 @@ def test_the_plate_check_gives_the_beam_the_width_where_the_foot_is(foot, width)
     got = _beam_of(foot)
     assert got["width_mm"] == pytest.approx(width, abs=1)
     assert got["stress_mpa"] == pytest.approx(_stress(width), rel=0.01)
-    # the sag at the same width as the stress
-    assert got["deflection_mm"] == pytest.approx(P * 300 ** 3 / (48 * PLY["E"] * width * T ** 3 / 12), rel=0.01)
+    # the sag beside "grain unknown" is the worse grain's (#122 review): along the span its own E on the narrower width,
+    # across it half as stiff on this width; never the isotropic sag, which reads stiffer
+    sag = lambda b, e: P * 300 ** 3 / (48 * e * b * T ** 3 / 12)   # noqa: E731
+    worse = max(sag(got["width_along_mm"], PLY["E"]), sag(width, PLY["E"] * PLY.get("across", 1.0)))
+    assert got["deflection_mm"] == pytest.approx(worse, rel=0.01)

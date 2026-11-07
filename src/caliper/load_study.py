@@ -281,16 +281,16 @@ def thin_words(store: DesignStore, part_id: str, thin: float, where: dict, fines
     inches = getattr(store.design, "display_units", "in") == "in"
     at = (f" in the {where['piece']}" if where.get("piece") else
           f" around z {_len(where['at'][2], inches)}" if where.get("at") else "")
-    head, sees = f"its {_wall(thin, inches)} walls{at}", RESOLVE_MIN * finest_mm
+    head, sees = f"its thinnest walls, {_wall(thin)}{at}, are", RESOLVE_MIN * finest_mm
     nozzle = DEFAULT_MACHINE.nozzle
     printing, rule = printed and thin < nozzle, wall_rule(store, part_id)
     need = rule if rule and thin < rule[1] else None
     if not (printing or need):
-        return (f"{head} are too thin for the strength check to see: at this size it sees walls from {sees:.1f} mm "
+        return (f"{head} too thin for the strength check to see: at this size it sees walls from {sees:.1f} mm "
                 f"on, so check it by hand or with a test piece instead.")
     rule_said = f"your rule {need[0]} (at least {round(need[1], 2):g} mm)" if need else ""
-    return (head + (f" are too thin for a {nozzle:g} mm nozzle to print" + (f" and for {rule_said}" if need else "")
-                    if printing else f" are thinner than {rule_said}")
+    return (head + (f" too thin for a {nozzle:g} mm nozzle to print" + (f" and for {rule_said}" if need else "")
+                    if printing else f" thinner than {rule_said}")
             + (": thicken them to that." if need else ": thicken them.")
             + f" For a strength carve, walls must be at least {sees:.1f} mm at this size, so check it by hand or "
               f"with a test piece instead.")
@@ -380,6 +380,52 @@ def plate(a: float, b: float, t: float, force: float, footprint: float, E: float
     return {"stress_mpa": stress, "deflection_mm": alpha * force * b ** 2 / (E * t ** 3)}
 
 
+def ring_plate(a: float, t: float, force: float, footprint: float, E: float) -> dict:
+    """A round plate simply supported on a ring of radius ``a`` (mm), ``t`` thick, a load ``force`` (N) over a central
+    ``footprint`` (mm²): the peak stress (MPa, at the middle) and the deflection (mm) there. Roark (7th ed.) Table 11.2
+    case 16, uniform load over a central circle r0 (with Table 11.4's equivalent radius for a small spot):
+    σ = 3W/(2πt²)·[(1+ν)·ln(a/r0) + 1 − (1−ν)·r0²/(4a²)], y = W·a²/(16πD)·[(3+ν)/(1+ν)] at most. A disc that runs on
+    past its ring is stiffer than this: the safe side. NEEDS ENGINEER CHECK (#137 item 7, against the foreman's hand
+    check of the bar stool's seat: 4.5 MPa)."""
+    r0 = min(math.sqrt(max(footprint, 1.0) / math.pi), a)
+    if r0 < 0.5 * t:                        # the equivalent radius for a load on a small spot
+        r0 = math.sqrt(1.6 * r0 ** 2 + t ** 2) - 0.675 * t
+    nu = POISSON
+    stress = 3 * force / (2 * math.pi * t ** 2) * ((1 + nu) * math.log(a / r0) + 1 - (1 - nu) * r0 ** 2 / (4 * a ** 2))
+    D = E * t ** 3 / (12 * (1 - nu ** 2))
+    return {"stress_mpa": stress, "deflection_mm": force * a ** 2 / (16 * math.pi * D) * (3 + nu) / (1 + nu)}
+
+
+def _ring_held(pc: dict, k: int, under, tol: float) -> Optional[float]:
+    """The radius (mm) of the widest ring under a round panel that the part beneath holds all the way round (90% of
+    it), measured from the panel's middle: a disc on a cone's top ring. The widest: a longer span bends more, the safe
+    side. None where nothing beneath holds a ring."""
+    from .consistency import _frame
+
+    poly, side, t = pc["polys"][k], pc["sides"][k], pc["thickness"]
+    o, u, v, n, flat = _frame(poly)
+    mid = poly.mean(axis=0)
+    rim = float(np.linalg.norm(poly - mid, axis=1).max())
+    ang = np.linspace(0, 2 * np.pi, 72, endpoint=False)
+    held = None
+    for r in np.arange(max(t, 1.0), rim + 1e-6, 1.0):
+        # just under the panel, and only what touches it: a cone flares below its top ring, so a deeper or looser probe
+        # reads the ring wider than where it meets the seat (the bar stool: 282 mm, against its 266 mm ring)
+        pts = (mid + r * (np.cos(ang)[:, None] * u + np.sin(ang)[:, None] * v)
+               + side * n * (t + 1.0))
+        if float(np.mean(under(pts, 0.5))) >= 0.9:
+            held = float(r)
+    return held
+
+
+def _round(poly: np.ndarray) -> bool:
+    """A panel drawn as a disc: eight or more sides, every corner within a tenth of the same radius."""
+    if len(poly) < 8:
+        return False
+    r = np.linalg.norm(poly - poly.mean(axis=0), axis=1)
+    return float(r.min()) >= 0.9 * float(r.max())
+
+
 #: How far either side of a load a panel on two edges carries it, as a share of the span: BS 8110-1:1997 clause
 #: 3.5.2.2 (a concentrated load on a slab spanning one way) gives the load's width + 2.4·x·(1 - x/L) for a load x
 #: from a support, so 0.6·L at mid-span; near an unsupported edge, no more than half that plus the load's distance
@@ -418,7 +464,14 @@ def beam(span: float, width: float, t: float, force: float, mat: dict, footprint
         """(safety with the grain along the span, at its narrower width; with the grain across, at the slab's)."""
         return mat["strength"] / at(tt, along)[0], mat["strength"] * mat.get("across", 1.0) / at(tt, carries)[0]
 
-    stress, sag = at(t, carries)
+    # the sag beside "grain unknown" is the worse grain's, as its safety is (#122 review): with the grain along the
+    # span, the panel's own E on the narrower width; across it, its stiffness across the face grain on the whole width
+    e_across = (mat["E_across"] / mat["E"]) if mat.get("E_across") else mat.get("across", 1.0)
+
+    def sag_worse(tt):
+        return max(at(tt, along)[1], at(tt, carries)[1] / max(min(e_across, 1.0), 1e-6))
+
+    stress, sag = at(t, carries)[0], sag_worse(t)
     good, wrong = both(t)
     by_t = []
     for tt in C.THICKNESSES:
@@ -426,7 +479,7 @@ def beam(span: float, width: float, t: float, force: float, mat: dict, footprint
             continue
         g, w = both(tt)
         by_t.append({"thickness_mm": tt, "label": M.nominal(tt), "safety": round(g, 2),
-                     "safety_across": round(min(g, w), 2), "deflection_mm": round(at(tt, carries)[1], 3)})
+                     "safety_across": round(min(g, w), 2), "deflection_mm": round(sag_worse(tt), 3)})
     return {"done": True, "as": "beam", "span_mm": round(span, 1), "thickness_mm": t, "stress_mpa": round(stress, 2),
             # the grain's way unknown, the verdict takes the worse of the two (#118)
             "safety": round(good, 2), "safety_across": round(min(good, wrong), 2),
@@ -526,10 +579,41 @@ def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=Non
                 return {**base, **beam(span, width, pc["thickness"], float(abs(f @ n)), mat,
                                        footprint=abs(float(ext @ np.abs(along))),
                                        edge=min(at, width - at))}
+            if _round(poly):                      # a disc: on a ring beneath it, or held all round (#137 item 7)
+                mid = poly.mean(axis=0)
+                ring = _ring_held(pc, k, under, tol) if under is not None else None
+                if ring is None and edges == len(poly):
+                    ring = float(np.linalg.norm(poly - mid, axis=1).max())
+                off = float(np.linalg.norm((c - mid) - ((c - mid) @ n) * n))
+                if ring is not None and off <= 0.25 * ring:
+                    t = pc["thickness"]
+                    # the pad's own area in the panel's plane: a disc's frame runs diagonal to the load's box, and
+                    # measured along it the bar stool's 4 in pad read 119.5 mm across (larger, so less stress)
+                    flat_ext = [float(ext[i]) for i in range(3) if i != int(np.argmax(np.abs(n)))]
+                    W, foot = float(abs(f @ n)), max(abs(flat_ext[0] * flat_ext[1]), 1.0)
+                    got = ring_plate(ring, t, W, foot, mat["E"])
+                    safety = mat["strength"] / got["stress_mpa"]
+                    by_t = [{"thickness_mm": tt, "label": M.nominal(tt),
+                             "safety": round(mat["strength"] / g["stress_mpa"], 2),
+                             "safety_across": round(mat["strength"] * mat["across"] / g["stress_mpa"], 2),
+                             "deflection_mm": round(g["deflection_mm"], 3)}
+                            for tt in C.THICKNESSES if tt <= 26
+                            for g in [ring_plate(ring, tt, W, foot, mat["E"])]]
+                    return {**base, "done": True, "support": "ring", "ring_mm": round(2 * ring, 1),
+                            "thickness_mm": t, "stress_mpa": round(got["stress_mpa"], 2),
+                            "safety": round(safety, 2), "safety_across": round(safety * mat["across"], 2),
+                            "deflection_mm": round(got["deflection_mm"], 3), "by_thickness": by_t}
+                return {**base, "done": False,
+                        "why": ("the load is off its middle; the round-plate check covers a load near the middle"
+                                if ring is not None else "nothing beneath holds it in a ring all the way round")
+                               + ", so the FEA is the number for it"}
             if edges < len(poly) or len(poly) != 4:
                 return {**base, "done": False,
-                        "why": f"only {edges} of its {len(poly)} edges rest on another piece; the plate "
-                               f"check covers a panel held all round, so the FEA is the number for it"}
+                        "why": (f"only {edges} of its {len(poly)} edges rest on another piece; the plate check covers "
+                                f"a panel held all round" if edges < len(poly) else
+                                f"it's held all round, but its {len(poly)}-sided outline isn't a rectangle or a disc, "
+                                f"which the plate check covers")  # never "16 of its 16 edges" (#137 item 7)
+                               + ", so the FEA is the number for it"}
             t = pc["thickness"]
             got = plate(a, b, t, float(abs(f @ n)), max(fu * fv, 1.0), mat["E"])
             safety = mat["strength"] / got["stress_mpa"]
@@ -589,7 +673,39 @@ def heat_mesh(mesh, grid, von_mises: np.ndarray, solid: np.ndarray, max_edge: fl
             "heat": b64(heat.astype(np.float32)), "max": float(heat.max()) if len(heat) else 0.0}
 
 
-def _nearest_piece(point: np.ndarray, pieces: list[dict]) -> Optional[str]:
+def plate_why(pl: Optional[dict]) -> Optional[str]:
+    """Why a plate check didn't run, from the record's numbers: a run from before #137 stored "only 16 of its 16 edges
+    rest on another piece" for a panel held all round (#139 review). Its own words otherwise."""
+    pl = pl or {}
+    if pl.get("done") or not pl.get("why"):
+        return pl.get("why")
+    edges, held = pl.get("edges"), pl.get("edges_held")
+    if edges is not None and held is not None and held >= edges and "of its" in pl["why"]:
+        return (f"it's held all round, but its {edges}-sided outline isn't one the plate check covered when this ran; "
+                f"check it again for a round plate's number")
+    return pl["why"]
+
+
+def peak_in(fea: Optional[dict]) -> Optional[str]:
+    """Where a run's hottest voxel is, by name, only from a run that recorded the wall there (``wall_mm``, #137): an
+    older run named the nearest wood even for a hot spot in a printed part (the bar stool's "seat top" was the cone)."""
+    fea = fea or {}
+    return fea.get("in") if "wall_mm" in fea else None
+
+
+def _printed_name(declared: dict) -> Optional[str]:
+    """What the part's printed share is called in its construction() ("cone"), or None if nothing's printed."""
+    for it in declared.get("construction") or []:
+        if isinstance(it, dict) and it.get("kind") == "printed":
+            return str(it.get("name") or "printed part")
+    return None
+
+
+def _nearest_piece(point: np.ndarray, pieces: list[dict], within: Optional[float] = None,
+                   otherwise: Optional[str] = None) -> Optional[str]:
+    """The sheet or stick a point is in. With ``within``, only one it's in or that near, else ``otherwise``: a printed
+    part isn't a piece, so its hot voxel took the nearest wood's name, 330 mm away (#137: the bar stool's "seat top"
+    at z 389 mm, in the cone's webs)."""
     from .consistency import segment_distance, slab_distance
 
     best = None
@@ -601,7 +717,9 @@ def _nearest_piece(point: np.ndarray, pieces: list[dict]) -> Optional[str]:
             d = float(segment_distance(point[None], pc["a"], pc["b"])[0]) - pc["half"]
         if best is None or d < best[0]:
             best = (d, pc["name"])
-    return best[1] if best else None
+    if within is not None and (best is None or best[0] > within):
+        return otherwise
+    return best[1] if best else otherwise
 
 
 # ---------------------------------------------------------------------------
@@ -733,6 +851,26 @@ def _two_materials(ctx: dict, wood: list[dict], sheet_mat: dict, rest) -> None:
         ctx["under"] = lambda pts, tol=ctx["tol"]: near.signed_distance(np.asarray(pts, float)) >= -tol
 
 
+def _peak_in(ctx: dict, at: np.ndarray, spacing: float) -> dict:
+    """Where the hottest voxel is (``in``: a piece, or the printed part) and the wall it's in (``wall_mm``): a printed
+    one measured near it, within two voxels; a piece's own thickness. So a line can say whether the worst stress is
+    among walls too thin for the voxels to see (#137 item 2)."""
+    printed = _printed_name(ctx["declared"])
+    name = _nearest_piece(at, ctx["pieces"], within=spacing if printed else None, otherwise=printed)
+    pc = next((p for p in ctx["pieces"] if p["name"] == name), None)
+    if pc is not None:
+        wall = pc["thickness"] if pc["kind"] == "sheet" else 2 * pc["half"]
+    elif printed:
+        from .measure import Geometry, wall_near, wall_samples
+
+        if "_walls" not in ctx:                   # sampled once per set-up: every case and carve step shares it
+            ctx["_walls"] = wall_samples(Geometry.from_mesh(ctx["mesh"]), samples=20000)
+        wall = wall_near(None, at, 2 * spacing, walls=ctx["_walls"])
+    else:
+        wall = None
+    return {"in": name, **({"wall_mm": round(float(wall), 2)} if wall is not None else {})}
+
+
 def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     """One load through the FEA (on ``solid``, the part's voxels unless given) and the plate check.
     Returns ``(case, result)``; the case is the record's entry for it."""
@@ -762,7 +900,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     fea = {"supported": True, "peak_mpa": round(peak, 2), "robust_mpa": round(float(r.peak_stress), 2),
            "safety": round(1.0 / float(worked[hot]), 2) if worked[hot] > 0 else None,
            "deflection_mm": round(float(r.max_displacement), 3),
-           "at": [round(float(x), 1) for x in at], "in": _nearest_piece(at, ctx["pieces"])}
+           "at": [round(float(x), 1) for x in at], **_peak_in(ctx, at, ls.grid.spacing)}
     pl = plate_check(ctx["pieces"], load, ctx.get("plate_mat") or mat, ctx["tol"], under=ctx.get("under"))
     options = [("fea", fea["safety"])]
     if pl and pl.get("done"):
@@ -908,6 +1046,31 @@ def finer_minutes(voxels: int, spacing: float, finer: float, fea_seconds: float,
     FEA's time goes as the voxels to the 4/3. A guess from one run, said as "about"."""
     more = (spacing / finer) ** 3
     return max(1, round((setup_seconds + fea_seconds * more ** (4 / 3)) / 60))
+
+
+def already_fails(store: DesignStore, part_id: str) -> Optional[str]:
+    """Why a carve or a lightening won't start: this version's own strength check already fails (#137 item 3: Carve
+    was offered and run on the bar stool at 0.53x; carving only takes material away). In words, "it already fails
+    (0.53x, in the cone around z 15.3 in): make it hold first", or None."""
+    from . import verdicts
+    from .answers import _times, worst_at
+
+    entry = store.design.part(part_id)
+    runs = [r for r in list_runs(store, part_id) if entry and r.get("version") == entry.version]
+    if not runs:
+        return None
+    rec = runs[0]
+    v = verdicts.run(rec)
+    if v["kind"] != "fails":
+        return None
+    worst = min((c for c in rec.get("cases") or [] if c.get("safety") is not None), key=lambda c: c["safety"],
+                default=None)
+    where, _ = worst_at(rec, worst, store.design.display_units == "in") if worst else ("", None)
+    times = _times(rec["safety"]) if rec.get("safety") is not None else "as checked"
+    if v.get("coarse") or (worst is not None and unresolved(rec, worst)):      # as the strength line says it (#139)
+        return (f"its check says it fails ({times}, a coarse run: the fail may be the model's"
+                + (f"; {where}" if where else "") + "): make it hold first")
+    return f"it already fails ({times}" + (f", {where}" if where else "") + "): make it hold first"
 
 
 def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:

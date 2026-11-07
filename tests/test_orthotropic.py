@@ -106,4 +106,68 @@ def test_the_beam_check_s_number_takes_its_colour_and_word_from_its_verdict(tmp_
     assert pl["verdict"]["kind"] == "fails" and pl["verdict"] == verdicts.meets(1.7, 2)
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     fn = re.search(r"^function loadCase\(.*?^}\n", src, re.S | re.M).group(0)
-    assert "<b style=\"color:var(--${verdictTone(pl.verdict)})\">${sx(pl.safety_across)}" in fn
+    assert "const plNum = (n) => `<b style=\"color:var(--${verdictTone(pl.verdict)})\">${sx(n)}" in fn
+    assert fn.count("${plNum(pl.safety_across)}") == 3           # the beam, the ring and the rectangle (#139 merged)
+
+
+
+def _beam_run(store, *, version=None, thinnest=19.05, spacing=3.0, finer=True):
+    beam = {"done": True, "as": "beam", "piece": "top", "safety": 3.4, "safety_across": 3.0,
+            "why": "a top on two sides", "deflection_mm": 1.2}
+    case = {"name": "an adult stepping up", "lb": 200, "factor": 2.0, "safety": 3.0, "holds": True, "governs": "fea",
+            "fea": {"supported": True, "safety": 3.0}, "plate": beam}
+    return {"id": "20261107-000001-beam", "part": "stool", "created": 1.0, "min_safety": 2, "safety": 3.0, "holds": True,
+            "version": version or store.design.part("stool").version, "spacing_mm": spacing, "thinnest_mm": thinnest,
+            "across": round(thinnest / spacing, 3), "resolved": thinnest / spacing >= 4, "cases": [case],
+            **({"finer": {"spacing_mm": 1.0, "minutes": 3}} if finer and thinnest / spacing < 4 else {})}
+
+
+@pytest.mark.parametrize("why", ["coarse", "stale"])
+def test_no_green_plate_or_beam_number_on_a_case_that_isn_t_settled(tmp_path, why):
+    """#122 review, the survivor: the plate or beam check's 3.0x (against 2x) is settled only where its case is. On a
+    case too coarse to see its walls, or of an older version, it reads as its case does, never holds: dropping the
+    guard fails this."""
+    import json
+    import os
+
+    from caliper import design_api, verdicts
+    from caliper.design import DesignStore
+
+    from .test_load_study import BOX_STOOL
+
+    pytest.importorskip("cadquery")
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", BOX_STOOL, intent="a box stool")
+    if why == "stale":
+        run = _beam_run(store, version=store.design.part("stool").version)
+        store.write_part("stool", BOX_STOOL + "\n", intent="a box stool")          # a new version: the run is older
+    else:
+        run = _beam_run(store, thinnest=2.0, spacing=4.0)                          # 0.5 voxels across: not resolved
+    folder = os.path.join(load_study.runs_dir(store), run["id"])
+    os.makedirs(folder)
+    with open(os.path.join(folder, "run.json"), "w") as f:
+        json.dump(run, f)
+    (shown,) = design_api.design_state(store)["load_runs"]
+    case = shown["cases"][0]
+    assert verdicts.meets(3.0, 2)["kind"] == "holds"                                # unguarded, it would be green
+    assert case["verdict"]["kind"] != "holds"
+    assert case["plate"]["verdict"]["kind"] == case["verdict"]["kind"]
+    assert not case["plate"]["verdict"]["counts_as_pass"] and case["plate"]["verdict"]["status"] != "ok"
+
+
+def test_the_sag_beside_grain_unknown_is_the_worse_grain_s():
+    """#122 review: the sag said beside "with the grain unknown" was the isotropic width's, not the worse grain's."""
+    mat = {"strength": 30.0, "across": 0.5, "E": 8000.0}
+    got = load_study.beam(300.0, 400.0, 19.05, 1000.0, mat, footprint=100.0)
+    t, F, L, E = 19.05, 1000.0, 300.0, 8000.0
+
+    def sag(b, e):
+        return F * L ** 3 / (48 * e * b * t ** 3 / 12)
+
+    along = sag(got["width_along_mm"], E)                     # the grain along the span: its own E, a narrower width
+    across = sag(got["width_mm"], E * 0.5)                    # across: half as stiff, the whole width
+    assert got["deflection_mm"] == pytest.approx(max(along, across), abs=1e-3)
+    assert got["deflection_mm"] > sag(got["width_mm"], E)     # never the isotropic sag, which reads stiffer
+    for b in got["by_thickness"]:
+        if b["thickness_mm"] == 19.05:
+            assert b["deflection_mm"] == pytest.approx(got["deflection_mm"], abs=1e-3)

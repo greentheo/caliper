@@ -240,7 +240,9 @@ def test_carving_through_the_api(stool, monkeypatch):
     part = next(p for p in c.get(f"/api/designs/{slug}").json()["parts"] if p["id"] == "stool")
     assert part["printed"] and not part["carved"]
     job = c.post(f"/api/designs/{slug}/carve", json={"part": "stool"}).json()["job_id"]
-    end = time.time() + 900
+    # the carve job's wait: 790 s on its own on a loaded machine (#134's merge-forward) and over 900 s twice beside two
+    # other test runs; a CI runner varies as much, so 1,500 s, which a carve that hangs still fails
+    end = time.time() + 1500
     while time.time() < end and c.get(f"/api/jobs/{job}").json()["status"] not in ("done", "error"):
         time.sleep(0.2)
     run = c.get(f"/api/designs/{slug}").json()["carve_runs"][0]

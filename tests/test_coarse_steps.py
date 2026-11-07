@@ -131,8 +131,8 @@ def test_the_too_thin_line_says_where_what_to_change_and_the_rule(tmp_path):
     said = ctx["thin_said"]
     import re
 
-    assert re.match(r"its 0\.(59|6) mm walls around z 2\d mm are thinner than your rule", said), said
-    assert said.endswith(" mm are thinner than your rule shell_wall_thickness (at least 2.85 mm): thicken them to "
+    assert re.match(r"its thinnest walls, 0\.(59|6) mm around z 2\d mm, are thinner than your rule", said), said
+    assert said.endswith(" mm, are thinner than your rule shell_wall_thickness (at least 2.85 mm): thicken them to "
                          "that. For a strength carve, walls must be at least " + f"{4 * ctx['finest']:.1f}" + " mm at "
                          "this size, so check it by hand or with a test piece instead."), said
     assert "nozzle" not in said                                    # 0.6 mm prints on a 0.4 mm nozzle
@@ -141,14 +141,14 @@ def test_the_too_thin_line_says_where_what_to_change_and_the_rule(tmp_path):
     assert seen["too_thin"] and seen["said"] == said and seen["where"] == ctx["thinnest_where"]
     # the bar stool's webs, in its own units: one number, where, the nozzle, its rule
     assert load_study.thin_words(_spool(tmp_path / "in"), "spool", 0.25, {"at": [0, 165, 410]}, 2.3, True) == (
-        "its 0.25 mm walls around z 16.1 in are too thin for a 0.4 mm nozzle to print and for your rule "
+        "its thinnest walls, 0.25 mm around z 16.1 in, are too thin for a 0.4 mm nozzle to print and for your rule "
         "shell_wall_thickness (at least 2.85 mm): thicken them to that. For a strength carve, walls must be at least "
         "9.2 mm at this size, so check it by hand or with a test piece instead.")
     # with no rule and nothing to print, only the strength check's limit, in mm (#136 review: not "3/8 in")
     plain = DesignStore.create("a wood thing", base=str(tmp_path / "plain"))
     plain.write_part("spool", SPOOL_PLAIN, intent="a spool")
     assert load_study.thin_words(plain, "spool", 3.0, {"piece": "seat top"}, 2.3, False) == (
-        "its 3 mm walls in the seat top are too thin for the strength check to see: at this size it sees walls from "
+        "its thinnest walls, 3 mm in the seat top, are too thin for the strength check to see: at this size it sees walls from "
         "9.2 mm on, so check it by hand or with a test piece instead.")
 
 
@@ -173,10 +173,11 @@ def test_one_wall_number_on_the_card_and_the_page():
 
     assert answers._wall(0.25, True) == answers._wall(0.25, False) == "0.25 mm"
     assert answers._wall(0.6, False) == "0.6 mm" and answers._wall(4.0, False) == "4 mm"
+    # walls in mm everywhere, whatever the design's units (#139 review)
     out = _run(_page(["wallLen"], consts=["gcd"], extra="const IN = 25.4; function inches() { return true; }\n"
                                                          "out = [wallLen(0.25), wallLen(0.6), wallLen(4)];"))
-    assert out == ["0.25 mm", "1/32″", "5/32″"]                   # as answers._wall says them in inches
-    assert [answers._wall(mm, True) for mm in (0.25, 0.6, 4)] == ["0.25 mm", "1/32 in", "5/32 in"]
+    assert out == ["0.25 mm", "0.6 mm", "4 mm"]                   # as answers._wall says them: mm (#139 review)
+    assert [answers._wall(mm, True) for mm in (0.25, 0.6, 4)] == ["0.25 mm", "0.6 mm", "4 mm"]
 
 
 def test_the_page_says_the_check_s_words_on_a_blocked_carve():
@@ -249,7 +250,7 @@ def test_lighten_on_a_coarse_run_says_not_resolved_not_nothing_holds():
         run = {"id": "r", "part": "a", "notes": [], "stations": [
             {"index": 0, "saved_lb": 0, "safety": 3.0, "verdict": {"kind": kind, "counts_as_pass": False}},
             {"index": 1, "saved_lb": 1.0, "safety": 2.5, "verdict": {"kind": kind, "counts_as_pass": False}}]}
-        return _run(_page(["lightenView"], consts=["esc", "holdsHere"], extra=(
+        return _run(_page(["lightenView", "lightenBlocked"], consts=["esc", "holdsHere"], extra=(
             f"const S = {{design: {{lighten_runs: [{_json.dumps(run)}]}}, station: null}};\n"
             "function lightenRuns() { return S.design.lighten_runs; } function defaultCheck() { return null; }\n"
             "function sx(v) { return v + 'x'; } function pct(v) { return v; } function lbs(v) { return v + ' lb'; }\n"
@@ -260,4 +261,4 @@ def test_lighten_on_a_coarse_run_says_not_resolved_not_nothing_holds():
     assert "Not checked: its walls are too thin for the voxels" in view("unchecked")
     assert "Nothing lighter still holds" not in view("unresolved")
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
-    assert "id=\"lightGo\" ${defaultCheck(p) && defaultCheck(p).too_thin ? 'disabled' : ''}" in src
+    assert "id=\"lightGo\" ${lightenBlocked(p) ? 'disabled' : ''}" in src                 # #137: one reason, both
