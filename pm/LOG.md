@@ -14,6 +14,49 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   shell of its own); only on a part open elsewhere does the zero-area step alone take it out. The test is that case,
   and it's the one that fails with the step off.
 - `tests/test_closed_everywhere.py` (5; 4 fail on main, the fifth pins the existing step).
+### 2026-11-07 · CALI-117 (#105) · A carved step whose part doesn't close up is never offered or adopted
+- **What it was:** with #106's front-edge foot, and on main's own carve-down test once BLAS ran on one thread (#121's
+  CI), the carve picked a step whose adopted part wasn't watertight. Which voxels a run carves follows the summation
+  order, so it came and went; a fresh run here was watertight at every stage (station, wood, join, STL reload).
+  A part that isn't watertight can't be voxelized, so the check adopting it runs fails or reads wrong.
+- **Now:** each step's mesh is repaired if a fill closes it (`carve._closed`: merge, drop degenerate faces, fill holes,
+  fix normals) and otherwise marked `closed: False` with why. The step offered is the lightest that holds **and**
+  whose part, as adopting it builds it (`carve._adopted`: the wood as drawn joined to the carved print), closes up;
+  one that doesn't is marked and the next is tried. `adopt` refuses a step that doesn't close (`carve.NotClosed`, a
+  422 with the reason) and checks the STL as it will be read back; nothing is written for it. The panel shows "Can't
+  use this step: …" and its Carve button is off. design.js v=56.
+- `tests/test_carve_closed.py`: a small hole filled and a big one not; every carved step forced to leak (not offered,
+  adopt refused, nothing written); a join with the wood forced to leak (a small gap repaired and adopted watertight,
+  a big one refused) and the study not offering it.
+- **#124 review, the cause:** a **pinch**. Where two surfaces of the carved part meet along an edge, the adopted
+  shape keeps two vertices at one point apart by index: watertight in memory, and once merged (any STL round trip)
+  four faces share an edge and it isn't (#105's 6,011 vertices, 12,060 faces). `_closed` judged the in-memory form,
+  so the study offered step 2 and `adopt` refused it. Now `_closed` judges a merged copy, as it reads back, so offer
+  and adopt agree; a pinch isn't something a fill mends, so that step is marked. `_offer` builds the script once.
+  Tests: a pinch along an edge (closed in memory, refused merged; one meeting only at a corner reads back closed),
+  and #105's repro (MIXED with its edge foot, 40 lb, 4 steps to 0.6): the step offered adopts, watertight
+  (`slow`: several minutes).
+
+### 2026-11-07 · CALI-120 (#128) · The server keys the page's scripts and styles; no PR bumps ?v= again
+- **`server.keyed_page`** serves `/`, `/index.html` and `/classic` with every `?v=` on the page's own `.js` and
+  `.css` set to a 10-character hash of that file (`cache_key`), read per request: a changed `design.js` is a new key on
+  reload, an unchanged one the same. The page itself is `no-store`. The pages keep `?v=dev` and never change for it
+  again. The vendored three.js is imported by version-pinned path through the importmap, so it needs no key.
+- **Why:** each merge to `main` made every other open PR conflict on `design.js?v=N` (tonight #122, #124 and #125
+  each merged `main` again only for it, a full CI run each).
+- CONTRIBUTING.md and firm/NIGHT_SHIFT.md: no bump step; the server does it.
+- `tests/test_cache_key.py` (3): the key follows the file and only the file; the served pages are keyed and
+  `no-store`; the pages keep the placeholder.
+
+### 2026-11-07 · CALI-114 (#116) · CI runs the suite across the runner's cores
+- **`pytest-xdist`** is in the requirements. CI runs `pytest -n auto --durations=25 -m "not serial"` with
+  `OMP_NUM_THREADS`, `MKL_NUM_THREADS` and `OPENBLAS_NUM_THREADS` at 1, so four FEA workers don't fight over four
+  cores. A second step runs anything marked `serial` on its own (exit 5, "no tests", passes once none is).
+- **Locally `pytest -rs` stays the default,** and `-n auto` is optional (TESTING.md).
+- **Before,** on main: the test step took 51.5 min (646a20a) and 40.8 min (ad2f296). After: in the PR, from its CI
+  runs, with `--durations=25`'s slowest tests.
+- **The carve-down test is marked `serial`** (7cdc550): in parallel, with one BLAS thread, it adopted a step that
+  wasn't watertight (#105, fixed by #124). After #124 merges, the mark comes off.
 
 ### 2026-11-07 · CALI-118 (#126) · A stray face from the CAD's meshing isn't the part; an open part is said, never thrown
 - **The cause:** OCCT's mesher fans a cone face's triangles from its apex, and one comes out with two corners on the
@@ -122,6 +165,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   - the reply says a parameter's plain name ("foot fillet radius") and every length with its unit, whole numbers too.
 - **A failing check's reason now reaches the chat** (`_fail_lines` adds its detail), so the line is named there too.
 - Tests: `tests/test_fallbacks.py`.
+
 ### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
 - **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
   `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its
