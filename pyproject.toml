@@ -37,6 +37,7 @@ addopts = "-q"
 pythonpath = ["src"]
 markers = [
     "serial: shares state with other tests, so CI runs it on its own after the parallel run (CALI-114)",
+    "slow: takes minutes (a full carve); CI runs it, `-m \"not slow\"` skips it locally (CALI-117)",
 ]
 
 [tool.ruff]

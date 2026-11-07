@@ -349,11 +349,12 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         _metric(metrics, "print.filament_g", round(grams), "g", "filament, every printed piece", "model", "slicer")
 
     # will it hold (CALI-54): each part's own loads(), from its strength check on this version (run if missing)
-    from . import load_study
+    from . import load_study, verdicts
 
     worst = None
     unsure = None                     # a ✓ on an FEA too coarse to see the wall: no pass from it (CALI-110)
     loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
+    left = []                         # parts whose strength isn't known: never left out of the verdict (#132 review)
     for p in store.design.parts:
         if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
             continue
@@ -366,10 +367,13 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             except Exception as e:  # noqa: BLE001 — a check that can't run is unknown, not a crash
                 _metric(metrics, f"strength.{p.id}.error", str(e), "", f"{p.id}'s strength couldn't be checked",
                         "model", "strength")
+                left.append(f"the {p.id.replace('_', ' ')}'s strength couldn't be checked ({e})")
                 continue
+        if run.get("safety") is None:
+            left.append(f"the {p.id.replace('_', ' ')}'s strength check gave no number")
         breaks = [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
         need.append(float(run.get("min_safety") or load_study.MIN_SAFETY))
-        if unsure is None and any(load_study.unresolved(run, c) and c.get("holds") for c in run["cases"]):
+        if unsure is None and any(verdicts.case(run, c)["kind"] in ("unresolved", "unchecked") for c in run["cases"]):
             from .answers import coarse
 
             unsure = coarse(run, store.design.display_units == "in")
@@ -407,23 +411,33 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                            "trust": m["trust"] if m else None, "unit": m["unit"] if m else ""})
             continue
         m = metrics.get(c["metric"])
-        if untrue and c["metric"].startswith("strength"):        # neither passed nor failed: not trusted yet
-            checks.append({**c, "status": "untrusted", "value": m["value"] if m else None, "margin": None,
+        strength = c["metric"].startswith("strength")
+        number = m is not None and isinstance(m["value"], (int, float))
+        if number:
+            v, lim, op = float(m["value"]), float(c["limit"]), c.get("op", ">=")
+            met = verdicts.compare(v, op, lim)
+        elif untrue and strength:             # no number, on a filled-in shape: not trusted, not merely unknown
+            met = True
+        else:
+            met = None
+        # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-110)
+        verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=unsure if strength else None,
+                                incomplete="; ".join(left) if strength and left else None)
+        status = verdicts.STATUS[verdict["kind"]]
+        if status == "untrusted":
+            checks.append({**c, "status": status, "value": m["value"] if m else None, "margin": None,
                            "unit": m["unit"] if m else "", "trust": "not trusted: a filled-in shape", "note": untrue})
-            continue
-        if m is None or not isinstance(m["value"], (int, float)):
-            # not checked, and why where it's known (an unweighed printed part: #125 review)
-            checks.append({**c, "status": "unknown", "value": None, "margin": None, "trust": None,
-                           **({"note": m["note"]} if m and m.get("note") else {})})
-            continue
-        v, lim, op = float(m["value"]), float(c["limit"]), c.get("op", ">=")
-        ok = v >= lim if op == ">=" else v <= lim if op == "<=" else abs(v - lim) < 1e-9
-        if ok and unsure and c["metric"].startswith("strength"):   # not resolved: never a pass; a fail stays one
-            checks.append({**c, "status": "unresolved", "value": m["value"], "unit": m["unit"], "margin": None,
+        elif status == "unresolved":
+            checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "not resolved: too coarse to see its walls", "note": unsure})
-            continue
-        checks.append({**c, "status": "pass" if ok else "fail", "value": m["value"], "unit": m["unit"],
-                       "margin": round(v - lim if op == ">=" else lim - v, 3), "trust": m["trust"]})
+        elif status == "unknown":             # not checked, or a part left out: said (#132 review)
+            # why, where it's known: a part left out, or the metric's own note (an unweighed printed part: #125)
+            why = verdict.get("why") or (m.get("note") if m else None)
+            checks.append({**c, "status": status, "value": m["value"] if m and number else None, "margin": None,
+                           "trust": None, **({"note": why} if why else {})})
+        else:
+            checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"],
+                           "margin": round(v - lim if op == ">=" else lim - v, 3), "trust": m["trust"]})
     previous = list_cards(store, 1)
     # a change is the design's, never the scorer's: against a card from an older scorer there's no "was" (#125 review)
     prev = previous[0]["metrics"] if previous and not previous[0].get("outdated") else {}

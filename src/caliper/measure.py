@@ -226,12 +226,18 @@ def body_count(g: Geometry) -> int:
 # Features — wall thickness (mesh, ray-cast)
 # ---------------------------------------------------------------------------
 def min_wall_thickness(g: Geometry, samples: int = 2000, seed: int = 0) -> float:
+    """Smallest local material thickness (:func:`thinnest_wall`'s number)."""
+    return thinnest_wall(g, samples, seed)[0]
+
+
+def thinnest_wall(g: Geometry, samples: int = 2000, seed: int = 0) -> tuple[float, Optional[list]]:
     """Smallest local material thickness, by ray-casting inward from the surface.
 
     Method: sample points on the surface, step just inside along the inward normal, cast a ray
     along the inward normal, and take the distance to the first opposite surface hit. The minimum
     over samples approximates the thinnest wall. For a solid block this is its smallest dimension.
-    Approximate but deterministic (fixed seed); exact-enough for the printability assertion.
+    Approximate but deterministic (fixed seed); exact-enough for the printability assertion. Returns the thickness
+    and where it is (the middle of the thinnest ray, mm), so a line can say where to thicken (#136 review).
     """
     m = g.require_mesh()
     rng = np.random.default_rng(seed)
@@ -244,10 +250,14 @@ def min_wall_thickness(g: Geometry, samples: int = 2000, seed: int = 0) -> float
 
     locations, index_ray, _ = spatial.intersects_location(m, origins, directions, multiple_hits=False)
     if len(locations) == 0:
-        return float("nan")
+        return float("nan"), None
     dists = np.linalg.norm(locations - origins[index_ray], axis=1)
-    dists = dists[dists > eps * 2]
-    return float(dists.min()) if len(dists) else float("nan")
+    ok = dists > eps * 2
+    if not ok.any():
+        return float("nan"), None
+    i = int(np.flatnonzero(ok)[np.argmin(dists[ok])])
+    at = (locations[i] + origins[index_ray[i]]) / 2
+    return float(dists[i]), [round(float(v), 1) for v in at]
 
 
 # ---------------------------------------------------------------------------

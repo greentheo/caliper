@@ -20,6 +20,7 @@ from typing import Callable, Optional
 
 from . import chat
 from . import plan as P
+from . import verdicts
 from .design import DesignStore
 
 
@@ -62,6 +63,11 @@ def plainly(error: str) -> str:
     last = lines[-1] if lines else "it never built"
     last = re.sub(r"^[A-Za-z_.]*(Error|Exception|Failure)\b:?\s*", "", last) or last
     return last if not re.search(r"(/|\\)[\w.-]+(/|\\)", last) else "it raised an error while building"
+
+
+def _mark(v: dict) -> str:
+    """A verdict as the build's reply marks it: ✓ holds, ✗ fails, · anything not yet settled (a rule that waits)."""
+    return "✓" if v["kind"] == "holds" else "✗" if v["kind"] == "fails" else "·"
 
 
 def _unheld(store: DesignStore, built: dict) -> bool:
@@ -120,11 +126,10 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
         built[pid] = store.part_geometry(pid)
         store.append_log({"kind": "firstrun", "action": "built", "part": pid, "version": res.version})
         mine = [r for r in check(built[pid])] if res.part_report is not None else []
-        marks = ", ".join(f"{r.id} {'✓' if r.status == 'pass' else '✗' if r.status in ('fail', 'error') else '·'}"
-                          for r in mine)
-        # a mark only for what was measured (#135 review): nothing measured, no mark; a check waiting, a dot
-        head = ("✗" if any(r.status in ("fail", "error") for r in mine) else "·" if any(r.status != "pass" for r in mine)
-                else "✓" if mine else "")
+        # each mark from its one verdict (#132): a rule that waits reads "·", an error is a fail
+        marks = ", ".join(f"{r.id} {_mark(verdicts.check('fail' if r.status == 'error' else r.status))}" for r in mine)
+        # a mark only for what was measured (#135 review): nothing measured, no mark; the parts' report's one verdict
+        head = _mark(verdicts.report({"results": [{"status": r.status} for r in mine]})) if mine else ""
         said.append(f"- the {name}: built" + (f" {head}" if head else "") + (f" ({marks})" if marks else ""))
         emit("step", f"The {name}: built" + (f" ({marks})" if marks else ""), step="built", part=pid)
 
@@ -150,6 +155,6 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
     steps["plan"] = f"{status}: {len(built)} of {len(made)} parts"
     store.append_log({"kind": "reply", "action": "plan", "ok": not failed, "reply": reply, "firstrun": True})
     emit("step", "Done", step="done")
-    ok = not failed and (report is None or (report.all_pass and not report.waiting))
+    ok = not failed and (report is None or verdicts.report(report.to_dict())["counts_as_pass"])
     return {"part": failed[0] if failed else (made[-1] if made else None), "ok": ok, "steps": steps,
             "reply": reply, "plan": status, "built": list(built)}

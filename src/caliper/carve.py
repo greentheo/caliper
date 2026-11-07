@@ -24,12 +24,42 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from . import verdicts
 from .design import DesignStore
 from .runs import newest_first
 
 STATIONS = 7
 REMOVE_UP_TO = 0.7
 NAME = "CARVED"
+#: A step whose shape doesn't close up isn't offered, and isn't adopted (CALI-117, #105): a part that isn't watertight
+#: can't be voxelized, so the check adopting it runs fails or reads wrong.
+OPEN = ("its carved shape doesn't close up into a solid (it isn't watertight), so it can't be built or checked: "
+        "use another step, or carve it again")
+
+
+class NotClosed(ValueError):
+    """A carved step whose shape isn't watertight, even repaired."""
+
+
+def _closed(mesh):
+    """The mesh as it will be read back, closed: its holes filled if that closes it (trimesh's repair: small gaps,
+    flipped faces), or None.
+
+    Judged after merging its vertices, as any STL round trip does (#124 review, #105's cause): where two surfaces
+    meet along an edge the carve leaves a pinch, two vertices at one point kept apart by index. That's watertight
+    in memory, and once merged it isn't (four faces on one edge), so the study offered a step adopt then refused.
+    A pinch isn't something a fill can mend: such a step is marked, not repaired."""
+    import trimesh
+
+    m = mesh.copy()
+    m.merge_vertices()
+    if m.is_watertight and m.is_volume:
+        return m
+    m.update_faces(m.nondegenerate_faces())
+    m.remove_unreferenced_vertices()
+    trimesh.repair.fill_holes(m)
+    trimesh.repair.fix_normals(m)
+    return m if m.is_watertight and m.is_volume else None
 
 
 def runs_dir(store: DesignStore) -> str:
@@ -60,6 +90,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     t0 = time.time()
     ctx = L.prepare(store, part_id, emit)
     mat = ctx["mat"]
+    seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)
+    if seen.get("too_thin"):                     # none a study may make can: not carved by strength
+        raise ValueError(f"Can't carve it by strength: {seen['said']}" if seen.get("said") else L.TOO_THIN)
     if not mat.get("printed"):
         raise ValueError(f"'{part_id}' isn't printed: only a printed part (or the printed rest of one) can be "
                          f"carved free-form; a sheet is lightened with holes a saw can cut")
@@ -82,7 +115,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     partial = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(), "status": "running",
                "version": store.design.part(part_id).version, "min_safety": min_safety, "material": mat["name"],
                "spacing_mm": round(s, 2), "steps": stations, "stations": [], "best": None, "weak": "",
-               "share": "printed", "notes": []}
+               "share": "printed", "notes": [], **seen}
 
     def keep(rec: dict) -> None:
         with open(os.path.join(out_dir, "run.json.tmp"), "w") as fh:
@@ -128,25 +161,28 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             mesh = st.build()
             import trimesh
 
-            tm = trimesh.Trimesh(np.asarray(mesh.vertices, float), np.asarray(mesh.faces, int), process=True)
+            tm = _station_mesh(mesh)
             f = f"station_{k:02d}.stl"
-            tm.export(os.path.join(out_dir, f))
-            holds = sides is not None and sides >= min_safety         # the printed part, carved: what this is about
+            fixed = _closed(tm)                                        # repaired if it can be; else not offered
+            (fixed or tm).export(os.path.join(out_dir, f))
+            holds = sides is not None and sides >= min_safety         # producer: the printed part, carved: what this is about
             out.append({"index": k, "removed": round(removed, 3), "safety": sides, "holds": holds,
-                        "whole": worst, "whole_holds": worst is not None and worst >= min_safety, "weakest": weak,
-                        "printed_g": round(grams), "saved_g": round(printed0 - grams), "stl": f})
+                        "whole": worst, "whole_holds": worst is not None and worst >= min_safety, "weakest": weak,  # producer
+                        "printed_g": round(grams), "saved_g": round(printed0 - grams), "stl": f,
+                        **({} if fixed is not None else {"closed": False, "why": OPEN})})
             keep({**partial, "stations": out})
             if not holds and k > 0:
                 break                                                  # the chart stops where it runs out
-        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)
+        best = _offer(store, part_id, out, out_dir, s)
         first = out[0]
-        if not first["whole_holds"] and first["holds"]:
+
+        if verdicts.station(first, whole=True)["kind"] == "fails" and verdicts.station(first)["kind"] != "fails":
             # the part fails where the carve can't reach: say so first, it's the thing to fix
             weak_note = (f"As it is, it doesn't hold: {first['whole']:g} times over, and it needs {min_safety:g}; the "
                          f"weak link is the {first['weakest'] or 'wood'}, which carving the printed part doesn't change.")
         else:
             weak_note = ""
-        record = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(),
+        record = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(), **seen,
                   "version": store.design.part(part_id).version, "min_safety": min_safety,
                   "material": mat["name"], "spacing_mm": round(s, 2), "seconds": round(time.time() - t0, 1),
                   "stations": out, "best": best["index"] if best else None, "weak": weak_note,
@@ -161,12 +197,20 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         keep(record)
         store.append_history(part_id, {"kind": "carve", "action": "studied", "run": rid, "stations": len(out)})
         store.append_log({"kind": "carve", "action": "studied", "part": part_id, "run": rid})
-        emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g" if best and best["saved_g"]
-             else f"{len(out)} steps", run=rid, progress=1.0)
+        from . import consistency
+
+        v = verdicts.carve_step(best, consistency.filled(store, part_id), record) if best is not None else None
+        why = ("too coarse to see its walls" if v and v["kind"] in ("unresolved", "unchecked")    # #101
+               else "the whole part doesn't hold" if v and v["kind"] == "fails" else v["word"] if v else "")
+        emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g"
+             if v and v["counts_as_pass"] and best["saved_g"]
+             else f"{len(out)} steps: the printed part comes off, but {why}"   # #132 review
+             if best is not None and best["saved_g"] else f"{len(out)} steps", run=rid, progress=1.0)
         return record
     except Cancelled:
         # asked to stop (CALI-101): the steps it finished, and the lightest of them that holds, as a partial run
-        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)
+        # the lightest step whose printed part holds and closes up, as its verdict says (#132, #124)
+        best = max((x for x in out if verdicts.station(x)["counts_as_pass"]), key=lambda x: x["saved_g"], default=None)
         keep({**partial, "stations": out, "status": "cancelled", "best": best["index"] if best else None,
               "seconds": round(time.time() - t0, 1)})
         store.append_history(part_id, {"kind": "carve", "action": "cancelled", "run": rid, "stations": len(out)})
@@ -175,6 +219,75 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         # a carve that fails says so, with what it finished: it doesn't read "not finished" forever (CALI-103)
         keep({**partial, "stations": out, "status": "failed", "error": f"{type(e).__name__}: {e}"})
         raise
+
+
+def _station_mesh(mesh):
+    """whittle's mesh of a step, as trimesh (one place, so a test can hand it a leaky one)."""
+    import trimesh
+
+    return trimesh.Trimesh(np.asarray(mesh.vertices, float), np.asarray(mesh.faces, int), process=True)
+
+
+def _offer(store: DesignStore, part_id: str, out: list, out_dir: str, spacing: float) -> Optional[dict]:
+    """The step to offer: the lightest that holds and whose part, as adopting it would build it, closes up. One that
+    doesn't is marked (``closed: False``, with why) and the next lightest is tried. The part's script is built
+    once for all of them (#124 review)."""
+    from . import sandbox
+
+    built = None
+    for x in sorted((x for x in out if verdicts.station(x)["counts_as_pass"]), key=lambda x: -x["saved_g"]):
+        if built is None:
+            built = sandbox.run_script(strip(store.read_script(part_id)), timeout=120)
+            if not built.ok:
+                raise ValueError(f"'{part_id}' won't build to carve: {built.error}")
+        try:
+            _adopted(store, part_id, os.path.join(out_dir, x["stl"]), spacing, built=built)
+            return x
+        except NotClosed:
+            x.update({"closed": False, "why": OPEN})
+    return None
+
+
+def _join(exact, printed):
+    """The wood as drawn and the printed rest as carved, one solid (manifold3d's union)."""
+    import trimesh
+
+    if not len(printed.faces) or not len(exact.faces):
+        return trimesh.util.concatenate([exact, printed])
+    return exact.union(printed, engine="manifold")
+
+
+def _adopted(store: DesignStore, pid: str, station_file: str, spacing: float, built=None):
+    """The part a step would become: the wood exactly as the script makes it, the printed rest as carved. Closed up,
+    or :class:`NotClosed` (CALI-117)."""
+    import trimesh
+
+    from . import construction as C
+    from . import sandbox
+    from .occt import OCCT
+
+    station = _closed(trimesh.load(station_file, force="mesh"))
+    if station is None:
+        raise NotClosed(OPEN)
+    if built is None:
+        built = sandbox.run_script(strip(store.read_script(pid)), timeout=120)
+        if not built.ok:
+            raise ValueError(f"'{pid}' won't build to carve: {built.error}")
+    whole = built.geometry.require_mesh()
+    wood = C.wood_solids(built.declared or {}, whole)
+    if not wood:
+        return station
+    cut = trimesh.util.concatenate(wood)
+    # the carve kept the wood's voxels, half a voxel proud of it: trim that lip off its edges and outside,
+    # and leave its inner face exact so the carved part stays joined to it
+    lip = trimesh.util.concatenate(C.wood_solids(built.declared or {}, whole, proud=float(spacing), inner=False))
+    with OCCT:                                       # manifold3d, one boolean at a time
+        exact = whole.intersection(cut, engine="manifold")
+        printed = station.difference(lip, engine="manifold")
+        shape = _closed(_join(exact, printed))
+    if shape is None:
+        raise NotClosed(OPEN)
+    return shape
 
 
 def share(rec: dict) -> str:
@@ -224,9 +337,6 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     """Make a step's shape the part's: the wood exactly as the script makes it, the printed rest as carved."""
     import trimesh
 
-    from . import construction as C
-    from . import sandbox
-
     rec = load_run(store, rid)
     if rec is None:
         raise FileNotFoundError(f"no carve {rid!r}")
@@ -237,32 +347,22 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     if rec.get("version") != entry.version:          # a carve is of one version's shape (CALI-87)
         raise Stale(f"this carve is of version {rec.get('version')} and the part is at version {entry.version}: "
                     f"carve it again")
-    station = trimesh.load(station_path(store, rid, index), force="mesh")
+    st = next((x for x in rec["stations"] if x["index"] == int(index)), None)
+    if st is not None and st.get("closed") is False:
+        raise NotClosed(f"step {int(index)}: {OPEN}")
     script = strip(store.read_script(pid))
-    built = sandbox.run_script(script, timeout=120)
-    if not built.ok:
-        raise ValueError(f"'{pid}' won't build to carve: {built.error}")
-    whole = built.geometry.require_mesh()
-    wood = C.wood_solids(built.declared or {}, whole)
-    from .occt import OCCT
-
-    if wood:
-        cut = trimesh.util.concatenate(wood)
-        # the carve kept the wood's voxels, half a voxel proud of it: trim that lip off its edges and outside,
-        # and leave its inner face exact so the carved part stays joined to it
-        lip = trimesh.util.concatenate(C.wood_solids(built.declared or {}, whole, proud=float(rec["spacing_mm"]),
-                                                     inner=False))
-        with OCCT:                                       # manifold3d, one boolean at a time
-            exact = whole.intersection(cut, engine="manifold")
-            printed = station.difference(lip, engine="manifold")
-            shape = trimesh.util.concatenate([exact, printed]) if not len(printed.faces) or not len(exact.faces) \
-                else exact.union(printed, engine="manifold")
-    else:
-        shape = station
+    try:
+        shape = _adopted(store, pid, station_path(store, rid, index), float(rec["spacing_mm"]))
+    except NotClosed:
+        raise NotClosed(f"step {int(index)}: {OPEN}") from None
     name = f"carved-{rid}-{int(index):02d}.stl"
     folder = os.path.join(store.part_dir(pid), "carved")
     os.makedirs(folder, exist_ok=True)
-    shape.export(os.path.join(folder, name))
+    path = os.path.join(folder, name)
+    shape.export(path)
+    if not trimesh.load(path, force="mesh").is_watertight:      # as the part will be read back: never a leaky part
+        os.remove(path)
+        raise NotClosed(f"step {int(index)}: {OPEN}")
     st = next(x for x in rec["stations"] if x["index"] == int(index))
     script = script.rstrip("\n") + (f"\n\n\n# The printed rest as carved by the strength study (CALI-82): Caliper builds the "
                                     f"part as this mesh.\n{NAME} = \"{name}\"\n")

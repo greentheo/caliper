@@ -700,13 +700,12 @@ class DesignStore:
 
 
 def _result(report: dict) -> dict:
-    """A revision's result for its history line (#103 review): ``all_pass`` only when nothing waited, ``waiting``
-    when a check couldn't run yet, else ``fail``; with :meth:`Report.said`'s words."""
-    # fail only with a failure: a report whose checks all wait is waiting, never red (#135 review, as #132's badge)
-    failed = any(r.get("status") in ("fail", "error") for r in report.get("results") or []) or (
-        not report.get("all_pass") and not report.get("waiting") and bool(report.get("results")))
-    result = "fail" if failed else "waiting" if report.get("waiting") or not report.get("results") else "all_pass"
-    return {"result": result, **({"said": report["said"]} if report.get("said") else {})}
+    """A revision's result for its history line (#103, #132 review): the report's one verdict, stored, never
+    ``all_pass`` (which counts a waiting check as a pass): ``result`` is its kind, with its word and ``said``."""
+    from . import verdicts
+
+    v = verdicts.report(report)
+    return {"result": v["kind"], "word": v["word"], **({"said": v["why"]} if v.get("why") else {})}
 
 
 def _invalidate_build_cache(script_path: str) -> None:

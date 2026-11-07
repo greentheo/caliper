@@ -218,3 +218,13 @@ def test_the_stop_says_the_reason_never_a_traceback(tmp_path):
     assert got["reply"].startswith("I couldn't build the hub: the hub won't fit the shaft.")
     assert "Traceback" not in got["reply"] and "/" not in got["reply"].split(".")[0]
     assert any("Traceback" in (e.get("error") or "") for e in store.log() if e.get("action") == "failed")
+
+
+def test_the_build_s_marks_come_from_the_one_verdict():
+    """Merged with #132: a rule that waits is "·", an error a "✗", and the part's mark is its report's verdict."""
+    from caliper import build_plan, verdicts
+
+    assert [build_plan._mark(verdicts.check(s)) for s in ("pass", "fail", "deferred", "unknown")] == ["✓", "✗", "·", "·"]
+    head = lambda *st: build_plan._mark(verdicts.report({"results": [{"status": s} for s in st]}))   # noqa: E731
+    assert head("pass", "pass") == "✓" and head("pass", "deferred") == "·" and head("pass", "error") == "✗"
+    assert head("deferred") == "·"                                                # nothing measured yet: never red

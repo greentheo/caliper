@@ -138,7 +138,9 @@ async function loadRun(runId) {
 function renderReport(data) {
   const rep = data.report || { results: [], all_pass: false };
   const bits = [];
-  bits.push(`<div class="verdict ${rep.all_pass ? 'pass' : 'fail'}">${rep.all_pass ? 'ALL PASS ✓' : 'FAILURES'}</div>`);
+  // ALL PASS only when every check ran (#132 review): a check still waiting isn't a pass
+  const green = rep.all_pass && !rep.waiting;
+  bits.push(`<div class="verdict ${green ? 'pass' : 'fail'}">${green ? 'ALL PASS ✓' : esc(rep.said || 'failures').toUpperCase()}</div>`);
   if (data.changes && data.changes.length)
     bits.push(`<div class="changes">changes: ${data.changes.map(esc).join(' · ')}</div>`);
   if (data.questions && data.questions.length)
