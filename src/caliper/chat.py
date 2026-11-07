@@ -651,6 +651,10 @@ def _accept(store: DesignStore, proposal, events: list[Event], on_event) -> Turn
     if now["kind"] == "fails":
         lines.append("\u26a0 Note: it does **not** hold right now — so the design reads as failing until "
                      "we fix it. Tell me to have a go.")
+        if store.design.part(proposal.part or "") is not None:     # "have a go" means: fix that part (#98)
+            from . import awaiting
+
+            awaiting.park(store, "fix_rule", part=proposal.part, rule=proposal.id, expr=proposal.expr)
     report, part_errors = _measure_design(store)
     return TurnResult(action="accept", ok=now["counts_as_pass"], part=proposal.part,
                       report=report, part_errors=part_errors, proposal=proposal,
@@ -1073,6 +1077,104 @@ def plan_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = 
                       + (f" ({gone[0].upper() + gone[1:]}.)" if gone else "") + P.said_aside(after), events=events)
 
 
+_REMOVE = re.compile(r"^\s*(?:please\s+)?(?:remove|delete|get\s+rid\s+of|take\s+out)\s+(?:the\s+)?(.+?)\s*[.!]*\s*$", re.I)
+_RESTORE = re.compile(r"^\s*(?:please\s+)?(?:put\s+back|restore|bring\s+back|undelete)\s+(?:the\s+)?(.+?)\s*[.!]*\s*$"
+                      r"|^\s*(?:please\s+)?put\s+(?:the\s+)?(.+?)\s+back\s*[.!]*\s*$", re.I)
+
+
+def _named_part(store: DesignStore, words: str, scope: Optional[str], ids: Optional[list] = None) -> Optional[str]:
+    """The part a short phrase names: its id, or its id with spaces ("conical skirt"); "it"/"this" is the clicked one."""
+    w = re.sub(r"\s+(part|piece)$", "", words.strip().lower())
+    if w in ("it", "this", "that", "this part", "that part") and scope:
+        return scope
+    for pid in ids if ids is not None else [p.id for p in store.design.parts]:
+        if w in (pid.lower(), pid.lower().replace("_", " ")):
+            return pid
+    return None
+
+
+def _remove_or_restore(store: DesignStore, message: str, scope: Optional[str], *, events, on_event):
+    """ "remove conical_skirt" asks once (its files go to the trash); "put back conical_skirt" restores it (#98)."""
+    from . import awaiting, trash
+
+    m = _RESTORE.match(message or "")
+    if m:
+        pid = _named_part(store, m.group(1) or m.group(2), None, ids=[t["part"] for t in trash.listing(store)])
+        if pid is None:
+            return None
+        try:
+            trash.restore(store, pid=pid)
+        except ValueError as e:
+            return TurnResult(action="restore", ok=False, part=pid, events=events, reply=f"I couldn't put it back: {e}.")
+        report, part_errors = _measure_design(store)
+        return TurnResult(action="restore", ok=True, part=pid, events=events, report=report, part_errors=part_errors,
+                          reply=f"Put back the {pid.replace('_', ' ')} ({pid}), as it was."
+                                + (f"\n\nThe design checks: {report.said()}." if report is not None else ""))
+    m = _REMOVE.match(message or "")
+    if m:
+        pid = _named_part(store, m.group(1), scope)
+        if pid is None:
+            return None
+        awaiting.park(store, "remove", part=pid)
+        return TurnResult(action="ask", ok=True, part=pid, events=events,
+                          reply=f"Remove {pid}? Its files go to the design's trash, so it can be put back.")
+    return None
+
+
+def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Optional[TurnResult]:
+    """Caliper's own last question, answered (#98): a fix for a rule it just locked in that doesn't hold, a removal
+    to confirm, a repeat to confirm. Anything else lets it lapse (None: the turn goes on as ever)."""
+    from . import awaiting, trash
+
+    aw = awaiting.pending(store)
+    if aw is None:
+        return None
+    yes = awaiting.reads(message)
+    awaiting.clear(store)
+    if yes is None:
+        return None
+    pid, events, on_event = aw.get("part"), kw["events"], kw["on_event"]
+    if store.design.part(pid or "") is None and aw["kind"] != "remove":
+        return None
+    if not yes:
+        return TurnResult(action="ask", ok=True, part=pid, events=events,
+                          reply={"remove": f"Kept {pid}.", "repeat": "Left it as it is.",
+                                 "fix_rule": f"Left it: {aw.get('rule')} still doesn't hold."}.get(aw["kind"], "Left it."))
+    if aw["kind"] == "remove":
+        if store.design.part(pid or "") is None:
+            return TurnResult(action="remove", ok=False, part=pid, events=events, reply=f"There's no {pid} to remove.")
+        trash.remove(store, pid)
+        report, part_errors = _measure_design(store)
+        return TurnResult(action="remove", ok=True, part=pid, events=events, report=report, part_errors=part_errors,
+                          reply=f"Removed {pid}: its files are in the design's trash (say \"put back {pid}\" to "
+                                f"restore it)." + (f"\n\nThe design checks: {report.said()}." if report is not None else ""))
+    message = (f"Change it so it meets its rule {aw['rule']}: {aw['expr']}. Change only what that needs."
+               if aw["kind"] == "fix_rule" else aw["message"])
+    return refine_part(store, pid, message, author=kw["author"], client=kw["client"], max_rounds=kw["max_rounds"],
+                       events=events, on_event=on_event, use_llm=kw["use_llm"], drafter=kw["drafter"],
+                       promote_feedback=kw["promote_feedback"])
+
+
+_DIRECTION = re.compile(r"\b(wider|narrower|taller|shorter|thicker|thinner|longer|deeper|shallower|bigger|smaller|"
+                        r"higher|lower|heavier|lighter|rounder)\b")
+
+
+def _repeats(store: DesignStore, pid: str, message: str) -> Optional[str]:
+    """The question to ask when a refine's request matches what the part's last revision just did (#98: the foot
+    flange widened 1 in twice): the same words, or the same numbers and the same directions. None otherwise."""
+    entry = store.design.part(pid)
+    last = next((h for h in reversed(store.history(pid)) if h.get("kind") == "revision"), None) if entry else None
+    if not last or last.get("action") != "refine" or last.get("version") != entry.version or not last.get("feedback"):
+        return None
+    norm = lambda s: re.sub(r"[^a-z0-9.]+", " ", s.lower()).strip()                   # noqa: E731
+    gist = lambda s: (sorted(re.findall(r"\d+(?:\.\d+)?", s)), sorted(_DIRECTION.findall(s.lower())))   # noqa: E731
+    a, b = last["feedback"], message
+    if norm(a) != norm(b) and not (gist(a)[0] and gist(a)[1] and gist(a) == gist(b)):
+        return None
+    return (f"v{entry.version} already did that (\"{a}\"). Do it again, on top of v{entry.version}? Say yes to do "
+            f"it again, or no to leave it.")
+
+
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
          use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
          on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False) -> TurnResult:
@@ -1106,6 +1208,20 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
             _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)
             return result
 
+    # what Caliper's own last question waits for (#98): a short go-ahead or no answers it, with no LLM
+    said = _awaited(store, message, scope, author=author, client=client, max_rounds=max_rounds, events=events,
+                    on_event=on_event, use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
+    if said is None:
+        said = _remove_or_restore(store, message, scope, events=events, on_event=on_event)
+    if said is not None:
+        if not logged:
+            store.append_log({"kind": "message", "text": message, "scope": scope, "action": said.action,
+                              "part": said.part, "routed_by": "pending"})
+        store.append_log({"kind": "reply", "action": said.action, "part": said.part, "version": said.version,
+                          "ok": said.ok, "reply": said.reply})
+        _emit(events, on_event, "done", said.action, ok=said.ok, part=said.part)
+        return said
+
     if scope is None and _reviewing(store) and not message.strip().endswith("?"):
         # a plan of several parts under review (CALI-35, #3a): the chat edits the plan, never the geometry
         result = plan_edit(store, message, client=client, use_llm=use_llm, events=events, on_event=on_event)
@@ -1136,7 +1252,13 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         store.append_log({"kind": "message", "text": message, "scope": scope,
                           "action": intent.action, "part": intent.part, "routed_by": intent.source})
 
-    if intent.action == "refine" and intent.part:
+    again = _repeats(store, intent.part, message) if intent.action == "refine" and intent.part else None
+    if again is not None:                          # the last revision already did this: asked first (#98)
+        from . import awaiting
+
+        awaiting.park(store, "repeat", part=intent.part, message=message)
+        result = TurnResult(action="ask", ok=True, part=intent.part, events=events, reply=again)
+    elif intent.action == "refine" and intent.part:
         result = refine_part(store, intent.part, message, author=author, client=client,
                              max_rounds=max_rounds, events=events, on_event=on_event,
                              use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
