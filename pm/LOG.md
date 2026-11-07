@@ -47,6 +47,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   "along"` or `"across"`), the prediction takes that grain's sag (`deflection_along_mm` / `deflection_across_mm`, now
   on the beam's record), pinned. Nothing declares a grain yet: a piece's `construction()` has no grain key, so today
   it's always the worse grain's. Theo has no recorded tests.
+- **#122 review, round 3:** `plNum`'s "(word)" pinned: an unsettled plate or beam number says its verdict's word ("3x (not resolved)"), a settled one never does.
 ### 2026-11-07 · CALI-122 (#137) · The bar stool's pre-flight: its broken rule said, where it fails, no carve on a fail
 From the reviewer's pre-flight of Theo's bar stool v7 (a copy; nothing of Theo's touched), with the foreman's
 correction: the run's "seat top" was a mislabel.

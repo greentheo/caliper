@@ -193,3 +193,23 @@ def test_the_real_test_s_prediction_spans_both_grains_unless_one_is_declared(mon
     assert predicted(beam) == pytest.approx(beam["deflection_mm"], abs=1e-3)                       # unknown: worse
     assert predicted({**beam, "grain": "along"}) == pytest.approx(beam["deflection_along_mm"], abs=1e-3)
     assert predicted({**beam, "grain": "across"}) == pytest.approx(beam["deflection_across_mm"], abs=1e-3)
+
+
+def test_an_unsettled_plate_number_says_its_word():
+    """#122 review: plNum's "(word)" on a number its verdict doesn't settle (not resolved, older version), never on one
+    that holds or fails. The line itself, run in node."""
+    import os
+    import re
+
+    from .test_carve_click import _page, _run
+
+    src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    line = re.search(r"^\s*const plNum = .*;$", src, re.M).group(0).strip()
+    out = _run(_page([], consts=["esc", "verdictTone", "settled"], extra=(
+        "function sx(v) { return v + 'x'; }\nlet pl;\n" + line + "\n"
+        "pl = {verdict: {kind: 'unresolved', status: 'warn', word: 'not resolved'}}; const a = plNum(3.0);\n"
+        "pl = {verdict: {kind: 'holds', status: 'ok', word: 'holds'}}; const b = plNum(3.0);\n"
+        "pl = {verdict: {kind: 'fails', status: 'bad', word: \"doesn't hold\"}}; const c = plNum(1.2);\n"
+        "out = [a, b, c];")))
+    assert out[0] == '<b style="color:var(--warn)">3x (not resolved)</b>'
+    assert out[1] == '<b style="color:var(--ok)">3x</b>' and out[2] == '<b style="color:var(--bad)">1.2x</b>'
