@@ -115,8 +115,8 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
                 "not resolved yet: too coarse to see its walls"
             return f"{word} (the FEA read {round(coarse[0][0]['safety'], 1):g}x)", None
         if v["kind"] == "fails":
-            if r.get("filled"):                 # a ✗ on the block stays a ✗: the part as built is weaker still
-                what += ", on a filled-in shape: the part as built is weaker still"
+            if r.get("filled"):                 # a ✗ on the block stays a ✗: the part as built is likely weaker
+                what += ", on a filled-in shape: the part as built is likely weaker"
             elif any(x.get("coarse") for x in v["cases"]):
                 what += ", and the fail may be the model's: the voxels can't see its walls"
             return f"doesn't hold — weakest {what} (needs {r.get('min_safety', 2):g}x)", False

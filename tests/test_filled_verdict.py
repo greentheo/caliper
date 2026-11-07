@@ -190,7 +190,7 @@ def test_on_the_design_card_a_filled_in_shape_wins_and_a_fail_stays_a_fail():
     assert line["status"] == "warn" and line["text"].startswith("Not trusted yet"), line
     (line,) = answers.held_to(_goal_state(), {**both, "strength.safety": 1.2})
     assert line["status"] == "bad" and line["text"].startswith("✗ Holds Dad"), line
-    assert line["text"].endswith("It ran on a filled-in shape, so the part as built is weaker still."), line
+    assert line["text"].endswith("It ran on a filled-in shape, so the part as built is likely weaker."), line   # #89
 
 
 def test_on_the_studies_page_a_filled_in_fail_is_still_a_fail():

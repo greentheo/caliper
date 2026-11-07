@@ -202,3 +202,32 @@ def test_the_design_card_s_scorecard_line_counts_it_apart(tmp_path):
                              "checks": [], "versions": {}}], "goals": {"checks": []}, "load_runs": []}
     (line,) = [c for c in answers.design(store, state) if c["key"] == "work"][0]["lines"][:1]
     assert line["text"] == "1 check pass, 1 not resolved, 1 middle only." and line["status"] == "warn"
+
+
+
+# --- #106 review sweep: the design card's last-checked line, and "about" owned by _times --------------------------
+
+def test_the_last_checked_line_says_middle_only():
+    """#140's "last checked on vN" line: amber, never ✓, and for a middle-only run it says so (#106 review sweep)."""
+    goal = {"id": "s", "label": "holds a kid stepping up", "metric": "strength.safety", "op": ">=", "limit": 2,
+            "source": "answered"}
+    state = {"parts": [{"id": "stool", "version": 5}], "goals": {"checks": [goal]}, "scorecards": []}
+    got = {}
+    for edge in (True, False):
+        now = {"strength.last": {"part": "stool", "version": 4, "now": 5, "safety": 3.1, "edge": edge}}
+        (line,) = [ln for ln in answers.held_to(state, now) if "last checked" in ln["text"]]
+        assert line["status"] == "warn" and not line["text"].startswith("✓"), line
+        got[edge] = line["text"]
+    assert got[True] == "! Holds a kid stepping up: last checked on v4: 3.1 times over, checked in the middle only · v5 " \
+                       "not checked yet."
+    assert got[False] == "! Holds a kid stepping up: last checked on v4: 3.1 times over · v5 not checked yet."
+
+
+@pytest.mark.parametrize("x,about,said", [
+    (3.14, False, "3.1 times over"), (3.14, True, "about 3.1 times over"),
+    (12.0, False, "more than 10 times over"), (12.0, True, "more than 10 times over"),     # never "about more than"
+    (9.96, True, "more than 10 times over"),
+])
+def test_times_owns_about(x, about, said):
+    assert answers._times(x, about) == said
+    assert answers._num("strength.safety", x, about=about) == said

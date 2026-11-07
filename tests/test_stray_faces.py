@@ -160,3 +160,21 @@ def test_closed_is_judged_as_it_reads_back():
     assert pinch.is_watertight and not closed(pinch)
     assert open_near(pinch) is not None
     assert closed(a)
+
+
+def test_the_card_s_stray_face_line_is_in_the_design_s_units(tmp_path):
+    """#144 review: the card went through ``answers._strays`` only by luck; ``meta["strays"]`` (mm) passed the suite.
+    Through ``answers.part``: an inch design reads its height in inches, an mm one in mm."""
+    import re
+
+    from caliper import answers, design_api
+
+    store = _store(tmp_path)
+    got = {}
+    for units in ("in", "mm"):
+        store.design.display_units = units
+        store.save()
+        what = answers.answers(store, design_api.design_state(store), "cone")[0]["lines"]
+        (got[units],) = [ln["text"] for ln in what if ln["text"].startswith("I left out 1 stray face")]
+    assert re.search(r"\(at z [\d.]+ in(–[\d.]+ in)?\)", got["in"]) and " mm" not in got["in"], got["in"]
+    assert re.search(r"\(at z [\d.]+ mm(–[\d.]+ mm)?\)", got["mm"]), got["mm"]

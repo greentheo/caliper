@@ -127,6 +127,7 @@ def clean(m: trimesh.Trimesh) -> trimesh.Trimesh:
         z0, z1 = float(pts[:, 2].min()), float(pts[:, 2].max())
         m.metadata["strays"] = (f"left out {gone} stray face{'s' if gone != 1 else ''} from the CAD's meshing "
                                 f"(at z {z0:.1f}" + (f"–{z1:.1f}" if z1 - z0 >= 0.05 else "") + " mm)")
+        m.metadata["strays_n"], m.metadata["strays_z"] = gone, [z0, z1]    # for a card in the design's units (#89)
     return m
 
 

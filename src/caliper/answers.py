@@ -29,10 +29,14 @@ def _len(mm: float, inches: bool) -> str:
     return f"{mm / IN:.1f} in".replace(".0 in", " in") if inches else f"{mm:.0f} mm"
 
 
-def _times(x: float) -> str:
-    """3.1 -> "3 times over"; the kid's reading of a safety factor."""
+def _times(x: float, about: bool = False) -> str:
+    """3.1 -> "3.1 times over"; the kid's reading of a safety factor. ``about``: the printed model's rough number
+    (CALI-97), "about 3.1 times over"; 10 or more is "more than 10 times over" either way, never "about more than"
+    (#144 review)."""
     n = round(x, 1)
-    return f"{n:g} times over" if n < 10 else "more than 10 times over"
+    if n >= 10:
+        return "more than 10 times over"
+    return ("about " if about else "") + f"{n:g} times over"
 
 
 def _sentence(text: str, most: int = 120) -> str:
@@ -51,6 +55,45 @@ def _sentence(text: str, most: int = 120) -> str:
 
 def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
+
+
+def _carve_offer(store: DesignStore, state: dict, p: dict, mk: dict) -> Optional[dict]:
+    """A printed part, on a design whose objective is its print time or its weight, with a carve to try (#89 item 6:
+    165 h of printing "as fast as possible", and nothing offered the carve): one line that offers it. Not on a part
+    already carved, nor one with nothing it must hold (a carve keeps what it holds), nor where the Carve button refuses
+    it (#144 review: ``load_study.blocked``, the one test both read: it already fails, or its walls are too thin)."""
+    from . import load_study as L
+
+    if not mk.get("printed") or not p.get("loads") or p.get("carved"):
+        return None
+    aims = [o.get("metric") or "" for o in (state.get("goals") or {}).get("objectives") or []]
+    if not any(m.startswith(("print.", "weight.")) for m in aims):
+        return None
+    stop = L.blocked(store, p["id"])
+    if stop and stop["why"] != "unchecked":
+        return None
+    try:
+        name = next((it.get("name") for it in C.declared(store, p["id"]).get("construction") or []
+                     if isinstance(it, dict) and it.get("kind") == "printed"), None)
+    except Exception:  # noqa: BLE001 — the offer is said with the part's own name
+        name = None
+    what = name or p["id"].replace("_", " ")
+    if stop:                                     # no check of this version: the button says the same (#144)
+        return _line(f"Check it holds first, then carve the {what} where it isn't working, to print less of it.",
+                     "info", action="load")
+    return _line(f"Carve the {what} where it isn't working, to print less of it: try Carve it.", "info",
+                 action="carve")
+
+
+def _strays(meta: dict, inches: bool) -> str:
+    """What the mesh left out, its height in the design's units (#89, #137 P2 item 11: "at z 14.0–15.6 mm" on an inch
+    design); measure's own words where it didn't say where."""
+    n, z = meta.get("strays_n"), meta.get("strays_z")
+    if not n or not z:
+        return meta["strays"]
+    lo, hi = _len(z[0], inches), _len(z[1], inches)
+    return (f"left out {n} stray face{'s' if n != 1 else ''} from the CAD's meshing (at z {lo}"
+            + (f"–{hi}" if hi != lo else "") + ")")
 
 
 def _wall(mm: float, inches: bool = False) -> str:
@@ -117,13 +160,12 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
         return _line(f"{c['name'][:1].upper() + c['name'][1:]}: {MIDDLE_ONLY}." + older, "warn", study="load")
     # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
     rough = L.rough(run, c)
-    about = "about " if rough else ""
     if v["kind"] == "holds":
-        text = f"Holds {c['name'].lower()}, {about}{_times(c['safety'])}."
+        text = f"Holds {c['name'].lower()}, {_times(c['safety'], rough)}."
     elif v["kind"] == "fails":
-        text = f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs {run['min_safety']:g}."
+        text = f"Doesn't hold {c['name'].lower()}: only {_times(c['safety'], rough)}, and it needs {run['min_safety']:g}."
         if filled:                                   # a ✗ stays a ✗: the block failed, the part is weaker
-            text += " It ran on a filled-in shape, so the part as built is weaker still."
+            text += filled_fail(filled)
         else:                                        # where it fails first, and how sure (#137 item 2)
             text += fail_hedge(run, c, v, inches)
         pl = c.get("plate") or {}
@@ -133,7 +175,7 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
                    if pl.get("support") == "ring" else "")
             text += f" By hand, the {pl['piece']} on its own{how}: {_times(pl['safety_across'])}."
     else:                                            # any other kind: its word, never a ✓ (CALI-112)
-        text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {about}{_times(c['safety'])}."
+        text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {_times(c['safety'], rough)}."
     return _line(text + older, v["status"], study="load",
                  **({"rough": L.ROUGH} if rough else {}))
 
@@ -190,6 +232,15 @@ def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
     if run.get("finer"):
         return f"Not resolved yet: the check was too coarse to see its {walls}. Check it again finer."
     return L.NOT_CHECKED
+def filled_fail(why: Optional[str]) -> str:
+    """What a ✗ adds when its check didn't run on the part as built (#89, #100's merge checks): on a filled-in shape,
+    the part as built is *likely* weaker (taking material away can, rarely, lower a peak); where its shape couldn't
+    be checked against its pieces, that is said, not "a filled-in shape", which isn't known."""
+    if (why or "").startswith(("couldn't", "Not trusted yet: I couldn't")):     # filled()'s, or untrusted()'s
+        return " Its shape couldn't be checked against its pieces, so this number may not be the part's."
+    return " It ran on a filled-in shape, so the part as built is likely weaker."
+
+
 def untrusted(pid: str, why: str = "") -> str:
     """What a strength verdict on a filled-in solid says instead of holding (CALI-96), or one whose shape couldn't
     be checked against its pieces at all (which fails closed: never holding)."""
@@ -254,7 +305,8 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             said = consistency.check(C.declared(store, pid), geom)
             off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
             edge = next((r.detail for r in said if r.id == "loads_edge" and r.detail), "")   # (CALI-94)
-            strays = geom.require_mesh().metadata.get("strays")
+            meta = geom.require_mesh().metadata
+            strays = _strays(meta, inches) if meta.get("strays") else None
         except Exception:  # noqa: BLE001 — the card says what it can
             off, strays, edge = [], None, ""
         if strays:                                   # what the mesh left out, said once (CALI-118)
@@ -383,6 +435,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                                  "bad"))
             if mk["shop_default"]:
                 how.append(_line("Planned for a jigsaw, a drill and a circular saw: say what's in your shop.", "info"))
+            offer = _carve_offer(store, state, p, mk)
+            if offer:
+                how.append(offer)
         pats = [r for r in state.get("pattern_runs") or [] if r["part"] == pid]
         if any(x["kind"] == "sheet" for x in (mk or {}).get("pieces", [])):        # patterns are for flat pieces
             if pats and pats[0].get("version") == p["version"]:
@@ -467,7 +522,8 @@ def measured(store: DesignStore, state: dict) -> dict:
     older = [p["id"] for p in loaded if p["id"] not in unchecked and runs[p["id"]].get("version") != p["version"]]
     # the newest strength run of a part changed since, with its verdict and age: what the design card says over an
     # older scorecard's number (#138 item 1: "2.58x" from v1 over v4's 1.7x ✗)
-    last = [{"part": pid, "version": runs[pid]["version"], "now": current[pid], "safety": ran_safety(runs[pid])}
+    last = [{"part": pid, "version": runs[pid]["version"], "now": current[pid], "safety": ran_safety(runs[pid]),
+             "edge": consistency.middle_only(store, pid, runs[pid])}           # the middle only (CALI-94, #106 sweep)
             for pid in older]
     if last:
         out["strength.last"] = min(last, key=lambda x: x["safety"])
@@ -537,17 +593,17 @@ def _against(c: dict, failed: bool, unit: str = "") -> str:
     return f", short of the {said} it needs" if failed else f", against the {said} it needs"
 
 
-def _num(metric: str, v: float, unit: str = "") -> str:
+def _num(metric: str, v: float, unit: str = "", about: bool = False) -> str:
     from .goals import METRICS
 
     unit = METRICS.get(metric, ("", unit, ""))[1] or unit
     if unit == "$":
         return f"${v:,.0f}"
-    if unit == "×":
-        return f"{v:g}x" if v < 10 else "more than 10x"
+    if unit == "×":                                         # as the part card says it (#144: "0.5 times over")
+        return _times(v, about)
     if v == 1 and unit.endswith("s") and unit not in ("lbs",):
         unit = unit[:-1]                                    # 1 sheet, 1 piece
-    return f"{v:g} {unit}".strip()
+    return ("about " if about else "") + f"{v:g} {unit}".strip()
 
 
 def held_to(state: dict, now: dict) -> list[dict]:
@@ -583,8 +639,9 @@ def held_to(state: dict, now: dict) -> list[dict]:
             # the newest run, with its age, over an older card's number: never greener than it (#138 item 1)
             verdict = verdicts.goal(verdicts.compare(last["safety"], c.get("op", ">="), c["limit"]), stale=True)
             out.append(_line(f"{'✗' if verdict['kind'] == 'fails' else '!'} {label}{assumed}: last checked on "
-                             f"v{last['version']}: {round(last['safety'], 1):g}x"
-                             + (f", needs {c['limit']:g}x" if verdict["kind"] == "fails" else "")
+                             f"v{last['version']}: {_times(last['safety'])}"
+                             + (f", needs {c['limit']:g}" if verdict["kind"] == "fails" else
+                                ", checked in the middle only" if last.get("edge") else "")
                              + f" · v{last['now']} not checked yet.", verdict["status"], study="load",
                              model=rests_on_model(c["metric"])))
             continue
@@ -616,11 +673,10 @@ def held_to(state: dict, now: dict) -> list[dict]:
             out.append(_line(f"! {label}{assumed}: {now['strength.unresolved']}", "warn",
                              study="load", model=rests_on_model(c["metric"])))
             continue
-        num = _num(c['metric'], v, units.get(c['metric'], ''))
-        if strength and now.get("strength.rough"):
-            num = "about " + num                       # the printed model's number, as the part card says (CALI-97)
+        # the printed model's number says "about", as the part card says it (CALI-97); _times owns it (#144 review)
+        num = _num(c['metric'], v, units.get(c['metric'], ''), about=bool(strength and now.get("strength.rough")))
         failed = verdict["kind"] == "fails"
-        why = (" It ran on a filled-in shape, so the part as built is weaker still." if failed and untrue   # still ✗
+        why = (filled_fail(untrue) if failed and untrue   # still ✗
                else f" {now['strength.coarse_fail']}" if failed and strength and now.get("strength.coarse_fail") else "")
         if verdict["kind"] == "waiting":               # a part left out isn't covered by the rest (#132 review)
             out.append(_line(f"! {label}{assumed}: {num} for the rest, but {verdict['why']}.", "warn",
@@ -656,7 +712,8 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     solo = {c["key"]: c for c in part(store, state, parts[0]["id"])} if len(parts) == 1 else {}
     what = [_line(_sentence(state.get("prompt") or state["name"]))]
     if solo:
-        what += solo["what"]["lines"][1:]
+        # the part's own description, as What do I buy? already reads it (#89 item 3: the raw "I want to make…")
+        what = list(solo["what"]["lines"][:1]) + solo["what"]["lines"][1:]
     elif parts:
         what.append(_line(f"{len(parts)} part{'s' if len(parts) != 1 else ''}: " + ", ".join(p["id"] for p in parts)))
     elif state.get("building"):
@@ -664,8 +721,10 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     elif state.get("plan"):                   # planned, not built: the person reviews it first (CALI-35, #3a)
         pl = state["plan"]
         what.append(_line(pl["headline"], "warn"))
+        # with no key the page shows the key's note where Build it would be: the line says so, never "press" (#89)
         what.append(_line("That's the plan, before anything's drawn: its numbers and the checks between the parts are "
-                          "under the numbers. Say what to change, or press Build it.", "info"))
+                          "under the numbers. " + ("Say what to change, or press Build it." if state.get("claude", True)
+                                                   else "Building it needs Claude, which isn't set up here."), "info"))
     else:
         what.append(_line("Not built yet: answer its questions and press Build it.", "warn"))
     assumed = sum(1 for r in state.get("requirements") or [] if r.get("source") == "assumed")
