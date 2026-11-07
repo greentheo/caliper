@@ -1196,6 +1196,8 @@ function goTo(id) {                   // open the card's numbers and bring that 
 // One card for the design as it stands: every check (pass/fail, margin) and every objective (value, change
 // since the last card) across design, optimization, making and cost — each with how far to trust it.
 const TRUST = { measured: 'measured', model: 'a model (on the safe side)', rough: 'rough', guess: 'a guess' };
+// a goal's own limit beside its number (#137 item 5): "13.1 lb (cap 10 lb)"
+const goalLimit = (c) => (typeof c.limit === 'number' ? ` (${c.op === '<=' || c.op === '<' ? 'cap' : 'needs'} ${num(c.limit, c.unit)})` : '');
 function scoreView(d) {
   const card = (d.scorecards || [])[0];
   const stale = card && (card.outdated     // scored the old way (CALI-111): its numbers aren't today's
@@ -1233,7 +1235,7 @@ function scoreView(d) {
     <ul class="list small" style="margin-top:6px">${card.checks.map((c) => { const now = held.find((x) => x.id === c.id) || c;
       return `<li>${c.status === 'pass' ? '✓' : c.status === 'fail' ? '<span style="color:var(--bad)">✗</span>' : c.status === 'proposed' ? '◇'
         : c.status === 'unresolved' || c.status === 'untrusted' ? '<span style="color:var(--amber)">!</span>' : '?'}
-      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
+      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}${goalLimit(c)}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
       ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}</li>`; }).join('')}
       ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${esc(c.label || c.id)} ${from(c)}
         <span class="muted">— new since this card</span></li>`).join('')}</ul>
@@ -1981,6 +1983,10 @@ async function followCarve(p, jobId, stopping) {
   }
 }
 // the panel while a carve runs: the step it's on, the bar, about how long is left (from its pace so far), and Cancel
+// how long a carve has run, from its start, always shown: 9.5 min of a sweep said nothing (#137 item 4)
+const ran = (cj) => (cj && cj.t0 && !cj.stopping ? ` · running for ${minutesText((Date.now() - cj.t0) / 60000)}` : '');
+// the panel's time moves while nothing else does: the sweep before step 1 reports little
+setInterval(() => { for (const pid of Object.keys(S.carveJob || {})) paintCarve(pid); }, 30000);
 function carveProgress(pid) {
   const cj = S.carveJob[pid];
   if (!cj) return '';
@@ -1993,7 +1999,7 @@ function carveProgress(pid) {
   const where = cj.step != null && cj.steps ? `step ${cj.step + 1} of ${cj.steps}: ` : '';   // one count (#102)
   return `<div class="bar"><i style="width:${pct}%"></i></div>
     <div class="small muted" id="carveMsg">${esc(cj.stopping ? 'stopping at the next step…'
-      : where + (where ? (cj.text || '').replace(/^step \d+: /, '') : cj.text || ''))}${left}</div>
+      : where + (where ? (cj.text || '').replace(/^step \d+: /, '') : cj.text || ''))}${left}${ran(cj)}</div>
     ${cj.job ? `<div class="actions"><button id="carveStop" ${cj.stopping ? 'disabled' : ''}>Cancel</button></div>` : ''}`;
 }
 function paintCarve(pid) {
@@ -2028,6 +2034,8 @@ function defaultCheck(p) {
 // what stops a carve (or a lightening) before it starts, in words, or '' (CALI-106, #101; #102's note)
 function carveBlocked(p) {
   const check = defaultCheck(p);
+  // carving only takes material away: not on a part that already fails as drawn (#137 item 3)
+  if (check && check.verdict && check.verdict.kind === 'fails') return `it already fails (${sx(check.safety)}): make it hold first, then carve`;
   // where the walls are, and what to change, as the check said it (#136 review)
   if (check && check.too_thin) return check.thin_said ? `Can't carve it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be carved by strength';
   if (check && check.cases.some((c) => c.fea && c.fea.supported === false)) {

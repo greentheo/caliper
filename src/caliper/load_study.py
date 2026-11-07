@@ -909,6 +909,28 @@ def finer_minutes(voxels: int, spacing: float, finer: float, fea_seconds: float,
     return max(1, round((setup_seconds + fea_seconds * more ** (4 / 3)) / 60))
 
 
+def already_fails(store: DesignStore, part_id: str) -> Optional[str]:
+    """Why a carve or a lightening won't start: this version's own strength check already fails (#137 item 3: Carve
+    was offered and run on the bar stool at 0.53x; carving only takes material away). In words, "it already fails
+    (0.53x, in the cone around z 15.3 in): make it hold first", or None."""
+    from . import verdicts
+    from .answers import _times, worst_at
+
+    entry = store.design.part(part_id)
+    runs = [r for r in list_runs(store, part_id) if entry and r.get("version") == entry.version]
+    if not runs:
+        return None
+    rec = runs[0]
+    v = verdicts.run(rec)
+    if v["kind"] != "fails":
+        return None
+    worst = min((c for c in rec.get("cases") or [] if c.get("safety") is not None), key=lambda c: c["safety"],
+                default=None)
+    where, _ = worst_at(rec, worst, store.design.display_units == "in") if worst else ("", None)
+    return (f"it already fails ({_times(rec['safety']) if rec.get('safety') is not None else 'as checked'}"
+            + (f", {where}" if where else "") + "): make it hold first")
+
+
 def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
     root = runs_dir(store)
     if not os.path.isdir(root):

@@ -456,6 +456,17 @@ def measured(store: DesignStore, state: dict) -> dict:
     return out
 
 
+def _against(c: dict, failed: bool, unit: str = "") -> str:
+    """A goal's own limit beside its number (#137 item 5: "13.1 lb" never said it was over a 10 lb cap)."""
+    lim = c.get("limit")
+    if not isinstance(lim, (int, float)) or isinstance(lim, bool):
+        return ""
+    cap, said = c.get("op", ">=") in ("<=", "<"), _num(c["metric"], float(lim), unit)
+    if cap:
+        return f", over its {said} cap" if failed else f", within its {said} cap"
+    return f", short of the {said} it needs" if failed else f", against the {said} it needs"
+
+
 def _num(metric: str, v: float, unit: str = "") -> str:
     from .goals import METRICS
 
@@ -534,7 +545,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
         later = (" (scored before the last change: score it again)." if late
                  else f" ({older})." if verdict["kind"] == "stale" and older else "." + why)
         out.append(_line(f"{'✗' if failed else '✓' if verdict['kind'] == 'holds' else '!'} {label}{assumed}: {num}"
-                         + later,
+                         + _against(c, failed, units.get(c['metric'], '')) + later,
                          "warn" if late else verdict["status"],
                          study="load" if c["metric"].startswith("strength") else None,
                          model=rests_on_model(c["metric"])))
