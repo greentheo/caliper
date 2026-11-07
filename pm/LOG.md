@@ -13,7 +13,9 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - **Lighten on a coarse run** says "Not resolved yet: the check was too coarse to see its walls…" (or "Not checked"),
   from the steps' `lighten_step` verdicts, as Studies does; it said "Nothing lighter still holds", a false ✗.
 - Pins for the review's survivors: a coarse fail stays a fail (`carve_step`, `lighten_step`), and Lighten's `disabled`.
-- Tests: tests/test_coarse_steps.py (15; 4 of the new fail without this, the fifth pins a fail).
+- Tests: tests/test_coarse_steps.py (16; 4 of the new fail without this, the fifth pins a fail). The review's last two
+  pins: a coarse fail stays a fail with the whole part holding (`whole_holds: True`, where the whole-holds branch can't
+  mask it), and the page's own refusal goes through `plainly()` (raw `e.message` fails it).
 
 ### 2026-11-07 · CALI-106 (#101, #136 review) · A refused carve says where the thin walls are and what to change
 - **Where:** `measure.thinnest_wall` returns the thinnest wall and where it is (the middle of its ray);
