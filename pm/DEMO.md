@@ -566,6 +566,20 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · A plan says what you said apart from what it assumed (CALI-115 #117)
+1. With a key, new design: "A Savonius wind turbine: printed buckets, plasma-cut end plates, a welded 7 ft mast on a
+   staked base, for a generator I already have with a 1 in shaft." Only the generator says "you have it".
+2. **What is it? → The plan:** a number you didn't give reads "· assumed"; a check over one reads "assumed: not
+   checked until you keep it" with **Keep**. Press it: the badge goes, and the check is enforced.
+3. "A box step stool from 3/4 in plywood, for the bathroom." builds at once, as one part: no plan review.
+4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_plan_live.py`.
+### 2026-11-06 · Asked for, changed, measured (CALI-107 #107)
+1. **On a part, say "make the wall 6 mm":** the reply starts "Asked for: make the wall 6 mm", then "Changed: wall 4 mm →
+   6 mm", "Measured: its volume went from … to … cm³", and what isn't measured. Then "The part's own checks pass."
+2. **Ask for something the designer can't fit:** the round fails, naming the line of any `try/except` or clamp that
+   would have skipped it quietly. If nothing changed, it says the shape didn't change.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_fallbacks.py`.
+
 ### 2026-11-06 · Nothing leaves the machine unsaid (CALI-91 #68)
 1. **Press 🎤:** it asks first, "Your browser turns speech into words by sending it to its maker (Google, in Chrome).
    Talk anyway?". **Type instead** doesn't listen. **Talk** does, and the next press doesn't ask again.

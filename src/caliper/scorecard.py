@@ -337,9 +337,11 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
 
     worst = None
     unsure = None                     # a ✓ on an FEA too coarse to see the wall: no pass from it (CALI-110)
+    loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
     for p in store.design.parts:
         if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
             continue
+        loaded = True
         run = next((r for r in load_study.list_runs(store, p.id) if r.get("version") == p.version), None)
         if run is None:
             emit("strength", f"checking what {p.id} must hold")
@@ -350,6 +352,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                         "model", "strength")
                 continue
         breaks = [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
+        need.append(float(run.get("min_safety") or load_study.MIN_SAFETY))
         if unsure is None and any(load_study.unresolved(run, c) and c.get("holds") for c in run["cases"]):
             from .answers import coarse
 
@@ -371,6 +374,14 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
 
     untrue = next((why for p in store.design.parts if store.is_scripted(p.id)
                    and "def loads(" in store.read_script(p.id) for why in [filled(store, p.id)] if why), None)
+
+    # CALI-113 (#115): a part that says what it must hold is held to it, goal or none. A design made without goals
+    # (no key, an older one, a hand-made scorecard.yaml) released "ready to cut" on a strength ✗.
+    if loaded and not any(str(c.get("metric", "")).startswith("strength") and c.get("source") != "proposed"
+                          for c in g["checks"]):
+        g["checks"] = [*g["checks"], {"id": "strength_loads", "label": "holds what its loads say, at its factor "
+                                      "(from its loads)", "metric": "strength.safety", "op": ">=",
+                                      "limit": max(need, default=load_study.MIN_SAFETY), "source": "implicit"}]
 
     # the user's checks and objectives (a proposed one is shown, and binds once it's kept: CALI-55)
     for c in g["checks"]:
