@@ -94,6 +94,9 @@ def test_the_page_disables_carve_and_lighten_with_the_reason():
 
 # --- #136 review: where the thin walls are, what to change, and the part's own rule ------------------------------
 
+from .test_resolved import SPOOL as SPOOL_PLAIN
+
+
 def _spool(tmp_path, units="in"):
     from caliper.spec import Assertion, Spec
 
@@ -128,17 +131,25 @@ def test_the_too_thin_line_says_where_what_to_change_and_the_rule(tmp_path):
     said = ctx["thin_said"]
     import re
 
-    assert re.match(r"its 0\.(59|6) mm walls around z 2\d mm are too thin for the strength check to see", said), said
-    assert said.endswith("Your rule shell_wall_thickness says at least 2.85 mm: thicken them to that first.")
+    assert re.match(r"its 0\.(59|6) mm walls around z 2\d mm are thinner than your rule", said), said
+    assert said.endswith(" mm are thinner than your rule shell_wall_thickness (at least 2.85 mm): thicken them to "
+                         "that. For a strength carve, walls must be at least " + f"{4 * ctx['finest']:.1f}" + " mm at "
+                         "this size, so check it by hand or with a test piece instead."), said
     assert "nozzle" not in said                                    # 0.6 mm prints on a 0.4 mm nozzle
     # where no run a study may make can see them, resolution carries the words
     seen = load_study.resolution({**ctx, "spacing": 4.6, "finest": 1.0})
     assert seen["too_thin"] and seen["said"] == said and seen["where"] == ctx["thinnest_where"]
     # the bar stool's webs, in its own units: one number, where, the nozzle, its rule
     assert load_study.thin_words(_spool(tmp_path / "in"), "spool", 0.25, {"at": [0, 165, 410]}, 2.3, True) == (
-        "its 0.25 mm walls around z 16.1 in are too thin for the strength check to see (at this size it sees walls "
-        "from 3/8 in on) and for a 0.4 mm nozzle to print. Your rule shell_wall_thickness says at least 2.85 mm: "
-        "thicken them to that first.")
+        "its 0.25 mm walls around z 16.1 in are too thin for a 0.4 mm nozzle to print and for your rule "
+        "shell_wall_thickness (at least 2.85 mm): thicken them to that. For a strength carve, walls must be at least "
+        "9.2 mm at this size, so check it by hand or with a test piece instead.")
+    # with no rule and nothing to print, only the strength check's limit, in mm (#136 review: not "3/8 in")
+    plain = DesignStore.create("a wood thing", base=str(tmp_path / "plain"))
+    plain.write_part("spool", SPOOL_PLAIN, intent="a spool")
+    assert load_study.thin_words(plain, "spool", 3.0, {"piece": "seat top"}, 2.3, False) == (
+        "its 3 mm walls in the seat top are too thin for the strength check to see: at this size it sees walls from "
+        "9.2 mm on, so check it by hand or with a test piece instead.")
 
 
 def test_a_refused_carve_says_where_and_what_to_change(tmp_path, monkeypatch):
@@ -177,3 +188,59 @@ def test_the_page_says_the_check_s_words_on_a_blocked_carve():
         f"function loadRuns() {{ return [{__import__('json').dumps(check)}]; }}\n"
         "out = [carveBlocked({id: 'stool', version: 7}), carveBlocked({id: 'stool', version: 6})];")))
     assert out == ["Can't carve it by strength: " + said, ""]
+
+
+# --- #136 review round 2: the page keeps a blocked carve off, and a coarse lightening isn't a ✗ -------------------
+
+def test_a_coarse_fail_stays_a_fail():
+    coarse = {"resolved": False, "too_thin": True}
+    step = {"index": 1, "holds": False, "safety": 0.4, "whole": 0.4, "whole_holds": False, "saved_g": 100}
+    assert verdicts.carve_step(step, run=coarse)["kind"] == "fails"
+    assert verdicts.lighten_step({"index": 1, "holds": False, "safety": 0.4, "saved_lb": 1}, run=coarse)["kind"] == "fails"
+
+
+def test_the_page_keeps_a_blocked_carve_off_after_a_job_ends():
+    """paintCarve set ``disabled`` from the job alone, so after a cancel "Carve it again" was clickable on a part its
+    check blocks."""
+    from .test_carve_click import _page, _run
+
+    out = _run(_page(["paintCarve"], extra=(
+        "const els = {carveGo: {disabled: false}}; function $(id) { return els[id]; }\n"
+        "const S = {scope: 'a', carveJob: {}, design: {parts: [{id: 'a'}]}};\n"
+        "let blocked = 'too thin'; function carveBlocked() { return blocked; }\n"
+        "paintCarve('a'); const off = els.carveGo.disabled; blocked = ''; paintCarve('a');\n"
+        "out = [off, els.carveGo.disabled];")))
+    assert out == [True, False]
+
+
+def test_a_refusal_reads_without_the_exception_s_name():
+    from .test_carve_click import _page, _run
+
+    out = _run(_page([], consts=["plainly"], extra=(
+        "out = [plainly(\"ValueError: Can't carve it by strength: its walls…\"), plainly('the part is busy')];")))
+    assert out == ["Can't carve it by strength: its walls…", "the part is busy"]
+
+
+def test_lighten_on_a_coarse_run_says_not_resolved_not_nothing_holds():
+    """The page said "Nothing lighter still holds" (a false ✗) where Studies said "not resolved"."""
+    import json as _json
+    import os
+
+    from .test_carve_click import _page, _run
+
+    def view(kind):
+        run = {"id": "r", "part": "a", "notes": [], "stations": [
+            {"index": 0, "saved_lb": 0, "safety": 3.0, "verdict": {"kind": kind, "counts_as_pass": False}},
+            {"index": 1, "saved_lb": 1.0, "safety": 2.5, "verdict": {"kind": kind, "counts_as_pass": False}}]}
+        return _run(_page(["lightenView"], consts=["esc", "holdsHere"], extra=(
+            f"const S = {{design: {{lighten_runs: [{_json.dumps(run)}]}}, station: null}};\n"
+            "function lightenRuns() { return S.design.lighten_runs; } function defaultCheck() { return null; }\n"
+            "function sx(v) { return v + 'x'; } function pct(v) { return v; } function lbs(v) { return v + ' lb'; }\n"
+            "function notTrusted() { return ''; } function verdictTone() { return 'warn'; }\n"
+            "out = lightenView({id: 'a'});")))
+
+    assert "Not resolved yet: the check was too coarse to see its walls" in view("unresolved")
+    assert "Not checked: its walls are too thin for the voxels" in view("unchecked")
+    assert "Nothing lighter still holds" not in view("unresolved")
+    src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    assert "id=\"lightGo\" ${defaultCheck(p) && defaultCheck(p).too_thin ? 'disabled' : ''}" in src

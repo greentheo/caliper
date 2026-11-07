@@ -1918,6 +1918,8 @@ function carveChart(p, run) {
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
     <div class="muted small">Click a step to see it; <b>Carve it like this</b> makes it the part's shape and checks it again.</div>`;
 }
+// a refusal as a person reads it: the server's reason without the exception's name ("ValueError: …", #136 review)
+const plainly = (msg) => String(msg ?? '').replace(/^[A-Za-z_.]*(Error|Exception):\s*/, '');
 // CALI-101: one click, one carve. The job is kept in S.carveJob[part] from the click until it ends, so the button
 // stays disabled, a redraw draws the panel again (steps, bar, time left, Cancel), and a reload finds it by
 // design.carving. The server refuses a second carve of the design (409) whatever the page does.
@@ -1933,7 +1935,7 @@ async function runCarve(p) {
     delete S.carveJob[p.id];
     await refresh();                              // a 409: the carve that's running is in design.carving; it's followed
     const prog = $('carveProgress');
-    if (prog && !S.carveJob[p.id]) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    if (prog && !S.carveJob[p.id]) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(plainly(e.message))}</div>`;
   }
 }
 async function followCarve(p, jobId, stopping) {
@@ -1986,7 +1988,9 @@ function carveProgress(pid) {
 function paintCarve(pid) {
   const prog = $('carveProgress'), go = $('carveGo');
   if (S.scope !== pid) return;
-  if (go) go.disabled = !!S.carveJob[pid];
+  const part = S.design && S.design.parts.find((x) => x.id === pid);
+  // a carve its check blocks stays off after a job ends (#136 review: Cancel re-enabled "Carve it again")
+  if (go) go.disabled = !!S.carveJob[pid] || !!(part && carveBlocked(part));
   if (!prog) return;
   prog.innerHTML = carveProgress(pid);
   const stop = $('carveStop');
@@ -2047,6 +2051,8 @@ function lightenView(p) {
   const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
   const best = run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
   const out = run && run.stations.find((x) => x.verdict && x.verdict.kind === 'fails');
+  // steps the check was too coarse to call: their verdict's word, never "nothing lighter holds" (#136 review)
+  const unsure = run && !best && run.stations.find((x) => x.index && x.verdict && ['unresolved', 'unchecked'].includes(x.verdict.kind));
   const what = (x) => x.phase === 'thinner' ? `in ${esc(x.label)} sheet <span class="badge">estimate</span>`
     : x.phase === 'top' ? `${pct(x.removed)} of the walls + ${x.top_holes} hole${x.top_holes === 1 ? '' : 's'} in the top`
     : x.index ? `${pct(x.removed)} of the walls` : 'as it is';
@@ -2060,6 +2066,8 @@ function lightenView(p) {
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
         : `The lightest that holds: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety)}.`)
+      : unsure ? (unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
+        : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.')
       : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety)}).` : ''}
       ${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
