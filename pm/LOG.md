@@ -3,6 +3,18 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-106 (#136 review, round 2) · What a refused carve asks for, said apart; the page keeps it off
+- **The line asks two things apart** (thickening to the rule's 2.85 mm doesn't unblock a carve): printing and the
+  part's own rule, "too thin for a 0.4 mm nozzle to print and for your rule shell_wall_thickness (at least 2.85 mm):
+  thicken them to that"; and the strength check, in mm, "For a strength carve, walls must be at least 9.2 mm at this
+  size, so check it by hand or with a test piece instead". With no rule and nothing printed, only the second.
+- **The page keeps a blocked Carve off** after a job ends (`paintCarve` set `disabled` from the job alone, so a cancel
+  re-enabled "Carve it again"), and a refusal reads without its exception's name (`plainly`: no "ValueError: …").
+- **Lighten on a coarse run** says "Not resolved yet: the check was too coarse to see its walls…" (or "Not checked"),
+  from the steps' `lighten_step` verdicts, as Studies does; it said "Nothing lighter still holds", a false ✗.
+- Pins for the review's survivors: a coarse fail stays a fail (`carve_step`, `lighten_step`), and Lighten's `disabled`.
+- Tests: tests/test_coarse_steps.py (15; 4 of the new fail without this, the fifth pins a fail).
+
 ### 2026-11-07 · CALI-106 (#101, #136 review) · A refused carve says where the thin walls are and what to change
 - **Where:** `measure.thinnest_wall` returns the thinnest wall and where it is (the middle of its ray);
   `min_wall_thickness` is its number. `load_study._thin` says which it is: a piece by name, or a measured wall's
@@ -69,6 +81,32 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   red; older records read through `verdicts.history`. `summary(None)` and `meets(…, None)` wait; `release()` keeps
   its own reason; `to_text` and the CLI say ALL PASS only with nothing waiting; lighten's two searches marked as such.
   Both guards cover `ready` and `all_pass` now.
+- **Merged with main's #124:** a carved step marked `closed: False` (its part doesn't close up) is never a pass:
+  `verdicts.station` reads it "not checked", with its why, so `carve_step`, the step offered (`_offer`, and the
+  lightest on a cancel), the chart dot and **Use this step** (off) all say so from the one verdict.
+
+### 2026-11-07 · CALI-117 (#105) · A carved step whose part doesn't close up is never offered or adopted
+- **What it was:** with #106's front-edge foot, and on main's own carve-down test once BLAS ran on one thread (#121's
+  CI), the carve picked a step whose adopted part wasn't watertight. Which voxels a run carves follows the summation
+  order, so it came and went; a fresh run here was watertight at every stage (station, wood, join, STL reload).
+  A part that isn't watertight can't be voxelized, so the check adopting it runs fails or reads wrong.
+- **Now:** each step's mesh is repaired if a fill closes it (`carve._closed`: merge, drop degenerate faces, fill holes,
+  fix normals) and otherwise marked `closed: False` with why. The step offered is the lightest that holds **and**
+  whose part, as adopting it builds it (`carve._adopted`: the wood as drawn joined to the carved print), closes up;
+  one that doesn't is marked and the next is tried. `adopt` refuses a step that doesn't close (`carve.NotClosed`, a
+  422 with the reason) and checks the STL as it will be read back; nothing is written for it. The panel shows "Can't
+  use this step: …" and its Carve button is off. design.js v=56.
+- `tests/test_carve_closed.py`: a small hole filled and a big one not; every carved step forced to leak (not offered,
+  adopt refused, nothing written); a join with the wood forced to leak (a small gap repaired and adopted watertight,
+  a big one refused) and the study not offering it.
+- **#124 review, the cause:** a **pinch**. Where two surfaces of the carved part meet along an edge, the adopted
+  shape keeps two vertices at one point apart by index: watertight in memory, and once merged (any STL round trip)
+  four faces share an edge and it isn't (#105's 6,011 vertices, 12,060 faces). `_closed` judged the in-memory form,
+  so the study offered step 2 and `adopt` refused it. Now `_closed` judges a merged copy, as it reads back, so offer
+  and adopt agree; a pinch isn't something a fill mends, so that step is marked. `_offer` builds the script once.
+  Tests: a pinch along an edge (closed in memory, refused merged; one meeting only at a corner reads back closed),
+  and #105's repro (MIXED with its edge foot, 40 lb, 4 steps to 0.6): the step offered adopts, watertight
+  (`slow`: several minutes).
 
 ### 2026-11-07 · CALI-120 (#128) · The server keys the page's scripts and styles; no PR bumps ?v= again
 - **`server.keyed_page`** serves `/`, `/index.html` and `/classic` with every `?v=` on the page's own `.js` and

@@ -269,23 +269,31 @@ def wall_rule(store: DesignStore, part_id: str) -> Optional[tuple[str, float]]:
 
 def thin_words(store: DesignStore, part_id: str, thin: float, where: dict, finest_mm: float,
                printed: bool) -> str:
-    """Why a study can't run on walls this thin, where they are, and what to change, in the design's units (#136
-    review): "its 0.25 mm walls around z 16.1 in are too thin for the strength check to see (at this size it sees
-    walls from 3/8 in on) and for a 0.4 mm nozzle to print. Your rule shell_wall_thickness says at least 2.85 mm:
-    thicken them to that first." One number for the wall, the same everywhere (#137 item 2)."""
+    """Why a study can't run on walls this thin, where they are, and what to change (#136 review), said in two parts
+    that ask different things. Printing and the part's own rule: "its 0.25 mm walls around z 16.1 in are too thin
+    for a 0.4 mm nozzle to print and for your rule shell_wall_thickness (at least 2.85 mm): thicken them to that."
+    The strength check, in mm: "For a strength carve, walls must be at least 9.2 mm at this size, so check it by hand
+    or with a test piece instead." (Thickening to 2.85 mm doesn't unblock a carve: only 9.2 mm would.) One number
+    for the wall, the same everywhere (#137 item 2)."""
     from .answers import _len, _wall
     from .evaluate import DEFAULT_MACHINE
 
     inches = getattr(store.design, "display_units", "in") == "in"
     at = (f" in the {where['piece']}" if where.get("piece") else
           f" around z {_len(where['at'][2], inches)}" if where.get("at") else "")
+    head, sees = f"its {_wall(thin, inches)} walls{at}", RESOLVE_MIN * finest_mm
     nozzle = DEFAULT_MACHINE.nozzle
-    out = (f"its {_wall(thin, inches)} walls{at} are too thin for the strength check to see (at this size it sees "
-           f"walls from {_wall(RESOLVE_MIN * finest_mm, inches)} on)"
-           + (f" and for a {nozzle:g} mm nozzle to print" if printed and thin < nozzle else "") + ".")
-    rule = wall_rule(store, part_id)
-    return out + (f" Your rule {rule[0]} says at least {round(rule[1], 2):g} mm: thicken them to that first."
-                  if rule else " Thicken them first.")
+    printing, rule = printed and thin < nozzle, wall_rule(store, part_id)
+    need = rule if rule and thin < rule[1] else None
+    if not (printing or need):
+        return (f"{head} are too thin for the strength check to see: at this size it sees walls from {sees:.1f} mm "
+                f"on, so check it by hand or with a test piece instead.")
+    rule_said = f"your rule {need[0]} (at least {round(need[1], 2):g} mm)" if need else ""
+    return (head + (f" are too thin for a {nozzle:g} mm nozzle to print" + (f" and for {rule_said}" if need else "")
+                    if printing else f" are thinner than {rule_said}")
+            + (": thicken them to that." if need else ": thicken them.")
+            + f" For a strength carve, walls must be at least {sees:.1f} mm at this size, so check it by hand or "
+              f"with a test piece instead.")
 
 
 def resolution(ctx: dict) -> dict:
