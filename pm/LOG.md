@@ -35,6 +35,7 @@ From Theo's first bar stool run: its designer wrote one case ("250 lb person sea
   "Not checked yet: tipping sideways (no push is declared that way, and its base is no wider that way)"; the box stool,
   wider side to side, doesn't. Pinned: 0.8 against a factor of 1 tips, and the same stool raised 50 mm (its loads
   with it) tips the same (the floor is where it stands; a floor at z 0 fails it). Merged main (#139).
+- **#141 review, round 2:** `check()`'s own factor is pinned (a base 10.13 in wide, about 0.8 times over: it tips against a factor of 1 and holds against 0.7, from `check()` itself), and so is "tipping front to back" (a sideways push on a square base).
 ### 2026-11-07 · CALI-122 (#137) · The bar stool's pre-flight: its broken rule said, where it fails, no carve on a fail
 From the reviewer's pre-flight of Theo's bar stool v7 (a copy; nothing of Theo's touched), with the foreman's
 correction: the run's "seat top" was a mislabel.

@@ -268,3 +268,26 @@ def test_a_stool_raised_50_mm_gives_the_same_answer(monkeypatch):
           "hi": tuple(v + (50 if i == 2 else 0) for i, v in enumerate(case["hi"]))}
     (raised,) = _checked(monkeypatch, raised_mesh, [up])
     assert raised["safety"] == flat["safety"] == 5.2 and raised["tips_at_lb"] == flat["tips_at_lb"]
+
+
+# --- #141 review, round 2 --------------------------------------------------------------------------------------------
+
+def test_check_s_own_factor_decides_it(monkeypatch):
+    """check() itself, not a verdict the test builds: a base 10.13 in wide, the front-edge push at 30 in, is about 0.8
+    times over by hand (restoring 10 lb x 128.6 + 600 N x (128.6 - 117.8) against 20 N x 762 mm)."""
+    case = _front_edge_case(30)
+    (tight,) = _checked(monkeypatch, _stool(10.126, 30), [{**case, "factor": 1.0}])
+    assert 0.75 < tight["safety"] < 0.85 and tight["verdict"]["kind"] == "fails"
+    assert tipping.line(tight)[0].startswith(f"Tips when someone sits on the front edge and leans: only {tight['safety']:g}")
+    (eased,) = _checked(monkeypatch, _stool(10.126, 30), [{**case, "factor": 0.7}])
+    assert eased["safety"] == tight["safety"] and eased["verdict"]["kind"] == "holds"     # the case's factor decides
+
+
+def test_a_sideways_push_on_a_square_base_says_front_to_back(monkeypatch):
+    sideways = {**_front_edge_case(29), "force": (20, 0, -600)}
+    mesh = _stool(18, 29)
+    monkeypatch.setattr(C, "declared", lambda store, pid: {"loads": [sideways]})
+    store = SimpleNamespace(part_geometry=lambda pid: SimpleNamespace(require_mesh=lambda: mesh))
+    assert tipping.undeclared_ways(store, "stool") == ["tipping front to back"]
+    monkeypatch.setattr(C, "declared", lambda store, pid: {"loads": [sideways, _front_edge_case(29)]})
+    assert tipping.undeclared_ways(store, "stool") == []                       # both ways pushed: nothing unsaid
