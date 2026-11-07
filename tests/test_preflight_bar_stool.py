@@ -221,3 +221,32 @@ def test_a_panel_held_all_round_never_reads_only_16_of_its_16():
     assert not pl["done"] and "only 6 of its 6" not in pl["why"]
     assert pl["why"] == ("it's held all round, but its 6-sided outline isn't a rectangle or a disc, which the plate "
                          "check covers, so the FEA is the number for it")
+
+
+def test_the_page_doesn_t_offer_lighten_on_a_part_that_fails_and_says_why():
+    fails = {"version": 7, "seconds": 60, "spacing_mm": 4.6, "safety": 0.53, "cases": [],
+             "verdict": {"kind": "fails", "status": "bad", "counts_as_pass": False}}
+    thin = {**fails, "verdict": {"kind": "unchecked", "status": "warn", "counts_as_pass": False}, "too_thin": True,
+            "thin_said": "its 0.25 mm walls … check it by hand or with a test piece instead."}
+    out = []
+    for check in (fails, thin, {**fails, "verdict": {"kind": "holds", "counts_as_pass": True}}):
+        out.append(_run(_page(["lightenBlocked", "defaultCheck"], extra=(
+            f"function loadRuns() {{ return [{json.dumps(check)}]; }} function sx(v) {{ return v + 'x'; }}\n"
+            "out = lightenBlocked({id: 'stool', version: 7});"))))
+    assert out == ["It already fails (0.53x): make it hold first, then lighten it",
+                   "Can't lighten it by strength: its 0.25 mm walls … check it by hand or with a test piece instead.", ""]
+
+
+def test_a_carved_step_that_doesn_t_close_up_is_an_amber_dot_not_a_red_one():
+    """The reviewer's nit on #132: a step that holds but doesn't close up (``unchecked``) was drawn red, as a fail."""
+    run = {"id": "r", "version": 7, "min_safety": 2, "best": 1, "stations": [
+        {"index": 0, "removed": 0.0, "safety": 3.0, "verdict": {"kind": "holds", "status": "ok", "word": "holds"}},
+        {"index": 1, "removed": 0.2, "safety": 2.5, "closed": False,
+         "verdict": {"kind": "unchecked", "status": "warn", "word": "not checked"}},
+        {"index": 2, "removed": 0.4, "safety": 1.2, "verdict": {"kind": "fails", "status": "bad", "word": "doesn't hold"}}]}
+    out = _run(_page(["carveChart"], consts=["esc", "verdictTone"], extra=(
+        "const S = {station: null}; function sx(v) { return v + 'x'; } function pct(v) { return v; }\n"
+        "function carveShare() { return '40%'; }\n"
+        f"const html = carveChart({{version: 7}}, {json.dumps(run)});\n"
+        "out = [...html.matchAll(/<circle[^>]*data-carve=\"(\\d)\"\\s*class=\"(\\w+)/g)].map((m) => m[2]);")))
+    assert out == ["ok", "warn", "bad"]

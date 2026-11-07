@@ -2066,6 +2066,14 @@ function wireCarve(p) {
 }
 
 // make it lighter (CALI-71): holes where the wood isn't working, through the thickness, each step re-checked
+// what stops a lightening before it starts, in words, or '': a part that already fails as drawn (#137 item 3), or
+// walls too thin for any check a study may make (#101, #136)
+function lightenBlocked(p) {
+  const check = defaultCheck(p);
+  if (check && check.verdict && check.verdict.kind === 'fails') return `It already fails (${sx(check.safety)}): make it hold first, then lighten it`;
+  if (check && check.too_thin) return check.thin_said ? `Can't lighten it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength';
+  return '';
+}
 function lightenRuns(pid) { return (S.design.lighten_runs || []).filter((r) => r.part === pid); }
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
@@ -2081,8 +2089,8 @@ function lightenView(p) {
     <div class="muted small">Down until the safety runs out: holes in the walls where the wood isn't working (a jigsaw cuts
       them, a solid rim where it's glued and screwed), then hole-saw holes in the panel you stand on, one at a time,
       then thinner sheet. Every step is checked again.</div>
-    <div class="actions"><button id="lightGo" ${defaultCheck(p) && defaultCheck(p).too_thin ? 'disabled' : ''}>${run ? 'Lighten it again' : 'Lighten it'}</button>
-      ${defaultCheck(p) && defaultCheck(p).too_thin ? `<span class="muted small">${defaultCheck(p).thin_said ? `Can't lighten it by strength: ${esc(defaultCheck(p).thin_said)}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength'}</span>` : ''}</div>
+    <div class="actions"><button id="lightGo" ${lightenBlocked(p) ? 'disabled' : ''}>${run ? 'Lighten it again' : 'Lighten it'}</button>
+      ${lightenBlocked(p) ? `<span class="muted small">${esc(lightenBlocked(p))}</span>` : ''}</div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'

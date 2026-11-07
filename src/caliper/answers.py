@@ -464,8 +464,8 @@ def measured(store: DesignStore, state: dict) -> dict:
 def _against(c: dict, failed: bool, unit: str = "") -> str:
     """A goal's own limit beside its number (#137 item 5: "13.1 lb" never said it was over a 10 lb cap)."""
     lim = c.get("limit")
-    if not isinstance(lim, (int, float)) or isinstance(lim, bool):
-        return ""
+    if not isinstance(lim, (int, float)) or isinstance(lim, bool) or c["metric"].startswith("strength"):
+        return ""                                  # a strength goal's label says what it needs ("2 times over")
     cap, said = c.get("op", ">=") in ("<=", "<"), _num(c["metric"], float(lim), unit)
     if cap:
         return f", over its {said} cap" if failed else f", within its {said} cap"
