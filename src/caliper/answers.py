@@ -232,9 +232,12 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         from . import tipping
 
         try:                                    # will it tip over? statics (CALI-98)
-            for case in tipping.check(store, pid):
+            cases = tipping.check(store, pid)
+            for case in cases:
                 text, status = tipping.line(case)
                 work.append(_line(text, status, study="tip"))
+            if any(c["checked"] for c in cases):        # NEEDS ENGINEER CHECK, said where it's read (#42)
+                work.append(_line(tipping.NOTE, "info", study="tip"))
             missing = tipping.unchecked(C.declared(store, pid), p.get("intent") or "")
         except Exception as e:  # noqa: BLE001 — said, never a crash of the card
             work.append(_line(f"Tipping: not checked ({e}).", "warn", study="tip"))
