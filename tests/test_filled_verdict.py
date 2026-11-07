@@ -72,7 +72,7 @@ def test_the_books_dont_print_a_holding_line_for_it(tmp_path, monkeypatch):
         pytest.skip(cutplan.available())
     store, rec = _checked(tmp_path, monkeypatch, FILLED)
     strength = release._strength(store, {"stool": store.design.part("stool").version})
-    assert all(c["filled"] for c in strength["stool"])
+    assert all(c["verdict"]["kind"] in ("untrusted", "fails") for c in strength["stool"])   # one verdict (CALI-112)
     made = release.make(store, pdf=False)
     root = os.path.join(release.releases_dir(store), made["id"])
     row = open(os.path.join(root, "index.html")).read().split("Will it hold?")[1].split("</table>")[0]
@@ -164,7 +164,7 @@ def test_the_studies_rows_and_the_book_say_not_trusted_in_their_own_words():
     text, ok = studies._headline("scorecard", {"summary": {"pass": 1, "fail": 0, "unknown": 1, "untrusted": 1}})
     assert text == "1 pass · 0 fail · 1 not trusted" and ok is False
     text, ok = studies._headline("load", {"filled": True, "holds": True, "safety": 3.1, "min_safety": 2,
-                                          "cases": [{"name": "a foot", "safety": 3.1}]})
+                                          "cases": [{"name": "a foot", "safety": 3.1, "holds": True}]})
     assert text == "not trusted: it ran on a filled-in shape (the block read 3.1x)" and ok is None
     assert "holds" not in text
     rec = {"id": "001", "ready": False, "shopping_usd": 40,
