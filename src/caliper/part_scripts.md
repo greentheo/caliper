@@ -159,6 +159,41 @@ the round.
 `held()` says where the part is held, as boxes of the same form (`name`, `lo`, `hi`). Leave it out for a
 part that stands on the floor: Caliper holds it at its underside.
 
+**The load cases, by kind of thing** (CALI-98). Declare every row that fits; each is checked on its own. Factor 2 for
+stepping or jumping onto it, 1 for a load that just sits there; a standard's test load is already a test load, so it
+takes 1. The values are as the engineering brief on Caliper's issue #42 cites them (NEEDS ENGINEER CHECK).
+
+| kind | case | how to declare it |
+|---|---|---|
+| a step or tread | a foot at the centre | the person's `lb`, factor 2, a 4 x 4 in box mid-span |
+| | a foot at the free front edge | the same foot with its edge on the free edge, factor 2 |
+| a seat (stool, chair, bench) | sitting at the centre | the person's `lb`, factor 2 (sitting down drops onto it), a 4 x 4 in box at the middle |
+| | sitting on the front edge | `force: (0, 0, -1300)` N, 100 mm in from the front edge, factor 1 (EN 12520 / EN 1728 seat static) |
+| | leaning back | `force: (0, 400, -1000)` N front to back, or `(300, 0, -1000)` sideways, at seat level, factor 1 (EN 12520 / EN 1728 leg tests): a strength case |
+| | climbing on | a foot on the seat: the person's `lb`, factor 2, at its edge |
+| | tipping over | `"tip": True`, `force: (20, 0, -600)` N, 60 mm in from the seat's edge, at seat height, factor 1, one for each way it could go over (EN 1022:2005/2018, BIFMA X5.1 front stability) |
+| a shelf or top | spread weight | what it holds, spread over it, factor 1 |
+| | a point at the front edge | a hand's weight at the front edge, factor 2 |
+| a step stool | its rating | EN 14183: 150 kg in all; its footprint at least the top plus 0.1 x its height each way |
+
+A load with `"tip": True` isn't a strength case: Caliper checks it for tipping over, by statics, taking moments about
+the edge of the footprint it would go over (the part's own weight and the downward push against the sideways one), and
+the card says "Won't tip …, 1.6 times over" or that it will. Anything someone stands or sits on that's taller than its
+base is wide gets one in each direction it could tip.
+
+```python
+def loads(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    r, top = p["seat_d"] / 2, p["height"]
+    return [{"name": "sitting", "lb": 250, "factor": 2.0, "lo": (-50, -50, top - 2), "hi": (50, 50, top)},
+            {"name": "sitting on the front edge", "force": (0, 0, -1300), "factor": 1.0,
+             "lo": (-50, -r + 50, top - 2), "hi": (50, -r + 150, top)},
+            {"name": "leaning back", "force": (0, 400, -1000), "factor": 1.0,
+             "lo": (-50, -50, top - 2), "hi": (50, 50, top)},
+            {"name": "when someone sits on the front edge and leans", "tip": True, "force": (0, -20, -600),
+             "factor": 1.0, "lo": (-10, -r + 50, top - 2), "hi": (10, -r + 70, top)}]
+```
+
 ## Holes Caliper cuts: HOLES
 
 When a lightening study is used, Caliper writes `HOLES` into the script: a list of holes cut all the way

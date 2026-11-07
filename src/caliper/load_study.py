@@ -517,7 +517,11 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     declared = C.declared(store, part_id)
     if not declared.get("loads"):
         raise ValueError(f"'{part_id}' doesn't say what it must hold: its script has no loads()")
-    loads = parse_loads(declared["loads"])
+    # a tipping case is the tip check's (statics), not a strength case (CALI-98)
+    strength = [ld for ld in declared["loads"] if not (isinstance(ld, dict) and ld.get("tip"))]
+    if not strength:
+        raise ValueError(f"'{part_id}' only says how it might tip, not what it must hold: add a load that isn't a tip")
+    loads = parse_loads(strength)
     mesh = store.part_geometry(part_id).require_mesh()
     from .measure import closed, open_near
 
