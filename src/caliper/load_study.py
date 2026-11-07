@@ -1034,14 +1034,17 @@ def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
     """What stops a carve or a lightening before it starts, from its default check (#144 review: the card offered Carve
     on the bar stool while the Carve button refused it). The one test the Carve button, the Lighten button and the
     card's carve offer all read, so they can't disagree; the studies themselves refuse on the same ``already_fails``.
-    ``{"why": "already_fails" | "too_thin" | "unsupported", "carve": words, "lighten": words or ""}``, or None."""
+    ``{"why": "already_fails" | "too_thin" | "unsupported" | "unchecked", "carve": words, "lighten": words or ""}``, or
+    None. ``unchecked``: no strength check of this version (#144, on Theo's own stool, whose v7 has none): the card
+    offered Carve and the button was live until the carve's own resolution check refused the click."""
     fails = already_fails(store, part_id)        # carving only takes material away (#137 item 3)
     if fails:
         return {"why": "already_fails", "carve": f"{fails}, then carve",
                 "lighten": f"{fails[:1].upper()}{fails[1:]}, then lighten it"}
     rec = default_check(store, part_id)
-    if rec is None:
-        return None
+    if rec is None:                              # what it holds, how thin its walls, how long a carve: all from it
+        return {"why": "unchecked", "carve": "Check it holds first: a carve starts from its strength check",
+                "lighten": ""}               # a lightening's holes are checked as it goes, by hand checks too
     if rec.get("too_thin"):                      # none a study may make can see its walls (#101, #136)
         said = rec.get("thin_said")
         return {"why": "too_thin",

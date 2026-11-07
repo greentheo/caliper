@@ -66,15 +66,19 @@ def _carve_offer(store: DesignStore, state: dict, p: dict, mk: dict) -> Optional
     if not any(m.startswith(("print.", "weight.")) for m in aims):
         return None
     stop = L.blocked(store, p["id"])
-    if stop and stop["carve"]:
+    if stop and stop["why"] != "unchecked":
         return None
     try:
         name = next((it.get("name") for it in C.declared(store, p["id"]).get("construction") or []
                      if isinstance(it, dict) and it.get("kind") == "printed"), None)
     except Exception:  # noqa: BLE001 — the offer is said with the part's own name
         name = None
-    return _line(f"Carve the {name or p['id'].replace('_', ' ')} where it isn't working, to print less of it: try "
-                 f"Carve it.", "info", action="carve")
+    what = name or p["id"].replace("_", " ")
+    if stop:                                     # no check of this version: the button says the same (#144)
+        return _line(f"Check it holds first, then carve the {what} where it isn't working, to print less of it.",
+                     "info", action="load")
+    return _line(f"Carve the {what} where it isn't working, to print less of it: try Carve it.", "info",
+                 action="carve")
 
 
 def _strays(meta: dict, inches: bool) -> str:
@@ -558,8 +562,8 @@ def _num(metric: str, v: float, unit: str = "") -> str:
     unit = METRICS.get(metric, ("", unit, ""))[1] or unit
     if unit == "$":
         return f"${v:,.0f}"
-    if unit == "×":
-        return f"{v:g}x" if v < 10 else "more than 10x"
+    if unit == "×":                                         # as the part card says it (#144: "0.5 times over")
+        return _times(v)
     if v == 1 and unit.endswith("s") and unit not in ("lbs",):
         unit = unit[:-1]                                    # 1 sheet, 1 piece
     return f"{v:g} {unit}".strip()
@@ -598,8 +602,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
             # the newest run, with its age, over an older card's number: never greener than it (#138 item 1)
             verdict = verdicts.goal(verdicts.compare(last["safety"], c.get("op", ">="), c["limit"]), stale=True)
             out.append(_line(f"{'✗' if verdict['kind'] == 'fails' else '!'} {label}{assumed}: last checked on "
-                             f"v{last['version']}: {round(last['safety'], 1):g}x"
-                             + (f", needs {c['limit']:g}x" if verdict["kind"] == "fails" else "")
+                             f"v{last['version']}: {_times(last['safety'])}"
+                             + (f", needs {c['limit']:g}" if verdict["kind"] == "fails" else "")
                              + f" · v{last['now']} not checked yet.", verdict["status"], study="load",
                              model=rests_on_model(c["metric"])))
             continue

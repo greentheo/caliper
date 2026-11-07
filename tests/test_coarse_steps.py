@@ -199,7 +199,8 @@ def test_the_page_says_the_check_s_words_on_a_blocked_carve():
     said = "its 0.25 mm walls around z 16.1 in are too thin for the strength check to see. Thicken them first."
     check = {"version": 7, "seconds": 60, "spacing_mm": 4.6, "too_thin": True, "thin_said": said, "cases": []}
     got = load_study.blocked(_checked([check]), "stool")
-    assert got["why"] == "too_thin" and load_study.blocked(_checked([{**check, "version": 6}]), "stool") is None
+    assert got["why"] == "too_thin"
+    assert load_study.blocked(_checked([{**check, "version": 6}]), "stool")["why"] == "unchecked"     # an older one
     out = _run(_page(["carveBlocked"], extra=(
         f"out = [carveBlocked({{id: 'stool', version: 7, blocked: {json.dumps(got)}}}), "
         "carveBlocked({id: 'stool', version: 6, blocked: null})];")))

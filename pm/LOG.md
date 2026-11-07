@@ -35,6 +35,13 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   `short_name` runs only when a design is made, so Theo's `I want` (its slug, part id and files) stays as it is.
   Tests: test_wording (+8), test_stray_faces (+1); the page tests take the server's `blocked`. Three mutants (offer
   ignores `blocked`, `settled = planned`, the stray line in mm) each fail them.
+- **The gap, on Theo's own stool (no check of v7):** with no strength check of this version, `blocked` is
+  `unchecked`. The Carve button is off ("Check it holds first: a carve starts from its strength check") and the card
+  says "Check it holds first, then carve the cone skirt where it isn't working, to print less of it." (to *Will it
+  hold?*), where it said "try Carve it" and the click was refused by the carve's own resolution check. Lightening isn't
+  held for it (its holes are checked as it goes). The design card's strength goal reads as the part card does: "0.5
+  times over" (`_times`), not "0.53x", and "last checked on v4: 1.7 times over, needs 2". Pinned with an older-run-only
+  part and a part with no run; the mutant (no check = not blocked) fails 4.
 ### 2026-11-07 · CALI-35 (#3b) · A reviewed plan's parts are built one by one, in order
 - **Build it on a reviewed plan** (`build_plan.build`, from `firstrun`): each part to be made is authored in the plan's
   build order, mounted-on first, narrated ("Building the mast", "The mast: built (mast_height ✓, …)"). A part the

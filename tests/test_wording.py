@@ -224,7 +224,8 @@ THIN = {**HOLDS, "too_thin": True, "thin_said": "its 0.25 mm walls are too thin 
     # a finer run asked for, the latest, holding: the carve runs at the default voxels, whose check fails
     ([{**HOLDS, "spacing_mm": 2.3}, FAILS], "already_fails"),
     ([HOLDS], None),
-    ([{**FAILS, "version": 6}], None),                  # an older version's check isn't this one's
+    ([{**FAILS, "version": 6}], "unchecked"),           # an older version's check isn't this one's (Theo's v7)
+    ([], "unchecked"),
 ])
 def test_no_carve_is_offered_where_the_carve_button_refuses_it(monkeypatch, runs, why):
     """#144 review: on the bar stool, How do I make it? offered "Carve the cone skirt…" while the Carve button refused
@@ -244,10 +245,17 @@ def test_no_carve_is_offered_where_the_carve_button_refuses_it(monkeypatch, runs
     mk = {"printed": [{"material": "petg", "pieces": 3, "hours": 165}]}
     aim = {"goals": {"objectives": [{"metric": "print.hours", "direction": "min"}]}}
     offer = answers._carve_offer(store, aim, p, mk)
-    assert (offer is None) == (why is not None)
     button = _run(_page(["carveBlocked"], extra=f"out = carveBlocked({{id: 'stool', blocked: {json.dumps(got)}}});"))
     assert button == ((got or {}).get("carve") or "")                 # the button's reason: the same words, or none
-    assert bool(button) == (offer is None)                             # never both offered and refused
+    if why == "unchecked":                                             # both say check it first (#144, Theo's v7)
+        assert offer["text"] == ("Check it holds first, then carve the cone where it isn't working, to print less of "
+                                 "it.") and offer["action"] == "load"
+        assert button == "Check it holds first: a carve starts from its strength check"
+    else:
+        assert (offer is None) == (why is not None)
+        assert bool(button) == (offer is None)                         # never both offered and refused
+        if offer:
+            assert offer["action"] == "carve"
     if why == "already_fails":
         assert button == "it already fails (0.5 times over): make it hold first, then carve"
 
@@ -259,7 +267,7 @@ def test_the_design_state_carries_each_part_s_blocked(tmp_path):
 
     store = DesignStore.create("a printed tube", base=str(tmp_path / "designs"))
     store.write_part("tube", TUBE, intent="a printed tube")
-    assert design_api.design_state(store)["parts"][0]["blocked"] is None
+    assert design_api.design_state(store)["parts"][0]["blocked"]["why"] == "unchecked"     # no check yet
     _failed_check(store, "tube")
     got = design_api.design_state(store)["parts"][0]["blocked"]
     assert got["why"] == "already_fails" and got["carve"].startswith("its check says it fails (0.5 times over")
