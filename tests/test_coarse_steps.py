@@ -196,6 +196,9 @@ def test_a_coarse_fail_stays_a_fail():
     coarse = {"resolved": False, "too_thin": True}
     step = {"index": 1, "holds": False, "safety": 0.4, "whole": 0.4, "whole_holds": False, "saved_g": 100}
     assert verdicts.carve_step(step, run=coarse)["kind"] == "fails"
+    # the whole part holding there: only the printed part's own fail keeps it a fail (the review's mutant hid behind
+    # whole_holds: False)
+    assert verdicts.carve_step({**step, "whole": 2.5, "whole_holds": True}, run=coarse)["kind"] == "fails"
     assert verdicts.lighten_step({"index": 1, "holds": False, "safety": 0.4, "saved_lb": 1}, run=coarse)["kind"] == "fails"
 
 
@@ -219,6 +222,20 @@ def test_a_refusal_reads_without_the_exception_s_name():
     out = _run(_page([], consts=["plainly"], extra=(
         "out = [plainly(\"ValueError: Can't carve it by strength: its walls…\"), plainly('the part is busy')];")))
     assert out == ["Can't carve it by strength: its walls…", "the part is busy"]
+
+
+def test_a_refused_carve_on_the_page_reads_without_the_exception_s_name():
+    """The page's own refusal (runCarve's catch) goes through plainly(), not e.message as it came."""
+    from .test_carve_click import _page, _run
+
+    out = _run(_page(["runCarve"], consts=["esc", "plainly"], extra=(
+        "const els = {carveProgress: {innerHTML: ''}}; function $(id) { return els[id]; }\n"
+        "const S = {slug: 'd', carveJob: {}}; function paintCarve() {} function loadRuns() { return []; }\n"
+        "async function refresh() {} async function followCarve() {}\n"
+        "async function api() { throw new Error(\"ValueError: Can't carve it by strength: its walls…\"); }\n"
+        "await runCarve({id: 'a'}); out = els.carveProgress.innerHTML;")))
+    assert "⚠ Can&#39;t carve it" in out or "⚠ Can't carve it by strength: its walls…" in out
+    assert "ValueError" not in out
 
 
 def test_lighten_on_a_coarse_run_says_not_resolved_not_nothing_holds():

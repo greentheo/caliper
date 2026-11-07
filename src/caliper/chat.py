@@ -980,7 +980,7 @@ def plan_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = 
     P.save(store, after, "review")
     gone = P.dropped_line(after)
     return TurnResult("plan", "Changed the plan: " + "; ".join(said) + ".\n\n" + P.headline(after, store.design.name)
-                      + (f" ({gone[0].upper() + gone[1:]}.)" if gone else ""), events=events)
+                      + (f" ({gone[0].upper() + gone[1:]}.)" if gone else "") + P.said_aside(after), events=events)
 
 
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
