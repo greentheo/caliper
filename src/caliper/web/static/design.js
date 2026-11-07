@@ -1311,7 +1311,7 @@ function historyItem(h) {
       : h.action === 'restore' ? `rolled back to v${h.restored_from}` : h.action;
     return `<li class="hist"><span class="v">v${h.version}</span>${esc(what)}
       ${h.feedback && h.action !== 'author' ? `<div>“${esc(h.feedback)}”</div>` : ''}
-      ${h.result ? `<span class="badge ${h.result === 'all_pass' ? 'ok' : 'bad'}">${h.result === 'all_pass' ? 'passed' : 'failing'}</span>` : ''}</li>`;
+      ${h.result ? `<span class="badge ${h.result === 'all_pass' ? 'ok' : h.result === 'waiting' ? 'warn' : 'bad'}">${h.result === 'all_pass' ? 'passed' : h.result === 'waiting' ? 'not all checked' : 'failing'}</span>` : ''}</li>`;
   }
   if (h.kind === 'assertion') {
     return `<li class="hist">${h.action === 'promoted' ? '🔒 locked in' : 'declined'} <code>${esc(h.expr || h.id)}</code></li>`;

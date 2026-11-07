@@ -406,7 +406,7 @@ class DesignStore:
             **({"feedback": feedback} if feedback else {}),
             **({"intent": intent} if intent else {}),
             **({"measured": measured} if measured else {}),
-            **({"result": ("all_pass" if report.get("all_pass") else "fail")} if report else {}),
+            **(_result(report) if report else {}),
             **(extra or {}),
         })
         return version
@@ -445,7 +445,7 @@ class DesignStore:
         self.append_history(part_id, {
             "kind": "revision", "action": action, "version": version, "geometry": "mesh",
             **({"feedback": feedback} if feedback else {}),
-            **({"result": ("all_pass" if report.get("all_pass") else "fail")} if report else {}),
+            **(_result(report) if report else {}),
             **(extra or {}),
         })
         return version
@@ -641,6 +641,8 @@ class DesignStore:
             lines.append("\nDESIGN RULES IN FORCE (locked in by the human — do not violate):")
             for a in relevant:
                 lines.append(f"  - {a.id}: {a.expr}")
+        if self.design.plan:
+            lines += self._plan_context(part_id)
         if part_id:
             spec = self.read_spec(part_id)
             if spec is not None and spec.assertions:
@@ -654,6 +656,49 @@ class DesignStore:
                     lines.append(f"  - \"{h['feedback']}\" -> v{h.get('version', '?')} "
                                  f"({h.get('result', 'unknown')})")
         return "\n".join(lines)
+
+    def _plan_context(self, part_id: Optional[str]) -> list[str]:
+        """A planned design's shared numbers, the parts already built where they are, and the checks between
+        parts (CALI-35, #3b): a part's designer builds against them, not from their names alone."""
+        from .measure import bounding_box
+        from .plan import SkeletonValue, mm
+
+        out = []
+        if self.design.skeleton:
+            out.append("\nSKELETON (the numbers the parts share, in mm for lengths; read them, never restate them):")
+            for raw in self.design.skeleton:
+                s = SkeletonValue.model_validate(raw)
+                v = mm(s)
+                said = f"{s.value:g} {s.unit}" + (f": {s.why}" if s.why else "")
+                out.append(f"  - {s.name} = {round(v, 1):g} mm ({said})" if v is not None
+                           else f"  - {s.name} = {s.value:g} {s.unit}" + (f" ({s.why})" if s.why else ""))
+        built = [p for p in self.design.parts if p.version and p.id != part_id]
+        if built:
+            out.append("\nALREADY BUILT (world coordinates, mm; build against them, where they are):")
+            for p in built:
+                try:
+                    b = bounding_box(self.part_geometry(p.id))
+                except Exception as e:  # noqa: BLE001 — said, not hidden: the designer knows it's there
+                    out.append(f"  - {p.id}: built, but it won't load ({type(e).__name__})")
+                    continue
+                r = lambda v: f"{round(v, 1):g}"  # noqa: E731
+                out.append(f"  - {p.id}: x {r(b.min_x)} to {r(b.max_x)}, y {r(b.min_y)} to {r(b.max_y)}, "
+                           f"z {r(b.min_z)} to {r(b.max_z)}")
+        rules = (self.design.plan or {}).get("rules") or []
+        if rules:
+            out.append("\nTHE PLAN'S CHECKS BETWEEN PARTS (measured after you build it):")
+            for r in rules:
+                out.append(f"  - {r['id']}: {r['expr']}" + ("" if r.get("source", "assumed") != "assumed"
+                                                            else "  [assumed: shown, not enforced]"))
+        return out
+
+
+
+def _result(report: dict) -> dict:
+    """A revision's result for its history line (#103 review): ``all_pass`` only when nothing waited, ``waiting``
+    when a check couldn't run yet, else ``fail``; with :meth:`Report.said`'s words."""
+    result = ("fail" if not report.get("all_pass") else "waiting" if report.get("waiting") else "all_pass")
+    return {"result": result, **({"said": report["said"]} if report.get("said") else {})}
 
 
 def _invalidate_build_cache(script_path: str) -> None:

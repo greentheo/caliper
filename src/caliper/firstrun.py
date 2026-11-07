@@ -71,7 +71,7 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
         steps["goals"] = f"failed: {e}"
         emit("error", f"couldn't write down what it has to do: {e}")
 
-    held = _plan(store, steps, emit, use_llm=use_llm, client=client)
+    held = _plan(store, steps, emit, use_llm=use_llm, client=client, author=author)
     if held is not None:                       # a plan of several parts: the person reviews it first (CALI-35)
         return held
 
@@ -150,23 +150,16 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
     return {"part": pid, "ok": bool(res.ok), "version": res.version, "steps": steps, "reply": reply}
 
 
-#: Building a reviewed plan's parts one by one, in order, is #3b's: until then it says so, never a silent no-op.
-NEXT = "The plan's saved: {n} parts. Building them one by one, in order, comes next (#3b)."
-
-
-def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, client) -> Optional[dict]:
+def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, client, author=None) -> Optional[dict]:
     """CALI-35 (#3a): plan before building. Returns the first run's result when it stops for the plan (a plan of
-    several parts, to review; or one already reviewed, whose building is #3b), else None and it builds as one part."""
+    several parts, to review), or when it builds a reviewed plan's parts in order (#3b); else None and it builds as
+    one part."""
+    from . import build_plan
     from . import plan as P
 
     saved = P.load(store)
-    if saved is not None and len(P.buildable(saved)) > 1:
-        store.design.plan = {**store.design.plan, "status": "saved"}
-        store.save()
-        reply = NEXT.format(n=len(saved.parts))
-        store.append_log({"kind": "reply", "action": "plan", "ok": True, "reply": reply, "firstrun": True})
-        steps["plan"] = "saved; building in order is #3b"
-        return {"part": None, "ok": True, "steps": steps, "reply": reply, "plan": "saved"}
+    if saved is not None and len(P.buildable(saved)) > 1:      # reviewed: Build it builds its parts, in order (#3b)
+        return build_plan.build(store, steps, emit, author=author, client=client, use_llm=use_llm)
     if not _llm(use_llm, client):
         steps["plan"] = "planning it in several parts needs Claude: I built it as one"
         return None
