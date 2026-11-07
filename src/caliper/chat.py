@@ -845,6 +845,25 @@ def _volume(store: DesignStore, part_id: str):
         return None
 
 
+#: The ends of a PARAMS name, in words: foot_fillet_r is the foot fillet radius (#119 review).
+_ENDS = {"r": "radius", "t": "thickness", "w": "width", "h": "height", "d": "depth", "dia": "diameter",
+         "l": "length", "len": "length", "x": "x", "y": "y", "z": "z"}
+#: Names that count things, said without a unit.
+_COUNT = ("n", "num", "count", "rows", "cols", "columns", "holes", "slats", "steps", "sides", "segments", "teeth",
+          "legs", "panels", "spokes", "stations", "openings", "pieces")
+
+
+def _plain(key: str) -> str:
+    """A PARAMS name as words: ``foot_fillet_r`` → "foot fillet radius"."""
+    bits = key.split("_")
+    return " ".join(_ENDS.get(b, b) if i == len(bits) - 1 else b for i, b in enumerate(bits))
+
+
+def _counts(key: str) -> bool:
+    bits = key.lower().split("_")
+    return bits[0] in _COUNT or bits[-1] in _COUNT
+
+
 def _asked(store: DesignStore, asked: str, prior: str, new: str, volumes) -> list[str]:
     """What was asked for, what changed, what the build shows, and what nothing measures (CALI-107, rule 6): a
     reply never lets "the checks pass" stand for "what you asked for happened"."""
@@ -852,16 +871,16 @@ def _asked(store: DesignStore, asked: str, prior: str, new: str, volumes) -> lis
 
     inches = store.design.display_units == "in"
 
-    def said(v):
+    def said(key, v):
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             return repr(v) if v is not None else "none"
-        if isinstance(v, int):                       # a count
-            return f"{v}"
-        return f"{v:g} mm" + (f" ({answers._wall(v, True)})" if inches and v > 0 else "")
+        if _counts(key):                             # a count: rows, holes, slats…
+            return f"{v:g}"
+        return f"{v:g} mm" + (f" ({answers._wall(v, True)})" if inches and v > 0 else "")   # a length, always its unit
 
     out = [f"Asked for: {asked.strip()}"]
     moved = fallbacks.changed(prior or "", new or "")
-    out.append("Changed: " + (", ".join(f"{k} {said(a)} → {said(b)}" for k, a, b in moved) if moved
+    out.append("Changed: " + (", ".join(f"{_plain(k)} {said(k, a)} → {said(k, b)}" for k, a, b in moved) if moved
                               else "no number in its PARAMS; the change is in how it's built"))
     was, now = volumes or (None, None)
     if was is not None and now is not None:

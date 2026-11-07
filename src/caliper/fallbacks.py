@@ -37,9 +37,8 @@ def _calls_cad(nodes) -> bool:
 
 def _swallows(handler: ast.ExceptHandler, try_names: set) -> Optional[str]:
     """What an except handler does that hides a failure, or None."""
-    if handler.type is not None and not (isinstance(handler.type, ast.Name) and handler.type.id in
-                                         ("Exception", "BaseException", "ValueError", "RuntimeError")):
-        return None
+    # any handler type or tuple counts around a CAD call: Exception, (ValueError, RuntimeError), OCP's
+    # Standard_Failure (#119 review)
     body = [b for b in handler.body if not (isinstance(b, ast.Expr) and isinstance(b.value, ast.Constant))]
     if all(isinstance(b, (ast.Pass, ast.Continue)) for b in body):
         return "passes"
@@ -49,7 +48,17 @@ def _swallows(handler: ast.ExceptHandler, try_names: set) -> Optional[str]:
         return f"returns {last.value.id if isinstance(last.value, ast.Name) else 'nothing'} unchanged"
     if isinstance(last, ast.Return) and isinstance(last.value, ast.Name):
         return f"returns {last.value.id} instead"
+    root = _root(last.value) if isinstance(last, ast.Return) else None
+    if root in try_names:                          # return s.translate(...): the input moved, without the feature
+        return f"returns {root} without it"
     return None
+
+
+def _root(node) -> Optional[str]:
+    """The name a call or attribute chain starts from: ``s`` in ``s.translate((0, 0, 1)).rotate(...)``."""
+    while isinstance(node, (ast.Call, ast.Attribute)):
+        node = node.func if isinstance(node, ast.Call) else node.value
+    return node.id if isinstance(node, ast.Name) else None
 
 
 def _param(node) -> Optional[str]:
@@ -103,18 +112,26 @@ def find(script: str) -> list[str]:
                                f"a limit without saying so: if {which} doesn't fit, raise and say why")
             if (isinstance(node, ast.If) and node.body and isinstance(node.body[0], ast.Return)
                     and isinstance(node.body[0].value, ast.Name) and node.body[0].value.id in args
-                    and _size_test(node.test)):
+                    and _size_test(node.test, requested)):
                 out.append(f"line {node.lineno}: in {fn.name}(), returns {node.body[0].value.id} unchanged when "
                            f"{ast.unparse(node.test)}: the feature is skipped without a word; if it can't be made, "
                            f"raise and say why")
     return sorted(set(out), key=lambda s: int(s.split(":")[0].split()[1]))
 
 
-def _size_test(test) -> bool:
-    """A comparison against a size (``actual_open_w < 6.0``), not against nothing (``r <= 0``: not asked for)."""
-    return isinstance(test, ast.Compare) and any(
-        isinstance(c, ast.Constant) and isinstance(c.value, (int, float)) and not isinstance(c.value, bool)
-        and c.value != 0 for c in [test.left, *test.comparators])
+def _size_test(test, requested=lambda n: None) -> bool:
+    """A comparison against a size (``actual_open_w < 6.0``), not against nothing: ``r <= 0`` and, for a requested
+    parameter or its copy, ``p["holes"] < 1`` are "none asked for" (#119 review)."""
+    if not isinstance(test, ast.Compare):
+        return False
+    sides = [test.left, *test.comparators]
+    nums = [c.value for c in sides if isinstance(c, ast.Constant) and isinstance(c.value, (int, float))
+            and not isinstance(c.value, bool)]
+    if not nums:
+        return False
+    if any(requested(c) for c in sides) and all(v in (0, 1) for v in nums):
+        return False
+    return any(v != 0 for v in nums)
 
 
 def result(script: str):

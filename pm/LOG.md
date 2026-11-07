@@ -17,6 +17,13 @@ Format: `### 2026-11-06 · CALI-107 (#107) · A requested feature builds or the 
   "fillet_r 6.35 mm (1/4 in) → 12.7 mm (1/2 in)"), and the volume before → after. If the shape didn't change, it
   says what you asked for may not have happened. It says what isn't measured. "The part's own checks pass" replaces
   "Every check on this part passes", which read as covering the request.
+- **From #119's review:**
+  - a requested parameter (or its copy) compared with 0 or 1 is "none asked for", not flagged (`if p["holes"] < 1:
+    return shape`); a computed size still is;
+  - any handler type or tuple around a CAD call counts (`(ValueError, RuntimeError)`, OCP's `Standard_Failure`), and
+    so does `return s.translate(...)`, the input moved without the feature;
+  - a try/except around anything but CAD isn't flagged;
+  - the reply says a parameter's plain name ("foot fillet radius") and every length with its unit, whole numbers too.
 - **A failing check's reason now reaches the chat** (`_fail_lines` adds its detail), so the line is named there too.
 - Tests: `tests/test_fallbacks.py`.
 Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass

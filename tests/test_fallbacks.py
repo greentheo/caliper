@@ -149,4 +149,70 @@ def test_in_inches_a_size_is_said_in_both(tmp_path):
     bigger = fillet.replace('"fillet_r": 6.35', '"fillet_r": 12.7')
     got = chat.refine_part(store, "tube", "make the fillet 1/2 in", author=lambda *a: bigger, use_llm=False,
                            promote_feedback=False)
-    assert "Changed: fillet_r 6.35 mm (1/4 in) → 12.7 mm (1/2 in)" in got.reply, got.reply
+    assert "Changed: fillet radius 6.35 mm (1/4 in) → 12.7 mm (1/2 in)" in got.reply, got.reply      # its plain name
+
+
+# --- #119 review ---------------------------------------------------------------------------------------------------
+def test_a_requested_count_compared_with_none_isn_t_a_size_guard():
+    """The blocker: 'if p["holes"] < 1: return shape' is "none asked for", not a feature skipped."""
+    ok = '''PARAMS = {"holes": 0}
+
+def _holes(shape, p):
+    if p["holes"] < 1:
+        return shape
+    n = p["holes"]
+    if n <= 0:
+        return shape
+    return shape.faces(">Z").hole(5)
+'''
+    assert fallbacks.find(ok) == []
+    computed = '''PARAMS = {"w": 20}
+
+def _cut(shape, p):
+    w = p["w"] - 18
+    if w < 1:
+        return shape
+    return shape.cut(shape)
+'''
+    assert [f.split(":")[0] for f in fallbacks.find(computed)] == ["line 5"]      # a computed size still is
+
+
+@pytest.mark.parametrize("handler,body", [
+    ("except (ValueError, RuntimeError):", "pass"),
+    ("except Standard_Failure:", "pass"),
+    ("except Exception:", "return s.translate((0, 0, 1))"),
+])
+def test_any_handler_around_a_cad_call_counts(handler, body):
+    src = (f"def build(params):\n    s = cq.Workplane().box(1, 1, 1)\n    try:\n        s = s.fillet(1)\n"
+           f"    {handler}\n        {body}\n    return s\n")
+    (got,) = fallbacks.find(src)
+    assert got.startswith("line 5: in build(), an except that ") and "hides a feature" in got, got
+
+
+def test_a_try_around_anything_but_cad_isn_t_flagged():
+    """The surviving mutant: a non-CAD try/except that passes stays unflagged."""
+    src = '''PARAMS = {"w": "20"}
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    w = 20.0
+    try:
+        w = float(p["w"])
+    except ValueError:
+        pass
+    return cq.Workplane().box(w, 1, 1)
+'''
+    assert fallbacks.find(src) == []
+
+
+def test_the_reply_names_a_param_plainly_and_a_length_always_has_its_unit():
+    assert chat._plain("foot_fillet_r") == "foot fillet radius" and chat._plain("wall_t") == "wall thickness"
+    assert chat._counts("rows") and chat._counts("n_holes") and not chat._counts("wall")
+
+
+def test_a_length_written_as_a_whole_number_still_says_mm(tmp_path):
+    """#119 review: never "4 → 6"."""
+    store = _store(tmp_path, TUBE.replace('"wall": 4.0', '"wall": 4'))
+    got = chat.refine_part(store, "tube", "make the wall 6 mm", author=lambda *a: TUBE.replace('"wall": 4.0', '"wall": 6'),
+                           use_llm=False, promote_feedback=False)
+    assert "Changed: wall 4 mm → 6 mm" in got.reply, got.reply
