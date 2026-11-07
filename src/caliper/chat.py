@@ -988,7 +988,8 @@ def skeleton_edit(store: DesignStore, message: str, *, client=None, use_llm: boo
     got = S.drive(store, [s.model_dump() for s in after.skeleton], said=message)
     rep = got.get("report")
     # it worked if nothing it rebuilt or measured fails: a check still waiting on an unbuilt part is said, not a fail
-    ok = not got["failed"] and (rep is None or verdicts.report(rep.to_dict())["kind"] != "fails")
+    ok = (not got.get("failed") and not got.get("refused") and not got.get("unmoved")
+          and (rep is None or verdicts.report(rep.to_dict())["kind"] != "fails"))
     return TurnResult("skeleton", S.said(got), ok=ok, events=events)
 
 

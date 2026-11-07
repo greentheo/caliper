@@ -168,22 +168,10 @@ def _resolve_source(source: str, base_dir: str) -> str:
     return path
 
 
-_PART_CACHE: dict = {}   # (abspath, mtime, skeleton numbers it reads) -> built Geometry in LOCAL frame (B-rep kept)
+_PART_CACHE: dict = {}   # (abspath, mtime) -> built Geometry in LOCAL frame (B-rep kept)
 
 
-def skeleton_params(script: str, values: Optional[dict]) -> dict:
-    """The skeleton's numbers a part's script reads (CALI-35c, #3's item 4): each of its ``PARAMS`` keys the skeleton
-    names, at the skeleton's value. So "make the mast 10 ft" is one number, and every part that reads it rebuilds."""
-    if not values:
-        return {}
-    from .aero import read_params
-
-    own = read_params(script) or {}
-    return {k: float(values[k]) for k in own
-            if isinstance(values.get(k), (int, float)) and not isinstance(values.get(k), bool)}
-
-
-def _build_py_local(path: str, values: Optional[dict] = None) -> Geometry:
+def _build_py_local(path: str) -> Geometry:
     """Build a CadQuery ``build(params)`` script in its LOCAL frame (cached by path + mtime).
 
     Runs in the sandbox (same path as the LLM author), so the part keeps its **B-rep** — exact hole/
@@ -192,18 +180,17 @@ def _build_py_local(path: str, values: Optional[dict] = None) -> Geometry:
     """
     from . import sandbox
 
-    with open(path) as f:
-        script = f.read()
-    over = skeleton_params(script, values)          # the skeleton drives the part (CALI-35c)
-    key = (os.path.abspath(path), os.path.getmtime(path), tuple(sorted(over.items())))
+    key = (os.path.abspath(path), os.path.getmtime(path))
     cached = _PART_CACHE.get(key)
     if cached is not None:
         return cached
+    with open(path) as f:
+        script = f.read()
     carved = _carved(path, script)
     if carved is not None:                         # a printed part carved by the strength study (CALI-82)
         _PART_CACHE[key] = carved
         return carved
-    res = sandbox.run_script(script, over)
+    res = sandbox.run_script(script, {})
     if not res.ok:
         # surface the traceback's LAST line — that's the actual exception; the head is boilerplate
         # that used to crowd it out of truncated error messages (CALI-27).
@@ -234,13 +221,13 @@ def _carved(path: str, script: str) -> Optional[Geometry]:
     raise ValueError(f"its carved shape {m.group(1)!r} is missing: roll it back, or carve it again")
 
 
-def _build_py_part(path: str, position, rotation, values: Optional[dict] = None) -> Geometry:
+def _build_py_part(path: str, position, rotation) -> Geometry:
     """Build a ``.py`` part (CALI-23) and pose it into the assembly frame.
 
     The pose is baked into the mesh; the solid stays in its local frame with the pose recorded on the
     Geometry, so feature probes (holes) transform their results to the assembly frame.
     """
-    base = _build_py_local(path, values)
+    base = _build_py_local(path)
     T = measure.pose_matrix(position, rotation)
     if np.allclose(T, np.eye(4)):
         return Geometry(mesh=base.mesh, solid=base.solid, pose=T)
@@ -249,7 +236,7 @@ def _build_py_part(path: str, position, rotation, values: Optional[dict] = None)
     return Geometry(mesh=m, solid=base.solid, pose=T)
 
 
-def load_parts(asm: Assembly, base_dir: str = ".", values: Optional[dict] = None) -> dict[str, Geometry]:
+def load_parts(asm: Assembly, base_dir: str = ".") -> dict[str, Geometry]:
     """Load and pose every part's geometry → ``{part_id: Geometry}``.
 
     Each part's ``position``/``rotation`` is baked into its mesh at load, so the fit probes measure the
@@ -260,14 +247,13 @@ def load_parts(asm: Assembly, base_dir: str = ".", values: Optional[dict] = None
     for p in asm.parts:
         path = _resolve_source(p.source, base_dir)
         if path.endswith(".py"):
-            parts[p.id] = _build_py_part(path, p.position, p.rotation, values)
+            parts[p.id] = _build_py_part(path, p.position, p.rotation)
         else:
             parts[p.id] = Geometry.from_stl_posed(path, p.position, p.rotation)
     return parts
 
 
-def load_parts_tolerant(asm: Assembly, base_dir: str = ".", skip=(),
-                        values: Optional[dict] = None) -> tuple[dict[str, Geometry], dict[str, str]]:
+def load_parts_tolerant(asm: Assembly, base_dir: str = ".", skip=()) -> tuple[dict[str, Geometry], dict[str, str]]:
     """Like :func:`load_parts`, but one broken part doesn't sink the assembly (CALI-27).
 
     Returns ``(loaded, errors)`` — every part that loads, plus ``{part_id: message}`` for the ones that
@@ -282,7 +268,7 @@ def load_parts_tolerant(asm: Assembly, base_dir: str = ".", skip=(),
         try:
             path = _resolve_source(p.source, base_dir)
             if path.endswith(".py"):
-                loaded[p.id] = _build_py_part(path, p.position, p.rotation, values)
+                loaded[p.id] = _build_py_part(path, p.position, p.rotation)
             else:
                 loaded[p.id] = Geometry.from_stl_posed(path, p.position, p.rotation)
         except Exception as e:  # noqa: BLE001 — collect, don't sink the assembly
@@ -339,7 +325,7 @@ def evaluate_assembly(
 
     from .evaluate import AssertionResult
 
-    parts = parts if parts is not None else load_parts(asm, base_dir, values=values)
+    parts = parts if parts is not None else load_parts(asm, base_dir)
     ctx = build_context(asm, parts)
     ctx.update(values or {})               # the skeleton's numbers, by name (CALI-35)
     out = []
