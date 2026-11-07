@@ -3,6 +3,23 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-124 (#145) · The questions read the shop, and an answer about the shop goes to the shop
+From Theo's bar stool run: the questions asked for the printer's bed size, which is the shop's, and his answer went
+into the design's requirements, where *How do I make it?* couldn't use it.
+- **The questions read the shop first** (`clarify.draft_questions(…, shop=)`): Claude is told the shop ("never ask
+  about it"), and any question about a machine the shop knows states it instead (`with_shop`): "Your printer: 256 ×
+  256 × 256 mm build volume, PLA, PETG. If this one's to be made on something else, say what." A question about the
+  shop is tagged (`about: shop:printer`, from its words where Claude doesn't tag it).
+- **A shop answer goes to the shop, on a yes** (`shop_offer`, `offers`, `take_offer`): it's never a design
+  requirement; an answer the shop can take ("256 x 256 x 256 mm, PETG", "10 in", "4 x 8 ft", "a jigsaw and a drill")
+  is offered under *Requirements*: "Add a 256 × 256 × 256 mm printer (PETG) to your shop?" with Add it / No. A yes
+  writes `shop.yaml` through `shop.write` (the shop's own path; the same kind of machine is replaced); a no leaves the
+  shop alone.
+- **The design's requirements keep only design facts.** An old design's shop fact is left where it is; *How do I make
+  it?* already reads the shop (`making.plan` → `shop.read()`), never the requirements.
+- Tests: tests/test_shop_questions.py (8, stubbed: a fake asker or client, the shop a file in a temp folder; 7 fail
+  without this).
+
 ### 2026-11-07 · CALI-122 (#137) · The bar stool's pre-flight: its broken rule said, where it fails, no carve on a fail
 From the reviewer's pre-flight of Theo's bar stool v7 (a copy; nothing of Theo's touched), with the foreman's
 correction: the run's "seat top" was a mislabel.

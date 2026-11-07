@@ -566,6 +566,14 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · The questions read your shop (CALI-124 #145)
+1. With a printer in your shop (Shop → printer, 256 mm): start a design that's printed. No question asks your bed
+   size; one says "Your printer: 256 × 256 × 256 mm build volume, PLA, PETG. If this one's to be made on something
+   else, say what."
+2. With no shop yet: answer the bed-size question "256 x 256 x 256 mm, PETG". Under *Requirements*: "Add a 256 × 256 ×
+   256 mm printer (PETG) to your shop?" — **Add it** writes it to your shop (Shop shows it); **No** leaves it.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_shop_questions.py`.
+
 ### 2026-11-07 · Theo's bar stool, as its cards should read it (CALI-122 #137)
 1. Open the bar stool (a copy) and press **Check it holds** on v7. *Will it work?* leads with "✗ Breaks its rule
    shell_wall_thickness: its walls are 0.25 mm around z 16.1 in; it says at least 2.85 mm", and *Rules on this part*
