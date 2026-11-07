@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Optional
 
 from . import construction as C
+from . import verdicts
 from .design import DesignStore
 
 IN = 25.4
@@ -66,11 +67,36 @@ def _wall(mm: float, inches: bool) -> str:
     return (f"{mm:.1f}".removesuffix(".0") if mm < 10 else f"{mm:.0f}") + " mm"
 
 
+def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool, inches: bool) -> dict:
+    """The part card's line for one load case: its words from its one verdict (CALI-112)."""
+    from . import load_study as L
+
+    older = " (Checked on an older version: check again.)" if stale else ""
+    v = verdicts.case(run, c, filled=filled)
+    if v["kind"] == "untrusted":                     # ran on a block: no ✓ from it (CALI-96); this wins
+        return _line(untrusted(pid, filled), "warn", study="load")   # the number: the panel, badged
+    if v["kind"] in ("unresolved", "unchecked"):     # an FEA that can't see the wall is no ✓ (CALI-97)
+        return _line(coarse(run, inches) + older, "warn", study="load")
+    # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
+    rough = L.rough(run, c)
+    about = "about " if rough else ""
+    if v["kind"] == "holds":
+        text = f"Holds {c['name'].lower()}, {about}{_times(c['safety'])}."
+    elif v["kind"] == "fails":
+        text = f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs {run['min_safety']:g}."
+        if filled:                                   # a ✗ stays a ✗: the block failed, the part is weaker
+            text += " It ran on a filled-in shape, so the part as built is weaker still."
+        elif v.get("coarse"):                        # a ✗ stays a ✗, and says why it may be wrong (CALI-97)
+            text += " " + coarse(run, inches, holds=False)
+    else:                                            # any other kind: its word, never a ✓ (CALI-112)
+        text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {about}{_times(c['safety'])}."
+    return _line(text + older, "warn" if stale and v["status"] == "ok" else v["status"], study="load",
+                 **({"rough": L.ROUGH} if rough else {}))
+
+
 def _why_not(rel: dict) -> str:
     """Why a build package isn't ready, in its own words (CALI-96: not trusted; CALI-110: not resolved)."""
-    s = (rel.get("card") or {}).get("summary") or {}
-    return ("a check fails" if s.get("fail") or not s else "a check isn't trusted yet" if s.get("untrusted")
-            else "a strength check isn't resolved" if s.get("unresolved") else "a check isn't settled")
+    return verdicts.summary((rel.get("card") or {}).get("summary"))["why"] or "a check isn't settled"
 
 
 def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
@@ -167,29 +193,8 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
 
         filled = consistency.filled(store, pid)              # the check ran on a block, not the part (CALI-96)
         for c in run["cases"]:
-            if c.get("safety") is None:
-                continue
-            if filled and c.get("holds"):                   # ran on a block: no ✓ from it (CALI-96); this wins
-                work.append(_line(untrusted(pid, filled), "warn", study="load"))   # the number: the panel, badged
-                continue
-            if L.unresolved(run, c) and c.get("holds"):      # an FEA that can't see the wall is no ✓ (CALI-97)
-                work.append(_line(coarse(run, inches) + (" (Checked on an older version: check again.)" if stale else ""),
-                                  "warn", study="load"))
-                continue
-            # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
-            rough = L.rough(run, c)
-            about = "about " if rough else ""
-            if c.get("holds"):
-                text = f"Holds {c['name'].lower()}, {about}{_times(c['safety'])}."
-            else:
-                text = f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs {run['min_safety']:g}."
-                if filled:                                   # a ✗ stays a ✗: the block failed, the part is weaker
-                    text += " It ran on a filled-in shape, so the part as built is weaker still."
-                elif L.unresolved(run, c):                   # a ✗ stays a ✗, and says why it may be wrong (CALI-97)
-                    text += " " + coarse(run, inches, holds=False)
-            work.append(_line(text + (" (Checked on an older version: check again.)" if stale else ""),
-                              "warn" if stale else "ok" if c.get("holds") else "bad", study="load",
-                              **({"rough": L.ROUGH} if rough else {})))
+            if c.get("safety") is not None:
+                work.append(_case_line(pid, run, c, filled, stale, inches))
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
                        and h.get("action") == "failed" and h.get("version") == p["version"]), None)
@@ -211,7 +216,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     if frames:
         d = frames[0].get("drawn") or {}
         if d.get("safety") is not None:
-            ok = d["safety"] >= frames[0].get("min_safety", 0)
+            ok = verdicts.meets(d["safety"], frames[0].get("min_safety"))["counts_as_pass"]
             work.append(_line(f"The frame holds, {_times(d['safety'])}." if ok else
                               f"The frame is too weak as drawn: {_times(d['safety'])}, it needs "
                               f"{frames[0].get('min_safety')}.", "ok" if ok else "bad", study="frame"))
@@ -327,11 +332,11 @@ def measured(store: DesignStore, state: dict) -> dict:
     cases = [(r, c) for r in latest if r and r.get("version") == current.get(r["part"])
              for c in r.get("cases") or [] if c.get("safety") is not None]
     inches = (state.get("display_units") or "in") == "in"
-    off = [(r, c) for r, c in cases if L.unresolved(r, c)]
-    held = [r for r, c in off if c.get("holds")]
+    said = [(r, verdicts.case(r, c)) for r, c in cases]
+    held = [r for r, v in said if v["kind"] in ("unresolved", "unchecked")]
     if held:                                           # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
         out["strength.unresolved"] = coarse(held[0], inches)
-    failed = [r for r, c in off if not c.get("holds")]
+    failed = [r for r, v in said if v["kind"] == "fails" and v.get("coarse")]
     if failed:                                         # ...and a ✗ on one says the fail may be the model's
         out["strength.coarse_fail"] = coarse(failed[0], inches, holds=False)
     if any(L.rough(r, c) for r, c in cases):
@@ -419,26 +424,29 @@ def held_to(state: dict, now: dict) -> list[dict]:
             out.append(_line(f"{label}{assumed}: not checked yet. {how}.", "warn",
                              study="load" if c["metric"].startswith("strength") else None))
             continue
-        ok = v >= c["limit"] if c.get("op", ">=") == ">=" else v <= c["limit"]
+        met = v >= c["limit"] if c.get("op", ">=") == ">=" else v <= c["limit"]
         strength = c["metric"].startswith("strength")
         untrue = now.get("strength.filled") if strength else None
-        if ok and untrue:                              # a ✓ on a filled-in solid isn't one (CALI-96); it wins over
-            # "not resolved": the check ran on a block. The verdict first; which check it is follows (#96 item 5)
+        # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-97)
+        verdict = verdicts.goal(met, untrusted=untrue, unresolved=now.get("strength.unresolved") if strength else None,
+                                stale=late)
+        if verdict["kind"] == "untrusted":             # the verdict first; which check it is follows (#96 item 5)
             out.append(_line(f"{untrue} ({label[:1].lower() + label[1:]}{', assumed' if c.get('source') == 'assumed' else ''})", "warn",
                              study="load", model=rests_on_model(c["metric"])))
             continue
-        if ok and strength and now.get("strength.unresolved"):     # no ✓ on an FEA that can't see the wall (CALI-97)
+        if verdict["kind"] == "unresolved":            # no ✓ on an FEA that can't see the wall (CALI-97)
             out.append(_line(f"! {label}{assumed}: {now['strength.unresolved']}", "warn",
                              study="load", model=rests_on_model(c["metric"])))
             continue
         num = _num(c['metric'], v, units.get(c['metric'], ''))
         if strength and now.get("strength.rough"):
             num = "about " + num                       # the printed model's number, as the part card says (CALI-97)
-        why = (" It ran on a filled-in shape, so the part as built is weaker still." if not ok and untrue   # still ✗
-               else f" {now['strength.coarse_fail']}" if not ok and strength and now.get("strength.coarse_fail") else "")
-        out.append(_line(f"{'✓' if ok else '✗'} {label}{assumed}: {num}"
+        failed = verdict["kind"] == "fails"
+        why = (" It ran on a filled-in shape, so the part as built is weaker still." if failed and untrue   # still ✗
+               else f" {now['strength.coarse_fail']}" if failed and strength and now.get("strength.coarse_fail") else "")
+        out.append(_line(f"{'✗' if failed else '✓' if verdict['kind'] in ('holds', 'stale') else '!'} {label}{assumed}: {num}"
                          + (" (scored before the last change: score it again)." if late else "." + why),
-                         "warn" if late else "ok" if ok else "bad",
+                         "warn" if late else verdict["status"],
                          study="load" if c["metric"].startswith("strength") else None,
                          model=rests_on_model(c["metric"])))
     return out
@@ -487,7 +495,7 @@ def design(store: DesignStore, state: dict) -> list[dict]:
             f", {s['fail']} fail: " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")
             + (f"{',' if s['pass'] or fails else ':'} " + ", ".join(rest) if rest else "") + "."
             + (" (A part has changed since: score it again.)" if stale else ""),
-            "bad" if fails else "warn" if stale or rest or not s["pass"] else "ok"))
+            "bad" if fails else "warn" if stale or rest or not verdicts.summary(s)["counts_as_pass"] else "ok"))
     elif not work:
         work.append(_line("Nothing to hold it to yet: say what it must do.", "warn"))
 

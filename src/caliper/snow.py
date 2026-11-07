@@ -149,10 +149,10 @@ def search(store: DesignStore, part_id: str, options: dict, *, psf: float = 20.0
         cost = cost_and_waste(store, {part_id: r}, {})
         rows.append({"build": build, "mass_lb": r["mass_lb"], "cost_usd": cost["usd"], "safety": snow["safety"],
                      "governing": snow["governing"], "sag_in": round(snow["sag_mm"] / M.IN, 2),
-                     "holds": snow["safety"] >= min_safety, "elements": snow["elements"]})
+                     "holds": snow["safety"] >= min_safety, "elements": snow["elements"]})  # producer
         emit("progress", f"{i + 1}/{len(combos)}: {build} → {r['mass_lb']} lb, {snow['safety']}x",
              progress=(i + 1) / len(combos))
-    ok = [r for r in rows if r["holds"]]
+    ok = [r for r in rows if r["holds"]]  # producer
     best = min(ok, key=lambda r: (r["mass_lb"], r["cost_usd"])) if ok else max(rows, key=lambda r: r["safety"])
     cheapest = min(ok, key=lambda r: (r["cost_usd"], r["mass_lb"])) if ok else None
     # the trade-off: nothing else both lighter and cheaper

@@ -413,7 +413,7 @@ def _candidate(store: DesignStore, aid: str, expr: str, level: str, part: str, w
         return Draft(measurable=True, reason=f"that check doesn't measure cleanly: {v.error}",
                      rejected=[f"{expr} → {v.error}"])
     return Draft(proposal=Proposal(id=aid, expr=expr, level=level, part=part, why=why,
-                                   holds_now=v.holds, actual=v.actual, source=source,
+                                   holds_now=v.holds, actual=v.actual, source=source,  # producer
                                    conflicts=conflicts(store, expr, level, part)))
 
 

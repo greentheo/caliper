@@ -652,7 +652,7 @@ def gussets(store: DesignStore, part_id: str, *, thickness: float = 4.7625, plat
                          "note": getattr(st, "note", "") or "",
                          "outline": [[round(float(u), 2), round(float(v), 2)] for u, v in cut.outline],
                          "holes_uv": [[[round(float(u), 2), round(float(v), 2)] for u, v in h] for h in cut.holes]})
-        ok = [r for r in rows if r["safety"] >= min_safety]
+        ok = [r for r in rows if r["safety"] >= min_safety]  # search
         pick = min(ok, key=lambda r: r["mass_kg"]) if ok else max(rows, key=lambda r: r["safety"])
         pl = plate.placement
         record["joints"][name] = {

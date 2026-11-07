@@ -1316,7 +1316,7 @@ function historyItem(h) {
   if (h.kind === 'whittle') return `<li class="hist">studied in whittle (${esc(h.study)}, ${h.stations} stations)</li>`;
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
-  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${h.unresolved && h.holds ? 'not resolved' : h.holds ? 'holds' : 'doesn\'t hold'}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
   if (h.kind === 'patterns' && h.action === 'made') return `<li class="hist">patterns for hand tools (${h.pieces} pieces)</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
@@ -2053,12 +2053,15 @@ const partOf = (pid) => (S.design && S.design.parts.find((x) => x.id === pid)) |
 // 'unresolved' when a finer run can see them, 'unchecked' when none a study may make can); its badge says so, and
 // no green "holds" sits under the card's warn. A ✗ stays a ✗.
 const coarseWord = (c) => (c.unresolved === 'unchecked' ? 'not checked' : 'not resolved');
-const caseBadge = (c) => (c.unresolved && c.holds ? `<span class="badge warn">${coarseWord(c)}</span>`
-  : c.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>');
-const runCoarse = (run) => (run.holds ? (run.cases || []).find((c) => c.unresolved && c.holds) : null);
-const runBadge = (run) => (runCoarse(run) ? `<span class="badge warn">${coarseWord(runCoarse(run))}</span>`
-  : run.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>');
-const runWord = (run) => (runCoarse(run) ? coarseWord(runCoarse(run)) : run.holds ? 'holds' : 'doesn\'t hold');
+// CALI-112: one verdict, the server's (verdicts.py), on every run, case and history line. The page never works one
+// out: its badge, word and colour are the verdict's, so a new kind can't be missed here.
+const verdictTone = (v) => (v && v.status === 'ok' ? 'ok' : v && v.status === 'bad' ? 'bad' : 'warn');
+const verdictBadge = (v) => `<span class="badge ${verdictTone(v)}">${esc(v ? v.word : 'not checked yet')}</span>`;
+// a verdict with a number a person may build on: it holds, or it fails
+const settled = (v) => !!v && (v.kind === 'holds' || v.kind === 'fails');
+const caseBadge = (c) => verdictBadge(c.verdict);
+const runBadge = (run) => verdictBadge(run.verdict);
+const runWord = (run) => (run.verdict ? run.verdict.word : 'not checked yet');
 function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
   const pl = c.plate, f = c.fea || {};
@@ -2090,7 +2093,7 @@ function loadCase(p, run, c, i) {
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
       ${c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety)}
         <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
-        ${c.holds ? 'no verdict' : 'the fail may be the model\'s'} (it needs ${run.min_safety}x)</span></div>`
+        ${c.verdict && c.verdict.kind === 'fails' ? 'the fail may be the model\'s' : 'no verdict'} (it needs ${run.min_safety}x)</span></div>`
       : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety)}</b>
         <span class="muted">(by ${c.governs === 'plate' ? 'the plate check, with the grain the wrong way' : 'the FEA'}; it needs ${run.min_safety}x)</span>
         ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>`}
@@ -2238,10 +2241,12 @@ async function showHeat(pid, run, index) {
     bar.hidden = false;
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →
         ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>`
-          : c.unresolved && c.holds        // no "holds" from voxels too coarse to see its walls (CALI-110)
+          : c.verdict && (c.verdict.kind === 'unresolved' || c.verdict.kind === 'unchecked')   // no "holds" (CALI-110)
             ? `<b style="color:var(--amber)">${coarseWord(c)}: the FEA read ${sx(c.safety)}, too coarse to see its walls</b>`
-            : `<b style="color:var(${c.holds ? '--ok' : '--bad'})">${c.holds ? 'holds' : 'doesn\'t hold'}, ${sx(c.safety)}</b>`}
-        ${c.breaks_lb && !(c.unresolved && c.holds) ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
+            : settled(c.verdict)           // the verdict's word and colour (CALI-112): never green unless it holds
+              ? `<b style="color:var(--${verdictTone(c.verdict)})">${esc(c.verdict.word)}, ${sx(c.safety)}</b>`
+              : `<b style="color:var(--amber)">${esc(c.verdict ? c.verdict.word : 'not checked yet')}: the check read ${sx(c.safety)}</b>`}
+        ${c.breaks_lb && settled(c.verdict) ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
       <div class="small muted" style="margin-top:2px">Colours: whittle's FEA <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span>
         0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${run.material.strength}). Decided by ${decided}.</div></div>
       <button id="stationClose" class="ghost">×</button>`;

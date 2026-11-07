@@ -131,16 +131,18 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             tm = trimesh.Trimesh(np.asarray(mesh.vertices, float), np.asarray(mesh.faces, int), process=True)
             f = f"station_{k:02d}.stl"
             tm.export(os.path.join(out_dir, f))
-            holds = sides is not None and sides >= min_safety         # the printed part, carved: what this is about
+            holds = sides is not None and sides >= min_safety         # producer: the printed part, carved: what this is about
             out.append({"index": k, "removed": round(removed, 3), "safety": sides, "holds": holds,
-                        "whole": worst, "whole_holds": worst is not None and worst >= min_safety, "weakest": weak,
+                        "whole": worst, "whole_holds": worst is not None and worst >= min_safety, "weakest": weak,  # producer
                         "printed_g": round(grams), "saved_g": round(printed0 - grams), "stl": f})
             keep({**partial, "stations": out})
             if not holds and k > 0:
                 break                                                  # the chart stops where it runs out
-        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)
+        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)  # producer
         first = out[0]
-        if not first["whole_holds"] and first["holds"]:
+        from . import verdicts
+
+        if not verdicts.station(first, whole=True)["counts_as_pass"] and verdicts.station(first)["counts_as_pass"]:
             # the part fails where the carve can't reach: say so first, it's the thing to fix
             weak_note = (f"As it is, it doesn't hold: {first['whole']:g} times over, and it needs {min_safety:g}; the "
                          f"weak link is the {first['weakest'] or 'wood'}, which carving the printed part doesn't change.")
@@ -166,7 +168,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         return record
     except Cancelled:
         # asked to stop (CALI-101): the steps it finished, and the lightest of them that holds, as a partial run
-        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)
+        best = max((x for x in out if x["holds"]), key=lambda x: x["saved_g"], default=None)  # producer
         keep({**partial, "stations": out, "status": "cancelled", "best": best["index"] if best else None,
               "seconds": round(time.time() - t0, 1)})
         store.append_history(part_id, {"kind": "carve", "action": "cancelled", "run": rid, "stations": len(out)})

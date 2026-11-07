@@ -41,6 +41,7 @@ from typing import Callable, Optional
 
 from . import construction as C
 from . import materials as M
+from . import verdicts
 from .design import DesignStore
 
 #: The order a part goes together in, by the layers ``construction._layer`` sorts its pieces into.
@@ -799,7 +800,7 @@ def _status(card: dict) -> str:
     """The book's header: ready to cut, or why not, each reason in its own words (CALI-96: "not trusted", not
     "unknown")."""
     s = card["summary"]
-    if s["fail"] == 0 and s["unknown"] == 0:
+    if verdicts.summary(s)["counts_as_pass"]:            # one verdict (CALI-112)
         return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass</span>'
     untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0
     rest = s["unknown"] - untrusted - unresolved
@@ -809,8 +810,30 @@ def _status(card: dict) -> str:
     return f'<span class="status notready">Not ready — {", ".join(w for w in why if w)}</span>'
 
 
+def _safety_cell(c: dict) -> tuple[str, str]:
+    """The Will it hold? row's safety and breaking load, from the case's one verdict (CALI-112): a number only
+    where it holds or fails (a ✗ stays a ✗)."""
+    breaks = f"about {c['breaks_lb']:,.0f} lb" if c.get("breaks_lb") else "—"
+    kind = (c.get("verdict") or {}).get("kind")
+    if kind == "untrusted":                          # the check ran on a block: no number to build on
+        return "not trusted: checked on a filled-in shape", "—"
+    if kind in ("unresolved", "unchecked"):          # too coarse to see its walls: no ✓ (CALI-110)
+        return "not resolved: too coarse to see its walls", "—"
+    if kind not in ("holds", "fails"):               # any other kind: its word, never a number to build on
+        return _e((c.get("verdict") or {}).get("word") or "not checked"), "—"
+    return f"{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x", breaks
+
+
+def _mark(status: str) -> str:
+    """A scorecard check's mark in the book, from its one verdict (CALI-112): ✓ only for a pass."""
+    v = verdicts.check(status)
+    return ("<span class='pass'>✓</span>" if v["counts_as_pass"] else "<span class='fail'>✗</span>"
+            if v["kind"] == "fails" else "?" if v["kind"] == "waiting" else f"<span class='fail'>{v['word']}</span>")
+
+
 def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], notes: list[str]) -> str:
     """The build book, as one printable page."""
+
     m = card.get("metrics") or {}
     status = _status(card)
     big = [("weight.total_lb", "all up, with the payload"), ("hitch.tongue_lb", "on the tongue"),
@@ -928,13 +951,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                    "<th class='n'>safety</th><th class='n'>breaks at (predicted)</th><th class='n'>broke at (measured)</th></tr>")
         for pid, cases in rec["strength"].items():
             for c in cases:
-                breaks = f"about {c['breaks_lb']:,.0f} lb" if c.get("breaks_lb") else "—"
-                if c.get("filled"):                          # the check ran on a block: no number to build on
-                    safety, breaks = "not trusted: checked on a filled-in shape", "—"
-                elif c.get("unresolved") and c.get("holds"):  # too coarse to see its walls: no ✓ (CALI-110)
-                    safety, breaks = "not resolved: too coarse to see its walls", "—"
-                else:
-                    safety = f"{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x"
+                safety, breaks = _safety_cell(c)
                 out.append(f"<tr><td>{_e(pid)}</td><td>{_e(c['name'])}, {c['lb']:g} lb × {c['factor']:g}</td>"
                            f"<td class='n'>{safety}</td><td class='n'>{breaks}</td>"
                            f"<td class='n'>______ lb</td></tr>")
@@ -945,9 +962,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
     out.append("<h2 class='page'>Scorecard, as released</h2><table><tr><th></th><th>check</th><th class='n'>value</th>"
                "<th class='n'>margin</th><th>trust</th></tr>")
     for c in card["checks"]:
-        mark = "<span class='pass'>✓</span>" if c["status"] == "pass" else "<span class='fail'>✗</span>" \
-            if c["status"] == "fail" else "<span class='fail'>not trusted</span>" if c["status"] == "untrusted" \
-            else "<span class='fail'>not resolved</span>" if c["status"] == "unresolved" else "?"
+        mark = _mark(c["status"])
         out.append(f"<tr><td>{mark}</td><td>{_e(c.get('label') or c['id'])}</td>"
                    f"<td class='n'>{_num(c.get('value'), c.get('unit', ''))}</td><td class='n'>{_num(c.get('margin'))}</td>"
                    f"<td>{'<span class=trust>' + _e(TRUST.get(c['trust'], c['trust'])) + '</span>' if c.get('trust') else ''}</td></tr>")
@@ -991,10 +1006,10 @@ def _strength(store: DesignStore, versions: dict) -> dict:
         if run:
             from .consistency import filled
 
-            untrue = bool(filled(store, pid))                # on a filled-in solid: not this part's (CALI-96)
-            out[pid] = [{**{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs", "holds")},
-                         "rough": load_study.rough(run, c), "filled": untrue,
-                         "unresolved": load_study.unresolved(run, c)} for c in run["cases"]]
+            why = filled(store, pid)                         # on a filled-in solid: not this part's (CALI-96)
+            out[pid] = [{**{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")},
+                         "rough": load_study.rough(run, c), "verdict": verdicts.case(run, c, filled=why)}
+                        for c in run["cases"]]
     return out
 
 
@@ -1165,7 +1180,7 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength, "making": made,
            "slug": os.path.basename(store.root), "versions": versions,
            "card": {"created": card["created"], "summary": card["summary"]},
-           "ready": card["summary"]["fail"] == 0 and card["summary"]["unknown"] == 0,
+           "ready": verdicts.summary(card["summary"])["counts_as_pass"],      # one verdict (CALI-112)
            "cutplans": {pid: plan["id"] for pid, plan in plans.items()},
            "shopping_usd": shop["usd"], "steps": [{"n": s["n"], "title": s["title"], "img": s["img"]} for s in st],
            "kids": kids, "kids_error": kids_error,

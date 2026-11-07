@@ -19,7 +19,7 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 
 from . import (aero, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
-               load_study, making, patterns, promote, release, samples, scorecard, shop, studies)
+               load_study, making, patterns, promote, release, samples, scorecard, shop, studies, verdicts)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, Busy, stream
@@ -306,10 +306,19 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "gussets": frame_study.list_gussets(store), "aero": aero.list_runs(store),
             "whittle": wb.list_runs(store), "cutplan": cutplan.list_runs(store),
             "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
-    for r in runs["load"]:                    # what the page can't work out: a case too coarse to see its walls (CALI-97)
-        for c in r.get("cases") or []:
-            if load_study.unresolved(r, c):
+    # one verdict per run and case, for the page to read and never work out (CALI-112): its badges, words and colours
+    untrusted = {p["id"]: p.get("untrusted") for p in parts}
+    for r in runs["load"]:
+        v = verdicts.run(r, filled=untrusted.get(r["part"]))
+        for c, cv in zip(r.get("cases") or [], v.pop("cases", [])):
+            c["verdict"] = cv
+            if load_study.unresolved(r, c):   # which coarse it is, for the panel's FEA line (CALI-97)
                 c["unresolved"] = "unresolved" if r.get("finer") else "unchecked"
+        r["verdict"] = v
+    for p in parts:                           # the history line of a strength check says the verdict it was given
+        for h in p["history"]:
+            if h.get("kind") == "load" and h.get("action") == "studied":
+                h["verdict"] = verdicts.of(h)
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
