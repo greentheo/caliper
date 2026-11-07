@@ -10,9 +10,9 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   note), Studies (its count said), the chat's facts, the build book's cell and the kid's book (each case's verdict),
   the picture's re-check, the history line (the run's verdict; `middle_only` kept for older readers) and the page
   (the server's verdict; the callout keeps "the middle read …; the front edge, where people stand, isn't checked").
-- **The carve tests stay light** (5604868: the carve's mechanics on the middle foot alone, for CI's hour), and **the
-  kid stage of the carve-down test is back on both feet**: it is #105's repro, whose adopted step wasn't watertight
-  until #124 offered only steps that close up.
+- **The carve tests stay light** (5604868: the carve's mechanics on the middle foot alone, for CI's hour). The
+  carve-down's kid stage stays on the middle foot: at 60 lb its front-edge foot fails as drawn (1.91x), so it can't
+  carve down from holding; #105's repro on both feet (40 lb) is #124's own slow test.
 - `test_edge_foot.py` reads the verdicts (the page's helpers are main's).
 
 ### 2026-11-06 · CALI-94 (#106 review) · A ✓ from the middle foot only isn't one

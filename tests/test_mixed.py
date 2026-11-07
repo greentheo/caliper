@@ -143,9 +143,10 @@ def test_the_printed_sides_carve_down_until_it_doesnt_hold(stool, monkeypatch):
     rec = carve.study(stool, "stool", stations=3, remove_up_to=0.4)
     assert not rec["stations"][0]["whole_holds"] and rec["stations"][0]["weakest"] == "top"
     assert rec["weak"].startswith("As it is, it doesn't hold") and "the weak link is the top" in rec["weak"]
-    # a kid stepping up: the top holds, and the printed sides carve down until they don't. On both feet (CALI-94):
-    # #105's repro, whose adopted step wasn't watertight until #124 offered only steps that close up
-    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
+    # a kid stepping up: the top holds, and the printed sides carve down until they don't. The middle foot only: at
+    # 60 lb its front-edge foot already fails as drawn (1.91x, test_edge_foot); #105's repro on both feet, at 40 lb,
+    # is #124's own (test_carve_closed, slow)
+    stool.write_part("stool", CENTRED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
     rec = carve.study(stool, "stool", stations=4, remove_up_to=0.6)
     st = rec["stations"]
     assert st[0]["whole_holds"] and not rec["weak"]
