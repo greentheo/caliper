@@ -194,7 +194,10 @@ def summary(store: DesignStore, part_id: str, inches: bool = True) -> Optional[d
         said = f"Tested: it broke at {at:,.0f} lb" + (f", as we predicted (about {breaks:,.0f})" if breaks else "")
         return {"text": said + ".", "status": "ok" if breaks else "info", "broke": True}
     top = max(live, key=lambda r: r["load_lb"])
-    said, status = f"Tested: it held {top['load_lb']:,.0f} lb", "ok"
+    # held, but short of what it must hold: not a pass for it (#132 review)
+    short = bool(must) and top["load_lb"] < must
+    said, status = (f"Tested: it held {top['load_lb']:,.0f} lb" + (f", short of the {must:,.0f} lb it must hold: "
+                    "test it to there before anyone relies on it" if short else "")), ("warn" if short else "ok")
     worst, how = None, 1.0                                   # the step whose sag fits the prediction worst
     for r in live:
         if r.get("sag_mm") is None or not r.get("predicted_mm"):

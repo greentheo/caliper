@@ -19,7 +19,7 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 
 from . import (aero, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
-               load_study, making, patterns, promote, release, samples, scorecard, shop, studies)
+               load_study, making, patterns, promote, release, samples, scorecard, shop, studies, verdicts)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, Busy, stream
@@ -212,12 +212,17 @@ def _plan(store: DesignStore) -> Optional[dict]:
     inches = store.design.display_units == "in"
     by = {p.id: p for p in pl.parts}
     return {"status": (store.design.plan or {}).get("status", "review"), "headline": P.headline(pl, store.design.name),
+            "dropped": P.dropped_line(pl),
+            "notes": pl.notes, "dropped_rules": pl.dropped_rules,     # said, never silent (CALI-119)
             "parts": [{**by[i].model_dump(), "built": bool(store.design.part(i) and store.design.part(i).version)}
                       for i in P.order(pl)],
-            "numbers": [f"{s.name.replace('_', ' ')}: {P.number(s, inches)}" + (f" ({s.why})" if s.why else "")
-                        for s in pl.skeleton],
-            "checks": [{"id": r.id, "expr": r.expr} for r in pl.rules]
-                      + [{"id": f"{m.kind}", "expr": f"{m.between[0]} and {m.between[1]}"} for m in pl.mates]}
+            "numbers": [P.said_number(s, inches) for s in pl.skeleton],
+            # an assumed check is shown as one, with a Keep; only what was said or kept is enforced (CALI-115)
+            "checks": [{"id": r.id, "expr": r.expr, "why": r.why,
+                        "source": r.source if r in P.binding(pl) else "assumed"}
+                       for r in pl.rules if not P.numbers_only(r, pl)]          # a note is said apart, never a check
+                      + [{"id": f"{m.kind}", "expr": f"{m.between[0]} and {m.between[1]}", "source": "mate"}
+                         for m in pl.mates]}
 
 
 def _building(slug: str) -> Optional[str]:
@@ -306,16 +311,40 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "gussets": frame_study.list_gussets(store), "aero": aero.list_runs(store),
             "whittle": wb.list_runs(store), "cutplan": cutplan.list_runs(store),
             "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
+    # one verdict per run and case, for the page to read and never work out (CALI-112): its badges, words and colours
+    untrusted = {p["id"]: p.get("untrusted") for p in parts}
     from .consistency import bare_edge
 
-    current = {p.id: p.version for p in d.parts}
-    middle = {pid for pid in current if bare_edge(store, pid)}          # loaded in the middle only (CALI-94)
-    for r in runs["load"]:                    # what the page can't work out: a case too coarse to see its walls (CALI-97)
-        for c in r.get("cases") or []:
-            if load_study.unresolved(r, c):
+    middle = {p["id"] for p in parts if p.get("loads") and bare_edge(store, p["id"])}   # the middle only (CALI-94)
+    for r in runs["load"]:
+        part = next((p for p in parts if p["id"] == r["part"]), None)
+        v = verdicts.run(r, filled=untrusted.get(r["part"]), edge=r["part"] in middle,
+                         stale=part is None or r.get("version") != part["version"])   # never green on an older run
+        for c, cv in zip(r.get("cases") or [], v.pop("cases", [])):
+            c["verdict"] = cv
+            # each thickness the plate check tried: its number against what it needs, and only where the case is
+            # settled (it holds or fails): never green on a not-trusted, unresolved or older case (#132 review)
+            for b in ((c.get("plate") or {}).get("by_thickness") or []):
+                b["verdict"] = (verdicts.meets(b.get("safety_across"), r.get("min_safety"))
+                                if cv["kind"] in ("holds", "fails") else cv)
+            if load_study.unresolved(r, c):   # which coarse it is, for the panel's FEA line (CALI-97)
                 c["unresolved"] = "unresolved" if r.get("finer") else "unchecked"
-            if r["part"] in middle and r.get("version") == current.get(r["part"]):
-                c["middle_only"] = True       # the page's caveat(): no "holds" from the middle only (#106 review)
+        r["verdict"] = v
+    for r in runs["carve"]:                   # a carve or lightening step, as the page shows it (#132 review)
+        for st in r.get("stations") or []:
+            st["verdict"] = verdicts.carve_step(st, untrusted.get(r["part"]), r)        # #101: coarse voxels too
+    for r in runs["lighten"]:
+        for st in r.get("stations") or []:
+            st["verdict"] = verdicts.lighten_step(st, untrusted.get(r["part"]), r)
+    for p in parts:                           # the history line of a strength check says the verdict it was given
+        for h in p["history"]:
+            if h.get("kind") == "load" and h.get("action") == "studied":
+                h["verdict"] = verdicts.of(h)
+            elif h.get("kind") == "revision" and h.get("result"):     # its report's verdict (#132 review)
+                h["verdict"] = verdicts.history(h)
+    current = {p["id"]: p["version"] for p in parts}
+    for rel in runs["release"]:                # ready, as made and for the parts as they are now (#132 review)
+        rel["verdict"] = verdicts.release(rel, current)
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,
@@ -763,6 +792,19 @@ def router():
                 ".html": "text/html"}.get(os.path.splitext(name)[1], "application/octet-stream")
         with open(path, "rb") as f:
             return Response(f.read(), media_type=kind)
+
+    # -- the plan (CALI-115): keep a check the planner assumed, so it's enforced --------------------------
+    @r.post("/api/designs/{slug}/plan/checks/{rule_id}/keep")
+    def plan_keep(slug: str, rule_id: str):
+        from . import plan as P
+
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                P.keep(store, rule_id)
+            except KeyError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+            return design_state(store)
 
     # -- what it's held to (CALI-55): keep or drop a check the conversation proposed -------------------
     @r.post("/api/designs/{slug}/goals/{check_id}")

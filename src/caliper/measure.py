@@ -80,12 +80,80 @@ class Geometry:
 
 
 def _cadquery_to_trimesh(wp: Any, tol: float = 0.05) -> trimesh.Trimesh:
-    """Tessellate a CadQuery Workplane/Solid to a trimesh mesh."""
+    """Tessellate a CadQuery Workplane/Solid to a trimesh mesh, without the CAD mesher's strays (:func:`clean`)."""
     solid = wp.val() if hasattr(wp, "val") else wp
     verts, faces = solid.tessellate(tol)
     v = np.array([[p.x, p.y, p.z] for p in verts], dtype=float)
     f = np.array(faces, dtype=int)
-    return trimesh.Trimesh(vertices=v, faces=f, process=True)
+    return clean(trimesh.Trimesh(vertices=v, faces=f, process=True))
+
+
+#: A loose open shell this small, against the part's whole surface, is the mesher's, not the part's (CALI-118): it
+#: bounds nothing, and at the 0.05 mm tessellation tolerance it moves the volume by at most its area × 0.05 mm,
+#: about 0.1 mm³ on Theo's bar stool (2.28 m² of surface). Anything bigger is an opening, and is kept, and said.
+STRAY_SHARE = 1e-6
+
+
+def clean(m: trimesh.Trimesh) -> trimesh.Trimesh:
+    """The mesh without what the CAD's mesher leaves that isn't the part (CALI-118, #126):
+
+    - faces with no area. OCCT fans a cone's triangles from its apex, and one of them comes out with two corners on
+      the apex (Theo's bar stool v7: the cone's apex at the flange, a 37 mm sliver of no area). It encloses nothing;
+      with it the mesh isn't one closed body, and every boolean on it threw "Not all meshes are volumes!";
+    - loose open shells under :data:`STRAY_SHARE` of the surface, beside a closed body.
+
+    What it left out is said, once, in ``m.metadata["strays"]``. A bigger open shell, or a part with no closed
+    body, is left as it is: :func:`open_near` says where it's open, and a reader that needs a solid says so."""
+    if closed(m) or not len(m.faces):
+        return m
+    gone, where = 0, []
+    flat = ~m.nondegenerate_faces(height=1e-9)
+    if flat.any():
+        where.append(m.vertices[m.faces[flat]].reshape(-1, 3))
+        gone += int(flat.sum())
+        m = m.copy()
+        m.update_faces(~flat)
+        m.remove_unreferenced_vertices()
+    if not m.is_watertight:
+        bodies = m.split(only_watertight=False)
+        whole = [b for b in bodies if closed(b)]
+        strays = [b for b in bodies if not closed(b) and b.area <= STRAY_SHARE * m.area]
+        if whole and len(whole) + len(strays) == len(bodies) and strays:
+            where += [b.vertices for b in strays]
+            gone += sum(len(b.faces) for b in strays)
+            m = trimesh.util.concatenate(whole) if len(whole) > 1 else whole[0]
+    if gone:
+        pts = np.vstack(where)
+        z0, z1 = float(pts[:, 2].min()), float(pts[:, 2].max())
+        m.metadata["strays"] = (f"left out {gone} stray face{'s' if gone != 1 else ''} from the CAD's meshing "
+                                f"(at z {z0:.1f}" + (f"–{z1:.1f}" if z1 - z0 >= 0.05 else "") + " mm)")
+    return m
+
+
+def closed(m: trimesh.Trimesh) -> bool:
+    """Closed as it will be read back: two vertices at one point (a pinch) are watertight in memory and merge in any
+    STL round trip, after which it isn't (#124 review). Judged on a merged copy, so every reader agrees."""
+    if not m.is_watertight:
+        return False
+    merged = m.copy()
+    merged.merge_vertices()
+    return bool(merged.is_watertight)
+
+
+def open_near(m: trimesh.Trimesh) -> Optional[str]:
+    """Where a mesh isn't closed, in words ("near z 14 mm"), or None when it's one closed solid. What a reader that
+    needs a solid (a boolean, a voxel check, a weight) says instead of throwing (CALI-118)."""
+    if closed(m):
+        return None
+    from trimesh.grouping import group_rows
+
+    m = m.copy()
+    m.merge_vertices()
+    edges = m.edges_sorted
+    lone = edges[group_rows(edges, require_count=1)]
+    pts = m.vertices[lone.reshape(-1)] if len(lone) else m.vertices
+    z0, z1 = float(pts[:, 2].min()), float(pts[:, 2].max())
+    return "near z " + (f"{z0:.0f} mm" if z1 - z0 < 1 else f"{z0:.0f}–{z1:.0f} mm")
 
 
 # ---------------------------------------------------------------------------
@@ -158,12 +226,18 @@ def body_count(g: Geometry) -> int:
 # Features — wall thickness (mesh, ray-cast)
 # ---------------------------------------------------------------------------
 def min_wall_thickness(g: Geometry, samples: int = 2000, seed: int = 0) -> float:
+    """Smallest local material thickness (:func:`thinnest_wall`'s number)."""
+    return thinnest_wall(g, samples, seed)[0]
+
+
+def thinnest_wall(g: Geometry, samples: int = 2000, seed: int = 0) -> tuple[float, Optional[list]]:
     """Smallest local material thickness, by ray-casting inward from the surface.
 
     Method: sample points on the surface, step just inside along the inward normal, cast a ray
     along the inward normal, and take the distance to the first opposite surface hit. The minimum
     over samples approximates the thinnest wall. For a solid block this is its smallest dimension.
-    Approximate but deterministic (fixed seed); exact-enough for the printability assertion.
+    Approximate but deterministic (fixed seed); exact-enough for the printability assertion. Returns the thickness
+    and where it is (the middle of the thinnest ray, mm), so a line can say where to thicken (#136 review).
     """
     m = g.require_mesh()
     rng = np.random.default_rng(seed)
@@ -176,10 +250,14 @@ def min_wall_thickness(g: Geometry, samples: int = 2000, seed: int = 0) -> float
 
     locations, index_ray, _ = spatial.intersects_location(m, origins, directions, multiple_hits=False)
     if len(locations) == 0:
-        return float("nan")
+        return float("nan"), None
     dists = np.linalg.norm(locations - origins[index_ray], axis=1)
-    dists = dists[dists > eps * 2]
-    return float(dists.min()) if len(dists) else float("nan")
+    ok = dists > eps * 2
+    if not ok.any():
+        return float("nan"), None
+    i = int(np.flatnonzero(ok)[np.argmin(dists[ok])])
+    at = (locations[i] + origins[index_ray[i]]) / 2
+    return float(dists[i]), [round(float(v), 1) for v in at]
 
 
 # ---------------------------------------------------------------------------

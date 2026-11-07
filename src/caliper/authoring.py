@@ -259,6 +259,10 @@ def improve(
         report = evaluate(spec, run.geometry, machine, references=references)
         # CALI-54: what the script says it's built from is measured against what it built
         report.results.extend(consistency.check(run.declared, run.geometry))
+        # CALI-107: a requested feature builds or the script says why not; a silent fallback fails the round
+        from . import fallbacks
+
+        report.results.append(fallbacks.result(script))
         best = (run.geometry, script, report)
         if report.all_pass:
             history.append(("passed", ""))

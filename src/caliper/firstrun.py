@@ -28,7 +28,9 @@ from . import chat, goals, load_study, patterns
 from .design import DesignStore
 
 #: A reply leads with what fails, then what holds, then what's still to check.
-VERDICT_FIRST = ("bad", "ok", "warn", "info")
+#: Worst first (#132 review): a fail, then a warning, then what holds, so the first reply's two lines never drop a
+#: "not trusted" or "not resolved" under two "Holds…".
+VERDICT_FIRST = ("bad", "warn", "ok", "info")
 #: What the goals are written from, when it's the design's sentence and its answers that say it.
 SAID = "(the design's goal and the answers to its questions)"
 
@@ -160,7 +162,7 @@ def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, cli
     from . import plan as P
 
     saved = P.load(store)
-    if saved is not None and len(saved.parts) > 1:
+    if saved is not None and len(P.buildable(saved)) > 1:
         store.design.plan = {**store.design.plan, "status": "saved"}
         store.save()
         reply = NEXT.format(n=len(saved.parts))
@@ -177,11 +179,15 @@ def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, cli
         steps["plan"] = f"planning it in several parts didn't work ({e}): I built it as one"
         emit("error", f"couldn't plan its parts: {e}")
         return None
-    if len(plan.parts) == 1:
-        steps["plan"] = "one part"
+    if len(P.buildable(plan)) <= 1:            # what it stands on, or what you have, doesn't stop it for review (#117)
+        gone = P.dropped_line(plan)
+        steps["plan"] = "one part" + (f" ({gone})" if gone else "")
         return None
     P.save(store, plan, "review")
-    reply = (P.headline(plan, store.design.name) + "\n\nThat's the plan, before anything's drawn: its numbers and the "
+    gone = P.dropped_line(plan)                # never dropped without a word (#123 review)
+    reply = (P.headline(plan, store.design.name) + (f" ({gone[0].upper() + gone[1:]}.)" if gone else "")
+             + P.said_aside(plan)
+             + "\n\nThat's the plan, before anything's drawn: its numbers and the "
              "checks between the parts are under What is it?. Say what to change (\"make the mast 10 ft\"), or "
              "**Build it** to go on.")
     store.append_log({"kind": "reply", "action": "plan", "ok": True, "reply": reply, "firstrun": True,

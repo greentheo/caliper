@@ -572,6 +572,67 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 2. **Say "add the front-edge case":** the designer adds "stepping on the front edge". The warning goes, and *Will it
    work?* reads that case, the weaker one.
 3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_edge_foot.py`.
+### 2026-11-07 · A carve on voxels too coarse to see its walls says so (CALI-106 #101)
+1. Carve a thin printed part (**Carve it**): where the check couldn't see its walls, the steps that hold are amber dots
+   reading "not resolved", and **Carve it like this** is off, saying why.
+2. Theo's bar stool (a copy): **Carve it** is off, saying where and what to change: "Can't carve it by strength: its
+   0.25 mm walls around z 16.1 in are too thin for a 0.4 mm nozzle to print and for your rule shell_wall_thickness
+   (at least 2.85 mm): thicken them to that. For a strength carve, walls must be at least 9.2 mm at this size, so
+   check it by hand or with a test piece instead." It stays off after a carve is cancelled, and a refusal never
+   reads "ValueError: …". The card and the page give the same wall number (0.25 mm, not 0.2 and 0.3).
+   **Lighten it** on a run too coarse to see the walls says "Not resolved yet…", as Studies does, not "Nothing
+   lighter still holds".
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_coarse_steps.py`.
+### 2026-11-07 · One verdict, everywhere (CALI-112 #114)
+1. Open a design whose strength check is a ✗, not trusted, not resolved or middle only: the card, the Score panel, the
+   Studies row, the history line, the build book and the kids' book all say the same word, and none says "holds" or
+   shows green unless it holds.
+2. A stool that fails: its kids' book ends "Don't stand on it yet. It isn't strong enough yet…".
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_verdicts.py`.
+
+### 2026-11-07 · The camper plans: a rule over its own numbers is a note, and no rule sinks the plan (CALI-119 #127)
+1. With a key: "A camper: a plywood cargo box on a welded frame that slides into my 2 in hitch receiver." It plans in
+   parts. Under **The plan**, a rule that holds by the numbers reads "By the numbers: …"; one the planner got wrong
+   twice reads "Left out the check '…': …", and the plan stands.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_plan_numbers.py`.
+
+### 2026-11-07 · A carved step that doesn't close up isn't offered (CALI-117 #105)
+1. Carve a printed part (**Carve it**). Every step offered rebuilds into a closed solid; one that wouldn't reads
+   "Can't use this step: its carved shape doesn't close up into a solid…", and its Carve button is off.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_carve_closed.py`.
+
+### 2026-11-07 · A changed design.js is picked up on reload, with no ?v= to bump (CALI-120 #128)
+1. View the page's source: `design.js?v=` is a hash of the file. Change `design.js` and reload: a new key, and the
+   new script. `index.html` still says `?v=dev`.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_cache_key.py`.
+
+### 2026-11-07 · Theo's bar stool scores again (CALI-118 #126)
+1. Open a design with a printed cone (the bar stool): its card says "I left out 1 stray face from the CAD's meshing
+   (at z …): it enclosed nothing and weighs nothing." Its weight, balance, scorecard and build package all work.
+2. A part whose shape really isn't closed says "not checked: its shape isn't closed near z … mm" for its weight and
+   its strength, and nothing throws.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_stray_faces.py`.
+### 2026-11-07 · An all-printed part gets its book; the book weighs what the card does (CALI-111 #112)
+1. Open a design that's all printed (a tube, a printed box) and press **Make the build package**: it's made, and its
+   cut list says "Nothing to cut: it's all printed."
+2. On a design with a printed part and plywood: the build book's scorecard and the design card give the same total
+   weight. A card scored before this reads "score it again" until it's re-scored.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_printed_release.py`.
+
+### 2026-11-07 · A plan says what you said apart from what it assumed (CALI-115 #117)
+1. With a key, new design: "A Savonius wind turbine: printed buckets, plasma-cut end plates, a welded 7 ft mast on a
+   staked base, for a generator I already have with a 1 in shaft." Only the generator says "you have it".
+2. **What is it? → The plan:** a number you didn't give reads "· assumed"; a check over one reads "assumed: not
+   checked until you keep it" with **Keep**. Press it: the badge goes, and the check is enforced.
+3. "A box step stool from 3/4 in plywood, for the bathroom." builds at once, as one part: no plan review.
+4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_plan_live.py`.
+### 2026-11-06 · Asked for, changed, measured (CALI-107 #107)
+1. **On a part, say "make the wall 6 mm":** the reply starts "Asked for: make the wall 6 mm", then "Changed: wall 4 mm →
+   6 mm", "Measured: its volume went from … to … cm³", and what isn't measured. Then "The part's own checks pass."
+2. **Ask for something the designer can't fit:** the round fails, naming the line of any `try/except` or clamp that
+   would have skipped it quietly. If nothing changed, it says the shape didn't change.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_fallbacks.py`.
+
 ### 2026-11-06 · Nothing leaves the machine unsaid (CALI-91 #68)
 1. **Press 🎤:** it asks first, "Your browser turns speech into words by sending it to its maker (Google, in Chrome).
    Talk anyway?". **Type instead** doesn't listen. **Talk** does, and the next press doesn't ask again.

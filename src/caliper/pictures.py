@@ -277,14 +277,14 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
         ctx = L.prepare(store, part_id)
         for k in range(TRIES):
             predicted = _try(ctx, panel, poly, min_safety)
-            if predicted is None or predicted >= min_safety:
+            if predicted is None or predicted >= min_safety:  # search
                 break
             shrunk += 1
             emit("step", f"Too weak at {predicted:g}x: making it smaller", step="check", safety=predicted)
             poly = fit(shape, panel, scale=SHRINK ** (k + 1))
             if poly is None:
                 break
-        if predicted is not None and predicted < min_safety:
+        if predicted is not None and predicted < min_safety:  # search
             return {"ok": False, "panel": panel["name"], "subject": subject, "predicted": predicted,
                     "min_safety": min_safety, "reply": (
                         f"A {subject} on the {panel['name']} would make it too weak: {predicted:g} times over at "
@@ -305,13 +305,12 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
     if checked:
         emit("step", "Checking the part as it's now built", step="recheck")
         run = L.study(store, part_id, min_safety=min_safety)
-        from .consistency import bare_edge
+        from . import consistency, verdicts
 
-        out.update({"safety": run["safety"], "holds": run["holds"], "run": run["id"],
-                    # a ✓ the voxels couldn't see the walls for is no "it still holds" (CALI-110), nor one loaded in
-                    # the middle only (CALI-94)
-                    "unresolved": any(L.unresolved(run, c) and c.get("holds") for c in run["cases"]),
-                    "too_thin": bool(run.get("too_thin")), "middle_only": bool(bare_edge(store, part_id))})
+        v = verdicts.run(run, filled=consistency.filled(store, part_id),          # one verdict (CALI-112)
+                         edge=bool(consistency.bare_edge(store, part_id)))       # the middle only (CALI-94)
+        out.update({"safety": run["safety"], "run": run["id"], "verdict": {k: x for k, x in v.items() if k != "cases"},
+                    "too_thin": bool(run.get("too_thin"))})
     out["reply"] = reply(out)
     return out
 
@@ -321,19 +320,24 @@ def reply(got: dict) -> str:
     if got.get("unchecked"):
         return (f"I cut a {got['subject']} {size} out of the {got['panel']}, but I couldn't check it still holds: "
                 f"{got['unchecked']}. Check it holds before anyone stands on it.")
-    said = f"✓ I cut a {got['subject']} {size} out of the {got['panel']}."
+    said = f"I cut a {got['subject']} {size} out of the {got['panel']}."
     if got.get("shrunk"):
         said += " I made it smaller to keep it strong."
     if got.get("safety") is None:
-        return said + " It doesn't say what it must hold, so I couldn't check it's still strong."
-    if got["holds"] and got.get("unresolved"):
+        return "✓ " + said + " It doesn't say what it must hold, so I couldn't check it's still strong."
+    from . import verdicts
+
+    v = verdicts.of(got)                               # one verdict (CALI-112)
+    if v["kind"] in ("unresolved", "unchecked"):
         return said + (" Its strength check couldn't see its walls closely enough to tell if it's still strong enough, so a "
                        "grown-up checks it again " + ("by hand or with a printed test piece" if got.get("too_thin")
                                                        else "finer") + " before anyone stands on it.")
-    if got["holds"] and got.get("middle_only"):
+    if v["counts_as_pass"]:                            # the ✓ only where it still holds (CALI-112)
+        return "✓ " + said + f" It still holds, {got['safety']:g} times over (it needs {got['min_safety']:g})."
+    if v["kind"] == "fails":
+        return (said + f" ✗ Built, it reads {got['safety']:g} times over and needs {got['min_safety']:g}: "
+                f"say **roll it back**, or try a smaller one.")
+    if v["kind"] == "edge":                            # the middle only (CALI-94)
         return said + (" Its strength was checked with a foot in the middle only, not at the front edge where people "
                        "stand, so a grown-up checks it before anyone stands on it.")
-    if got["holds"]:
-        return said + f" It still holds, {got['safety']:g} times over (it needs {got['min_safety']:g})."
-    return (said + f" ✗ Built, it reads {got['safety']:g} times over and needs {got['min_safety']:g}: "
-            f"say **roll it back**, or try a smaller one.")
+    return said + (f" Its strength check reads {v['word']}, so a grown-up checks it before anyone stands on it.")

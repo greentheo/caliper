@@ -78,7 +78,7 @@ def test_the_books_promise_nothing_on_it(tmp_path, monkeypatch):
         pytest.skip(cutplan.available())
     store, rec = _store(tmp_path, monkeypatch, LIGHT, "stool", 1, STOOL_GOALS)
     strength = release._strength(store, {"stool": store.design.part("stool").version})
-    assert any(c["unresolved"] and c["holds"] for c in strength["stool"])
+    assert any(c["verdict"]["kind"] in ("unresolved", "unchecked") for c in strength["stool"])   # one verdict (CALI-112)
     made = release.make(store, pdf=False)
     assert not made["ready"]
     root = os.path.join(release.releases_dir(store), made["id"])
@@ -183,6 +183,6 @@ def test_the_history_line_says_not_resolved(tmp_path, monkeypatch):
 
 def test_the_stress_callout_has_no_holds_or_breaking_load_for_it():
     src = _fn(open(JS).read(), "showHeat")
-    assert "caveat(c)" in src and "${c.breaks_lb && !caveat(c) ?" in src     # one helper for every such ✓ (#106)
-    page = open(JS).read()
-    assert "c.unresolved ? coarseWord(c)" in page.split("const caveat = ", 1)[1].split("\n", 1)[0]
+    # CALI-112: the bar reads the case's verdict; a breaking load only where it holds or fails (settled)
+    assert "c.verdict && (c.verdict.kind === 'unresolved' || c.verdict.kind === 'unchecked')" in src
+    assert "${c.breaks_lb && settled(c.verdict) ?" in src

@@ -156,8 +156,11 @@ def test_the_test_record_s_verdicts_are_the_right_colour(checked):
     assert got["status"] == "warn" and "sagged more than we predicted" in got["text"]
     got = line((200, {"sag_mm": lo * 200 / 15}))
     assert got["status"] == "warn" and "sagged less than we predicted" in got["text"]
-    got = line((200, {"sag_mm": (lo + hi) / 2 * 200}))
+    got = line((must, {"sag_mm": (lo + hi) / 2 * must}))
     assert got["status"] == "ok" and "predicted" in got["text"]
+    # held, but short of what it must hold: not a pass for it (#132 review)
+    got = line((200, {"sag_mm": (lo + hi) / 2 * 200}))
+    assert got["status"] == "warn" and "short of the 400 lb it must hold" in got["text"]
 
 
 @pytest.mark.parametrize("line", [
@@ -240,11 +243,12 @@ def test_every_edge_of_the_verdict_is_pinned(checked):
                                                               "too hopeful. It still held the 400 lb it must hold")
     assert "(200 lb, twice over for an adult stepping up)" in got["text"]
     # the sag: up to 2x outside the predicted range is fine, past it isn't (the range as the card rounds it)
-    a, b = round(lo * 200, 3), round(hi * 200, 3)
-    assert _only(checked, (200, {"sag_mm": 2 * b}))["status"] == "ok"
-    assert _only(checked, (200, {"sag_mm": 2 * b * 1.01}))["status"] == "warn"
-    assert _only(checked, (200, {"sag_mm": a / 2}))["status"] == "ok"
-    got = _only(checked, (200, {"sag_mm": a / 2 * 0.99}))
+    # (loaded to what it must hold: a test short of it is a warning whatever the sag, #132 review)
+    a, b = round(lo * must, 3), round(hi * must, 3)
+    assert _only(checked, (must, {"sag_mm": 2 * b}))["status"] == "ok"
+    assert _only(checked, (must, {"sag_mm": 2 * b * 1.01}))["status"] == "warn"
+    assert _only(checked, (must, {"sag_mm": a / 2}))["status"] == "ok"
+    got = _only(checked, (must, {"sag_mm": a / 2 * 0.99}))
     assert got["status"] == "warn" and "sagged less than we predicted, so it's stiffer than our check said" in got["text"]
 
 

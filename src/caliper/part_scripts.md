@@ -30,6 +30,17 @@ Write `406.4`, not `16 * 25.4`, and put the inch value in a comment. A radius or
 "none" (skip the fillet). Every value in PARAMS must build: they are the part as it stands. Studies
 search these numbers and write the ones they pick back into the script.
 
+**No silent fallbacks.** A feature the person asked for either builds or raises with a clear message
+(`raise ValueError("the 12.7 mm fillet doesn't fit a 14 mm flange")`): then the round fails and you fix
+it, or say plainly why it can't be done. Never wrap a fillet, a cut or a union in `try/except` that
+passes or hands back the shape without it, never return the input unchanged because a size came out
+too small, and never clamp a requested size below what was asked (`min(p["fillet_r"], ...)`) without
+raising. Caliper reads the script for each of these and fails the round, naming the line.
+
+**A cone that runs to its apex** (`makeCone(r, 0, h)`, or a revolved profile that touches the axis) meshes with
+one sliver of no area at the apex: the CAD's mesher fans the cone's triangles from it. Caliper leaves it out and
+says so, but a cone that stops short of its point (a small top radius, or a flat cap) has none to leave out.
+
 ## What it's built from: BUILD and construction(params, build=None)
 
 Write these for anything made from sheet goods, lumber or steel tube. They give the part its weight,

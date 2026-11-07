@@ -1,7 +1,21 @@
 # Caliper work log
 
 Append-only. Newest first. One entry per shipped task or notable decision.
-Format: `### 2026-11-06 · CALI-94 (#106 review) · A ✓ from the middle foot only isn't one
+Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
+
+### 2026-11-07 · CALI-94 (#106, with main's #124, #132, #136) · The middle foot only, through the one verdict
+- **Merged forward** onto main's one verdict (#132): #106's hand-written "middle only" checks become `edge=` on
+  `verdicts.case` / `run` / `goal`, and each reader asks those: the part card ("A kid stepping up: checked in the middle
+  only; …", never "Holds …", which #132's guard now catches), the design card and scorecard (`edge` status, its
+  note), Studies (its count said), the chat's facts, the build book's cell and the kid's book (each case's verdict),
+  the picture's re-check, the history line (the run's verdict; `middle_only` kept for older readers) and the page
+  (the server's verdict; the callout keeps "the middle read …; the front edge, where people stand, isn't checked").
+- **The carve tests stay light** (5604868: the carve's mechanics on the middle foot alone, for CI's hour), and **the
+  kid stage of the carve-down test is back on both feet**: it is #105's repro, whose adopted step wasn't watertight
+  until #124 offered only steps that close up.
+- `test_edge_foot.py` reads the verdicts (the page's helpers are main's).
+
+### 2026-11-06 · CALI-94 (#106 review) · A ✓ from the middle foot only isn't one
 - **The reviewer's block:** a two-sided top loaded only in the middle read a green ✓ on *Will it work?* ("Holds a kid
   stepping up, 2.2 times over", `MIXED` at 60 lb), when with the front-edge foot the same stool reads ✗ 1.91×. The
   warning was only on *What is it?*.
@@ -25,7 +39,270 @@ Format: `### 2026-11-06 · CALI-94 (#106 review) · A ✓ from the middle foot o
     filing. The make card's `edge` branch waits for #111's `_why_not` to reach `main`. `design.js?v=51`.
 - **A ✗ stays a ✗.** The authoring round still only warns, as #73 scoped it.
 - Tests: the reviewer's case, the same stool with its edge foot (✗ 1.91×), and the printed-sides warning path (`under`).
-Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
+
+### 2026-11-07 · CALI-106 (#136 review, round 2) · What a refused carve asks for, said apart; the page keeps it off
+- **The line asks two things apart** (thickening to the rule's 2.85 mm doesn't unblock a carve): printing and the
+  part's own rule, "too thin for a 0.4 mm nozzle to print and for your rule shell_wall_thickness (at least 2.85 mm):
+  thicken them to that"; and the strength check, in mm, "For a strength carve, walls must be at least 9.2 mm at this
+  size, so check it by hand or with a test piece instead". With no rule and nothing printed, only the second.
+- **The page keeps a blocked Carve off** after a job ends (`paintCarve` set `disabled` from the job alone, so a cancel
+  re-enabled "Carve it again"), and a refusal reads without its exception's name (`plainly`: no "ValueError: …").
+- **Lighten on a coarse run** says "Not resolved yet: the check was too coarse to see its walls…" (or "Not checked"),
+  from the steps' `lighten_step` verdicts, as Studies does; it said "Nothing lighter still holds", a false ✗.
+- Pins for the review's survivors: a coarse fail stays a fail (`carve_step`, `lighten_step`), and Lighten's `disabled`.
+- Tests: tests/test_coarse_steps.py (16; 4 of the new fail without this, the fifth pins a fail). The review's last two
+  pins: a coarse fail stays a fail with the whole part holding (`whole_holds: True`, where the whole-holds branch can't
+  mask it), and the page's own refusal goes through `plainly()` (raw `e.message` fails it).
+
+### 2026-11-07 · CALI-106 (#101, #136 review) · A refused carve says where the thin walls are and what to change
+- **Where:** `measure.thinnest_wall` returns the thinnest wall and where it is (the middle of its ray);
+  `min_wall_thickness` is its number. `load_study._thin` says which it is: a piece by name, or a measured wall's
+  place. The strength record carries `thinnest_where`.
+- **What to change:** `load_study.thin_words`, in the design's units: the wall, where, the size the strength check
+  sees walls from at this size, a 0.4 mm nozzle where it's printed and thinner, and the part's own `min_wall >= …`
+  rule (`wall_rule`, its spec's or the design's, read with `safe_eval`); otherwise "Thicken them first."
+  `resolution()` carries it (`said`, `where`), the carve refuses with "Can't carve it by strength: …", and a too-thin
+  check stores it as `thin_said`, which the page's disabled Carve and Lighten say.
+- **One wall number** (#137 item 2, the same words): under 1 mm, two places, in `answers._wall` and the page's
+  `wallLen`. The bar stool's 0.25 mm wall read 0.2 mm on the card and 0.3 mm on the page.
+- On a copy of Theo's bar stool v7: "its 0.25 mm walls around z 16.1 in … Your rule shell_wall_thickness says at
+  least 2.85 mm: thicken them to that first." z 409 mm, r ≈ 169 mm: the webs between the openings, where the
+  foreman found them.
+- Tests: tests/test_coarse_steps.py (+5: where, the line on the spool and on the stool's numbers, the refused carve,
+  one wall number on both sides, the page's blocked carve). Touched suites: 187 passed locally; CI is the full run.
+
+### 2026-11-07 · CALI-106 (#101) · A carve or lightening step on voxels too coarse to see the wall is no "holds"
+- **Carve and lighten record whether their voxels see the walls** (`load_study.resolution`, from the same set-up the
+  strength check uses): `thinnest_mm`, `across`, `resolved`, and unresolved, `finer` or `too_thin`.
+- **A step that holds on a run that doesn't see its walls is "not resolved"** (or "not checked" where no run a study
+  may make could see them), through `verdicts.station`/`carve_step`/`lighten_step` (stacked on #132's one verdict);
+  a fail stays a fail, not trusted still ranks above it. Every reader: the chart's dots (amber), "the lightest step
+  where the printed part holds" line, the station bar and its **Carve it like this** / **Cut these holes** (off, with
+  why), the Studies rows, the carve's chat reply and its closing message.
+- **Where no run can see the walls it isn't carved:** `carve.study` stops before carving, "Its walls are too thin for
+  the voxel check at this size, so it can't be carved by strength", and the page's Carve and Lighten buttons are off
+  with that line. Also off, with its reason, where the default check's voxels don't connect (#102's note). Theo's
+  bar stool v7 (a copy): a 0.25 mm wall at 4.6 mm voxels, too thin, so Carve isn't offered.
+- `tests/test_coarse_steps.py`: the thin printed tube carved at one voxel through reads not resolved at every step that
+  holds (and in the page's state, Studies and the chat), at four it reads as its safety says; `resolution` on the bar
+  stool's numbers; a too-thin part isn't carved; lightening's coarse steps; the page's buttons.
+
+
+### 2026-11-07 · CALI-112 (#114) · One verdict function every reader asks
+- **`verdicts.py`:** kinds worst first (`fails`, `untrusted`, `unchecked`, `unresolved`, `edge`, `stale`,
+  `waiting`, `holds`), each with a status, a word and `counts_as_pass`; `case`, `run`, `goal`, `meets`, `station`,
+  `check`, `summary`, `of`. A new kind is one entry. Precedence as the PRs settled it: a ✗ stays a ✗, then not
+  trusted, not resolved, middle only, older version, waiting.
+- **Every reader asks it** (the audit is in the PR): the part and design cards, the make card, the scorecard's
+  statuses, the book's header, its Will it hold? row and its marks, the kids' book, Studies, the chat's facts, the
+  picture reply and the chat's ok for it, the history line, the study's closing message, and the page's badges,
+  run word, history line and stress bar (from `design_state`'s `verdict` on every run, case and history line).
+  Producers and searches carry `# producer` / `# search`.
+- **What the audit found, now fixed:** a fail on a filled-in block read "not trusted" on the scorecard (✗ on the card);
+  the kids' book said "It should hold …, 1.2 times over" for a stool that fails; the history read "holds" for a check
+  on a filled-in block; "✓ I cut a T. rex" led a ✗; Studies showed a card with checks still unknown green; a design
+  with no checks read "Ready to cut — 0 of 0".
+- `tests/test_verdicts.py` (37; can't import on main): two grep guards (Python and the page), every kind through
+  every reader (cards, book row, kids' book, Studies, picture reply, page badges in node), the precedence, the summary,
+  `goal`. Tests that read the old fields read the verdict now. design.js v=67.
+- **#132 review (the foreman's sweep), A–D:** a design's verdict never leaves a part out (a part unchecked, older or
+  errored is that: `measured()`, the scorecard, the kids' book, frame runs now record their version); `stale` is
+  produced wherever a run isn't the part's version (badges, the part card, the chat's facts, the make card, Studies
+  rows, releases via `verdicts.release`); carve steps (`carve_step`: the whole part and filled-in too), lightening
+  steps (`lighten_step`: an estimate is its own kind), the plate check's rows, the first reply (worst first), a part's
+  rules (`_rules_line`), trials (held but short), `promote`'s `holds_now` (unknown by default, `verdicts.rule`) and
+  app.js's badge all ask the verdict; goals compare in `verdicts.compare`. Both guards widened (`< min_safety`,
+  `>= limit`/`lim`, `ready`, `best`, `holds_now`; every `.holds`, `whole_holds`, `safety_across >=` in design.js and
+  app.js): on the pre-rework head both fail, with all 13 of `tests/test_verdicts_sweep.py`.
+- **#132 review, round 2:** the release panel reads `verdicts.release` (ready as made and for the parts as they are,
+  its own reason when not); a revision's history stores its report's verdict (`verdicts.report`): a fail only with a
+  failure, pass plus a waiting check is "not all checked", only waiting or nothing is "nothing checked yet", never
+  red; older records read through `verdicts.history`. `summary(None)` and `meets(…, None)` wait; `release()` keeps
+  its own reason; `to_text` and the CLI say ALL PASS only with nothing waiting; lighten's two searches marked as such.
+  Both guards cover `ready` and `all_pass` now.
+- **Merged with main's #124:** a carved step marked `closed: False` (its part doesn't close up) is never a pass:
+  `verdicts.station` reads it "not checked", with its why, so `carve_step`, the step offered (`_offer`, and the
+  lightest on a cancel), the chart dot and **Use this step** (off) all say so from the one verdict.
+
+### 2026-11-07 · CALI-119 (#127) · A rule over the plan's own numbers is decided when it's planned; no rule sinks the plan
+- **#117's live re-run:** the camper's planner wrote `tube_size * 25.4 <= 50.8` (the frame tube fits the 2 in
+  receiver) twice; #117 refused a numbers-only rule, so the plan fell back to one part.
+- **Decided at plan time** (`plan._by_the_numbers`): true, it's a note ("the frame tube fits the receiver (by the
+  numbers: tube_size <= receiver)"), not a check; false, the plan contradicts itself and is refused with it, the
+  numbers named ("tube_size * 25.4 <= 50.8 is false (tube_size 50.8 mm); lengths in a check read in mm", so the
+  retry can see the slip); literals alone are left out, said.
+- **No rule sinks the plan:** after the one retry a rule that still fails (an `=`, an unknown part, a contradiction)
+  is left out with why ("I left out the check '…' (…): …" in the review, on the card); only a plan-level fault (no
+  parts, a cycle, no answer) falls back to one part.
+- **Units in `classify`:** speeds (mph, km/h, m/s) and masses (lb, kg) compare with what the person said, so "60 mph"
+  is the planner's 26.82 m/s (or the "m" it wrote for a speed); skeleton units take m/s, km/h and mph.
+- `tests/test_plan_numbers.py` (15; 14 fail on main), the camper's rule verbatim; #117's tests updated (a numbers-only
+  rule is a note, a contradiction or left out; refused twice, the plan stands). design.js v=64.
+- **#130 review:** deciding a rule uses the checks' own `approx` and `within`, and any error while deciding is that
+  rule's fault (`PlanError(rule=…)`: retried, then left out and said), never the plan's. **A decided rule is plan
+  data:** it stays in `rules` (never a check: `binding()` and the card's checks leave it out), its note is worked out
+  on every validate, and what's left out is the plan's `left_out` field, so a revision shows both to the planner and
+  "make the frame tube 3 in" is refused with "the frame tube fits the receiver, but tube_size <= receiver is false
+  (tube_size 76.2 mm, …)", the plan as it was (a revision never drops a rule). A speed goes by its unit, never its
+  name ("m" is a length). The card says "by the numbers" and a check's name once. Tests pin a note's whole path
+  (the reply, the saved plan, the card, Keep) and the refused edit.
+  Then: `left_out` is validate's own (a planner's answer can't claim a check was left out) plus, through an edit,
+  the prior plan's; the "lengths in a check read in mm" hint goes to the planner's retry (`PlanError.hint`), never
+  into what the person reads; both pinned.
+
+### 2026-11-07 · CALI-117 (#105) · A carved step whose part doesn't close up is never offered or adopted
+- **What it was:** with #106's front-edge foot, and on main's own carve-down test once BLAS ran on one thread (#121's
+  CI), the carve picked a step whose adopted part wasn't watertight. Which voxels a run carves follows the summation
+  order, so it came and went; a fresh run here was watertight at every stage (station, wood, join, STL reload).
+  A part that isn't watertight can't be voxelized, so the check adopting it runs fails or reads wrong.
+- **Now:** each step's mesh is repaired if a fill closes it (`carve._closed`: merge, drop degenerate faces, fill holes,
+  fix normals) and otherwise marked `closed: False` with why. The step offered is the lightest that holds **and**
+  whose part, as adopting it builds it (`carve._adopted`: the wood as drawn joined to the carved print), closes up;
+  one that doesn't is marked and the next is tried. `adopt` refuses a step that doesn't close (`carve.NotClosed`, a
+  422 with the reason) and checks the STL as it will be read back; nothing is written for it. The panel shows "Can't
+  use this step: …" and its Carve button is off. design.js v=56.
+- `tests/test_carve_closed.py`: a small hole filled and a big one not; every carved step forced to leak (not offered,
+  adopt refused, nothing written); a join with the wood forced to leak (a small gap repaired and adopted watertight,
+  a big one refused) and the study not offering it.
+- **#124 review, the cause:** a **pinch**. Where two surfaces of the carved part meet along an edge, the adopted
+  shape keeps two vertices at one point apart by index: watertight in memory, and once merged (any STL round trip)
+  four faces share an edge and it isn't (#105's 6,011 vertices, 12,060 faces). `_closed` judged the in-memory form,
+  so the study offered step 2 and `adopt` refused it. Now `_closed` judges a merged copy, as it reads back, so offer
+  and adopt agree; a pinch isn't something a fill mends, so that step is marked. `_offer` builds the script once.
+  Tests: a pinch along an edge (closed in memory, refused merged; one meeting only at a corner reads back closed),
+  and #105's repro (MIXED with its edge foot, 40 lb, 4 steps to 0.6): the step offered adopts, watertight
+  (`slow`: several minutes).
+
+### 2026-11-07 · CALI-120 (#128) · The server keys the page's scripts and styles; no PR bumps ?v= again
+- **`server.keyed_page`** serves `/`, `/index.html` and `/classic` with every `?v=` on the page's own `.js` and
+  `.css` set to a 10-character hash of that file (`cache_key`), read per request: a changed `design.js` is a new key on
+  reload, an unchanged one the same. The page itself is `no-store`. The pages keep `?v=dev` and never change for it
+  again. The vendored three.js is imported by version-pinned path through the importmap, so it needs no key.
+- **Why:** each merge to `main` made every other open PR conflict on `design.js?v=N` (tonight #122, #124 and #125
+  each merged `main` again only for it, a full CI run each).
+- CONTRIBUTING.md and firm/NIGHT_SHIFT.md: no bump step; the server does it.
+- `tests/test_cache_key.py` (3): the key follows the file and only the file; the served pages are keyed and
+  `no-store`; the pages keep the placeholder.
+
+### 2026-11-07 · CALI-114 (#116) · CI runs the suite across the runner's cores
+- **`pytest-xdist`** is in the requirements. CI runs `pytest -n auto --durations=25 -m "not serial"` with
+  `OMP_NUM_THREADS`, `MKL_NUM_THREADS` and `OPENBLAS_NUM_THREADS` at 1, so four FEA workers don't fight over four
+  cores. A second step runs anything marked `serial` on its own (exit 5, "no tests", passes once none is).
+- **Locally `pytest -rs` stays the default,** and `-n auto` is optional (TESTING.md).
+- **Before,** on main: the test step took 51.5 min (646a20a) and 40.8 min (ad2f296). After: in the PR, from its CI
+  runs, with `--durations=25`'s slowest tests.
+- **The carve-down test is marked `serial`** (7cdc550): in parallel, with one BLAS thread, it adopted a step that
+  wasn't watertight (#105, fixed by #124). After #124 merges, the mark comes off.
+
+### 2026-11-07 · CALI-118 (#126) · A stray face from the CAD's meshing isn't the part; an open part is said, never thrown
+- **The cause:** OCCT's mesher fans a cone face's triangles from its apex, and one comes out with two corners on the
+  apex: a sliver of no area along the cone's seam. Any cone that runs to its apex does it
+  (`cq.Solid.makeCone(30, 0, 40)`). On Theo's bar stool v7 (a copy) it was face 128, the cone, at its apex on the
+  flange (z 14–15.6 mm): 22,772 faces closed and this one apart, so every boolean threw "Not all meshes are volumes!".
+- **`measure.clean`**, where every built part becomes a mesh: faces with no area go, and so does a loose open shell
+  under `STRAY_SHARE` (1e-6) of the part's surface beside a closed body (it bounds nothing: at the 0.05 mm
+  tolerance it moves the volume by about 0.1 mm³ on the bar stool). Said once, `mesh.metadata["strays"]`, and on the
+  part card: "I left out 1 stray face from the CAD's meshing (at z 14.0–15.6 mm): it enclosed nothing and weighs
+  nothing." A bigger open shell, or a real opening, is kept.
+- **An open part is said, never thrown:** `measure.open_near` says where ("near z 40 mm"); `printed_solid` refuses
+  a boolean on it, so (on #125's fail-soft) its weight is "not checked: its shape isn't closed near z 40 mm"; the
+  strength check (and carve, lighten and the picture, which share `prepare`) says "not checked: its shape isn't
+  closed near …, so it can't be voxelized".
+- **The bar stool v7 copy:** closed, weighed at 13.1 lb printed included (v7 is a bigger part than v6's 10.9 lb: a
+  1 in fillet for ½ in, a new opening pattern; 10.4 L of solid against 7.7 L), scored and released (below).
+- `part_scripts.md`: a cone that stops short of its point has no sliver to leave out.
+- `tests/test_stray_faces.py` (9; they can't import on main): three real CAD cones, a closed mesh and one stray
+  triangle (dropped, said, its weight unchanged), a real opening and a big open shell (kept, said where), a cone
+  part weighed whole with the card's line, and an open part (not checked, said, `/balance` 200, the page 200).
+  Built on #125 (its fail-soft weighing). Closed is judged as it reads back (merged; #124's
+  review). design.js v=65.
+
+### 2026-11-07 · CALI-111 (#112) · An all-printed design gets a build package, and the book weighs what the card does
+- **`cutplan.run`** makes its run folder whatever the materials. An all-printed part's cut list says "Nothing to cut:
+  it's all printed." (The release raised FileNotFoundError on the tube.)
+- **The 1.6 lb vs 10.9 lb:** the same card on the bar stool's copy said `weight.i_want` 10.9 lb and `weight.total_lb`
+  1.6 lb. `construction.balance()` left out every printed piece; `report()` weighs them (`with_printed`). So the
+  book's ✓ was wrong and the design card's ✗ 10.9 lb right. `balance()` now weighs printed pieces too.
+- **A card from the old scorer is out of date:** cards carry `scorer: 2`. `list_cards` marks an older one `outdated`,
+  the release scores again rather than reuse it, and the page and design card say "score it again". The camper
+  sample's shipped card is re-scored (its verdicts the same; waste $90.30 → $90.24 from older drift).
+- `tests/test_printed_release.py` (4; all fail on main): the tube's package, the total against each part's weight, the
+  book's numbers equal to the live card's for the same version (a weight goal it fails is ✗ in both), and an old card
+  re-scored. design.js v=61.
+- **#125 review:** a printed piece whose solid can't be made (the bar stool v7's throw, #126) fails soft: `with_printed`
+  marks it unweighed, and that part's weight, the total and the hitch's are **unknown**, never the rest's; the weight
+  check reads "not checked: the printed part's shape isn't closed (…)", the design card and the page say so, and
+  `/balance` answers 200 with the note. No `was`/change against a card from an older scorer ("scored differently
+  since"). `compute` says to bump `SCORER` when a metric's meaning changes.
+
+### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
+- **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to
+  build…) is refused with that reason, and so is any fixed part when nothing the person said says they have something.
+- **No part for the ground, the floor or the room:** validation drops it, with the mates and rules that name it
+  (`plan.dropped`). **One part to build builds at once:** `P.buildable` counts parts to make, so a reference part
+  doesn't stop the first run for review. The stool's step says "one part (the bathroom floor is what it stands on,
+  not a part)".
+- **One retry:** a refused plan goes back to the planner once with the reason, then falls back to one part. `=` in a
+  rule says "`=` isn't a comparison; use `==`".
+- **No tautologies:** a rule that calls no measure of a part and names no part ("shaft_d == 25.4") is refused.
+- **Invented numbers are proposals:** `classify()` marks a skeleton number `stated` only when the person gave it (any
+  unit: "1 in" is the planner's 25.4 mm), and a rule `stated` only when it reads stated numbers. Everything else is
+  `assumed`, whatever the planner wrote, and not enforced: only `binding()` rules go into assembly.yaml. Review shows
+  "assumed: not checked until you keep it" with **Keep** (`POST …/plan/checks/{id}/keep`). A revision doesn't undo
+  a keep. design.js v=54.
+- `tests/test_plan_live.py` (31; all fail on main). One #103 test now expects only the turbine's stated rule enforced.
+- **Not done here:** the accept's live re-run of the three sentences. It spends Theo's key, so it needs his word in
+  night shift's session (a relayed word doesn't count).
+- **#123 review:** what it stands on is dropped only when its id's last word is a ground word and it isn't made
+  (`floor_lamp`, `wall_shelf`, `ground_stake` stay; `bathroom_floor`, `garage_wall` go), and it's always said
+  (the review reply, the card, the one-part step). Making is read from `made` only ("a Honda generator, built in
+  2019" is still yours). A fixed part with no possession phrase near its own noun is **assumed**, "(you have it? say
+  if not)", not a refused plan; "my kid's science fair" isn't having a generator. Keep marks its numbers kept (tested).
+
+### 2026-11-07 · CALI-113 (#115) · A part with loads() is held to them, goal or none
+- **Rule 6, found in #106's re-check:** a design whose parts have `loads()` but whose `scorecard.yaml` has no strength
+  goal released "ready to cut" on a strength ✗. Only "your shop can make it" was scored. It hits designs made
+  without goals: no key, older ones, a hand-made `scorecard.yaml`.
+- **The scorecard now adds an implicit check** when no binding goal names strength: "holds what its loads say, at
+  its factor (from its loads)", `strength.safety >=` the runs' own `min_safety`, `source: implicit`. It goes through
+  the same rules as a stated goal:
+  - a ✗ is a fail, so not ready;
+  - "not trusted" (#96) and "not resolved" (#110) count as unknown, so not ready;
+  - a strength check that couldn't run counts as unknown;
+  - #106's middle-only `edge` applies once it's in `main`.
+- **A stated strength goal isn't doubled.** A proposed one doesn't bind, so the implicit check still stands beside it.
+- **Old designs** get the check the next time they're scored.
+- Tests: `tests/test_implicit_strength.py` (the goal-less test stool at ✗ 1.46×: fail, not ready, and the book says
+  why; light: pass and ready; a stated goal: no doubling). On main there's no implicit check at all. CI is the full
+  run.
+
+### 2026-11-06 · CALI-107 (#107) · A requested feature builds or the script says why not; the reply says what changed
+- **`part_scripts.md`: no silent fallbacks.** A requested feature builds or raises with a clear message. No
+  `try/except` that passes or hands back the shape without it, no returning the input because a size came out
+  small, no clamping a requested size without raising.
+- **The round checks it** (`fallbacks.find`, an AST read of the script; it never runs it), and fails naming each line:
+  - an `except` (bare, `Exception`, …) around a CadQuery call that passes or returns something unchanged;
+  - `min(<a requested size>, <a computed limit>)`, through a local copy too (`r = p["fillet_r"]`; tuple
+    unpacking counts);
+  - `if <a size test>: return <the input>` (a test against 0, "not asked for", is fine).
+  - On copies of the bar stool's v4 to v6 it flags every fallback the issue names: the fillet's clamp and its two
+    `except: pass`, the mesh's clamps, its two size-guarded returns and its `except: return cone_solid`. The
+    samples and the suite's fixtures are clean.
+- **The reply says what was asked for and what changed:** "Asked for: …", "Changed: wall 4 mm → 6 mm" (in inches too:
+  "fillet_r 6.35 mm (1/4 in) → 12.7 mm (1/2 in)"), and the volume before → after. If the shape didn't change, it
+  says what you asked for may not have happened. It says what isn't measured. "The part's own checks pass" replaces
+  "Every check on this part passes", which read as covering the request.
+- **From #119's review:**
+  - a requested parameter (or its copy) compared with 0 or 1 is "none asked for", not flagged (`if p["holes"] < 1:
+    return shape`); a computed size still is;
+  - any handler type or tuple around a CAD call counts (`(ValueError, RuntimeError)`, OCP's `Standard_Failure`), and
+    so does `return s.translate(...)`, the input moved without the feature;
+  - a try/except around anything but CAD isn't flagged;
+  - the reply says a parameter's plain name ("foot fillet radius") and every length with its unit, whole numbers too.
+- **A failing check's reason now reaches the chat** (`_fail_lines` adds its detail), so the line is named there too.
+- Tests: `tests/test_fallbacks.py`.
+
+### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
 - **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
   `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its
   note. A ✗ by its number stays a fail. `untrusted` (#96, a filled-in shape) is as it was.
@@ -64,7 +341,6 @@ Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book n
 - **Page:** "not trusted" first, then "not resolved", then holds or doesn't. `design.js?v=45`.
 - Tests: `test_filled_verdict` (both together on the design card and in Studies).
 
-### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
 ---
 

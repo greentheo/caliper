@@ -52,14 +52,23 @@ def cards_dir(store: DesignStore) -> str:
     return os.path.join(store.root, "scorecards")
 
 
+#: How the card weighs and scores. A card filed by an older scorer is out of date even at the same versions: the
+#: release scores again, the page says so (CALI-111: cards before 2 left printed pieces out of weight.total_lb).
+SCORER = 2
+
+
 def list_cards(store: DesignStore, limit: int = 20) -> list[dict]:
+    """The filed cards, newest first; each from an older scorer marked ``outdated``."""
     root = cards_dir(store)
     if not os.path.isdir(root):
         return []
     out = []
     for name in sorted(os.listdir(root), reverse=True)[:limit]:
         with open(os.path.join(root, name)) as f:
-            out.append(json.load(f))
+            card = json.load(f)
+        if card.get("scorer") != SCORER:
+            card["outdated"] = True
+        out.append(card)
     return out
 
 
@@ -163,7 +172,10 @@ def cost_and_waste(store: DesignStore, reports: dict, cutplans: dict) -> dict:
 # The card
 # ---------------------------------------------------------------------------
 def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
-    """Score the design as it stands, file the card, and return it."""
+    """Score the design as it stands, file the card, and return it.
+
+    Bump :data:`SCORER` whenever a metric's meaning changes (what it counts, how it's weighed): every card filed
+    before then reads out of date, the release scores again, and no "was" is set against it."""
     from . import aero, cutplan, frame_study
 
     emit = emit or (lambda *a, **k: None)
@@ -190,7 +202,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         r = C.report(store, p.id)
         r["pieces_raw"] = C.takeoff(C._items(C.declared(store, p.id)))
         reports[p.id] = r
-        _metric(metrics, f"weight.{p.id}", r["mass_lb"], "lb", f"{p.id} weighs", "model", "construction")
+        _metric(metrics, f"weight.{p.id}", r["mass_lb"], "lb", f"{p.id} weighs", "model", "construction",
+                **({"note": r["unweighed"]} if r.get("unweighed") else {}))     # unknown, said (#125 review)
         for k in r.get("keeps") or []:
             checks.append({"id": f"keeps:{p.id}.{k['name']}", "label": f"{p.id} holds the {k['name']}",
                            "status": "pass" if k["clear"] else "fail", "value": k["depth_mm"], "margin": -k["depth_mm"],
@@ -202,8 +215,11 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                 _metric(metrics, f"make.{p.id}.stale", True, "", f"{p.id}'s cut plan is for an older version",
                         "measured", "cut plan")
     b = C.balance(store, payload_lb=payload)
-    _metric(metrics, "weight.total_lb", b["mass_lb"], "lb", f"everything, with {payload:g} lb aboard", "model", "balance")
-    _metric(metrics, "hitch.tongue_lb", b["mass_lb"], "lb", "on the hitch's tongue, standing still", "model", "balance")
+    unknown = {"note": "; ".join(b["unweighed"])} if b.get("unweighed") else {}    # never a lower total (#125)
+    _metric(metrics, "weight.total_lb", b["mass_lb"], "lb", f"everything, with {payload:g} lb aboard", "model", "balance",
+            **unknown)
+    _metric(metrics, "hitch.tongue_lb", b["mass_lb"], "lb", "on the hitch's tongue, standing still", "model", "balance",
+            **unknown)
     if b.get("moment_lbin") is not None:
         _metric(metrics, "hitch.moment_lbin", b["moment_lbin"], "lb·in", "the hitch carries, standing still",
                 "model", "balance")
@@ -333,13 +349,16 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         _metric(metrics, "print.filament_g", round(grams), "g", "filament, every printed piece", "model", "slicer")
 
     # will it hold (CALI-54): each part's own loads(), from its strength check on this version (run if missing)
-    from . import load_study
+    from . import load_study, verdicts
 
     worst = None
     unsure = None                     # a ✓ on an FEA too coarse to see the wall: no pass from it (CALI-110)
+    loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
+    left = []                         # parts whose strength isn't known: never left out of the verdict (#132 review)
     for p in store.design.parts:
         if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
             continue
+        loaded = True
         run = next((r for r in load_study.list_runs(store, p.id) if r.get("version") == p.version), None)
         if run is None:
             emit("strength", f"checking what {p.id} must hold")
@@ -348,9 +367,13 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             except Exception as e:  # noqa: BLE001 — a check that can't run is unknown, not a crash
                 _metric(metrics, f"strength.{p.id}.error", str(e), "", f"{p.id}'s strength couldn't be checked",
                         "model", "strength")
+                left.append(f"the {p.id.replace('_', ' ')}'s strength couldn't be checked ({e})")
                 continue
+        if run.get("safety") is None:
+            left.append(f"the {p.id.replace('_', ' ')}'s strength check gave no number")
         breaks = [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
-        if unsure is None and any(load_study.unresolved(run, c) and c.get("holds") for c in run["cases"]):
+        need.append(float(run.get("min_safety") or load_study.MIN_SAFETY))
+        if unsure is None and any(verdicts.case(run, c)["kind"] in ("unresolved", "unchecked") for c in run["cases"]):
             from .answers import coarse
 
             unsure = coarse(run, store.design.display_units == "in")
@@ -377,6 +400,14 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
     edgeless = next((why for p in store.design.parts if store.is_scripted(p.id)
                      and "def loads(" in store.read_script(p.id) for why in [bare_edge(store, p.id)] if why), None)
 
+    # CALI-113 (#115): a part that says what it must hold is held to it, goal or none. A design made without goals
+    # (no key, an older one, a hand-made scorecard.yaml) released "ready to cut" on a strength ✗.
+    if loaded and not any(str(c.get("metric", "")).startswith("strength") and c.get("source") != "proposed"
+                          for c in g["checks"]):
+        g["checks"] = [*g["checks"], {"id": "strength_loads", "label": "holds what its loads say, at its factor "
+                                      "(from its loads)", "metric": "strength.safety", "op": ">=",
+                                      "limit": max(need, default=load_study.MIN_SAFETY), "source": "implicit"}]
+
     # the user's checks and objectives (a proposed one is shown, and binds once it's kept: CALI-55)
     for c in g["checks"]:
         if c.get("source") == "proposed":
@@ -385,27 +416,40 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                            "trust": m["trust"] if m else None, "unit": m["unit"] if m else ""})
             continue
         m = metrics.get(c["metric"])
-        if untrue and c["metric"].startswith("strength"):        # neither passed nor failed: not trusted yet
-            checks.append({**c, "status": "untrusted", "value": m["value"] if m else None, "margin": None,
+        strength = c["metric"].startswith("strength")
+        number = m is not None and isinstance(m["value"], (int, float))
+        if number:
+            v, lim, op = float(m["value"]), float(c["limit"]), c.get("op", ">=")
+            met = verdicts.compare(v, op, lim)
+        elif untrue and strength:             # no number, on a filled-in shape: not trusted, not merely unknown
+            met = True
+        else:
+            met = None
+        # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-110)
+        verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=unsure if strength else None,
+                                edge=bool(edgeless) if strength else False,             # the middle only (CALI-94)
+                                incomplete="; ".join(left) if strength and left else None)
+        status = verdicts.STATUS[verdict["kind"]]
+        if status == "untrusted":
+            checks.append({**c, "status": status, "value": m["value"] if m else None, "margin": None,
                            "unit": m["unit"] if m else "", "trust": "not trusted: a filled-in shape", "note": untrue})
-            continue
-        if m is None or not isinstance(m["value"], (int, float)):
-            checks.append({**c, "status": "unknown", "value": None, "margin": None, "trust": None})
-            continue
-        v, lim, op = float(m["value"]), float(c["limit"]), c.get("op", ">=")
-        ok = v >= lim if op == ">=" else v <= lim if op == "<=" else abs(v - lim) < 1e-9
-        if ok and unsure and c["metric"].startswith("strength"):   # not resolved: never a pass; a fail stays one
-            checks.append({**c, "status": "unresolved", "value": m["value"], "unit": m["unit"], "margin": None,
+        elif status == "unresolved":
+            checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "not resolved: too coarse to see its walls", "note": unsure})
-            continue
-        if ok and edgeless and c["metric"].startswith("strength"):   # middle only (CALI-94): a ✗ stays a fail
-            checks.append({**c, "status": "edge", "value": m["value"], "unit": m["unit"], "margin": None,
+        elif status == "edge":                # loaded in the middle only (CALI-94): never a pass; a ✗ stays a fail
+            checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "checked in the middle only", "note": MIDDLE_ONLY})
-            continue
-        checks.append({**c, "status": "pass" if ok else "fail", "value": m["value"], "unit": m["unit"],
-                       "margin": round(v - lim if op == ">=" else lim - v, 3), "trust": m["trust"]})
+        elif status == "unknown":             # not checked, or a part left out: said (#132 review)
+            # why, where it's known: a part left out, or the metric's own note (an unweighed printed part: #125)
+            why = verdict.get("why") or (m.get("note") if m else None)
+            checks.append({**c, "status": status, "value": m["value"] if m and number else None, "margin": None,
+                           "trust": None, **({"note": why} if why else {})})
+        else:
+            checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"],
+                           "margin": round(v - lim if op == ">=" else lim - v, 3), "trust": m["trust"]})
     previous = list_cards(store, 1)
-    prev = previous[0]["metrics"] if previous else {}
+    # a change is the design's, never the scorer's: against a card from an older scorer there's no "was" (#125 review)
+    prev = previous[0]["metrics"] if previous and not previous[0].get("outdated") else {}
     objectives = []
     for o in g["objectives"]:
         m = metrics.get(o["metric"])
@@ -413,8 +457,10 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         value = m["value"] if m else None
         objectives.append({**o, "value": value, "unit": m["unit"] if m else "", "trust": m["trust"] if m else None,
                            "was": was, "change": (round(value - was, 3) if isinstance(value, (int, float))
-                                                  and isinstance(was, (int, float)) else None)})
-    card = {"created": time.time(), "versions": versions, "settings": settings, "checks": checks,
+                                                  and isinstance(was, (int, float)) else None),
+                           **({"note": "scored differently since"} if previous and previous[0].get("outdated")
+                              else {})})
+    card = {"created": time.time(), "scorer": SCORER, "versions": versions, "settings": settings, "checks": checks,
             "notes": g.get("notes") or [],
             "objectives": objectives, "metrics": metrics, "cost": cw,
             "summary": {"pass": sum(c["status"] == "pass" for c in checks),

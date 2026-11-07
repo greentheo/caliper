@@ -128,6 +128,9 @@ def test_two_materials_each_judged_against_its_own_strength(stool, monkeypatch, 
 
 
 # --- carving the printed sides (slice 3) -------------------------------------------------------------------
+@pytest.mark.serial   # CALI-114: failed once in parallel (#121's run 2: the adopted step wasn't watertight, #105),
+#                       passes on its own on main every run; the carve is seeded, so what differs is the tests
+#                       before it in its worker. On its own until #105 makes the adopt watertight.
 def test_the_printed_sides_carve_down_until_it_doesnt_hold(stool, monkeypatch):
     pytest.importorskip("whittle")
     from caliper import carve, load_study
@@ -140,9 +143,9 @@ def test_the_printed_sides_carve_down_until_it_doesnt_hold(stool, monkeypatch):
     rec = carve.study(stool, "stool", stations=3, remove_up_to=0.4)
     assert not rec["stations"][0]["whole_holds"] and rec["stations"][0]["weakest"] == "top"
     assert rec["weak"].startswith("As it is, it doesn't hold") and "the weak link is the top" in rec["weak"]
-    # a kid stepping up: the top holds, and the printed sides carve down until they don't. Its middle foot only: with
-    # the front-edge foot (CALI-94) the carve picks a step whose adopted part isn't watertight (#105)
-    stool.write_part("stool", CENTRED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
+    # a kid stepping up: the top holds, and the printed sides carve down until they don't. On both feet (CALI-94):
+    # #105's repro, whose adopted step wasn't watertight until #124 offered only steps that close up
+    stool.write_part("stool", MIXED.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
     rec = carve.study(stool, "stool", stations=4, remove_up_to=0.6)
     st = rec["stations"]
     assert st[0]["whole_holds"] and not rec["weak"]

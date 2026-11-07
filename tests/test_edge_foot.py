@@ -113,7 +113,7 @@ def test_a_middle_only_tick_reads_warn_everywhere_and_isn_t_a_pass(tmp_path, mon
     part = [ln for ln in answers.answers(store, design_api.design_state(store), "stool")[1]["lines"]
             if ln.get("study") == "load"]
     assert part and all(ln["status"] == "warn" for ln in part), part
-    assert part[0]["text"] == "Holds a kid stepping up in the middle: " + consistency.MIDDLE_ONLY + "."
+    assert part[0]["text"] == "A kid stepping up: " + consistency.MIDDLE_ONLY + "."       # never "holds" (#132)
     design = [ln for ln in answers.answers(store, design_api.design_state(store))[1]["lines"] if ln.get("study") == "load"]
     assert design and all(ln["status"] == "warn" and "checked in the middle only" in ln["text"].lower() for ln in design), design
     card = scorecard.compute(store)
@@ -123,7 +123,7 @@ def test_a_middle_only_tick_reads_warn_everywhere_and_isn_t_a_pass(tmp_path, mon
     assert studies._headline("scorecard", card)[1] is False
     # what the build book's Will it hold? row and the kid's book read: no "holds" from it either
     strength = release._strength(store, {"stool": store.design.part("stool").version})
-    assert all(c["edge"] for c in strength["stool"]) and any(c["holds"] for c in strength["stool"])
+    assert all(c["verdict"]["kind"] == "edge" and not c["verdict"]["counts_as_pass"] for c in strength["stool"])
 
 
 def test_with_its_front_edge_foot_the_same_stool_is_a_fail_and_stays_one(tmp_path, monkeypatch):
@@ -149,11 +149,11 @@ def test_no_reader_says_holds_on_the_middle_only(tmp_path, monkeypatch):
     from caliper import chat, pictures
 
     store, rec = _kid(tmp_path, monkeypatch, MIXED_CENTRED, "middle")
-    # the page's state marks each case, and the history the study wrote says it
+    # the page's state gives each case and the run its one verdict, and the history the study wrote says it (#132)
     (shown,) = design_api.design_state(store)["load_runs"]
-    assert all(c.get("middle_only") for c in shown["cases"])
+    assert all(c["verdict"]["kind"] == "edge" for c in shown["cases"]) and shown["verdict"]["kind"] == "edge"
     h = store.history("stool")[-1]
-    assert h["kind"] == "load" and h["holds"] and h["middle_only"] is True
+    assert h["kind"] == "load" and h["middle_only"] is True and h["verdict"]["kind"] == "edge"
     # the chat answers from facts that say so
     assert "CHECKED IN THE MIDDLE ONLY" in chat._facts(store, None)
     # the picture reply (kid-facing)
@@ -166,7 +166,7 @@ def test_no_reader_says_holds_on_the_middle_only(tmp_path, monkeypatch):
         pytest.skip("no node")
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     consts = "".join(re.search(rf"^const {n} = .*?;\n(?=\S)", src, re.M | re.S).group(0)
-                     for n in ("coarseWord", "caveat", "caseBadge", "runCoarse", "runBadge", "runWord"))
+                     for n in ("verdictTone", "verdictBadge", "settled", "caseBadge", "runBadge", "runWord"))
     hist = re.search(r"^function historyItem\(.*?^}\n", src, re.S | re.M).group(0)
     script = "const esc = (s) => String(s);\n" + consts + hist + (
         f"const run = {json.dumps(shown)}, c = run.cases[0];\n"
@@ -174,9 +174,11 @@ def test_no_reader_says_holds_on_the_middle_only(tmp_path, monkeypatch):
     got = json.loads(subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30, check=True).stdout)
     assert got[:3] == ['<span class="badge warn">middle only</span>', '<span class="badge warn">middle only</span>',
                        "middle only"], got
-    assert "strength check: checked in the middle only" in got[3] and "holds" not in got[3]
+    assert "strength check: middle only" in got[3] and "holds" not in got[3]
+    # the callout: the middle only says where people stand isn't checked, and no breaking load from it
     callout = re.search(r"^async function showHeat\(.*?^}\n", src, re.S | re.M).group(0)
-    assert "caveat(c)" in callout and "${c.breaks_lb && !caveat(c) ?" in callout
+    assert "c.verdict.kind === 'edge'" in callout and "the front edge, where people stand, isn't checked" in callout
+    assert "${c.breaks_lb && settled(c.verdict) ?" in callout
 
 
 def test_the_make_card_and_the_scorecard_line_name_the_middle_only():

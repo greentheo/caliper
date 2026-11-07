@@ -207,24 +207,33 @@ NOT_CHECKED = ("Not checked: its walls are too thin for the voxel check at this 
                "test piece is the way to know.")
 
 
-def _thin(declared: dict, mesh, pieces: list[dict]) -> tuple[list, Optional[float]]:
+def _thin(declared: dict, mesh, pieces: list[dict]) -> tuple[list, Optional[float], dict]:
     """Every piece's thinnest dimension, and a printed part's thinnest wall (measured). The thinnest, not a
     percentile: a thin neck the load goes through is a sliver of the surface, and a percentile let 5 mm voxels
     "see" a spool hung from a 0.6 mm neck and call it ✓ (#100, the reviewer's spool; rule 6). Where the thinnest
-    spot is only a lip, the cap says "not checked", the safe side."""
-    walls = None
+    spot is only a lip, the cap says "not checked", the safe side. And where the thinnest is: ``{"piece": name}``,
+    or ``{"at": (x, y, z)}`` for a measured wall, so a line can say where to thicken it (#136 review)."""
+    walls, at = None, None
     if any(isinstance(it, dict) and it.get("kind") == "printed" for it in declared.get("construction") or []):
-        from .measure import Geometry, min_wall_thickness
+        from .measure import Geometry, thinnest_wall
 
-        walls = min_wall_thickness(Geometry.from_mesh(mesh))
-    thin = [pc["thickness"] for pc in pieces if pc["kind"] == "sheet"] + [2 * pc["half"] for pc in pieces
-                                                                           if pc["kind"] == "stick"]
-    return thin + ([walls] if walls and walls > 0 else []), walls
+        walls, at = thinnest_wall(Geometry.from_mesh(mesh))
+    named = ([(pc["thickness"], pc.get("name")) for pc in pieces if pc["kind"] == "sheet"]
+             + [(2 * pc["half"], pc.get("name")) for pc in pieces if pc["kind"] == "stick"])
+    thin = [t for t, _ in named] + ([walls] if walls and walls > 0 else [])
+    where: dict = {}
+    if thin:
+        least = min(thin)
+        if walls and walls > 0 and walls == least:
+            where = {"at": at} if at else {}
+        else:
+            where = next(({"piece": n} for t, n in named if t == least and n), {})
+    return thin, walls, where
 
 
 def study_spacing(declared: dict, mesh, pieces: list[dict]) -> tuple[float, Optional[str]]:
     """The voxel size the strength check analyses this part at (:func:`spacing_for`), from what it declares."""
-    _, walls = _thin(declared, mesh, pieces)
+    _, walls, _ = _thin(declared, mesh, pieces)
     return spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)), walls)
 
 
@@ -232,6 +241,75 @@ def _sees(across: float) -> bool:
     """Enough voxels across to see a wall: RESOLVE_MIN, give or take a voxel size's rounding (a default run sized at
     exactly RESOLVE_MIN across reads 3.99999)."""
     return across >= RESOLVE_MIN * (1 - 1e-3)
+
+
+#: What a carve or lightening says where no run a study may make can see the walls (CALI-106, #101), when where
+#: they are isn't known; :func:`thin_words` says where, and what to change.
+TOO_THIN = "Its walls are too thin for the voxel check at this size, so it can't be carved by strength"
+
+
+def wall_rule(store: DesignStore, part_id: str) -> Optional[tuple[str, float]]:
+    """The part's own rule on its thinnest wall (``min_wall >= …``, its spec's or the design's), and the mm it asks
+    for: what the person already said the walls must be (#136 review: the bar stool's locked 2.85 mm)."""
+    import re
+
+    from .evaluate import DEFAULT_MACHINE, safe_eval
+
+    spec = store.read_spec(part_id)
+    rules = list(spec.assertions if spec else []) + [a for a in store.assembly.assertions if part_id in a.expr]
+    for a in rules:
+        m = re.match(r"\s*min_wall\s*>=?\s*(.+)$", a.expr)
+        if m:
+            try:
+                return a.id, float(safe_eval(m.group(1), {"machine": DEFAULT_MACHINE}))
+            except Exception:  # noqa: BLE001 — a rule this can't read is left out, not guessed at
+                continue
+    return None
+
+
+def thin_words(store: DesignStore, part_id: str, thin: float, where: dict, finest_mm: float,
+               printed: bool) -> str:
+    """Why a study can't run on walls this thin, where they are, and what to change (#136 review), said in two parts
+    that ask different things. Printing and the part's own rule: "its 0.25 mm walls around z 16.1 in are too thin
+    for a 0.4 mm nozzle to print and for your rule shell_wall_thickness (at least 2.85 mm): thicken them to that."
+    The strength check, in mm: "For a strength carve, walls must be at least 9.2 mm at this size, so check it by hand
+    or with a test piece instead." (Thickening to 2.85 mm doesn't unblock a carve: only 9.2 mm would.) One number
+    for the wall, the same everywhere (#137 item 2)."""
+    from .answers import _len, _wall
+    from .evaluate import DEFAULT_MACHINE
+
+    inches = getattr(store.design, "display_units", "in") == "in"
+    at = (f" in the {where['piece']}" if where.get("piece") else
+          f" around z {_len(where['at'][2], inches)}" if where.get("at") else "")
+    head, sees = f"its {_wall(thin, inches)} walls{at}", RESOLVE_MIN * finest_mm
+    nozzle = DEFAULT_MACHINE.nozzle
+    printing, rule = printed and thin < nozzle, wall_rule(store, part_id)
+    need = rule if rule and thin < rule[1] else None
+    if not (printing or need):
+        return (f"{head} are too thin for the strength check to see: at this size it sees walls from {sees:.1f} mm "
+                f"on, so check it by hand or with a test piece instead.")
+    rule_said = f"your rule {need[0]} (at least {round(need[1], 2):g} mm)" if need else ""
+    return (head + (f" are too thin for a {nozzle:g} mm nozzle to print" + (f" and for {rule_said}" if need else "")
+                    if printing else f" are thinner than {rule_said}")
+            + (": thicken them to that." if need else ": thicken them.")
+            + f" For a strength carve, walls must be at least {sees:.1f} mm at this size, so check it by hand or "
+              f"with a test piece instead.")
+
+
+def resolution(ctx: dict) -> dict:
+    """Can this set-up's voxels see the thinnest wall? As the strength check measures it (CALI-97), for the studies
+    that share its set-up (carve, lighten: CALI-106): ``thinnest_mm``, ``across``, ``resolved``, and, unresolved,
+    ``finer`` (a finer run can see it) or ``too_thin`` (none a study may make can). {} when it can't be told."""
+    thin, s = ctx.get("thinnest"), ctx.get("spacing")
+    if not thin or not s:
+        return {}
+    out = {"thinnest_mm": round(thin, 2), "across": round(thin / s, 3), "resolved": _sees(thin / s)}
+    if not out["resolved"]:
+        want = math.floor(thin / RESOLVE_MIN * 100) / 100
+        out.update({"finer": True} if want >= (ctx.get("finest") or 0) else {"too_thin": True})
+        if ctx.get("thin_said"):
+            out.update({"where": ctx.get("thinnest_where") or {}, "said": ctx["thin_said"]})
+    return out
 
 
 def unresolved(run: dict, case: dict) -> bool:
@@ -560,8 +638,10 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
         raise ValueError(f"'{part_id}' doesn't say what it must hold: its script has no loads()")
     loads = parse_loads(declared["loads"])
     mesh = store.part_geometry(part_id).require_mesh()
-    if not mesh.is_watertight:
-        raise ValueError(f"'{part_id}' isn't a closed solid, so it can't be voxelized")
+    from .measure import closed, open_near
+
+    if not closed(mesh):                       # said where, never a throw from deep in a boolean (CALI-118)
+        raise ValueError(f"not checked: its shape isn't closed {open_near(mesh)}, so it can't be voxelized")
     pieces = shapes(declared)
     rest = C.printed_solid(store, part_id, declared)       # what's printed: the whole part, or the rest (CALI-82)
     printed = printed_material(declared, mesh, rest)       # a printed part (CALI-81)
@@ -570,7 +650,7 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     mat = printed or sheet_mat or material(pieces)
     _sides(mesh, pieces)
     tol = tolerance(mesh)
-    thins, walls = _thin(declared, mesh, pieces)
+    thins, walls, where = _thin(declared, mesh, pieces)
     volume, longest = float(abs(mesh.volume)), float(max(mesh.extents))
     least = finest(volume, longest, FINER_BUDGET)       # as fine as any run of it may go (CALI-97)
     if spacing is None:
@@ -617,7 +697,8 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
         boxes.append(box)
     ctx = {"declared": declared, "loads": loads, "boxes": boxes, "mesh": mesh, "pieces": pieces,
            "mat": mat, "tol": tol, "spacing": spacing, "coarse": coarse, "held": held, "ls": ls,
-           "thinnest": min(thins) if thins else None, "finest": least,
+           "thinnest": min(thins) if thins else None, "finest": least, "thinnest_where": where,
+           "thin_said": thin_words(store, part_id, min(thins), where, least, bool(printed)) if thins else None,
            "attach": attach, "plate_mat": sheet_mat or mat}
     if printed and wood:
         _two_materials(ctx, wood, sheet_mat, rest)
@@ -703,7 +784,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     governs, safety = min(((k, s) for k, s in options if s is not None), key=lambda x: x[1],
                           default=("fea", None))
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
-                 "holds": bool(safety is not None and safety >= min_safety),
+                 "holds": bool(safety is not None and safety >= min_safety),  # producer
                  # where it's predicted to break, placed the same way: linear to failure, as wood is
                  # close to; the joints aren't modelled and may go first
                  "breaks_lb": round(load["lb"] * load["factor"] * safety, -1) if safety else None})
@@ -778,11 +859,13 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
         "material": mat, "spacing_mm": round(ctx["spacing"], 2), "voxels": int(ctx["ls"].solid.sum()),
         "min_safety": min_safety, "held": held, "cases": cases, "notes": notes,
-        "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),
+        "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
     }
     thin = ctx.get("thinnest")
     if thin:                                          # can the FEA see its thinnest wall? (CALI-97)
         record["thinnest_mm"] = round(thin, 2)
+        if ctx.get("thinnest_where"):
+            record["thinnest_where"] = ctx["thinnest_where"]
         record["across"] = round(thin / ctx["spacing"], 3)
         record["resolved"] = _sees(thin / ctx["spacing"])
         if not record["resolved"]:
@@ -801,6 +884,8 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
                              "load to a support."))
             else:
                 record["too_thin"] = True
+                if ctx.get("thin_said"):                  # where, and what to change (#136 review)
+                    record["thin_said"] = ctx["thin_said"]
                 notes.append(f"{seen} {RESOLVE_MIN:g} across would take more voxels than a study of a part this "
                              f"size may: {NOT_CHECKED}")
     from .consistency import filled
@@ -810,20 +895,24 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         notes.append("This ran on a filled-in shape, not the part as built: its numbers are the block's.")
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
+    from . import verdicts
+
     from .consistency import bare_edge
 
+    # one verdict (CALI-112): the history line and the message say it; loaded in the middle only (CALI-94) too
+    v = verdicts.run(record, edge=bool(bare_edge(store, part_id)))
     store.append_history(part_id, {"kind": "load", "action": "studied", "run": rid,
-                                   "cases": len(cases), "safety": worst, "holds": record["holds"],
-                                   # the history line says "not resolved" (CALI-110) or "checked in the middle only"
-                                   # (CALI-94), never "holds", for them
-                                   **({"unresolved": True} if any(unresolved(record, c) and c.get("holds")
-                                                                  for c in cases) else {}),
-                                   **({"middle_only": True} if bare_edge(store, part_id) else {})})
+                                   "cases": len(cases), "safety": worst,
+                                   "holds": record["holds"],  # producer: the study's number, kept for older readers
+                                   "verdict": {k: x for k, x in v.items() if k != "cases"},
+                                   # the history line says "not resolved", never "holds", for it (CALI-110)
+                                   **({"unresolved": True} if v["kind"] in ("unresolved", "unchecked") else {}),
+                                   **({"middle_only": True} if v["kind"] == "edge" else {})})
     store.append_log({"kind": "load", "action": "studied", "part": part_id, "run": rid})
-    said = "it holds" if record["holds"] else "it doesn't hold"
-    if record["holds"] and any(unresolved(record, c) for c in cases):      # never greener than its check (CALI-97)
-        said = "not checked: its walls are too thin for the voxels" if record.get("too_thin") else \
-            "not resolved yet: check it again finer"
+    said = {"holds": "it holds", "fails": "it doesn't hold",
+            "unchecked": "not checked: its walls are too thin for the voxels",
+            "unresolved": "not resolved yet: check it again finer",
+            "untrusted": "not trusted: it ran on a filled-in shape"}.get(v["kind"], v["word"])
     emit("done", f"{len(cases)} load(s) checked: " + said + (f", {worst:g}x" if worst else ""),
          run=rid, progress=1.0)
     return record

@@ -355,7 +355,8 @@ def _fail_lines(report, only: Optional[list[str]] = None, limit: int = 6) -> lis
         if only is not None and r.id not in only:
             continue
         margin = "" if r.margin is None else f" (margin {r.margin:+.3g})"
-        out.append(f"  • {r.id}: {r.expr} → actual={r.actual}{margin}")
+        # the reason, where the check gives one: the line a fallback hides a feature on (CALI-107)
+        out.append(f"  • {r.id}: {r.expr} → actual={r.actual}{margin}" + (f". {r.detail}" if r.detail else ""))
     return out[:limit]
 
 
@@ -436,6 +437,8 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     before, _ = _measure_design(store)
     spec = _working_spec(store, part_id, entry.intent)
     script = store.read_script(part_id)
+    prior = script                                 # what the request changes, as it was (CALI-107)
+    was = _volume(store, part_id)
 
     _emit(events, on_event, "authoring", f"revising {part_id}…", part=part_id)
     res = authoring.refine_authored(spec, script, message, max_rounds=max_rounds,
@@ -464,7 +467,9 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     _emit(events, on_event, "measured", "measured the whole design", part=part_id)
     broke, fixed = _delta(before, after)
 
-    reply = _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb="revised")
+    reply = _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb="revised",
+                     asked=message, prior=prior, new=script,
+                     volumes=(was, _volume(store, part_id)))
     if uncarved:
         reply += "\n\n" + carve.DROPPED
     proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
@@ -501,7 +506,7 @@ def _offer_promotion(store: DesignStore, part_id: str, feedback: str, *, use_llm
     if got.proposal is not None:
         promote.park(store, got.proposal)
         _emit(events, on_event, "proposed", f"{got.proposal.id}: {got.proposal.expr}",
-              part=part_id, assertion=got.proposal.id, holds_now=got.proposal.holds_now)
+              part=part_id, assertion=got.proposal.id, holds_now=got.proposal.holds_now)  # producer: carried
         return got.proposal, got.proposal.describe()
 
     fb = (feedback or "").lower()
@@ -606,11 +611,14 @@ def _accept(store: DesignStore, proposal, events: list[Event], on_event) -> Turn
              "Every future revision is measured against it; if something breaks it, I'll say so."]
     for _, cid, cexpr in proposal.conflicts:
         lines.append(f"\u21ba Retired **{cid}** (`{cexpr}`) — it couldn't hold alongside this one.")
-    if not proposal.holds_now:
+    from . import verdicts
+
+    now = verdicts.rule(proposal.holds_now)
+    if now["kind"] == "fails":
         lines.append("\u26a0 Note: it does **not** hold right now — so the design reads as failing until "
                      "we fix it. Tell me to have a go.")
     report, part_errors = _measure_design(store)
-    return TurnResult(action="accept", ok=proposal.holds_now, part=proposal.part,
+    return TurnResult(action="accept", ok=now["counts_as_pass"], part=proposal.part,
                       report=report, part_errors=part_errors, proposal=proposal,
                       events=events, reply="\n".join(lines))
 
@@ -637,18 +645,28 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
     except (ValueError, ImportError) as e:
         return TurnResult(action="carve", ok=False, part=part_id, events=events, error=str(e),
                           reply=f"I couldn't carve it: {e}.")
-    best = next((x for x in rec["stations"] if x["index"] == rec["best"]), None)
+    from . import consistency, verdicts
+
+    best = next((x for x in rec["stations"] if x["index"] == rec["best"]), None)  # search: the printed part's lightest
+    v = verdicts.carve_step(best, consistency.filled(store, part_id), rec) if best else None   # #132 review, #101
     said = []
     if rec.get("weak"):
         said.append(f"⚠ {rec['weak']}")
-    if best and best["saved_g"]:
+    if best and best["saved_g"] and not v["counts_as_pass"]:
+        said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. It could come off down to step "
+                    f"{best['index']} ({best['saved_g']} g less filament), but that isn't a part that holds: "
+                    + (f"the whole part is then {best.get('whole')}x." if v["kind"] == "fails" else
+                       f"the voxels were too coarse to see its walls (not resolved): check it again finer first." if v["kind"] in ("unresolved", "unchecked") else f"{v['word']}.")
+                    + " Fix that first.")
+    elif best and best["saved_g"]:
         said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. The lightest that holds is step "
                     f"{best['index']}: {best['removed']:.0%} {carve.share(rec)} carved away, {best['saved_g']} g less filament, "
                     f"about {best['safety']:g} times over (printed parts are a rough model). It's on the 3D view: **Carve it like this** to make it the "
                     f"part's shape (under *Will it work? → the numbers*, with every step).")
     else:
         said.append("Nothing could come off it and still hold.")
-    return TurnResult(action="carve", ok=True, part=part_id, events=events, reply="\n\n".join(said))
+    return TurnResult(action="carve", ok=bool(v and v["counts_as_pass"]), part=part_id, events=events,
+                      reply="\n\n".join(said))
 
 
 def picture_part(store: DesignStore, part_id: str, subject: str, where: str = "", *, points=None, events=None,
@@ -672,8 +690,10 @@ def picture_part(store: DesignStore, part_id: str, subject: str, where: str = ""
     except (ValueError, ImportError) as e:
         return TurnResult(action="picture", ok=False, part=part_id, events=events, error=str(e),
                           reply=f"I couldn't put a {subject} on it: {e}.")
-    return TurnResult(action="picture", ok=got["ok"] and got.get("holds", True) is not False
-                      and not got.get("unresolved") and not got.get("middle_only"), part=part_id,
+    from . import verdicts
+
+    checked = got.get("safety") is not None            # one verdict (CALI-112): only a ✓ with nothing over it is ok
+    return TurnResult(action="picture", ok=got["ok"] and (not checked or verdicts.of(got)["counts_as_pass"]), part=part_id,
                       version=got.get("version"), events=events, reply=got["reply"])
 
 
@@ -754,19 +774,24 @@ def _facts(store: DesignStore, scope: Optional[str]) -> str:
             promised = promised or bool(c.get("promise"))
     if promised:                                       # so a plain answer about strength can say it (CALI-86)
         out.append(f"what a strength verdict promises: {answers.PROMISE}")
-    from .consistency import bare_edge
+    from . import consistency, verdicts
 
     for run in load_study.list_runs(store)[:2]:
-        middle = bool(bare_edge(store, run["part"]))     # loaded in the middle only (CALI-94): no verdict to repeat
+        filled = consistency.filled(store, run["part"])
+        middle = bool(consistency.bare_edge(store, run["part"]))     # loaded in the middle only (CALI-94)
+        part = store.design.part(run["part"])
+        older = part is None or run.get("version") != part.version      # an older run says so (#132 review)
         for c in run.get("cases") or []:
+            v = verdicts.case(run, c, filled=filled, stale=older, edge=middle)   # one verdict (CALI-112)
             out.append(f"strength check of {run['part']} v{run['version']}: {c.get('name')} {c.get('lb')} lb x "
-                       f"{c.get('factor')}: safety {c.get('safety')} ({c.get('governs')}), breaks near "
-                       f"{c.get('breaks_lb')} lb; needs {run.get('min_safety')}"
+                       f"{c.get('factor')}: verdict {v['word'].upper()}; safety {c.get('safety')} ({c.get('governs')}), "
+                       f"breaks near {c.get('breaks_lb')} lb; needs {run.get('min_safety')}"
                        # never a verdict to repeat: the FEA couldn't see the wall (CALI-110), or the middle only (CALI-94)
                        + ("; NOT RESOLVED: the voxels were too coarse to see its walls, so this number is no verdict"
-                          if load_study.unresolved(run, c) else
-                          "; CHECKED IN THE MIDDLE ONLY: the front edge, where people stand, isn't, so this is no "
-                          "verdict" if middle and c.get("holds") else ""))
+                          if v["kind"] in ("unresolved", "unchecked") or v.get("coarse") else "")
+                       + ("; CHECKED IN THE MIDDLE ONLY: the front edge, where people stand, isn't, so this is no "
+                          "verdict" if v["kind"] == "edge" else "")
+                       + ("; NOT TRUSTED: it ran on a filled-in shape" if v["kind"] == "untrusted" else ""))
         out += [f"strength note: {n}" for n in (run.get("notes") or [])[:4]]
     said = [e for e in store.log() if e.get("kind") in ("message", "reply")][-6:]
     out += [f"{'they said' if e['kind'] == 'message' else 'Caliper said'}: {(e.get('text') or e.get('reply') or '')[:600]}"
@@ -837,10 +862,69 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
                       part_errors=part_errors, events=events, reply="\n".join(lines))
 
 
-def _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb: str) -> str:
-    """The chat reply: what happened, what it measures, and — critically — what it broke."""
+def _volume(store: DesignStore, part_id: str):
+    """The part's volume now, in mm³, or None (CALI-107: whether a request changed the shape at all)."""
+    try:
+        return float(abs(store.part_geometry(part_id).require_mesh().volume))
+    except Exception:  # noqa: BLE001 — not measurable is said, not hidden
+        return None
+
+
+#: The ends of a PARAMS name, in words: foot_fillet_r is the foot fillet radius (#119 review).
+_ENDS = {"r": "radius", "t": "thickness", "w": "width", "h": "height", "d": "depth", "dia": "diameter",
+         "l": "length", "len": "length", "x": "x", "y": "y", "z": "z"}
+#: Names that count things, said without a unit.
+_COUNT = ("n", "num", "count", "rows", "cols", "columns", "holes", "slats", "steps", "sides", "segments", "teeth",
+          "legs", "panels", "spokes", "stations", "openings", "pieces")
+
+
+def _plain(key: str) -> str:
+    """A PARAMS name as words: ``foot_fillet_r`` → "foot fillet radius"."""
+    bits = key.split("_")
+    return " ".join(_ENDS.get(b, b) if i == len(bits) - 1 else b for i, b in enumerate(bits))
+
+
+def _counts(key: str) -> bool:
+    bits = key.lower().split("_")
+    return bits[0] in _COUNT or bits[-1] in _COUNT
+
+
+def _asked(store: DesignStore, asked: str, prior: str, new: str, volumes) -> list[str]:
+    """What was asked for, what changed, what the build shows, and what nothing measures (CALI-107, rule 6): a
+    reply never lets "the checks pass" stand for "what you asked for happened"."""
+    from . import answers, fallbacks
+
+    inches = store.design.display_units == "in"
+
+    def said(key, v):
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return repr(v) if v is not None else "none"
+        if _counts(key):                             # a count: rows, holes, slats…
+            return f"{v:g}"
+        return f"{v:g} mm" + (f" ({answers._wall(v, True)})" if inches and v > 0 else "")   # a length, always its unit
+
+    out = [f"Asked for: {asked.strip()}"]
+    moved = fallbacks.changed(prior or "", new or "")
+    out.append("Changed: " + (", ".join(f"{_plain(k)} {said(k, a)} → {said(k, b)}" for k, a, b in moved) if moved
+                              else "no number in its PARAMS; the change is in how it's built"))
+    was, now = volumes or (None, None)
+    if was is not None and now is not None:
+        out.append(f"Its shape didn't change (the same volume, {was / 1000:,.0f} cm³): what you asked for may not have "
+                   f"happened. Look at it, and say so if it didn't." if abs(now - was) <= 1e-6 * max(was, 1.0) else
+                   f"Measured: its volume went from {was / 1000:,.0f} to {now / 1000:,.0f} cm³.")
+    out.append("Not measured: whether that's what you meant. The checks below are the part's own rules, not your "
+               "request; look at it to see it's right.")
+    return out
+
+
+def _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb: str, *, asked: str = "",
+             prior: str = "", new: str = "", volumes=None) -> str:
+    """The chat reply: what happened, what it measures, and — critically — what it broke. For a request, what was
+    asked for and what changed come first, and nothing below stands for it (CALI-107)."""
     head = "✓" if (res.ok and not broke) else "✗"
     lines = [f"{head} {verb} **{part_id}** → v{version} ({res.rounds} round(s))"]
+    if asked:
+        lines += _asked(store, asked, prior, new, volumes)
 
     if res.report is not None:
         part_fails = _fail_lines(res.report)
@@ -848,7 +932,7 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
             lines.append(f"{len(part_fails)} check(s) on this part still failing:")
             lines.extend(part_fails)
         else:
-            lines.append("Every check on this part passes.")
+            lines.append("The part's own checks pass." if asked else "Every check on this part passes.")
 
     if broke:
         lines.append("")
@@ -872,7 +956,8 @@ def _reviewing(store: DesignStore) -> bool:
     """A plan of several parts saved and none of them built: what the chat changes is the plan (CALI-35)."""
     plan = store.design.plan or {}
     ids = [p["id"] for p in plan.get("parts") or []]
-    return len(ids) > 1 and not any(store.design.part(i) and store.design.part(i).version for i in ids)
+    made = [p["id"] for p in plan.get("parts") or [] if p.get("role") != "fixed"]
+    return len(made) > 1 and not any(store.design.part(i) and store.design.part(i).version for i in ids)
 
 
 def plan_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = True, events=None,
@@ -896,8 +981,9 @@ def plan_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = 
         return TurnResult("plan", "That didn't change the plan. Say which part or number to change.", ok=False,
                           events=events)
     P.save(store, after, "review")
-    return TurnResult("plan", "Changed the plan: " + "; ".join(said) + ".\n\n" + P.headline(after, store.design.name),
-                      events=events)
+    gone = P.dropped_line(after)
+    return TurnResult("plan", "Changed the plan: " + "; ".join(said) + ".\n\n" + P.headline(after, store.design.name)
+                      + (f" ({gone[0].upper() + gone[1:]}.)" if gone else "") + P.said_aside(after), events=events)
 
 
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
