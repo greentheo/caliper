@@ -285,9 +285,9 @@ def test_the_score_panel_and_goal_limit_render_together_unstubbed():
             "objectives": [{"label": "weight", "value": 13.1, "unit": "lb"}], "notes": []}
     design = {"scorecards": [card], "parts": [{"id": "i_want", "version": 7}], "goals": {"checks": []},
               "has_goals": True}
-    out = _run(_page(["scoreView", "scoreNum"], consts=["esc", "TRUST", "goalLimit"], extra=(
+    out = _run(_page(["scoreView", "scoreNum", "asOf", "scoreMark"], consts=["esc", "TRUST", "goalLimit"], extra=(
         f"out = scoreView({json.dumps(design)});")))
-    assert "13.1 lb (cap 10 lb)" in out
+    assert "13.1 lb (cap 10 lb)" in out and "(as of v1)" in out           # with #140's stale card
 
 
 def test_show_the_stress_names_no_old_label():
