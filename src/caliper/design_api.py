@@ -212,12 +212,16 @@ def _plan(store: DesignStore) -> Optional[dict]:
     inches = store.design.display_units == "in"
     by = {p.id: p for p in pl.parts}
     return {"status": (store.design.plan or {}).get("status", "review"), "headline": P.headline(pl, store.design.name),
+            "dropped": P.dropped_line(pl),
             "parts": [{**by[i].model_dump(), "built": bool(store.design.part(i) and store.design.part(i).version)}
                       for i in P.order(pl)],
-            "numbers": [f"{s.name.replace('_', ' ')}: {P.number(s, inches)}" + (f" ({s.why})" if s.why else "")
-                        for s in pl.skeleton],
-            "checks": [{"id": r.id, "expr": r.expr} for r in pl.rules]
-                      + [{"id": f"{m.kind}", "expr": f"{m.between[0]} and {m.between[1]}"} for m in pl.mates]}
+            "numbers": [P.said_number(s, inches) for s in pl.skeleton],
+            # an assumed check is shown as one, with a Keep; only what was said or kept is enforced (CALI-115)
+            "checks": [{"id": r.id, "expr": r.expr, "why": r.why,
+                        "source": r.source if r in P.binding(pl) else "assumed"}
+                       for r in pl.rules]
+                      + [{"id": f"{m.kind}", "expr": f"{m.between[0]} and {m.between[1]}", "source": "mate"}
+                         for m in pl.mates]}
 
 
 def _building(slug: str) -> Optional[str]:
@@ -757,6 +761,19 @@ def router():
                 ".html": "text/html"}.get(os.path.splitext(name)[1], "application/octet-stream")
         with open(path, "rb") as f:
             return Response(f.read(), media_type=kind)
+
+    # -- the plan (CALI-115): keep a check the planner assumed, so it's enforced --------------------------
+    @r.post("/api/designs/{slug}/plan/checks/{rule_id}/keep")
+    def plan_keep(slug: str, rule_id: str):
+        from . import plan as P
+
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                P.keep(store, rule_id)
+            except KeyError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+            return design_state(store)
 
     # -- what it's held to (CALI-55): keep or drop a check the conversation proposed -------------------
     @r.post("/api/designs/{slug}/goals/{check_id}")
