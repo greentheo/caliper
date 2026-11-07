@@ -170,5 +170,6 @@ If you had a tab open from a previous version, **hard-refresh** (⌘⇧R) to pic
 
 ```bash
 make test     # pytest — the full guard
+python -m pytest -n auto   # optional: across your cores (pytest-xdist); CI runs it this way (CALI-114)
 make review   # pytest + ruff + diff summary (ruff optional)
 ```

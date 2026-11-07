@@ -10,7 +10,9 @@ Run with ``caliper serve`` (or ``make serve``).
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 
 from typing import Optional
 
@@ -557,14 +559,46 @@ def create_app():
     # the M2 control panel moved to /classic when the design session became the home page (CALI-32)
     @app.get("/classic")
     def classic():
-        return FileResponse(os.path.join(STATIC_DIR, "classic.html"),
-                            headers={"Cache-Control": "no-store"})
+        return keyed_page("classic.html")
+
+    # the home page, its scripts and styles keyed by their contents (CALI-120): no PR touches a ?v= again
+    @app.get("/")
+    @app.get("/index.html")
+    def home():
+        return keyed_page("index.html")
 
     # the front end (registered last so /api/* wins)
     if os.path.isdir(STATIC_DIR):
         app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
     return app
+
+
+#: ``/name.js?v=…`` or ``/name.css?v=…`` in a page: the key the server sets (CALI-120).
+_KEYED = re.compile(r"(/)([\w./-]+\.(?:js|css))\?v=[\w.-]*")
+
+
+def cache_key(name: str) -> str:
+    """A short hash of a static file's contents: its ``?v=``. A change to the file is a new key, and nothing else is."""
+    path = os.path.join(STATIC_DIR, name.lstrip("/"))
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()[:10]
+    except OSError:
+        return "dev"
+
+
+def keyed_page(name: str):
+    """A page with every ``?v=`` on its own scripts and styles set to :func:`cache_key` of that file, so a browser
+    fetches ``design.js`` again exactly when it changed (CALI-120: the hand-bumped ``?v=N`` made every open PR
+    conflict on one line). Read per request, so a dev server picks a change up on reload; the page itself is never
+    cached. The vendored three.js is imported by version-pinned path, so it needs no key."""
+    from fastapi.responses import HTMLResponse
+
+    with open(os.path.join(STATIC_DIR, name), encoding="utf-8") as f:
+        html = f.read()
+    html = _KEYED.sub(lambda m: f"{m.group(1)}{m.group(2)}?v={cache_key(m.group(2))}", html)
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
