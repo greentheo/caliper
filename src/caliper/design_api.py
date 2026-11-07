@@ -19,7 +19,7 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 
 from . import (aero, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, lighten,
-               load_study, making, patterns, promote, release, samples, scorecard, shop, studies)
+               load_study, making, patterns, promote, release, samples, scorecard, shop, studies, verdicts)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, Busy, stream
@@ -213,13 +213,14 @@ def _plan(store: DesignStore) -> Optional[dict]:
     by = {p.id: p for p in pl.parts}
     return {"status": (store.design.plan or {}).get("status", "review"), "headline": P.headline(pl, store.design.name),
             "dropped": P.dropped_line(pl),
+            "notes": pl.notes, "dropped_rules": pl.dropped_rules,     # said, never silent (CALI-119)
             "parts": [{**by[i].model_dump(), "built": bool(store.design.part(i) and store.design.part(i).version)}
                       for i in P.order(pl)],
             "numbers": [P.said_number(s, inches) for s in pl.skeleton],
             # an assumed check is shown as one, with a Keep; only what was said or kept is enforced (CALI-115)
             "checks": [{"id": r.id, "expr": r.expr, "why": r.why,
                         "source": r.source if r in P.binding(pl) else "assumed"}
-                       for r in pl.rules]
+                       for r in pl.rules if not P.numbers_only(r, pl)]          # a note is said apart, never a check
                       + [{"id": f"{m.kind}", "expr": f"{m.between[0]} and {m.between[1]}", "source": "mate"}
                          for m in pl.mates]}
 
@@ -310,10 +311,41 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "gussets": frame_study.list_gussets(store), "aero": aero.list_runs(store),
             "whittle": wb.list_runs(store), "cutplan": cutplan.list_runs(store),
             "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
-    for r in runs["load"]:                    # what the page can't work out: a case too coarse to see its walls (CALI-97)
-        for c in r.get("cases") or []:
-            if load_study.unresolved(r, c):
+    # one verdict per run and case, for the page to read and never work out (CALI-112): its badges, words and colours
+    untrusted = {p["id"]: p.get("untrusted") for p in parts}
+    for r in runs["load"]:
+        part = next((p for p in parts if p["id"] == r["part"]), None)
+        v = verdicts.run(r, filled=untrusted.get(r["part"]),
+                         stale=part is None or r.get("version") != part["version"])   # never green on an older run
+        for c, cv in zip(r.get("cases") or [], v.pop("cases", [])):
+            c["verdict"] = cv
+            # each thickness the plate check tried: its number against what it needs, and only where the case is
+            # settled (it holds or fails): never green on a not-trusted, unresolved or older case (#132 review)
+            for b in ((c.get("plate") or {}).get("by_thickness") or []):
+                b["verdict"] = (verdicts.meets(b.get("safety_across"), r.get("min_safety"))
+                                if cv["kind"] in ("holds", "fails") else cv)
+            pl = c.get("plate") or {}
+            if pl.get("done"):                # the plate or beam check's own number, the worse grain's (#122, CALI-116)
+                pl["verdict"] = (verdicts.meets(pl.get("safety_across"), r.get("min_safety"))
+                                 if cv["kind"] in ("holds", "fails") else cv)
+            if load_study.unresolved(r, c):   # which coarse it is, for the panel's FEA line (CALI-97)
                 c["unresolved"] = "unresolved" if r.get("finer") else "unchecked"
+        r["verdict"] = v
+    for r in runs["carve"]:                   # a carve or lightening step, as the page shows it (#132 review)
+        for st in r.get("stations") or []:
+            st["verdict"] = verdicts.carve_step(st, untrusted.get(r["part"]), r)        # #101: coarse voxels too
+    for r in runs["lighten"]:
+        for st in r.get("stations") or []:
+            st["verdict"] = verdicts.lighten_step(st, untrusted.get(r["part"]), r)
+    for p in parts:                           # the history line of a strength check says the verdict it was given
+        for h in p["history"]:
+            if h.get("kind") == "load" and h.get("action") == "studied":
+                h["verdict"] = verdicts.of(h)
+            elif h.get("kind") == "revision" and h.get("result"):     # its report's verdict (#132 review)
+                h["verdict"] = verdicts.history(h)
+    current = {p["id"]: p["version"] for p in parts}
+    for rel in runs["release"]:                # ready, as made and for the parts as they are now (#132 review)
+        rel["verdict"] = verdicts.release(rel, current)
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,

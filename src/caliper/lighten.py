@@ -281,7 +281,7 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
     safety = round(min(worst, fea) if fea else worst, 2)
     plate = dict(pl or {}, done=False, why="it has holes, so the plate formula doesn't apply; the FEA does, "
                                            "calibrated against it on the panel solid")
-    case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety, "plate": plate,
+    case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety, "plate": plate,  # producer
                  "breaks_lb": round(case["lb"] * case["factor"] * safety, -1)})
     return case
 
@@ -344,6 +344,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     t0 = time.time()
     ctx = L.prepare(store, part_id, emit)
     s, mat = ctx["spacing"], ctx["mat"]
+    seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)
     plist, tops = panels(ctx), panels(ctx, stood_on=True)
     # a panel stood on that already has holes is judged as it is (judge_holed), and gets no more
     tops = [p for p in tops if not any(pc["name"] == p["name"] and pc.get("holes") for pc in ctx["pieces"])]
@@ -432,7 +433,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
                         mine = min(allow / (peak * kk), allow / (KT_HOLE * edge * kk) if edge > 0 else np.inf)
                         fea = (case.get("fea") or {}).get("safety")
                         safety = round(min(mine, fea) if fea else mine, 2)
-                        case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety,
+                        case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety,  # producer
                                      "breaks_lb": round(case["lb"] * case["factor"] * safety, -1)})
             cases.append(case)
             results.append(r)
@@ -442,7 +443,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
         st = {"index": k, "phase": phase, "target": target, "removed": round(wall_area / whole, 3) if whole else 0.0,
               "saved_lb": round(saved_g / 453.59237, 2), "holes": sum(len(v) for v in holes.values()),
               "top_holes": sum(len(chosen[p["name"]]) for p in tops),
-              "safety": safety, "holds": bool(cases) and all(c.get("holds") for c in cases),
+              "safety": safety, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
               "cases": [{"name": c["name"], "safety": c.get("safety"), "governs": c.get("governs"),
                          "fea_safety": (c.get("fea") or {}).get("safety"), "breaks_lb": c.get("breaks_lb"),
                          "in": (c.get("fea") or {}).get("in")} for c in cases],
@@ -458,7 +459,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
         solid = cut
         if phase == "walls":
             wall_holes = {n: v for n, v in holes.items() if n in wall_cover}
-        if not st["holds"]:
+        if not st["holds"]:  # search
             break
 
     # thinner sheet, from the lightest step that holds: an estimate, until it's rebuilt and checked
@@ -466,7 +467,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     stations += [dict(t, index=len(stations) + i) for i, t in enumerate(thinner)]
 
     record = {
-        "id": rid, "part": part_id, "kind": "lighten", "created": time.time(),
+        "id": rid, "part": part_id, "kind": "lighten", "created": time.time(), **seen,
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
         "min_safety": min_safety, "material": mat["name"], "spacing_mm": round(s, 2),
         "panels": [{"name": p["name"], "thickness_mm": p["t"], "normal": [round(float(c), 6) for c in p["n"]],
@@ -494,7 +495,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     }
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
-    best = max((x for x in stations if x["holds"] and not x.get("estimate")), key=lambda x: x["saved_lb"], default=None)
+    best = max((x for x in stations if x["holds"] and not x.get("estimate")), key=lambda x: x["saved_lb"], default=None)  # producer
     store.append_history(part_id, {"kind": "lighten", "action": "studied", "run": rid,
                                    "stations": len(stations), "best_removed": best and best["removed"]})
     store.append_log({"kind": "lighten", "action": "studied", "part": part_id, "run": rid})
@@ -520,7 +521,7 @@ def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
     that thickness, the walls by their FEA scaled with the thickness."""
     # from the lightest step that holds with the panel stood on still solid: there the plate check is exact at
     # any thickness, and holes in that panel save next to nothing for what they cost it
-    base = max((x for x in stations if x["holds"] and not x.get("top_holes")), key=lambda x: x["saved_lb"],
+    base = max((x for x in stations if x["holds"] and not x.get("top_holes")), key=lambda x: x["saved_lb"],  # search
                default=None)
     sheets = [pc for pc in ctx["pieces"] if pc["kind"] == "sheet"]
     if base is None or not sheets:
@@ -543,9 +544,9 @@ def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
         saved = base["saved_lb"] + (wood_g / 453.59237 - base["saved_lb"]) * (1 - ratio)
         out.append({"phase": "thinner", "estimate": True, "thickness_mm": t, "label": M.nominal(t),
                     "removed": base["removed"], "holes": base["holes"], "top_holes": base.get("top_holes", 0),
-                    "safety": round(worst, 2), "holds": worst >= min_safety, "saved_lb": round(saved, 2),
+                    "safety": round(worst, 2), "holds": worst >= min_safety, "saved_lb": round(saved, 2),  # producer
                     "from_step": base["index"], "cases": [], "panels": base["panels"]})
-        if worst < min_safety:
+        if worst < min_safety:  # search
             break
     return out
 

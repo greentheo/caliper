@@ -116,6 +116,9 @@ def test_two_materials_each_judged_against_its_own_strength(stool, monkeypatch, 
 
 
 # --- carving the printed sides (slice 3) -------------------------------------------------------------------
+@pytest.mark.serial   # CALI-114: failed once in parallel (#121's run 2: the adopted step wasn't watertight, #105),
+#                       passes on its own on main every run; the carve is seeded, so what differs is the tests
+#                       before it in its worker. On its own until #105 makes the adopt watertight.
 def test_the_printed_sides_carve_down_until_it_doesnt_hold(stool, monkeypatch):
     pytest.importorskip("whittle")
     from caliper import carve, load_study

@@ -28,7 +28,9 @@ from . import chat, goals, load_study, patterns
 from .design import DesignStore
 
 #: A reply leads with what fails, then what holds, then what's still to check.
-VERDICT_FIRST = ("bad", "ok", "warn", "info")
+#: Worst first (#132 review): a fail, then a warning, then what holds, so the first reply's two lines never drop a
+#: "not trusted" or "not resolved" under two "Holds…".
+VERDICT_FIRST = ("bad", "warn", "ok", "info")
 #: What the goals are written from, when it's the design's sentence and its answers that say it.
 SAID = "(the design's goal and the answers to its questions)"
 
@@ -184,6 +186,7 @@ def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, cli
     P.save(store, plan, "review")
     gone = P.dropped_line(plan)                # never dropped without a word (#123 review)
     reply = (P.headline(plan, store.design.name) + (f" ({gone[0].upper() + gone[1:]}.)" if gone else "")
+             + P.said_aside(plan)
              + "\n\nThat's the plan, before anything's drawn: its numbers and the "
              "checks between the parts are under What is it?. Say what to change (\"make the mast 10 ft\"), or "
              "**Build it** to go on.")

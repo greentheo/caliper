@@ -138,7 +138,8 @@ function wallLen(mm) {
   const n = Math.round(mm / IN * 32);
   if (inches() && mm >= IN) return len(mm, 1);
   if (inches() && n >= 1) { const g = gcd(n, 32); return `${n / g}/${32 / g}″`; }
-  return `${mm < 10 ? +mm.toFixed(1) : Math.round(mm)} mm`;
+  // under 1 mm, two places, as the server says it: 0.25 mm, not 0.3 (#137 item 2)
+  return `${mm < 1 ? +mm.toFixed(2) : mm < 10 ? +mm.toFixed(1) : Math.round(mm)} mm`;
 }
 const gcd = (a, b) => (b ? gcd(b, a % b) : a);
 function sizeText(size) {
@@ -908,6 +909,8 @@ function designView(d) {
         <div class="muted small">${esc(x.what)}${x.made ? ` · ${esc(x.made)}` : ''}${x.mounts_on.length
           ? ` · on the ${x.mounts_on.map((m) => esc(m.replace(/_/g, ' '))).join(' and the ')}` : ''}</div></li>`).join('')}</ol>
       ${d.plan.dropped ? `<div class="small muted">${esc(d.plan.dropped[0].toUpperCase() + d.plan.dropped.slice(1))}.</div>` : ''}
+      ${(d.plan.dropped_rules || []).map((x) => `<div class="small" style="color:var(--amber)">Left out ${esc(x)}.</div>`).join('')}
+      ${(d.plan.notes || []).length ? `<div class="small muted">By the numbers: ${esc(d.plan.notes.join('; '))}.</div>` : ''}
       ${d.plan.numbers.length ? '<div class="small"><b>The numbers they share</b></div><ul class="list">'
         + d.plan.numbers.map((n) => `<li class="small">${esc(n)}</li>`).join('') + '</ul>' : ''}
       ${d.plan.checks.length ? '<div class="small"><b>Checked between them</b></div><ul class="list">'
@@ -1184,7 +1187,8 @@ function goTo(id) {                   // open the card's numbers and bring that 
 const TRUST = { measured: 'measured', model: 'a model (on the safe side)', rough: 'rough', guess: 'a guess' };
 function scoreView(d) {
   const card = (d.scorecards || [])[0];
-  const stale = card && d.parts.some((p) => card.versions && card.versions[p.id] !== undefined && card.versions[p.id] !== p.version);
+  const stale = card && (card.outdated     // scored the old way (CALI-111): its numbers aren't today's
+    || d.parts.some((p) => card.versions && card.versions[p.id] !== undefined && card.versions[p.id] !== p.version));
   const num = (v, u) => {
     if (v == null) return '—';
     const n = typeof v === 'number' ? (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : `${+v.toFixed(2)}`) : esc(String(v));
@@ -1270,7 +1274,9 @@ function releaseView(d) {
   const stale = d.parts.some((p) => rel.versions[p.id] !== undefined && rel.versions[p.id] !== p.version);
   const vers = Object.entries(rel.versions).map(([k, v]) => `${esc(k)} v${v}`).join(', ');
   return `<div class="small"><b>Release ${esc(rel.id)}</b>
-      ${rel.ready ? '<span class="badge ok">ready to cut</span>' : '<span class="badge bad">not ready — a check fails</span>'}
+      ${rel.verdict && rel.verdict.kind === 'holds' ? '<span class="badge ok">ready to cut</span>'
+        : rel.verdict && rel.verdict.kind === 'stale' ? '<span class="badge warn">ready as it was made: a part has changed since</span>'
+        : `<span class="badge ${verdictTone(rel.verdict)}">not ready — ${esc((rel.verdict && rel.verdict.why) || 'a check isn\'t settled')}</span>`}
       ${stale ? '<span class="badge bad">a part has changed since</span>' : ''}
       <div class="muted">${new Date(rel.created * 1000).toLocaleString()} · ${vers}</div>
       <div>${rel.steps.length} assembly steps · ${rel.sheets} sheets · ~$${Math.round(rel.shopping_usd)} to buy</div></div>
@@ -1311,7 +1317,7 @@ function historyItem(h) {
       : h.action === 'restore' ? `rolled back to v${h.restored_from}` : h.action;
     return `<li class="hist"><span class="v">v${h.version}</span>${esc(what)}
       ${h.feedback && h.action !== 'author' ? `<div>“${esc(h.feedback)}”</div>` : ''}
-      ${h.result ? `<span class="badge ${h.result === 'all_pass' ? 'ok' : 'bad'}">${h.result === 'all_pass' ? 'passed' : 'failing'}</span>` : ''}</li>`;
+      ${h.verdict ? `<span class="badge ${verdictTone(h.verdict)}">${esc(h.verdict.kind === 'holds' ? 'passed' : h.verdict.kind === 'fails' ? 'failing' : h.verdict.word)}</span>` : ''}</li>`;
   }
   if (h.kind === 'assertion') {
     return `<li class="hist">${h.action === 'promoted' ? '🔒 locked in' : 'declined'} <code>${esc(h.expr || h.id)}</code></li>`;
@@ -1319,7 +1325,7 @@ function historyItem(h) {
   if (h.kind === 'whittle') return `<li class="hist">studied in whittle (${esc(h.study)}, ${h.stations} stations)</li>`;
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
-  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${h.unresolved && h.holds ? 'not resolved' : h.holds ? 'holds' : 'doesn\'t hold'}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
   if (h.kind === 'patterns' && h.action === 'made') return `<li class="hist">patterns for hand tools (${h.pieces} pieces)</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
@@ -1471,7 +1477,8 @@ function builtResults(p, c) {
   return `<div class="card">
       <button class="ghost" id="b3d" style="float:right">${built3d.has(p.id) ? 'Back to the solid' : 'Show how it\'s built'}</button>
       <b style="font-size:1.3em">${lbs(r.mass_lb)}</b> ${changed ? '<span class="badge">trying — not saved</span>' : ''}
-      <div class="small">centre of gravity ${cogText(p, r.cog)} <span class="muted">(the red dot)</span></div>
+      ${r.unweighed ? `<div class="small" style="color:var(--amber)">Its weight isn't known: ${esc(r.unweighed)}.</div>`   // never the rest's (#125)
+        : `<div class="small">centre of gravity ${cogText(p, r.cog)} <span class="muted">(the red dot)</span></div>`}
       ${(r.keeps || []).map((k) => `<div class="small" style="margin-top:4px">${k.clear
         ? `✓ holds the <b>${esc(k.name)}</b>`
         : `<span style="color:var(--bad)">✗ the <b>${esc(k.name)}</b> doesn't fit — the outside cuts ${len(k.depth_mm, 1)} into it</span>`}
@@ -1762,6 +1769,7 @@ function balanceView() {
   const hitch = b.moment_lbin != null;           // only when a part declares where it's held (a hitch)
   const part = (x) => (x.part === 'payload' ? 'payload' : `<span class="partlink" data-part="${esc(x.part)}">${esc(x.part)}</span>`);
   return `<div class="card"><b style="font-size:1.3em">${lbs(b.mass_lb)}</b> ${tried ? '<span class="badge">with what-ifs</span>' : ''}
+      ${b.unweighed ? `<div class="small" style="color:var(--amber)">The total isn't known: ${esc(b.unweighed.join('; '))}.</div>` : ''}
       ${hitch ? `<div class="small">The hitch carries <b>${lbs(b.force_lb)}</b> with its centre of gravity
         ${len(b.arm_in * IN, 1)} behind it: <b>${lbin(b.moment_lbin)}</b> standing still.</div>
       <div class="muted small" style="margin-top:4px">${HITCH_NOTE}</div>` : ''}</div>
@@ -1872,7 +1880,7 @@ function carveView(p) {
   const head = `<h5 style="margin:14px 0 4px">Carve it <span class="badge">printed, any shape</span></h5>
     <div class="muted small">A printer makes any shape, so the printed part can be carved wherever it isn't working: in steps,
       each one checked. ${p.carved ? 'It\'s carved now; carving again starts from its shape as drawn.' : ''}</div>
-    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo" ${S.carveJob[p.id] ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
+    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo" ${S.carveJob[p.id] || carveBlocked(p) ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
       <span class="muted small">${esc(carveTime(p))}</span></div><div id="carveProgress">${carveProgress(p.id)}</div>`;
   if (!run) return head;
   if (run.status === 'cancelled') {                // stopped from its panel: the steps it finished (CALI-101)
@@ -1894,7 +1902,7 @@ function carveChart(p, run) {
   const x = (r) => 24 + (W - 34) * r / Math.max(...run.stations.map((s) => s.removed), 0.01);
   const y = (sf) => H - 16 - (H - 26) * Math.min(sf, top) / top;
   const dots = run.stations.map((st) => `<circle cx="${x(st.removed)}" cy="${y(st.safety || 0)}" r="5" data-carve="${st.index}"
-    class="${st.holds ? 'ok' : 'bad'}${S.station && S.station.run === run.id && S.station.index === st.index ? ' on' : ''}"><title>step ${st.index}</title></circle>`).join('');
+    class="${verdictTone(st.verdict)}${S.station && S.station.run === run.id && S.station.index === st.index ? ' on' : ''}"><title>step ${st.index}: ${esc(st.verdict ? st.verdict.word : '')}</title></circle>`).join('');
   const line = run.stations.map((st, i) => `${i ? 'L' : 'M'}${x(st.removed)},${y(st.safety || 0)}`).join(' ');
   const best = run.stations.find((st) => st.index === run.best);
   return `${run.weak ? `<div class="note-warn small">${esc(run.weak)}</div>` : ''}
@@ -1904,11 +1912,16 @@ function carveChart(p, run) {
       <text x="24" y="${H - 3}">as drawn</text><text x="${W - 10}" y="${H - 3}" text-anchor="end">${carveShare(run)} carved away →</text></svg>
     <div class="small">${best && best.saved_g ? `The lightest step where the printed part holds: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% ${carveShare(run)}
       carved away, <b>${best.saved_g} g</b> less filament, the printed part ${best.safety}x;
-      ${best.whole_holds ? `the whole part ${best.whole}x` : `<b class="bad">the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold</b>`}.`
+      ${holdsHere(best) ? `the whole part ${best.whole}x`
+        : best.verdict && (best.verdict.kind === 'unresolved' || best.verdict.kind === 'unchecked')    // #101
+          ? `<b style="color:var(--amber)">${esc(best.verdict.word)}: the voxels were too coarse to see its walls, so no step can be said to hold yet</b>`
+        : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a filled-in shape' : `the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
       : 'Nothing could come off and still hold.'}
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
     <div class="muted small">Click a step to see it; <b>Carve it like this</b> makes it the part's shape and checks it again.</div>`;
 }
+// a refusal as a person reads it: the server's reason without the exception's name ("ValueError: …", #136 review)
+const plainly = (msg) => String(msg ?? '').replace(/^[A-Za-z_.]*(Error|Exception):\s*/, '');
 // CALI-101: one click, one carve. The job is kept in S.carveJob[part] from the click until it ends, so the button
 // stays disabled, a redraw draws the panel again (steps, bar, time left, Cancel), and a reload finds it by
 // design.carving. The server refuses a second carve of the design (409) whatever the page does.
@@ -1924,7 +1937,7 @@ async function runCarve(p) {
     delete S.carveJob[p.id];
     await refresh();                              // a 409: the carve that's running is in design.carving; it's followed
     const prog = $('carveProgress');
-    if (prog && !S.carveJob[p.id]) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    if (prog && !S.carveJob[p.id]) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(plainly(e.message))}</div>`;
   }
 }
 async function followCarve(p, jobId, stopping) {
@@ -1977,7 +1990,9 @@ function carveProgress(pid) {
 function paintCarve(pid) {
   const prog = $('carveProgress'), go = $('carveGo');
   if (S.scope !== pid) return;
-  if (go) go.disabled = !!S.carveJob[pid];
+  const part = ((S.design && S.design.parts) || []).find((x) => x.id === pid);
+  // a carve its check blocks stays off after a job ends (#136 review: Cancel re-enabled "Carve it again")
+  if (go) go.disabled = !!S.carveJob[pid] || !!(part && carveBlocked(part));
   if (!prog) return;
   prog.innerHTML = carveProgress(pid);
   const stop = $('carveStop');
@@ -2003,14 +2018,22 @@ function defaultCheck(p) {
   const at = loadRuns(p.id).filter((r) => r.version === p.version && r.seconds);
   return at.length ? at.reduce((a, r) => (r.spacing_mm > a.spacing_mm ? r : a)) : null;
 }
+// what stops a carve (or a lightening) before it starts, in words, or '' (CALI-106, #101; #102's note)
+function carveBlocked(p) {
+  const check = defaultCheck(p);
+  // where the walls are, and what to change, as the check said it (#136 review)
+  if (check && check.too_thin) return check.thin_said ? `Can't carve it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be carved by strength';
+  if (check && check.cases.some((c) => c.fea && c.fea.supported === false)) {
+    return "its voxels don't connect the load to a support yet, so a carve can't run";
+  }
+  return '';
+}
 function carveTime(p) {
+  if (carveBlocked(p)) return carveBlocked(p);
   const done = carveRuns(p.id).find((r) => r.status === 'done' && r.seconds);
   if (done) return `about ${minutesText(done.seconds / 60)} at this size, as its last carve took`;
   const check = defaultCheck(p);
   if (!check) return 'check it holds first: how long it takes comes from that';
-  if (check.cases.some((c) => c.fea && c.fea.supported === false)) {
-    return "its voxels don't connect the load to a support yet, so a carve can't run";
-  }
   return `at least about ${minutesText(check.seconds * CARVE_PER_CHECK_AT_LEAST / 60)} at this size`;
 }
 function wireCarve(p) {
@@ -2028,8 +2051,10 @@ function lightenRuns(pid) { return (S.design.lighten_runs || []).filter((r) => r
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
   const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
-  const best = run && run.stations.filter((x) => x.holds).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
-  const out = run && run.stations.find((x) => !x.holds);
+  const best = run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
+  const out = run && run.stations.find((x) => x.verdict && x.verdict.kind === 'fails');
+  // steps the check was too coarse to call: their verdict's word, never "nothing lighter holds" (#136 review)
+  const unsure = run && !best && run.stations.find((x) => x.index && x.verdict && ['unresolved', 'unchecked'].includes(x.verdict.kind));
   const what = (x) => x.phase === 'thinner' ? `in ${esc(x.label)} sheet <span class="badge">estimate</span>`
     : x.phase === 'top' ? `${pct(x.removed)} of the walls + ${x.top_holes} hole${x.top_holes === 1 ? '' : 's'} in the top`
     : x.index ? `${pct(x.removed)} of the walls` : 'as it is';
@@ -2037,18 +2062,21 @@ function lightenView(p) {
     <div class="muted small">Down until the safety runs out: holes in the walls where the wood isn't working (a jigsaw cuts
       them, a solid rim where it's glued and screwed), then hole-saw holes in the panel you stand on, one at a time,
       then thinner sheet. Every step is checked again.</div>
-    <div class="actions"><button id="lightGo">${run ? 'Lighten it again' : 'Lighten it'}</button></div>
+    <div class="actions"><button id="lightGo" ${defaultCheck(p) && defaultCheck(p).too_thin ? 'disabled' : ''}>${run ? 'Lighten it again' : 'Lighten it'}</button>
+      ${defaultCheck(p) && defaultCheck(p).too_thin ? `<span class="muted small">${defaultCheck(p).thin_said ? `Can't lighten it by strength: ${esc(defaultCheck(p).thin_said)}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength'}</span>` : ''}</div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
         : `The lightest that holds: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety)}.`)
+      : unsure ? (unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
+        : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.')
       : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety)}).` : ''}
       ${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
       ${run.stations.map((x) => `<tr class="${x.estimate ? '' : 'pick'} ${x.index === on ? 'on' : ''}" ${x.estimate ? '' : `data-lst="${x.index}"`}>
         <td>${x.index}</td><td style="text-align:left">${what(x)}</td><td>${lbs(x.saved_lb)}</td>
-        <td style="color:var(${x.holds ? '--ok' : '--bad'})">${sx(x.safety)}</td>
-        <td>${x.estimate && x.holds ? `<button class="ghost" data-use-t="Make it from ${esc(x.label)} ${esc((run.material || 'plywood').toLowerCase())}">Use</button>` : ''}</td></tr>`).join('')}</table></div>
+        <td style="color:var(--${verdictTone(x.verdict)})">${sx(x.safety)}</td>
+        <td>${x.verdict && x.verdict.kind === 'estimate' ? `<button class="ghost" data-use-t="Make it from ${esc(x.label)} ${esc((run.material || 'plywood').toLowerCase())}">Use</button>` : ''}</td></tr>`).join('')}</table></div>
     <div class="muted small" style="margin-top:4px">Click a step to see it; <b>Cut these holes</b> makes it the part. An estimate's
       <b>Use</b> asks for that sheet, and the strength check runs on the real thing.</div>
     ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}` : ''}`;
@@ -2065,19 +2093,24 @@ const partOf = (pid) => (S.design && S.design.parts.find((x) => x.id === pid)) |
 // 'unresolved' when a finer run can see them, 'unchecked' when none a study may make can); its badge says so, and
 // no green "holds" sits under the card's warn. A ✗ stays a ✗.
 const coarseWord = (c) => (c.unresolved === 'unchecked' ? 'not checked' : 'not resolved');
-const caseBadge = (c) => (c.unresolved && c.holds ? `<span class="badge warn">${coarseWord(c)}</span>`
-  : c.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>');
-const runCoarse = (run) => (run.holds ? (run.cases || []).find((c) => c.unresolved && c.holds) : null);
-const runBadge = (run) => (runCoarse(run) ? `<span class="badge warn">${coarseWord(runCoarse(run))}</span>`
-  : run.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>');
-const runWord = (run) => (runCoarse(run) ? coarseWord(runCoarse(run)) : run.holds ? 'holds' : 'doesn\'t hold');
+// CALI-112: one verdict, the server's (verdicts.py), on every run, case and history line. The page never works one
+// out: its badge, word and colour are the verdict's, so a new kind can't be missed here.
+const verdictTone = (v) => (v && v.status === 'ok' ? 'ok' : v && v.status === 'bad' ? 'bad' : 'warn');
+const verdictBadge = (v) => `<span class="badge ${verdictTone(v)}">${esc(v ? v.word : 'not checked yet')}</span>`;
+// a verdict with a number a person may build on: it holds, or it fails
+const settled = (v) => !!v && (v.kind === 'holds' || v.kind === 'fails');
+const caseBadge = (c) => verdictBadge(c.verdict);
+// a carve or lightening step, or a thickness the plate check tried: the server's verdict says if it holds (#132 review)
+const holdsHere = (x) => !!(x && x.verdict && x.verdict.counts_as_pass);
+const runBadge = (run) => verdictBadge(run.verdict);
+const runWord = (run) => (run.verdict ? run.verdict.word : 'not checked yet');
 function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
   const pl = c.plate, f = c.fea || {};
   const holds = p.untrusted ? untrustedBadge(p) : caseBadge(c);     // a filled-in shape wins (CALI-96, then 97)
   const plate = !pl ? '' : pl.done && pl.as === 'beam'      // a top on two sides: a beam, not a plate held all round (CALI-116)
     ? `<div class="small" style="margin-top:4px"><b>Beam check</b> — ${esc(pl.piece)}: ${esc(pl.why)} ·
-        <b>${sx(pl.safety_across)}</b> with the grain unknown · sags ${len(pl.deflection_mm, 3)}</div>`
+        <b style="color:var(--${verdictTone(pl.verdict)})">${sx(pl.safety_across)}${pl.verdict && !settled(pl.verdict) ? ` (${esc(pl.verdict.word)})` : ''}</b> with the grain unknown · sags ${len(pl.deflection_mm, 3)}</div>`
     : pl.done
     ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
@@ -2087,25 +2120,25 @@ function loadCase(p, run, c, i) {
     : `<div class="small" style="margin-top:4px"><b>whittle FEA</b> — works hardest in ${esc(f.in || 'the part')}
         (${fixed(f.peak_mpa, 1)} MPa → ${sx(f.safety)}) · gives ${len(f.deflection_mm, 3)}</div>`;
   const by = pl && pl.done && pl.by_thickness ? (() => {
-    const ok = pl.by_thickness.filter((b) => b.safety_across >= run.min_safety);
+    const ok = pl.by_thickness.filter(holdsHere);
     const thin = ok.length ? ok[0] : null;
     return `<details class="small" style="margin-top:4px"><summary>Other thicknesses (plate check)${thin
-      ? ` — the thinnest that holds: <b>${esc(thin.label)}</b>` : ''}</summary>
+      ? ` — the thinnest the plate check passes: <b>${esc(thin.label)}</b>` : ''}</summary>
       <table class="st"><tr><th style="text-align:left">${esc(run.material.name)}</th><th>grain wrong way</th><th>grain right</th><th>sags</th><th></th></tr>
       ${pl.by_thickness.map((b) => { const now = Math.abs(b.thickness_mm - pl.thickness_mm) < 0.01;
         const nowLabel = (pl.by_thickness.find((x) => Math.abs(x.thickness_mm - pl.thickness_mm) < 0.01) || {}).label;
         return `<tr${now ? ' class="on"' : ''}>
         <td style="text-align:left">${esc(b.label)}</td>
-        <td style="color:var(${b.safety_across >= run.min_safety ? '--ok' : '--bad'})">${sx(b.safety_across)}</td>
+        <td style="color:var(--${verdictTone(b.verdict)})">${sx(b.safety_across)}</td>
         <td>${sx(b.safety)}</td><td>${len(b.deflection_mm, 3)}</td>
-        <td>${now ? '<span class="muted">now</span>' : b.safety_across >= run.min_safety
+        <td>${now ? '<span class="muted">now</span>' : holdsHere(b)
           ? `<button class="ghost" data-use-t="Make it from ${esc(b.label)} ${esc(run.material.name)} instead of ${esc(nowLabel || 'what it is now')}">Use</button>` : ''}</td></tr>`; }).join('')}</table></details>`;
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
       ${c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety)}
         <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
-        ${c.holds ? 'no verdict' : 'the fail may be the model\'s'} (it needs ${run.min_safety}x)</span></div>`
+        ${c.verdict && c.verdict.kind === 'fails' ? 'the fail may be the model\'s' : 'no verdict'} (it needs ${run.min_safety}x)</span></div>`
       : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety)}</b>
         <span class="muted">(by ${c.governs === 'plate' ? 'the plate check, with the grain the wrong way' : 'the FEA'}; it needs ${run.min_safety}x)</span>
         ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>`}
@@ -2169,7 +2202,7 @@ async function runLighten(p) {
     clearStation();
     await refresh();
     const run = lightenRuns(p.id)[0];
-    const best = run && run.stations.filter((x) => x.holds && !x.estimate).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
+    const best = run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
     if (best && best.index) showStation(p.id, run, best.index);
   } catch (e) {
     prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
@@ -2253,10 +2286,12 @@ async function showHeat(pid, run, index) {
     bar.hidden = false;
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →
         ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>`
-          : c.unresolved && c.holds        // no "holds" from voxels too coarse to see its walls (CALI-110)
+          : c.verdict && (c.verdict.kind === 'unresolved' || c.verdict.kind === 'unchecked')   // no "holds" (CALI-110)
             ? `<b style="color:var(--amber)">${coarseWord(c)}: the FEA read ${sx(c.safety)}, too coarse to see its walls</b>`
-            : `<b style="color:var(${c.holds ? '--ok' : '--bad'})">${c.holds ? 'holds' : 'doesn\'t hold'}, ${sx(c.safety)}</b>`}
-        ${c.breaks_lb && !(c.unresolved && c.holds) ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
+            : settled(c.verdict)           // the verdict's word and colour (CALI-112): never green unless it holds
+              ? `<b style="color:var(--${verdictTone(c.verdict)})">${esc(c.verdict.word)}, ${sx(c.safety)}</b>`
+              : `<b style="color:var(--amber)">${esc(c.verdict ? c.verdict.word : 'not checked yet')}: the check read ${sx(c.safety)}</b>`}
+        ${c.breaks_lb && settled(c.verdict) ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
       <div class="small muted" style="margin-top:2px">Colours: whittle's FEA <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span>
         0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${run.material.strength}). Decided by ${decided}.</div></div>
       <button id="stationClose" class="ghost">×</button>`;
@@ -2676,16 +2711,17 @@ async function showStation(pid, run, index) {
     const removed = parametric ? st.removed : st.removed_part;
     const what = carved
       ? `<span><b>Preview, not carved yet:</b> step <b>${index}</b> · ${pct(st.removed)} ${carveShare(run)} carved away ·
-        ${st.saved_g} g less filament · ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b>`}</span>`
+        ${st.saved_g} g less filament · ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(--${verdictTone(st.verdict)})">${esc(st.verdict ? st.verdict.word : 'not checked yet')}, ${sx(st.safety)}</b>`}</span>`
       : lightened
       ? `<span><b>Preview, not cut yet:</b> step <b>${index}</b> · ${pct(st.removed)} out of the walls${st.top_holes ? ` and ${st.top_holes} hole${st.top_holes === 1 ? '' : 's'} in the top` : ''} · ${lbs(st.saved_lb)} lighter ·
-        ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(${st.holds ? '--ok' : '--bad'})">${st.holds ? 'holds' : 'doesn\'t hold'}, ${sx(st.safety)}</b>`}</span>`
+        ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(--${verdictTone(st.verdict)})">${esc(st.verdict ? st.verdict.word : 'not checked yet')}, ${sx(st.safety)}</b>`}</span>`
       : framed
       ? `<span>design <b>${index}</b> · ${st.mass_lb} lb of steel · weakest ${st.safety}x · sags ${len(st.deflection_mm, 2)}</span>`
       : `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume
       ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>`;
     bar.innerHTML = `${what}
-      ${(lightened || carved) && !index ? '' : `<button class="primary" id="adoptBtn" ${(lightened || carved) && !st.holds ? 'disabled' : ''}>${lightened ? 'Cut these holes in '
+      ${carved && st.closed === false ? `<span class="small" style="color:var(--bad)">Can't use this step: ${esc(st.why)}.</span>` : ''}
+      ${(lightened || carved) && !index ? '' : `<button class="primary" id="adoptBtn" ${(lightened || carved) && !holdsHere(st) ? `disabled title="${esc(st.verdict ? `It can't be used: ${st.verdict.word}` : '')}"` : ''}>${lightened ? 'Cut these holes in '
         : carved ? 'Carve it like this: ' : framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`}
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };

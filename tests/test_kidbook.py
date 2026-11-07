@@ -35,7 +35,7 @@ def test_one_page_a_piece_in_the_order_they_go_together(stool, tmp_path):
     os.makedirs(root)
     shop = {"groups": [{"rows": [{"qty": "1", "item": "sheet 3/4 in plywood"},
                                  {"qty": "18 (a box of 50)", "item": "#8 wood screws"}]}]}
-    rec = {"design": "Box stool", "strength": {"stool": [{"name": "An adult stepping up", "safety": 3.11}]}}
+    rec = {"design": "Box stool", "strength": {"stool": [{"name": "An adult stepping up", "safety": 3.11, "verdict": {"kind": "holds"}}]}}
     assert kidbook.make(stool, root, rec, ["stool"], shop) == "kids.html"
     book = open(os.path.join(root, "kids.html")).read()
     titles = re.findall(r"<h2><span class='n'>\d+</span>([^<]+)</h2>", book)
@@ -70,7 +70,7 @@ def test_no_page_puts_a_kid_s_hands_at_the_work_while_a_tool_runs(stool, tmp_pat
     kid stands back with safety glasses on while a tool runs."""
     root = str(tmp_path / "release")
     os.makedirs(root)
-    rec = {"design": "Box stool", "strength": {"stool": [{"name": "An adult stepping up", "safety": 3.11}]}}
+    rec = {"design": "Box stool", "strength": {"stool": [{"name": "An adult stepping up", "safety": 3.11, "verdict": {"kind": "holds"}}]}}
     kidbook.make(stool, root, rec, ["stool"], {"groups": []})
     import html
 

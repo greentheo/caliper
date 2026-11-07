@@ -243,7 +243,9 @@ class Report:
             act = "" if r.actual is None else f"  actual={_fmt(r.actual)}"
             extra = f"  {r.detail}" if r.detail else ""
             lines.append(f"  {r.symbol} {r.id:<16} {r.expr}{act}{m}{extra}")
-        verdict = "ALL PASS" if self.all_pass else "FAILURES"
+        # ALL PASS only when every check ran (#132 review): a waiting check is said, never counted
+        verdict = ("FAILURES" if self.failures else "ALL PASS" if self.all_pass and not self.waiting
+                   else "NOT ALL CHECKED")
         return f"Measurement report — {verdict}\n" + "\n".join(lines)
 
 
