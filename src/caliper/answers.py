@@ -53,6 +53,35 @@ def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
 
 
+def _carve_offer(store: DesignStore, state: dict, p: dict, mk: dict) -> Optional[dict]:
+    """A printed part, on a design whose objective is its print time or its weight, with a carve to try (#89 item 6:
+    165 h of printing "as fast as possible", and nothing offered the carve): one line that offers it. Not on a part
+    already carved, nor one with nothing it must hold (a carve keeps what it holds)."""
+    if not mk.get("printed") or not p.get("loads") or p.get("carved"):
+        return None
+    aims = [o.get("metric") or "" for o in (state.get("goals") or {}).get("objectives") or []]
+    if not any(m.startswith(("print.", "weight.")) for m in aims):
+        return None
+    try:
+        name = next((it.get("name") for it in C.declared(store, p["id"]).get("construction") or []
+                     if isinstance(it, dict) and it.get("kind") == "printed"), None)
+    except Exception:  # noqa: BLE001 — the offer is said with the part's own name
+        name = None
+    return _line(f"Carve the {name or p['id'].replace('_', ' ')} where it isn't working, to print less of it: try "
+                 f"Carve it.", "info", action="carve")
+
+
+def _strays(meta: dict, inches: bool) -> str:
+    """What the mesh left out, its height in the design's units (#89, #137 P2 item 11: "at z 14.0–15.6 mm" on an inch
+    design); measure's own words where it didn't say where."""
+    n, z = meta.get("strays_n"), meta.get("strays_z")
+    if not n or not z:
+        return meta["strays"]
+    lo, hi = _len(z[0], inches), _len(z[1], inches)
+    return (f"left out {n} stray face{'s' if n != 1 else ''} from the CAD's meshing (at z {lo}"
+            + (f"–{hi}" if hi != lo else "") + ")")
+
+
 def _wall(mm: float, inches: bool) -> str:
     """A wall's thickness: in inches to the nearest 1/32 (5/32 in), and in mm where that would round to nothing,
     never "0 in" (CALI-97, #100 item 5)."""
@@ -87,7 +116,7 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     elif v["kind"] == "fails":
         text = f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs {run['min_safety']:g}."
         if filled:                                   # a ✗ stays a ✗: the block failed, the part is weaker
-            text += " It ran on a filled-in shape, so the part as built is weaker still."
+            text += filled_fail(filled)
         elif v.get("coarse"):                        # a ✗ stays a ✗, and says why it may be wrong (CALI-97)
             text += " " + coarse(run, inches, holds=False)
     else:                                            # any other kind: its word, never a ✓ (CALI-112)
@@ -127,6 +156,15 @@ def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
     if run.get("finer"):
         return f"Not resolved yet: the check was too coarse to see its {wall} walls. Check it again finer."
     return L.NOT_CHECKED
+def filled_fail(why: Optional[str]) -> str:
+    """What a ✗ adds when its check didn't run on the part as built (#89, #100's merge checks): on a filled-in shape,
+    the part as built is *likely* weaker (taking material away can, rarely, lower a peak); where its shape couldn't
+    be checked against its pieces, that is said, not "a filled-in shape", which isn't known."""
+    if (why or "").startswith(("couldn't", "Not trusted yet: I couldn't")):     # filled()'s, or untrusted()'s
+        return " Its shape couldn't be checked against its pieces, so this number may not be the part's."
+    return " It ran on a filled-in shape, so the part as built is likely weaker."
+
+
 def untrusted(pid: str, why: str = "") -> str:
     """What a strength verdict on a filled-in solid says instead of holding (CALI-96), or one whose shape couldn't
     be checked against its pieces at all (which fails closed: never holding)."""
@@ -190,7 +228,8 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             geom = store.part_geometry(pid)                  # cached by the assembly (path, mtime)
             off = sorted((r for r in consistency.check(C.declared(store, pid), geom)
                           if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
-            strays = geom.require_mesh().metadata.get("strays")
+            meta = geom.require_mesh().metadata
+            strays = _strays(meta, inches) if meta.get("strays") else None
         except Exception:  # noqa: BLE001 — the card says what it can
             off, strays = [], None
         if strays:                                   # what the mesh left out, said once (CALI-118)
@@ -296,6 +335,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                                  "bad"))
             if mk["shop_default"]:
                 how.append(_line("Planned for a jigsaw, a drill and a circular saw: say what's in your shop.", "info"))
+            offer = _carve_offer(store, state, p, mk)
+            if offer:
+                how.append(offer)
         pats = [r for r in state.get("pattern_runs") or [] if r["part"] == pid]
         if any(x["kind"] == "sheet" for x in (mk or {}).get("pieces", [])):        # patterns are for flat pieces
             if pats and pats[0].get("version") == p["version"]:
@@ -489,7 +531,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
         if strength and now.get("strength.rough"):
             num = "about " + num                       # the printed model's number, as the part card says (CALI-97)
         failed = verdict["kind"] == "fails"
-        why = (" It ran on a filled-in shape, so the part as built is weaker still." if failed and untrue   # still ✗
+        why = (filled_fail(untrue) if failed and untrue   # still ✗
                else f" {now['strength.coarse_fail']}" if failed and strength and now.get("strength.coarse_fail") else "")
         if verdict["kind"] == "waiting":               # a part left out isn't covered by the rest (#132 review)
             out.append(_line(f"! {label}{assumed}: {num} for the rest, but {verdict['why']}.", "warn",
@@ -515,7 +557,8 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     solo = {c["key"]: c for c in part(store, state, parts[0]["id"])} if len(parts) == 1 else {}
     what = [_line(_sentence(state.get("prompt") or state["name"]))]
     if solo:
-        what += solo["what"]["lines"][1:]
+        # the part's own description, as What do I buy? already reads it (#89 item 3: the raw "I want to make…")
+        what = list(solo["what"]["lines"][:1]) + solo["what"]["lines"][1:]
     elif parts:
         what.append(_line(f"{len(parts)} part{'s' if len(parts) != 1 else ''}: " + ", ".join(p["id"] for p in parts)))
     elif state.get("building"):
@@ -523,8 +566,10 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     elif state.get("plan"):                   # planned, not built: the person reviews it first (CALI-35, #3a)
         pl = state["plan"]
         what.append(_line(pl["headline"], "warn"))
+        # with no key the page shows the key's note where Build it would be: the line says so, never "press" (#89)
         what.append(_line("That's the plan, before anything's drawn: its numbers and the checks between the parts are "
-                          "under the numbers. Say what to change, or press Build it.", "info"))
+                          "under the numbers. " + ("Say what to change, or press Build it." if state.get("claude", True)
+                                                   else "Building it needs Claude, which isn't set up here."), "info"))
     else:
         what.append(_line("Not built yet: answer its questions and press Build it.", "warn"))
     assumed = sum(1 for r in state.get("requirements") or [] if r.get("source") == "assumed")

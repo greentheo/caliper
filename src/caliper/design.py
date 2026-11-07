@@ -70,16 +70,20 @@ def slugify(text: str, fallback: str = "design") -> str:
 #: Where a sentence stops saying what the thing is and starts saying what it's for (CALI-59).
 _NAME_STOP = re.compile(r"\s(?:so|for|that|which|who|to|with|on|behind|from|made|using|in|at|under|over|and)\s"
                         r"|[,.;:!?(]", re.I)
-_NAME_LEAD = re.compile(r"^(?:i\s+(?:want|need|would like|'d like)\s+(?:to\s+(?:build|make)\s+)?"
-                        r"|(?:please\s+)?(?:build|make|design)\s+(?:me\s+)?)?(?:a|an|the|some|my|our)\s+", re.I)
+#: The request around the thing: "I want to make a…", "Can you design me a…", "I'd like a…" (#89 item 1: the bar stool
+#: was named "I want", because the stop words split "I want to make…" at "to" before the lead was taken off).
+_NAME_LEAD = re.compile(r"^(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:help\s+me\s+)?"
+                        r"(?:build|make|design|create)\s+(?:me\s+)?"
+                        r"|i\s*(?:want|need|would like|'d like|wanna)\s+(?:to\s+(?:build|make|design|create)\s+(?:me\s+)?)?"
+                        r"|(?:please\s+)?(?:build|make|design|create)\s+(?:me\s+)?)?(?:a|an|the|some|my|our)\s+", re.I)
 
 
 def short_name(prompt: str, most: int = 40) -> str:
     """A design's name from its sentence: what it is, not the whole sentence ("A step stool so my 6-year-old
     can reach the sink…" -> "Step stool")."""
     first = (prompt or "").strip().splitlines()[0].strip() if (prompt or "").strip() else ""
-    head = _NAME_STOP.split(f" {first} ", 1)[0].strip()
-    head = _NAME_LEAD.sub("", head).strip() or first
+    rest = _NAME_LEAD.sub("", first).strip() or first           # the request's lead off first, then where it stops
+    head = _NAME_STOP.split(f" {rest} ", 1)[0].strip() or rest
     if len(head) > most:
         head = head[:most].rsplit(" ", 1)[0]
     return (head[:1].upper() + head[1:]) if head else "Untitled design"

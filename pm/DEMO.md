@@ -566,6 +566,14 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · The wording pass (CALI-99 #89)
+1. New design: "I want to make a bar stool to hold up to a 250 lb person, sitting." It's named "Bar stool", not
+   "I want"; once built, *What is it?* opens with the part's own description.
+2. On a printed part whose design aims at print time or weight, *How do I make it?* offers "Carve the … where it
+   isn't working, to print less of it: try Carve it."
+3. A reply that once showed a traceback shows its last line, with no paths on this machine.
+4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_wording.py`.
+
 ### 2026-11-07 · The carve-through-the-API test allows a slow runner (CALI-121, #134 follow-up)
 1. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_mixed.py -k carving_through_the_api` waits up to 25 min
    for its carve job (it took 13 on a loaded machine). Nothing to see in the app.

@@ -942,7 +942,8 @@ function designView(d) {
 // today's panels for that question, and once someone opens it, it stays open for them.
 const QUESTIONS = [['what', 'What is it?'], ['work', 'Will it work?'], ['buy', 'What do I buy?'], ['make', 'How do I make it?']];
 const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' };
-const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox', trial: 'trialBox' };
+const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox', trial: 'trialBox',
+  carve: 'loadBox' };                 // the carve's panel is under Will it hold? (#89 item 6)
 function numbersOpen(k) { try { return localStorage.getItem(`caliper.numbers.${k}`) === '1'; } catch (e) { return false; } }
 function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${k}`, on ? '1' : '0'); } catch (e) { /* private window */ } }
 
@@ -1858,7 +1859,7 @@ function loadView(p) {
   const runs = loadRuns(p.id);
   const pick = Math.min(S.loadRun[p.id] || 0, Math.max(runs.length - 1, 0));
   return `<div class="form">
-      <span>least safety</span><span><input type="number" id="lSafety" value="${runs[0] ? runs[0].min_safety : 2}" min="1" max="10" step="0.5">
+      <span>least safety</span><span><input type="number" id="lSafety" value="${(runs[0] && runs[0].min_safety) || 2}" min="1" max="10" step="0.5">
         × at each load times its factor</span></div>
     <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button>
       ${runs[0] && runs[0].finer && runs[0].version === p.version ? `<button id="lFiner" title="voxels of ${wallLen(runs[0].finer.spacing_mm)}, enough
@@ -2148,7 +2149,7 @@ function loadResults(p, run, runs) {
   const stale = run.version !== p.version;
   return `<div class="small" style="margin-top:12px">${runs.length > 1 ? `<select id="lRun">${runs.map((r, k) =>
       `<option value="${k}" ${r.id === run.id ? 'selected' : ''}>${esc(new Date(r.created * 1000).toLocaleString())} · v${r.version}
-        · ${p.untrusted ? 'not trusted' : runWord(r)}</option>`).join('')}</select>`
+        · ${runWord(r)}</option>`).join('')}</select>`       // each run's own verdict: a fail stays a fail (#89)
       : `<b>Last check</b> · v${run.version} · ${new Date(run.created * 1000).toLocaleString()}`}
       ${p.untrusted ? untrustedBadge(p) : runBadge(run)}
       ${stale ? '<span class="badge bad">the part has changed since</span>' : ''}</div>
@@ -2221,6 +2222,7 @@ async function runLoad(p, spacing) {
       if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
     });
     S.loadRun[p.id] = 0;
+    S.trial = null;                       // the test is set beside the check that just ran, not the one before (#89)
     clearStation();
     await refresh();
     const run = loadRuns(p.id)[0];
@@ -2290,7 +2292,7 @@ async function showHeat(pid, run, index) {
               : `<b style="color:var(--amber)">${esc(c.verdict ? c.verdict.word : 'not checked yet')}: the check read ${sx(c.safety)}</b>`}
         ${c.breaks_lb && settled(c.verdict) ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
       <div class="small muted" style="margin-top:2px">Colours: whittle's FEA <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span>
-        0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${run.material.strength}). Decided by ${decided}.</div></div>
+        0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${fixed(run.material.strength, 1)} MPa). Decided by ${decided}.</div></div>
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };
     paint(); renderInspector();
