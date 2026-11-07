@@ -362,12 +362,15 @@ checks = [{ version: 3, spacing_mm: 2.3, seconds: 2350, cases: joined },        
           { version: 2, spacing_mm: 9.0, seconds: 1, cases: joined }];           // an older version
 out.floor = carveTime(p);
 checks[1].cases = cut;
+p.blocked = { why: 'unsupported', carve: "its voxels don't connect the load to a support yet, so a carve can't run" };
 out.cut = carveTime(p);
 carves = [{ status: 'cancelled', seconds: 60 }, { status: 'done', seconds: 1800 }];
 out.blocked = carveTime(p);                    // still not connected: why it can't run wins over a past carve's time
 checks[1].cases = joined;
+p.blocked = null;
 out.done = carveTime(p);
 checks[1].too_thin = true;
+p.blocked = { why: 'too_thin', carve: "Its walls are too thin for the voxel check at this size, so it can't be carved by strength" };
 out.thin = carveTime(p);
 """))
     assert out["none"] == "check it holds first: how long it takes comes from that"
@@ -376,6 +379,7 @@ out.thin = carveTime(p);
     assert out["done"] == "about 30 min at this size, as its last carve took"
     assert out["blocked"] == out["cut"]                                       # #102's note: the reason, not a time
     assert out["thin"] == "Its walls are too thin for the voxel check at this size, so it can't be carved by strength"
+    # the reasons themselves are the server's, from the same default check (#144 review): pinned in test_wording
 
 
 PANEL = ["runCarve", "followCarve", "carveProgress", "paintCarve", "wireCarve"]

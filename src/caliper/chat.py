@@ -333,6 +333,29 @@ def _delta(before, after) -> tuple[list[str], list[str]]:
     return sorted(broke), sorted(fixed)
 
 
+#: A path on the machine the server runs on, as a traceback or an error names it: never shown to the person.
+_SERVER_PATH = re.compile(r"(?:/Users|/home|/private|/tmp|/var|/opt|[A-Za-z]:\\)[^\s\"',)]*")
+
+
+def shown(reply: str) -> str:
+    """A reply as the chat shows it again (#89, #137 P2 item 12: an old reply from before the stop said its reason
+    plainly kept a raw traceback naming `/Users/…/_sandbox_runner.py`): a traceback down to its last line, and a server
+    path down to its file's name. The log keeps every word; this is what's shown."""
+    if not reply:
+        return reply
+    out, base = [], None
+    for line in reply.splitlines():
+        indent = len(line) - len(line.lstrip())
+        if line.lstrip().startswith("Traceback (most recent call last)"):
+            base = indent                              # the frames are indented past it; its last line isn't
+            continue
+        if base is not None and (indent > base or not line.strip()):
+            continue                                   # a frame: dropped
+        base = None
+        out.append(line)
+    return _SERVER_PATH.sub(lambda m: m.group(0).replace("\\", "/").rsplit("/", 1)[-1], "\n".join(out))
+
+
 def _measure_design(store: DesignStore):
     """Measure the whole design, tolerantly. ``(None, {})`` when there's nothing to measure yet."""
     from .assembly import derived_assertions

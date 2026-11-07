@@ -952,7 +952,8 @@ function designView(d) {
 // today's panels for that question, and once someone opens it, it stays open for them.
 const QUESTIONS = [['what', 'What is it?'], ['work', 'Will it work?'], ['buy', 'What do I buy?'], ['make', 'How do I make it?']];
 const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' };
-const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox', trial: 'trialBox' };
+const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox', trial: 'trialBox',
+  carve: 'loadBox' };                 // the carve's panel is under Will it hold? (#89 item 6)
 function numbersOpen(k) { try { return localStorage.getItem(`caliper.numbers.${k}`) === '1'; } catch (e) { return false; } }
 function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${k}`, on ? '1' : '0'); } catch (e) { /* private window */ } }
 
@@ -1888,7 +1889,7 @@ function loadView(p) {
   const runs = loadRuns(p.id);
   const pick = Math.min(S.loadRun[p.id] || 0, Math.max(runs.length - 1, 0));
   return `<div class="form">
-      <span>least safety</span><span><input type="number" id="lSafety" value="${runs[0] ? runs[0].min_safety : 2}" min="1" max="10" step="0.5">
+      <span>least safety</span><span><input type="number" id="lSafety" value="${(runs[0] && runs[0].min_safety) || 2}" min="1" max="10" step="0.5">
         × at each load times its factor</span></div>
     <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button>
       ${runs[0] && runs[0].finer && runs[0].version === p.version ? `<button id="lFiner" title="voxels of ${wallLen(runs[0].finer.spacing_mm)}, enough
@@ -2052,20 +2053,11 @@ function defaultCheck(p) {
   const at = loadRuns(p.id).filter((r) => r.version === p.version && r.seconds);
   return at.length ? at.reduce((a, r) => (r.spacing_mm > a.spacing_mm ? r : a)) : null;
 }
-// what stops a carve (or a lightening) before it starts, in words, or '' (CALI-106, #101; #102's note)
+// what stops a carve (or a lightening) before it starts, in words, or '' (CALI-106, #101; #102's note): it already
+// fails (#137 item 3), its walls are too thin (#136), its voxels don't connect. The server's one test
+// (load_study.blocked), which the card's carve offer reads too, so the two can't disagree (#144 review)
 function carveBlocked(p) {
-  const check = defaultCheck(p);
-  // carving only takes material away: not on a part that already fails as drawn (#137 item 3)
-  // a fail on a run too coarse to see its walls hedges as the strength line does (#139 review)
-  if (check && check.verdict && check.verdict.kind === 'fails') return check.verdict.coarse
-    ? `its check says it fails (${sx(check.safety)}, a coarse run: the fail may be the model's): make it hold first, then carve`
-    : `it already fails (${sx(check.safety)}): make it hold first, then carve`;
-  // where the walls are, and what to change, as the check said it (#136 review)
-  if (check && check.too_thin) return check.thin_said ? `Can't carve it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be carved by strength';
-  if (check && check.cases.some((c) => c.fea && c.fea.supported === false)) {
-    return "its voxels don't connect the load to a support yet, so a carve can't run";
-  }
-  return '';
+  return (p && p.blocked && p.blocked.carve) || '';
 }
 function carveTime(p) {
   if (carveBlocked(p)) return carveBlocked(p);
@@ -2089,12 +2081,7 @@ function wireCarve(p) {
 // what stops a lightening before it starts, in words, or '': a part that already fails as drawn (#137 item 3), or
 // walls too thin for any check a study may make (#101, #136)
 function lightenBlocked(p) {
-  const check = defaultCheck(p);
-  if (check && check.verdict && check.verdict.kind === 'fails') return check.verdict.coarse
-    ? `Its check says it fails (${sx(check.safety)}, a coarse run: the fail may be the model's): make it hold first, then lighten it`
-    : `It already fails (${sx(check.safety)}): make it hold first, then lighten it`;
-  if (check && check.too_thin) return check.thin_said ? `Can't lighten it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength';
-  return '';
+  return (p && p.blocked && p.blocked.lighten) || '';
 }
 // where a run's worst stress is: a piece by name only from a run that recorded the wall there (#137: an older run's
 // "seat top" was the nearest wood to a hot spot in the printed cone), else how high up it is
@@ -2207,7 +2194,7 @@ function loadResults(p, run, runs) {
   const stale = run.version !== p.version;
   return `<div class="small" style="margin-top:12px">${runs.length > 1 ? `<select id="lRun">${runs.map((r, k) =>
       `<option value="${k}" ${r.id === run.id ? 'selected' : ''}>${esc(new Date(r.created * 1000).toLocaleString())} · v${r.version}
-        · ${p.untrusted ? 'not trusted' : runWord(r)}</option>`).join('')}</select>`
+        · ${runWord(r)}</option>`).join('')}</select>`       // each run's own verdict: a fail stays a fail (#89)
       : `<b>Last check</b> · v${run.version} · ${new Date(run.created * 1000).toLocaleString()}`}
       ${p.untrusted ? untrustedBadge(p) : runBadge(run)}
       ${stale ? '<span class="badge bad">the part has changed since</span>' : ''}</div>
@@ -2280,6 +2267,7 @@ async function runLoad(p, spacing) {
       if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
     });
     S.loadRun[p.id] = 0;
+    S.trial = null;                       // the test is set beside the check that just ran, not the one before (#89)
     clearStation();
     await refresh();
     const run = loadRuns(p.id)[0];
@@ -2349,7 +2337,7 @@ async function showHeat(pid, run, index) {
               : `<b style="color:var(--amber)">${esc(c.verdict ? c.verdict.word : 'not checked yet')}: the check read ${sx(c.safety)}</b>`}
         ${c.breaks_lb && settled(c.verdict) ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
       <div class="small muted" style="margin-top:2px">Colours: whittle's FEA <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span>
-        0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${run.material.strength}). Decided by ${decided}.</div></div>
+        0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${fixed(run.material.strength, 1)} MPa). Decided by ${decided}.</div></div>
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };
     paint(); renderInspector();

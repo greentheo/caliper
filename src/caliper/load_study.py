@@ -1021,6 +1021,40 @@ def finer_minutes(voxels: int, spacing: float, finer: float, fea_seconds: float,
     return max(1, round((setup_seconds + fea_seconds * more ** (4 / 3)) / 60))
 
 
+def default_check(store: DesignStore, part_id: str) -> Optional[dict]:
+    """The strength check a carve or a lightening goes by: this version's at the default voxels, the ones a carve runs
+    at. A finer run asked for (CALI-97) is always finer than the default, so it's the coarsest at this version (the
+    newest of those), never just the latest. None when this version has no check."""
+    entry = store.design.part(part_id)
+    runs = [r for r in list_runs(store, part_id) if entry and r.get("version") == entry.version]
+    return max(runs, key=lambda r: r.get("spacing_mm") or 0) if runs else None     # max keeps the first: the newest
+
+
+def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
+    """What stops a carve or a lightening before it starts, from its default check (#144 review: the card offered Carve
+    on the bar stool while the Carve button refused it). The one test the Carve button, the Lighten button and the
+    card's carve offer all read, so they can't disagree; the studies themselves refuse on the same ``already_fails``.
+    ``{"why": "already_fails" | "too_thin" | "unsupported", "carve": words, "lighten": words or ""}``, or None."""
+    fails = already_fails(store, part_id)        # carving only takes material away (#137 item 3)
+    if fails:
+        return {"why": "already_fails", "carve": f"{fails}, then carve",
+                "lighten": f"{fails[:1].upper()}{fails[1:]}, then lighten it"}
+    rec = default_check(store, part_id)
+    if rec is None:
+        return None
+    if rec.get("too_thin"):                      # none a study may make can see its walls (#101, #136)
+        said = rec.get("thin_said")
+        return {"why": "too_thin",
+                "carve": f"Can't carve it by strength: {said}" if said else
+                "Its walls are too thin for the voxel check at this size, so it can't be carved by strength",
+                "lighten": f"Can't lighten it by strength: {said}" if said else
+                "Its walls are too thin for the voxel check at this size, so it can't be lightened by strength"}
+    if any((c.get("fea") or {}).get("supported") is False for c in rec.get("cases") or []):
+        return {"why": "unsupported", "carve": "its voxels don't connect the load to a support yet, so a carve can't run",
+                "lighten": ""}               # a lightening's holes are checked by the hand checks too
+    return None
+
+
 def already_fails(store: DesignStore, part_id: str) -> Optional[str]:
     """Why a carve or a lightening won't start: this version's own strength check already fails (#137 item 3: Carve
     was offered and run on the bar stool at 0.53x; carving only takes material away). In words, "it already fails
@@ -1028,11 +1062,9 @@ def already_fails(store: DesignStore, part_id: str) -> Optional[str]:
     from . import verdicts
     from .answers import _times, worst_at
 
-    entry = store.design.part(part_id)
-    runs = [r for r in list_runs(store, part_id) if entry and r.get("version") == entry.version]
-    if not runs:
+    rec = default_check(store, part_id)
+    if rec is None:
         return None
-    rec = runs[0]
     v = verdicts.run(rec)
     if v["kind"] != "fails":
         return None
