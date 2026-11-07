@@ -38,6 +38,11 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - **#135 review, round 3:** the marks are `_marks(mine)` (what `build()` uses, tested with erroring and failing rules,
   not a copy of it), and a design whose measurement throws (`_measure_design`'s `(None, {"<design>": …})`) says "The
   design checks: not checked: …" and isn't ok: it read `report is None` as ok (rule 6).
+### 2026-11-07 · CALI-121 (#134 follow-up) · The carve-through-the-API test waits 1,500 s for its job, not 900
+- `test_mixed::test_carving_through_the_api` waits for its carve job before it reads the run. On a loaded machine the
+  job took 790 s on its own and over 900 s twice beside two other test runs (#134's merge-forward), so the test timed
+  out with the job still running. A CI runner varies as much: the wait is 1,500 s, which a carve that hangs still
+  fails. No code changed.
 
 ### 2026-11-07 · CALI-106 (#136 review, round 2) · What a refused carve asks for, said apart; the page keeps it off
 - **The line asks two things apart** (thickening to the rule's 2.85 mm doesn't unblock a carve): printing and the
