@@ -459,7 +459,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
         solid = cut
         if phase == "walls":
             wall_holes = {n: v for n, v in holes.items() if n in wall_cover}
-        if not st["holds"]:  # producer
+        if not st["holds"]:  # search
             break
 
     # thinner sheet, from the lightest step that holds: an estimate, until it's rebuilt and checked
@@ -521,7 +521,7 @@ def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
     that thickness, the walls by their FEA scaled with the thickness."""
     # from the lightest step that holds with the panel stood on still solid: there the plate check is exact at
     # any thickness, and holes in that panel save next to nothing for what they cost it
-    base = max((x for x in stations if x["holds"] and not x.get("top_holes")), key=lambda x: x["saved_lb"],  # producer
+    base = max((x for x in stations if x["holds"] and not x.get("top_holes")), key=lambda x: x["saved_lb"],  # search
                default=None)
     sheets = [pc for pc in ctx["pieces"] if pc["kind"] == "sheet"]
     if base is None or not sheets:
