@@ -1,7 +1,9 @@
 # Caliper work log
 
 Append-only. Newest first. One entry per shipped task or notable decision.
-Format: `### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
+Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
+
+### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
 - **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to
   build…) is refused with that reason, and so is any fixed part when nothing the person said says they have something.
 - **No part for the ground, the floor or the room:** validation drops it, with the mates and rules that name it
@@ -19,7 +21,54 @@ Format: `### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, b
 - `tests/test_plan_live.py` (31; all fail on main). One #103 test now expects only the turbine's stated rule enforced.
 - **Not done here:** the accept's live re-run of the three sentences. It spends Theo's key, so it needs his word in
   night shift's session (a relayed word doesn't count).
+- **#123 review:** what it stands on is dropped only when its id's last word is a ground word and it isn't made
+  (`floor_lamp`, `wall_shelf`, `ground_stake` stay; `bathroom_floor`, `garage_wall` go), and it's always said
+  (the review reply, the card, the one-part step). Making is read from `made` only ("a Honda generator, built in
+  2019" is still yours). A fixed part with no possession phrase near its own noun is **assumed**, "(you have it? say
+  if not)", not a refused plan; "my kid's science fair" isn't having a generator. Keep marks its numbers kept (tested).
 
+### 2026-11-07 · CALI-113 (#115) · A part with loads() is held to them, goal or none
+- **Rule 6, found in #106's re-check:** a design whose parts have `loads()` but whose `scorecard.yaml` has no strength
+  goal released "ready to cut" on a strength ✗. Only "your shop can make it" was scored. It hits designs made
+  without goals: no key, older ones, a hand-made `scorecard.yaml`.
+- **The scorecard now adds an implicit check** when no binding goal names strength: "holds what its loads say, at
+  its factor (from its loads)", `strength.safety >=` the runs' own `min_safety`, `source: implicit`. It goes through
+  the same rules as a stated goal:
+  - a ✗ is a fail, so not ready;
+  - "not trusted" (#96) and "not resolved" (#110) count as unknown, so not ready;
+  - a strength check that couldn't run counts as unknown;
+  - #106's middle-only `edge` applies once it's in `main`.
+- **A stated strength goal isn't doubled.** A proposed one doesn't bind, so the implicit check still stands beside it.
+- **Old designs** get the check the next time they're scored.
+- Tests: `tests/test_implicit_strength.py` (the goal-less test stool at ✗ 1.46×: fail, not ready, and the book says
+  why; light: pass and ready; a stated goal: no doubling). On main there's no implicit check at all. CI is the full
+  run.
+
+### 2026-11-06 · CALI-107 (#107) · A requested feature builds or the script says why not; the reply says what changed
+- **`part_scripts.md`: no silent fallbacks.** A requested feature builds or raises with a clear message. No
+  `try/except` that passes or hands back the shape without it, no returning the input because a size came out
+  small, no clamping a requested size without raising.
+- **The round checks it** (`fallbacks.find`, an AST read of the script; it never runs it), and fails naming each line:
+  - an `except` (bare, `Exception`, …) around a CadQuery call that passes or returns something unchanged;
+  - `min(<a requested size>, <a computed limit>)`, through a local copy too (`r = p["fillet_r"]`; tuple
+    unpacking counts);
+  - `if <a size test>: return <the input>` (a test against 0, "not asked for", is fine).
+  - On copies of the bar stool's v4 to v6 it flags every fallback the issue names: the fillet's clamp and its two
+    `except: pass`, the mesh's clamps, its two size-guarded returns and its `except: return cone_solid`. The
+    samples and the suite's fixtures are clean.
+- **The reply says what was asked for and what changed:** "Asked for: …", "Changed: wall 4 mm → 6 mm" (in inches too:
+  "fillet_r 6.35 mm (1/4 in) → 12.7 mm (1/2 in)"), and the volume before → after. If the shape didn't change, it
+  says what you asked for may not have happened. It says what isn't measured. "The part's own checks pass" replaces
+  "Every check on this part passes", which read as covering the request.
+- **From #119's review:**
+  - a requested parameter (or its copy) compared with 0 or 1 is "none asked for", not flagged (`if p["holes"] < 1:
+    return shape`); a computed size still is;
+  - any handler type or tuple around a CAD call counts (`(ValueError, RuntimeError)`, OCP's `Standard_Failure`), and
+    so does `return s.translate(...)`, the input moved without the feature;
+  - a try/except around anything but CAD isn't flagged;
+  - the reply says a parameter's plain name ("foot fillet radius") and every length with its unit, whole numbers too.
+- **A failing check's reason now reaches the chat** (`_fail_lines` adds its detail), so the line is named there too.
+- Tests: `tests/test_fallbacks.py`.
 ### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
 - **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
   `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its
@@ -59,7 +108,6 @@ Format: `### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, b
 - **Page:** "not trusted" first, then "not resolved", then holds or doesn't. `design.js?v=45`.
 - Tests: `test_filled_verdict` (both together on the design card and in Studies).
 
-### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
 ---
 
