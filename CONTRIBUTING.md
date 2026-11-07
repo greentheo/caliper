@@ -15,7 +15,8 @@ make serve      # the design session at http://127.0.0.1:8000
 ```
 
 The webapp is plain FastAPI with no front-end build: `src/caliper/web/static/` is served as is. After
-changing a `.js` or `.css` file, bump its `?v=N` in `index.html` so browsers don't keep the old one.
+changing a `.js` or `.css` file there's nothing to bump: the server keys each page's `?v=` by a hash of that
+file (CALI-120), and the pages keep `?v=dev`.
 After changing Python, restart the server.
 
 ## Issues

@@ -49,7 +49,7 @@ writing code. At most three passes.
 ### 6. Build
 One logical change at a time, matching the surrounding code's style and comment density (module docstrings
 say what and why; comments name the issue that needs them). The page is plain JavaScript with no build step:
-bump `?v=` on `design.js` / `design.css` in `index.html` when you change them, and `node --check` a copy named `.mjs` (below): `design.js` is an ES module, and Node before 22 reads a `.js` as
+`?v=` is the server's (a hash of the file, CALI-120): leave `index.html`'s `?v=dev` alone. `node --check` a copy named `.mjs` (below): `design.js` is an ES module, and Node before 22 reads a `.js` as
 CommonJS and fails on its first `import`, so the plain command passes or fails depending on whose `node` runs it.
 Update `src/caliper/part_scripts.md` when what a script may declare changes.
 

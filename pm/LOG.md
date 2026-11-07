@@ -32,6 +32,68 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   goes to the log; a history line fails only with a failure (all waiting is waiting). Tests pin the assumed mark in
   the prompt, `ok` with a waiting rule, and a rule over a part not built yet.
 
+### 2026-11-07 · CALI-120 (#128) · The server keys the page's scripts and styles; no PR bumps ?v= again
+- **`server.keyed_page`** serves `/`, `/index.html` and `/classic` with every `?v=` on the page's own `.js` and
+  `.css` set to a 10-character hash of that file (`cache_key`), read per request: a changed `design.js` is a new key on
+  reload, an unchanged one the same. The page itself is `no-store`. The pages keep `?v=dev` and never change for it
+  again. The vendored three.js is imported by version-pinned path through the importmap, so it needs no key.
+- **Why:** each merge to `main` made every other open PR conflict on `design.js?v=N` (tonight #122, #124 and #125
+  each merged `main` again only for it, a full CI run each).
+- CONTRIBUTING.md and firm/NIGHT_SHIFT.md: no bump step; the server does it.
+- `tests/test_cache_key.py` (3): the key follows the file and only the file; the served pages are keyed and
+  `no-store`; the pages keep the placeholder.
+
+### 2026-11-07 · CALI-114 (#116) · CI runs the suite across the runner's cores
+- **`pytest-xdist`** is in the requirements. CI runs `pytest -n auto --durations=25 -m "not serial"` with
+  `OMP_NUM_THREADS`, `MKL_NUM_THREADS` and `OPENBLAS_NUM_THREADS` at 1, so four FEA workers don't fight over four
+  cores. A second step runs anything marked `serial` on its own (exit 5, "no tests", passes once none is).
+- **Locally `pytest -rs` stays the default,** and `-n auto` is optional (TESTING.md).
+- **Before,** on main: the test step took 51.5 min (646a20a) and 40.8 min (ad2f296). After: in the PR, from its CI
+  runs, with `--durations=25`'s slowest tests.
+- **The carve-down test is marked `serial`** (7cdc550): in parallel, with one BLAS thread, it adopted a step that
+  wasn't watertight (#105, fixed by #124). After #124 merges, the mark comes off.
+
+### 2026-11-07 · CALI-118 (#126) · A stray face from the CAD's meshing isn't the part; an open part is said, never thrown
+- **The cause:** OCCT's mesher fans a cone face's triangles from its apex, and one comes out with two corners on the
+  apex: a sliver of no area along the cone's seam. Any cone that runs to its apex does it
+  (`cq.Solid.makeCone(30, 0, 40)`). On Theo's bar stool v7 (a copy) it was face 128, the cone, at its apex on the
+  flange (z 14–15.6 mm): 22,772 faces closed and this one apart, so every boolean threw "Not all meshes are volumes!".
+- **`measure.clean`**, where every built part becomes a mesh: faces with no area go, and so does a loose open shell
+  under `STRAY_SHARE` (1e-6) of the part's surface beside a closed body (it bounds nothing: at the 0.05 mm
+  tolerance it moves the volume by about 0.1 mm³ on the bar stool). Said once, `mesh.metadata["strays"]`, and on the
+  part card: "I left out 1 stray face from the CAD's meshing (at z 14.0–15.6 mm): it enclosed nothing and weighs
+  nothing." A bigger open shell, or a real opening, is kept.
+- **An open part is said, never thrown:** `measure.open_near` says where ("near z 40 mm"); `printed_solid` refuses
+  a boolean on it, so (on #125's fail-soft) its weight is "not checked: its shape isn't closed near z 40 mm"; the
+  strength check (and carve, lighten and the picture, which share `prepare`) says "not checked: its shape isn't
+  closed near …, so it can't be voxelized".
+- **The bar stool v7 copy:** closed, weighed at 13.1 lb printed included (v7 is a bigger part than v6's 10.9 lb: a
+  1 in fillet for ½ in, a new opening pattern; 10.4 L of solid against 7.7 L), scored and released (below).
+- `part_scripts.md`: a cone that stops short of its point has no sliver to leave out.
+- `tests/test_stray_faces.py` (9; they can't import on main): three real CAD cones, a closed mesh and one stray
+  triangle (dropped, said, its weight unchanged), a real opening and a big open shell (kept, said where), a cone
+  part weighed whole with the card's line, and an open part (not checked, said, `/balance` 200, the page 200).
+  Built on #125 (its fail-soft weighing). Closed is judged as it reads back (merged; #124's
+  review). design.js v=65.
+
+### 2026-11-07 · CALI-111 (#112) · An all-printed design gets a build package, and the book weighs what the card does
+- **`cutplan.run`** makes its run folder whatever the materials. An all-printed part's cut list says "Nothing to cut:
+  it's all printed." (The release raised FileNotFoundError on the tube.)
+- **The 1.6 lb vs 10.9 lb:** the same card on the bar stool's copy said `weight.i_want` 10.9 lb and `weight.total_lb`
+  1.6 lb. `construction.balance()` left out every printed piece; `report()` weighs them (`with_printed`). So the
+  book's ✓ was wrong and the design card's ✗ 10.9 lb right. `balance()` now weighs printed pieces too.
+- **A card from the old scorer is out of date:** cards carry `scorer: 2`. `list_cards` marks an older one `outdated`,
+  the release scores again rather than reuse it, and the page and design card say "score it again". The camper
+  sample's shipped card is re-scored (its verdicts the same; waste $90.30 → $90.24 from older drift).
+- `tests/test_printed_release.py` (4; all fail on main): the tube's package, the total against each part's weight, the
+  book's numbers equal to the live card's for the same version (a weight goal it fails is ✗ in both), and an old card
+  re-scored. design.js v=61.
+- **#125 review:** a printed piece whose solid can't be made (the bar stool v7's throw, #126) fails soft: `with_printed`
+  marks it unweighed, and that part's weight, the total and the hitch's are **unknown**, never the rest's; the weight
+  check reads "not checked: the printed part's shape isn't closed (…)", the design card and the page say so, and
+  `/balance` answers 200 with the note. No `was`/change against a card from an older scorer ("scored differently
+  since"). `compute` says to bump `SCORER` when a metric's meaning changes.
+
 ### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
 - **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to
   build…) is refused with that reason, and so is any fixed part when nothing the person said says they have something.
@@ -98,6 +160,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   - the reply says a parameter's plain name ("foot fillet radius") and every length with its unit, whole numbers too.
 - **A failing check's reason now reaches the chat** (`_fail_lines` adds its detail), so the line is named there too.
 - Tests: `tests/test_fallbacks.py`.
+
 ### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
 - **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
   `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its

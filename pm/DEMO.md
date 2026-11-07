@@ -572,6 +572,24 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
    parts ("The mast: built (mast_height ✓)"); the generator is yours, not designed.
 2. A part that won't build stops there: the ones before it stay, and **Build it** again carries on from it.
 3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_build_plan.py`.
+### 2026-11-07 · A changed design.js is picked up on reload, with no ?v= to bump (CALI-120 #128)
+1. View the page's source: `design.js?v=` is a hash of the file. Change `design.js` and reload: a new key, and the
+   new script. `index.html` still says `?v=dev`.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_cache_key.py`.
+
+### 2026-11-07 · Theo's bar stool scores again (CALI-118 #126)
+1. Open a design with a printed cone (the bar stool): its card says "I left out 1 stray face from the CAD's meshing
+   (at z …): it enclosed nothing and weighs nothing." Its weight, balance, scorecard and build package all work.
+2. A part whose shape really isn't closed says "not checked: its shape isn't closed near z … mm" for its weight and
+   its strength, and nothing throws.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_stray_faces.py`.
+### 2026-11-07 · An all-printed part gets its book; the book weighs what the card does (CALI-111 #112)
+1. Open a design that's all printed (a tube, a printed box) and press **Make the build package**: it's made, and its
+   cut list says "Nothing to cut: it's all printed."
+2. On a design with a printed part and plywood: the build book's scorecard and the design card give the same total
+   weight. A card scored before this reads "score it again" until it's re-scored.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_printed_release.py`.
+
 ### 2026-11-07 · A plan says what you said apart from what it assumed (CALI-115 #117)
 1. With a key, new design: "A Savonius wind turbine: printed buckets, plasma-cut end plates, a welded 7 ft mast on a
    staked base, for a generator I already have with a 1 in shaft." Only the generator says "you have it".
