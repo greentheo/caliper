@@ -89,7 +89,14 @@ def test_the_page_disables_carve_and_lighten_with_the_reason():
 
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     assert "id=\"carveGo\" ${S.carveJob[p.id] || carveBlocked(p) ? 'disabled' : ''}" in src
-    assert "can\\'t be carved by strength" in src and "can\\'t be lightened by strength" in src
+    # the reason is the server's one test (#144 review), the words its own
+    assert "return (p && p.blocked && p.blocked.carve) || '';" in src
+    assert "return (p && p.blocked && p.blocked.lighten) || '';" in src
+    import inspect
+
+    from caliper import load_study
+    words = inspect.getsource(load_study.blocked)
+    assert "can't be carved by strength" in words and "can't be lightened by strength" in words
 
 
 # --- #136 review: where the thin walls are, what to change, and the part's own rule ------------------------------
@@ -183,11 +190,20 @@ def test_one_wall_number_on_the_card_and_the_page():
 def test_the_page_says_the_check_s_words_on_a_blocked_carve():
     from .test_carve_click import _page, _run
 
+    import json
+
+    from caliper import load_study
+
+    from .test_wording import _checked
+
     said = "its 0.25 mm walls around z 16.1 in are too thin for the strength check to see. Thicken them first."
     check = {"version": 7, "seconds": 60, "spacing_mm": 4.6, "too_thin": True, "thin_said": said, "cases": []}
-    out = _run(_page(["carveBlocked", "defaultCheck"], extra=(
-        f"function loadRuns() {{ return [{__import__('json').dumps(check)}]; }}\n"
-        "out = [carveBlocked({id: 'stool', version: 7}), carveBlocked({id: 'stool', version: 6})];")))
+    got = load_study.blocked(_checked([check]), "stool")
+    assert got["why"] == "too_thin"
+    assert load_study.blocked(_checked([{**check, "version": 6}]), "stool")["why"] == "unchecked"     # an older one
+    out = _run(_page(["carveBlocked"], extra=(
+        f"out = [carveBlocked({{id: 'stool', version: 7, blocked: {json.dumps(got)}}}), "
+        "carveBlocked({id: 'stool', version: 6, blocked: null})];")))
     assert out == ["Can't carve it by strength: " + said, ""]
 
 

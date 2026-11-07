@@ -26,14 +26,14 @@ def _state(card_safety=2.58):
 
 def test_the_design_line_takes_the_newest_run_over_an_older_card():
     (line,) = answers.held_to(_state(), {"strength.last": {"part": "i_want", "version": 4, "now": 7, "safety": 1.67}})
-    assert line["text"] == ("✗ Holds a 250 lb person sitting, 2× safety (assumed): last checked on v4: 1.7x, needs 2x · "
+    assert line["text"] == ("✗ Holds a 250 lb person sitting, 2× safety (assumed): last checked on v4: 1.7 times over, needs 2 · "
                             "v7 not checked yet.")
     assert line["status"] == "bad"
 
 
 def test_a_newest_run_that_held_is_amber_and_old_not_a_tick():
     (line,) = answers.held_to(_state(), {"strength.last": {"part": "i_want", "version": 4, "now": 7, "safety": 2.4}})
-    assert line["text"] == "! Holds a 250 lb person sitting, 2× safety (assumed): last checked on v4: 2.4x · v7 not checked yet."
+    assert line["text"] == "! Holds a 250 lb person sitting, 2× safety (assumed): last checked on v4: 2.4 times over · v7 not checked yet."
     assert line["status"] == "warn"
 
 
@@ -195,16 +195,26 @@ def test_the_slicer_key_holds_its_infill_and_a_timeout_isn_t_remembered(tmp_path
 # --- #139's whole pass, the non-blocking asks (carried on #140) -------------------------------------------------------
 
 def test_the_page_s_blocked_carve_and_lighten_hedge_on_a_coarse_run():
+    """The words are the server's (``load_study.blocked``, #144 review): the page shows them as they come."""
+    from caliper import load_study
+
+    from .test_wording import _checked
+
+    fea = {"name": "sitting", "safety": 0.53, "holds": False, "governs": "fea"}
     for coarse, carve, light in (
-            (True, "its check says it fails (0.53x, a coarse run: the fail may be the model's): make it hold first, then carve",
-             "Its check says it fails (0.53x, a coarse run: the fail may be the model's): make it hold first, then lighten it"),
-            (False, "it already fails (0.53x): make it hold first, then carve",
-             "It already fails (0.53x): make it hold first, then lighten it")):
-        check = {"version": 7, "seconds": 60, "spacing_mm": 4.6, "safety": 0.53, "cases": [],
-                 "verdict": {"kind": "fails", "status": "bad", "counts_as_pass": False, "coarse": coarse}}
-        out = _run(_page(["carveBlocked", "lightenBlocked", "defaultCheck"], extra=(
-            f"function loadRuns() {{ return [{json.dumps(check)}]; }} function sx(v) {{ return v + 'x'; }}\n"
-            "out = [carveBlocked({id: 'stool', version: 7}), lightenBlocked({id: 'stool', version: 7})];")))
+            (True, "its check says it fails (0.5 times over, a coarse run: the fail may be the model's): make it hold "
+                   "first, then carve",
+             "Its check says it fails (0.5 times over, a coarse run: the fail may be the model's): make it hold first, "
+             "then lighten it"),
+            (False, "it already fails (0.5 times over): make it hold first, then carve",
+             "It already fails (0.5 times over): make it hold first, then lighten it")):
+        check = {"version": 7, "seconds": 60, "spacing_mm": 4.6, "safety": 0.53, "min_safety": 2,
+                 "thinnest_mm": 4.0 if coarse else 19.0, "across": 4.0 / 4.6 if coarse else 19.0 / 4.6,
+                 "cases": [fea if coarse else {**fea, "governs": "plate"}]}
+        got = load_study.blocked(_checked([check]), "stool")
+        out = _run(_page(["carveBlocked", "lightenBlocked"], extra=(
+            f"const p = {{id: 'stool', version: 7, blocked: {json.dumps(got)}}};\n"
+            "out = [carveBlocked(p), lightenBlocked(p)];")))
         assert out == [carve, light]
 
 

@@ -67,7 +67,7 @@ def test_a_strength_check_becomes_a_verdict_and_an_older_one_says_so(store):
 
 def test_the_design_card_says_what_isnt_done_yet(store):
     cards = {c["key"]: c for c in answers.answers(store, design_api.design_state(store))}
-    assert cards["what"]["lines"][0]["text"] == "A step stool so my kid can reach the sink."
+    assert cards["what"]["lines"][0]["text"] == "A one-platform step stool from 3/4 in plywood."   # the part's own (#89)
     assert cards["work"]["status"] == "warn" and "say what it must do" in cards["work"]["lines"][0]["text"]
     # one part: the design answers with that part's list and plan (CALI-59), then offers the build package
     assert cards["make"]["lines"][0]["text"] == "With your jigsaw: 5 pieces."

@@ -574,6 +574,15 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
    range is refused with the range. The panel's UI comes after Theo's look at the mockup.
 3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_params.py`.
 
+### 2026-11-07 · The wording pass (CALI-99 #89)
+1. New design: "I want to make a bar stool to hold up to a 250 lb person, sitting." It's named "Bar stool", not
+   "I want"; once built, *What is it?* opens with the part's own description.
+2. On a printed part whose design aims at print time or weight, *How do I make it?* offers "Carve the … where it
+   isn't working, to print less of it: try Carve it."
+   Not where the Carve button refuses it: on the bar stool (a copy, v7, failing as drawn) neither is offered, and the
+   button says why in the same words.
+3. A reply that once showed a traceback shows its last line, with no paths on this machine.
+4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_wording.py`.
 ### 2026-11-07 · A shared number drives the parts that read it (CALI-35c #3c)
 1. With a key: plan a design of several parts (the turbine sentence), Build it, then say "make the mast 10 ft". The
    reply says "Changed mast top z from 7 to 10 ft. Rebuilt from it, with no new design: the mast, the hub." and what
@@ -635,7 +644,8 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 2. The strength line says where its worst stress is ("in the cone skirt around z 15.3 in, among 7/32 in walls the
    voxels can't see"), and gives the seat its own number by hand: "as a round plate on its 10.6 in ring: 3.3 times
    over". Nothing says "seat top" for a hot spot in the cone.
-3. **Carve it** and **Lighten it** are off: "it already fails (0.53x): make it hold first, then carve".
+3. **Carve it** and **Lighten it** are off: "its check says it fails (0.5 times over, a coarse run: the fail may be
+   the model's; …): make it hold first, then carve".
 4. The weight goal reads "13.1 lb, over its 10 lb cap"; the Score panel says "(cap 10 lb)".
 5. Start a carve on a part that holds: its panel says "· running for N min" from the start.
 6. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_preflight_bar_stool.py`.
