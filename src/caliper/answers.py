@@ -147,10 +147,14 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         try:
             from . import consistency
 
-            off = sorted((r for r in consistency.check(C.declared(store, pid), store.part_geometry(pid))
+            geom = store.part_geometry(pid)                  # cached by the assembly (path, mtime)
+            off = sorted((r for r in consistency.check(C.declared(store, pid), geom)
                           if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
+            strays = geom.require_mesh().metadata.get("strays")
         except Exception:  # noqa: BLE001 — the card says what it can
-            off = []
+            off, strays = [], None
+        if strays:                                   # what the mesh left out, said once (CALI-118)
+            what.append(_line(f"I {strays}: it enclosed nothing and weighs nothing.", "info"))
         if off:
             what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"fix its shape to "
                               f"match its pieces\" and I'll revise it.", "bad"))

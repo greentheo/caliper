@@ -736,6 +736,10 @@ def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
     if printed is None:
         return None
     mesh = store.part_geometry(part_id).require_mesh()
+    from .measure import closed, open_near
+
+    if not closed(mesh):                        # no boolean on an open mesh: said where it's open (CALI-118)
+        raise ValueError(f"its shape isn't closed {open_near(mesh)}")
     if not printed.get("rest"):
         return mesh
     entry = store.design.part(part_id)
@@ -824,7 +828,7 @@ def with_printed(store: DesignStore, part_id: str, items: list, d: Optional[dict
         if not g.is_volume:
             raise ValueError("its mesh isn't a closed solid")
     except Exception as e:  # noqa: BLE001 — said, and the weight unknown: never a lower total
-        why = f"{UNWEIGHED} ({e})"
+        why = f"not checked: {e}" if str(e).startswith("its shape isn't closed") else f"{UNWEIGHED} ({e})"
         return [{**it, "unweighed": why} if it.get("kind") == "printed" else it for it in items]
     return [{**it, "volume_mm3": float(abs(g.volume)), "area_mm2": float(g.area),
              "at": [float(v) for v in g.center_mass]} if it.get("kind") == "printed" else it for it in items]
