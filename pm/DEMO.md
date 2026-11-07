@@ -566,6 +566,29 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · "Closed" means closed as it reads back, everywhere (CALI-121 #133, #134)
+1. Build a part whose shape doesn't close (two blocks meeting only along an edge): the build's reply says "⚠ Its shape
+   isn't closed near z … mm: strength, weight and carving can't be checked until it is", at the edge where they meet.
+2. Its weight reads "not checked: its shape isn't closed near z …", and whittle refuses it, saying where.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_closed_everywhere.py`.
+
+### 2026-11-07 · A seat's load cases, and whether it tips over (CALI-98 #86)
+1. Open a seat whose script declares a tipping case (the guide's example: `"tip": True`, 600 N down 60 mm in from
+   the front edge, 20 N forward at seat height): *Will it work?* says "Won't tip when someone sits on the front edge
+   and leans, N times over" (or that it tips, and at what push), and that the pushes aren't yet checked by an engineer.
+2. A seat that declares only "sitting" says "Not checked yet for a seat: leaning back …; sitting on the front edge;
+   tipping over; buckling of the legs."
+3. The designer's guide (`src/caliper/part_scripts.md`) has the load cases by kind of thing, each value cited.
+4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_tipping.py`.
+
+### 2026-11-07 · The questions read your shop (CALI-124 #145)
+1. With a printer in your shop (Shop → printer, 256 mm): start a design that's printed. No question asks your bed
+   size; one says "Your printer: 256 × 256 × 256 mm build volume, PLA, PETG. If this one's to be made on something
+   else, say what."
+2. With no shop yet: answer the bed-size question "256 x 256 x 256 mm, PETG". Under *Requirements*: "Add a 256 × 256 ×
+   256 mm printer (PETG) to your shop?" — **Add it** writes it to your shop (Shop shows it); **No** leaves it.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_shop_questions.py`.
+
 ### 2026-11-07 · Build it on a reviewed plan builds its parts, in order (CALI-35 #3b)
 1. With a key, plan the turbine ("…a 7 ft mast…, for a generator I already have"), review it, and press **Build it**:
    the base, then the mast, then what goes on it, one at a time, each narrated as it's built with its checks between

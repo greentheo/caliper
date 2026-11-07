@@ -162,8 +162,10 @@ def plan(store: DesignStore, part_id: str, *, kind: str = "flow", flow=(-1.0, 0.
         raise ValueError("carve must be 'anywhere' or 'tail'")
     stl = store.part_stl(part_id)
     part_mesh = _mesh_of(stl)
-    if not part_mesh.is_watertight:
-        raise ValueError(f"'{part_id}' isn't watertight — whittle can't voxelize or carve it")
+    from .measure import closed, open_near
+
+    if not closed(part_mesh):                  # as it reads back: a pinch isn't closed either (CALI-121)
+        raise ValueError(f"'{part_id}' isn't closed ({open_near(part_mesh)}): whittle can't voxelize or carve it")
     plo, phi = part_mesh.bounds
     notes = ["whittle's drag model ranks shapes well; its absolute numbers are good to perhaps 30%."]
 

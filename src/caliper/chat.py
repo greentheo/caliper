@@ -925,6 +925,20 @@ def _asked(store: DesignStore, asked: str, prior: str, new: str, volumes) -> lis
     return out
 
 
+def _not_closed(res) -> str:
+    """The build's own line when :func:`measure.clean` couldn't close the part (CALI-121), else ""."""
+    from .measure import closed, open_near
+
+    try:
+        mesh = res.geometry.require_mesh() if res.geometry is not None else None
+    except Exception:  # noqa: BLE001 — no mesh to judge: the build says what it can
+        return ""
+    if mesh is None or closed(mesh):
+        return ""
+    return (f"⚠ Its shape isn't closed {open_near(mesh)}: strength, weight and carving can't be checked until it "
+            f"is.")
+
+
 def _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb: str, *, asked: str = "",
              prior: str = "", new: str = "", volumes=None) -> str:
     """The chat reply: what happened, what it measures, and — critically — what it broke. For a request, what was
@@ -934,6 +948,9 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     if asked:
         lines += _asked(store, asked, prior, new, volumes)
 
+    shut = _not_closed(res)
+    if shut:                                    # said once, by the build itself (CALI-121)
+        lines.append(shut)
     if res.report is not None:
         part_fails = _fail_lines(res.report)
         if part_fails:
