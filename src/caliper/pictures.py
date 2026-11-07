@@ -305,7 +305,10 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
     if checked:
         emit("step", "Checking the part as it's now built", step="recheck")
         run = L.study(store, part_id, min_safety=min_safety)
-        out.update({"safety": run["safety"], "holds": run["holds"], "run": run["id"]})
+        out.update({"safety": run["safety"], "holds": run["holds"], "run": run["id"],
+                    # a ✓ the voxels couldn't see the walls for is no "it still holds" (CALI-110)
+                    "unresolved": any(L.unresolved(run, c) and c.get("holds") for c in run["cases"]),
+                    "too_thin": bool(run.get("too_thin"))})
     out["reply"] = reply(out)
     return out
 
@@ -320,6 +323,10 @@ def reply(got: dict) -> str:
         said += " I made it smaller to keep it strong."
     if got.get("safety") is None:
         return said + " It doesn't say what it must hold, so I couldn't check it's still strong."
+    if got["holds"] and got.get("unresolved"):
+        return said + (" Its strength check couldn't see its walls closely enough to tell if it's still strong enough, so a "
+                       "grown-up checks it again " + ("by hand or with a printed test piece" if got.get("too_thin")
+                                                       else "finer") + " before anyone stands on it.")
     if got["holds"]:
         return said + f" It still holds, {got['safety']:g} times over (it needs {got['min_safety']:g})."
     return (said + f" ✗ Built, it reads {got['safety']:g} times over and needs {got['min_safety']:g}: "

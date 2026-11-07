@@ -801,9 +801,11 @@ def _status(card: dict) -> str:
     s = card["summary"]
     if s["fail"] == 0 and s["unknown"] == 0:
         return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass</span>'
-    untrusted = s.get("untrusted") or 0
+    untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0
+    rest = s["unknown"] - untrusted - unresolved
     why = [f"{s['fail']} check(s) fail" if s["fail"] else "", f"{untrusted} not trusted" if untrusted else "",
-           f"{s['unknown'] - untrusted} unknown" if s["unknown"] - untrusted else ""]
+           f"{unresolved} not resolved" if unresolved else "",          # an FEA too coarse to see its walls (CALI-110)
+           f"{rest} unknown" if rest else ""]
     return f'<span class="status notready">Not ready — {", ".join(w for w in why if w)}</span>'
 
 
@@ -929,6 +931,8 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                 breaks = f"about {c['breaks_lb']:,.0f} lb" if c.get("breaks_lb") else "—"
                 if c.get("filled"):                          # the check ran on a block: no number to build on
                     safety, breaks = "not trusted: checked on a filled-in shape", "—"
+                elif c.get("unresolved") and c.get("holds"):  # too coarse to see its walls: no ✓ (CALI-110)
+                    safety, breaks = "not resolved: too coarse to see its walls", "—"
                 else:
                     safety = f"{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x"
                 out.append(f"<tr><td>{_e(pid)}</td><td>{_e(c['name'])}, {c['lb']:g} lb × {c['factor']:g}</td>"
@@ -942,7 +946,8 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                "<th class='n'>margin</th><th>trust</th></tr>")
     for c in card["checks"]:
         mark = "<span class='pass'>✓</span>" if c["status"] == "pass" else "<span class='fail'>✗</span>" \
-            if c["status"] == "fail" else "<span class='fail'>not trusted</span>" if c["status"] == "untrusted" else "?"
+            if c["status"] == "fail" else "<span class='fail'>not trusted</span>" if c["status"] == "untrusted" \
+            else "<span class='fail'>not resolved</span>" if c["status"] == "unresolved" else "?"
         out.append(f"<tr><td>{mark}</td><td>{_e(c.get('label') or c['id'])}</td>"
                    f"<td class='n'>{_num(c.get('value'), c.get('unit', ''))}</td><td class='n'>{_num(c.get('margin'))}</td>"
                    f"<td>{'<span class=trust>' + _e(TRUST.get(c['trust'], c['trust'])) + '</span>' if c.get('trust') else ''}</td></tr>")
@@ -987,8 +992,9 @@ def _strength(store: DesignStore, versions: dict) -> dict:
             from .consistency import filled
 
             untrue = bool(filled(store, pid))                # on a filled-in solid: not this part's (CALI-96)
-            out[pid] = [{**{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")},
-                         "rough": load_study.rough(run, c), "filled": untrue} for c in run["cases"]]
+            out[pid] = [{**{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs", "holds")},
+                         "rough": load_study.rough(run, c), "filled": untrue,
+                         "unresolved": load_study.unresolved(run, c)} for c in run["cases"]]
     return out
 
 

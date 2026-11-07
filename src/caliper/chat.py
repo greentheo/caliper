@@ -677,7 +677,8 @@ def picture_part(store: DesignStore, part_id: str, subject: str, where: str = ""
     except (ValueError, ImportError) as e:
         return TurnResult(action="picture", ok=False, part=part_id, events=events, error=str(e),
                           reply=f"I couldn't put a {subject} on it: {e}.")
-    return TurnResult(action="picture", ok=got["ok"] and got.get("holds", True) is not False, part=part_id,
+    return TurnResult(action="picture", ok=got["ok"] and got.get("holds", True) is not False
+                      and not got.get("unresolved"), part=part_id,
                       version=got.get("version"), events=events, reply=got["reply"])
 
 
@@ -762,7 +763,10 @@ def _facts(store: DesignStore, scope: Optional[str]) -> str:
         for c in run.get("cases") or []:
             out.append(f"strength check of {run['part']} v{run['version']}: {c.get('name')} {c.get('lb')} lb x "
                        f"{c.get('factor')}: safety {c.get('safety')} ({c.get('governs')}), breaks near "
-                       f"{c.get('breaks_lb')} lb; needs {run.get('min_safety')}")
+                       f"{c.get('breaks_lb')} lb; needs {run.get('min_safety')}"
+                       # never a verdict to repeat: the FEA couldn't see the wall (CALI-110)
+                       + ("; NOT RESOLVED: the voxels were too coarse to see its walls, so this number is no verdict"
+                          if load_study.unresolved(run, c) else ""))
         out += [f"strength note: {n}" for n in (run.get("notes") or [])[:4]]
     said = [e for e in store.log() if e.get("kind") in ("message", "reply")][-6:]
     out += [f"{'they said' if e['kind'] == 'message' else 'Caliper said'}: {(e.get('text') or e.get('reply') or '')[:600]}"

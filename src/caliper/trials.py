@@ -52,6 +52,8 @@ def measure_with(sag_mm: float) -> str:
 def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     """For the worst load the part was checked for: the sag at each step to where it should break, as a range,
     and what to measure it with. None without a strength check on this version."""
+    from . import load_study as L
+
     run = _run(store, part_id)
     if run is None:
         return None
@@ -73,7 +75,9 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
             "where": plate.get("piece") if plate.get("done") else case["fea"].get("in"),
             "breaks_lb": breaks, "steps": steps, "per_lb_mm": [round(lo, 6), round(hi, 6)],
             "measure_with": measure_with(hi * case["lb"]),
-            "basis": "linear to breaking: the FEA's sag (joints solid, the stiff end)"
+            "basis": ("from an FEA too coarse to see its walls, so a rough guess until it's checked finer: "
+                      if L.unresolved(run, case) else "")                       # said, not hidden (CALI-110)
+                     + "linear to breaking: the FEA's sag (joints solid, the stiff end)"
                      + (" to the plate check's (edges free, the flexible end)" if flex is not None else "")}
 
 
