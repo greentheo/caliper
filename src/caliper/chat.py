@@ -648,14 +648,15 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
     from . import consistency, verdicts
 
     best = next((x for x in rec["stations"] if x["index"] == rec["best"]), None)  # search: the printed part's lightest
-    v = verdicts.carve_step(best, consistency.filled(store, part_id)) if best else None   # what it says (#132 review)
+    v = verdicts.carve_step(best, consistency.filled(store, part_id), rec) if best else None   # #132 review, #101
     said = []
     if rec.get("weak"):
         said.append(f"⚠ {rec['weak']}")
     if best and best["saved_g"] and not v["counts_as_pass"]:
         said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. It could come off down to step "
                     f"{best['index']} ({best['saved_g']} g less filament), but that isn't a part that holds: "
-                    + (f"the whole part is then {best.get('whole')}x." if v["kind"] == "fails" else f"{v['word']}.")
+                    + (f"the whole part is then {best.get('whole')}x." if v["kind"] == "fails" else
+                       f"the voxels were too coarse to see its walls (not resolved): check it again finer first." if v["kind"] in ("unresolved", "unchecked") else f"{v['word']}.")
                     + " Fix that first.")
     elif best and best["saved_g"]:
         said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. The lightest that holds is step "

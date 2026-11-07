@@ -328,10 +328,10 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         r["verdict"] = v
     for r in runs["carve"]:                   # a carve or lightening step, as the page shows it (#132 review)
         for st in r.get("stations") or []:
-            st["verdict"] = verdicts.carve_step(st, untrusted.get(r["part"]))
+            st["verdict"] = verdicts.carve_step(st, untrusted.get(r["part"]), r)        # #101: coarse voxels too
     for r in runs["lighten"]:
         for st in r.get("stations") or []:
-            st["verdict"] = verdicts.lighten_step(st, untrusted.get(r["part"]))
+            st["verdict"] = verdicts.lighten_step(st, untrusted.get(r["part"]), r)
     for p in parts:                           # the history line of a strength check says the verdict it was given
         for h in p["history"]:
             if h.get("kind") == "load" and h.get("action") == "studied":

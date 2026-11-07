@@ -60,6 +60,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     t0 = time.time()
     ctx = L.prepare(store, part_id, emit)
     mat = ctx["mat"]
+    seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)
+    if seen.get("too_thin"):                     # none a study may make can: not carved by strength
+        raise ValueError(L.TOO_THIN)
     if not mat.get("printed"):
         raise ValueError(f"'{part_id}' isn't printed: only a printed part (or the printed rest of one) can be "
                          f"carved free-form; a sheet is lightened with holes a saw can cut")
@@ -82,7 +85,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     partial = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(), "status": "running",
                "version": store.design.part(part_id).version, "min_safety": min_safety, "material": mat["name"],
                "spacing_mm": round(s, 2), "steps": stations, "stations": [], "best": None, "weak": "",
-               "share": "printed", "notes": []}
+               "share": "printed", "notes": [], **seen}
 
     def keep(rec: dict) -> None:
         with open(os.path.join(out_dir, "run.json.tmp"), "w") as fh:
@@ -142,13 +145,13 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         first = out[0]
         from . import verdicts
 
-        if not verdicts.station(first, whole=True)["counts_as_pass"] and verdicts.station(first)["counts_as_pass"]:
+        if verdicts.station(first, whole=True)["kind"] == "fails" and verdicts.station(first)["kind"] != "fails":
             # the part fails where the carve can't reach: say so first, it's the thing to fix
             weak_note = (f"As it is, it doesn't hold: {first['whole']:g} times over, and it needs {min_safety:g}; the "
                          f"weak link is the {first['weakest'] or 'wood'}, which carving the printed part doesn't change.")
         else:
             weak_note = ""
-        record = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(),
+        record = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(), **seen,
                   "version": store.design.part(part_id).version, "min_safety": min_safety,
                   "material": mat["name"], "spacing_mm": round(s, 2), "seconds": round(time.time() - t0, 1),
                   "stations": out, "best": best["index"] if best else None, "weak": weak_note,
@@ -165,9 +168,12 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         store.append_log({"kind": "carve", "action": "studied", "part": part_id, "run": rid})
         from . import consistency, verdicts
 
-        held = best is not None and verdicts.carve_step(best, consistency.filled(store, part_id))["counts_as_pass"]
-        emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g" if held and best["saved_g"]
-             else f"{len(out)} steps: the printed part comes off, but the whole part doesn't hold"   # #132 review
+        v = verdicts.carve_step(best, consistency.filled(store, part_id), record) if best is not None else None
+        why = ("too coarse to see its walls" if v and v["kind"] in ("unresolved", "unchecked")    # #101
+               else "the whole part doesn't hold" if v and v["kind"] == "fails" else v["word"] if v else "")
+        emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g"
+             if v and v["counts_as_pass"] and best["saved_g"]
+             else f"{len(out)} steps: the printed part comes off, but {why}"   # #132 review
              if best is not None and best["saved_g"] else f"{len(out)} steps", run=rid, progress=1.0)
         return record
     except Cancelled:

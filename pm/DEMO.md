@@ -566,6 +566,12 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · A carve on voxels too coarse to see its walls says so (CALI-106 #101)
+1. Carve a thin printed part (**Carve it**): where the check couldn't see its walls, the steps that hold are amber dots
+   reading "not resolved", and **Carve it like this** is off, saying why.
+2. Theo's bar stool (a copy): **Carve it** is off, "Its walls are too thin for the voxel check at this size, so it
+   can't be carved by strength".
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_coarse_steps.py`.
 ### 2026-11-07 · One verdict, everywhere (CALI-112 #114)
 1. Open a design whose strength check is a ✗, not trusted, not resolved or middle only: the card, the Score panel, the
    Studies row, the history line, the build book and the kids' book all say the same word, and none says "holds" or

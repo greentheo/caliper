@@ -234,6 +234,24 @@ def _sees(across: float) -> bool:
     return across >= RESOLVE_MIN * (1 - 1e-3)
 
 
+#: What a carve or lightening says where no run a study may make can see the walls (CALI-106, #101).
+TOO_THIN = "Its walls are too thin for the voxel check at this size, so it can't be carved by strength"
+
+
+def resolution(ctx: dict) -> dict:
+    """Can this set-up's voxels see the thinnest wall? As the strength check measures it (CALI-97), for the studies
+    that share its set-up (carve, lighten: CALI-106): ``thinnest_mm``, ``across``, ``resolved``, and, unresolved,
+    ``finer`` (a finer run can see it) or ``too_thin`` (none a study may make can). {} when it can't be told."""
+    thin, s = ctx.get("thinnest"), ctx.get("spacing")
+    if not thin or not s:
+        return {}
+    out = {"thinnest_mm": round(thin, 2), "across": round(thin / s, 3), "resolved": _sees(thin / s)}
+    if not out["resolved"]:
+        want = math.floor(thin / RESOLVE_MIN * 100) / 100
+        out.update({"finer": True} if want >= (ctx.get("finest") or 0) else {"too_thin": True})
+    return out
+
+
 def unresolved(run: dict, case: dict) -> bool:
     """A verdict the FEA governs at fewer than RESOLVE_MIN voxels across the thinnest wall: too coarse to see it."""
     thin, s = run.get("thinnest_mm"), run.get("spacing_mm")
