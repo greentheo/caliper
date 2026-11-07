@@ -29,6 +29,33 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   app.js's badge all ask the verdict; goals compare in `verdicts.compare`. Both guards widened (`< min_safety`,
   `>= limit`/`lim`, `ready`, `best`, `holds_now`; every `.holds`, `whole_holds`, `safety_across >=` in design.js and
   app.js): on the pre-rework head both fail, with all 13 of `tests/test_verdicts_sweep.py`.
+- **#132 review, round 2:** the release panel reads `verdicts.release` (ready as made and for the parts as they are,
+  its own reason when not); a revision's history stores its report's verdict (`verdicts.report`): a fail only with a
+  failure, pass plus a waiting check is "not all checked", only waiting or nothing is "nothing checked yet", never
+  red; older records read through `verdicts.history`. `summary(None)` and `meets(…, None)` wait; `release()` keeps
+  its own reason; `to_text` and the CLI say ALL PASS only with nothing waiting; lighten's two searches marked as such.
+  Both guards cover `ready` and `all_pass` now.
+
+### 2026-11-07 · CALI-120 (#128) · The server keys the page's scripts and styles; no PR bumps ?v= again
+- **`server.keyed_page`** serves `/`, `/index.html` and `/classic` with every `?v=` on the page's own `.js` and
+  `.css` set to a 10-character hash of that file (`cache_key`), read per request: a changed `design.js` is a new key on
+  reload, an unchanged one the same. The page itself is `no-store`. The pages keep `?v=dev` and never change for it
+  again. The vendored three.js is imported by version-pinned path through the importmap, so it needs no key.
+- **Why:** each merge to `main` made every other open PR conflict on `design.js?v=N` (tonight #122, #124 and #125
+  each merged `main` again only for it, a full CI run each).
+- CONTRIBUTING.md and firm/NIGHT_SHIFT.md: no bump step; the server does it.
+- `tests/test_cache_key.py` (3): the key follows the file and only the file; the served pages are keyed and
+  `no-store`; the pages keep the placeholder.
+
+### 2026-11-07 · CALI-114 (#116) · CI runs the suite across the runner's cores
+- **`pytest-xdist`** is in the requirements. CI runs `pytest -n auto --durations=25 -m "not serial"` with
+  `OMP_NUM_THREADS`, `MKL_NUM_THREADS` and `OPENBLAS_NUM_THREADS` at 1, so four FEA workers don't fight over four
+  cores. A second step runs anything marked `serial` on its own (exit 5, "no tests", passes once none is).
+- **Locally `pytest -rs` stays the default,** and `-n auto` is optional (TESTING.md).
+- **Before,** on main: the test step took 51.5 min (646a20a) and 40.8 min (ad2f296). After: in the PR, from its CI
+  runs, with `--durations=25`'s slowest tests.
+- **The carve-down test is marked `serial`** (7cdc550): in parallel, with one BLAS thread, it adopted a step that
+  wasn't watertight (#105, fixed by #124). After #124 merges, the mark comes off.
 
 ### 2026-11-07 · CALI-118 (#126) · A stray face from the CAD's meshing isn't the part; an open part is said, never thrown
 - **The cause:** OCCT's mesher fans a cone face's triangles from its apex, and one comes out with two corners on the
@@ -137,6 +164,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   - the reply says a parameter's plain name ("foot fillet radius") and every length with its unit, whole numbers too.
 - **A failing check's reason now reaches the chat** (`_fail_lines` adds its detail), so the line is named there too.
 - Tests: `tests/test_fallbacks.py`.
+
 ### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
 - **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
   `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its
