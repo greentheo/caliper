@@ -809,13 +809,31 @@ def wood_solids(d: dict, mesh, proud: float = 0.0, inner: bool = True) -> list:
     return cutters
 
 
+#: What a weight says when the printed piece's solid can't be made (CALI-111, #125 review): unknown, never less.
+UNWEIGHED = "not checked: the printed part's shape isn't closed"
+
+
 def with_printed(store: DesignStore, part_id: str, items: list, d: Optional[dict] = None) -> list:
-    """The items with the printed piece measured from its own solid (:func:`printed_solid`)."""
+    """The items with the printed piece measured from its own solid (:func:`printed_solid`). Where that solid can't
+    be made, or isn't closed, the printed item is marked ``unweighed`` with why, and fails soft: its weight, and
+    every total with it, is unknown (#125 review: a lower total read ✓ 1.6 lb against a 10 lb cap)."""
     if not any(it.get("kind") == "printed" for it in items):
         return items
-    g = printed_solid(store, part_id, d)
+    try:
+        g = printed_solid(store, part_id, d)
+        if not g.is_volume:
+            raise ValueError("its mesh isn't a closed solid")
+    except Exception as e:  # noqa: BLE001 — said, and the weight unknown: never a lower total
+        why = f"{UNWEIGHED} ({e})"
+        return [{**it, "unweighed": why} if it.get("kind") == "printed" else it for it in items]
     return [{**it, "volume_mm3": float(abs(g.volume)), "area_mm2": float(g.area),
              "at": [float(v) for v in g.center_mass]} if it.get("kind") == "printed" else it for it in items]
+
+
+def _weighed(items: list) -> tuple[list, Optional[str]]:
+    """The items that can be weighed, and why one can't (or None)."""
+    why = next((it["unweighed"] for it in items if it.get("unweighed")), None)
+    return [it for it in items if not it.get("unweighed")], why
 
 
 def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> dict:
@@ -827,12 +845,12 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
     if items is None:
         raise ValueError(f"'{part_id}' doesn't say what it's built from — give its script a "
                          f"construction(params, build) (or members() for a tube frame)")
-    items = with_printed(store, part_id, items, d)
+    items, unweighed = _weighed(with_printed(store, part_id, items, d))
     rows = takeoff(items)
     mass, cog = totals(rows)
     saved = read_build(store.read_script(part_id)) or {}
     used = d.get("build") or {}
-    notes = []
+    notes = [unweighed[:1].upper() + unweighed[1:] + "."] if unweighed else []
     if d.get("members"):
         notes.append("Tubes weighed along their centrelines, joint to joint, one length where a tube runs "
                      "straight through — within a few percent; exact cuts (mitres, copes) come with the cut plan.")
@@ -867,7 +885,9 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
     return {"part": part_id, "source": source, "build": used, "saved": saved, "keeps": keeps,
             "changed": {k: v for k, v in used.items() if k in saved and saved[k] != v},
             "choices": choices(used, d.get("build_options")),
-            "mass_kg": round(mass, 2), "mass_lb": round(mass * M.LB_KG, 1), "cog": _round3(cog),
+            # unknown, not the rest's: a part whose printed piece can't be weighed has no weight (#125 review)
+            "mass_kg": None if unweighed else round(mass, 2), "mass_lb": None if unweighed else round(mass * M.LB_KG, 1),
+            "cog": None if unweighed else _round3(cog), **({"unweighed": unweighed} if unweighed else {}),
             "materials": by_material(rows), "bom": bom_, "notes": notes,
             "pieces": [{"name": r["name"], "label": r["label"], "mass_lb": round(r["mass_kg"] * M.LB_KG, 2)}
                        for r in rows]}
@@ -880,15 +900,20 @@ def balance(store: DesignStore, build: Optional[dict] = None, payload_lb: float 
     gear or people, set on the floor — the middle of the first sheet whose group is ``floor``.
     """
     build = build or {}
-    parts, rows_all, hitch, floor_at = [], [], None, None
+    parts, rows_all, hitch, floor_at, unweighed = [], [], None, None, []
     for p in store.design.parts:
         d = declared(store, p.id, build.get(p.id))
         items = _items(d)
         if items:
-            rows = takeoff(items)
+            # printed pieces weighed from their solid, as report() does: without it the bar stool's total read
+            # 1.6 lb (its plywood seat) while its part weighed 10.9 (CALI-111)
+            known, why = _weighed(with_printed(store, p.id, items, d))
+            rows = takeoff(known)
             mass, cog = totals(rows)
-            parts.append({"part": p.id, "mass_kg": round(mass, 2), "mass_lb": round(mass * M.LB_KG, 1),
-                          "cog": _round3(cog)})
+            if why:                                # unknown, and so is the total (#125 review)
+                unweighed.append(f"{p.id}: {why}")
+            parts.append({"part": p.id, "mass_kg": None if why else round(mass, 2),
+                          "mass_lb": None if why else round(mass * M.LB_KG, 1), "cog": None if why else _round3(cog)})
             rows_all.extend(rows)
             if floor_at is None:
                 floor_at = next((r["at"] for r in rows if r["kind"] == "sheet" and r.get("group") == "floor"),
@@ -907,6 +932,10 @@ def balance(store: DesignStore, build: Optional[dict] = None, payload_lb: float 
     mass, cog = totals(rows_all)
     out = {"parts": parts, "mass_kg": round(mass, 2), "mass_lb": round(mass * M.LB_KG, 1),
            "cog": _round3(cog), "hitch": hitch, "payload_lb": payload_lb, "notes": notes}
+    if unweighed:                              # one part unknown: the total is too, said (#125 review)
+        out.update({"mass_kg": None, "mass_lb": None, "cog": None, "unweighed": unweighed})
+        notes.append("The total isn't known: " + "; ".join(unweighed) + ".")
+        return out
     if hitch is not None:
         # the receiver sits ahead of the load (+x toward the car): weight behind it bends it down
         for row in parts:

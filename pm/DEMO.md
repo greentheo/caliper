@@ -566,6 +566,13 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · An all-printed part gets its book; the book weighs what the card does (CALI-111 #112)
+1. Open a design that's all printed (a tube, a printed box) and press **Make the build package**: it's made, and its
+   cut list says "Nothing to cut: it's all printed."
+2. On a design with a printed part and plywood: the build book's scorecard and the design card give the same total
+   weight. A card scored before this reads "score it again" until it's re-scored.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_printed_release.py`.
+
 ### 2026-11-07 · A plan says what you said apart from what it assumed (CALI-115 #117)
 1. With a key, new design: "A Savonius wind turbine: printed buckets, plasma-cut end plates, a welded 7 ft mast on a
    staked base, for a generator I already have with a 1 in shaft." Only the generator says "you have it".
