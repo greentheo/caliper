@@ -566,6 +566,10 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · A carved step that doesn't close up isn't offered (CALI-117 #105)
+1. Carve a printed part (**Carve it**). Every step offered rebuilds into a closed solid; one that wouldn't reads
+   "Can't use this step: its carved shape doesn't close up into a solid…", and its Carve button is off.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_carve_closed.py`.
 ### 2026-11-06 · Asked for, changed, measured (CALI-107 #107)
 1. **On a part, say "make the wall 6 mm":** the reply starts "Asked for: make the wall 6 mm", then "Changed: wall 4 mm →
    6 mm", "Measured: its volume went from … to … cm³", and what isn't measured. Then "The part's own checks pass."

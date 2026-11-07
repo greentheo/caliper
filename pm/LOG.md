@@ -1,7 +1,24 @@
 # Caliper work log
 
 Append-only. Newest first. One entry per shipped task or notable decision.
-Format: `### 2026-11-06 · CALI-107 (#107) · A requested feature builds or the script says why not; the reply says what changed
+Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
+
+### 2026-11-07 · CALI-117 (#105) · A carved step whose part doesn't close up is never offered or adopted
+- **What it was:** with #106's front-edge foot, and on main's own carve-down test once BLAS ran on one thread (#121's
+  CI), the carve picked a step whose adopted part wasn't watertight. Which voxels a run carves follows the summation
+  order, so it came and went; a fresh run here was watertight at every stage (station, wood, join, STL reload).
+  A part that isn't watertight can't be voxelized, so the check adopting it runs fails or reads wrong.
+- **Now:** each step's mesh is repaired if a fill closes it (`carve._closed`: merge, drop degenerate faces, fill holes,
+  fix normals) and otherwise marked `closed: False` with why. The step offered is the lightest that holds **and**
+  whose part, as adopting it builds it (`carve._adopted`: the wood as drawn joined to the carved print), closes up;
+  one that doesn't is marked and the next is tried. `adopt` refuses a step that doesn't close (`carve.NotClosed`, a
+  422 with the reason) and checks the STL as it will be read back; nothing is written for it. The panel shows "Can't
+  use this step: …" and its Carve button is off. design.js v=56.
+- `tests/test_carve_closed.py`: a small hole filled and a big one not; every carved step forced to leak (not offered,
+  adopt refused, nothing written); a join with the wood forced to leak (a small gap repaired and adopted watertight,
+  a big one refused) and the study not offering it.
+
+### 2026-11-06 · CALI-107 (#107) · A requested feature builds or the script says why not; the reply says what changed
 - **`part_scripts.md`: no silent fallbacks.** A requested feature builds or raises with a clear message. No
   `try/except` that passes or hands back the shape without it, no returning the input because a size came out
   small, no clamping a requested size without raising.
@@ -26,7 +43,7 @@ Format: `### 2026-11-06 · CALI-107 (#107) · A requested feature builds or the 
   - the reply says a parameter's plain name ("foot fillet radius") and every length with its unit, whole numbers too.
 - **A failing check's reason now reaches the chat** (`_fail_lines` adds its detail), so the line is named there too.
 - Tests: `tests/test_fallbacks.py`.
-Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
+### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
 - **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
   `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its
   note. A ✗ by its number stays a fail. `untrusted` (#96, a filled-in shape) is as it was.
@@ -65,7 +82,6 @@ Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book n
 - **Page:** "not trusted" first, then "not resolved", then holds or doesn't. `design.js?v=45`.
 - Tests: `test_filled_verdict` (both together on the design card and in Studies).
 
-### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
 ---
 
