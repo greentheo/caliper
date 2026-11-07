@@ -21,6 +21,9 @@ reach the maker.
 - **The Beam check line says which grain it used:** "with the grain along the span, as you said" or "the grain unknown:
   the weaker way", never a hard-coded "unknown"; the case's "by the plate check" says the same.
 - No design of Theo's writes or states a grain (checked by hand, read-only), so nothing of his moves.
+- **With #106:** the advice quotes a number only from a case whose own verdict is settled (it holds or fails): never
+  one checked in the middle only, too coarse, on a filled-in shape or of an older version (`test_edge_foot`'s
+  middle-only stool caught "about 4.2 times over" beside "checked in the middle only").
 - Not here: an arrow on the pattern sheets (the line is on the cut list and in the book).
 - Tests: tests/test_grain.py (7: assumed never moves it, stated does and reaches the cut list and the book, the part's
   own directions, refused grains and panels, the card's advice then "check again", the chat, the page's line). The

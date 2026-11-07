@@ -139,10 +139,12 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     return ""
 
 
-def _grain_lines(store: DesignStore, pid: str, run: dict, stale: bool) -> list[dict]:
+def _grain_lines(store: DesignStore, pid: str, run: dict, stale: bool, filled: Optional[str] = None,
+                 edge: bool = False) -> list[dict]:
     """A beam's face grain (CALI-126): the advice where the person hasn't said which way it's cut (a grain the designer
     wrote is only assumed: it never moves the verdict), and "check it again" where they have and the check predates
-    it. Never a greener number from a grain nobody said."""
+    it. Never a greener number from a grain nobody said, and the advice's number only from a case whose own verdict
+    is settled (it holds or fails): never one checked in the middle only, too coarse, on a block or an older version."""
     from . import grain as G
 
     said, out, seen = G.stated(store, pid), [], set()
@@ -150,6 +152,9 @@ def _grain_lines(store: DesignStore, pid: str, run: dict, stale: bool) -> list[d
         pl = c.get("plate") or {}
         piece = pl.get("piece")
         if pl.get("as") != "beam" or not pl.get("done") or piece in seen:
+            continue
+        if c.get("safety") is None or verdicts.case(run, c, filled=filled, stale=stale, edge=edge)["kind"] not in (
+                "holds", "fails"):
             continue
         seen.add(piece)
         mine = said.get(piece)
@@ -359,7 +364,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         for c in run["cases"]:
             if c.get("safety") is not None:
                 work.append(_case_line(pid, run, c, filled, stale, inches, edge=bool(edge)))
-        work += _grain_lines(store, pid, run, stale)
+        work += _grain_lines(store, pid, run, stale, filled, bool(edge))
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
                        and h.get("action") == "failed" and h.get("version") == p["version"]), None)
