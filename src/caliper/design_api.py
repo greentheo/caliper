@@ -36,6 +36,11 @@ class ChatMessage(BaseModel):
     scope: Optional[str] = None
 
 
+class ShopOffer(BaseModel):
+    index: int
+    add: bool = True
+
+
 class ClarifyAnswers(BaseModel):
     answers: dict[str, str] = {}
     skip: bool = False
@@ -368,6 +373,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "carving": _carving(slug),            # the carve's job, while it runs (CALI-101)
         "display_units": d.display_units,
         "requirements": [r.model_dump() for r in d.requirements],
+        "shop_offers": clarify.offers(store),     # what the answers offered to add to the shop (CALI-124)
         "parts": parts,
         "mates": [{"id": m.id, "between": m.between, "kind": m.kind} for m in store.assembly.mates],
         "rules": [{"id": a.id, "expr": a.expr} for a in store.assembly.assertions],
@@ -477,7 +483,9 @@ def router():
 
         def ask(j):
             j.emit("clarify", "working out what to ask…")
-            qs, source = clarify.draft_questions(req.prompt.strip())   # the slow part — unlocked
+            # the shop read first (CALI-124): no question asks what it already says
+            qs, source = clarify.draft_questions(req.prompt.strip(), shop=shop.read(),
+                                                 shop_known=os.path.exists(shop.path()))   # the slow part — unlocked
             with RUNNER.locked(_lock(slug)):
                 clarify.open_round(DesignStore.load(slug), qs, source)
             return {"questions": [q.to_dict() for q in qs], "source": source}
@@ -522,6 +530,17 @@ def router():
                     raise HTTPException(status_code=422, detail="display_units is 'mm' or 'in'")
                 store.design.display_units = req.display_units
             store.save()
+            return design_state(store)
+
+    @r.post("/api/designs/{slug}/shop-offer")
+    def take_shop_offer(slug: str, req: ShopOffer):
+        """Add what an answer offered to the shop (shop.yaml, through its own path), or turn it down (CALI-124)."""
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                clarify.take_offer(store, req.index, req.add)
+            except ValueError as e:
+                raise HTTPException(404, str(e))
             return design_state(store)
 
     @r.post("/api/designs/{slug}/clarify")

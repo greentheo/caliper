@@ -36,6 +36,70 @@ From Theo's first bar stool run: its designer wrote one case ("250 lb person sea
   wider side to side, doesn't. Pinned: 0.8 against a factor of 1 tips, and the same stool raised 50 mm (its loads
   with it) tips the same (the floor is where it stands; a floor at z 0 fails it). Merged main (#139).
 - **#141 review, round 2:** `check()`'s own factor is pinned (a base 10.13 in wide, about 0.8 times over: it tips against a factor of 1 and holds against 0.7, from `check()` itself), and so is "tipping front to back" (a sideways push on a square base).
+
+### 2026-11-07 · CALI-124 (#145) · The questions read the shop, and an answer about the shop goes to the shop
+From Theo's bar stool run: the questions asked for the printer's bed size, which is the shop's, and his answer went
+into the design's requirements, where *How do I make it?* couldn't use it.
+- **The questions read the shop first** (`clarify.draft_questions(…, shop=)`): Claude is told the shop ("never ask
+  about it"), and any question about a machine the shop knows states it instead (`with_shop`): "Your printer: 256 ×
+  256 × 256 mm build volume, PLA, PETG. If this one's to be made on something else, say what." A question about the
+  shop is tagged (`about: shop:printer`, from its words where Claude doesn't tag it).
+- **A shop answer goes to the shop, on a yes** (`shop_offer`, `offers`, `take_offer`): it's never a design
+  requirement; an answer the shop can take ("256 x 256 x 256 mm, PETG", "10 in", "4 x 8 ft", "a jigsaw and a drill")
+  is offered under *Requirements*: "Add a 256 × 256 × 256 mm printer (PETG) to your shop?" with Add it / No. A yes
+  writes `shop.yaml` through `shop.write` (the shop's own path; the same kind of machine is replaced); a no leaves the
+  shop alone.
+- **The design's requirements keep only design facts.** An old design's shop fact is left where it is; *How do I make
+  it?* already reads the shop (`making.plan` → `shop.read()`), never the requirements.
+- Tests: tests/test_shop_questions.py (8, stubbed: a fake asker or client, the shop a file in a temp folder; 7 fail
+  without this).
+- **#146 review:** only a question about *your* machine is the shop's ("your printer", "do you have a CNC router",
+  "what tools do you have"), the machine it names first; a design question that names one ("How tall is the plasma
+  cutter the cart carries?", "What nozzle diameter should the hose fitting take?", "Which router bit profile?") keeps
+  its answer as a requirement: the reviewer's 5 probes, none lost. A shop answer that offers nothing is said ("I
+  couldn't read a printer from 'Bambu X1C': add it to your shop by hand, or give its build volume with its units"),
+  its answer kept as a requirement, and the note only dismissed. Only sizes said with their units make an offer ("X1C",
+  "0.4 nozzle, 256 bed" don't; "150 x 150 mm" is mm, not inches); a bare "4x8" table is feet; the offer says its
+  numbers and units. The first yes with no shop.yaml writes only the machine offered: the hand tools stay unsaid
+  (`shop.read` assumes the default for a file with no `hand`, `hand_default`), never written as yours.
+- **#146 review, round 2 (the foreman's call):** an offer never removes an answer. A "your …" answer that becomes a shop offer is kept as a requirement too ("your plasma cutter" still sizes the cart), and a no to the shop keeps it.
+
+### 2026-11-07 · CALI-35 (#3b) · A reviewed plan's parts are built one by one, in order
+- **Build it on a reviewed plan** (`build_plan.build`, from `firstrun`): each part to be made is authored in the plan's
+  build order, mounted-on first, narrated ("Building the mast", "The mast: built (mast_height ✓, …)"). A part the
+  person has (`fixed`) isn't designed. "The plan's saved … comes next (#3b)" is gone.
+- **Each designer sees the skeleton and what's built** (`DesignStore._plan_context`, in `prompt_context` when there's
+  a plan): every skeleton number in mm with its unit and why, each part already built with its world bounding box,
+  and the plan's checks between parts.
+- **A rule between parts fails the round:** `authoring.improve` takes `interfaces`, the plan's mates and rules over this
+  part and the parts already built, measured each round with the skeleton's values (`evaluate_assembly`); a rule
+  over a part not built yet waits. A failing one is fed back like any failing measurement.
+- **A part that won't build** stops the run there: the parts before it stay, the reply names it and why ("Build it
+  again to retry it, change the plan, or carry on without it"), and Build it again carries on from it.
+- **#103's review items:** a revision's history says `waiting` (amber "not all checked", with `said`) when a check
+  couldn't run, never a green "passed"; the chat says "The whole design measures green" only when every check ran
+  (`chat._design_line`), else `Report.said()`; each evaluator guard is pinned on its own (the string repeat too).
+- `tests/test_build_plan.py` (10, stub authors that build boxes from the skeleton): every interface holds; a mast
+  100 mm short fails its round naming `mast_height` and the retry fixes it; the designers' prompts carry the skeleton
+  and the built parts' boxes; a part that won't build stops there and Build it again goes on; the history and chat
+  lines; the four guards. #3a's "comes next" test now checks Build it starts at the base. The skeleton driving the
+  parts (rebuilds on a change) is #3c.
+- **#135 review:** a part's line has a mark only for what was measured on it (none, no mark; a check waiting, `·`);
+  the reply gives the design checks in `said()`'s words and says what isn't checked yet ("whether it holds (Check
+  it holds) and the scorecard. Run *Will it work?* next"), and `ok` stays False while a rule waits; a rule over a
+  part the person has says "needs the generator's size: say it, or keep it off", and the designer's prompt names
+  that part (YOURS, not designed); the plan's review says the cost before Build it ("3 parts to make, up to 4
+  designer tries each (at most 12)"), which a run can't exceed; the stop gives the reason's last line, the traceback
+  goes to the log; a history line fails only with a failure (all waiting is waiting). Tests pin the assumed mark in
+  the prompt, `ok` with a waiting rule, and a rule over a part not built yet.
+- **Merged with main's one verdict (#132):** the revision history's `result` is `verdicts.report`'s kind (main's
+  `_result`; #135's own copy goes), and the build's marks come from verdicts: each rule's from `verdicts.check` (a rule
+  that waits reads "·", an error "✗"), the part's from `verdicts.report`, and the build's `ok` from its
+  `counts_as_pass`, not `all_pass`.
+- **#135 review, round 3:** the marks are `_marks(mine)` (what `build()` uses, tested with erroring and failing rules,
+  not a copy of it), and a design whose measurement throws (`_measure_design`'s `(None, {"<design>": …})`) says "The
+  design checks: not checked: …" and isn't ok: it read `report is None` as ok (rule 6).
+
 ### 2026-11-07 · CALI-123 (#138) · No card reads greener than the newest strength run
 From the reviewer's cards-only re-pre-flight of Theo's bar stool on main (a fresh copy; Theo's folder has v1 2.58x,
 v3 twice "0x", v4 1.7x ✗, and no v7 run).

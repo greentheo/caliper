@@ -913,6 +913,10 @@ function designView(d) {
     ${d.requirements.length ? '<ul class="list">' + d.requirements.map((r) => `<li>${esc(r.question)}
       <div><b>${esc(r.answer)}</b>${r.source === 'assumed' ? ' <span class="badge">assumed</span>' : ''}</div></li>`).join('') + '</ul>'
     : '<div class="empty">None yet.</div>'}
+    ${(d.shop_offers || []).map((o, i) => `<div class="small" style="margin-top:6px">${esc(o.text)}
+      ${o.kind === 'note' ? `<button class="ghost small" data-shopoffer="${i}" data-add="0">OK</button>`
+        : `<button class="ghost small" data-shopoffer="${i}" data-add="1">Add it</button>
+      <button class="ghost small" data-shopoffer="${i}" data-add="0">No</button>`}</div>`).join('')}
     ${d.plan ? `<h4>The plan <span class="badge">${d.plan.status === 'review' ? 'to review' : 'saved'}</span></h4>
       <ol class="list">${d.plan.parts.map((x) => `<li><b>${esc(x.id.replace(/_/g, ' '))}</b>
         ${x.role === 'fixed' ? (x.source === 'assumed' ? '<span class="badge">assumed: you have it? say if not</span>' : '<span class="badge ref">you have it</span>') : ''}${x.built ? '<span class="badge ok">built</span>' : ''}
@@ -1409,6 +1413,15 @@ function wireInspector(p) {
   showMarks();
   wireCards();
   // keep a check the planner assumed: it's enforced from then on (CALI-115)
+  // an answer about the shop goes to the shop, on a yes (CALI-124)
+  document.querySelectorAll('#inspector [data-shopoffer]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        S.design = await api('POST', `/api/designs/${S.slug}/shop-offer`, { index: +b.dataset.shopoffer, add: b.dataset.add === '1' });
+        renderInspector();
+      } catch (e) { showErr(e.message); }
+    };
+  });
   document.querySelectorAll('#inspector [data-plankeep]').forEach((b) => {
     b.onclick = async () => {
       try {
