@@ -232,13 +232,35 @@ def min_wall_thickness(g: Geometry, samples: int = 2000, seed: int = 0) -> float
 
 
 def thinnest_wall(g: Geometry, samples: int = 2000, seed: int = 0) -> tuple[float, Optional[list]]:
+    """The thinnest wall (:func:`wall_samples`) and where it is (the middle of its ray, mm), so a line can say where
+    to thicken it (#136 review)."""
+    dists, mids = wall_samples(g, samples, seed)
+    if not len(dists):
+        return float("nan"), None
+    i = int(np.argmin(dists))
+    return float(dists[i]), [round(float(v), 1) for v in mids[i]]
+
+
+def wall_near(g: Geometry, point, radius: float, samples: int = 20000, seed: int = 0,
+              walls: Optional[tuple] = None) -> Optional[float]:
+    """The thinnest wall within ``radius`` of ``point`` (say, an FEA's hottest voxel), or None where no sample falls
+    that near (#137 item 2: is the worst stress among walls too thin for the voxels?). ``walls``: :func:`wall_samples`
+    already taken."""
+    dists, mids = walls if walls is not None else wall_samples(g, samples, seed)
+    if not len(dists):
+        return None
+    near = np.linalg.norm(mids - np.asarray(point, float)[None], axis=1) <= radius
+    return float(dists[near].min()) if near.any() else None
+
+
+def wall_samples(g: Geometry, samples: int = 2000, seed: int = 0) -> tuple[np.ndarray, np.ndarray]:
     """Smallest local material thickness, by ray-casting inward from the surface.
 
     Method: sample points on the surface, step just inside along the inward normal, cast a ray
     along the inward normal, and take the distance to the first opposite surface hit. The minimum
     over samples approximates the thinnest wall. For a solid block this is its smallest dimension.
-    Approximate but deterministic (fixed seed); exact-enough for the printability assertion. Returns the thickness
-    and where it is (the middle of the thinnest ray, mm), so a line can say where to thicken (#136 review).
+    Approximate but deterministic (fixed seed); exact-enough for the printability assertion. Returns each sampled
+    thickness and the middle of its ray (mm).
     """
     m = g.require_mesh()
     rng = np.random.default_rng(seed)
@@ -251,14 +273,10 @@ def thinnest_wall(g: Geometry, samples: int = 2000, seed: int = 0) -> tuple[floa
 
     locations, index_ray, _ = spatial.intersects_location(m, origins, directions, multiple_hits=False)
     if len(locations) == 0:
-        return float("nan"), None
+        return np.zeros(0), np.zeros((0, 3))
     dists = np.linalg.norm(locations - origins[index_ray], axis=1)
     ok = dists > eps * 2
-    if not ok.any():
-        return float("nan"), None
-    i = int(np.flatnonzero(ok)[np.argmin(dists[ok])])
-    at = (locations[i] + origins[index_ray[i]]) / 2
-    return float(dists[i]), [round(float(v), 1) for v in at]
+    return dists[ok], (locations[ok] + origins[index_ray[ok]]) / 2
 
 
 # ---------------------------------------------------------------------------

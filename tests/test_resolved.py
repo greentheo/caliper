@@ -61,7 +61,8 @@ checks:
   limit: 2.0
   source: assumed
 """
-COARSE = "Not resolved yet: the check was too coarse to see its 4 mm walls. Check it again finer."
+COARSE = "Not resolved yet: the check was too coarse to see its thinnest walls, 4 mm around z "   # which (#139)
+COARSE_END = " mm. Check it again finer."
 NOT_CHECKED = load_study.NOT_CHECKED
 
 
@@ -96,7 +97,7 @@ def test_a_verdict_on_an_fea_that_cant_see_the_wall_reads_warn(tmp_path, monkeyp
     assert case["governs"] == "fea" and case["holds"] and rec["thinnest_mm"] == pytest.approx(4.0, abs=0.3)
     assert not rec["resolved"]
     part = _work(store, "tube")
-    assert part and all(ln["status"] == "warn" and ln["text"] == COARSE for ln in part), part
+    assert part and all(ln["status"] == "warn" and ln["text"].startswith(COARSE) and ln["text"].endswith(COARSE_END) for ln in part), part
     design = _work(store)
     assert design and all(ln["status"] == "warn" and COARSE in ln["text"] for ln in design), design
     # the page's numbers: no green "holds" under the warn (#100 item 7)
@@ -108,7 +109,7 @@ def test_a_verdict_on_an_fea_that_cant_see_the_wall_reads_warn(tmp_path, monkeyp
     assert rec["finer"]["spacing_mm"] <= rec["thinnest_mm"] / 4 and rec["finer"]["minutes"] >= 1
     finer = load_study.study(store, "tube", spacing=rec["finer"]["spacing_mm"])
     assert finer["resolved"] and finer["spacing_mm"] == pytest.approx(rec["finer"]["spacing_mm"], abs=0.01)
-    assert not [ln for ln in _work(store, "tube") if ln["text"] == COARSE]
+    assert not [ln for ln in _work(store, "tube") if ln["text"].startswith(COARSE)]
     assert not [ln for ln in _work(store) if COARSE in ln["text"]]        # the design card reads the latest too
 
 
@@ -135,7 +136,7 @@ def test_a_fail_on_coarse_voxels_stays_a_fail(tmp_path, monkeypatch):
     assert case["governs"] == "fea" and not case["holds"] and not rec["resolved"]
     (part,) = _work(store, "tube")
     assert part["status"] == "bad" and part["text"].startswith("Doesn't hold a foot: only about ")
-    assert part["text"].endswith("The fail may be the model's: the voxels can't see its 4 mm walls. "
+    assert part["text"].endswith("where its wall is 4 mm, too thin for the voxels to see: the fail may be the model's. "
                                  "Check it again finer."), part["text"]
     (design,) = _work(store)
     assert design["status"] == "bad" and design["text"].startswith("✗ Holds a foot (40 lb), 2 times over (assumed)")
@@ -190,8 +191,10 @@ def test_a_spool_hung_on_a_thin_neck_never_reads_holds(tmp_path, monkeypatch):
     (25.4, True, "1 in"), (4.0, False, "4 mm"), (3.9, False, "3.9 mm"), (0.3, False, "0.3 mm"), (19.05, False, "19 mm"),
 ])
 def test_a_thin_wall_is_said_in_a_unit_that_doesnt_round_it_away(mm, inches, said):
-    """#100 item 5: a 0.3 mm wall read "0 in"."""
-    assert answers._wall(mm, inches) == said
+    """#100 item 5: a 0.3 mm wall read "0 in". A small length the chat says beside its mm keeps that rule
+    (``_small_len``); a wall itself is said in mm, whatever the design's units (#139 review)."""
+    assert answers._small_len(mm, inches) == said
+    assert answers._wall(mm, inches) == answers._wall(mm, False) and answers._wall(mm).endswith(" mm")
 
 
 def test_the_finer_run_s_time_is_from_its_own_time_per_voxel():
