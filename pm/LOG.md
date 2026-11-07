@@ -39,6 +39,102 @@ for his look at the mockup; this is what it calls.
   interface fails, said (the drive isn't ok).
 - Tests: tests/test_skeleton_drives.py (6, stubbed: the fake planner answers the plan and its revision; the parts are
   boxes that read the skeleton). No live runs.
+- **#143 review (the foreman's call): no override at build time.** A drive writes each changed number into every part
+  that reads it (`aero.set_params`, the same rewrite #147's by-hand edit makes) and saves that as a new version
+  ("mast_top_z set to 10 ft (3048 mm) by the skeleton"); builds always use a script's own `PARAMS`, so nothing changes
+  shape at the same version, and older runs go stale through the new version. (`assembly`, `design` and
+  `construction` are back to main's: no `skeleton_params`.) A part reads a number only where the plan's rules name
+  both (`skeleton.readers`), never by a key that only shares the name; one the plan says reads it but whose `PARAMS`
+  hasn't got it is said and doesn't move. The inches guard: a default equal to the skeleton's old mm ÷ 25.4 is
+  refused, with why. All or nothing: every part is built with its new numbers first; one refused or that won't build
+  leaves the skeleton and every part as they were, and the reply says which and why. The reply names each part and
+  the key it set, and "Strength: check it again on the mast" for each driven part with a strength run.
+### 2026-11-07 · CALI-123 (#138) · No card reads greener than the newest strength run
+From the reviewer's cards-only re-pre-flight of Theo's bar stool on main (a fresh copy; Theo's folder has v1 2.58x,
+v3 twice "0x", v4 1.7x ✗, and no v7 run).
+1. **The design card takes the newest run, and says how old it is.** It said "! Holds a 250 lb person sitting, 2×
+   safety (assumed): 2.58x (scored before the last change…)" from the v1 scorecard while the part card said v4 doesn't
+   hold. `answers.measured` keeps the newest run of a part changed since (`strength.last`), and `held_to` says it over
+   any older card's number: "✗ Holds a 250 lb person sitting, 2× safety (assumed): last checked on v4: 1.7x, needs 2x ·
+   v7 not checked yet." A newest run that held reads amber with its age, never ✓; a card newer than the run still
+   reads as the card.
+2. **A stale scorecard's rows are no ✓.** The panel kept v1's "✓ holds … 2.58x", "✓ your shop can make every piece",
+   165 h and Stock $101 under "a part has changed since". Now its passes are an amber "·" and every number says
+   "(as of v1)", the header "Scored as of v1:"; a fail stays a ✗ (`scoreMark`, `asOf`).
+3. **A check whose load never reached a support isn't a 0x ✗.** `verdicts.case` reads it `unchecked`, with its own
+   reason ("nothing connects where it's pushed to where it's held"), so Studies, the part card ("…: not checked: …
+   Check where it's held and pushed, then check it again"), the history line (from the run's own verdict, where the run
+   is still there, so v3's older lines change too) and the scorecard all say so; its 0x never enters the design's
+   minimum (`answers.ran_safety`).
+4. **The cold /answers:** of the design cards' 89 s and the part cards' 115 s on the copy, ~39 s per call was
+   PrusaSlicer, run as a subprocess for each printed piece (3), three times per /answers (`making.plan` from the part
+   card, its weight and print time). `printing.estimate` now remembers what it sliced by the STL's bytes, material,
+   printer size, infill and slicer: on the copy, 45 s for the first design cards (each piece sliced once, the rest is
+   the state's builds) and 3 s for the part cards after.
+- **#140 review:** the run's `safety` is written from the cases that ran, at the source (`load_study`), so the first
+  run's step, the picture's re-check and Studies can't print 0.0x; an older record reads unchecked. Studies says an
+  unsupported case's own reason, with no number ("not checked: nothing connects where it's pushed to where it's
+  held"). A slicer that timed out (or wouldn't run) says so, not "no slicer installed", and isn't remembered. Pinned:
+  the history's verdicts through `design_state`, `scorecard.compute` with an unsupported case, and the infill in the
+  slicer's key.
+- Tests: tests/test_newest_run.py (12; 7 + 2 fail without this, the rest pin what it keeps).
+- **Merged with main's #139,** with the reviewer's asks from #139's pass: the scorecard row keeps both (`scoreMark` with
+  "as of v1", and `goalLimit` through `scoreNum`); the page's blocked Carve and Lighten hedge on a coarse run, as the
+  strength line does; the design card's hedge is the part card's (`fail_hedge`: the same wall, the 5.2 mm at the
+  peak, not the 0.25 mm webs); pinned: a rule whose measurement errors is a fail (as `verdicts.report` reads an
+  error, never a pass), `_peak_in` keeps `within`, `design_state` calls `plate_why`, and `study()` writes `safety`
+  through `load_study.run_safety`.
+### 2026-11-07 · CALI-122 (#137) · The bar stool's pre-flight: its broken rule said, where it fails, no carve on a fail
+From the reviewer's pre-flight of Theo's bar stool v7 (a copy; nothing of Theo's touched), with the foreman's
+correction: the run's "seat top" was a mislabel.
+1. **A part's own rules, measured, with their verdicts** (`part_rules.measured`: once per version, in memory, nothing
+   written). The page's *Rules on this part* shows each rule's verdict, and what it measured where it doesn't hold;
+   *Design checks* falls back to the parts' rules. A rule it breaks leads *Will it work?*, on the part and the design:
+   "✗ Breaks its rule shell_wall_thickness: its walls are 0.25 mm around z 16.1 in; it says at least 2.85 mm."
+2. **Where it fails, and how sure.** The FEA's hottest voxel was named after the nearest *wood* piece even in the
+   printed part: v7's "seat top" was at z 389 mm, in the cone's 0.25 mm webs (the foreman's v1 run too). `in` now
+   names a piece only within a voxel of it, else the printed part, and the run records the wall there (`wall_mm`,
+   measured within two voxels; a piece's own thickness). The line says where the worst stress is, in one run at its
+   voxel size; the coarse caveat only where the walls there are too thin to see, otherwise the thin walls are said
+   apart. An older run (no `wall_mm`) keeps the old words, and its label is never shown: the page's "works hardest
+   in seat top" (Theo's v4 card on main) and a trial's "where" name a piece only from a run that recorded its wall
+   (`peak_in`; the page says "around 27.8 in up" instead). One wall number, with where.
+3. **No Carve, no Lighten, on a part that already fails as drawn** (`load_study.already_fails`, from this version's
+   own check's one verdict): "Can't carve it: it already fails (0.5 times over, in …): make it hold first, then
+   carve." The page's Carve and Lighten are off and say the same (`carveBlocked`, `lightenBlocked`).
+4. **A carve says how long it has run** ("· running for 6 min"), repainted every 30 s: its sweep reports little before
+   step 1. "the printed PETG (printed)" (P2 item 8) reads "the printed PETG".
+5. **A goal says its limit:** "✗ Mesh cone keeps total weight down (assumed): 13.1 lb, over its 10 lb cap" on the
+   card (`_against`), and "(cap 10 lb)" in the Score panel.
+7. **A disc on a ring gets its own plate check** (Roark Table 11.2 case 16, `ring_plate`; the ring is the widest one
+   the part beneath holds 90% of the way round, probed just under the panel). The bar stool's seat: ring 270 mm,
+   4 in pad, 3/4 in ply: 4.57 MPa, 3.3x across the grain; the foreman's hand check gave about 4.5 MPa. A failing line gives it as a second opinion
+   ("By hand, the seat top on its own, as a round plate on its 10.6 in ring: …"). The pad is measured in the panel's
+   plane (the disc's frame ran diagonal, and read the 4 in pad as 119.5 mm). Never "only 16 of its 16 edges rest".
+   NEEDS ENGINEER CHECK: the round-plate formula and the ring as its support.
+- **The pre-flight again, on a fresh copy of the stool** (its strength check re-run, no live calls): "✗ Breaks its rule
+  shell_wall_thickness: its walls are 0.25 mm around z 16.1 in; it says at least 2.85 mm." / "Doesn't hold 250 lb
+  person seated: only about 0.5 times over, and it needs 2. Its worst stress, in one run at 3/16 in voxels, is in the
+  cone skirt around z 15.3 in, among 7/32 in walls the voxels can't see: the fail may be the model's. … By hand, the
+  seat top on its own, as a round plate on its 10.6 in ring: 3.3 times over." / "✗ … 13.1 lb, over its 10 lb cap."
+  Carve and Lighten refused. Theo's own folder has no v7 strength run (its newest is v4): these read after he checks
+  v7 again.
+- The reviewer's nit on #132: a carved step that doesn't close up is an amber dot (#136 draws dots by verdict), pinned.
+- Not here: P2 items 6, 9–12 (#89's wording pass), and a live first run (no key).
+- **#139 review, the blocker:** `goalLimit` called `scoreView`'s own `num`, so a goal with a number threw "num is not
+  defined" and blanked the inspector (a global stub in the test hid it). It's `scoreNum`, at module level, tested
+  unstubbed with `scoreView` itself. A refused job reads without its exception's name: `follow()` passes the job's
+  error through `plainly()` (main said "⚠ ValueError: Can't carve it…" since #136). *Show the stress* names the peak
+  by `peakWhere`, never an old run's "seat top".
+- **#139 review, items 4–7:** each wall number says which wall ("its thinnest walls, 0.25 mm around z 16.1 in"; "the
+  worst stress is in the cone skirt around z 15.3 in, where its wall is 5.2 mm"), and walls and voxels are in mm
+  everywhere, heights and positions in the design's units (`_wall`; the chat's small lengths keep their fractions,
+  `_small_len`). The seat's ring is probed 1 mm under it in 1 mm steps and said as its outer edge ("held at its ring's
+  outer edge (10.6 in across)": the cone flares to r 135 mm there). An older run's stored "only 16 of its 16 edges"
+  is rebuilt from its numbers (`load_study.plate_why`). A refusal on a coarse run hedges as the strength line does:
+  "its check says it fails (0.5 times over, a coarse run: the fail may be the model's; …): make it hold first".
+- Tests: tests/test_preflight_bar_stool.py (17), and touched suites' expectations for the new words. Stacked on #136
+  (its too-thin words), on #132's one verdict.
 
 ### 2026-11-07 · CALI-121 (#134 follow-up) · The carve-through-the-API test waits 1,500 s for its job, not 900
 - `test_mixed::test_carving_through_the_api` waits for its carve job before it reads the run. On a loaded machine the

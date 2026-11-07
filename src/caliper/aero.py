@@ -146,6 +146,12 @@ def write_params(script: str, values: dict[str, float], keep_float: bool = False
     return data.decode()
 
 
+def set_params(script: str, values: dict[str, float]) -> str:
+    """A part's numbers set in its script, as a person or the skeleton sets them (#143, #147: one rewrite for both):
+    each ``PARAMS`` value by its source position, its comment and every other line kept, a float kept a float."""
+    return write_params(script, values, keep_float=True)
+
+
 RANGES_NAME = "RANGES"
 
 

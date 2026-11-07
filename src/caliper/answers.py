@@ -53,9 +53,16 @@ def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
 
 
-def _wall(mm: float, inches: bool) -> str:
-    """A wall's thickness: in inches to the nearest 1/32 (5/32 in), and in mm where that would round to nothing,
-    never "0 in" (CALI-97, #100 item 5)."""
+def _wall(mm: float, inches: bool = False) -> str:
+    """A wall's thickness, or a voxel's size: in mm, whatever the design's units (#139 review: walls in mm everywhere,
+    heights and positions in the design's), two places under 1 mm (0.25 mm, #137 item 2)."""
+    return (f"{mm:.2f}".rstrip("0").rstrip(".") if mm < 1 else
+            f"{mm:.1f}".removesuffix(".0") if mm < 10 else f"{mm:.0f}") + " mm"
+
+
+def _small_len(mm: float, inches: bool) -> str:
+    """A small length in inches to the nearest 1/32 (5/32 in), and in mm where that would round to nothing, never
+    "0 in" (CALI-97, #100 item 5): what the chat says beside a number in mm."""
     from math import gcd
 
     if inches and mm >= IN:
@@ -69,6 +76,26 @@ def _wall(mm: float, inches: bool) -> str:
             f"{mm:.1f}".removesuffix(".0") if mm < 10 else f"{mm:.0f}") + " mm"
 
 
+def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
+    """What a ✗ adds about where it fails and how sure (#137 item 2), the same words on the part card and the design
+    card (#139 review: the design card named the 0.25 mm webs, the part card the 5.2 mm wall at the peak). "" when
+    there's nothing to add."""
+    where, thin_here = worst_at(run, c, inches)
+    wall = _wall(c["fea"]["wall_mm"], inches) if where else ""
+    if v.get("coarse") and thin_here:                # among walls the voxels can't see: the fail may be the model's
+        return (f" Its worst stress, in one run at {_wall(run['spacing_mm'])} voxels, is {where}, where its wall is "
+                f"{wall}, too thin for the voxels to see: the fail may be the model's. "
+                + ("Check it again finer." if run.get("finer") else
+                   "A hand check or a printed test piece is the way to know."))
+    if where:                                        # the voxels see the wall where it's worst
+        return (f" Its worst stress is {where}."
+                + (f" Separately, its thinnest walls, {_wall(run['thinnest_mm'])}{_thin_at(run, inches)}, are too "
+                   f"thin for the voxels to see." if v.get("coarse") else ""))  # said apart, not as its cause
+    if v.get("coarse"):                              # an older run: where isn't known (CALI-97's words)
+        return " " + coarse(run, inches, holds=False)
+    return ""
+
+
 def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool, inches: bool) -> dict:
     """The part card's line for one load case: its words from its one verdict (CALI-112)."""
     from . import load_study as L
@@ -77,6 +104,9 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     v = verdicts.case(run, c, filled=filled, stale=stale)   # an older run's ✓ is "older version" (#132 review)
     if v["kind"] == "untrusted":                     # ran on a block: no ✓ from it (CALI-96); this wins
         return _line(untrusted(pid, filled), "warn", study="load")   # the number: the panel, badged
+    if v["kind"] == "unchecked" and (c.get("fea") or {}).get("supported") is False:     # couldn't run (#138 item 3)
+        return _line(f"{c['name'][:1].upper() + c['name'][1:]}: not checked: {v['why']}. Check where it's held and "
+                     f"pushed, then check it again." + older, v["status"], study="load")
     if v["kind"] in ("unresolved", "unchecked"):     # an FEA that can't see the wall is no ✓ (CALI-97)
         return _line(coarse(run, inches) + older, "warn", study="load")
     # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
@@ -88,8 +118,14 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
         text = f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs {run['min_safety']:g}."
         if filled:                                   # a ✗ stays a ✗: the block failed, the part is weaker
             text += " It ran on a filled-in shape, so the part as built is weaker still."
-        elif v.get("coarse"):                        # a ✗ stays a ✗, and says why it may be wrong (CALI-97)
-            text += " " + coarse(run, inches, holds=False)
+        else:                                        # where it fails first, and how sure (#137 item 2)
+            text += fail_hedge(run, c, v, inches)
+        pl = c.get("plate") or {}
+        if pl.get("done") and c.get("governs") != "plate" and pl.get("safety_across") is not None:
+            # a second opinion by hand on the panel it lands on (#137 item 7: the seat on its ring)
+            how = (f", as a round plate held at its ring's outer edge ({_len(pl['ring_mm'], inches)} across)"
+                   if pl.get("support") == "ring" else "")
+            text += f" By hand, the {pl['piece']} on its own{how}: {_times(pl['safety_across'])}."
     else:                                            # any other kind: its word, never a ✓ (CALI-112)
         text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {about}{_times(c['safety'])}."
     return _line(text + older, v["status"], study="load",
@@ -113,19 +149,40 @@ def _why_not(rel: dict) -> str:
     return verdicts.summary((rel.get("card") or {}).get("summary"))["why"] or "a check isn't settled"
 
 
+def _thin_at(run: dict, inches: bool) -> str:
+    """Where a run's thinnest wall is, as it recorded it (#136): " around z 16.1 in", " in the seat top", or ""."""
+    w = run.get("thinnest_where") or {}
+    return (f" in the {w['piece']}" if w.get("piece") else
+            f" around z {_len(w['at'][2], inches)}" if w.get("at") else "")
+
+
+def worst_at(run: dict, c: dict, inches: bool) -> tuple[str, Optional[bool]]:
+    """Where a case's worst stress is in its run ("in the cone around z 15.3 in"), and whether the wall there is too
+    thin for its voxels (None where the run didn't record it: older runs, whose ``in`` named the nearest wood even for
+    a printed part, #137 item 2)."""
+    from . import load_study as L
+
+    fea = c.get("fea") or {}
+    if "wall_mm" not in fea or not fea.get("at"):
+        return "", None
+    where = (f"in the {fea['in']} " if fea.get("in") else "") + f"around z {_len(fea['at'][2], inches)}"
+    s = run.get("spacing_mm")
+    return where, (not L._sees(fea["wall_mm"] / s)) if s else None
+
+
 def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
     """What a verdict says when the FEA that governs it couldn't see the wall it's checking (CALI-97). A ✓ is no
     verdict then: not resolved yet (a finer run can see it) or not checked (none a study may make can). A ✗ stays a
     ✗, and says the fail may be the model's."""
     from . import load_study as L
 
-    wall = _wall(run.get("thinnest_mm") or 0, inches)
+    walls = f"thinnest walls, {_wall(run.get('thinnest_mm') or 0)}{_thin_at(run, inches)}"   # which, and where (#139)
     if not holds:
-        return (f"The fail may be the model's: the voxels can't see its {wall} walls. "
+        return (f"The fail may be the model's: the voxels can't see its {walls}. "
                 + ("Check it again finer." if run.get("finer") else
                    "A hand check or a printed test piece is the way to know."))
     if run.get("finer"):
-        return f"Not resolved yet: the check was too coarse to see its {wall} walls. Check it again finer."
+        return f"Not resolved yet: the check was too coarse to see its {walls}. Check it again finer."
     return L.NOT_CHECKED
 def untrusted(pid: str, why: str = "") -> str:
     """What a strength verdict on a filled-in solid says instead of holding (CALI-96), or one whose shape couldn't
@@ -203,6 +260,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     work = []
     if p.get("role") == "fixed":
         work.append(_line("It's a reference (like the car): nothing to check."))
+    work += _broken(p)                                     # a rule of its own it breaks, first (#137 item 1)
     runs = [r for r in state.get("load_runs") or [] if r["part"] == pid]
     if runs:
         run, stale = runs[0], runs[0].get("version") != p["version"]
@@ -334,6 +392,14 @@ def _cost(store: DesignStore, pid: str, report: dict) -> Optional[float]:
 # ---------------------------------------------------------------------------
 # What it's held to (step 2): the conversation's checks, judged on what's already measured
 # ---------------------------------------------------------------------------
+def ran_safety(run: dict) -> Optional[float]:
+    """A strength run's number from the cases that ran: a case whose load never reached a support is no 0x (#138
+    item 3), and a run with none that ran has no number."""
+    got = [c["safety"] for c in run.get("cases") or []
+           if c.get("safety") is not None and (c.get("fea") or {}).get("supported") is not False]
+    return min(got) if got else None
+
+
 def measured(store: DesignStore, state: dict) -> dict:
     """What the checks can be judged by without running anything: the strength checks on each part's current
     version, its weight and cost, what the shop can't make, and print time. ``{metric: value}``."""
@@ -344,8 +410,8 @@ def measured(store: DesignStore, state: dict) -> dict:
     safeties, breaks = [], []
     for pid in current:
         run = next((r for r in state.get("load_runs") or [] if r["part"] == pid), None)
-        if run and run.get("version") == current[pid] and run.get("safety") is not None:
-            safeties.append(run["safety"])
+        if run and run.get("version") == current[pid] and ran_safety(run) is not None:
+            safeties.append(ran_safety(run))
             breaks += [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
     from . import load_study as L
 
@@ -357,9 +423,9 @@ def measured(store: DesignStore, state: dict) -> dict:
     held = [r for r, v in said if v["kind"] in ("unresolved", "unchecked")]
     if held:                                           # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
         out["strength.unresolved"] = coarse(held[0], inches)
-    failed = [r for r, v in said if v["kind"] == "fails" and v.get("coarse")]
-    if failed:                                         # ...and a ✗ on one says the fail may be the model's
-        out["strength.coarse_fail"] = coarse(failed[0], inches, holds=False)
+    failed = [(r, c, v) for (r, c), (_, v) in zip(cases, said) if v["kind"] == "fails" and v.get("coarse")]
+    if failed:                                         # ...and a ✗ on one says it, as the part card does (#139)
+        out["strength.coarse_fail"] = fail_hedge(*failed[0], inches).strip()
     if any(L.rough(r, c) for r, c in cases):
         out["strength.rough"] = True                   # the printed model's number: "about", as the part card says
     from . import consistency
@@ -368,8 +434,14 @@ def measured(store: DesignStore, state: dict) -> dict:
     # unchecked, or older; its number isn't in the min above, so the rest can't read as holding for it
     loaded = [p for p in state["parts"] if p.get("loads") and p.get("role") != "fixed"]
     runs = {pid: next((r for r in state.get("load_runs") or [] if r["part"] == pid), None) for pid in current}
-    unchecked = [p["id"] for p in loaded if runs.get(p["id"]) is None or runs[p["id"]].get("safety") is None]
+    unchecked = [p["id"] for p in loaded if runs.get(p["id"]) is None or ran_safety(runs[p["id"]]) is None]
     older = [p["id"] for p in loaded if p["id"] not in unchecked and runs[p["id"]].get("version") != p["version"]]
+    # the newest strength run of a part changed since, with its verdict and age: what the design card says over an
+    # older scorecard's number (#138 item 1: "2.58x" from v1 over v4's 1.7x ✗)
+    last = [{"part": pid, "version": runs[pid]["version"], "now": current[pid], "safety": ran_safety(runs[pid])}
+            for pid in older]
+    if last:
+        out["strength.last"] = min(last, key=lambda x: x["safety"])
     if unchecked:
         out["strength.unchecked"] = ("not checked yet on the " + " and the ".join(x.replace("_", " ") for x in unchecked)
                                      + ": Check it holds")
@@ -421,6 +493,17 @@ def measured(store: DesignStore, state: dict) -> dict:
     return out
 
 
+def _against(c: dict, failed: bool, unit: str = "") -> str:
+    """A goal's own limit beside its number (#137 item 5: "13.1 lb" never said it was over a 10 lb cap)."""
+    lim = c.get("limit")
+    if not isinstance(lim, (int, float)) or isinstance(lim, bool) or c["metric"].startswith("strength"):
+        return ""                                  # a strength goal's label says what it needs ("2 times over")
+    cap, said = c.get("op", ">=") in ("<=", "<"), _num(c["metric"], float(lim), unit)
+    if cap:
+        return f", over its {said} cap" if failed else f", within its {said} cap"
+    return f", short of the {said} it needs" if failed else f", against the {said} it needs"
+
+
 def _num(metric: str, v: float, unit: str = "") -> str:
     from .goals import METRICS
 
@@ -462,6 +545,16 @@ def held_to(state: dict, now: dict) -> list[dict]:
             out.append(_line(f"{label}{assumed}: {verdict.get('why') or unknown}.", "warn"))
             continue
         v, late = now.get(c["metric"]), False
+        last = now.get("strength.last") if c["metric"] == "strength.safety" and v is None else None
+        if last and (not card or last["version"] >= ((card.get("versions") or {}).get(last["part"]) or 0)):
+            # the newest run, with its age, over an older card's number: never greener than it (#138 item 1)
+            verdict = verdicts.goal(verdicts.compare(last["safety"], c.get("op", ">="), c["limit"]), stale=True)
+            out.append(_line(f"{'✗' if verdict['kind'] == 'fails' else '!'} {label}{assumed}: last checked on "
+                             f"v{last['version']}: {round(last['safety'], 1):g}x"
+                             + (f", needs {c['limit']:g}x" if verdict["kind"] == "fails" else "")
+                             + f" · v{last['now']} not checked yet.", verdict["status"], study="load",
+                             model=rests_on_model(c["metric"])))
+            continue
         if v is None and c["metric"] in scored:
             v, late = scored[c["metric"]], stale
         if v is None:
@@ -499,7 +592,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
         later = (" (scored before the last change: score it again)." if late
                  else f" ({older})." if verdict["kind"] == "stale" and older else "." + why)
         out.append(_line(f"{'✗' if failed else '✓' if verdict['kind'] == 'holds' else '!'} {label}{assumed}: {num}"
-                         + later,
+                         + _against(c, failed, units.get(c['metric'], '')) + later,
                          "warn" if late else verdict["status"],
                          study="load" if c["metric"].startswith("strength") else None,
                          model=rests_on_model(c["metric"])))
@@ -509,6 +602,16 @@ def held_to(state: dict, now: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 # The whole design
 # ---------------------------------------------------------------------------
+def _broken(p: dict, named: bool = False) -> list[dict]:
+    """A part's own rules it breaks as built now, each a line from its verdict (#137 item 1: the bar stool's locked
+    shell wall, broken, and no card said so)."""
+    from . import part_rules
+
+    who = f"The {p['id'].replace('_', ' ')} breaks" if named else "Breaks"
+    return [_line(f"✗ {who} its rule {r['said']}.", r["verdict"]["status"], study="rule")
+            for r in part_rules.failing(p.get("rules") or [])]
+
+
 def design(store: DesignStore, state: dict) -> list[dict]:
     parts = [p for p in state["parts"] if p.get("role") != "fixed"]
     # a design that's one part (the stool) answers with that part's own list and plan (CALI-59)
@@ -532,6 +635,8 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         what.append(_line(f"{assumed} answer{'s' if assumed != 1 else ''} assumed: check them under the numbers.", "warn"))
 
     now = measured(store, state) if parts else {}
+    # a part's own rule it breaks leads the design's answer too (#137 item 1)
+    broken = [ln for p in parts for ln in _broken(p, named=len(parts) > 1)]
     work = held_to(state, now) if parts else []
     card = (state.get("scorecards") or [None])[0]
     if card and not work:
@@ -551,8 +656,9 @@ def design(store: DesignStore, state: dict) -> list[dict]:
             + (f"{',' if s['pass'] or fails else ':'} " + ", ".join(rest) if rest else "") + "."
             + (" (A part has changed since: score it again.)" if stale else ""),
             "bad" if fails else "warn" if stale or rest or not verdicts.summary(s)["counts_as_pass"] else "ok"))
-    elif not work:
+    elif not work and not broken:
         work.append(_line("Nothing to hold it to yet: say what it must do.", "warn"))
+    work = broken + work
 
     buy = list(solo["buy"]["lines"]) if solo else []
     if now.get("cost.usd") and not solo:

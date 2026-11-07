@@ -247,7 +247,7 @@ def _try(ctx: dict, panel: dict, poly, min_safety: float) -> Optional[float]:
     worst = None
     for i in range(len(ctx["loads"])):
         case, _ = L.check_load(ctx, i, min_safety, solid=solid)
-        if case.get("safety") is not None:
+        if case.get("safety") is not None and (case.get("fea") or {}).get("supported") is not False:   # no 0x (#140)
             worst = case["safety"] if worst is None else min(worst, case["safety"])
     return worst
 
@@ -308,7 +308,10 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
         from . import consistency, verdicts
 
         v = verdicts.run(run, filled=consistency.filled(store, part_id))   # one verdict (CALI-112)
-        out.update({"safety": run["safety"], "run": run["id"], "verdict": {k: x for k, x in v.items() if k != "cases"},
+        from .answers import ran_safety
+
+        out.update({"safety": ran_safety(run), "run": run["id"],                     # the cases that ran (#140)
+                    "verdict": {k: x for k, x in v.items() if k != "cases"},
                     "too_thin": bool(run.get("too_thin"))})
     out["reply"] = reply(out)
     return out

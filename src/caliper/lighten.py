@@ -342,6 +342,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
 
     emit = emit or (lambda *a, **k: None)
     t0 = time.time()
+    fails = L.already_fails(store, part_id)        # lightening only takes material away (#137 item 3)
+    if fails:
+        raise ValueError(f"Can't lighten it: {fails}, then lighten it.")
     ctx = L.prepare(store, part_id, emit)
     s, mat = ctx["spacing"], ctx["mat"]
     seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)

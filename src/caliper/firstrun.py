@@ -106,7 +106,12 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
         try:
             run = load_study.study(store, pid, min_safety=_min_safety(store),
                                    emit=lambda k, t="", **d: emit("strength", t, **d) if t else None)
-            steps["strength"] = f"{run['safety']}x" if run.get("safety") is not None else "no verdict"
+            from .answers import ran_safety
+
+            ran = ran_safety(run)                    # never 0x for a load that never reached a support (#140)
+            steps["strength"] = f"{ran}x" if ran is not None else next(
+                (f"not checked: {c['why']}" for c in run.get("cases") or []
+                 if (c.get("fea") or {}).get("supported") is False and c.get("why")), "no verdict")
         except Exception as e:  # noqa: BLE001 — the card says it's not checked yet, with the button
             steps["strength"] = f"failed: {e}"
             emit("error", f"couldn't check it holds: {e}")
