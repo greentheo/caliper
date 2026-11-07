@@ -1,7 +1,29 @@
 # Caliper work log
 
 Append-only. Newest first. One entry per shipped task or notable decision.
-Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
+Format: `### 2026-11-07 · CALI-116 (#118) · Plywood's beam width takes its orthotropy, the safe side
+- **`load_study.beam()`** scales the effective width under a foot by `orthotropic(mat)` = (D_across / D_along)^¼ (the
+  material's `E_across` if given, else its strength ratio across; 0.841 for ply) when the face grain runs along the
+  span, the edge's share too, never past the panel's width (BS 8110 cl. 3.5.2.2(b)). `width_along_mm` and
+  `orthotropic` are on the record. The grain's way unknown, `safety_across` (the verdict) is the worse of the two.
+- **The `why` says so,** and the page's Load panel shows a two-sided top as a **Beam check** with its `why`, not "held all
+  round, edges free to turn" (design.js v=53).
+- **Before → after** (the plate numbers; the FEA and every verdict unchanged, since the verdict already took the grain
+  across the gap at half strength):
+
+  | fixture · case | width (mm) | grain along the span | verdict |
+  |---|---|---|---|
+  | test stool · front edge | 206.7 → 173.8 | 2.37 → 1.99 | 1.19 ✗ → 1.19 ✗ |
+  | test stool · middle | 254.0 → 238.5 | 2.91 → 2.74 | 1.46 ✗ → 1.46 ✗ |
+  | MIXED · front edge | 190.0 → 159.8 | 1.15 → 0.97 | 0.57 ✗ → 0.57 ✗ |
+  | MIXED · middle | 220.0 → 210.2 | 1.33 → 1.27 | 0.66 ✗ → 0.66 ✗ |
+
+  The greener number was the advice: "cut with its face grain running across the gap and it's about 2.4 times over"
+  for the test stool's front edge is now 2.0.
+- **NEEDS ENGINEER CHECK:** the factor (#42: or b_ef = M_beam / m_plate, or let the plate check govern).
+- `tests/test_orthotropic.py` (7; six fail on main).
+
+### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
 - **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
   `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its
   note. A ✗ by its number stays a fail. `untrusted` (#96, a filled-in shape) is as it was.

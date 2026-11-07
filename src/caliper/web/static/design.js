@@ -2063,7 +2063,10 @@ function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
   const pl = c.plate, f = c.fea || {};
   const holds = p.untrusted ? untrustedBadge(p) : caseBadge(c);     // a filled-in shape wins (CALI-96, then 97)
-  const plate = !pl ? '' : pl.done
+  const plate = !pl ? '' : pl.done && pl.as === 'beam'      // a top on two sides: a beam, not a plate held all round (CALI-116)
+    ? `<div class="small" style="margin-top:4px"><b>Beam check</b> — ${esc(pl.piece)}: ${esc(pl.why)} ·
+        <b>${sx(pl.safety_across)}</b> with the grain unknown · sags ${len(pl.deflection_mm, 3)}</div>`
+    : pl.done
     ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
         ${sx(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`

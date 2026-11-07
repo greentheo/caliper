@@ -326,8 +326,10 @@ def beam(span: float, width: float, t: float, force: float, mat: dict, footprint
     # (D_across / D_along)^(1/4), the panel's two moduli (about 0.84 for ply, half as stiff across). With the grain
     # across the span the isotropic width is the safe side. NEEDS ENGINEER CHECK (#42: or an orthotropic plate's
     # b_ef = M_beam / m_plate, or let the plate check govern).
+    # The whole effective width takes the factor (the edge's share too: the slab beside the foot spreads it by the
+    # same stiffness), still never past the panel's own width.
     k = orthotropic(mat)
-    along = min(width, k * spread, k * 0.5 * spread + (width / 2 if edge is None else max(edge, 0.0)))
+    along = min(width, k * spread, k * (0.5 * spread + (width / 2 if edge is None else max(edge, 0.0))))
 
     def at(tt, b):
         stress = force * span / 4 / (b * tt ** 2 / 6)
