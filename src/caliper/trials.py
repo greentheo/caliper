@@ -64,7 +64,11 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     applied = case["lb"] * case["factor"]                      # what the check put on it
     stiff = case["fea"]["deflection_mm"] / applied             # mm per lb, the FEA: joints solid
     plate = case.get("plate") or {}
-    flex = plate["deflection_mm"] / applied if plate.get("done") else None
+    # the plate or beam's sag: the declared grain's where a piece says which way it runs ("grain": "along" or
+    # "across" the span), else the worse grain's, so the prediction spans both (#122 review)
+    grain = plate.get("grain") if plate.get("grain") in ("along", "across") else None
+    sag = plate.get(f"deflection_{grain}_mm") if grain else None
+    flex = (sag if sag is not None else plate["deflection_mm"]) / applied if plate.get("done") else None
     lo, hi = sorted([stiff, flex if flex is not None else stiff])
     breaks = case.get("breaks_lb")
     step = 50 if (breaks or applied) <= 1500 else 100          # a sandbag at a time

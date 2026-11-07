@@ -345,6 +345,16 @@ def _measure_design(store: DesignStore):
         return None, {"<design>": f"{type(e).__name__}: {e}"}
 
 
+def _design_line(report) -> str:
+    """What the whole design measures, in a line (#103 review, for #3b): green only when every check ran and
+    passed (:meth:`Report.said`); a check that waits for an unbuilt part is said, never counted."""
+    if report is None or report.failures:
+        return ""
+    if report.all_pass and not report.waiting:
+        return "The whole design measures green."
+    return f"The whole design: {report.said()}."
+
+
 def _fail_lines(report, only: Optional[list[str]] = None, limit: int = 6) -> list[str]:
     if report is None:
         return []
@@ -557,7 +567,8 @@ def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = 
 
 def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, client=None,
                 max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
-                use_llm: bool = True, drafter=None, promote_feedback: bool = True) -> TurnResult:
+                use_llm: bool = True, drafter=None, promote_feedback: bool = True,
+                interfaces=None) -> TurnResult:
     """Author a brand-new part into the design, then measure the design with it in place."""
     from . import authoring
 
@@ -567,7 +578,7 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
 
     _emit(events, on_event, "authoring", f"authoring {part_id}…", part=part_id)
     res = authoring.improve(spec, author=author, max_rounds=max_rounds, client=client,
-                            ref_base=store.root)
+                            ref_base=store.root, interfaces=interfaces)
 
     if res.geometry is None:
         _emit(events, on_event, "error", f"{part_id} would not build", part=part_id)
@@ -734,8 +745,8 @@ def revert_part(store: DesignStore, part_id: str, *, events=None, on_event=None)
     if broke:
         lines.append(f"\u26a0 But it broke: {', '.join(broke)}")
         lines.extend(_fail_lines(after, only=broke))
-    if after is not None and after.all_pass:
-        lines.append("The whole design measures green.")
+    if _design_line(after):
+        lines.append(_design_line(after))
     return TurnResult(action="revert", ok=(after is None or after.all_pass), part=part_id,
                       version=version, report=after, broke=broke, fixed=fixed,
                       part_errors=part_errors, events=events, reply="\n".join(lines))
@@ -914,6 +925,20 @@ def _asked(store: DesignStore, asked: str, prior: str, new: str, volumes) -> lis
     return out
 
 
+def _not_closed(res) -> str:
+    """The build's own line when :func:`measure.clean` couldn't close the part (CALI-121), else ""."""
+    from .measure import closed, open_near
+
+    try:
+        mesh = res.geometry.require_mesh() if res.geometry is not None else None
+    except Exception:  # noqa: BLE001 — no mesh to judge: the build says what it can
+        return ""
+    if mesh is None or closed(mesh):
+        return ""
+    return (f"⚠ Its shape isn't closed {open_near(mesh)}: strength, weight and carving can't be checked until it "
+            f"is.")
+
+
 def _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb: str, *, asked: str = "",
              prior: str = "", new: str = "", volumes=None) -> str:
     """The chat reply: what happened, what it measures, and — critically — what it broke. For a request, what was
@@ -923,6 +948,9 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     if asked:
         lines += _asked(store, asked, prior, new, volumes)
 
+    shut = _not_closed(res)
+    if shut:                                    # said once, by the build itself (CALI-121)
+        lines.append(shut)
     if res.report is not None:
         part_fails = _fail_lines(res.report)
         if part_fails:
@@ -938,8 +966,8 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
         lines.append("_Tell me how to fix it, or say **roll it back** to undo this revision._")
     if fixed:
         lines.append(f"✓ It also fixed: {', '.join(fixed)}")
-    if not broke and after is not None and after.all_pass:
-        lines.append("The whole design still measures green.")
+    if not broke and _design_line(after):
+        lines.append(_design_line(after).replace("measures green", "still measures green"))
     for pid, err in part_errors.items():
         if pid != part_id:
             lines.append(f"⚠ {pid} won't build: {err}")

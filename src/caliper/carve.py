@@ -51,15 +51,17 @@ def _closed(mesh):
     A pinch isn't something a fill can mend: such a step is marked, not repaired."""
     import trimesh
 
+    from .measure import closed
+
     m = mesh.copy()
     m.merge_vertices()
-    if m.is_watertight and m.is_volume:
+    if closed(m, volume=True):
         return m
     m.update_faces(m.nondegenerate_faces())
     m.remove_unreferenced_vertices()
     trimesh.repair.fill_holes(m)
     trimesh.repair.fix_normals(m)
-    return m if m.is_watertight and m.is_volume else None
+    return m if closed(m, volume=True) else None
 
 
 def runs_dir(store: DesignStore) -> str:
@@ -364,7 +366,9 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, name)
     shape.export(path)
-    if not trimesh.load(path, force="mesh").is_watertight:      # as the part will be read back: never a leaky part
+    from .measure import closed
+
+    if not closed(trimesh.load(path, force="mesh")):             # as the part will be read back: never a leaky part
         os.remove(path)
         raise NotClosed(f"step {int(index)}: {OPEN}")
     st = next(x for x in rec["stations"] if x["index"] == int(index))
