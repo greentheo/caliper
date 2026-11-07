@@ -35,6 +35,9 @@ caliper = ["web/static/*", "web/static/**/*", "part_scripts.md", "samples/**/*"]
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["src"]
+markers = [
+    "serial: shares state with other tests, so CI runs it on its own after the parallel run (CALI-114)",
+]
 
 [tool.ruff]
 line-length = 100

@@ -43,7 +43,16 @@ jobs:
       - name: The optional tools, at the refs the Makefile pins
         run: make tools CALIPER_PY=python
 
-      - name: Test
+      - name: Test, across the runner's cores (CALI-114)
         env:
           CALIPER_CHROME: none          # no headless Chrome here: build books skip the PDF
-        run: python -m pytest
+          # one BLAS thread per worker, so the FEA in four workers doesn't fight over four cores
+          OMP_NUM_THREADS: "1"
+          MKL_NUM_THREADS: "1"
+          OPENBLAS_NUM_THREADS: "1"
+        run: python -m pytest -n auto --durations=25 -m "not serial"
+
+      - name: Test what can't share, on its own
+        env:
+          CALIPER_CHROME: none
+        run: python -m pytest -m serial --durations=10 || test $? -eq 5      # 5: no serial tests yet

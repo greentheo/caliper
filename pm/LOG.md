@@ -1,7 +1,15 @@
 # Caliper work log
 
 Append-only. Newest first. One entry per shipped task or notable decision.
-Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
+Format: `### 2026-11-07 · CALI-114 (#116) · CI runs the suite across the runner's cores
+- **`pytest-xdist`** is in the requirements. CI runs `pytest -n auto --durations=25 -m "not serial"` with
+  `OMP_NUM_THREADS`, `MKL_NUM_THREADS` and `OPENBLAS_NUM_THREADS` at 1, so four FEA workers don't fight over four
+  cores. A second step runs anything marked `serial` on its own (none yet; exit 5, "no tests", passes).
+- **Locally `pytest -rs` stays the default,** and `-n auto` is optional (TESTING.md).
+- **Before,** on main: the test step took 51.5 min (646a20a) and 40.8 min (ad2f296). After: in the PR, from its CI
+  runs, with `--durations=25`'s slowest tests.
+
+### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
 - **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
   `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its
   note. A ✗ by its number stays a fail. `untrusted` (#96, a filled-in shape) is as it was.
