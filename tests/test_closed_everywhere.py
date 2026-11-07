@@ -125,3 +125,17 @@ def test_a_pinched_printed_part_isn_t_weighed(monkeypatch):
     monkeypatch.setattr(C, "printed_solid", lambda store, pid, d=None: trimesh.creation.box((10, 10, 10)))
     (got,) = C.with_printed(None, "cone", [{"kind": "printed", "name": "cone"}], d={})
     assert got["volume_mm3"] == pytest.approx(1000) and "unweighed" not in got
+
+
+def test_an_inside_out_box_is_closed_but_not_a_solid_to_weigh(monkeypatch):
+    """#134 review: closed(volume=True) adds the winding. A box with every face turned inward is watertight, and closed,
+    but its volume reads negative: not a solid to weigh or adopt."""
+    from caliper import construction as C
+
+    box = trimesh.creation.box((10, 10, 10))
+    inside_out = trimesh.Trimesh(box.vertices, box.faces[:, ::-1], process=False)
+    assert measure.closed(inside_out) and not measure.closed(inside_out, volume=True)
+    assert measure.closed(box, volume=True)
+    monkeypatch.setattr(C, "printed_solid", lambda store, pid, d=None: inside_out)
+    (got,) = C.with_printed(None, "cone", [{"kind": "printed", "name": "cone"}], d={})
+    assert "isn't a closed solid" in got["unweighed"] and "volume_mm3" not in got

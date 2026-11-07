@@ -17,6 +17,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   weight).
 - **`test_mixed`'s carve-down runs in parallel again:** its `serial` mark (CALI-114) waited on #105's watertight adopt,
   which #124 landed. CI's serial step allows none (`|| test $? -eq 5`).
+- **#134 review, round 2:** `closed(volume=True)` pinned with an inside-out box: watertight and closed, but its volume reads negative, so it's no solid to weigh (`with_printed` says so).
 
 ### 2026-11-07 · CALI-121 (#133) · Every judgment of "closed" is made as the mesh reads back
 - `measure.is_watertight`, `is_manifold`, `body_count`, `clean`'s own check, the weight's solid check and the
