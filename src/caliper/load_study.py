@@ -519,8 +519,10 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
         raise ValueError(f"'{part_id}' doesn't say what it must hold: its script has no loads()")
     loads = parse_loads(declared["loads"])
     mesh = store.part_geometry(part_id).require_mesh()
-    if not mesh.is_watertight:
-        raise ValueError(f"'{part_id}' isn't a closed solid, so it can't be voxelized")
+    if not mesh.is_watertight:                 # said where, never a throw from deep in a boolean (CALI-118)
+        from .measure import open_near
+
+        raise ValueError(f"not checked: its shape isn't closed {open_near(mesh)}, so it can't be voxelized")
     pieces = shapes(declared)
     rest = C.printed_solid(store, part_id, declared)       # what's printed: the whole part, or the rest (CALI-82)
     printed = printed_material(declared, mesh, rest)       # a printed part (CALI-81)

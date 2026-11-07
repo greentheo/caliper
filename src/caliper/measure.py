@@ -80,12 +80,68 @@ class Geometry:
 
 
 def _cadquery_to_trimesh(wp: Any, tol: float = 0.05) -> trimesh.Trimesh:
-    """Tessellate a CadQuery Workplane/Solid to a trimesh mesh."""
+    """Tessellate a CadQuery Workplane/Solid to a trimesh mesh, without the CAD mesher's strays (:func:`clean`)."""
     solid = wp.val() if hasattr(wp, "val") else wp
     verts, faces = solid.tessellate(tol)
     v = np.array([[p.x, p.y, p.z] for p in verts], dtype=float)
     f = np.array(faces, dtype=int)
-    return trimesh.Trimesh(vertices=v, faces=f, process=True)
+    return clean(trimesh.Trimesh(vertices=v, faces=f, process=True))
+
+
+#: A loose open shell this small, against the part's whole surface, is the mesher's, not the part's (CALI-118): it
+#: bounds nothing, and at the 0.05 mm tessellation tolerance it moves the volume by at most its area × 0.05 mm,
+#: about 0.1 mm³ on Theo's bar stool (2.28 m² of surface). Anything bigger is an opening, and is kept, and said.
+STRAY_SHARE = 1e-6
+
+
+def clean(m: trimesh.Trimesh) -> trimesh.Trimesh:
+    """The mesh without what the CAD's mesher leaves that isn't the part (CALI-118, #126):
+
+    - faces with no area. OCCT fans a cone's triangles from its apex, and one of them comes out with two corners on
+      the apex (Theo's bar stool v7: the cone's apex at the flange, a 37 mm sliver of no area). It encloses nothing;
+      with it the mesh isn't one closed body, and every boolean on it threw "Not all meshes are volumes!";
+    - loose open shells under :data:`STRAY_SHARE` of the surface, beside a closed body.
+
+    What it left out is said, once, in ``m.metadata["strays"]``. A bigger open shell, or a part with no closed
+    body, is left as it is: :func:`open_near` says where it's open, and a reader that needs a solid says so."""
+    if m.is_watertight or not len(m.faces):
+        return m
+    gone, where = 0, []
+    flat = ~m.nondegenerate_faces(height=1e-9)
+    if flat.any():
+        where.append(m.vertices[m.faces[flat]].reshape(-1, 3))
+        gone += int(flat.sum())
+        m = m.copy()
+        m.update_faces(~flat)
+        m.remove_unreferenced_vertices()
+    if not m.is_watertight:
+        bodies = m.split(only_watertight=False)
+        closed = [b for b in bodies if b.is_watertight]
+        strays = [b for b in bodies if not b.is_watertight and b.area <= STRAY_SHARE * m.area]
+        if closed and len(closed) + len(strays) == len(bodies) and strays:
+            where += [b.vertices for b in strays]
+            gone += sum(len(b.faces) for b in strays)
+            m = trimesh.util.concatenate(closed) if len(closed) > 1 else closed[0]
+    if gone:
+        pts = np.vstack(where)
+        z0, z1 = float(pts[:, 2].min()), float(pts[:, 2].max())
+        m.metadata["strays"] = (f"left out {gone} stray face{'s' if gone != 1 else ''} from the CAD's meshing "
+                                f"(at z {z0:.1f}" + (f"–{z1:.1f}" if z1 - z0 >= 0.05 else "") + " mm)")
+    return m
+
+
+def open_near(m: trimesh.Trimesh) -> Optional[str]:
+    """Where a mesh isn't closed, in words ("near z 14 mm"), or None when it's one closed solid. What a reader that
+    needs a solid (a boolean, a voxel check, a weight) says instead of throwing (CALI-118)."""
+    if m.is_watertight:
+        return None
+    from trimesh.grouping import group_rows
+
+    edges = m.edges_sorted
+    lone = edges[group_rows(edges, require_count=1)]
+    pts = m.vertices[lone.reshape(-1)] if len(lone) else m.vertices
+    z0, z1 = float(pts[:, 2].min()), float(pts[:, 2].max())
+    return "near z " + (f"{z0:.0f} mm" if z1 - z0 < 1 else f"{z0:.0f}–{z1:.0f} mm")
 
 
 # ---------------------------------------------------------------------------
