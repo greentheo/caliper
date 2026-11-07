@@ -1195,6 +1195,19 @@ function goTo(id) {                   // open the card's numbers and bring that 
 // One card for the design as it stands: every check (pass/fail, margin) and every objective (value, change
 // since the last card) across design, optimization, making and cost — each with how far to trust it.
 const TRUST = { measured: 'measured', model: 'a model (on the safe side)', rough: 'rough', guess: 'a guess' };
+// which version a stale card's numbers are of: "as of v1" (#138 item 2)
+function asOf(card) {
+  const v = Object.values(card.versions || {});
+  return v.length === 1 ? `as of v${v[0]}` : 'as of an older version';
+}
+// a scorecard row's mark: a stale card's pass is no ✓ (it was the part as it was), amber, said as of when; a fail
+// stays a ✗ (#138 item 2: "✓ holds … 2.58x" from v1 beside v4's 1.7x ✗)
+function scoreMark(c, stale, when) {
+  if (c.status === 'fail') return '<span style="color:var(--bad)">✗</span>';
+  if (stale && c.status === 'pass') return `<span style="color:var(--amber)" title="${esc(when)}">·</span>`;
+  return c.status === 'pass' ? '✓' : c.status === 'proposed' ? '◇'
+    : c.status === 'unresolved' || c.status === 'untrusted' ? '<span style="color:var(--amber)">!</span>' : '?';
+}
 // a goal's own limit beside its number (#137 item 5): "13.1 lb (cap 10 lb)"
 // a scorecard number as the panel says it, at module level: goalLimit uses it too (#139 review: it called scoreView's
 // own num, so a goal with a number threw "num is not defined" and blanked the inspector)
@@ -1231,19 +1244,20 @@ function scoreView(d) {
     const better = o.direction === 'max' ? o.change > 0 : o.change < 0;
     return ` <span class="small" style="color:var(${better ? '--ok' : '--bad'})">${o.change > 0 ? '+' : ''}${num(o.change)}</span>`;
   };
-  return `<div class="small">${card.summary.pass} pass · <b style="color:var(--bad)">${card.summary.fail} fail</b>${card.summary.unknown ? ` · ${card.summary.unknown} unknown` : ''}${card.summary.unresolved ? ` (${card.summary.unresolved} not resolved)` : ''}${card.summary.proposed ? ` · ${card.summary.proposed} proposed` : ''}
+  const when = stale ? asOf(card) : '';
+  const old = when ? ` <span class="muted">(${esc(when)})</span>` : '';
+  return `<div class="small">${when ? `<b style="color:var(--amber)">Scored ${esc(when)}:</b> ` : ''}${card.summary.pass} pass · <b style="color:var(--bad)">${card.summary.fail} fail</b>${card.summary.unknown ? ` · ${card.summary.unknown} unknown` : ''}${card.summary.unresolved ? ` (${card.summary.unresolved} not resolved)` : ''}${card.summary.proposed ? ` · ${card.summary.proposed} proposed` : ''}
       <span class="muted">· scored ${new Date(card.created * 1000).toLocaleString()}</span>
       ${stale ? '<span class="badge bad">a part has changed since</span>' : ''}</div>
     <ul class="list small" style="margin-top:6px">${card.checks.map((c) => { const now = held.find((x) => x.id === c.id) || c;
-      return `<li>${c.status === 'pass' ? '✓' : c.status === 'fail' ? '<span style="color:var(--bad)">✗</span>' : c.status === 'proposed' ? '◇'
-        : c.status === 'unresolved' || c.status === 'untrusted' ? '<span style="color:var(--amber)">!</span>' : '?'}
-      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}${goalLimit(c)}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
+      return `<li>${scoreMark(c, stale, when)}
+      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}${goalLimit(c)}${old}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
       ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}</li>`; }).join('')}
       ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${esc(c.label || c.id)} ${from(c)}
         <span class="muted">— new since this card</span></li>`).join('')}</ul>
     <table class="st" style="margin-top:6px">${card.objectives.map((o) => `<tr><td style="text-align:left">${esc(o.label)}</td>
-      <td>${num(o.value, o.unit)}${delta(o)}</td><td>${tag(o.trust)}</td></tr>`).join('')}</table>
-    ${card.cost ? `<details class="small" style="margin-top:6px"><summary>Stock: $${Math.round(card.cost.usd)} · offcut $${Math.round(card.cost.waste_usd)}</summary>
+      <td>${num(o.value, o.unit)}${delta(o)}${old}</td><td>${tag(o.trust)}</td></tr>`).join('')}</table>
+    ${card.cost ? `<details class="small" style="margin-top:6px"><summary>Stock: $${Math.round(card.cost.usd)} · offcut $${Math.round(card.cost.waste_usd)}${old}</summary>
       <table class="st">${card.cost.lines.map((l) => `<tr><td style="text-align:left">${esc(l.part)}</td><td style="text-align:left">${esc(l.item)}</td>
         <td>$${l.usd.toFixed(0)}</td><td class="muted">${l.waste_usd ? `$${l.waste_usd.toFixed(0)} offcut` : ''}</td></tr>`).join('')}</table>
       <div class="muted">${esc(card.cost.basis)}</div></details>` : ''}
@@ -1340,7 +1354,8 @@ function historyItem(h) {
   if (h.kind === 'whittle') return `<li class="hist">studied in whittle (${esc(h.study)}, ${h.stations} stations)</li>`;
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
-  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  // a number only where the check gave one: a check that couldn't run says why, never "0x" (#138 item 3)
+  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.verdict && h.verdict.kind === 'unchecked' && h.verdict.why ? `: ${esc(h.verdict.why)}` : h.safety != null && h.verdict && ['holds', 'fails'].includes(h.verdict.kind) ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
   if (h.kind === 'patterns' && h.action === 'made') return `<li class="hist">patterns for hand tools (${h.pieces} pieces)</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
@@ -2041,7 +2056,10 @@ function defaultCheck(p) {
 function carveBlocked(p) {
   const check = defaultCheck(p);
   // carving only takes material away: not on a part that already fails as drawn (#137 item 3)
-  if (check && check.verdict && check.verdict.kind === 'fails') return `it already fails (${sx(check.safety)}): make it hold first, then carve`;
+  // a fail on a run too coarse to see its walls hedges as the strength line does (#139 review)
+  if (check && check.verdict && check.verdict.kind === 'fails') return check.verdict.coarse
+    ? `its check says it fails (${sx(check.safety)}, a coarse run: the fail may be the model's): make it hold first, then carve`
+    : `it already fails (${sx(check.safety)}): make it hold first, then carve`;
   // where the walls are, and what to change, as the check said it (#136 review)
   if (check && check.too_thin) return check.thin_said ? `Can't carve it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be carved by strength';
   if (check && check.cases.some((c) => c.fea && c.fea.supported === false)) {
@@ -2072,7 +2090,9 @@ function wireCarve(p) {
 // walls too thin for any check a study may make (#101, #136)
 function lightenBlocked(p) {
   const check = defaultCheck(p);
-  if (check && check.verdict && check.verdict.kind === 'fails') return `It already fails (${sx(check.safety)}): make it hold first, then lighten it`;
+  if (check && check.verdict && check.verdict.kind === 'fails') return check.verdict.coarse
+    ? `Its check says it fails (${sx(check.safety)}, a coarse run: the fail may be the model's): make it hold first, then lighten it`
+    : `It already fails (${sx(check.safety)}): make it hold first, then lighten it`;
   if (check && check.too_thin) return check.thin_said ? `Can't lighten it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength';
   return '';
 }

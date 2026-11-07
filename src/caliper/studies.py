@@ -92,7 +92,9 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     """What a run came to, in one line, and whether that's good news (None: neither)."""
     if kind == "load":
         cases = r.get("cases") or []
-        worst = min(cases, key=lambda c: c.get("safety") if c.get("safety") is not None else 1e9, default=None)
+        # the worst case that ran: one whose load never reached a support has no number (#140 review)
+        ran = [c for c in cases if (c.get("fea") or {}).get("supported") is not False] or cases
+        worst = min(ran, key=lambda c: c.get("safety") if c.get("safety") is not None else 1e9, default=None)
         if worst is None:
             return "no loads", None
         v = verdicts.run(r)                     # one verdict (CALI-112): a ✗ stays a ✗, then not trusted, …
@@ -101,7 +103,12 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
                     + (f" (the block read {round(r['safety'], 1):g}x)" if r.get("safety") is not None else "")), None
         what = (f"{worst['name']}: {round(worst['safety'], 1):g}x" if worst.get("safety") is not None
                 else worst["name"])
-        coarse = [(c, x) for c, x in zip(cases, v["cases"]) if x["kind"] in ("unresolved", "unchecked")]
+        unjoined = [x for c, x in zip(cases, v["cases"])
+                    if x["kind"] == "unchecked" and (c.get("fea") or {}).get("supported") is False]
+        if unjoined and not any(x["kind"] == "fails" for x in v["cases"]):   # couldn't run: its reason, no 0x (#140)
+            return f"not checked: {unjoined[0].get('why') or 'its load never reached a support'}", None
+        coarse = [(c, x) for c, x in zip(cases, v["cases"]) if x["kind"] in ("unresolved", "unchecked")
+                  and (c.get("fea") or {}).get("supported") is not False]
         if coarse:                              # a ✓ on an FEA too coarse to see its walls is no ✓ (CALI-97)
             word = "not checked: its walls are too thin for the voxels" if coarse[0][1]["kind"] == "unchecked" else \
                 "not resolved yet: too coarse to see its walls"
