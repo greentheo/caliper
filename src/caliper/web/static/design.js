@@ -908,6 +908,8 @@ function designView(d) {
         <div class="muted small">${esc(x.what)}${x.made ? ` · ${esc(x.made)}` : ''}${x.mounts_on.length
           ? ` · on the ${x.mounts_on.map((m) => esc(m.replace(/_/g, ' '))).join(' and the ')}` : ''}</div></li>`).join('')}</ol>
       ${d.plan.dropped ? `<div class="small muted">${esc(d.plan.dropped[0].toUpperCase() + d.plan.dropped.slice(1))}.</div>` : ''}
+      ${(d.plan.dropped_rules || []).map((x) => `<div class="small" style="color:var(--amber)">Left out ${esc(x)}.</div>`).join('')}
+      ${(d.plan.notes || []).length ? `<div class="small muted">By the numbers: ${esc(d.plan.notes.join('; '))}.</div>` : ''}
       ${d.plan.numbers.length ? '<div class="small"><b>The numbers they share</b></div><ul class="list">'
         + d.plan.numbers.map((n) => `<li class="small">${esc(n)}</li>`).join('') + '</ul>' : ''}
       ${d.plan.checks.length ? '<div class="small"><b>Checked between them</b></div><ul class="list">'

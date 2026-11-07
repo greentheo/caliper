@@ -39,7 +39,7 @@ MAX_RULE = 300
 #: rule can say it).
 NAME = re.compile(r"^[a-z][a-z0-9_]*$")
 #: The units a skeleton number may be in. Lengths are stored in mm, as the models are.
-UNITS = {"mm", "in", "ft", "m", "cm", "deg", "N", "lb", "kg", "count"}
+UNITS = {"mm", "in", "ft", "m", "cm", "deg", "N", "lb", "kg", "count", "m/s", "km/h", "mph"}
 #: The measures that read a part. A rule that calls none of them, and names no part, reads only the plan's own numbers:
 #: it always says the same thing (CALI-115, #117: "generator_shaft_dia == 25.4").
 MEASURES = FUNCTIONS - {"abs", "min", "max", "approx", "within"}
@@ -63,7 +63,16 @@ SOURCES = ("stated", "assumed", "kept")
 
 
 class PlanError(ValueError):
-    """A plan that can't be used, and why, in words the person can read."""
+    """A plan that can't be used, and why, in words the person can read. ``rule``: the check it's about, when the
+    fault is one rule's (CALI-119: after the retry that rule is dropped and said, never the plan)."""
+
+    def __init__(self, message: str, rule: Optional[str] = None):
+        super().__init__(message)
+        self.rule = rule
+
+
+class _NumbersOnly(PlanError):
+    """A rule over the plan's own numbers: decided when it's planned (CALI-119), not measured."""
 
 
 class _Base(BaseModel):
@@ -108,10 +117,27 @@ class Plan(_Base):
     rules: list[PlanRule] = Field(default_factory=list)
     #: parts validation dropped: the floor, the ground, the room (#117)
     _dropped: list = PrivateAttr(default_factory=list)
+    #: rules over the plan's own numbers that hold, as notes (CALI-119)
+    _notes: list = PrivateAttr(default_factory=list)
+    #: checks left out, each with why (CALI-119): said in the review, never a silent drop
+    _dropped_rules: list = PrivateAttr(default_factory=list)
 
     @property
     def dropped(self) -> list[str]:
         return list(self._dropped)
+
+    @property
+    def notes(self) -> list[str]:
+        return list(self._notes)
+
+    @property
+    def dropped_rules(self) -> list[str]:
+        return list(self._dropped_rules)
+
+    def _carry(self, other: "Plan") -> "Plan":
+        """This plan with ``other``'s dropped parts, notes and left-out checks (a copy doesn't keep them)."""
+        self._dropped, self._notes, self._dropped_rules = other.dropped, other.notes, other.dropped_rules
+        return self
 
     def ids(self) -> list[str]:
         return [p.id for p in self.parts]
@@ -120,7 +146,7 @@ class Plan(_Base):
         return next((s for s in self.skeleton if s.name == name), None)
 
 
-def validate(data) -> Plan:
+def validate(data, drop_bad_rules: bool = False) -> Plan:
     """A plan from the planner's JSON (or a :class:`Plan`), checked: every name well formed and used once, every
     skeleton number with a unit, every mate and rule over parts and numbers the plan has, the rules in the
     language the assembly measures and each measuring a part, a part you have that isn't one to be made, and a build
@@ -170,10 +196,46 @@ def validate(data) -> Plan:
     dup = next((r for r in rule_ids if rule_ids.count(r) > 1), None)
     if dup:
         raise PlanError(f"two checks are both called {dup!r}")
+    kept, notes, left = [], [], []
     for r in plan.rules:
-        _check_rule(r, set(ids), set(names))
-    order(plan)                                  # a cycle is refused here
-    return plan
+        try:
+            try:
+                _check_rule(r, set(ids), set(names))
+            except _NumbersOnly:                 # decided now (CALI-119): a note, a contradiction, or nothing
+                note = _by_the_numbers(r, plan)
+                if note:
+                    notes.append(note)
+                else:
+                    left.append(f"the check {r.id!r} ({r.expr}): it reads only numbers")
+                continue
+            kept.append(r)
+        except PlanError as e:
+            if not drop_bad_rules:
+                raise PlanError(str(e), rule=r.id) from e
+            left.append(f"the check {r.id!r} ({r.expr}): {e}")       # one rule never sinks the plan (CALI-119)
+    out = plan.model_copy(update={"rules": kept})._carry(plan)
+    out._notes, out._dropped_rules = notes, left
+    order(out)                                   # a cycle is refused here: the plan's, not a rule's
+    return out
+
+
+def _by_the_numbers(rule: "PlanRule", plan: "Plan") -> Optional[str]:
+    """A rule over the plan's own numbers, decided now (CALI-119): true, its note; false, the plan is refused with
+    the contradiction; over literals alone, None (it says nothing about this plan)."""
+    from .evaluate import safe_eval
+
+    tree = ast.parse(rule.expr, mode="eval")
+    read = [n.id for n in ast.walk(tree) if isinstance(n, ast.Name)]
+    if not read:
+        return None
+    values = skeleton_values(plan.skeleton)
+    if safe_eval(rule.expr, {**values, "abs": abs, "min": min, "max": max}):
+        return f"{rule.why or rule.id.replace('_', ' ')} (by the numbers: {rule.expr})"
+    said = ", ".join(f"{n} {values[n]:g} " + ("mm" if mm(plan.value(n)) is not None else plan.value(n).unit)
+                     for n in dict.fromkeys(read))
+    lengths = any(mm(plan.value(n)) is not None for n in read)
+    raise PlanError(f"the check {rule.id!r} contradicts the plan's own numbers: {rule.expr} is false ({said})"
+                    + ("; lengths in a check read in mm" if lengths else ""), rule=rule.id)
 
 
 def _ground(p: PlanPart) -> bool:
@@ -181,6 +243,15 @@ def _ground(p: PlanPart) -> bool:
     "floor_lamp", "wall_shelf" and "ground_stake" are parts; "bathroom_floor" and "garage_wall" aren't; a
     "retaining_wall" that's built is)."""
     return p.id.split("_")[-1] in GROUND and not p.made.strip()
+
+
+def said_aside(plan: Plan) -> str:
+    """What the review says besides the parts (CALI-119): checks left out, each with why, and the notes that hold
+    by the numbers. Never a silent drop."""
+    out = "".join(f"\n\nI left out {d}." for d in plan.dropped_rules)
+    if plan.notes:
+        out += "\n\nBy the numbers: " + "; ".join(plan.notes) + "."
+    return out
 
 
 def dropped_line(plan: Plan) -> str:
@@ -279,8 +350,7 @@ def _check_rule(rule: PlanRule, ids: set, names: set) -> None:
                         f"({rule.expr!r})")
     if not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in MEASURES
                for n in ast.walk(tree)) and not any(isinstance(n, ast.Name) and n.id in ids for n in ast.walk(tree)):
-        raise PlanError(f"the check {rule.id!r} reads only the plan's own numbers, so it can't measure anything "
-                        f"({rule.expr!r}): compare a measure of a part with them")
+        raise _NumbersOnly(f"the check {rule.id!r} reads only the plan's own numbers ({rule.expr!r})", rule=rule.id)
 
 
 def _yes_no(n: ast.AST) -> bool:
@@ -340,10 +410,13 @@ def skeleton_values(skeleton: list) -> dict:
 # Where its numbers came from (CALI-115, #117): what the person said is enforced; the rest is shown, assumed
 # ---------------------------------------------------------------------------
 #: A number with its unit in what the person said: "7 ft", "1 in", "3/4 in", "40 lb", "600 mm", '2"'.
-_SAID = re.compile(r"(\d+(?:\.\d+)?(?:\s*/\s*\d+)?|\d+\s+\d+/\d+)\s*(mm|cm|m|in|inch|inches|\"|ft|feet|foot|'|deg|"
-                   r"degrees|°|lb|lbs|pounds?|kg|n)(?![a-z])", re.I)
+_SAID = re.compile(r"(\d+(?:\.\d+)?(?:\s*/\s*\d+)?|\d+\s+\d+/\d+)\s*(mph|km/h|kmh|kph|m/s|mm|cm|m|in|inch|inches|\"|"
+                   r"ft|feet|foot|'|deg|degrees|°|lb|lbs|pounds?|kg|n)(?![a-z])", re.I)
+#: Speeds and masses to one unit each, so "60 mph" is the planner's 26.82 m/s (CALI-119).
+SAME = {"mph": ("m/s", 0.44704), "km/h": ("m/s", 1 / 3.6), "m/s": ("m/s", 1.0), "lb": ("kg", 0.45359237),
+        "kg": ("kg", 1.0)}
 _SAID_UNIT = {"inch": "in", "inches": "in", '"': "in", "feet": "ft", "foot": "ft", "'": "ft", "degrees": "deg",
-              "°": "deg", "lbs": "lb", "pound": "lb", "pounds": "lb", "n": "N"}
+              "°": "deg", "lbs": "lb", "pound": "lb", "pounds": "lb", "n": "N", "kmh": "km/h", "kph": "km/h"}
 
 
 def _amount(num: str) -> float:
@@ -361,13 +434,21 @@ def _said_numbers(said: str) -> list[tuple[float, str]]:
             v = _amount(num.replace(" / ", "/"))
         except (ValueError, ZeroDivisionError):
             continue
-        out.append((v * TO_MM[unit], "mm") if unit in TO_MM else (v, unit))
+        out.append((v * TO_MM[unit], "mm") if unit in TO_MM else
+                   (v * SAME[unit][1], SAME[unit][0]) if unit in SAME else (v, unit))
     return out
 
 
+def _speedish(s: SkeletonValue) -> bool:
+    """A speed the planner wrote in "m" (#127: design_wind_speed_ms = 26.82 m): read as m/s."""
+    return s.unit == "m" and bool(re.search(r"speed|_ms$|_mps$|wind|gust", s.name))
+
+
 def _was_said(s: SkeletonValue, said: list[tuple[float, str]]) -> bool:
-    v = mm(s)
-    want = (v, "mm") if v is not None else (s.value, s.unit)
+    unit = "m/s" if _speedish(s) else s.unit
+    v = None if _speedish(s) else mm(s)
+    want = ((v, "mm") if v is not None else (s.value * SAME[unit][1], SAME[unit][0]) if unit in SAME
+            else (s.value, unit))
     return any(u == want[1] and abs(x - want[0]) <= max(0.005 * abs(want[0]), 1e-9) for x, u in said)
 
 
@@ -391,9 +472,7 @@ def classify(plan: Plan, said: str, prior: Optional[Plan] = None) -> Plan:
     kept_p = {p.id for p in (prior.parts if prior else []) if p.role == "fixed" and p.source == "stated"}
     parts = [p.model_copy(update={"source": "stated" if p.role != "fixed" or p.id in kept_p or _have(said, p)
                                   else "assumed"}) for p in plan.parts]
-    out = plan.model_copy(update={"skeleton": skel, "rules": rules, "parts": parts})
-    out._dropped = plan.dropped
-    return out
+    return plan.model_copy(update={"skeleton": skel, "rules": rules, "parts": parts})._carry(plan)
 
 
 def binding(plan: Plan) -> list[PlanRule]:
@@ -413,7 +492,7 @@ def keep(store, rule_id: str) -> Plan:
     plan = plan.model_copy(update={
         "rules": [r.model_copy(update={"source": "kept"}) if r.id == rule_id else r for r in plan.rules],
         "skeleton": [s.model_copy(update={"source": "kept"}) if s.name in read and s.source == "assumed" else s
-                     for s in plan.skeleton]})
+                     for s in plan.skeleton]})._carry(plan)
     save(store, plan, (store.design.plan or {}).get("status", "review"))
     return plan
 
@@ -452,7 +531,9 @@ def save(store, plan: Plan, status: str = "review") -> None:
     store.design.skeleton = [s.model_dump() for s in plan.skeleton]
     store.design.plan = {"status": status, "parts": [p.model_dump() for p in plan.parts], "order": order(plan),
                          "rules": [r.model_dump() for r in plan.rules],
-                         **({"dropped": plan.dropped} if plan.dropped else {})}
+                         **({"dropped": plan.dropped} if plan.dropped else {}),
+                         **({"notes": plan.notes} if plan.notes else {}),
+                         **({"dropped_rules": plan.dropped_rules} if plan.dropped_rules else {})}
     store.save()
 
 
@@ -466,6 +547,7 @@ def load(store) -> Optional[Plan]:
     plan = Plan.model_validate({"parts": rec["parts"], "skeleton": store.design.skeleton or [], "mates": mates,
                                 "rules": rec.get("rules") or []})
     plan._dropped = list(rec.get("dropped") or [])
+    plan._notes, plan._dropped_rules = list(rec.get("notes") or []), list(rec.get("dropped_rules") or [])
     return plan
 
 
@@ -546,13 +628,13 @@ role "fixed" only for what the person said they already have ("my generator", "a
 stated size as a reference, never designed. Anything welded, printed, cut or otherwise made is never fixed. A part \
 is never the ground, the floor, a wall or the room: what it stands on is held, the floor by default.
 
-Name the numbers the parts share as the skeleton: each with a value, a unit (mm, in, ft, m, cm, deg, N, lb, kg or \
-count) and why. Write mates between parts (touch, clearance, fit, no_interference) and rules over part ids and \
+Name the numbers the parts share as the skeleton: each with a value, a unit (mm, in, ft, m, cm, deg, N, lb, kg, \
+count, or a speed in m/s, km/h or mph) and why. Write mates between parts (touch, clearance, fit, no_interference) and rules over part ids and \
 skeleton names, so every interface is measured. A rule may call: interference(a, b), min_clearance(a, b), \
 hole_misalignment(a, b), holes_aligned(a, b), bbox(part).dx/.dy/.dz (sizes) and .min_x/.min_y/.min_z/.max_x/\
 .max_y/.max_z (corners), abs, min, max. Every rule compares a measure of a part with a number (`==`, never `=`), \
-with + - * / and no powers or text; a rule over skeleton numbers alone measures nothing and is refused. Lengths in \
-rules are mm; a skeleton name in a rule reads in mm. Each part says what it mounts on (the parts it's built onto).
+with + - * / and no powers or text. A rule over skeleton numbers alone measures nothing: it's decided when it's \
+planned (true, it's a note; false, the plan contradicts itself and is refused). Lengths in rules are mm; a skeleton name in a rule reads in mm. Each part says what it mounts on (the parts it's built onto).
 
 Give a number or a rule source "stated" only when the person gave it; anything you chose (a size, a margin, a rule \
 of thumb) is "assumed": shown to them, and not enforced until they keep it. Don't add rules nobody asked for beyond \
@@ -584,7 +666,7 @@ def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[
         try:
             if got is None:
                 raise PlanError("the planner didn't answer with a plan")
-            return classify(validate(got), said, prior)
+            return classify(validate(got, drop_bad_rules=attempt == 2), said, prior)
         except PlanError as e:
             if attempt == 2:
                 raise

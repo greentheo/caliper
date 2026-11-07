@@ -3,6 +3,21 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-119 (#127) · A rule over the plan's own numbers is decided when it's planned; no rule sinks the plan
+- **#117's live re-run:** the camper's planner wrote `tube_size * 25.4 <= 50.8` (the frame tube fits the 2 in
+  receiver) twice; #117 refused a numbers-only rule, so the plan fell back to one part.
+- **Decided at plan time** (`plan._by_the_numbers`): true, it's a note ("the frame tube fits the receiver (by the
+  numbers: tube_size <= receiver)"), not a check; false, the plan contradicts itself and is refused with it, the
+  numbers named ("tube_size * 25.4 <= 50.8 is false (tube_size 50.8 mm); lengths in a check read in mm", so the
+  retry can see the slip); literals alone are left out, said.
+- **No rule sinks the plan:** after the one retry a rule that still fails (an `=`, an unknown part, a contradiction)
+  is left out with why ("I left out the check '…' (…): …" in the review, on the card); only a plan-level fault (no
+  parts, a cycle, no answer) falls back to one part.
+- **Units in `classify`:** speeds (mph, km/h, m/s) and masses (lb, kg) compare with what the person said, so "60 mph"
+  is the planner's 26.82 m/s (or the "m" it wrote for a speed); skeleton units take m/s, km/h and mph.
+- `tests/test_plan_numbers.py` (15; 14 fail on main), the camper's rule verbatim; #117's tests updated (a numbers-only
+  rule is a note, a contradiction or left out; refused twice, the plan stands). design.js v=64.
+
 ### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
 - **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to
   build…) is refused with that reason, and so is any fixed part when nothing the person said says they have something.

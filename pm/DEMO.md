@@ -566,6 +566,11 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · The camper plans: a rule over its own numbers is a note, and no rule sinks the plan (CALI-119 #127)
+1. With a key: "A camper: a plywood cargo box on a welded frame that slides into my 2 in hitch receiver." It plans in
+   parts. Under **The plan**, a rule that holds by the numbers reads "By the numbers: …"; one the planner got wrong
+   twice reads "Left out the check '…': …", and the plan stands.
+2. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_plan_numbers.py`.
 ### 2026-11-07 · A plan says what you said apart from what it assumed (CALI-115 #117)
 1. With a key, new design: "A Savonius wind turbine: printed buckets, plasma-cut end plates, a welded 7 ft mast on a
    staked base, for a generator I already have with a 1 in shaft." Only the generator says "you have it".

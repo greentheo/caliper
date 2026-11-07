@@ -213,6 +213,7 @@ def _plan(store: DesignStore) -> Optional[dict]:
     by = {p.id: p for p in pl.parts}
     return {"status": (store.design.plan or {}).get("status", "review"), "headline": P.headline(pl, store.design.name),
             "dropped": P.dropped_line(pl),
+            "notes": pl.notes, "dropped_rules": pl.dropped_rules,     # said, never silent (CALI-119)
             "parts": [{**by[i].model_dump(), "built": bool(store.design.part(i) and store.design.part(i).version)}
                       for i in P.order(pl)],
             "numbers": [P.said_number(s, inches) for s in pl.skeleton],

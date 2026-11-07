@@ -234,26 +234,35 @@ def test_a_refused_plan_is_asked_for_again_once_with_the_reason(tmp_path):
     assert first["messages"][0]["content"] in retry                   # the same ask, with the reason after it
 
 
-def test_refused_twice_it_falls_back_to_one_part_saying_why(tmp_path, monkeypatch):
-    built = []
-    monkeypatch.setattr(chat, "author_part", lambda *a, **k: built.append(a[1]) or chat.TurnResult(
-        "author", "no", ok=False, error="stub"))
+def test_refused_twice_the_bad_rule_is_left_out_and_said_and_the_plan_stands(tmp_path):
+    """CALI-119 (#127): a rule's fault after the retry drops that rule, said; it never throws the plan away."""
     store = DesignStore.create("A camper: a 48 in wide plywood cargo box on a welded frame.",
                                base=str(tmp_path / "designs"))
     client = fake(CAMPER)
-    got = firstrun.build(store, use_llm=True, strength=False, client=client)
-    assert len(client.plan_calls()) == 2 and built and store.design.plan is None
-    assert got["steps"]["plan"].startswith("planning it in several parts didn't work (the check 'box_fits'")
+    got = firstrun.build(store, use_llm=True, strength=False, client=client, author=_never)
+    assert len(client.plan_calls()) == 2 and got["plan"] == "review"
+    assert P.load(store).ids() == ["cargo_box", "frame"] and not P.load(store).rules
+    assert "I left out the check 'box_fits' (bbox(cargo_box).dy = box_width):" in got["reply"]
+    assert "use `==`" in got["reply"]
 
 
 # --- 4. no tautologies ------------------------------------------------------------------------------------------------
-@pytest.mark.parametrize("expr", ["shaft_d == 25.4", "abs(rotor_d - 600) < 1", "rotor_d > mast_h", "1 < 2"])
-def test_a_rule_that_measures_nothing_is_refused(expr):
+@pytest.mark.parametrize("expr,note", [("shaft_d == 25.4", True), ("abs(rotor_d - 600) < 1", True)])
+def test_a_rule_that_measures_nothing_is_decided_when_it_s_planned(expr, note):
+    """CALI-119 (#127): no longer refused; true, a note (it can't change), not a check."""
     plan = _fixed_ok(TURBINE)
     plan["rules"].append({"id": "same", "expr": expr})
-    with pytest.raises(P.PlanError, match="the check 'same' reads only the plan's own numbers, so it can't measure "
-                                          "anything"):
+    got = P.validate(plan)
+    assert "same" not in [r.id for r in got.rules] and got.notes == [f"same (by the numbers: {expr})"]
+
+
+def test_one_that_contradicts_the_plan_is_refused_and_one_of_literals_is_dropped():
+    plan = _fixed_ok(TURBINE)
+    plan["rules"].append({"id": "same", "expr": "rotor_d > mast_h"})
+    with pytest.raises(P.PlanError, match="the check 'same' contradicts the plan's own numbers"):
         P.validate(plan)
+    plan["rules"][-1]["expr"] = "1 < 2"
+    assert P.validate(plan).dropped_rules == ["the check 'same' (1 < 2): it reads only numbers"]
 
 
 @pytest.mark.parametrize("expr", ["bbox(mast).dz >= mast_h", "holes_aligned(end_plates, buckets)",
