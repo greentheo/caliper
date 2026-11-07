@@ -255,3 +255,7 @@ def test_a_design_whose_measurement_throws_is_not_checked_never_ok(tmp_path, mon
     got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=Stub(), strength=False)
     assert got["plan"] == "built" and got["ok"] is False
     assert "The design checks: not checked: the rotor's mesh broke." in got["reply"]
+    # the log line says what the result says (#135 review nit, CALI-125): it said ok=True here
+    logged = [e for e in store.log()
+              if e.get("kind") == "reply" and e.get("action") == "plan" and e.get("firstrun")][-1]
+    assert logged["ok"] is False and logged["reply"] == got["reply"]

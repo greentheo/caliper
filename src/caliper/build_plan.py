@@ -163,8 +163,9 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
                     f"\n\nThe design checks: not checked: {unmeasured}." if unmeasured else "")
                  + (f"\n\nNot checked yet: {' and '.join(unchecked)}. Run *Will it work?* next." if unchecked else ""))
     steps["plan"] = f"{status}: {len(built)} of {len(made)} parts"
-    store.append_log({"kind": "reply", "action": "plan", "ok": not failed, "reply": reply, "firstrun": True})
-    emit("step", "Done", step="done")
     ok = not failed and not unmeasured and (report is None or verdicts.report(report.to_dict())["counts_as_pass"])
+    # the log says what the result says (#135 review nit): a measurement that threw is no ok there either
+    store.append_log({"kind": "reply", "action": "plan", "ok": ok, "reply": reply, "firstrun": True})
+    emit("step", "Done", step="done")
     return {"part": failed[0] if failed else (made[-1] if made else None), "ok": ok, "steps": steps,
             "reply": reply, "plan": status, "built": list(built)}

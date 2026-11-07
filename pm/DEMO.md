@@ -579,6 +579,12 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 4. **Check it holds** again: the Beam check reads "with its face grain running front to back, from one support to the
    other, as you said", and the build book's cut lists carry the same line.
 5. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_grain.py`.
+### 2026-11-07 · Follow-ups from the 11/07 reviews (CALI-125 #148)
+1. Give a part a rule whose probe can't be measured: *Will it work?* leads with "✗ Breaks its rule …, not measured:
+   …", never a ✓.
+2. On a changed part whose last strength check was the middle foot only, the design card says "…, checked in the
+   middle only · vN not checked yet."
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_followups.py`.
 ### 2026-11-06 · A foot at the front edge of a step (CALI-94 #73)
 1. **A stool whose top rests on two sides, loaded only in the middle:** *What is it?* warns "The top is held on two
    sides, and no load stands on its free edge, where it's weakest: add a case…".
