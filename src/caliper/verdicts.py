@@ -211,9 +211,12 @@ def coarse(run: Optional[dict]) -> Optional[str]:
 
 def carve_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = None) -> dict:
     """A carve step as a person reads it (#132 review): it holds only if the printed part holds there AND the whole
-    part does (``whole_holds``), on a shape that isn't a filled-in block, at voxels that can see its walls (#101).
-    A fail stays a fail."""
-    if station(st)["kind"] == "fails":
+    part does (``whole_holds``), on a shape that isn't a filled-in block, at voxels that can see its walls (#101),
+    and whose part closes up (#124). A fail stays a fail."""
+    v = station(st)
+    if v["kind"] == "unchecked":                # its part doesn't close up (#124): said, not a fail
+        return v
+    if not v["counts_as_pass"]:
         return _make("fails", st.get("safety"))
     if st.get("whole_holds") is False:  # producer: the study's own number, judged here
         return _make("fails", st.get("whole"), why="the whole part doesn't hold there")
@@ -244,6 +247,8 @@ def station(st: dict, *, whole: bool = False, run: Optional[dict] = None) -> dic
     hold on voxels too coarse to see its walls is ``unresolved``/``unchecked`` (#101), and a fail stays a fail."""
     held = st.get("whole_holds" if whole else "holds")  # producer: the study's own number, judged here
     safety = st.get("whole" if whole else "safety")
+    if held and st.get("closed") is False:     # a carved step whose part doesn't close up can't be adopted (#124)
+        return _make("unchecked", safety, why=st.get("why") or "its shape doesn't close up")
     if held is None:
         return _make("waiting")
     if held and coarse(run):

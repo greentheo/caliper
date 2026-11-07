@@ -249,3 +249,16 @@ def test_the_small_asks():
     rep = Report([AssertionResult("a", "x > 0", "pass", 1), AssertionResult("b", "y > 0", "deferred", None)])
     assert rep.to_text().startswith("Measurement report — NOT ALL CHECKED")
     assert Report([AssertionResult("a", "x > 0", "pass", 1)]).to_text().startswith("Measurement report — ALL PASS")
+
+
+def test_a_carved_step_that_doesn_t_close_up_is_never_a_pass():
+    """Merged with #124: a step marked ``closed: False`` holds by its numbers, but its part can't be adopted. Its one
+    verdict says "not checked", with why, so nothing offers it or reads it as holding."""
+    from caliper import verdicts
+
+    step = {"index": 2, "holds": True, "safety": 2.4, "whole": 2.1, "whole_holds": True, "saved_g": 300,
+            "closed": False, "why": "its carved shape doesn't close up"}
+    for v in (verdicts.station(step), verdicts.carve_step(step)):
+        assert v["kind"] == "unchecked" and not v["counts_as_pass"] and v["why"] == step["why"]
+    assert verdicts.carve_step({**step, "closed": True})["kind"] == "holds"
+    assert verdicts.station({**step, "holds": False})["kind"] == "fails"          # a fail stays a fail

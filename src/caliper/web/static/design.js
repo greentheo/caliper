@@ -1988,7 +1988,7 @@ function carveProgress(pid) {
 function paintCarve(pid) {
   const prog = $('carveProgress'), go = $('carveGo');
   if (S.scope !== pid) return;
-  const part = S.design && S.design.parts.find((x) => x.id === pid);
+  const part = ((S.design && S.design.parts) || []).find((x) => x.id === pid);
   // a carve its check blocks stays off after a job ends (#136 review: Cancel re-enabled "Carve it again")
   if (go) go.disabled = !!S.carveJob[pid] || !!(part && carveBlocked(part));
   if (!prog) return;
@@ -2715,6 +2715,7 @@ async function showStation(pid, run, index) {
       : `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume
       ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>`;
     bar.innerHTML = `${what}
+      ${carved && st.closed === false ? `<span class="small" style="color:var(--bad)">Can't use this step: ${esc(st.why)}.</span>` : ''}
       ${(lightened || carved) && !index ? '' : `<button class="primary" id="adoptBtn" ${(lightened || carved) && !holdsHere(st) ? `disabled title="${esc(st.verdict ? `It can't be used: ${st.verdict.word}` : '')}"` : ''}>${lightened ? 'Cut these holes in '
         : carved ? 'Carve it like this: ' : framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`}
       <button id="stationClose" class="ghost">×</button>`;
