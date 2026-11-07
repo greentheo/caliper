@@ -135,10 +135,7 @@ function len(mm, digits) {
 // a wall or a voxel, thin: inches to the nearest 1/32 (5/32″), mm where that rounds to nothing; never "0.0″" (CALI-97)
 function wallLen(mm) {
   if (mm == null || isNaN(mm)) return '—';
-  const n = Math.round(mm / IN * 32);
-  if (inches() && mm >= IN) return len(mm, 1);
-  if (inches() && n >= 1) { const g = gcd(n, 32); return `${n / g}/${32 / g}″`; }
-  // under 1 mm, two places, as the server says it: 0.25 mm, not 0.3 (#137 item 2)
+  // walls (and voxels) in mm, whatever the design's units (#139 review); under 1 mm, two places (#137 item 2)
   return `${mm < 1 ? +mm.toFixed(2) : mm < 10 ? +mm.toFixed(1) : Math.round(mm)} mm`;
 }
 const gcd = (a, b) => (b ? gcd(b, a % b) : a);
@@ -2148,7 +2145,7 @@ function loadCase(p, run, c, i) {
   const holds = p.untrusted ? untrustedBadge(p) : caseBadge(c);     // a filled-in shape wins (CALI-96, then 97)
   const plate = !pl ? '' : pl.done
     ? (pl.support === 'ring'
-      ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, a round plate on its ${len(pl.ring_mm)} ring,
+      ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, a round plate held at its ring's outer edge (${len(pl.ring_mm)} across),
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety_across)}</b> across the grain, ${sx(pl.safety)} along it
         · sags ${len(pl.deflection_mm, 3)} <span class="muted">(Roark; needs an engineer's check)</span></div>`
       : `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,

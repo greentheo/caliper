@@ -33,7 +33,7 @@ def _said(r: dict, where: Optional[list], inches: bool) -> str:
         except Exception:  # noqa: BLE001 — said without its number rather than guessed
             need = None
         at = f" around z {_len(where[2], inches)}" if where else ""
-        return (f"{r['id']}: its walls are {_wall(float(r['actual']), inches)}{at}"
+        return (f"{r['id']}: its thinnest walls are {_wall(float(r['actual']))}{at}"
                 + (f"; it says at least {round(need, 2):g} mm" if need is not None else f" ({r['expr']})"))
     if r.get("status") in ("error", "deferred") and r.get("detail"):
         return f"{r['id']}: {r['expr']}, not measured: {r['detail']}"

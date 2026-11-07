@@ -45,6 +45,13 @@ correction: the run's "seat top" was a mislabel.
   unstubbed with `scoreView` itself. A refused job reads without its exception's name: `follow()` passes the job's
   error through `plainly()` (main said "⚠ ValueError: Can't carve it…" since #136). *Show the stress* names the peak
   by `peakWhere`, never an old run's "seat top".
+- **#139 review, items 4–7:** each wall number says which wall ("its thinnest walls, 0.25 mm around z 16.1 in"; "the
+  worst stress is in the cone skirt around z 15.3 in, where its wall is 5.2 mm"), and walls and voxels are in mm
+  everywhere, heights and positions in the design's units (`_wall`; the chat's small lengths keep their fractions,
+  `_small_len`). The seat's ring is probed 1 mm under it in 1 mm steps and said as its outer edge ("held at its ring's
+  outer edge (10.6 in across)": the cone flares to r 135 mm there). An older run's stored "only 16 of its 16 edges"
+  is rebuilt from its numbers (`load_study.plate_why`). A refusal on a coarse run hedges as the strength line does:
+  "its check says it fails (0.5 times over, a coarse run: the fail may be the model's; …): make it hold first".
 - Tests: tests/test_preflight_bar_stool.py (17), and touched suites' expectations for the new words. Stacked on #136
   (its too-thin words), on #132's one verdict.
 

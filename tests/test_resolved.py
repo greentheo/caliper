@@ -61,7 +61,7 @@ checks:
   limit: 2.0
   source: assumed
 """
-COARSE = "Not resolved yet: the check was too coarse to see its 4 mm walls around z "   # and where (#136)
+COARSE = "Not resolved yet: the check was too coarse to see its thinnest walls, 4 mm around z "   # which (#139)
 COARSE_END = " mm. Check it again finer."
 NOT_CHECKED = load_study.NOT_CHECKED
 
@@ -136,7 +136,7 @@ def test_a_fail_on_coarse_voxels_stays_a_fail(tmp_path, monkeypatch):
     assert case["governs"] == "fea" and not case["holds"] and not rec["resolved"]
     (part,) = _work(store, "tube")
     assert part["status"] == "bad" and part["text"].startswith("Doesn't hold a foot: only about ")
-    assert part["text"].endswith("among 4 mm walls the voxels can't see: the fail may be the model's. "
+    assert part["text"].endswith("where its wall is 4 mm, too thin for the voxels to see: the fail may be the model's. "
                                  "Check it again finer."), part["text"]
     (design,) = _work(store)
     assert design["status"] == "bad" and design["text"].startswith("✗ Holds a foot (40 lb), 2 times over (assumed)")
@@ -191,8 +191,10 @@ def test_a_spool_hung_on_a_thin_neck_never_reads_holds(tmp_path, monkeypatch):
     (25.4, True, "1 in"), (4.0, False, "4 mm"), (3.9, False, "3.9 mm"), (0.3, False, "0.3 mm"), (19.05, False, "19 mm"),
 ])
 def test_a_thin_wall_is_said_in_a_unit_that_doesnt_round_it_away(mm, inches, said):
-    """#100 item 5: a 0.3 mm wall read "0 in"."""
-    assert answers._wall(mm, inches) == said
+    """#100 item 5: a 0.3 mm wall read "0 in". A small length the chat says beside its mm keeps that rule
+    (``_small_len``); a wall itself is said in mm, whatever the design's units (#139 review)."""
+    assert answers._small_len(mm, inches) == said
+    assert answers._wall(mm, inches) == answers._wall(mm, False) and answers._wall(mm).endswith(" mm")
 
 
 def test_the_finer_run_s_time_is_from_its_own_time_per_voxel():

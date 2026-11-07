@@ -329,6 +329,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
                          stale=part is None or r.get("version") != part["version"])   # never green on an older run
         for c, cv in zip(r.get("cases") or [], v.pop("cases", [])):
             c["verdict"] = cv
+            if c.get("plate") and not c["plate"].get("done"):      # never an older run's "16 of its 16" (#139)
+                c["plate"]["why"] = load_study.plate_why(c["plate"])
             # each thickness the plate check tried: its number against what it needs, and only where the case is
             # settled (it holds or fails): never green on a not-trusted, unresolved or older case (#132 review)
             for b in ((c.get("plate") or {}).get("by_thickness") or []):

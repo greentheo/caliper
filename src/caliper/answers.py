@@ -53,9 +53,16 @@ def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
 
 
-def _wall(mm: float, inches: bool) -> str:
-    """A wall's thickness: in inches to the nearest 1/32 (5/32 in), and in mm where that would round to nothing,
-    never "0 in" (CALI-97, #100 item 5)."""
+def _wall(mm: float, inches: bool = False) -> str:
+    """A wall's thickness, or a voxel's size: in mm, whatever the design's units (#139 review: walls in mm everywhere,
+    heights and positions in the design's), two places under 1 mm (0.25 mm, #137 item 2)."""
+    return (f"{mm:.2f}".rstrip("0").rstrip(".") if mm < 1 else
+            f"{mm:.1f}".removesuffix(".0") if mm < 10 else f"{mm:.0f}") + " mm"
+
+
+def _small_len(mm: float, inches: bool) -> str:
+    """A small length in inches to the nearest 1/32 (5/32 in), and in mm where that would round to nothing, never
+    "0 in" (CALI-97, #100 item 5): what the chat says beside a number in mm."""
     from math import gcd
 
     if inches and mm >= IN:
@@ -92,21 +99,22 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
             where, thin_here = worst_at(run, c, inches)
             wall = _wall(c["fea"]["wall_mm"], inches) if where else ""
             if v.get("coarse") and thin_here:        # among walls the voxels can't see: the fail may be the model's
-                text += (f" Its worst stress, in one run at {_wall(run['spacing_mm'], inches)} voxels, is {where}, "
-                         f"among {wall} walls the voxels can't see: the fail may be the model's. "
+                text += (f" Its worst stress, in one run at {_wall(run['spacing_mm'])} voxels, is {where}, where its "
+                         f"wall is {wall}, too thin for the voxels to see: the fail may be the model's. "
                          + ("Check it again finer." if run.get("finer") else
                             "A hand check or a printed test piece is the way to know."))
             elif where:                              # the voxels see the wall where it's worst
                 text += f" Its worst stress is {where}."
                 if v.get("coarse"):                  # the thin walls are said apart from it, not as its cause
-                    text += (f" Separately, its {_wall(run['thinnest_mm'], inches)} walls{_thin_at(run, inches)} "
+                    text += (f" Separately, its thinnest walls, {_wall(run['thinnest_mm'])}{_thin_at(run, inches)}, "
                              f"are too thin for the voxels to see.")
             elif v.get("coarse"):                    # an older run: where isn't known (CALI-97's words)
                 text += " " + coarse(run, inches, holds=False)
         pl = c.get("plate") or {}
         if pl.get("done") and c.get("governs") != "plate" and pl.get("safety_across") is not None:
             # a second opinion by hand on the panel it lands on (#137 item 7: the seat on its ring)
-            how = f", as a round plate on its {_len(pl['ring_mm'], inches)} ring" if pl.get("support") == "ring" else ""
+            how = (f", as a round plate held at its ring's outer edge ({_len(pl['ring_mm'], inches)} across)"
+                   if pl.get("support") == "ring" else "")
             text += f" By hand, the {pl['piece']} on its own{how}: {_times(pl['safety_across'])}."
     else:                                            # any other kind: its word, never a ✓ (CALI-112)
         text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {about}{_times(c['safety'])}."
@@ -158,7 +166,7 @@ def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
     ✗, and says the fail may be the model's."""
     from . import load_study as L
 
-    walls = f"{_wall(run.get('thinnest_mm') or 0, inches)} walls{_thin_at(run, inches)}"   # where, too (#136)
+    walls = f"thinnest walls, {_wall(run.get('thinnest_mm') or 0)}{_thin_at(run, inches)}"   # which, and where (#139)
     if not holds:
         return (f"The fail may be the model's: the voxels can't see its {walls}. "
                 + ("Check it again finer." if run.get("finer") else

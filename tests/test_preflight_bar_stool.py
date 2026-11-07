@@ -43,7 +43,7 @@ def test_a_broken_rule_of_its_own_leads_will_it_work(tmp_path):
     store = _with_rule(tmp_path)
     (r,) = part_rules.measured(store, "spool")
     assert r["status"] == "fail" and r["verdict"]["kind"] == "fails" and r["actual"] == pytest.approx(0.6, abs=0.05)
-    assert r["said"].startswith("shell_wall_thickness: its walls are 0.") and "around z 2" in r["said"]
+    assert r["said"].startswith("shell_wall_thickness: its thinnest walls are 0.") and "around z 2" in r["said"]
     assert r["said"].endswith("; it says at least 2.85 mm")
     state = design_api.design_state(store)
     assert state["parts"][0]["rules"][0]["verdict"]["kind"] == "fails"            # the page's rules list has it
@@ -88,15 +88,15 @@ def test_a_fail_among_walls_the_voxels_can_t_see_says_where_and_how_sure():
     run = _run_rec({"at": [-46.0, 165.7, 389.0], "in": "cone", "wall_mm": 0.25, "safety": 0.53})
     text = answers._case_line("i_want", run, run["cases"][0], None, False, True)["text"]
     assert text == ("Doesn't hold 250 lb person seated: only 0.5 times over, and it needs 2. Its worst stress, in one "
-                    "run at 3/16 in voxels, is in the cone around z 15.3 in, among 0.25 mm walls the voxels can't see: "
-                    "the fail may be the model's. A hand check or a printed test piece is the way to know.")
+                    "run at 4.6 mm voxels, is in the cone around z 15.3 in, where its wall is 0.25 mm, too thin for the "
+                    "voxels to see: the fail may be the model's. A hand check or a printed test piece is the way to know.")
 
 
 def test_a_fail_where_the_voxels_see_the_wall_says_the_thin_walls_apart():
     run = _run_rec({"at": [0.0, 0.0, 717.0], "in": "seat top", "wall_mm": 19.05, "safety": 0.53})
     text = answers._case_line("i_want", run, run["cases"][0], None, False, True)["text"]
-    assert text.endswith("Its worst stress is in the seat top around z 28.2 in. Separately, its 0.25 mm walls around "
-                         "z 16.1 in are too thin for the voxels to see.")
+    assert text.endswith("Its worst stress is in the seat top around z 28.2 in. Separately, its thinnest walls, "
+                         "0.25 mm around z 16.1 in, are too thin for the voxels to see.")
     assert "the fail may be the model's" not in text
 
 
@@ -104,7 +104,7 @@ def test_an_older_run_without_its_wall_keeps_the_old_words():
     """An older run's ``in`` named the nearest wood even for a printed hot spot: it isn't repeated."""
     run = _run_rec({"at": [-46.0, 165.7, 389.0], "in": "seat top", "safety": 0.53})
     text = answers._case_line("i_want", run, run["cases"][0], None, False, True)["text"]
-    assert "seat top" not in text and "the voxels can't see its 0.25 mm walls around z 16.1 in" in text
+    assert "seat top" not in text and "the voxels can't see its thinnest walls, 0.25 mm around z 16.1 in" in text
 
 
 def test_a_hot_voxel_in_the_printed_part_isn_t_named_after_the_nearest_wood():
@@ -123,7 +123,8 @@ def _failed_check(store, pid):
     os.makedirs(run)
     with open(os.path.join(run, "run.json"), "w") as f:
         json.dump({"id": "t", "part": pid, "version": store.design.part(pid).version, "created": 1.0,
-                   "min_safety": 2, "safety": 0.53, "holds": False, "spacing_mm": 3.0,
+                   "min_safety": 2, "safety": 0.53, "holds": False, "spacing_mm": 3.0, "thinnest_mm": 4.0,
+                   "across": 1.333,                    # 3 mm voxels across a 4 mm wall: coarse (#139 review item 7)
                    "cases": [{"name": "a foot", "safety": 0.53, "holds": False, "governs": "fea",
                               "fea": {"at": [0, 0, 70.0], "in": "tube", "wall_mm": 4.0, "safety": 0.53}}]}, f)
 
@@ -134,10 +135,10 @@ def test_carve_and_lighten_refuse_a_part_that_already_fails(tmp_path):
     _failed_check(store, "tube")
     with pytest.raises(ValueError) as e:
         carve.study(store, "tube", stations=2)
-    assert str(e.value) == ("Can't carve it: it already fails (0.5 times over, in the tube around z 70 mm): make it "
-                            "hold first, then carve.")
+    assert str(e.value) == ("Can't carve it: its check says it fails (0.5 times over, a coarse run: the fail may be "
+                            "the model's; in the tube around z 70 mm): make it hold first, then carve.")
     assert carve.list_runs(store) == []
-    with pytest.raises(ValueError, match="^Can't lighten it: it already fails"):
+    with pytest.raises(ValueError, match="^Can.t lighten it: its check says it fails .*a coarse run"):
         lighten.study(store, "tube")
 
 
@@ -292,3 +293,26 @@ def test_the_score_panel_and_goal_limit_render_together_unstubbed():
 def test_show_the_stress_names_no_old_label():
     src = open(__file__.replace("tests/test_preflight_bar_stool.py", "src/caliper/web/static/design.js")).read()
     assert "MPa ${esc(peakWhere(f))}" in src and "MPa in the ${esc(f.in" not in src
+
+
+
+def test_a_coarse_fail_s_refusal_hedges_like_the_strength_line(tmp_path):
+    """#139 review item 7: Carve's "it already fails" on a run too coarse to see its walls says the fail may be the
+    model's, as the strength line does."""
+    store = DesignStore.create("a printed tube", base=str(tmp_path / "designs"))
+    store.write_part("tube", TUBE, intent="a printed tube")
+    _failed_check(store, "tube")                     # 3 mm voxels across a 4 mm wall: coarse
+    said = load_study.already_fails(store, "tube")
+    assert said.startswith("its check says it fails (0.5 times over, a coarse run: the fail may be the model's")
+    assert said.endswith("): make it hold first")
+
+
+def test_an_older_run_s_plate_words_are_rebuilt_from_its_numbers():
+    """#139 review item 6: Theo's v4 run stored "only 16 of its 16 edges rest on another piece"."""
+    old = {"done": False, "piece": "seat top", "edges": 16, "edges_held": 16,
+           "why": "only 16 of its 16 edges rest on another piece; the plate check covers a panel held all round, so the "
+                  "FEA is the number for it"}
+    said = load_study.plate_why(old)
+    assert "16 of its 16" not in said and said.startswith("it's held all round, but its 16-sided outline")
+    real = {**old, "edges_held": 2, "why": "only 2 of its 4 edges rest on another piece; …"}
+    assert load_study.plate_why(real) == real["why"]

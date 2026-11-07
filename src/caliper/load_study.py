@@ -281,16 +281,16 @@ def thin_words(store: DesignStore, part_id: str, thin: float, where: dict, fines
     inches = getattr(store.design, "display_units", "in") == "in"
     at = (f" in the {where['piece']}" if where.get("piece") else
           f" around z {_len(where['at'][2], inches)}" if where.get("at") else "")
-    head, sees = f"its {_wall(thin, inches)} walls{at}", RESOLVE_MIN * finest_mm
+    head, sees = f"its thinnest walls, {_wall(thin)}{at}, are", RESOLVE_MIN * finest_mm
     nozzle = DEFAULT_MACHINE.nozzle
     printing, rule = printed and thin < nozzle, wall_rule(store, part_id)
     need = rule if rule and thin < rule[1] else None
     if not (printing or need):
-        return (f"{head} are too thin for the strength check to see: at this size it sees walls from {sees:.1f} mm "
+        return (f"{head} too thin for the strength check to see: at this size it sees walls from {sees:.1f} mm "
                 f"on, so check it by hand or with a test piece instead.")
     rule_said = f"your rule {need[0]} (at least {round(need[1], 2):g} mm)" if need else ""
-    return (head + (f" are too thin for a {nozzle:g} mm nozzle to print" + (f" and for {rule_said}" if need else "")
-                    if printing else f" are thinner than {rule_said}")
+    return (head + (f" too thin for a {nozzle:g} mm nozzle to print" + (f" and for {rule_said}" if need else "")
+                    if printing else f" thinner than {rule_said}")
             + (": thicken them to that." if need else ": thicken them.")
             + f" For a strength carve, walls must be at least {sees:.1f} mm at this size, so check it by hand or "
               f"with a test piece instead.")
@@ -408,12 +408,12 @@ def _ring_held(pc: dict, k: int, under, tol: float) -> Optional[float]:
     rim = float(np.linalg.norm(poly - mid, axis=1).max())
     ang = np.linspace(0, 2 * np.pi, 72, endpoint=False)
     held = None
-    for r in np.arange(max(t, 2.0), rim + 1e-6, 2.0):
+    for r in np.arange(max(t, 1.0), rim + 1e-6, 1.0):
         # just under the panel, and only what touches it: a cone flares below its top ring, so a deeper or looser probe
         # reads the ring wider than where it meets the seat (the bar stool: 282 mm, against its 266 mm ring)
         pts = (mid + r * (np.cos(ang)[:, None] * u + np.sin(ang)[:, None] * v)
                + side * n * (t + 1.0))
-        if float(np.mean(under(pts, 1.0))) >= 0.9:
+        if float(np.mean(under(pts, 0.5))) >= 0.9:
             held = float(r)
     return held
 
@@ -637,6 +637,19 @@ def heat_mesh(mesh, grid, von_mises: np.ndarray, solid: np.ndarray, max_edge: fl
 
     return {"positions": b64(v.astype(np.float32)), "index": b64(f.astype(np.uint32)),
             "heat": b64(heat.astype(np.float32)), "max": float(heat.max()) if len(heat) else 0.0}
+
+
+def plate_why(pl: Optional[dict]) -> Optional[str]:
+    """Why a plate check didn't run, from the record's numbers: a run from before #137 stored "only 16 of its 16 edges
+    rest on another piece" for a panel held all round (#139 review). Its own words otherwise."""
+    pl = pl or {}
+    if pl.get("done") or not pl.get("why"):
+        return pl.get("why")
+    edges, held = pl.get("edges"), pl.get("edges_held")
+    if edges is not None and held is not None and held >= edges and "of its" in pl["why"]:
+        return (f"it's held all round, but its {edges}-sided outline isn't one the plate check covered when this ran; "
+                f"check it again for a round plate's number")
+    return pl["why"]
 
 
 def peak_in(fea: Optional[dict]) -> Optional[str]:
@@ -1019,8 +1032,11 @@ def already_fails(store: DesignStore, part_id: str) -> Optional[str]:
     worst = min((c for c in rec.get("cases") or [] if c.get("safety") is not None), key=lambda c: c["safety"],
                 default=None)
     where, _ = worst_at(rec, worst, store.design.display_units == "in") if worst else ("", None)
-    return (f"it already fails ({_times(rec['safety']) if rec.get('safety') is not None else 'as checked'}"
-            + (f", {where}" if where else "") + "): make it hold first")
+    times = _times(rec["safety"]) if rec.get("safety") is not None else "as checked"
+    if v.get("coarse") or (worst is not None and unresolved(rec, worst)):      # as the strength line says it (#139)
+        return (f"its check says it fails ({times}, a coarse run: the fail may be the model's"
+                + (f"; {where}" if where else "") + "): make it hold first")
+    return f"it already fails ({times}" + (f", {where}" if where else "") + "): make it hold first"
 
 
 def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
