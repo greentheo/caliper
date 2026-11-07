@@ -572,6 +572,15 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
    across the gap and it's about 2.0 times over instead of 1.2 (on 6.8 in: with the grain along the span it's less
    stiff across, so less of it carries the load)". The verdict is the second number, as before.
 3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_orthotropic.py`.
+### 2026-11-07 · No card reads greener than the newest strength check (CALI-123 #138)
+1. Open the bar stool (a copy of Theo's): the design card's *Will it work?* says "✗ Holds a 250 lb person sitting…:
+   last checked on v4: 1.7x, needs 2x · v7 not checked yet", as the part card does; no "2.58x" from the v1 card.
+2. The Score panel reads "Scored as of v1:", each old pass an amber "·", each number "(as of v1)"; Score it again.
+3. The history's v3 strength checks say "not checked: nothing connects where it's pushed to where it's held", not
+   "doesn't hold, 0x".
+4. The first open of the cards takes about 45 s on the stool (each printed piece sliced once), the next a few seconds.
+5. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_newest_run.py`.
+
 ### 2026-11-07 · Theo's bar stool, as its cards should read it (CALI-122 #137)
 1. Open the bar stool (a copy) and press **Check it holds** on v7. *Will it work?* leads with "✗ Breaks its rule
    shell_wall_thickness: its walls are 0.25 mm around z 16.1 in; it says at least 2.85 mm", and *Rules on this part*
