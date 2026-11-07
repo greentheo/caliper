@@ -37,6 +37,7 @@ const result = runScale(prepared, 1, { rotations: job.rotations ?? 8 });
 // way, or not. A piece split in two (top -> topa, topb) keeps its panel's grain.
 const want = job.grain || {};
 const grainOut = [];
+let grainFree = null;
 if (Object.keys(want).length) {
   const P = result.mesh.positions;
   const at = (i) => [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]];
@@ -74,11 +75,13 @@ if (Object.keys(want).length) {
   });
   const rot = (q, deg) => { const r = (deg * Math.PI) / 180, c = Math.cos(r), s = Math.sin(r); return { u: q.u * c - q.v * s, v: q.u * s + q.v * c }; };
   const s = result.stock;
+  const free = result.sheetCount;              // what it took turning freely: the lock's cost, said (#151 review)
   const nest = nestPieces(result.pieces.map((p, i) => ({ id: i, label: p.label,
     outline: turn.has(i) ? p.flat.cutOutline.map((q) => rot(q, -turn.get(i))) : p.flat.cutOutline })),
   { sheetLength: s.sheetLength, sheetWidth: s.sheetWidth, margin: s.margin, kerf: s.kerf, grain: true,
     rotations: job.rotations ?? 8, openSheets: 0 });
   for (const sheet of nest.sheets) for (const pl of sheet.placed) if (turn.has(pl.index)) pl.angle -= turn.get(pl.index);
+  grainFree = free;
   const sheetArea = s.sheetLength * s.sheetWidth;
   result.nest = nest; result.sheets = nest.sheets; result.sheetCount = nest.sheets.length;
   result.stockArea = nest.sheets.length * sheetArea;
@@ -157,4 +160,5 @@ console.log(JSON.stringify({ joints,
   files: files.map((f) => ({ name: f.name, kind: f.kind, describe: f.describe })),
   piece_list: pieces,
   grain: grainOut,
+  grain_sheets: grainOut.length ? { free: grainFree, kept: result.sheetCount } : null,
 }));

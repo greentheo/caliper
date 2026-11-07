@@ -160,6 +160,7 @@ def test_one_phrase_for_the_cut_everywhere_it_s_said(tmp_path):
     (p,) = design_api.design_state(store)["parts"]
     said["page's you said"] = p["grain"]["top"]["line"]
     said["beam after"] = _beam(store)["why"]
+    assert said["beam after"].count(PHRASE) == 1                    # said once on the Beam line (#151 review)
     said["chat"] = chat.turn(store, "cut the top with the grain front to back", use_llm=False).reply
     for where, text in said.items():
         assert PHRASE in text, (where, text)
@@ -201,6 +202,18 @@ def test_a_grain_with_no_way_is_asked_and_a_question_isn_t_kept(tmp_path):
     assert grain.stated(store, "bench") == {}
 
 
+@pytest.mark.parametrize("said", ["give the top a nice wood grain finish", "use a fine-grain plywood for the top",
+                                  "stain it to show the grain"])
+def test_a_finish_or_a_kind_of_plywood_isn_t_a_grain_to_cut(tmp_path, said):
+    """#151 review, blocking: any message with "grain" in it was taken for which way to cut a panel, and asked."""
+    store = _store(tmp_path)
+    _run_with(store, _beam(store))
+    assert grain.from_chat(store, said) is None and chat._grain_said(store, said, None) is None
+    assert grain.stated(store, "bench") == {}
+    # a real one, beside them, still is
+    assert grain.from_chat(store, "lay the top out with its grain running side to side")["grain"] == "across"
+
+
 def test_a_sheet_named_in_two_parts_asks_which(tmp_path):
     store = _store(tmp_path)
     store.write_part("shelf", TOP, intent="a shelf")              # its sheet is a "top" too
@@ -221,7 +234,7 @@ def test_the_page_says_which_grain_the_beam_check_used():
         "out = [beamGrain(pl), beamGrain({...pl, grain: 'along', grain_phrase: pl.advice_phrase}),\n"
         "       grainKeep({grain: {}}, pl), grainKeep({grain: said}, pl), grainKeep({grain: said}, {...pl, grain: 'along'})];")))
     assert out[0] == "the grain unknown: the weaker way"
-    assert out[1] == f"with its {PHRASE}, as you said"
+    assert out[1] == "with the grain as you said"                 # the cut's words are in the why, once (#151)
     assert 'data-grain="top"' in out[2] and f"Keep: cut it with its {PHRASE} (3.1x)" in out[2]
     assert out[3] == f" · <span class=\"muted\">you said: Cut the top with its {PHRASE}. Check it holds again to use it.</span>"
     assert out[4] == ""
@@ -261,7 +274,9 @@ def test_the_cut_plan_lays_a_stated_grain_along_the_sheet(tmp_path):
     rec = cutplan.run(store, "bench")
     assert _top_on_the_sheet(store, rec) == (300, 900)
     assert rec["grain"] == [{"piece": "top", "line": f"Cut the top with its {PHRASE}.", "follows": True, "why": ""}]
-    assert any("turning pieces end for end only" in n for n in rec["notes"])
+    (note,) = [n for n in rec["notes"] if "end for end only" in n]
+    assert "every piece is turned end for end only, to keep the top's grain along the sheet" in note
+    assert note.endswith(("it takes no more sheets than turning them freely.", "turned freely."))
     assert cutplan.cutlist_text(rec).splitlines()[2] == f"Cut the top with its {PHRASE}."
 
 

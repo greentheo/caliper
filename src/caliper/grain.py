@@ -110,6 +110,10 @@ def notes(store: DesignStore, pid: str) -> list[str]:
 # --- the chat: "cut the seat with the grain front to back" ------------------------------------------------------------
 
 _SAID = re.compile(r"\bgrain\b", re.I)
+#: cutting or laying a sheet with its grain some way: "cut the top with the grain", "its grain should run …" (#151
+#: review: "a nice wood grain finish", "a fine-grain plywood", "stain it to show the grain" are the chat's, not this)
+_CUTTING = re.compile(r"\b(?:cut|cutting|lay|laid|laying)\b[^.?!]*\bgrain\b|\bgrain\b[^.?!]*\b(?:run|runs|running|go|goes|"
+                      r"going|way|direction)\b", re.I)
 _WAY = re.compile(r"\b(side to side|left to right|right to left|front to back|back to front|up and down)\b|"
                   r"\b(along|across)\s+the\s+(?:span|gap)\b", re.I)
 
@@ -122,6 +126,8 @@ def from_chat(store: DesignStore, message: str, scope: Optional[str] = None) -> 
     if not _SAID.search(message or "") or message.strip().endswith("?"):
         return None                              # a question about the grain is the chat's to answer, never kept
     m = _WAY.search(message)
+    if m is None and not _CUTTING.search(message):
+        return None                              # a finish, a kind of plywood: not which way a panel is cut
     text = _WAY.sub(" ", message.lower())        # "front to back" names a direction, not the front or back panel
     found = []
     for p in store.design.parts:
@@ -137,8 +143,7 @@ def from_chat(store: DesignStore, message: str, scope: Optional[str] = None) -> 
             if name and (name.lower().replace("_", " ") in text or (words and all(w in text for w in words))):
                 found.append((p.id, name))
     if m is None:                                # a grain with no way: asked, never left to the designer (#151)
-        return {"why": ("which way: front to back, or side to side?" if found else
-                        "which sheet, and which way: front to back, or side to side?")}
+        return {"why": "which way: front to back, or side to side?"} if found else None
     if not found:
         return {"why": "which sheet? Name it as its part does (its sheets are on the part's card)"}
     if len(found) > 1:

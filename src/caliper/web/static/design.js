@@ -2173,8 +2173,9 @@ const holdsHere = (x) => !!(x && x.verdict && x.verdict.counts_as_pass);
 const runBadge = (run) => verdictBadge(run.verdict);
 const runWord = (run) => (run.verdict ? run.verdict.word : 'not checked yet');
 // which grain the Beam check used (CALI-126): the one the person said, or the weaker way; never a hard-coded "unknown"
+// the cut's own words are in the check's why once ("With its face grain running …, as you said"): said once (#151)
 function beamGrain(pl) {
-  return pl.grain ? `with its ${pl.grain_phrase || 'face grain as you said'}, as you said` : 'the grain unknown: the weaker way';
+  return pl.grain ? 'with the grain as you said' : 'the grain unknown: the weaker way';
 }
 // keep the advice: the grain the person keeps is the only one that moves the verdict, and it goes on the cut list
 function grainKeep(p, pl) {

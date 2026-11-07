@@ -40,6 +40,12 @@ reach the maker.
     the grain ("should it run front to back?") is the chat's, never kept.
   - Pinned: advice from an unsettled case quotes no number; the book's line end to end (`release.make`); a sheet
     named in two parts asks which. Mutants (no settled filter, no book lines, no "say which one", no turn) each fail.
+  - **Round 2 (blocking):** only cutting or laying a sheet is a grain to keep or ask about: a way ("front to back")
+    or a cutting verb near "grain" ("cut the top with the grain", "its grain should run …"), and asked only when it
+    names a sheet. "give the top a nice wood grain finish", "use a fine-grain plywood", "stain it to show the grain"
+    go to the chat as ever. The nester turns a whole material end for end only, so the plan says what that cost ("…
+    to keep the top's grain along the sheet: 3 sheets, against 2 turned freely", or that it took none). The Beam line
+    says the cut's words once (in its why; then "with the grain as you said").
 - Tests: tests/test_grain.py (14 with the review's: assumed never moves it, stated does, the part's own directions,
   refused grains and panels, the card's advice then "check again", unsettled advice, one phrase everywhere, the chat,
   no way asked, two parts, the page's line, the layout turned on a real cut plan, a layout that can't follow it, the

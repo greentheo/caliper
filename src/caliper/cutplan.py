@@ -352,9 +352,14 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
             why = ("which way it runs isn't known until a strength check has measured its span" if n not in ways
                    else next((g["why"] for g in got if not g.get("fits")), "") if got else "it wasn't laid out")
             record["grain"].append({"piece": n, "line": G.line(n, e), "follows": not why, "why": why})
-        if ways:
-            record["notes"].append(f"{mat['name']}: laid out turning pieces end for end only, so "
-                                   f"{', '.join(sorted(ways))}' grain runs along the sheet, as the sheet's does.")
+        if ways:                                 # the nester turns a whole material end for end only: its cost, said
+            names = " and ".join(f"the {n}'s" for n in sorted(ways))
+            cost = summary.get("grain_sheets") or {}
+            more = (cost.get("kept") or 0) - (cost.get("free") or 0)
+            record["notes"].append(
+                f"{mat['name']}: every piece is turned end for end only, to keep {names} grain along the sheet"
+                + (f": {cost['kept']} sheet{'s' if cost['kept'] != 1 else ''}, against {cost['free']} turned freely."
+                   if more > 0 else ": it takes no more sheets than turning them freely."))
         record["sheets"].append({"key": key, "material": material, "thickness_mm": thickness,
                                  "label": mat["name"], "stock": stock["name"],
                                  "panels": [it["name"] for it in its], **summary})
