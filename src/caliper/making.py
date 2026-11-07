@@ -57,6 +57,12 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
             path = os.path.join(keep, name)
             m.export(path)
             each.append({"file": name, **printing.estimate(path, pc["material"], volume, wait=wait)})
+        if any(e.get("hours") is None and e.get("slicer_failed") for e in each):   # a crashed slice: said, no total
+            printed.append({"name": pc["name"], "material": pc["material"], "pieces": len(parts),
+                            "pinned": len(parts) > 1, "files": each, "slicer_failed": True, "hours": None,
+                            "filament_g": None, "usd": None, "trust": None,
+                            "from": next(e["from"] for e in each if e.get("hours") is None)})
+            continue
         if any(e.get("pending") for e in each):     # one piece still slicing: no total, never a part of one
             printed.append({"name": pc["name"], "material": pc["material"], "pieces": len(parts),
                             "pinned": len(parts) > 1, "files": each, "pending": True, "hours": None,

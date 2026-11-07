@@ -131,6 +131,32 @@ _GAVE_UP: dict = {}
 #: what a card shows while the slicer works: no number, never a stale or rough one as if final
 WORKING = {"pending": True, "hours": None, "filament_g": None, "usd": None, "trust": None,
            "from": "PrusaSlicer: working it out"}
+#: a slice in the background gives up sooner than one a caller waits on: a hung slicer is said, not waited on (#152)
+BACKGROUND_TIMEOUT = 180.0
+_QUEUE = None
+
+
+def _submit(job) -> None:
+    """One slicer worker for the cards: a three-piece part's slices run in turn, never three PrusaSlicers at once."""
+    import queue
+    import threading
+
+    global _QUEUE
+    if _QUEUE is None:
+        _QUEUE = queue.Queue()
+
+        def work():
+            while True:
+                fn = _QUEUE.get()
+                try:
+                    fn()
+                except Exception:  # noqa: BLE001 — each job says its own failure; the worker keeps going
+                    pass
+                finally:
+                    _QUEUE.task_done()
+
+        threading.Thread(target=work, daemon=True, name="caliper-slicer").start()
+    _QUEUE.put(job)
 
 
 def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_INFILL, wait: bool = True) -> dict:
@@ -138,7 +164,6 @@ def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_IN
     sliced, so the same piece isn't sliced again. ``wait=False`` (the cards, #97: 10 s of the bar stool's 20 s): a
     piece not sliced yet is started in the background and :data:`WORKING` comes back; the next ask has the number."""
     import hashlib
-    import threading
 
     with open(stl_path, "rb") as fh:
         key = (hashlib.sha1(fh.read()).hexdigest(), material, tuple(float(v) for v in volume_mm), float(infill),
@@ -156,16 +181,19 @@ def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_IN
 
             def later():
                 try:
-                    got = _estimate(copy, material, volume_mm, infill)
-                    if got.pop("_retry", False):         # failed or hung: the card says so, once
+                    got = _estimate(copy, material, volume_mm, infill, timeout=BACKGROUND_TIMEOUT)
+                    if got.pop("_retry", False):         # failed or hung: the card says so, once (#152 review)
                         _GAVE_UP[key] = {**got, "slicer_failed": True}
                     else:
                         _SLICED[key] = got
+                except Exception as e:  # noqa: BLE001 — a slice that crashed is said too, never restarted per ask
+                    _GAVE_UP[key] = {"hours": None, "filament_g": None, "usd": None, "trust": None,
+                                     "from": f"no estimate ({e})", "slicer_failed": True}
                 finally:
                     _PENDING.discard(key)
                     shutil.rmtree(keep, ignore_errors=True)
 
-            threading.Thread(target=later, daemon=True, name="caliper-slice").start()
+            _submit(later)
         return dict(WORKING)
     got = _estimate(stl_path, material, volume_mm, infill)
     if not got.pop("_retry", False):                  # a slicer that timed out isn't remembered (#140 review)
@@ -173,7 +201,7 @@ def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_IN
     return dict(got)
 
 
-def _estimate(stl_path: str, material: str, volume_mm, infill: float) -> dict:
+def _estimate(stl_path: str, material: str, volume_mm, infill: float, timeout: float = 600.0) -> dict:
     pm = M.printed(material)
     density = pm["density"] / 1000.0                        # g/cm³
     exe = slicer()
@@ -187,7 +215,7 @@ def _estimate(stl_path: str, material: str, volume_mm, infill: float) -> dict:
                    "--filament-diameter", f"{FILAMENT_D_MM:g}", stl_path]
             failed = ""
             try:
-                subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
                 text = open(out, errors="ignore").read() if os.path.exists(out) else ""
             except subprocess.TimeoutExpired:
                 text, failed = "", "the slicer timed out"

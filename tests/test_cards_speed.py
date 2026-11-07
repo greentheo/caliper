@@ -101,7 +101,7 @@ def slow_slicer(monkeypatch):
 
     go, calls = threading.Event(), []
 
-    def estimate(path, material, volume, infill):
+    def estimate(path, material, volume, infill, timeout=600.0):
         calls.append(path)
         go.wait(10)
         return {"hours": 3.5, "filament_g": 120.0, "usd": 3.0, "trust": "model", "from": "PrusaSlicer"}
@@ -185,7 +185,7 @@ def test_a_slicer_that_fails_or_hangs_is_said_once_and_not_asked_again(tmp_path,
 
     calls = []
 
-    def hung(path, material, volume, infill):
+    def hung(path, material, volume, infill, timeout=600.0):
         calls.append(path)
         return {"hours": 9.9, "filament_g": 300.0, "usd": 7.0, "trust": "rough",
                 "from": "walls + infill at rough speeds (the slicer timed out)", "_retry": True}
@@ -206,8 +206,113 @@ def test_a_slicer_that_fails_or_hangs_is_said_once_and_not_asked_again(tmp_path,
     assert not mk["pending"] and pr["slicer_failed"] and pr["trust"] == "rough" and pr["hours"] == 19.8
     how = next(c for c in answers.part(store, design_api.design_state(store), "bar") if c["key"] == "make")
     (line,) = [ln for ln in how["lines"] if ln["text"].startswith("Print it in PETG")]
-    assert line["text"] == "Print it in PETG: 2 pieces, about 19.8 h (a rough estimate: the slicer timed out)."
+    assert line["text"] == ("Print it in PETG: 2 pieces, about 19.8 h (a rough guess; the slicer couldn't work it "
+                            "out: the slicer timed out).")
     assert not line.get("working")                                          # the page stops asking
     assert len(calls) == first == 2                                         # not sliced again per ask
     making.plan(store, "bar")                                               # a caller that waits still tries again
     assert len(calls) == 4
+
+
+def _failing(monkeypatch, fail):
+    from caliper import printing
+
+    calls, live, most = [], [0], [0]
+
+    def run(path, material, volume, infill, timeout=600.0):
+        import time
+
+        calls.append(timeout)
+        live[0] += 1
+        most[0] = max(most[0], live[0])
+        time.sleep(0.05)
+        live[0] -= 1
+        return fail()
+
+    monkeypatch.setattr(printing, "_SLICED", {})
+    monkeypatch.setattr(printing, "_PENDING", set())
+    monkeypatch.setattr(printing, "_GAVE_UP", {})
+    monkeypatch.setattr(printing, "slicer", lambda: "/usr/bin/prusa-slicer")
+    monkeypatch.setattr(printing, "_estimate", run)
+    return calls, most
+
+
+def test_a_failing_slicer_starts_once_however_often_the_page_asks(tmp_path, monkeypatch):
+    """#152 review, blocking: each 4 s re-ask started PrusaSlicer again (5 asks, 5 starts) and never said it couldn't."""
+    import time
+
+    from caliper import printing
+
+    calls, _ = _failing(monkeypatch, lambda: {"hours": 2.0, "filament_g": 50.0, "usd": 1.0, "trust": "rough",
+                                              "from": "walls + infill at rough speeds (the slicer gave no estimate)",
+                                              "_retry": True})
+    stl = tmp_path / "a.stl"
+    stl.write_bytes(b"solid a\nendsolid a\n")
+    for _ in range(5):
+        got = printing.estimate(str(stl), "petg", (220, 220, 250), wait=False)
+        time.sleep(0.1)
+    assert len(calls) == 1 and calls[0] == printing.BACKGROUND_TIMEOUT          # once, with the hang's own timeout
+    assert got["slicer_failed"] and got["hours"] == 2.0 and not got.get("pending")
+
+
+def test_a_slice_that_crashes_is_said_and_never_restarted(tmp_path, monkeypatch):
+    import time
+
+    from caliper import answers, design_api, making, shop
+
+    from .test_shop import PRINTED, PRINTER
+
+    def boom():
+        raise RuntimeError("the STL wouldn't load")
+
+    calls, _ = _failing(monkeypatch, boom)
+    shop.write({"hand": ["drill"], "machines": [PRINTER]})
+    store = DesignStore.create("a bar", base=str(tmp_path / "designs"))
+    store.write_part("bar", PRINTED, intent="a printed bar")
+    making.plan(store, "bar", wait=False)
+    time.sleep(0.5)
+    state = design_api.design_state(store)
+    how = next(c for c in answers.part(store, state, "bar") if c["key"] == "make")
+    (line,) = [ln for ln in how["lines"] if ln["text"].startswith("Print it in PETG")]
+    assert line["text"] == "Print it in PETG: 2 pieces; print time: the slicer couldn't work it out: the STL wouldn't load."
+    assert not line.get("working") and line["status"] == "warn"
+    now = answers.measured(store, state)
+    assert "print.hours" not in now and now["print.unknown"].startswith("print time: the slicer couldn't work it out")
+    making.plan(store, "bar", wait=False)
+    assert len(calls) == 2                                                       # two pieces, each once
+
+
+def test_one_slicer_at_a_time(tmp_path, monkeypatch):
+    """A three-piece part's slices run in turn, never three PrusaSlicers at once."""
+    import time
+
+    from caliper import printing
+
+    calls, most = _failing(monkeypatch, lambda: {"hours": 1.0, "filament_g": 1.0, "usd": 1.0, "trust": "model",
+                                                 "from": "PrusaSlicer"})
+    for i in range(3):
+        stl = tmp_path / f"p{i}.stl"
+        stl.write_bytes(f"solid {i}\nendsolid {i}\n".encode())
+        printing.estimate(str(stl), "petg", (220, 220, 250), wait=False)
+    t = time.time()
+    while len(printing._SLICED) < 3 and time.time() - t < 5:
+        time.sleep(0.02)
+    assert len(calls) == 3 and most[0] == 1
+
+
+def test_a_same_mtime_rewrite_with_other_text_misses_the_offer(store):
+    """An offer is checked against the file's text, not only its path and time: a rewrite in the same tick builds."""
+    import os
+
+    wide = _box(dx=60)
+    built = sandbox.run_script(wide, {})
+    store.write_part("box", wide, intent="wider", built=(wide, {}, built.geometry))
+    path = store.script_path("box")
+    st = os.stat(path)
+    with open(path, "w") as f:
+        f.write(_box(dx=90))
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))                         # the same mtime, other text
+    assert (os.path.abspath(path), os.path.getmtime(path)) in assembly._OFFERED
+    got = store.part_geometry("box")
+    assert got.solid is not built.geometry.solid
+    assert got.require_mesh().bounds[1][0] - got.require_mesh().bounds[0][0] == pytest.approx(90, abs=0.01)
