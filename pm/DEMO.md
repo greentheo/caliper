@@ -566,6 +566,10 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · The carve-through-the-API test allows a slow runner (CALI-121, #134 follow-up)
+1. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_mixed.py -k carving_through_the_api` waits up to 25 min
+   for its carve job (it took 13 on a loaded machine). Nothing to see in the app.
+
 ### 2026-11-07 · A carve on voxels too coarse to see its walls says so (CALI-106 #101)
 1. Carve a thin printed part (**Carve it**): where the check couldn't see its walls, the steps that hold are amber dots
    reading "not resolved", and **Carve it like this** is off, saying why.
