@@ -62,7 +62,8 @@ def test_by_thickness_says_the_same():
 
 def test_the_why_says_less_of_it_carries_the_load_with_the_grain_along():
     why = load_study.beam(mat=PLY, **EDGE)["why"]
-    assert "with the grain along the span it's less stiff across, so less of it carries the load" in why
+    # in the one phrase for the cut (#151 review): never "along the span" beside "across the gap"
+    assert "cut that way it's less stiff across, so less of it carries the load" in why
     assert "less stiff across" not in load_study.beam(mat=SAME, **EDGE)["why"]
 
 
