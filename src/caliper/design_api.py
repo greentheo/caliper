@@ -36,6 +36,12 @@ class ChatMessage(BaseModel):
     scope: Optional[str] = None
 
 
+class ParamSet(BaseModel):
+    name: str
+    value: float
+    unit: Optional[str] = None            # a length's unit (mm when none); no unit for a count, a ratio or an angle
+
+
 class ShopOffer(BaseModel):
     index: int
     add: bool = True
@@ -328,9 +334,12 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
     # one verdict per run and case, for the page to read and never work out (CALI-112): its badges, words and colours
     untrusted = {p["id"]: p.get("untrusted") for p in parts}
+    from .consistency import bare_edge
+
+    middle = {p["id"] for p in parts if p.get("loads") and bare_edge(store, p["id"])}   # the middle only (CALI-94)
     for r in runs["load"]:
         part = next((p for p in parts if p["id"] == r["part"]), None)
-        v = verdicts.run(r, filled=untrusted.get(r["part"]),
+        v = verdicts.run(r, filled=untrusted.get(r["part"]), edge=r["part"] in middle,
                          stale=part is None or r.get("version") != part["version"])   # never green on an older run
         for c, cv in zip(r.get("cases") or [], v.pop("cases", [])):
             c["verdict"] = cv
@@ -361,8 +370,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
                 # the run's own verdict where it's still here: an older line kept "doesn't hold, 0x" for a check that
                 # couldn't run (#138 item 3)
                 rec = loads_by_id.get(h.get("run"))
-                h["verdict"] = ({k: x for k, x in verdicts.run(rec).items() if k != "cases"} if rec
-                                else verdicts.of(h))
+                h["verdict"] = ({k: x for k, x in verdicts.run(rec, edge=rec["part"] in middle).items()
+                                 if k != "cases"} if rec else verdicts.of(h))        # the middle only too (CALI-94)
             elif h.get("kind") == "revision" and h.get("result"):     # its report's verdict (#132 review)
                 h["verdict"] = verdicts.history(h)
     for p in parts:                           # what stops a carve or a lightening: the card's offer reads it too (#144)
@@ -623,6 +632,38 @@ def router():
                 store.append_history(pid, {"kind": "setting", "role": req.role})
             store.save()
             return design_state(store)
+
+    @r.get("/api/designs/{slug}/parts/{pid}/params")
+    def part_params(slug: str, pid: str):
+        """The part's exact numbers (CALI-108): each PARAMS entry in plain words, its value (mm for a length), its
+        unit and its RANGES bounds, and whether its build reads it."""
+        from . import params
+
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(404, f"no part {pid!r}")
+        try:
+            return {"part": pid, "units": store.design.display_units, "params": params.listing(store, pid)}
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+
+    @r.post("/api/designs/{slug}/parts/{pid}/params")
+    def set_part_param(slug: str, pid: str, req: ParamSet):
+        """Set one of a part's numbers by hand (CALI-108): no Claude call. A new version with that PARAMS line
+        rewritten, rebuilt and the design measured again; refused (422, saying why) outside its range or if it won't
+        build. A value its build ignores or clamps comes back as ``warning``."""
+        from . import params
+
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None:
+                raise HTTPException(404, f"no part {pid!r}")
+            try:
+                got = params.set_value(store, pid, req.name, req.value, req.unit)
+            except (ValueError, KeyError) as e:
+                raise HTTPException(422, str(e).strip("'\""))
+            return {"version": got["version"], "said": got["said"], "warning": got["warning"], "notes": got["notes"],
+                    "design": design_state(store)}
 
     @r.get("/api/designs/{slug}/parts/{pid}/script")
     def part_script(slug: str, pid: str):

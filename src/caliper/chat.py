@@ -812,16 +812,19 @@ def _facts(store: DesignStore, scope: Optional[str]) -> str:
 
     for run in load_study.list_runs(store)[:2]:
         filled = consistency.filled(store, run["part"])
+        middle = bool(consistency.bare_edge(store, run["part"]))     # loaded in the middle only (CALI-94)
         part = store.design.part(run["part"])
         older = part is None or run.get("version") != part.version      # an older run says so (#132 review)
         for c in run.get("cases") or []:
-            v = verdicts.case(run, c, filled=filled, stale=older)   # one verdict (CALI-112): the chat repeats it
+            v = verdicts.case(run, c, filled=filled, stale=older, edge=middle)   # one verdict (CALI-112)
             out.append(f"strength check of {run['part']} v{run['version']}: {c.get('name')} {c.get('lb')} lb x "
                        f"{c.get('factor')}: verdict {v['word'].upper()}; safety {c.get('safety')} ({c.get('governs')}), "
                        f"breaks near {c.get('breaks_lb')} lb; needs {run.get('min_safety')}"
-                       # never a verdict to repeat: the FEA couldn't see the wall (CALI-110)
+                       # never a verdict to repeat: the FEA couldn't see the wall (CALI-110), or the middle only (CALI-94)
                        + ("; NOT RESOLVED: the voxels were too coarse to see its walls, so this number is no verdict"
                           if v["kind"] in ("unresolved", "unchecked") or v.get("coarse") else "")
+                       + ("; CHECKED IN THE MIDDLE ONLY: the front edge, where people stand, isn't, so this is no "
+                          "verdict" if v["kind"] == "edge" else "")
                        + ("; NOT TRUSTED: it ran on a filled-in shape" if v["kind"] == "untrusted" else ""))
         out += [f"strength note: {n}" for n in (run.get("notes") or [])[:4]]
     said = [e for e in store.log() if e.get("kind") in ("message", "reply")][-6:]

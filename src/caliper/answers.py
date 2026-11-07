@@ -29,10 +29,14 @@ def _len(mm: float, inches: bool) -> str:
     return f"{mm / IN:.1f} in".replace(".0 in", " in") if inches else f"{mm:.0f} mm"
 
 
-def _times(x: float) -> str:
-    """3.1 -> "3 times over"; the kid's reading of a safety factor."""
+def _times(x: float, about: bool = False) -> str:
+    """3.1 -> "3.1 times over"; the kid's reading of a safety factor. ``about``: the printed model's rough number
+    (CALI-97), "about 3.1 times over"; 10 or more is "more than 10 times over" either way, never "about more than"
+    (#144 review)."""
     n = round(x, 1)
-    return f"{n:g} times over" if n < 10 else "more than 10 times over"
+    if n >= 10:
+        return "more than 10 times over"
+    return ("about " if about else "") + f"{n:g} times over"
 
 
 def _sentence(text: str, most: int = 120) -> str:
@@ -135,12 +139,13 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     return ""
 
 
-def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool, inches: bool) -> dict:
+def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool, inches: bool,
+               edge: bool = False) -> dict:
     """The part card's line for one load case: its words from its one verdict (CALI-112)."""
     from . import load_study as L
 
     older = " (Checked on an older version: check again.)" if stale else ""
-    v = verdicts.case(run, c, filled=filled, stale=stale)   # an older run's ✓ is "older version" (#132 review)
+    v = verdicts.case(run, c, filled=filled, stale=stale, edge=edge)   # an older run's ✓ is "older version" (#132)
     if v["kind"] == "untrusted":                     # ran on a block: no ✓ from it (CALI-96); this wins
         return _line(untrusted(pid, filled), "warn", study="load")   # the number: the panel, badged
     if v["kind"] == "unchecked" and (c.get("fea") or {}).get("supported") is False:     # couldn't run (#138 item 3)
@@ -148,13 +153,17 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
                      f"pushed, then check it again." + older, v["status"], study="load")
     if v["kind"] in ("unresolved", "unchecked"):     # an FEA that can't see the wall is no ✓ (CALI-97)
         return _line(coarse(run, inches) + older, "warn", study="load")
+    if v["kind"] == "edge":                          # the middle only: no ✓ for where people stand (CALI-94)
+        from .consistency import MIDDLE_ONLY
+
+        # never "holds" for it (#132's guard): the case, then what was and wasn't checked
+        return _line(f"{c['name'][:1].upper() + c['name'][1:]}: {MIDDLE_ONLY}." + older, "warn", study="load")
     # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
     rough = L.rough(run, c)
-    about = "about " if rough else ""
     if v["kind"] == "holds":
-        text = f"Holds {c['name'].lower()}, {about}{_times(c['safety'])}."
+        text = f"Holds {c['name'].lower()}, {_times(c['safety'], rough)}."
     elif v["kind"] == "fails":
-        text = f"Doesn't hold {c['name'].lower()}: only {about}{_times(c['safety'])}, and it needs {run['min_safety']:g}."
+        text = f"Doesn't hold {c['name'].lower()}: only {_times(c['safety'], rough)}, and it needs {run['min_safety']:g}."
         if filled:                                   # a ✗ stays a ✗: the block failed, the part is weaker
             text += filled_fail(filled)
         else:                                        # where it fails first, and how sure (#137 item 2)
@@ -166,7 +175,7 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
                    if pl.get("support") == "ring" else "")
             text += f" By hand, the {pl['piece']} on its own{how}: {_times(pl['safety_across'])}."
     else:                                            # any other kind: its word, never a ✓ (CALI-112)
-        text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {about}{_times(c['safety'])}."
+        text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {_times(c['safety'], rough)}."
     return _line(text + older, v["status"], study="load",
                  **({"rough": L.ROUGH} if rough else {}))
 
@@ -293,17 +302,20 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             from . import consistency
 
             geom = store.part_geometry(pid)                  # cached by the assembly (path, mtime)
-            off = sorted((r for r in consistency.check(C.declared(store, pid), geom)
-                          if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
+            said = consistency.check(C.declared(store, pid), geom)
+            off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
+            edge = next((r.detail for r in said if r.id == "loads_edge" and r.detail), "")   # (CALI-94)
             meta = geom.require_mesh().metadata
             strays = _strays(meta, inches) if meta.get("strays") else None
         except Exception:  # noqa: BLE001 — the card says what it can
-            off, strays = [], None
+            off, strays, edge = [], None, ""
         if strays:                                   # what the mesh left out, said once (CALI-118)
             what.append(_line(f"I {strays}: it enclosed nothing and weighs nothing.", "info"))
         if off:
             what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"fix its shape to "
                               f"match its pieces\" and I'll revise it.", "bad"))
+        if edge:                               # a load case it's missing: a warning, the round passed (CALI-94)
+            what.append(_line(edge[0].upper() + edge[1:] + ".", "warn", study="load"))
 
     # Will it work?
     work = []
@@ -317,9 +329,10 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         from . import load_study as L
 
         filled = consistency.filled(store, pid)              # the check ran on a block, not the part (CALI-96)
+        edge = consistency.bare_edge(store, pid)             # where people stand wasn't loaded (CALI-94)
         for c in run["cases"]:
             if c.get("safety") is not None:
-                work.append(_case_line(pid, run, c, filled, stale, inches))
+                work.append(_case_line(pid, run, c, filled, stale, inches, edge=bool(edge)))
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
                        and h.get("action") == "failed" and h.get("version") == p["version"]), None)
@@ -509,7 +522,8 @@ def measured(store: DesignStore, state: dict) -> dict:
     older = [p["id"] for p in loaded if p["id"] not in unchecked and runs[p["id"]].get("version") != p["version"]]
     # the newest strength run of a part changed since, with its verdict and age: what the design card says over an
     # older scorecard's number (#138 item 1: "2.58x" from v1 over v4's 1.7x ✗)
-    last = [{"part": pid, "version": runs[pid]["version"], "now": current[pid], "safety": ran_safety(runs[pid])}
+    last = [{"part": pid, "version": runs[pid]["version"], "now": current[pid], "safety": ran_safety(runs[pid]),
+             "edge": consistency.middle_only(store, pid, runs[pid])}           # the middle only (CALI-94, #106 sweep)
             for pid in older]
     if last:
         out["strength.last"] = min(last, key=lambda x: x["safety"])
@@ -523,6 +537,10 @@ def measured(store: DesignStore, state: dict) -> dict:
                                             for r in state.get("load_runs") or []) and consistency.filled(store, pid)]
     if filled:                                         # a verdict measured on a filled-in solid isn't one (CALI-96)
         out["strength.filled"] = untrusted(filled[0], consistency.filled(store, filled[0]) or "")
+    edged = [pid for pid in current if any(r["part"] == pid and r.get("version") == current[pid]
+                                           for r in state.get("load_runs") or []) and consistency.bare_edge(store, pid)]
+    if edged:                                          # loaded in the middle only (CALI-94, #106 review)
+        out["strength.edge"] = consistency.MIDDLE_ONLY[0].upper() + consistency.MIDDLE_ONLY[1:] + "."
     if safeties:
         out["strength.safety"] = min(safeties)
     if breaks:
@@ -575,17 +593,17 @@ def _against(c: dict, failed: bool, unit: str = "") -> str:
     return f", short of the {said} it needs" if failed else f", against the {said} it needs"
 
 
-def _num(metric: str, v: float, unit: str = "") -> str:
+def _num(metric: str, v: float, unit: str = "", about: bool = False) -> str:
     from .goals import METRICS
 
     unit = METRICS.get(metric, ("", unit, ""))[1] or unit
     if unit == "$":
         return f"${v:,.0f}"
     if unit == "×":                                         # as the part card says it (#144: "0.5 times over")
-        return _times(v)
+        return _times(v, about)
     if v == 1 and unit.endswith("s") and unit not in ("lbs",):
         unit = unit[:-1]                                    # 1 sheet, 1 piece
-    return f"{v:g} {unit}".strip()
+    return ("about " if about else "") + f"{v:g} {unit}".strip()
 
 
 def held_to(state: dict, now: dict) -> list[dict]:
@@ -622,7 +640,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
             verdict = verdicts.goal(verdicts.compare(last["safety"], c.get("op", ">="), c["limit"]), stale=True)
             out.append(_line(f"{'✗' if verdict['kind'] == 'fails' else '!'} {label}{assumed}: last checked on "
                              f"v{last['version']}: {_times(last['safety'])}"
-                             + (f", needs {c['limit']:g}" if verdict["kind"] == "fails" else "")
+                             + (f", needs {c['limit']:g}" if verdict["kind"] == "fails" else
+                                ", checked in the middle only" if last.get("edge") else "")
                              + f" · v{last['now']} not checked yet.", verdict["status"], study="load",
                              model=rests_on_model(c["metric"])))
             continue
@@ -639,19 +658,23 @@ def held_to(state: dict, now: dict) -> list[dict]:
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-97)
         older = now.get("strength.stale") if strength else None
         verdict = verdicts.goal(met, untrusted=untrue, unresolved=now.get("strength.unresolved") if strength else None,
+                                edge=bool(now.get("strength.edge")) if strength else False,       # (CALI-94)
                                 stale=late or bool(older),
                                 incomplete=now.get("strength.unchecked") if strength else None)
         if verdict["kind"] == "untrusted":             # the verdict first; which check it is follows (#96 item 5)
             out.append(_line(f"{untrue} ({label[:1].lower() + label[1:]}{', assumed' if c.get('source') == 'assumed' else ''})", "warn",
                              study="load", model=rests_on_model(c["metric"])))
             continue
+        if verdict["kind"] == "edge":                  # the middle only: no ✓ for where people stand (CALI-94)
+            out.append(_line(f"! {label}{assumed}: {now['strength.edge']}", "warn", study="load",
+                             model=rests_on_model(c["metric"])))
+            continue
         if verdict["kind"] == "unresolved":            # no ✓ on an FEA that can't see the wall (CALI-97)
             out.append(_line(f"! {label}{assumed}: {now['strength.unresolved']}", "warn",
                              study="load", model=rests_on_model(c["metric"])))
             continue
-        num = _num(c['metric'], v, units.get(c['metric'], ''))
-        if strength and now.get("strength.rough"):
-            num = "about " + num                       # the printed model's number, as the part card says (CALI-97)
+        # the printed model's number says "about", as the part card says it (CALI-97); _times owns it (#144 review)
+        num = _num(c['metric'], v, units.get(c['metric'], ''), about=bool(strength and now.get("strength.rough")))
         failed = verdict["kind"] == "fails"
         why = (filled_fail(untrue) if failed and untrue   # still ✗
                else f" {now['strength.coarse_fail']}" if failed and strength and now.get("strength.coarse_fail") else "")
@@ -720,11 +743,13 @@ def design(store: DesignStore, state: dict) -> list[dict]:
                                                   for p in parts)
         # never a pass: a check that couldn't run (#103 review), nor one measured on a filled-in shape (CALI-96)
         untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0     # never a pass (CALI-110)
-        waits = (s.get("unknown") or 0) - untrusted - unresolved
+        edge = s.get("edge") or 0                                                      # nor middle only (CALI-94)
+        waits = (s.get("unknown") or 0) - untrusted - unresolved - edge
         said = (f"{s['pass']} check{'s' if s['pass'] != 1 else ''} pass" if s["pass"] or fails
-                else "No check has run yet" if waits and not untrusted and not unresolved else "No check passes yet")
+                else "No check has run yet" if waits and not untrusted and not unresolved and not edge
+                else "No check passes yet")
         rest = ([f"{untrusted} not trusted"] * bool(untrusted) + [f"{unresolved} not resolved"] * bool(unresolved)
-                + [f"{waits} not checked yet"] * bool(waits))
+                + [f"{edge} middle only"] * bool(edge) + [f"{waits} not checked yet"] * bool(waits))
         work.append(_line(said + (
             f", {s['fail']} fail: " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")
             + (f"{',' if s['pass'] or fails else ':'} " + ", ".join(rest) if rest else "") + "."
