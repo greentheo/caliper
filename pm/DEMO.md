@@ -566,6 +566,13 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · A shared number drives the parts that read it (CALI-35c #3c)
+1. With a key: plan a design of several parts (the turbine sentence), Build it, then say "make the mast 10 ft". The
+   reply says "Changed mast top z from 7 to 10 ft. Rebuilt from it, with no new design: the mast, the hub." and what
+   the design's checks measure now; the viewport shows the taller mast with the hub on it.
+2. Each rebuilt part's history says "skeleton" with the change; its strength check reads "older version" until it's
+   checked again.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_skeleton_drives.py` (stubbed: no key needed).
 ### 2026-11-07 · No card reads greener than the newest strength check (CALI-123 #138)
 1. Open the bar stool (a copy of Theo's): the design card's *Will it work?* says "✗ Holds a 250 lb person sitting…:
    last checked on v4: 1.7x, needs 2x · v7 not checked yet", as the part card does; no "2.58x" from the v1 card.
