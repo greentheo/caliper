@@ -66,3 +66,73 @@ def test_the_designer_is_told_to_put_a_foot_there():
     text = open(os.path.join(os.path.dirname(caliper.__file__), "part_scripts.md")).read()
     assert '"stepping on the front edge", the same foot mid-span with its edge on the free edge' in text
     assert "A top held all round keeps the one centred foot." in text
+
+
+# --- #106 review: a ✓ from the middle only isn't one, on any card, the scorecard or the books -------------------
+from .test_mixed import CENTRED as MIXED_CENTRED, MIXED  # noqa: E402
+
+KID_GOALS = """written_by: caliper
+checks:
+- id: strength_kid
+  label: holds a kid stepping up (60 lb), 2 times over
+  metric: strength.safety
+  op: '>='
+  limit: 2.0
+  source: assumed
+"""
+
+
+def _kid(tmp_path, monkeypatch, src, name):
+    import os
+
+    from caliper import load_study
+
+    pytest.importorskip("whittle")
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    store = DesignStore.create("a stool", base=str(tmp_path / name))
+    store.write_part("stool", src.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
+    with open(os.path.join(store.root, "scorecard.yaml"), "w") as f:
+        f.write(KID_GOALS)
+    return store, load_study.study(store, "stool")
+
+
+def test_a_top_on_printed_sides_with_only_a_middle_foot_gets_the_warning():
+    """The printed-rest path (the solid under the top holds it), which #106 had no test for."""
+    edge = _checks(MIXED_CENTRED)["loads_edge"]
+    assert edge.passed and edge.detail == WARN
+    assert _checks(MIXED)["loads_edge"].detail == ""
+
+
+def test_a_middle_only_tick_reads_warn_everywhere_and_isn_t_a_pass(tmp_path, monkeypatch):
+    """The reviewer's case: MIXED at 60 lb, the middle foot only, read ✓ "Holds a kid stepping up, 2.2 times over"."""
+    from caliper import consistency, release, scorecard, studies
+
+    store, rec = _kid(tmp_path, monkeypatch, MIXED_CENTRED, "middle")
+    assert rec["holds"]                                              # the middle foot alone holds
+    assert consistency.bare_edge(store, "stool") == WARN
+    part = [ln for ln in answers.answers(store, design_api.design_state(store), "stool")[1]["lines"]
+            if ln.get("study") == "load"]
+    assert part and all(ln["status"] == "warn" for ln in part), part
+    assert part[0]["text"] == "Holds a kid stepping up in the middle: " + consistency.MIDDLE_ONLY + "."
+    design = [ln for ln in answers.answers(store, design_api.design_state(store))[1]["lines"] if ln.get("study") == "load"]
+    assert design and all(ln["status"] == "warn" and "checked in the middle only" in ln["text"].lower() for ln in design), design
+    card = scorecard.compute(store)
+    (check,) = [c for c in card["checks"] if c["id"] == "strength_kid"]
+    assert check["status"] == "edge" and card["summary"]["edge"] == 1 and card["summary"]["pass"] < len(card["checks"])
+    assert "1 checked in the middle only, not at the front edge" in release._status(card)
+    assert studies._headline("scorecard", card)[1] is False
+    # what the build book's Will it hold? row and the kid's book read: no "holds" from it either
+    strength = release._strength(store, {"stool": store.design.part("stool").version})
+    assert all(c["edge"] for c in strength["stool"]) and any(c["holds"] for c in strength["stool"])
+
+
+def test_with_its_front_edge_foot_the_same_stool_is_a_fail_and_stays_one(tmp_path, monkeypatch):
+    store, rec = _kid(tmp_path, monkeypatch, MIXED, "edge")
+    edge, middle = rec["cases"]
+    assert not edge["holds"] and edge["safety"] == pytest.approx(1.91, abs=0.05) and middle["holds"]
+    from caliper import consistency
+
+    assert consistency.bare_edge(store, "stool") is None
+    part = [ln for ln in answers.answers(store, design_api.design_state(store), "stool")[1]["lines"]
+            if ln.get("study") == "load"]
+    assert part[0]["status"] == "bad" and part[0]["text"].startswith("Doesn't hold stepping on the front edge"), part

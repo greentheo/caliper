@@ -162,6 +162,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         from . import load_study as L
 
         filled = consistency.filled(store, pid)              # the check ran on a block, not the part (CALI-96)
+        edge = consistency.bare_edge(store, pid)             # where people stand wasn't loaded (CALI-94)
         for c in run["cases"]:
             if c.get("safety") is None:
                 continue
@@ -170,6 +171,10 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                 continue
             if L.unresolved(run, c) and c.get("holds"):      # an FEA that can't see the wall is no ✓ (CALI-97)
                 work.append(_line(coarse(run, inches) + (" (Checked on an older version: check again.)" if stale else ""),
+                                  "warn", study="load"))
+                continue
+            if edge and c.get("holds"):                      # the middle only: no ✓ for where people stand (CALI-94)
+                work.append(_line(f"Holds {c['name'].lower()} in the middle: " + consistency.MIDDLE_ONLY + ".",
                                   "warn", study="load"))
                 continue
             # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
@@ -338,6 +343,10 @@ def measured(store: DesignStore, state: dict) -> dict:
                                             for r in state.get("load_runs") or []) and consistency.filled(store, pid)]
     if filled:                                         # a verdict measured on a filled-in solid isn't one (CALI-96)
         out["strength.filled"] = untrusted(filled[0], consistency.filled(store, filled[0]) or "")
+    edged = [pid for pid in current if any(r["part"] == pid and r.get("version") == current[pid]
+                                           for r in state.get("load_runs") or []) and consistency.bare_edge(store, pid)]
+    if edged:                                          # loaded in the middle only (CALI-94, #106 review)
+        out["strength.edge"] = consistency.MIDDLE_ONLY[0].upper() + consistency.MIDDLE_ONLY[1:] + "."
     if safeties:
         out["strength.safety"] = min(safeties)
     if breaks:
@@ -422,6 +431,10 @@ def held_to(state: dict, now: dict) -> list[dict]:
             # "not resolved": the check ran on a block. The verdict first; which check it is follows (#96 item 5)
             out.append(_line(f"{untrue} ({label[:1].lower() + label[1:]}{', assumed' if c.get('source') == 'assumed' else ''})", "warn",
                              study="load", model=rests_on_model(c["metric"])))
+            continue
+        if ok and strength and now.get("strength.edge") and not now.get("strength.unresolved"):   # (CALI-94)
+            out.append(_line(f"! {label}{assumed}: {now['strength.edge']}", "warn", study="load",
+                             model=rests_on_model(c["metric"])))
             continue
         if ok and strength and now.get("strength.unresolved"):     # no ✓ on an FEA that can't see the wall (CALI-97)
             out.append(_line(f"! {label}{assumed}: {now['strength.unresolved']}", "warn",

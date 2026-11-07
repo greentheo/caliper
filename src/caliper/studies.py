@@ -193,12 +193,13 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     if kind == "scorecard":
         s = r.get("summary") or {}
         untrusted = s.get("untrusted") or 0                         # not trusted is never green (CALI-96)
-        return (f"{s.get('pass', 0)} pass · {s.get('fail', 0)} fail" + (f" · {untrusted} not trusted" if untrusted else ""),
-                not s.get("fail") and not untrusted)
+        edge = s.get("edge") or 0                                   # nor middle-only (CALI-94)
+        return (f"{s.get('pass', 0)} pass · {s.get('fail', 0)} fail" + (f" · {untrusted} not trusted" if untrusted else "")
+                + (f" · {edge} middle only" if edge else ""), not s.get("fail") and not untrusted and not edge)
     if kind == "release":
         s = (r.get("card") or {}).get("summary") or {}
         why = ("a check fails" if s.get("fail") or not s else "a check isn't trusted yet" if s.get("untrusted")
-               else "a check isn't settled")
+               else "a strength check skipped the front edge" if s.get("edge") else "a check isn't settled")
         return (f"release {r.get('id')} · {'ready to cut' if r.get('ready') else 'not ready: ' + why}"
                 f" · ~${round(r.get('shopping_usd') or 0)} to buy"), bool(r.get("ready"))
     return "", None

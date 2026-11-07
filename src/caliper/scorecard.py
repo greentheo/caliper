@@ -366,6 +366,11 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
 
     untrue = next((why for p in store.design.parts if store.is_scripted(p.id)
                    and "def loads(" in store.read_script(p.id) for why in [filled(store, p.id)] if why), None)
+    # loaded in the middle only, where a two-sided top is strongest: no pass from it (CALI-94, #106 review)
+    from .consistency import MIDDLE_ONLY, bare_edge
+
+    edgeless = next((why for p in store.design.parts if store.is_scripted(p.id)
+                     and "def loads(" in store.read_script(p.id) for why in [bare_edge(store, p.id)] if why), None)
 
     # the user's checks and objectives (a proposed one is shown, and binds once it's kept: CALI-55)
     for c in g["checks"]:
@@ -384,6 +389,10 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             continue
         v, lim, op = float(m["value"]), float(c["limit"]), c.get("op", ">=")
         ok = v >= lim if op == ">=" else v <= lim if op == "<=" else abs(v - lim) < 1e-9
+        if ok and edgeless and c["metric"].startswith("strength"):   # a ✗ stays a fail
+            checks.append({**c, "status": "edge", "value": m["value"], "unit": m["unit"], "margin": None,
+                           "trust": "checked in the middle only", "note": MIDDLE_ONLY})
+            continue
         checks.append({**c, "status": "pass" if ok else "fail", "value": m["value"], "unit": m["unit"],
                        "margin": round(v - lim if op == ">=" else lim - v, 3), "trust": m["trust"]})
     previous = list_cards(store, 1)
@@ -403,7 +412,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                         "fail": sum(c["status"] == "fail" for c in checks),
                         "unknown": sum(c["status"] not in ("pass", "fail", "proposed") for c in checks),
                         "proposed": sum(c["status"] == "proposed" for c in checks),
-                        "untrusted": sum(c["status"] == "untrusted" for c in checks)}}
+                        "untrusted": sum(c["status"] == "untrusted" for c in checks),
+                        "edge": sum(c["status"] == "edge" for c in checks)}}
     os.makedirs(cards_dir(store), exist_ok=True)
     with open(os.path.join(cards_dir(store), time.strftime("%Y%m%d-%H%M%S") + ".json"), "w") as f:
         json.dump(card, f, indent=2, default=str)

@@ -245,6 +245,9 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
                                                    "Two coats, and let the first one dry.", "img": img})
     held = []
     untrusted = any(c.get("filled") for cases in (rec.get("strength") or {}).values() for c in cases)
+    # loaded in the middle only, where a top on two sides is strongest: no promise from it (CALI-94)
+    untrusted = untrusted or any(c.get("edge") and c.get("holds") for cases in (rec.get("strength") or {}).values()
+                                 for c in cases)
     for cases in (rec.get("strength") or {}).values():
         if untrusted:                                    # checked on a block: nothing to promise (CALI-96)
             break

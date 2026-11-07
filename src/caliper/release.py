@@ -801,9 +801,11 @@ def _status(card: dict) -> str:
     s = card["summary"]
     if s["fail"] == 0 and s["unknown"] == 0:
         return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass</span>'
-    untrusted = s.get("untrusted") or 0
+    untrusted, edge = s.get("untrusted") or 0, s.get("edge") or 0
+    rest = s["unknown"] - untrusted - edge
     why = [f"{s['fail']} check(s) fail" if s["fail"] else "", f"{untrusted} not trusted" if untrusted else "",
-           f"{s['unknown'] - untrusted} unknown" if s["unknown"] - untrusted else ""]
+           f"{edge} checked in the middle only, not at the front edge" if edge else "",       # (CALI-94)
+           f"{rest} unknown" if rest else ""]
     return f'<span class="status notready">Not ready — {", ".join(w for w in why if w)}</span>'
 
 
@@ -929,6 +931,8 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                 breaks = f"about {c['breaks_lb']:,.0f} lb" if c.get("breaks_lb") else "—"
                 if c.get("filled"):                          # the check ran on a block: no number to build on
                     safety, breaks = "not trusted: checked on a filled-in shape", "—"
+                elif c.get("edge") and c.get("holds"):        # where people stand wasn't loaded (CALI-94)
+                    safety, breaks = "checked in the middle only, not at the front edge", "—"
                 else:
                     safety = f"{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x"
                 out.append(f"<tr><td>{_e(pid)}</td><td>{_e(c['name'])}, {c['lb']:g} lb × {c['factor']:g}</td>"
@@ -987,8 +991,11 @@ def _strength(store: DesignStore, versions: dict) -> dict:
             from .consistency import filled
 
             untrue = bool(filled(store, pid))                # on a filled-in solid: not this part's (CALI-96)
-            out[pid] = [{**{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")},
-                         "rough": load_study.rough(run, c), "filled": untrue} for c in run["cases"]]
+            from .consistency import bare_edge
+
+            edge = bool(bare_edge(store, pid))               # loaded in the middle only (CALI-94)
+            out[pid] = [{**{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs", "holds")},
+                         "rough": load_study.rough(run, c), "filled": untrue, "edge": edge} for c in run["cases"]]
     return out
 
 

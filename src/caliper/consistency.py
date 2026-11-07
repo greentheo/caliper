@@ -347,6 +347,37 @@ def _edge_foot(mesh, declared: dict, pieces: list[dict], tol: float, rest: bool 
     return AssertionResult(id="loads_edge", expr="a top held on two sides is stood on at its free edge too",
                            status="pass", passed=True, actual=len(tops) - len(bare), detail=detail)
 _FILLED: dict = {}
+_EDGE: dict = {}
+#: What a strength ✓ says while a two-sided top has no foot at its free edge (CALI-94, #106 review).
+MIDDLE_ONLY = ("checked in the middle only; the front edge, where people stand, isn't checked (add a \"stepping on "
+               "the front edge\" case)")
+
+
+def bare_edge(store, part_id: str) -> Optional[str]:
+    """CALI-94 (#106 review): the loads_edge warning's detail while a part's two-sided top has no foot at its free
+    edge, else None. Its strength ✓ isn't one then: the case where people stand wasn't checked. Kept per version and
+    script, as filled() is."""
+    from . import construction as C
+
+    entry = store.design.part(part_id)
+    try:
+        script = store.read_script(part_id)
+    except (OSError, KeyError, ValueError):
+        return None
+    key = (store.root, part_id, entry.version if entry else None, hash(script))
+    if key not in _EDGE:
+        out = None
+        try:
+            declared = C.declared(store, part_id)
+            if declared.get("loads"):
+                got = next((r for r in check(declared, store.part_geometry(part_id)) if r.id == "loads_edge"), None)
+                out = (got.detail or None) if got is not None else None
+        except Exception:  # noqa: BLE001 — this only ever takes a ✓ away; a part that won't check is said elsewhere
+            out = None
+        _EDGE[key] = out
+        while len(_EDGE) > 64:
+            _EDGE.pop(next(iter(_EDGE)))
+    return _EDGE[key]
 
 
 def filled(store, part_id: str) -> Optional[str]:
