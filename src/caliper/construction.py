@@ -825,7 +825,11 @@ def with_printed(store: DesignStore, part_id: str, items: list, d: Optional[dict
         return items
     try:
         g = printed_solid(store, part_id, d)
-        if not g.is_volume:
+        from .measure import closed, open_near
+
+        if not closed(g):                     # as it reads back: a pinch isn't closed, said where (#134 review)
+            raise ValueError(f"its shape isn't closed {open_near(g)}")
+        if not closed(g, volume=True):        # closed, but its faces aren't wound as one solid
             raise ValueError("its mesh isn't a closed solid")
     except Exception as e:  # noqa: BLE001 — said, and the weight unknown: never a lower total
         why = f"not checked: {e}" if str(e).startswith("its shape isn't closed") else f"{UNWEIGHED} ({e})"

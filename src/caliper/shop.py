@@ -53,6 +53,8 @@ def read() -> dict:
         return {**DEFAULT, "default": True}
     with open(p) as f:
         data = yaml.safe_load(f) or {}
+    if "hand" not in data:                 # hand tools never said (#146: a printer added first): the default, assumed
+        return {"hand": list(DEFAULT["hand"]), "machines": list(data.get("machines") or []), "hand_default": True}
     return {"hand": list(data.get("hand") or []), "machines": list(data.get("machines") or [])}
 
 
@@ -64,9 +66,11 @@ def write(data: dict) -> dict:
     for m in machines:
         m.setdefault("id", m["kind"])
     os.makedirs(os.path.dirname(path()), exist_ok=True)
+    # hand tools never said stay unsaid (#146 review: a first printer must not write the default saws as yours)
+    out = ({} if data.get("hand_default") or "hand" not in data else {"hand": hand}) | {"machines": machines}
     with open(path(), "w") as f:
         f.write("# Your shop (CALI-48): what Caliper plans the making with. Edit here or under Shop in the app.\n")
-        yaml.safe_dump({"hand": hand, "machines": machines}, f, sort_keys=False)
+        yaml.safe_dump(out, f, sort_keys=False)
     return read()
 
 

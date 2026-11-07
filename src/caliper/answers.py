@@ -288,6 +288,25 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                 # a test that went against the prediction outranks it: no ✓ left above a failed test (CALI-86)
                 work = [ln for ln in work if not (ln.get("study") == "load" and ln["status"] == "ok")]
             work.append(_line(tried["text"], tried["status"], study="trial"))
+    if p.get("loads") and p.get("role") != "fixed" and p.get("built"):
+        from . import tipping
+
+        try:                                    # will it tip over? statics (CALI-98)
+            cases = tipping.check(store, pid)
+            for case in cases:
+                text, status = tipping.line(case)
+                work.append(_line(text, status, study="tip"))
+            # a way it could tip that nothing pushes, where its base is no wider: said, not passed over (#141 review)
+            ways = tipping.undeclared_ways(store, pid) if cases else []
+            if ways:
+                work.append(_line(f"Not checked yet: {' or '.join(ways)} (no push is declared that way, and its base "
+                                  f"is no wider that way).", "warn", study="tip"))
+            missing = tipping.unchecked(C.declared(store, pid), p.get("intent") or "")
+        except Exception as e:  # noqa: BLE001 — said, never a crash of the card
+            work.append(_line(f"Tipping: not checked ({e}).", "warn", study="tip"))
+            missing = []
+        if missing:                             # a seat's cases nobody checked, said (#86 item 3)
+            work.append(_line("Not checked yet for a seat: " + "; ".join(missing) + ".", "warn", study="tip"))
     frames = [r for r in state.get("frame_runs") or [] if r["part"] == pid]
     if frames:
         d = frames[0].get("drawn") or {}
