@@ -43,8 +43,49 @@ def interfaces(store: DesignStore, pid: str, built: dict) -> Callable:
     return check
 
 
+#: Designer tries a part gets: the plan's review says the total before Build it (#135 review), and no run exceeds it.
+ROUNDS = 4
+
+
+def cost(plan) -> str:
+    """What building a plan may take, said before Build it: "3 parts to make, up to 4 designer tries each"."""
+    n = len(P.buildable(plan))
+    return f"{n} part{'s' if n != 1 else ''} to make, up to {ROUNDS} designer tries each (at most {n * ROUNDS})"
+
+
+def plainly(error: str) -> str:
+    """A build error as a person reads it (#135 review): the reason's last line ("the hub won't fit the shaft"),
+    never a traceback or a server path."""
+    import re
+
+    lines = [ln.strip() for ln in (error or "").splitlines() if ln.strip()]
+    last = lines[-1] if lines else "it never built"
+    last = re.sub(r"^[A-Za-z_.]*(Error|Exception|Failure)\b:?\s*", "", last) or last
+    return last if not re.search(r"(/|\\)[\w.-]+(/|\\)", last) else "it raised an error while building"
+
+
+def _unheld(store: DesignStore, built: dict) -> bool:
+    """A built part that says what it must hold, with no strength check of this version."""
+    from . import load_study
+
+    for pid in built:
+        entry = store.design.part(pid)
+        if entry and store.is_scripted(pid) and "def loads(" in store.read_script(pid) and not any(
+                r.get("version") == entry.version for r in load_study.list_runs(store, pid)):
+            return True
+    return False
+
+
+def _unscored(store: DesignStore) -> bool:
+    from . import scorecard
+
+    versions = {p.id: p.version for p in store.design.parts}
+    cards = scorecard.list_cards(store, 1)
+    return not cards or cards[0].get("versions") != versions
+
+
 def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, client=None, use_llm: bool = True,
-          max_rounds: int = 4) -> dict:
+          max_rounds: int = ROUNDS) -> dict:
     """Build the saved plan's parts in order. Returns the first run's result: ``plan`` is ``built`` when every
     part to be made is, ``stopped`` (with ``part``, the one that wouldn't build) when one isn't."""
     plan = P.load(store)
@@ -72,16 +113,19 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
                                client=client, use_llm=use_llm, on_event=forward, promote_feedback=False,
                                max_rounds=max_rounds, interfaces=check)
         if not res.version:
-            failed = (pid, res.error or "it never built")
-            store.append_log({"kind": "firstrun", "action": "failed", "part": pid})
+            failed = (pid, plainly(res.error or "it never built"))
+            # the whole text (its traceback) goes to the log, never the reply (#135 review)
+            store.append_log({"kind": "firstrun", "action": "failed", "part": pid, "error": res.error})
             break
         built[pid] = store.part_geometry(pid)
         store.append_log({"kind": "firstrun", "action": "built", "part": pid, "version": res.version})
         mine = [r for r in check(built[pid])] if res.part_report is not None else []
         marks = ", ".join(f"{r.id} {'✓' if r.status == 'pass' else '✗' if r.status in ('fail', 'error') else '·'}"
                           for r in mine)
-        ok = all(r.status == "pass" for r in mine)
-        said.append(f"- the {name}: built {'✓' if ok else '✗'}" + (f" ({marks})" if marks else ""))
+        # a mark only for what was measured (#135 review): nothing measured, no mark; a check waiting, a dot
+        head = ("✗" if any(r.status in ("fail", "error") for r in mine) else "·" if any(r.status != "pass" for r in mine)
+                else "✓" if mine else "")
+        said.append(f"- the {name}: built" + (f" {head}" if head else "") + (f" ({marks})" if marks else ""))
         emit("step", f"The {name}: built" + (f" ({marks})" if marks else ""), step="built", part=pid)
 
     made = [pid for pid in order if by[pid].role != "fixed"]
@@ -97,8 +141,12 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
                  + (f"The parts before it stay ({', '.join(before)}). " if before else "")
                  + "Build it again to retry it, change the plan, or carry on without it.")
     else:
+        # what wasn't checked, said: design checks are geometry, never whether it holds (#135 review)
+        unchecked = [x for x in ("whether it holds (Check it holds)" if _unheld(store, built) else "",
+                                 "the scorecard" if _unscored(store) else "") if x]
         reply = (f"I built the plan's {len(made)} parts, in order:\n" + "\n".join(said)
-                 + (f"\n\n{whole}" if whole else ""))
+                 + (f"\n\nThe design checks: {report.said()}." if report is not None else "")
+                 + (f"\n\nNot checked yet: {' and '.join(unchecked)}. Run *Will it work?* next." if unchecked else ""))
     steps["plan"] = f"{status}: {len(built)} of {len(made)} parts"
     store.append_log({"kind": "reply", "action": "plan", "ok": not failed, "reply": reply, "firstrun": True})
     emit("step", "Done", step="done")

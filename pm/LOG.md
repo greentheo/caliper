@@ -23,6 +23,14 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   and the built parts' boxes; a part that won't build stops there and Build it again goes on; the history and chat
   lines; the four guards. #3a's "comes next" test now checks Build it starts at the base. The skeleton driving the
   parts (rebuilds on a change) is #3c.
+- **#135 review:** a part's line has a mark only for what was measured on it (none, no mark; a check waiting, `·`);
+  the reply gives the design checks in `said()`'s words and says what isn't checked yet ("whether it holds (Check
+  it holds) and the scorecard. Run *Will it work?* next"), and `ok` stays False while a rule waits; a rule over a
+  part the person has says "needs the generator's size: say it, or keep it off", and the designer's prompt names
+  that part (YOURS, not designed); the plan's review says the cost before Build it ("3 parts to make, up to 4
+  designer tries each (at most 12)"), which a run can't exceed; the stop gives the reason's last line, the traceback
+  goes to the log; a history line fails only with a failure (all waiting is waiting). Tests pin the assumed mark in
+  the prompt, `ok` with a waiting rule, and a rule over a part not built yet.
 
 ### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
 - **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to

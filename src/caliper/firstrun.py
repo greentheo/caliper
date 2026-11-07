@@ -179,7 +179,7 @@ def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, cli
     reply = (P.headline(plan, store.design.name) + (f" ({gone[0].upper() + gone[1:]}.)" if gone else "")
              + "\n\nThat's the plan, before anything's drawn: its numbers and the "
              "checks between the parts are under What is it?. Say what to change (\"make the mast 10 ft\"), or "
-             "**Build it** to go on.")
+             "**Build it** to go on: " + build_plan.cost(plan) + ".")      # the cost, said first (#135 review)
     store.append_log({"kind": "reply", "action": "plan", "ok": True, "reply": reply, "firstrun": True,
                       "parts": plan.ids()})
     steps["plan"] = f"{len(plan.parts)} parts, to review"

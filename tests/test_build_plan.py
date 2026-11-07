@@ -6,6 +6,7 @@ bounding boxes), a rule between it and a built part fails its round like any fai
 won't build leaves the ones before it, the reply naming it and why. Stub authors only: no live Claude."""
 
 import copy
+import json
 
 import pytest
 
@@ -83,11 +84,13 @@ def test_build_it_builds_the_parts_in_order_and_every_interface_holds(tmp_path):
     assert {r.id for r in report.results} >= {"mast_height", "plan_mast_base_touch", "plan_hub_mast_touch"}
     reply = got["reply"]
     assert reply.startswith("I built the plan's 3 parts, in order:"), reply
-    assert "- the base: built ✓" in reply                             # nothing between it and nothing built
+    assert "- the base: built\n" in reply                            # nothing measured on it yet: no mark (#135)
     assert "- the mast: built ✓ (" in reply and "mast_height ✓" in reply and "plan_mast_base_touch ✓" in reply
     assert "- the hub: built ✓ (plan_hub_mast_touch ✓)" in reply
     assert "the generator: yours, not designed" in reply
-    assert "All design checks pass." in reply
+    assert "The design checks: all design checks pass." in reply
+    assert "Not checked yet: the scorecard. Run *Will it work?* next." in reply           # never "all pass" alone
+    assert stub.calls and len(stub.calls) <= 3 * 4                                     # the cost said, kept
     assert store.design.plan["status"] == "built"
 
 
@@ -165,3 +168,53 @@ def test_each_evaluator_guard_alone(expr, why):
 
     with pytest.raises(SafeEvalError, match=why):
         safe_eval(expr, {})
+
+
+
+# --- #135 review -----------------------------------------------------------------------------------------------------
+def _with_generator_rule(tmp_path):
+    """The plan with a rule over the generator the person has, kept, and an assumed rule shown to the designer."""
+    plan = json.loads(json.dumps(TURBINE))
+    plan["rules"] += [{"id": "clear_of_generator", "expr": "min_clearance(hub, generator) >= 5"},
+                      {"id": "hub_size", "expr": "bbox(hub).dx <= 100"}]
+    store = DesignStore.create(SAID, base=str(tmp_path / "designs"))
+    got = firstrun.build(store, use_llm=True, client=fake(plan), author=Stub(fails={"base", "mast", "hub"}),
+                         strength=False)
+    assert "3 parts to make, up to 4 designer tries each (at most 12)" in got["reply"]      # the cost, before Build
+    P.keep(store, "clear_of_generator")
+    return store, plan
+
+
+def test_a_rule_over_the_part_you_have_asks_for_its_size_and_ok_stays_false(tmp_path):
+    store, plan = _with_generator_rule(tmp_path)
+    stub = Stub()
+    got = firstrun.build(store, use_llm=True, client=fake(plan), author=stub, strength=False)
+    report, _ = store.evaluate(tolerant=True)
+    (waits,) = [r for r in report.results if r.id == "clear_of_generator"]
+    assert waits.status == "deferred" and waits.detail == "needs the generator's size: say it, or keep it off"
+    assert not got["ok"] and "1 not checked yet" in got["reply"]                     # never ok while a rule waits
+    hub = next(intent for p, intent, _ in stub.calls if p == "hub")
+    assert "YOURS (not designed; build against it as stated):" in hub and "generator: the generator I already have" in hub
+    assert "hub_size: bbox(hub).dx <= 100  [assumed: shown, not enforced]" in hub        # the mark the mutant dropped
+
+
+def test_a_rule_over_a_part_not_built_yet_isn_t_measured_in_the_round(tmp_path):
+    """The mast is built before the hub: a rule over both waits, never a false ✗ or · on the mast."""
+    plan = json.loads(json.dumps(TURBINE))
+    plan["rules"].append({"id": "hub_over_mast", "expr": "bbox(hub).min_z >= bbox(mast).max_z - 1"})
+    store = DesignStore.create(SAID, base=str(tmp_path / "designs"))
+    firstrun.build(store, use_llm=True, client=fake(plan), author=Stub(fails={"base", "mast", "hub"}), strength=False)
+    P.keep(store, "hub_over_mast")
+    got = firstrun.build(store, use_llm=True, client=fake(plan), author=Stub(), strength=False)
+    mast = next(ln for ln in got["reply"].splitlines() if ln.startswith("- the mast"))
+    assert "hub_over_mast" not in mast and mast.startswith("- the mast: built ✓"), mast
+    hub = next(ln for ln in got["reply"].splitlines() if ln.startswith("- the hub"))
+    assert "hub_over_mast ✓" in hub
+
+
+def test_the_stop_says_the_reason_never_a_traceback(tmp_path):
+    store = _reviewed(tmp_path)
+    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=Stub(fails={"hub"}), strength=False)
+    assert got["reply"].startswith("I couldn't build the hub: the hub won't fit the shaft.")
+    assert "Traceback" not in got["reply"] and "/" not in got["reply"].split(".")[0]
+    assert any("Traceback" in (e.get("error") or "") for e in store.log() if e.get("action") == "failed")

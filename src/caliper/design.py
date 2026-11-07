@@ -684,6 +684,11 @@ class DesignStore:
                 r = lambda v: f"{round(v, 1):g}"  # noqa: E731
                 out.append(f"  - {p.id}: x {r(b.min_x)} to {r(b.max_x)}, y {r(b.min_y)} to {r(b.max_y)}, "
                            f"z {r(b.min_z)} to {r(b.max_z)}")
+        yours = [p for p in (self.design.plan or {}).get("parts") or [] if p.get("role") == "fixed"]
+        if yours:                               # what the person has: built against, never designed (#135 review)
+            out.append("\nYOURS (not designed; build against it as stated):")
+            for p in yours:
+                out.append(f"  - {p['id']}: {p.get('what') or 'as the person described it'}")
         rules = (self.design.plan or {}).get("rules") or []
         if rules:
             out.append("\nTHE PLAN'S CHECKS BETWEEN PARTS (measured after you build it):")
@@ -697,7 +702,10 @@ class DesignStore:
 def _result(report: dict) -> dict:
     """A revision's result for its history line (#103 review): ``all_pass`` only when nothing waited, ``waiting``
     when a check couldn't run yet, else ``fail``; with :meth:`Report.said`'s words."""
-    result = ("fail" if not report.get("all_pass") else "waiting" if report.get("waiting") else "all_pass")
+    # fail only with a failure: a report whose checks all wait is waiting, never red (#135 review, as #132's badge)
+    failed = any(r.get("status") in ("fail", "error") for r in report.get("results") or []) or (
+        not report.get("all_pass") and not report.get("waiting") and bool(report.get("results")))
+    result = "fail" if failed else "waiting" if report.get("waiting") or not report.get("results") else "all_pass"
     return {"result": result, **({"said": report["said"]} if report.get("said") else {})}
 
 
