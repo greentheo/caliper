@@ -55,7 +55,8 @@ def test_the_camper_s_rule_verbatim_says_what_a_number_reads_as_in_a_check():
     with pytest.raises(P.PlanError) as e:
         P.validate(CAMPER)
     assert "tube_size * 25.4 <= 50.8 is false (tube_size 50.8 mm)" in str(e.value)
-    assert "lengths in a check read in mm" in str(e.value)
+    # the hint is the planner's, for its retry; what the person reads doesn't carry it (#130 review)
+    assert e.value.hint == "lengths in a check read in mm" and "lengths in a check" not in str(e.value)
 
 
 def test_a_rule_of_literals_alone_is_dropped_and_said():
@@ -182,3 +183,32 @@ def test_an_edit_a_note_contradicts_is_refused_with_it_never_a_silent_drop(tmp_p
     assert "the frame tube fits the receiver, but tube_size <= receiver is false (tube_size 76.2 mm" in got.reply
     assert '"tube_size <= receiver"' in client.plan_calls()[0]["messages"][0]["content"]       # the planner saw it
     assert P.load(store).value("tube_size").value == 2 and P.load(store).notes        # as it was
+
+
+def test_the_retry_gets_the_hint_and_the_person_doesn_t(tmp_path):
+    store = DesignStore.create(CAMPER_SAID, base=str(tmp_path / "designs"))
+    client = fake(CAMPER)
+    got = firstrun.build(store, use_llm=True, client=client, author=_never, strength=False)
+    retry = client.plan_calls()[1]["messages"][0]["content"]
+    assert "(lengths in a check read in mm)" in retry
+    assert "lengths in a check" not in got["reply"]
+
+
+def test_left_out_is_validate_s_own_and_a_revision_keeps_the_prior_s(tmp_path):
+    """#130 review: a planner's answer can't claim checks were left out; an edit keeps what the plan left out."""
+    from caliper import chat
+
+    claimed = _with("25.4 == 25.4")
+    claimed["left_out"] = ["the check 'made_up' (1 > 0): the planner says so"]
+    plan = P.validate(claimed)
+    assert plan.left_out == ["the check 'frame_tube_fits_receiver' (25.4 == 25.4): it reads only numbers"]
+    store = DesignStore.create(CAMPER_SAID, base=str(tmp_path / "designs"))
+    firstrun.build(store, use_llm=True, client=fake(_with("25.4 == 25.4")), author=_never, strength=False)
+    kept = P.load(store).left_out
+    assert kept == plan.left_out
+    wider = _with("25.4 == 25.4")
+    wider["rules"] = wider["rules"][1:]                       # the planner's answer leaves the literal rule out
+    wider["skeleton"][1]["value"] = 2.5
+    got = chat.turn(store, "make the receiver 2 1/2 in", client=fake(wider), use_llm=True)
+    assert got.ok, got.reply
+    assert P.load(store).left_out == kept                     # carried through the edit

@@ -25,6 +25,9 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   (tube_size 76.2 mm, …)", the plan as it was (a revision never drops a rule). A speed goes by its unit, never its
   name ("m" is a length). The card says "by the numbers" and a check's name once. Tests pin a note's whole path
   (the reply, the saved plan, the card, Keep) and the refused edit.
+  Then: `left_out` is validate's own (a planner's answer can't claim a check was left out) plus, through an edit,
+  the prior plan's; the "lengths in a check read in mm" hint goes to the planner's retry (`PlanError.hint`), never
+  into what the person reads; both pinned.
 
 ### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
 - **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to

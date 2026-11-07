@@ -66,9 +66,11 @@ class PlanError(ValueError):
     """A plan that can't be used, and why, in words the person can read. ``rule``: the check it's about, when the
     fault is one rule's (CALI-119: after the retry that rule is dropped and said, never the plan)."""
 
-    def __init__(self, message: str, rule: Optional[str] = None):
+    def __init__(self, message: str, rule: Optional[str] = None, hint: Optional[str] = None):
         super().__init__(message)
         self.rule = rule
+        #: a word for the planner's retry, never in what the person reads (#130 review)
+        self.hint = hint
 
 
 class _NumbersOnly(PlanError):
@@ -208,10 +210,12 @@ def validate(data, drop_bad_rules: bool = False) -> Plan:
             kept.append(r)
         except PlanError as e:
             if not drop_bad_rules:
-                raise PlanError(str(e), rule=r.id) from e
+                raise PlanError(str(e), rule=r.id, hint=getattr(e, "hint", None)) from e
             said = str(e).removeprefix(f"the check {r.id!r} ")          # the check named once (#130 review)
             left.append(f"the check {r.id!r} ({r.expr}): {said}")       # one rule never sinks the plan (CALI-119)
-    out = plan.model_copy(update={"rules": kept, "left_out": list(dict.fromkeys([*plan.left_out, *left]))})
+    # validate's own left-out checks only: never what a planner's answer claims was left out (#130 review); a
+    # revision adds the prior plan's (revise)
+    out = plan.model_copy(update={"rules": kept, "left_out": list(dict.fromkeys(left))})
     order(out)                                   # a cycle is refused here: the plan's, not a rule's
     return out._carry(plan)
 
@@ -252,7 +256,7 @@ def _by_the_numbers(rule: "PlanRule", plan: "Plan") -> Optional[str]:
     lengths = any(mm(plan.value(n)) is not None for n in read)
     what = rule.why or rule.id.replace("_", " ")
     raise PlanError(f"the check {rule.id!r} contradicts the plan's own numbers: {what}, but {rule.expr} is false "
-                    f"({said})" + ("; lengths in a check read in mm" if lengths else ""), rule=rule.id)
+                    f"({said})", rule=rule.id, hint="lengths in a check read in mm" if lengths else None)
 
 
 def _ground(p: PlanPart) -> bool:
@@ -681,8 +685,8 @@ def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[
         except PlanError as e:
             if attempt == 2:
                 raise
-            ask = (f"{content}\n\nYour last plan was refused: {e}. Answer with the whole plan again, with that "
-                   "fixed and everything else as it was.")
+            ask = (f"{content}\n\nYour last plan was refused: {e}" + (f" ({e.hint})" if getattr(e, "hint", None) else "")
+                   + ". Answer with the whole plan again, with that fixed and everything else as it was.")
     raise AssertionError("unreachable")
 
 
@@ -706,6 +710,6 @@ def revise(store, said: str, *, client=None, model: Optional[str] = None) -> tup
                  + f"\n\nThe person said: {said}\n\nAnswer with the whole plan as it should now be. Change only what "
                    "they asked for; keep every other part, number and check as it is.",
                  words(store) + "\n" + said, prior=before, drop=False)   # an edit that contradicts a note is refused
-    if not after.left_out and before.left_out:   # what was left out stays said through an edit
-        after = after.model_copy(update={"left_out": before.left_out})._carry(after)
+    if before.left_out:                          # what was left out stays said through an edit (#130 review)
+        after = after.model_copy(update={"left_out": list(dict.fromkeys([*before.left_out, *after.left_out]))})._carry(after)
     return before, after
