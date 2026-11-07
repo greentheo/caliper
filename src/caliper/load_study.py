@@ -652,6 +652,13 @@ def plate_why(pl: Optional[dict]) -> Optional[str]:
     return pl["why"]
 
 
+def run_safety(cases: list) -> Optional[float]:
+    """A strength run's number, as ``study`` writes it: the worst of the cases that ran. A case whose load never
+    reached a support has none, so it's never a 0x (#140 review); none that ran, no number."""
+    return min((c["safety"] for c in cases if c.get("safety") is not None
+                and (c.get("fea") or {}).get("supported") is not False), default=None)
+
+
 def peak_in(fea: Optional[dict]) -> Optional[str]:
     """Where a run's hottest voxel is, by name, only from a run that recorded the wall there (``wall_mm``, #137): an
     older run named the nearest wood even for a hot spot in a printed part (the bar stool's "seat top" was the cone)."""
@@ -943,7 +950,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         notes.append(ctx["coarse"])
     if any(h.get("default") for h in held):
         notes.append("Held by the floor: everything at its underside, as if it stands on a flat floor.")
-    worst = min((c["safety"] for c in cases if c.get("safety") is not None), default=None)
+    worst = run_safety(cases)            # from the cases that ran, never 0x (#140 review)
     record = {
         "id": rid, "part": part_id, "kind": "load", "created": time.time(),
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
