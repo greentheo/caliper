@@ -90,6 +90,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     stop = stop or (lambda: None)
     min_safety = min_safety or firstrun._min_safety(store)
     t0 = time.time()
+    fails = L.already_fails(store, part_id)        # carving only takes material away (#137 item 3)
+    if fails:
+        raise ValueError(f"Can't carve it: {fails}, then carve.")
     ctx = L.prepare(store, part_id, emit)
     mat = ctx["mat"]
     seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)
@@ -128,7 +131,8 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     out: list = []
     try:
         # one count everywhere (#102 review): n checks, as drawn and n - 1 carved; the panel says "step k of n"
-        emit("carving", f"carving the printed {mat['name']} in {stations} steps (as drawn, then {stations - 1} carved)")
+        plastic = re.sub(r"\s*\(printed\)$", "", mat["name"])     # "the printed PETG", not "… PETG (printed)" (#137)
+        emit("carving", f"carving the printed {plastic} in {stations} steps (as drawn, then {stations - 1} carved)")
         def swept(f: float) -> None:
             stop()                                                     # a cancel lands here too (CALI-101)
             emit("carving", "", progress=round(0.7 * f, 3))

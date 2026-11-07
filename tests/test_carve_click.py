@@ -246,7 +246,7 @@ def test_a_cancelled_carve_keeps_the_steps_it_finished(tmp_path, monkeypatch):
         carve.study(store, "stool", stations=4, remove_up_to=0.4, stop=stop, emit=lambda k, t="", **d: said.append(t))
     (rec,) = carve.list_runs(store)
     assert rec["status"] == "cancelled" and len(rec["stations"]) == 2 and rec["steps"] == 4
-    assert "carving the printed PETG (printed) in 4 steps (as drawn, then 3 carved)" in said
+    assert "carving the printed PETG in 4 steps (as drawn, then 3 carved)" in said             # one "printed" (#137)
     holding = [s for s in rec["stations"] if s["holds"]]
     assert rec["best"] == (max(holding, key=lambda s: s["saved_g"])["index"] if holding else None)
     text, ok = studies._headline("carve", rec)
@@ -311,7 +311,7 @@ console.log(JSON.stringify({ first, again, asked }));
 def test_a_redraw_while_a_carve_runs_keeps_its_panel_and_the_button_stays_off():
     """#93 item 3: a redraw replaced the progress panel with an empty one, and the button came back enabled."""
     out = _run(_page(["carveView", "carveChart", "carveProgress", "carveTime", "carveBlocked", "defaultCheck"],
-                     ["CARVE_PER_CHECK_AT_LEAST", "minutesText", "verdictTone", "holdsHere"], """
+                     ["CARVE_PER_CHECK_AT_LEAST", "minutesText", "ran", "verdictTone", "holdsHere"], """
 const esc = (s) => String(s);
 const S = { carveJob: {}, station: null };
 const carveRuns = () => [];
@@ -380,6 +380,7 @@ out.thin = carveTime(p);
 
 PANEL = ["runCarve", "followCarve", "carveProgress", "paintCarve", "wireCarve"]
 STUBS = """
+const ran = () => '';
 const S = { carveJob: {}, scope: 'stool', design: {} };
 const esc = (s) => String(s), $ = () => null, showErr = () => {}, clearStation = () => {}, showStation = () => {};
 const document = { querySelectorAll: () => [] };

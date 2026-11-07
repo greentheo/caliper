@@ -898,7 +898,7 @@ def _asked(store: DesignStore, asked: str, prior: str, new: str, volumes) -> lis
             return repr(v) if v is not None else "none"
         if _counts(key):                             # a count: rows, holes, slats…
             return f"{v:g}"
-        return f"{v:g} mm" + (f" ({answers._wall(v, True)})" if inches and v > 0 else "")   # a length, always its unit
+        return f"{v:g} mm" + (f" ({answers._small_len(v, True)})" if inches and v > 0 else "")   # a length, always its unit
 
     out = [f"Asked for: {asked.strip()}"]
     moved = fallbacks.changed(prior or "", new or "")
