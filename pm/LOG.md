@@ -3,6 +3,27 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-35 (#3b) · A reviewed plan's parts are built one by one, in order
+- **Build it on a reviewed plan** (`build_plan.build`, from `firstrun`): each part to be made is authored in the plan's
+  build order, mounted-on first, narrated ("Building the mast", "The mast: built (mast_height ✓, …)"). A part the
+  person has (`fixed`) isn't designed. "The plan's saved … comes next (#3b)" is gone.
+- **Each designer sees the skeleton and what's built** (`DesignStore._plan_context`, in `prompt_context` when there's
+  a plan): every skeleton number in mm with its unit and why, each part already built with its world bounding box,
+  and the plan's checks between parts.
+- **A rule between parts fails the round:** `authoring.improve` takes `interfaces`, the plan's mates and rules over this
+  part and the parts already built, measured each round with the skeleton's values (`evaluate_assembly`); a rule
+  over a part not built yet waits. A failing one is fed back like any failing measurement.
+- **A part that won't build** stops the run there: the parts before it stay, the reply names it and why ("Build it
+  again to retry it, change the plan, or carry on without it"), and Build it again carries on from it.
+- **#103's review items:** a revision's history says `waiting` (amber "not all checked", with `said`) when a check
+  couldn't run, never a green "passed"; the chat says "The whole design measures green" only when every check ran
+  (`chat._design_line`), else `Report.said()`; each evaluator guard is pinned on its own (the string repeat too).
+- `tests/test_build_plan.py` (10, stub authors that build boxes from the skeleton): every interface holds; a mast
+  100 mm short fails its round naming `mast_height` and the retry fixes it; the designers' prompts carry the skeleton
+  and the built parts' boxes; a part that won't build stops there and Build it again goes on; the history and chat
+  lines; the four guards. #3a's "comes next" test now checks Build it starts at the base. The skeleton driving the
+  parts (rebuilds on a change) is #3c.
+
 ### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
 - **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to
   build…) is refused with that reason, and so is any fixed part when nothing the person said says they have something.
