@@ -3,6 +3,23 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-35c (#3c) · The skeleton's numbers drive the parts
+#3's last slice: a planned design's shared numbers (the skeleton: "mast_top_z: 7 ft") drive every part that reads them.
+- **The params override** (`assembly.skeleton_params`): a part's `PARAMS` key the skeleton names is built at the
+  skeleton's value (`_build_py_local`, `part_geometry`, `evaluate`, `load_parts`; cached by the numbers it reads), and
+  what it declares (`construction.declared`'s probe) gets the same numbers, so its pieces and loads move with its shape.
+- **Changing one after the build** (`skeleton.drive`): the skeleton takes it, every part that reads it is written again
+  as a new version (the same script, `action: skeleton`, the change in its history: no call to Claude), and the whole
+  design is measured again. Its strength check, weight and score are then of the older shape, said as for any change.
+- **In the chat:** after the build, "make the mast 10 ft" (a message that names a number) is the plan's revision
+  (`P.revise`, one call); if only shared numbers changed, they drive the parts: "Changed mast top z from 7 to 10 ft.
+  Rebuilt from it, with no new design: the mast, the hub. The design checks: …". A change to more than the numbers (a
+  part, a check), or none, goes to the chat as ever.
+- **A part that hard-codes a shared number** instead of reading it doesn't move, and the plan's rule pinning that
+  interface fails, said (the drive isn't ok).
+- Tests: tests/test_skeleton_drives.py (6, stubbed: the fake planner answers the plan and its revision; the parts are
+  boxes that read the skeleton). No live runs.
+
 ### 2026-11-07 · CALI-121 (#134 follow-up) · The carve-through-the-API test waits 1,500 s for its job, not 900
 - `test_mixed::test_carving_through_the_api` waits for its carve job before it reads the run. On a loaded machine the
   job took 790 s on its own and over 900 s twice beside two other test runs (#134's merge-forward), so the test timed

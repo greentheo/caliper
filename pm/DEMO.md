@@ -566,6 +566,14 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · A shared number drives the parts that read it (CALI-35c #3c)
+1. With a key: plan a design of several parts (the turbine sentence), Build it, then say "make the mast 10 ft". The
+   reply says "Changed mast top z from 7 to 10 ft. Rebuilt from it, with no new design: the mast, the hub." and what
+   the design's checks measure now; the viewport shows the taller mast with the hub on it.
+2. Each rebuilt part's history says "skeleton" with the change; its strength check reads "older version" until it's
+   checked again.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_skeleton_drives.py` (stubbed: no key needed).
+
 ### 2026-11-07 · The carve-through-the-API test allows a slow runner (CALI-121, #134 follow-up)
 1. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_mixed.py -k carving_through_the_api` waits up to 25 min
    for its carve job (it took 13 on a loaded machine). Nothing to see in the app.
