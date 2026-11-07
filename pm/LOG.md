@@ -1,7 +1,26 @@
 # Caliper work log
 
 Append-only. Newest first. One entry per shipped task or notable decision.
-Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
+Format: `### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
+- **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to
+  build…) is refused with that reason, and so is any fixed part when nothing the person said says they have something.
+- **No part for the ground, the floor or the room:** validation drops it, with the mates and rules that name it
+  (`plan.dropped`). **One part to build builds at once:** `P.buildable` counts parts to make, so a reference part
+  doesn't stop the first run for review. The stool's step says "one part (the bathroom floor is what it stands on,
+  not a part)".
+- **One retry:** a refused plan goes back to the planner once with the reason, then falls back to one part. `=` in a
+  rule says "`=` isn't a comparison; use `==`".
+- **No tautologies:** a rule that calls no measure of a part and names no part ("shaft_d == 25.4") is refused.
+- **Invented numbers are proposals:** `classify()` marks a skeleton number `stated` only when the person gave it (any
+  unit: "1 in" is the planner's 25.4 mm), and a rule `stated` only when it reads stated numbers. Everything else is
+  `assumed`, whatever the planner wrote, and not enforced: only `binding()` rules go into assembly.yaml. Review shows
+  "assumed: not checked until you keep it" with **Keep** (`POST …/plan/checks/{id}/keep`). A revision doesn't undo
+  a keep. design.js v=54.
+- `tests/test_plan_live.py` (31; all fail on main). One #103 test now expects only the turbine's stated rule enforced.
+- **Not done here:** the accept's live re-run of the three sentences. It spends Theo's key, so it needs his word in
+  night shift's session (a relayed word doesn't count).
+
+### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
 - **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
   `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its
   note. A ✗ by its number stays a fail. `untrusted` (#96, a filled-in shape) is as it was.

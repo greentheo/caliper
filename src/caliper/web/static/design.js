@@ -910,7 +910,9 @@ function designView(d) {
       ${d.plan.numbers.length ? '<div class="small"><b>The numbers they share</b></div><ul class="list">'
         + d.plan.numbers.map((n) => `<li class="small">${esc(n)}</li>`).join('') + '</ul>' : ''}
       ${d.plan.checks.length ? '<div class="small"><b>Checked between them</b></div><ul class="list">'
-        + d.plan.checks.map((c) => `<li class="small"><b>${esc(c.id)}</b> <code>${esc(c.expr)}</code></li>`).join('') + '</ul>' : ''}` : ''}
+        + d.plan.checks.map((c) => `<li class="small"><b>${esc(c.id)}</b> <code>${esc(c.expr)}</code>${c.source === 'assumed'
+          ? ` <span class="badge">assumed: not checked until you keep it</span>${c.why ? ` <span class="muted">${esc(c.why)}</span>` : ''}
+            <button class="ghost small" data-plankeep="${esc(c.id)}">Keep</button>` : ''}</li>`).join('') + '</ul>' : ''}` : ''}
     <h4>Parts</h4>
     ${d.parts.length ? '<ul class="list">' + d.parts.map((p) => `<li><span class="partlink" data-part="${esc(p.id)}">${esc(p.id)}</span>
       <span class="muted small">v${p.version}</span>
@@ -1369,6 +1371,15 @@ function wireInspector(p) {
   document.querySelectorAll('#inspector [data-part]').forEach((a) => { a.onclick = () => setScope(a.dataset.part); });
   showMarks();
   wireCards();
+  // keep a check the planner assumed: it's enforced from then on (CALI-115)
+  document.querySelectorAll('#inspector [data-plankeep]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        S.design = await api('POST', `/api/designs/${S.slug}/plan/checks/${encodeURIComponent(b.dataset.plankeep)}/keep`);
+        renderInspector();
+      } catch (e) { showErr(e.message); }
+    };
+  });
   if (!p) { wireBalance(); wireScore(); wireRelease(); return; }
   wireBuilt(p);
   wireCutplan(p);
