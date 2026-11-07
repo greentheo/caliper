@@ -566,6 +566,12 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · One verdict, everywhere (CALI-112 #114)
+1. Open a design whose strength check is a ✗, not trusted, not resolved or middle only: the card, the Score panel, the
+   Studies row, the history line, the build book and the kids' book all say the same word, and none says "holds" or
+   shows green unless it holds.
+2. A stool that fails: its kids' book ends "Don't stand on it yet. It isn't strong enough yet…".
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_verdicts.py`.
 ### 2026-11-07 · A plan says what you said apart from what it assumed (CALI-115 #117)
 1. With a key, new design: "A Savonius wind turbine: printed buckets, plasma-cut end plates, a welded 7 ft mast on a
    staked base, for a generator I already have with a 1 in shaft." Only the generator says "you have it".

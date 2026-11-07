@@ -3,6 +3,24 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-112 (#114) · One verdict function every reader asks
+- **`verdicts.py`:** kinds worst first (`fails`, `untrusted`, `unchecked`, `unresolved`, `edge`, `stale`,
+  `waiting`, `holds`), each with a status, a word and `counts_as_pass`; `case`, `run`, `goal`, `meets`, `station`,
+  `check`, `summary`, `of`. A new kind is one entry. Precedence as the PRs settled it: a ✗ stays a ✗, then not
+  trusted, not resolved, middle only, older version, waiting.
+- **Every reader asks it** (the audit is in the PR): the part and design cards, the make card, the scorecard's
+  statuses, the book's header, its Will it hold? row and its marks, the kids' book, Studies, the chat's facts, the
+  picture reply and the chat's ok for it, the history line, the study's closing message, and the page's badges,
+  run word, history line and stress bar (from `design_state`'s `verdict` on every run, case and history line).
+  Producers and searches carry `# producer` / `# search`.
+- **What the audit found, now fixed:** a fail on a filled-in block read "not trusted" on the scorecard (✗ on the card);
+  the kids' book said "It should hold …, 1.2 times over" for a stool that fails; the history read "holds" for a check
+  on a filled-in block; "✓ I cut a T. rex" led a ✗; Studies showed a card with checks still unknown green; a design
+  with no checks read "Ready to cut — 0 of 0".
+- `tests/test_verdicts.py` (37; can't import on main): two grep guards (Python and the page), every kind through
+  every reader (cards, book row, kids' book, Studies, picture reply, page badges in node), the precedence, the summary,
+  `goal`. Tests that read the old fields read the verdict now. design.js v=67.
+
 ### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
 - **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to
   build…) is refused with that reason, and so is any fixed part when nothing the person said says they have something.
