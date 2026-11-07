@@ -3,6 +3,34 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-121 (#134 review, with main's #124) · #124's own closed reads, and a pinch said where it is
+- **#124's three reads in `carve.py`** (`_closed`'s two, and `adopt`'s check of the STL as it reads back) go through
+  `measure.closed()`; `closed(m, volume=True)` adds the winding (`is_volume`), so `with_printed`'s raw `is_volume`
+  goes too. The guard passes with no new `# raw:`.
+- **`open_near` places a pinch:** it takes every edge with other than two faces (an opening has one, a pinch four),
+  so a pinch reads "near z 5 mm", not the part's whole height. `with_printed` says where: "not checked: its shape
+  isn't closed near z …".
+- **The whittle bridge already merged on load:** `_mesh_of` reads the STL with trimesh's default `process=True`,
+  which merges vertices, so a pinch already read open there. Its switch to `closed()` is belt and braces, not a fix.
+- **The review's two survivors are pinned:** the build reply carries the ⚠ line (through `_compose`), and a pinched
+  printed part isn't weighed. Fail-first: 4 of the 8 fail without this (the guard, the pinch's place, the reply, the
+  weight).
+- **`test_mixed`'s carve-down runs in parallel again:** its `serial` mark (CALI-114) waited on #105's watertight adopt,
+  which #124 landed. CI's serial step allows none (`|| test $? -eq 5`).
+- **#134 review, round 2:** `closed(volume=True)` pinned with an inside-out box: watertight and closed, but its volume reads negative, so it's no solid to weigh (`with_printed` says so).
+
+### 2026-11-07 · CALI-121 (#133) · Every judgment of "closed" is made as the mesh reads back
+- `measure.is_watertight`, `is_manifold`, `body_count`, `clean`'s own check, the weight's solid check and the
+  whittle bridge go through `measure.closed()` (a merged copy, as any STL round trip): a pinch, watertight in memory,
+  isn't closed for any of them. The bridge says where: "'box' isn't closed (near z …): whittle can't voxelize or
+  carve it". A raw read is `closed()` itself or says why (`# raw:`), and a guard test holds every other line to it.
+- **The build says once when its part isn't closed** (`chat._not_closed`, in the round's reply): "⚠ Its shape isn't
+  closed near z … mm: strength, weight and carving can't be checked until it is."
+- **#129's surviving mutant, pinned:** on a closed part the stray step drops a zero-area face anyway (it's a loose
+  shell of its own); only on a part open elsewhere does the zero-area step alone take it out. The test is that case,
+  and it's the one that fails with the step off.
+- `tests/test_closed_everywhere.py` (5; 4 fail on main, the fifth pins the existing step).
+
 ### 2026-11-07 · CALI-98 (#86) · A seat's load cases, and will it tip over
 From Theo's first bar stool run: its designer wrote one case ("250 lb person seated", factor 1.5) and the card read ✓.
 - **The designer's guide gets the load cases by kind of thing** (`part_scripts.md`): a step or tread, a seat (sitting,

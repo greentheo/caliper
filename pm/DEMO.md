@@ -566,6 +566,12 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · "Closed" means closed as it reads back, everywhere (CALI-121 #133, #134)
+1. Build a part whose shape doesn't close (two blocks meeting only along an edge): the build's reply says "⚠ Its shape
+   isn't closed near z … mm: strength, weight and carving can't be checked until it is", at the edge where they meet.
+2. Its weight reads "not checked: its shape isn't closed near z …", and whittle refuses it, saying where.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_closed_everywhere.py`.
+
 ### 2026-11-07 · A seat's load cases, and whether it tips over (CALI-98 #86)
 1. Open a seat whose script declares a tipping case (the guide's example: `"tip": True`, 600 N down 60 mm in from
    the front edge, 20 N forward at seat height): *Will it work?* says "Won't tip when someone sits on the front edge
