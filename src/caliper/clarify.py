@@ -114,21 +114,27 @@ def llm_questions(prompt: str, client=None, model: Optional[str] = None) -> list
 # ---------------------------------------------------------------------------
 # The shop (CALI-124, #145): a question about it is answered by it, and an answer about it goes to it
 # ---------------------------------------------------------------------------
-#: What a question about the shop asks, by what in the shop answers it.
-_SHOP_Q = [("printer", re.compile(r"\b(?:bed|build (?:volume|plate|area|size)|print (?:volume|area|bed)|nozzle)\b"
-                                  r"|\bprinter(?:'s)? (?:size|bed|volume)\b|\bhow big (?:a|is your) print", re.I)),
-           ("router", re.compile(r"\b(?:cnc|router)\b", re.I)),
+#: A question about the person's own machine (#146 review: "your printer", "your bed", "what tools do you have"), not a
+#: design question that names a machine ("How tall is the plasma cutter the cart carries?", "Which router bit profile?").
+_YOURS = re.compile(r"\b(?:your|you(?:'ve| have| own)|do you have an?|what (?:hand )?tools do you)\b", re.I)
+#: The machine a question names comes first ("your router's bed size" is the router's); then a printer's own words.
+_SHOP_Q = [("router", re.compile(r"\b(?:cnc|router)\b(?! bit)", re.I)),
            ("plasma", re.compile(r"\bplasma\b", re.I)),
-           ("hand", re.compile(r"\bwhat (?:hand )?tools\b|\btools (?:do )?you (?:have|own)\b", re.I))]
+           ("printer", re.compile(r"\b(?:3d )?printer|\bbed size\b|\bbuild (?:volume|plate|area)\b|\bprint (?:bed|area|volume)\b",
+                                  re.I)),
+           ("hand", re.compile(r"\btools\b", re.I))]
 _PLASTICS = ("pla", "petg", "abs", "asa", "tpu", "nylon")
 
 
 def shop_topic(q: Question) -> str:
-    """What in the shop a question asks about ("printer", "router", "plasma", "hand"), or ""."""
+    """What of the person's own shop a question asks about ("printer", "router", "plasma", "hand"), or "" for a
+    design question. The question-writer's own tag wins; otherwise only a question about *your* machine is the shop's
+    (#146 review: "What nozzle diameter should the hose fitting take?" is the design's, and its answer is kept)."""
     if q.about.startswith("shop:"):
         return q.about[5:]
-    text = f"{q.question} {q.why}"
-    return next((kind for kind, rx in _SHOP_Q if rx.search(text)), "")
+    if not _YOURS.search(q.question):
+        return ""
+    return next((kind for kind, rx in _SHOP_Q if rx.search(q.question)), "")
 
 
 def shop_says(shop: dict, kind: str, known: bool = True) -> str:
@@ -139,7 +145,7 @@ def shop_says(shop: dict, kind: str, known: bool = True) -> str:
 
     if kind == "hand":
         tools = (shop or {}).get("hand") or []
-        return f"your hand tools: {', '.join(tools)}" if known and tools else ""
+        return f"your hand tools: {', '.join(tools)}" if known and tools and not (shop or {}).get("hand_default") else ""
     m = S.machine(shop or {}, kind)
     if not m:
         return ""
@@ -160,8 +166,8 @@ def shop_words(shop: dict, known: bool) -> str:
 
 
 def with_shop(questions: list[Question], shop: Optional[dict], known: bool = True) -> list[Question]:
-    """Each question about the shop is tagged so its answer goes to the shop, and one the shop already answers
-    says what the shop has instead of asking it (#145: Theo was asked his printer's bed size)."""
+    """Each question about the person's own shop is tagged so its answer goes to the shop, and one the shop already
+    answers says what the shop has instead of asking it (#145: Theo was asked his printer's bed size)."""
     out = []
     for q in questions:
         kind = shop_topic(q)
@@ -175,38 +181,73 @@ def with_shop(questions: list[Question], shop: Optional[dict], known: bool = Tru
     return out
 
 
-def _numbers(text: str) -> tuple[list[float], bool]:
-    nums = [float(n) for n in re.findall(r"\d+(?:\.\d+)?", text or "")]
-    inches = bool(re.search(r"\d\s*(?:\"|in\b|inch)", text or "", re.I))
-    return nums, inches
+#: A size said with its unit: "256 x 256 x 256 mm", "10 in", "4 x 8 ft", '48" x 96"'. Only these make an offer (#146:
+#: "X1C" was a 1 x 1 x 1 printer, "0.4 nozzle, 256 bed" 0.4 x 256 x 0.4, and "150 x 150 mm" read as inches).
+_UNIT = r"(mm|cm|in(?:ch(?:es)?)?\b|\"|ft\b|feet|foot|')"
+_SIZE = re.compile(rf"(\d+(?:\.\d+)?)\s*{_UNIT}?\s*(?:(?:x|×|by)\s*(\d+(?:\.\d+)?)\s*{_UNIT}?\s*)?"
+                   rf"(?:(?:x|×|by)\s*(\d+(?:\.\d+)?)\s*{_UNIT}?)?", re.I)
+_TO_MM = {"mm": 1.0, "cm": 10.0, "in": 25.4, '"': 25.4, "ft": 304.8, "'": 304.8}
+#: A table's size said as a sheet's, with no unit: "4x8", "5 x 10" (feet, as plywood is sold).
+_SHEET = re.compile(r"^\s*(4|5|6)\s*(?:x|×|by)\s*(4|5|8|10|12)\s*$", re.I)
+
+
+def _sizes(text: str) -> list[tuple[list[float], str]]:
+    """Each size said with a unit, in mm: ``[([256, 256, 256], "256 × 256 × 256 mm"), …]``."""
+    out = []
+    for m in _SIZE.finditer(text or ""):
+        nums = [float(x) for x in (m.group(1), m.group(3), m.group(5)) if x]
+        unit = next((u for u in (m.group(6), m.group(4), m.group(2)) if u), None)
+        if not unit:
+            continue                               # a number with no unit isn't a size (#146)
+        u = unit.lower()
+        key = "in" if u.startswith("in") or u == '"' else "ft" if u in ("ft", "feet", "foot", "'") else u
+        out.append(([v * _TO_MM[key] for v in nums],
+                    " × ".join(f"{v:g}" for v in nums) + f" {key}"))
+    return out
 
 
 def shop_offer(kind: str, answer: str) -> Optional[dict]:
-    """What an answer about the shop offers to add to it: ``{text, kind, machine | hand}``, or None where it says
-    nothing the shop can take (it's about the shop either way: never a design requirement)."""
+    """What an answer about the shop offers to add to it: ``{text, kind, machine | hand}``, its size said with its
+    numbers and units so a yes is informed; or a note, ``{kind: "note", text}``, where it says nothing the shop can take
+    ("I couldn't read a printer from 'Bambu X1C': …"); None for a blank answer, or one that keeps the shop as it is."""
     from . import shop as S
 
     a = (answer or "").strip()
-    if not a or a.lower() in ("as your shop has it", "same", "yes", "no"):
+    if not a or a.lower() in ("as your shop has it", "same", "yes", "no", "none"):
         return None
+    cant = {"kind": "note", "about": kind,
+            "text": f"I couldn't read {'your tools' if kind == 'hand' else 'a ' + kind} from {a!r}: add "
+                    f"{'them' if kind == 'hand' else 'it'} to your shop by hand"
+                    + ("." if kind == "hand" else ", or give its " + ("build volume" if kind == "printer" else "bed")
+                       + " with its units (" + ('"256 x 256 x 256 mm"' if kind == "printer" else '"4 x 8 ft"') + ").")}
     if kind == "hand":
         tools = [t for t in S.HAND if re.search(rf"\b{re.escape(t)}s?\b", a, re.I)]
-        return {"kind": "hand", "hand": tools, "text": f"Add {', '.join(tools)} to your shop's tools?"} if tools else None
-    nums, inches = _numbers(a)
+        return {"kind": "hand", "hand": tools, "text": f"Add {', '.join(tools)} to your shop's tools?"} if tools else cant
     mats = [p for p in _PLASTICS if re.search(rf"\b{p}\b", a, re.I)]
-    if kind == "printer" and nums:
-        mm = [v * 25.4 if inches else v for v in nums[:3]]
+    if kind == "printer":
+        beds = [(mm, said) for mm, said in _sizes(a) if min(mm) >= 50]          # a nozzle's 0.4 mm isn't a bed
+        if not beds:
+            return cant
+        mm, said = max(beds, key=lambda b: (len(b[0]), max(b[0])))
         vol = (mm * 3)[:3] if len(mm) == 1 else (mm + mm[:1])[:3] if len(mm) == 2 else mm
-        machine = {"kind": "printer", "volume_mm": [round(v, 1) for v in vol], "materials": mats or ["pla", "petg"]}
-        size = " × ".join(f"{v:g}" for v in machine["volume_mm"])
+        machine = {"kind": "printer", "volume_mm": [round(v, 1) for v in vol], **({"materials": mats} if mats else {})}
+        size = " × ".join(f"{v:g}" for v in machine["volume_mm"]) + " mm"
         return {"kind": "printer", "machine": machine,
-                "text": f"Add a {size} mm printer ({', '.join(m.upper() for m in machine['materials'])}) to your shop?"}
-    if kind in ("router", "plasma") and len(nums) >= 2:
-        feet = bool(re.search(r"\d\s*(?:'|ft\b|feet|foot)", a, re.I))      # "4 x 8 ft": a sheet's size, in feet
-        bed = [v * 12 if feet else v if inches or v < 200 else v / 25.4 for v in nums[:2]]   # inches, as shops say
-        machine = {"kind": kind, "bed_in": [round(v, 2) for v in bed]}
-        return {"kind": kind, "machine": machine,
-                "text": f"Add a {bed[0]:g} × {bed[1]:g} in {kind} to your shop?"}
+                "text": f"Add a printer with a {size} build volume" + (f" (you said {said})" if not said.endswith(" mm") or
+                                                                         len(mm) < 3 else "")
+                        + (f", {', '.join(m.upper() for m in mats)}" if mats else ", materials not said") + ", to your shop?"}
+    if kind in ("router", "plasma"):
+        sheet = _SHEET.match(a)
+        if sheet:                                  # a bare "4x8" is a sheet's size: feet, as plywood is sold (#146)
+            mm, said = [float(sheet.group(1)) * 304.8, float(sheet.group(2)) * 304.8], f"{sheet.group(1)} × {sheet.group(2)} ft"
+        else:
+            beds = [(m, s) for m, s in _sizes(a) if len(m) >= 2]
+            if not beds:
+                return cant
+            mm, said = max(beds, key=lambda b: max(b[0]))
+        bed = [round(v / 25.4, 2) for v in mm[:2]]
+        return {"kind": kind, "machine": {"kind": kind, "bed_in": bed},
+                "text": f"Add a {kind} with a {bed[0]:g} × {bed[1]:g} in bed ({said}) to your shop?"}
     return None
 
 
@@ -235,14 +276,18 @@ def take_offer(store: DesignStore, index: int, add: bool) -> dict:
     with open(_offers_path(store), "w") as f:
         json.dump(got, f, indent=2)
     have = S.read()
-    if not add:
+    if not add or offer.get("kind") == "note":    # a note is only seen, never written
         return have
+    if have.get("default"):                       # no shop.yaml yet: only what was offered, never the default saws
+        have = {"machines": [], "hand_default": True}
     if offer.get("machine"):
         kind = offer["machine"]["kind"]
         have = {**have, "machines": [m for m in have.get("machines") or [] if m.get("kind") != kind]
                 + [offer["machine"]]}
     if offer.get("hand"):
-        have = {**have, "hand": list(dict.fromkeys([*(have.get("hand") or []), *offer["hand"]]))}
+        mine = [] if have.get("hand_default") else (have.get("hand") or [])
+        have = {**{k: v for k, v in have.items() if k != "hand_default"},
+                "hand": list(dict.fromkeys([*mine, *offer["hand"]]))}
     store.append_log({"kind": "shop", "action": "added", "what": offer["text"]})
     return S.write(have)
 
@@ -306,11 +351,15 @@ def answer_round(store: DesignStore, answers: dict[str, str], skip: bool = False
     for q in qs:
         given = "" if skip else str(answers.get(q.id, "") or "").strip()
         kind = shop_topic(q)
-        if kind:                                   # about the shop: offered to it, never a design fact (CALI-124)
+        if kind:                                   # about your shop: offered to it (CALI-124)
             offer = shop_offer(kind, given)
-            if offer:
+            if offer and offer["kind"] != "note":
+                offered.append(offer)              # it goes to the shop, on a yes: not a design fact
+                continue
+            if offer:                              # nothing the shop can take: said, and the answer kept (#146 review)
                 offered.append(offer)
-            continue
+            if not given:
+                continue                           # a shop question left blank: the shop's, nothing to keep
         if given:
             recorded.append(store.add_requirement(q.question, given, source="answered"))
         elif q.default:

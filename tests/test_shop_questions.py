@@ -74,12 +74,15 @@ def test_with_no_shop_a_bed_size_answer_offers_to_add_it_and_a_yes_lands_in_shop
     # the design keeps its own fact, and only that
     assert [(r.question, r.answer) for r in store.design.requirements] == [(HEIGHT.question, "29 in")]
     (offer,) = clarify.offers(store)
-    assert offer["text"] == "Add a 256 × 256 × 256 mm printer (PETG) to your shop?"
+    assert offer["text"] == "Add a printer with a 256 × 256 × 256 mm build volume, PETG, to your shop?"
     assert not os.path.exists(no_shop)                                         # nothing written until a yes
     clarify.take_offer(store, 0, add=True)
     on_disk = yaml.safe_load(open(no_shop))
-    assert {"kind": "printer", "volume_mm": [256, 256, 256], "materials": ["petg"], "id": "printer"} in on_disk["machines"]
-    assert shop.machine(shop.read(), "printer")["volume_mm"] == [256, 256, 256]
+    # only the machine offered: the default jigsaw, drill and saw are never written as yours (#146 review)
+    assert on_disk == {"machines": [{"kind": "printer", "volume_mm": [256, 256, 256], "materials": ["petg"],
+                                     "id": "printer"}]}
+    have = shop.read()
+    assert have["machines"][0]["volume_mm"] == [256, 256, 256] and have["hand_default"] is True
     assert clarify.offers(store) == []
 
 
@@ -96,8 +99,15 @@ def test_a_no_leaves_the_shop_alone(tmp_path, no_shop):
 def test_an_answer_that_says_nothing_the_shop_can_take_offers_nothing():
     assert clarify.shop_offer("printer", "") is None
     assert clarify.shop_offer("printer", "as your shop has it") is None
-    assert clarify.shop_offer("printer", "a big one") is None
+    assert clarify.shop_offer("printer", "a big one")["kind"] == "note"         # said, never dropped (#146)
     assert clarify.shop_offer("hand", "a jigsaw and a drill")["hand"] == ["jigsaw", "drill"]
+    # no wrong machine (#146 review): only sizes said with their units, a bare 4x8 table in feet
+    assert clarify.shop_offer("printer", "Bambu X1C")["kind"] == "note"
+    assert clarify.shop_offer("printer", "0.4 nozzle, 256 bed")["kind"] == "note"
+    assert clarify.shop_offer("printer", "0.4 mm nozzle, 256 x 256 x 256 mm bed")["machine"]["volume_mm"] == [256] * 3
+    assert clarify.shop_offer("router", "150 x 150 mm")["machine"]["bed_in"] == [5.91, 5.91]   # mm, not inches
+    assert clarify.shop_offer("router", "4x8")["text"] == "Add a router with a 48 × 96 in bed (4 × 8 ft) to your shop?"
+    assert clarify.shop_offer("router", "4x8 table")["kind"] == "note"         # only a bare sheet size is feet
     assert clarify.shop_offer("router", "4 x 8 ft")["machine"]["bed_in"] == [48, 96]            # feet, as inches
     assert clarify.shop_offer("router", "48 x 96 in")["machine"]["bed_in"] == [48, 96]
     assert clarify.shop_offer("plasma", "1220 x 1220 mm")["machine"]["bed_in"] == [48.03, 48.03]
@@ -108,6 +118,7 @@ def test_a_shop_question_is_known_by_its_words():
     assert clarify.shop_topic(Question("q", "Do you have a CNC router?")) == "router"
     assert clarify.shop_topic(Question("q", "What tools do you have?")) == "hand"
     assert clarify.shop_topic(Question("q", "How tall is the seat?")) == ""
+    assert clarify.shop_topic(Question("q", "What nozzle diameter should the hose fitting take?")) == ""
     # a question already tagged keeps its tag
     assert clarify.shop_topic(Question("q", "Anything else?", about="shop:plasma")) == "plasma"
 
@@ -122,3 +133,47 @@ def test_the_page_offers_add_it_or_no():
     src = open(os.path.join(os.path.dirname(clarify.__file__), "web", "static", "design.js")).read()
     assert "data-shopoffer=\"${i}\" data-add=\"1\">Add it</button>" in src
     assert "`/api/designs/${S.slug}/shop-offer`" in src
+
+
+
+# --- #146 review ---------------------------------------------------------------------------------------------------
+
+PROBES = [Question("cart", "How tall is the plasma cutter the cart has to carry?"),
+          Question("enclosure", "Should the enclosure fit a CNC router with its dust shoe?"),
+          Question("hose", "What nozzle diameter should the hose fitting take?"),
+          Question("bit", "Which router bit profile do you want on the edge?"),
+          Question("bed", "What size is your printer bed?")]
+
+
+def test_the_reviewer_s_five_probes_lose_no_answer(tmp_path, no_shop):
+    """Only a question about your own machine is the shop's; a design question that names a machine keeps its answer."""
+    store = _asked(tmp_path, PROBES)
+    assert [q.about for q in clarify.pending(store)] == ["", "", "", "", "shop:printer"]
+    clarify.answer_round(store, {"cart": "about 40 in", "enclosure": "yes, with the shoe", "hose": "3/4 in",
+                                 "bit": "a 1/4 in roundover", "bed": "256 x 256 x 256 mm"})
+    kept = {r.question: r.answer for r in store.design.requirements}
+    assert kept == {PROBES[0].question: "about 40 in", PROBES[1].question: "yes, with the shoe",
+                    PROBES[2].question: "3/4 in", PROBES[3].question: "a 1/4 in roundover"}
+    (offer,) = clarify.offers(store)
+    assert offer["machine"]["volume_mm"] == [256, 256, 256]                    # the bed went to the shop's offer
+
+
+def test_a_shop_answer_that_offers_nothing_is_said_and_kept(tmp_path, no_shop):
+    store = _asked(tmp_path, [BED])
+    clarify.answer_round(store, {"bed_size": "Bambu X1C"})
+    assert [(r.question, r.answer) for r in store.design.requirements] == [(BED.question, "Bambu X1C")]
+    (note,) = clarify.offers(store)
+    assert note == {"kind": "note", "about": "printer",
+                    "text": "I couldn't read a printer from 'Bambu X1C': add it to your shop by hand, or give its build "
+                            "volume with its units (\"256 x 256 x 256 mm\")."}
+    clarify.take_offer(store, 0, add=True)                                     # a note is only seen: nothing written
+    assert not os.path.exists(no_shop) and clarify.offers(store) == []
+
+
+def test_tools_you_said_are_kept_when_a_machine_is_added(tmp_path, theos_shop):
+    store = _asked(tmp_path, [Question("router", "Do you have a CNC router? Its bed size?")])
+    clarify.answer_round(store, {"router": "4 x 8 ft"})
+    clarify.take_offer(store, 0, add=True)
+    have = shop.read()
+    assert have["hand"] == ["jigsaw", "drill", "circular saw"] and "hand_default" not in have
+    assert [m["kind"] for m in have["machines"]] == ["printer", "router"]

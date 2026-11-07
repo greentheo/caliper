@@ -19,6 +19,15 @@ into the design's requirements, where *How do I make it?* couldn't use it.
   it?* already reads the shop (`making.plan` → `shop.read()`), never the requirements.
 - Tests: tests/test_shop_questions.py (8, stubbed: a fake asker or client, the shop a file in a temp folder; 7 fail
   without this).
+- **#146 review:** only a question about *your* machine is the shop's ("your printer", "do you have a CNC router",
+  "what tools do you have"), the machine it names first; a design question that names one ("How tall is the plasma
+  cutter the cart carries?", "What nozzle diameter should the hose fitting take?", "Which router bit profile?") keeps
+  its answer as a requirement: the reviewer's 5 probes, none lost. A shop answer that offers nothing is said ("I
+  couldn't read a printer from 'Bambu X1C': add it to your shop by hand, or give its build volume with its units"),
+  its answer kept as a requirement, and the note only dismissed. Only sizes said with their units make an offer ("X1C",
+  "0.4 nozzle, 256 bed" don't; "150 x 150 mm" is mm, not inches); a bare "4x8" table is feet; the offer says its
+  numbers and units. The first yes with no shop.yaml writes only the machine offered: the hand tools stay unsaid
+  (`shop.read` assumes the default for a file with no `hand`, `hand_default`), never written as yours.
 
 ### 2026-11-07 · CALI-122 (#137) · The bar stool's pre-flight: its broken rule said, where it fails, no carve on a fail
 From the reviewer's pre-flight of Theo's bar stool v7 (a copy; nothing of Theo's touched), with the foreman's
