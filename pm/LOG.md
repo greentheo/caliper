@@ -41,7 +41,7 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   - the reply says a parameter's plain name ("foot fillet radius") and every length with its unit, whole numbers too.
 - **A failing check's reason now reaches the chat** (`_fail_lines` adds its detail), so the line is named there too.
 - Tests: `tests/test_fallbacks.py`.
-Format: `### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
+### 2026-11-06 · CALI-110 (#110) · The scorecard and the build book never call an unresolved ✓ a pass
 - **The scorecard:** a strength check that would pass on a run whose FEA governs a ✓ it can't see the wall for is
   `unresolved`: never pass, counted with the unknowns (`summary["unresolved"]`), with the cards' own words as its
   note. A ✗ by its number stays a fail. `untrusted` (#96, a filled-in shape) is as it was.
