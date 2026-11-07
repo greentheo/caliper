@@ -1,5 +1,6 @@
 {
   "created": 1793238028.6425622,
+  "scorer": 2,
   "versions": {
     "leaf_rear": 1,
     "frame": 26,
@@ -44,6 +45,17 @@
       "kind": "design",
       "auto": true,
       "note": "a 75 x 38 x 6 in twin on the floor, and the 1 in walls around it"
+    },
+    {
+      "id": "make:shop",
+      "label": "your shop can make every piece",
+      "kind": "make",
+      "auto": true,
+      "status": "pass",
+      "value": 0,
+      "margin": 0,
+      "trust": "measured",
+      "note": ""
     },
     {
       "id": "tongue",
@@ -473,7 +485,7 @@
       "note": "rough retail guesses (big-box / local metal supplier), 2026 \u2014 edit materials.PRICES"
     },
     "waste.usd": {
-      "value": 90.3,
+      "value": 90.24,
       "unit": "$",
       "label": "of it left as offcut",
       "trust": "guess",
@@ -485,11 +497,18 @@
       "label": "offcut, by cost",
       "trust": "measured",
       "source": "cut plan"
+    },
+    "make.not_in_shop": {
+      "value": 0,
+      "unit": "pieces",
+      "label": "pieces your shop can't make",
+      "trust": "measured",
+      "source": "shop"
     }
   },
   "cost": {
     "usd": 451.27,
-    "waste_usd": 90.3,
+    "waste_usd": 90.24,
     "waste_pct": 0.2,
     "lines": [
       {
@@ -536,7 +555,7 @@
         "part": "cargo_box",
         "item": "4 \u00d7 1 in XPS foam board sheet",
         "usd": 168.0,
-        "waste_usd": 68.93,
+        "waste_usd": 68.86,
         "waste_pct": 0.41,
         "from": "cut plan"
       },
@@ -592,8 +611,11 @@
     "basis": "rough retail guesses (big-box / local metal supplier), 2026 \u2014 edit materials.PRICES"
   },
   "summary": {
-    "pass": 11,
+    "pass": 12,
     "fail": 0,
-    "unknown": 0
+    "unknown": 0,
+    "proposed": 0,
+    "untrusted": 0,
+    "unresolved": 0
   }
 }

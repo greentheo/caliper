@@ -173,3 +173,25 @@ def test_a_rule_whose_holding_isn_t_known_is_never_a_tick():
     assert p.holds_now is None
     text = p.describe()
     assert "✓ it holds now" not in text and "isn't known yet" in text
+
+
+# --- merged with #125 and #129: their readers ask the verdict too ---------------------------------------------------
+def test_an_unweighed_total_is_not_checked_never_the_last_card_s_lower_number(tmp_path, monkeypatch):
+    """#125's unknown weight, through the design card: even with an older card's number on file it's "not checked",
+    never that number's ✓ (#132's merge with #125)."""
+    from caliper import construction
+
+    store = _store(tmp_path, goals="written_by: caliper\nchecks:\n- id: light\n  label: keeps total weight down\n"
+                                   "  metric: weight.total_lb\n  op: <=\n  limit: 10.0\n  source: assumed\n")
+    state = design_api.design_state(store)
+    state["scorecards"] = [{"metrics": {"weight.total_lb": {"value": 0.1, "unit": "lb"}}, "versions": {"tube": 1},
+                            "summary": {"pass": 1, "fail": 0, "unknown": 0}, "checks": []}]
+
+    def throws(*a, **k):
+        raise ValueError("Not all meshes are volumes!")
+    monkeypatch.setattr(construction, "printed_solid", throws)
+    now = answers.measured(store, state)
+    assert now["weight.total_lb"] is None
+    (line,) = [ln for ln in answers.held_to(state, now) if "weight down" in ln["text"]]
+    assert line["status"] == "warn" and "not checked" in line["text"] and "✓" not in line["text"], line
+    assert verdicts.goal(None, incomplete="why")["why"] == "why"

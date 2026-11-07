@@ -1051,7 +1051,7 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     cards = scorecard.list_cards(store, 1)
     goals = scorecard.goals_path(store)
     card = cards[0] if cards else None
-    if (fresh or card is None or card.get("versions") != versions
+    if (fresh or card is None or card.get("versions") != versions or card.get("outdated")
             or (os.path.exists(goals) and os.path.getmtime(goals) > card["created"])):
         emit("scoring", "the design as it stands")
         card = scorecard.compute(store, emit=emit)

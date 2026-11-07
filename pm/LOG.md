@@ -30,6 +30,47 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   `>= limit`/`lim`, `ready`, `best`, `holds_now`; every `.holds`, `whole_holds`, `safety_across >=` in design.js and
   app.js): on the pre-rework head both fail, with all 13 of `tests/test_verdicts_sweep.py`.
 
+### 2026-11-07 · CALI-118 (#126) · A stray face from the CAD's meshing isn't the part; an open part is said, never thrown
+- **The cause:** OCCT's mesher fans a cone face's triangles from its apex, and one comes out with two corners on the
+  apex: a sliver of no area along the cone's seam. Any cone that runs to its apex does it
+  (`cq.Solid.makeCone(30, 0, 40)`). On Theo's bar stool v7 (a copy) it was face 128, the cone, at its apex on the
+  flange (z 14–15.6 mm): 22,772 faces closed and this one apart, so every boolean threw "Not all meshes are volumes!".
+- **`measure.clean`**, where every built part becomes a mesh: faces with no area go, and so does a loose open shell
+  under `STRAY_SHARE` (1e-6) of the part's surface beside a closed body (it bounds nothing: at the 0.05 mm
+  tolerance it moves the volume by about 0.1 mm³ on the bar stool). Said once, `mesh.metadata["strays"]`, and on the
+  part card: "I left out 1 stray face from the CAD's meshing (at z 14.0–15.6 mm): it enclosed nothing and weighs
+  nothing." A bigger open shell, or a real opening, is kept.
+- **An open part is said, never thrown:** `measure.open_near` says where ("near z 40 mm"); `printed_solid` refuses
+  a boolean on it, so (on #125's fail-soft) its weight is "not checked: its shape isn't closed near z 40 mm"; the
+  strength check (and carve, lighten and the picture, which share `prepare`) says "not checked: its shape isn't
+  closed near …, so it can't be voxelized".
+- **The bar stool v7 copy:** closed, weighed at 13.1 lb printed included (v7 is a bigger part than v6's 10.9 lb: a
+  1 in fillet for ½ in, a new opening pattern; 10.4 L of solid against 7.7 L), scored and released (below).
+- `part_scripts.md`: a cone that stops short of its point has no sliver to leave out.
+- `tests/test_stray_faces.py` (9; they can't import on main): three real CAD cones, a closed mesh and one stray
+  triangle (dropped, said, its weight unchanged), a real opening and a big open shell (kept, said where), a cone
+  part weighed whole with the card's line, and an open part (not checked, said, `/balance` 200, the page 200).
+  Built on #125 (its fail-soft weighing). Closed is judged as it reads back (merged; #124's
+  review). design.js v=65.
+
+### 2026-11-07 · CALI-111 (#112) · An all-printed design gets a build package, and the book weighs what the card does
+- **`cutplan.run`** makes its run folder whatever the materials. An all-printed part's cut list says "Nothing to cut:
+  it's all printed." (The release raised FileNotFoundError on the tube.)
+- **The 1.6 lb vs 10.9 lb:** the same card on the bar stool's copy said `weight.i_want` 10.9 lb and `weight.total_lb`
+  1.6 lb. `construction.balance()` left out every printed piece; `report()` weighs them (`with_printed`). So the
+  book's ✓ was wrong and the design card's ✗ 10.9 lb right. `balance()` now weighs printed pieces too.
+- **A card from the old scorer is out of date:** cards carry `scorer: 2`. `list_cards` marks an older one `outdated`,
+  the release scores again rather than reuse it, and the page and design card say "score it again". The camper
+  sample's shipped card is re-scored (its verdicts the same; waste $90.30 → $90.24 from older drift).
+- `tests/test_printed_release.py` (4; all fail on main): the tube's package, the total against each part's weight, the
+  book's numbers equal to the live card's for the same version (a weight goal it fails is ✗ in both), and an old card
+  re-scored. design.js v=61.
+- **#125 review:** a printed piece whose solid can't be made (the bar stool v7's throw, #126) fails soft: `with_printed`
+  marks it unweighed, and that part's weight, the total and the hitch's are **unknown**, never the rest's; the weight
+  check reads "not checked: the printed part's shape isn't closed (…)", the design card and the page say so, and
+  `/balance` answers 200 with the note. No `was`/change against a card from an older scorer ("scored differently
+  since"). `compute` says to bump `SCORER` when a metric's meaning changes.
+
 ### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
 - **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to
   build…) is refused with that reason, and so is any fixed part when nothing the person said says they have something.

@@ -129,8 +129,8 @@ def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Op
     change, a part left out. ``untrusted``/``unresolved``/``incomplete`` are the words that say why, as ``why``:
     a design's verdict never leaves a part out (#132 review: a part unchecked, older or errored is that, so the
     rest can't read as holding for it)."""
-    if met is None:
-        return _make("waiting")
+    if met is None:                            # no number: not checked, and why where it's known
+        return _make("waiting", **({"why": incomplete} if incomplete else {}))
     if not met:
         return _make("fails")
     if untrusted:
