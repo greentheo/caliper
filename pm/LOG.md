@@ -3,6 +3,29 @@
 Append-only. Newest first. One entry per shipped task or notable decision.
 Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the commit hash.
 
+### 2026-11-07 · CALI-126 (#150) · A sheet's grain is greener only when the person says it, and the maker is told
+From #149's review (rule 6): a greener number may rest only on something the person said, and what they said must
+reach the maker.
+- **Assumed:** a `"grain"` the designer writes on a sheet in `construction()` is carried as `grain_assumed` and never
+  reaches the verdict: the beam check takes the worse grain, and the card gives the advice ("Cut the top with its face
+  grain running front to back and it's about 3.1 times over, not 1.6 times over: keep that under Will it hold? and it
+  goes on the cut list.").
+- **Stated:** the person's grain lives in the design (`design.grain`, `caliper.grain`), never the script: said in the
+  chat ("cut the top with the grain front to back", deterministic, no Claude call; a direction is read against the
+  span the last beam check measured) or by the Beam check's **Keep** button (`POST …/parts/{pid}/grain`). The next
+  strength check gives it to `beam()`, where that grain's number, sag and by-thickness govern; until then the card
+  says "You said: …. Check it holds again to use it."
+- **The maker is told:** the cut plan on the page and the build book's cut lists say "Cut the top with its face grain
+  running side to side (across the gap it spans)." (in the part's own directions once a check has measured the span:
+  `span_axis` on a beam).
+- **The Beam check line says which grain it used:** "with the grain along the span, as you said" or "the grain unknown:
+  the weaker way", never a hard-coded "unknown"; the case's "by the plate check" says the same.
+- No design of Theo's writes or states a grain (checked by hand, read-only), so nothing of his moves.
+- Not here: an arrow on the pattern sheets (the line is on the cut list and in the book).
+- Tests: tests/test_grain.py (7: assumed never moves it, stated does and reaches the cut list and the book, the part's
+  own directions, refused grains and panels, the card's advice then "check again", the chat, the page's line). The
+  mutant (the check taking the designer's grain) fails 3.
+
 ### 2026-11-07 · CALI-108 (#108, the backend) · A part's exact numbers, set by hand, with no Claude call
 Theo, on the bar stool: "the advantage to manual cad is the ability to specify things precisely". The panel's UI waits
 for his look at the mockup; this is what it calls.

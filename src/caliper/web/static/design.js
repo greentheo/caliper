@@ -1736,6 +1736,7 @@ function cutplanView(p) {
   const stale = run && run.version !== p.version
     ? `<div class="small" style="color:var(--bad)">Made for v${run.version}; the part is v${p.version} now — make it again.</div>` : '';
   return `<h5 style="margin:14px 0 4px">Cut plan</h5>${note}
+    ${(p.grain_notes || []).map((n) => `<div class="small" style="margin-top:4px">↔ ${esc(n)}</div>`).join('')}
     ${run ? `${stale}${sheets}${plates}${tubes}${sticks}<div class="small"><a href="${url('cutlist.txt')}" target="_blank">cut list as text</a></div>
       ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`
       : `<div class="muted small">Flatten every panel onto the sheets it's cut from — score lines where it bends — and list every
@@ -2159,6 +2160,17 @@ const caseBadge = (c) => verdictBadge(c.verdict);
 const holdsHere = (x) => !!(x && x.verdict && x.verdict.counts_as_pass);
 const runBadge = (run) => verdictBadge(run.verdict);
 const runWord = (run) => (run.verdict ? run.verdict.word : 'not checked yet');
+// which grain the Beam check used (CALI-126): the one the person said, or the weaker way; never a hard-coded "unknown"
+function beamGrain(pl) {
+  return pl.grain ? `with the grain ${pl.grain} the span, as you said` : 'the grain unknown: the weaker way';
+}
+// keep the advice: the grain the person keeps is the only one that moves the verdict, and it goes on the cut list
+function grainKeep(p, pl) {
+  const said = (p.grain || {})[pl.piece];
+  if (said) return pl.grain === said.grain ? '' : ` · <span class="muted">you said ${esc(said.grain)} the span: check it holds again to use it</span>`;
+  if (!(pl.safety > pl.safety_across)) return '';
+  return ` <button class="ghost" data-grain="${esc(pl.piece)}">Keep: cut it with the grain along the span (${sx(pl.safety)})</button>`;
+}
 function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
   const pl = c.plate, f = c.fea || {};
@@ -2170,7 +2182,7 @@ function loadCase(p, run, c, i) {
     ? `<div class="muted small" style="margin-top:4px">No plate check for ${esc(pl.piece)}: ${esc(pl.why)}.</div>`
     : pl.as === 'beam'      // a top on two sides: a beam, not a plate held all round (CALI-116)
       ? `<div class="small" style="margin-top:4px"><b>Beam check</b> — ${esc(pl.piece)}: ${esc(pl.why)} ·
-        ${plNum(pl.safety_across)} with the grain unknown · sags ${len(pl.deflection_mm, 3)}</div>`
+        ${plNum(pl.safety_across)} ${beamGrain(pl)} · sags ${len(pl.deflection_mm, 3)}${grainKeep(p, pl)}</div>`
     : pl.support === 'ring'  // a disc on a ring (#137 item 7)
       ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, a round plate held at its ring's outer edge (${len(pl.ring_mm)} across),
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → ${plNum(pl.safety_across)} across the grain, ${sx(pl.safety)} along it
@@ -2202,7 +2214,7 @@ function loadCase(p, run, c, i) {
         <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
         ${c.verdict && c.verdict.kind === 'fails' ? 'the fail may be the model\'s' : 'no verdict'} (it needs ${run.min_safety}x)</span></div>`
       : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety)}</b>
-        <span class="muted">(by ${c.governs === 'plate' ? 'the plate check, with the grain the wrong way' : 'the FEA'}; it needs ${run.min_safety}x)</span>
+        <span class="muted">(by ${c.governs === 'plate' ? (pl && pl.grain ? `the plate check, with the grain ${pl.grain} the span, as you said` : 'the plate check, with the grain the wrong way') : 'the FEA'}; it needs ${run.min_safety}x)</span>
         ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>`}
       ${plate}${fea}${by}
       ${c.heat ? `<div class="actions"><button data-heat="${i}" class="${on ? 'primary' : ''}">${on ? 'Showing the stress' : 'Show the stress'}</button></div>` : ''}
@@ -2240,6 +2252,15 @@ function wireLoad(p) {
   });
   document.querySelectorAll('#loadBox [data-use-t]').forEach((b) => {
     b.onclick = () => send(b.dataset.useT, p.id);
+  });
+  document.querySelectorAll('#loadBox [data-grain]').forEach((b) => {   // the person keeps the grain (CALI-126)
+    b.onclick = async () => {
+      b.disabled = true;
+      try {
+        const got = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/grain`, { piece: b.dataset.grain, grain: 'along' });
+        S.design = got.design; renderInspector();
+      } catch (e) { b.disabled = false; showErr(plainly(e.message)); }
+    };
   });
   document.querySelectorAll('#loadBox [data-heat]').forEach((b) => {
     b.onclick = () => {

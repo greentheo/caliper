@@ -135,6 +135,32 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     return ""
 
 
+def _grain_lines(store: DesignStore, pid: str, run: dict, stale: bool) -> list[dict]:
+    """A beam's face grain (CALI-126): the advice where the person hasn't said which way it's cut (a grain the designer
+    wrote is only assumed: it never moves the verdict), and "check it again" where they have and the check predates
+    it. Never a greener number from a grain nobody said."""
+    from . import grain as G
+
+    said, out, seen = G.stated(store, pid), [], set()
+    for c in run.get("cases") or []:
+        pl = c.get("plate") or {}
+        piece = pl.get("piece")
+        if pl.get("as") != "beam" or not pl.get("done") or piece in seen:
+            continue
+        seen.add(piece)
+        mine = said.get(piece)
+        if mine and pl.get("grain") != mine["grain"]:
+            out.append(_line(f"You said: {G.line(piece, mine)[0].lower()}{G.line(piece, mine)[1:]} Check it holds "
+                             f"again to use it.", "warn", study="load"))
+        elif not mine and not stale and pl.get("safety") is not None and pl.get("safety_across") is not None \
+                and pl["safety"] > pl["safety_across"]:
+            runs = G.runs(pl.get("span_axis"), "along")
+            out.append(_line(f"Cut the {piece} with its face grain running {runs or 'along the gap it spans'} and it's "
+                             f"about {_times(pl['safety'])}, not {_times(pl['safety_across'])}: keep that under Will it "
+                             f"hold? and it goes on the cut list.", "info", study="load"))
+    return out
+
+
 def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool, inches: bool) -> dict:
     """The part card's line for one load case: its words from its one verdict (CALI-112)."""
     from . import load_study as L
@@ -320,6 +346,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         for c in run["cases"]:
             if c.get("safety") is not None:
                 work.append(_case_line(pid, run, c, filled, stale, inches))
+        work += _grain_lines(store, pid, run, stale)
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
                        and h.get("action") == "failed" and h.get("version") == p["version"]), None)

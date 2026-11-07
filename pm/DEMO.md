@@ -566,6 +566,17 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 
 ## 📓 Demo log (newest first)
 
+### 2026-11-07 · A sheet's grain, as you say it (CALI-126 #150)
+1. On a part whose top rests on two sides, **Check it holds**: the Beam check line says "the grain unknown: the weaker
+   way", and *Will it work?* gives the advice ("Cut the top with its face grain running front to back and it's about
+   …").
+2. Press **Keep: cut it with the grain along the span**, or say "cut the top with the grain front to back": the card
+   says "Check it holds again to use it", and the cut plan says "↔ Cut the top with its face grain running front to
+   back (along the gap it spans)."
+3. **Check it holds** again: the Beam check reads "with the grain along the span, as you said", and the build book's
+   cut lists carry the same line.
+4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_grain.py`.
+
 ### 2026-11-07 · A part's exact numbers, set by hand (CALI-108 #108, the backend)
 1. `curl localhost:8016/api/designs/<slug>/parts/<part>/params`: each number in plain words, with its unit and range.
 2. `curl -X POST -H 'content-type: application/json' -d '{"name": "wall_t", "value": 5, "unit": "mm"}'
