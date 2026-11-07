@@ -79,7 +79,7 @@ def test_the_stool_holds_and_says_which_check_governs(tmp_path, monkeypatch):
     pl = step["plate"]
     assert pl["piece"] == "top" and pl["done"] and pl["as"] == "beam" and pl["edges_held"] == 2
     assert pl["span_mm"] == pytest.approx(355.6, abs=1)
-    assert "face grain running across the gap" in pl["why"]
+    assert "Cut with its face grain running side to side, from one support to the other" in pl["why"]   # (#151)
     assert step["governs"] == "plate" and step["safety"] == pl["safety_across"] < step["fea"]["safety"]
     assert not step["holds"] and pl["safety"] > 2               # grain along the span: it would
     assert shove["plate"] is None                                 # pushed side-on: no plate it lands face-on

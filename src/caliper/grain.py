@@ -67,7 +67,8 @@ def state(store: DesignStore, pid: str, piece: str, grain: str, said: str = "") 
     from . import construction as C
 
     if grain not in GRAINS:
-        raise ValueError(f"a sheet's grain is along or across the gap it spans, not {grain!r}")
+        raise ValueError(f"a sheet's grain is \"along\" the span (from one support to the other) or \"across\" it "
+                         f"(parallel to the supports), not {grain!r}")
     if store.design.part(pid) is None:
         raise ValueError(f"there's no part {pid!r}")
     sheets = [it.get("name") for it in C.declared(store, pid).get("construction") or []

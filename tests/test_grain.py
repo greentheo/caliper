@@ -94,7 +94,8 @@ def test_a_stated_grain_after_a_check_is_said_in_the_part_s_own_directions(tmp_p
 
 def test_a_grain_is_along_or_across_and_on_a_sheet_the_part_has(tmp_path):
     store = _store(tmp_path)
-    with pytest.raises(ValueError, match="^a sheet's grain is along or across the gap it spans, not 'sideways'$"):
+    with pytest.raises(ValueError, match="^a sheet's grain is \"along\" the span \\(from one support to the other\\) or "
+                                         "\"across\" it \\(parallel to the supports\\), not 'sideways'$"):
         grain.state(store, "bench", "top", "sideways")
     with pytest.raises(ValueError, match=r"^the bench has no sheet 'lid' \(its sheets: top, front, back\)$"):
         grain.state(store, "bench", "lid", "along")
