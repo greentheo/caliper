@@ -29,6 +29,9 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   refused, with why. All or nothing: every part is built with its new numbers first; one refused or that won't build
   leaves the skeleton and every part as they were, and the reply says which and why. The reply names each part and
   the key it set, and "Strength: check it again on the mast" for each driven part with a strength run.
+- **The name-collision pin:** the base, named in a rule of its own (`bbox(base).max_z <= 1`) but in none with
+  `mast_top_z`, keeps its own `mast_top_z` key: not a reader, not rebuilt. Readers from any rule (the mutant that
+  survived with the base in none) now fail it.
 ### 2026-11-07 · CALI-123 (#138) · No card reads greener than the newest strength run
 From the reviewer's cards-only re-pre-flight of Theo's bar stool on main (a fresh copy; Theo's folder has v1 2.58x,
 v3 twice "0x", v4 1.7x ✗, and no v7 run).
