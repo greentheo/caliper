@@ -353,13 +353,11 @@ def answer_round(store: DesignStore, answers: dict[str, str], skip: bool = False
         kind = shop_topic(q)
         if kind:                                   # about your shop: offered to it (CALI-124)
             offer = shop_offer(kind, given)
-            if offer and offer["kind"] != "note":
-                offered.append(offer)              # it goes to the shop, on a yes: not a design fact
-                continue
-            if offer:                              # nothing the shop can take: said, and the answer kept (#146 review)
+            if offer:                              # an offer, or a note where the shop can't take it (#146 review)
                 offered.append(offer)
             if not given:
                 continue                           # a shop question left blank: the shop's, nothing to keep
+            # an offer never removes an answer (#146, the foreman's call): "your plasma cutter" still sizes the cart
         if given:
             recorded.append(store.add_requirement(q.question, given, source="answered"))
         elif q.default:

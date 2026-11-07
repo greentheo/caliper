@@ -71,8 +71,9 @@ def test_with_no_shop_a_bed_size_answer_offers_to_add_it_and_a_yes_lands_in_shop
     store = _asked(tmp_path, [BED, HEIGHT])
     assert clarify.pending(store)[0].about == "shop:printer"                   # still asked: the shop doesn't know
     clarify.answer_round(store, {"bed_size": "256 x 256 x 256 mm, PETG", "seat_height": "29 in"})
-    # the design keeps its own fact, and only that
-    assert [(r.question, r.answer) for r in store.design.requirements] == [(HEIGHT.question, "29 in")]
+    # an offer never removes an answer: both are kept (#146, the foreman's call)
+    assert [(r.question, r.answer) for r in store.design.requirements] == [
+        (BED.question, "256 x 256 x 256 mm, PETG"), (HEIGHT.question, "29 in")]
     (offer,) = clarify.offers(store)
     assert offer["text"] == "Add a printer with a 256 × 256 × 256 mm build volume, PETG, to your shop?"
     assert not os.path.exists(no_shop)                                         # nothing written until a yes
@@ -93,7 +94,7 @@ def test_a_no_leaves_the_shop_alone(tmp_path, no_shop):
     assert offer["machine"]["volume_mm"] == [254, 254, 254]                    # a bed said in inches, as mm
     clarify.take_offer(store, 0, add=False)
     assert not os.path.exists(no_shop) and clarify.offers(store) == []
-    assert store.design.requirements == []                                     # never a design fact
+    assert [r.answer for r in store.design.requirements] == ["10 in"]          # the answer kept all the same
 
 
 def test_an_answer_that_says_nothing_the_shop_can_take_offers_nothing():
@@ -153,7 +154,8 @@ def test_the_reviewer_s_five_probes_lose_no_answer(tmp_path, no_shop):
                                  "bit": "a 1/4 in roundover", "bed": "256 x 256 x 256 mm"})
     kept = {r.question: r.answer for r in store.design.requirements}
     assert kept == {PROBES[0].question: "about 40 in", PROBES[1].question: "yes, with the shoe",
-                    PROBES[2].question: "3/4 in", PROBES[3].question: "a 1/4 in roundover"}
+                    PROBES[2].question: "3/4 in", PROBES[3].question: "a 1/4 in roundover",
+                    PROBES[4].question: "256 x 256 x 256 mm"}                    # an offer never removes an answer
     (offer,) = clarify.offers(store)
     assert offer["machine"]["volume_mm"] == [256, 256, 256]                    # the bed went to the shop's offer
 
@@ -177,3 +179,17 @@ def test_tools_you_said_are_kept_when_a_machine_is_added(tmp_path, theos_shop):
     have = shop.read()
     assert have["hand"] == ["jigsaw", "drill", "circular saw"] and "hand_default" not in have
     assert [m["kind"] for m in have["machines"]] == ["printer", "router"]
+
+
+
+def test_an_offer_never_removes_an_answer(tmp_path, no_shop):
+    """#146, the foreman's call on the reviewer's residual: a "your …" answer that becomes a shop offer is kept as a
+    requirement too. The cart is sized by "your plasma cutter" whether or not it goes to the shop."""
+    cart = Question("cutter", "How big is your plasma cutter's table?")
+    store = _asked(tmp_path, [cart])
+    clarify.answer_round(store, {"cutter": "4 x 8 ft"})
+    (offer,) = clarify.offers(store)
+    assert offer["machine"] == {"kind": "plasma", "bed_in": [48.0, 96.0]}
+    assert [(r.question, r.answer) for r in store.design.requirements] == [(cart.question, "4 x 8 ft")]
+    clarify.take_offer(store, 0, add=False)                                    # a no to the shop keeps it too
+    assert [r.answer for r in store.design.requirements] == ["4 x 8 ft"]

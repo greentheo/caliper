@@ -28,6 +28,7 @@ into the design's requirements, where *How do I make it?* couldn't use it.
   "0.4 nozzle, 256 bed" don't; "150 x 150 mm" is mm, not inches); a bare "4x8" table is feet; the offer says its
   numbers and units. The first yes with no shop.yaml writes only the machine offered: the hand tools stay unsaid
   (`shop.read` assumes the default for a file with no `hand`, `hand_default`), never written as yours.
+- **#146 review, round 2 (the foreman's call):** an offer never removes an answer. A "your …" answer that becomes a shop offer is kept as a requirement too ("your plasma cutter" still sizes the cart), and a no to the shop keeps it.
 
 ### 2026-11-07 · CALI-123 (#138) · No card reads greener than the newest strength run
 From the reviewer's cards-only re-pre-flight of Theo's bar stool on main (a fresh copy; Theo's folder has v1 2.58x,
