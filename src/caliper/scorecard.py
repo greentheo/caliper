@@ -336,6 +336,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
     from . import load_study
 
     worst = None
+    unsure = None                     # a ✓ on an FEA too coarse to see the wall: no pass from it (CALI-110)
     for p in store.design.parts:
         if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
             continue
@@ -349,6 +350,10 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                         "model", "strength")
                 continue
         breaks = [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
+        if unsure is None and any(load_study.unresolved(run, c) and c.get("holds") for c in run["cases"]):
+            from .answers import coarse
+
+            unsure = coarse(run, store.design.display_units == "in")
         if run.get("safety") is not None:
             _metric(metrics, f"strength.{p.id}.safety", run["safety"], "×", f"{p.id}, its weakest load",
                     "model", "strength check")
@@ -389,7 +394,11 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             continue
         v, lim, op = float(m["value"]), float(c["limit"]), c.get("op", ">=")
         ok = v >= lim if op == ">=" else v <= lim if op == "<=" else abs(v - lim) < 1e-9
-        if ok and edgeless and c["metric"].startswith("strength"):   # a ✗ stays a fail
+        if ok and unsure and c["metric"].startswith("strength"):   # not resolved: never a pass; a fail stays one
+            checks.append({**c, "status": "unresolved", "value": m["value"], "unit": m["unit"], "margin": None,
+                           "trust": "not resolved: too coarse to see its walls", "note": unsure})
+            continue
+        if ok and edgeless and c["metric"].startswith("strength"):   # middle only (CALI-94): a ✗ stays a fail
             checks.append({**c, "status": "edge", "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "checked in the middle only", "note": MIDDLE_ONLY})
             continue
@@ -413,6 +422,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                         "unknown": sum(c["status"] not in ("pass", "fail", "proposed") for c in checks),
                         "proposed": sum(c["status"] == "proposed" for c in checks),
                         "untrusted": sum(c["status"] == "untrusted" for c in checks),
+                        "unresolved": sum(c["status"] == "unresolved" for c in checks),
                         "edge": sum(c["status"] == "edge" for c in checks)}}
     os.makedirs(cards_dir(store), exist_ok=True)
     with open(os.path.join(cards_dir(store), time.strftime("%Y%m%d-%H%M%S") + ".json"), "w") as f:

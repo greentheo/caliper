@@ -177,3 +177,18 @@ def test_no_reader_says_holds_on_the_middle_only(tmp_path, monkeypatch):
     assert "strength check: checked in the middle only" in got[3] and "holds" not in got[3]
     callout = re.search(r"^async function showHeat\(.*?^}\n", src, re.S | re.M).group(0)
     assert "caveat(c)" in callout and "${c.breaks_lb && !caveat(c) ?" in callout
+
+
+def test_the_make_card_and_the_scorecard_line_name_the_middle_only():
+    """#106 merged with #111: the make card's reason, and the design card's scorecard line, say it."""
+    assert answers._why_not({"card": {"summary": {"fail": 0, "untrusted": 0, "unresolved": 0, "edge": 1}}}) \
+        == "a strength check skipped the front edge"
+
+
+def test_the_design_card_s_scorecard_line_counts_it_apart(tmp_path):
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    state = {"parts": [{"id": "stool", "version": 1, "role": "movable"}], "prompt": "a stool", "name": "s",
+             "scorecards": [{"summary": {"pass": 1, "fail": 0, "unknown": 2, "untrusted": 0, "unresolved": 1, "edge": 1},
+                             "checks": [], "versions": {}}], "goals": {"checks": []}, "load_runs": []}
+    (line,) = [c for c in answers.design(store, state) if c["key"] == "work"][0]["lines"][:1]
+    assert line["text"] == "1 check pass, 1 not resolved, 1 middle only." and line["status"] == "warn"

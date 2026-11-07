@@ -245,19 +245,21 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
                                                    "Two coats, and let the first one dry.", "img": img})
     held = []
     untrusted = any(c.get("filled") for cases in (rec.get("strength") or {}).values() for c in cases)
-    # loaded in the middle only, where a top on two sides is strongest: no promise from it (CALI-94)
-    untrusted = untrusted or any(c.get("edge") and c.get("holds") for cases in (rec.get("strength") or {}).values()
-                                 for c in cases)
+    # a ✓ from an FEA too coarse to see its walls is no promise either (CALI-110), nor one loaded in the middle only,
+    # where a top on two sides is strongest (CALI-94)
+    unsettled = any((c.get("unresolved") or c.get("edge")) and c.get("holds")
+                    for cases in (rec.get("strength") or {}).values() for c in cases)
     for cases in (rec.get("strength") or {}).values():
-        if untrusted:                                    # checked on a block: nothing to promise (CALI-96)
+        if untrusted or unsettled:                       # checked on a block, or too coarsely: nothing to promise
             break
         for c in cases:
             if c.get("safety"):
                 held.append(f"It should hold {c['name'].lower()}, {answers._times(c['safety'])}.")
     with open(os.path.join(root, "kids", "finished.png"), "wb") as f:
         f.write(release.draw(view, [(every, "now")]))
-    if untrusted:
-        # its strength hasn't been checked on the stool as built: no standing on it at all (#96 rework, item 4)
+    if untrusted or unsettled:
+        # its strength hasn't been checked on the stool as built: no standing on it at all (#96 rework, item 4;
+        # CALI-110: nor where the check was too coarse to see its walls)
         pages.append({"title": "Don't stand on it yet", "img": "kids/finished.png",
                       "say": "Don't stand on it yet. Its strength hasn't been checked on it as it's built, so a "
                              "grown-up checks it first, before anyone stands on it.", "grownup": True})

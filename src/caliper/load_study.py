@@ -814,7 +814,10 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
 
     store.append_history(part_id, {"kind": "load", "action": "studied", "run": rid,
                                    "cases": len(cases), "safety": worst, "holds": record["holds"],
-                                   # the history line never says "holds" for the middle only (CALI-94)
+                                   # the history line says "not resolved" (CALI-110) or "checked in the middle only"
+                                   # (CALI-94), never "holds", for them
+                                   **({"unresolved": True} if any(unresolved(record, c) and c.get("holds")
+                                                                  for c in cases) else {}),
                                    **({"middle_only": True} if bare_edge(store, part_id) else {})})
     store.append_log({"kind": "load", "action": "studied", "part": part_id, "run": rid})
     said = "it holds" if record["holds"] else "it doesn't hold"
