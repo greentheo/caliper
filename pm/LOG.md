@@ -24,6 +24,11 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   for the test stool's front edge is now 2.0.
 - **NEEDS ENGINEER CHECK:** the factor (#42: or b_ef = M_beam / m_plate, or let the plate check govern).
 - `tests/test_orthotropic.py` (7; six fail on main).
+- **Merged forward onto main's one verdict (#132):** the plate or beam check gets its own verdict on the server
+  (`verdicts.meets` of its worse-grain number against the run's need, only where the case is settled: never green on
+  a not-trusted, unresolved or older case), and the Beam check panel takes its colour and word from it. Before, the
+  panel's number was plain bold. No number moves. Both guards pass.
+
 ### 2026-11-07 · CALI-106 (#136 review, round 2) · What a refused carve asks for, said apart; the page keeps it off
 - **The line asks two things apart** (thickening to the rule's 2.85 mm doesn't unblock a carve): printing and the
   part's own rule, "too thin for a 0.4 mm nozzle to print and for your rule shell_wall_thickness (at least 2.85 mm):

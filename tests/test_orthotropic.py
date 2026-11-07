@@ -74,3 +74,36 @@ def test_the_page_shows_a_beam_as_a_beam():
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     fn = re.search(r"^function loadCase\(.*?^}\n", src, re.S | re.M).group(0)
     assert "pl.as === 'beam'" in fn and "esc(pl.why)" in fn
+
+
+def test_the_beam_check_s_number_takes_its_colour_and_word_from_its_verdict(tmp_path):
+    """#122's merge with #132: the Beam check panel showed its number in plain bold, its own verdict worked out nowhere.
+    The server gives the plate or beam check its verdict (its number against the run's need, only where the case is
+    settled), and the panel colours it from that."""
+    import json
+    import os
+    import re
+
+    from caliper import design_api, verdicts
+    from caliper.design import DesignStore
+
+    from .test_load_study import BOX_STOOL
+
+    pytest.importorskip("cadquery")
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", BOX_STOOL, intent="a box stool")
+    beam = {"done": True, "as": "beam", "piece": "top", "safety": 2.6, "safety_across": 1.7, "why": "a top on two sides"}
+    case = {"name": "an adult stepping up", "lb": 200, "factor": 2.0, "safety": 1.7, "holds": False, "governs": "plate",
+            "fea": {"supported": True, "safety": 3.0}, "plate": beam}
+    run = {"id": "20261107-000000-beam", "part": "stool", "version": store.design.part("stool").version, "created": 1.0,
+           "min_safety": 2, "safety": 1.7, "holds": False, "spacing_mm": 3.0, "cases": [case]}
+    folder = os.path.join(load_study.runs_dir(store), run["id"])
+    os.makedirs(folder)
+    with open(os.path.join(folder, "run.json"), "w") as f:
+        json.dump(run, f)
+    (shown,) = design_api.design_state(store)["load_runs"]
+    pl = shown["cases"][0]["plate"]
+    assert pl["verdict"]["kind"] == "fails" and pl["verdict"] == verdicts.meets(1.7, 2)
+    src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    fn = re.search(r"^function loadCase\(.*?^}\n", src, re.S | re.M).group(0)
+    assert "<b style=\"color:var(--${verdictTone(pl.verdict)})\">${sx(pl.safety_across)}" in fn
