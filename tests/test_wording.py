@@ -43,10 +43,31 @@ def test_the_design_card_s_top_line_is_the_part_s_description(tmp_path):
 
 # --- item 6: a print-time objective offers the carve ------------------------------------------------------------------
 
+def _checked(runs, version=7, units="mm"):
+    """A design whose only part, the stool at ``version``, has these strength runs (newest first), saved as runs are:
+    what ``load_study.blocked`` reads, without a build."""
+    import json
+    import tempfile
+    from types import SimpleNamespace
+
+    from caliper import load_study
+
+    store = SimpleNamespace(root=tempfile.mkdtemp(), design=SimpleNamespace(
+        part=lambda pid: SimpleNamespace(version=version), display_units=units))
+    for i, r in enumerate(runs):
+        rid = f"2026110{7 - i}-000000-stool"
+        os.makedirs(os.path.join(load_study.runs_dir(store), rid))
+        with open(os.path.join(load_study.runs_dir(store), rid, "run.json"), "w") as f:
+            json.dump({"id": rid, "part": "stool", "created": 100.0 - i, **r}, f)
+    return store
+
+
 def test_a_print_time_objective_offers_the_carve_on_a_printed_part(monkeypatch):
     from caliper import construction as C
+    from caliper import load_study
 
     monkeypatch.setattr(C, "declared", lambda store, pid: {"construction": [{"name": "cone", "kind": "printed"}]})
+    monkeypatch.setattr(load_study, "blocked", lambda store, pid: None)
     p = {"id": "i_want", "loads": True, "carved": False}
     mk = {"printed": [{"material": "petg", "pieces": 3, "hours": 165}]}
     aim = {"goals": {"objectives": [{"metric": "print.hours", "direction": "min"}]}}
@@ -135,6 +156,32 @@ def test_the_shop_check_is_no_tick_over_nothing_worked_out(tmp_path, monkeypatch
     assert "couldn't work out how to make stool: its pieces couldn't be read" in shop["note"]
 
 
+def test_the_shop_check_waits_when_one_part_s_plan_couldn_t_be_made(tmp_path, monkeypatch):
+    """#144 review: two parts, one whose making plan raises and one that works, read ✓ with ``settled = planned``
+    (the ``and not unplanned`` dropped). It waits, naming the part and why."""
+    pytest.importorskip("cadquery")
+    from caliper import making, scorecard
+
+    from .test_load_study import BOX_STOOL
+
+    monkeypatch.setenv("CALIPER_SLICER", "")
+    store = DesignStore.create("two stools", base=str(tmp_path / "designs"))
+    for pid in ("stool", "step"):
+        store.write_part(pid, BOX_STOOL.split("\ndef loads(")[0], intent="a box")
+    real = making.plan
+
+    def one_broken(store, pid):
+        if pid == "step":
+            raise ValueError("its pieces couldn't be read")
+        return real(store, pid)
+
+    monkeypatch.setattr(making, "plan", one_broken)
+    (shop,) = [c for c in scorecard.compute(store)["checks"] if c["id"] == "make:shop"]
+    assert shop["status"] == "unknown" and shop["value"] is None and shop["trust"] is None
+    assert "couldn't work out how to make step: its pieces couldn't be read" in shop["note"]
+    assert "stool:" not in shop["note"]                                   # the one that worked isn't named
+
+
 def test_a_stray_face_is_said_where_in_the_design_s_units():
     """P2 item 11: "at z 14.0–15.6 mm" on an inch design."""
     meta = {"strays": "left out 1 stray face from the CAD's meshing (at z 14.0–15.6 mm)", "strays_n": 1,
@@ -158,3 +205,61 @@ def test_an_old_reply_s_traceback_is_shown_to_its_last_line_without_server_paths
     assert chat.shown("All good.") == "All good."
     src = open(design_api.__file__).read()
     assert '"reply": chat.shown(e["reply"])' in src
+
+
+
+# --- #144 review: the offer asks what the Carve button asks ----------------------------------------------------------
+
+FAILS = {"version": 7, "seconds": 60, "spacing_mm": 4.6, "safety": 0.53, "min_safety": 2, "thinnest_mm": 19.0,
+         "cases": [{"name": "sitting", "safety": 0.53, "holds": False, "governs": "plate"}]}
+HOLDS = {**FAILS, "safety": 3.0, "cases": [{"name": "sitting", "safety": 3.0, "holds": True, "governs": "plate"}]}
+THIN = {**HOLDS, "too_thin": True, "thin_said": "its 0.25 mm walls are too thin for the strength check to see."}
+
+
+@pytest.mark.parametrize("runs,why", [
+    ([FAILS], "already_fails"),
+    ([THIN], "too_thin"),
+    ([{**HOLDS, "cases": [{"name": "sitting", "safety": 3.0, "holds": True, "fea": {"supported": False}}]}],
+     "unsupported"),
+    # a finer run asked for, the latest, holding: the carve runs at the default voxels, whose check fails
+    ([{**HOLDS, "spacing_mm": 2.3}, FAILS], "already_fails"),
+    ([HOLDS], None),
+    ([{**FAILS, "version": 6}], None),                  # an older version's check isn't this one's
+])
+def test_no_carve_is_offered_where_the_carve_button_refuses_it(monkeypatch, runs, why):
+    """#144 review: on the bar stool, How do I make it? offered "Carve the cone skirt…" while the Carve button refused
+    it ("its check says it fails…"). Both read load_study.blocked now; the page shows its words."""
+    import json
+
+    from caliper import construction as C
+    from caliper import load_study
+
+    from .test_carve_click import _page, _run
+
+    monkeypatch.setattr(C, "declared", lambda store, pid: {"construction": [{"name": "cone", "kind": "printed"}]})
+    store = _checked(runs)
+    got = load_study.blocked(store, "stool")
+    assert (got or {}).get("why") == why
+    p = {"id": "stool", "loads": True, "carved": False}
+    mk = {"printed": [{"material": "petg", "pieces": 3, "hours": 165}]}
+    aim = {"goals": {"objectives": [{"metric": "print.hours", "direction": "min"}]}}
+    offer = answers._carve_offer(store, aim, p, mk)
+    assert (offer is None) == (why is not None)
+    button = _run(_page(["carveBlocked"], extra=f"out = carveBlocked({{id: 'stool', blocked: {json.dumps(got)}}});"))
+    assert button == ((got or {}).get("carve") or "")                 # the button's reason: the same words, or none
+    assert bool(button) == (offer is None)                             # never both offered and refused
+    if why == "already_fails":
+        assert button == "it already fails (0.5 times over): make it hold first, then carve"
+
+
+def test_the_design_state_carries_each_part_s_blocked(tmp_path):
+    """What the page's carveBlocked reads: the server's own, on every part."""
+    pytest.importorskip("cadquery")
+    from .test_preflight_bar_stool import TUBE, _failed_check
+
+    store = DesignStore.create("a printed tube", base=str(tmp_path / "designs"))
+    store.write_part("tube", TUBE, intent="a printed tube")
+    assert design_api.design_state(store)["parts"][0]["blocked"] is None
+    _failed_check(store, "tube")
+    got = design_api.design_state(store)["parts"][0]["blocked"]
+    assert got["why"] == "already_fails" and got["carve"].startswith("its check says it fails (0.5 times over")

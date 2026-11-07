@@ -143,12 +143,13 @@ def test_carve_and_lighten_refuse_a_part_that_already_fails(tmp_path):
 
 
 def test_the_page_doesn_t_offer_carve_on_a_part_that_fails():
-    check = {"version": 7, "seconds": 60, "spacing_mm": 4.6, "safety": 0.53, "cases": [],
-             "verdict": {"kind": "fails", "status": "bad", "counts_as_pass": False}}
-    out = _run(_page(["carveBlocked", "defaultCheck"], extra=(
-        f"function loadRuns() {{ return [{json.dumps(check)}]; }} function sx(v) {{ return v + 'x'; }}\n"
-        "out = carveBlocked({id: 'stool', version: 7});")))
-    assert out == "it already fails (0.53x): make it hold first, then carve"
+    from .test_wording import _checked
+
+    check = {"version": 7, "seconds": 60, "spacing_mm": 4.6, "safety": 0.53, "min_safety": 2, "thinnest_mm": 19.0,
+             "cases": [{"name": "sitting", "safety": 0.53, "holds": False, "governs": "plate"}]}
+    got = load_study.blocked(_checked([check]), "stool")
+    out = _run(_page(["carveBlocked"], extra=f"out = carveBlocked({{id: 'stool', version: 7, blocked: {json.dumps(got)}}});"))
+    assert out == "it already fails (0.5 times over): make it hold first, then carve"
 
 
 # --- 4. a carve's time, from its start ---------------------------------------------------------------------------------
@@ -226,16 +227,19 @@ def test_a_panel_held_all_round_never_reads_only_16_of_its_16():
 
 
 def test_the_page_doesn_t_offer_lighten_on_a_part_that_fails_and_says_why():
-    fails = {"version": 7, "seconds": 60, "spacing_mm": 4.6, "safety": 0.53, "cases": [],
-             "verdict": {"kind": "fails", "status": "bad", "counts_as_pass": False}}
-    thin = {**fails, "verdict": {"kind": "unchecked", "status": "warn", "counts_as_pass": False}, "too_thin": True,
+    from .test_wording import _checked
+
+    fails = {"version": 7, "seconds": 60, "spacing_mm": 4.6, "safety": 0.53, "min_safety": 2, "thinnest_mm": 19.0,
+             "cases": [{"name": "sitting", "safety": 0.53, "holds": False, "governs": "plate"}]}
+    thin = {**fails, "safety": 3.0, "cases": [], "too_thin": True,
             "thin_said": "its 0.25 mm walls … check it by hand or with a test piece instead."}
+    holds = {**fails, "safety": 3.0, "cases": [{"name": "sitting", "safety": 3.0, "holds": True, "governs": "plate"}]}
     out = []
-    for check in (fails, thin, {**fails, "verdict": {"kind": "holds", "counts_as_pass": True}}):
-        out.append(_run(_page(["lightenBlocked", "defaultCheck"], extra=(
-            f"function loadRuns() {{ return [{json.dumps(check)}]; }} function sx(v) {{ return v + 'x'; }}\n"
-            "out = lightenBlocked({id: 'stool', version: 7});"))))
-    assert out == ["It already fails (0.53x): make it hold first, then lighten it",
+    for check in (fails, thin, holds):
+        got = load_study.blocked(_checked([check]), "stool")
+        out.append(_run(_page(["lightenBlocked"], extra=(
+            f"out = lightenBlocked({{id: 'stool', version: 7, blocked: {json.dumps(got)}}});"))))
+    assert out == ["It already fails (0.5 times over): make it hold first, then lighten it",
                    "Can't lighten it by strength: its 0.25 mm walls … check it by hand or with a test piece instead.", ""]
 
 

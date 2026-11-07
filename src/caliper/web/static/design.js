@@ -2038,17 +2038,11 @@ function defaultCheck(p) {
   const at = loadRuns(p.id).filter((r) => r.version === p.version && r.seconds);
   return at.length ? at.reduce((a, r) => (r.spacing_mm > a.spacing_mm ? r : a)) : null;
 }
-// what stops a carve (or a lightening) before it starts, in words, or '' (CALI-106, #101; #102's note)
+// what stops a carve (or a lightening) before it starts, in words, or '' (CALI-106, #101; #102's note): it already
+// fails (#137 item 3), its walls are too thin (#136), its voxels don't connect. The server's one test
+// (load_study.blocked), which the card's carve offer reads too, so the two can't disagree (#144 review)
 function carveBlocked(p) {
-  const check = defaultCheck(p);
-  // carving only takes material away: not on a part that already fails as drawn (#137 item 3)
-  if (check && check.verdict && check.verdict.kind === 'fails') return `it already fails (${sx(check.safety)}): make it hold first, then carve`;
-  // where the walls are, and what to change, as the check said it (#136 review)
-  if (check && check.too_thin) return check.thin_said ? `Can't carve it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be carved by strength';
-  if (check && check.cases.some((c) => c.fea && c.fea.supported === false)) {
-    return "its voxels don't connect the load to a support yet, so a carve can't run";
-  }
-  return '';
+  return (p && p.blocked && p.blocked.carve) || '';
 }
 function carveTime(p) {
   if (carveBlocked(p)) return carveBlocked(p);
@@ -2072,10 +2066,7 @@ function wireCarve(p) {
 // what stops a lightening before it starts, in words, or '': a part that already fails as drawn (#137 item 3), or
 // walls too thin for any check a study may make (#101, #136)
 function lightenBlocked(p) {
-  const check = defaultCheck(p);
-  if (check && check.verdict && check.verdict.kind === 'fails') return `It already fails (${sx(check.safety)}): make it hold first, then lighten it`;
-  if (check && check.too_thin) return check.thin_said ? `Can't lighten it by strength: ${check.thin_said}` : 'Its walls are too thin for the voxel check at this size, so it can\'t be lightened by strength';
-  return '';
+  return (p && p.blocked && p.blocked.lighten) || '';
 }
 // where a run's worst stress is: a piece by name only from a run that recorded the wall there (#137: an older run's
 // "seat top" was the nearest wood to a hot spot in the printed cone), else how high up it is

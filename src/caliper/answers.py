@@ -56,11 +56,17 @@ def _worst(lines: list[dict]) -> str:
 def _carve_offer(store: DesignStore, state: dict, p: dict, mk: dict) -> Optional[dict]:
     """A printed part, on a design whose objective is its print time or its weight, with a carve to try (#89 item 6:
     165 h of printing "as fast as possible", and nothing offered the carve): one line that offers it. Not on a part
-    already carved, nor one with nothing it must hold (a carve keeps what it holds)."""
+    already carved, nor one with nothing it must hold (a carve keeps what it holds), nor where the Carve button refuses
+    it (#144 review: ``load_study.blocked``, the one test both read: it already fails, or its walls are too thin)."""
+    from . import load_study as L
+
     if not mk.get("printed") or not p.get("loads") or p.get("carved"):
         return None
     aims = [o.get("metric") or "" for o in (state.get("goals") or {}).get("objectives") or []]
     if not any(m.startswith(("print.", "weight.")) for m in aims):
+        return None
+    stop = L.blocked(store, p["id"])
+    if stop and stop["carve"]:
         return None
     try:
         name = next((it.get("name") for it in C.declared(store, p["id"]).get("construction") or []

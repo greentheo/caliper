@@ -22,6 +22,19 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
 - Already done elsewhere: items 4 and 5 (the FEA's piece, "16 of its 16") in #139. Not here: item 2 (the questions
   read the shop, and offer to add an answer to it): a change to how the questions work, not wording; its own issue.
 - Tests: tests/test_wording.py (20; 16 fail without this), and two suites' expectations for the new words.
+- **#144 review: the offer asks what the Carve button asks.** On the bar stool, *How do I make it?* offered "Carve the
+  cone skirt…" while the Carve button refused it. `load_study.blocked` is now the one test: it already fails
+  (`already_fails`), its walls are too thin for any check (`too_thin`, #136), or its voxels don't connect
+  (`unsupported`, carve only). It reads the default-voxel check (`default_check`: this version's coarsest, the voxels
+  a carve runs at, not just the latest), with the words each button says. The design state gives each part its
+  `blocked`; the page's `carveBlocked` and `lightenBlocked` read that and nothing else; `_carve_offer` makes no offer
+  where it's set; the studies refuse on the same `already_fails`. On a copy of the stool (v7, 0.53, coarse): no offer,
+  the button says "its check says it fails (0.5 times over, a coarse run…): make it hold first, then carve". Also
+  pinned: one part's making plan raising leaves the shop check waiting, naming that part (not the one that worked);
+  the stray-face line in the design's units through the card (`answers.answers`). Existing designs keep their names:
+  `short_name` runs only when a design is made, so Theo's `I want` (its slug, part id and files) stays as it is.
+  Tests: test_wording (+8), test_stray_faces (+1); the page tests take the server's `blocked`. Three mutants (offer
+  ignores `blocked`, `settled = planned`, the stray line in mm) each fail them.
 ### 2026-11-07 · CALI-122 (#137) · The bar stool's pre-flight: its broken rule said, where it fails, no carve on a fail
 From the reviewer's pre-flight of Theo's bar stool v7 (a copy; nothing of Theo's touched), with the foreman's
 correction: the run's "seat top" was a mislabel.

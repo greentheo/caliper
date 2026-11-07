@@ -351,6 +351,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
                 h["verdict"] = verdicts.of(h)
             elif h.get("kind") == "revision" and h.get("result"):     # its report's verdict (#132 review)
                 h["verdict"] = verdicts.history(h)
+    for p in parts:                           # what stops a carve or a lightening: the card's offer reads it too (#144)
+        p["blocked"] = load_study.blocked(store, p["id"])
     current = {p["id"]: p["version"] for p in parts}
     for rel in runs["release"]:                # ready, as made and for the parts as they are now (#132 review)
         rel["verdict"] = verdicts.release(rel, current)
