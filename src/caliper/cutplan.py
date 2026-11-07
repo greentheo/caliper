@@ -345,6 +345,7 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
         if summary.get("missing"):
             record["notes"].append(f"{mat['name']}: {len(summary['missing'])} piece(s) didn't fit a sheet — "
                                    + "; ".join(f"{m['label']}: {m['why']}" for m in summary["missing"]))
+    os.makedirs(root, exist_ok=True)       # whatever it's made of: an all-printed part has no sheet folder (CALI-111)
     with open(os.path.join(root, "cutplan.json"), "w") as f:
         json.dump(record, f, indent=2)
     with open(os.path.join(root, "cutlist.txt"), "w") as f:
@@ -360,6 +361,9 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
 def cutlist_text(record: dict) -> str:
     """The sticks as a shop cut list, inches first."""
     lines = [f"CUT LIST — {record['part']} ({record['id']})", ""]
+    if not (record.get("plates") or record.get("tubes") or record.get("sticks") or record.get("sheets")):
+        lines.append("Nothing to cut: it's all printed.")              # said, not an empty list (CALI-111)
+        lines.append("")
     for pl in record.get("plates") or []:
         w, h = pl["size_mm"]
         lines.append(f"{pl['label']}, plasma: {pl['count']} x {pl['name']}  ({w / M.IN:.1f} x {h / M.IN:.1f} in, "
