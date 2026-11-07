@@ -88,8 +88,9 @@ def _lb(v) -> str:
     return f"{v:,.1f} lb" if v is not None else "?"
 
 
-def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
-    """What a run came to, in one line, and whether that's good news (None: neither)."""
+def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[bool]]:
+    """What a run came to, in one line, and whether that's good news (None: neither). ``edge``: a strength run checked
+    in the middle only (CALI-94): never "holds" (#106 review sweep)."""
     if kind == "load":
         cases = r.get("cases") or []
         # the worst case that ran: one whose load never reached a support has no number (#140 review)
@@ -97,7 +98,7 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         worst = min(ran, key=lambda c: c.get("safety") if c.get("safety") is not None else 1e9, default=None)
         if worst is None:
             return "no loads", None
-        v = verdicts.run(r)                     # one verdict (CALI-112): a ✗ stays a ✗, then not trusted, …
+        v = verdicts.run(r, edge=edge)          # one verdict (CALI-112): a ✗ stays a ✗, then not trusted, …
         if v["kind"] == "untrusted":            # a block's number, not the part's: no "holds" (CALI-96)
             return (f"not trusted: it ran on a filled-in shape"
                     + (f" (the block read {round(r['safety'], 1):g}x)" if r.get("safety") is not None else "")), None
@@ -121,6 +122,8 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
             return f"doesn't hold — weakest {what} (needs {r.get('min_safety', 2):g}x)", False
         if v["kind"] == "holds":
             return f"holds — weakest {what}", True
+        if v["kind"] == "edge":                 # the middle only: the front edge, where people stand, isn't checked
+            return f"middle only — weakest {what}; the front edge isn't checked", None
         return f"{v['word']} — weakest {what}", None
     if kind == "lighten" and r.get("filled"):
         text, _ = _headline("lighten", {k: v for k, v in r.items() if k != "filled"})
@@ -214,8 +217,9 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         s = r.get("summary") or {}
         untrusted = s.get("untrusted") or 0                         # not trusted is never green (CALI-96)
         unresolved = s.get("unresolved") or 0                       # nor is not resolved (CALI-110)
+        edge = s.get("edge") or 0                                   # nor middle-only (CALI-94)
         return (f"{s.get('pass', 0)} pass · {s.get('fail', 0)} fail" + (f" · {untrusted} not trusted" if untrusted else "")
-                + (f" · {unresolved} not resolved" if unresolved else ""),
+                + (f" · {unresolved} not resolved" if unresolved else "") + (f" · {edge} middle only" if edge else ""),
                 verdicts.summary(s)["counts_as_pass"])              # one verdict (CALI-112)
     if kind == "release":
         why = verdicts.summary((r.get("card") or {}).get("summary"))["why"] or "a check isn't settled"
@@ -248,7 +252,12 @@ def index(store, runs: dict[str, list[dict]], parts: list[dict], air: Optional[d
 
                 if filled(store, part):                   # the part as it is now, not a flag the run kept (CALI-96)
                     r = {**r, "filled": True}
-            row["headline"], row["ok"] = _headline(kind, r)
+            edge = False
+            if kind == "load" and part in current:          # the middle only (CALI-94, #106 review sweep)
+                from .consistency import middle_only
+
+                edge = middle_only(store, part, r, history[part])
+            row["headline"], row["ok"] = _headline(kind, r, edge=edge)
             if row.get("stale") and row["ok"]:        # an older version's green isn't the part as it is (#132 review)
                 row["ok"] = None
             rows.append(row)

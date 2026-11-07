@@ -116,10 +116,13 @@ def test_a_verdict_on_an_fea_that_cant_see_the_wall_reads_warn(tmp_path, monkeyp
 def test_the_same_tube_seen_finely_reads_as_its_safety_says_with_about(tmp_path, monkeypatch):
     store, rec = _studied(tmp_path, monkeypatch, 4)               # 1 mm voxels: four across the wall
     assert rec["resolved"] and "finer" not in rec
+    from caliper.answers import _times
+
+    said = _times(rec["cases"][0]["safety"], about=True)          # "about 3.1 times over", or "more than 10 times over"
     (part,) = _work(store, "tube")
-    assert part["text"].startswith(("Holds a foot, about ", "Doesn't hold a foot: only about ")), part["text"]
+    assert part["text"] in (f"Holds a foot, {said}.", f"Doesn't hold a foot: only {said}, and it needs 2."), part["text"]
     (design,) = _work(store)
-    assert ": about " in design["text"] and design["text"].endswith("times over."), design["text"]     # (#144: _times)
+    assert f": {said}" in design["text"] and "about more than" not in design["text"], design["text"]   # (#144 review)
 
 
 def test_two_across_isnt_enough_any_more(tmp_path, monkeypatch):

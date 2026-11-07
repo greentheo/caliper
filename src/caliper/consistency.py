@@ -321,7 +321,65 @@ def _loads(mesh, declared: dict, pieces: list[dict], tol: float) -> AssertionRes
                            detail="; ".join(missed))
 
 
+def _edge_foot(mesh, declared: dict, pieces: list[dict], tol: float, rest: bool = False) -> Optional[AssertionResult]:
+    """CALI-94 (#73): a top or tread held on just two sides is stood on at its free front edge, where it's weakest
+    (BS 8110 cl. 3.5.2.2's edge width, NEEDS ENGINEER CHECK). If no load puts a foot there, say so: a warning, not
+    a fail (the round still passes). None when there's no two-sided top to ask about."""
+    from . import load_study as L
+
+    try:
+        loads = L.parse_loads(declared["loads"])
+    except (ValueError, TypeError, KeyError):
+        return None                                        # _loads says what's wrong with them
+    from . import spatial
+
+    # a top on printed sides (a printed rest, CALI-82) rests on the solid under it, as the plate check reads it
+    under = (lambda pts: spatial.contains(mesh, pts)) if rest else None
+    tops: dict = {}
+    for ld in loads:
+        got = L.two_sided(pieces, ld, tol, under)
+        if got:
+            tops.setdefault(got["piece"], []).append(got["free"])
+    if not tops:
+        return None
+    bare = [name for name, gaps in tops.items() if min(gaps) > L.AT_EDGE_MM]
+    detail = "; ".join(f"the {name} is held on two sides, and no load stands on its free edge, where it's weakest: "
+                       f"add a case, the same foot mid-span with its edge on the free edge (\"stepping on the front "
+                       f"edge\")" for name in bare)
+    return AssertionResult(id="loads_edge", expr="a top held on two sides is stood on at its free edge too",
+                           status="pass", passed=True, actual=len(tops) - len(bare), detail=detail)
 _FILLED: dict = {}
+_EDGE: dict = {}
+#: What a strength ✓ says while a two-sided top has no foot at its free edge (CALI-94, #106 review).
+MIDDLE_ONLY = ("checked in the middle only; the front edge, where people stand, isn't checked (add a \"stepping on "
+               "the front edge\" case)")
+
+
+def bare_edge(store, part_id: str) -> Optional[str]:
+    """CALI-94 (#106 review): the loads_edge warning's detail while a part's two-sided top has no foot at its free
+    edge, else None. Its strength ✓ isn't one then: the case where people stand wasn't checked. Kept per version and
+    script, as filled() is."""
+    from . import construction as C
+
+    entry = store.design.part(part_id)
+    try:
+        script = store.read_script(part_id)
+    except (OSError, KeyError, ValueError):
+        return None
+    key = (store.root, part_id, entry.version if entry else None, hash(script))
+    if key not in _EDGE:
+        out = None
+        try:
+            declared = C.declared(store, part_id)
+            if declared.get("loads"):
+                got = next((r for r in check(declared, store.part_geometry(part_id)) if r.id == "loads_edge"), None)
+                out = (got.detail or None) if got is not None else None
+        except Exception:  # noqa: BLE001 — this only ever takes a ✓ away; a part that won't check is said elsewhere
+            out = None
+        _EDGE[key] = out
+        while len(_EDGE) > 64:
+            _EDGE.pop(next(iter(_EDGE)))
+    return _EDGE[key]
 
 
 def filled(store, part_id: str) -> Optional[str]:
@@ -384,4 +442,19 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
             out += [vol] if vol else []
     if declared.get("loads") is not None:
         out.append(_loads(mesh, declared, pieces, tol))
+        if pieces:
+            edge = _edge_foot(mesh, declared, pieces, tol, rest)  # a warning, said in its detail (CALI-94)
+            out += [edge] if edge else []
     return out
+
+
+def middle_only(store, part_id: str, run: dict, history: Optional[list] = None) -> bool:
+    """Whether a strength run's ✓ is the middle only (CALI-94): its own history line says so, or the part as it is
+    now has a two-sided top with no foot at its free edge (as the design state judges its runs). For the readers that
+    judge a run away from the design state: Studies, the design card's last-checked line (#106 review sweep)."""
+    for h in history if history is not None else store.history(part_id):
+        if h.get("kind") == "load" and h.get("action") == "studied" and h.get("run") == run.get("id"):
+            if h.get("middle_only"):
+                return True
+            break
+    return bool(bare_edge(store, part_id))
