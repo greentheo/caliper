@@ -306,10 +306,16 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "gussets": frame_study.list_gussets(store), "aero": aero.list_runs(store),
             "whittle": wb.list_runs(store), "cutplan": cutplan.list_runs(store),
             "scorecard": scorecard.list_cards(store, 20), "release": release.list_releases(store)}
+    from .consistency import bare_edge
+
+    current = {p.id: p.version for p in d.parts}
+    middle = {pid for pid in current if bare_edge(store, pid)}          # loaded in the middle only (CALI-94)
     for r in runs["load"]:                    # what the page can't work out: a case too coarse to see its walls (CALI-97)
         for c in r.get("cases") or []:
             if load_study.unresolved(r, c):
                 c["unresolved"] = "unresolved" if r.get("finer") else "unchecked"
+            if r["part"] in middle and r.get("version") == current.get(r["part"]):
+                c["middle_only"] = True       # the page's caveat(): no "holds" from the middle only (#106 review)
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
     return {
         "slug": slug, "name": d.name, "prompt": d.prompt, "units": d.units,

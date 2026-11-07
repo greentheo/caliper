@@ -810,8 +810,12 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         notes.append("This ran on a filled-in shape, not the part as built: its numbers are the block's.")
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
+    from .consistency import bare_edge
+
     store.append_history(part_id, {"kind": "load", "action": "studied", "run": rid,
-                                   "cases": len(cases), "safety": worst, "holds": record["holds"]})
+                                   "cases": len(cases), "safety": worst, "holds": record["holds"],
+                                   # the history line never says "holds" for the middle only (CALI-94)
+                                   **({"middle_only": True} if bare_edge(store, part_id) else {})})
     store.append_log({"kind": "load", "action": "studied", "part": part_id, "run": rid})
     said = "it holds" if record["holds"] else "it doesn't hold"
     if record["holds"] and any(unresolved(record, c) for c in cases):      # never greener than its check (CALI-97)

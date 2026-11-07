@@ -1315,7 +1315,7 @@ function historyItem(h) {
   if (h.kind === 'whittle') return `<li class="hist">studied in whittle (${esc(h.study)}, ${h.stations} stations)</li>`;
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
-  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${h.holds ? 'holds' : 'doesn\'t hold'}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${h.holds && h.middle_only ? 'checked in the middle only' : h.holds ? 'holds' : 'doesn\'t hold'}${h.safety != null ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
   if (h.kind === 'patterns' && h.action === 'made') return `<li class="hist">patterns for hand tools (${h.pieces} pieces)</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
@@ -2052,12 +2052,15 @@ const partOf = (pid) => (S.design && S.design.parts.find((x) => x.id === pid)) |
 // 'unresolved' when a finer run can see them, 'unchecked' when none a study may make can); its badge says so, and
 // no green "holds" sits under the card's warn. A ✗ stays a ✗.
 const coarseWord = (c) => (c.unresolved === 'unchecked' ? 'not checked' : 'not resolved');
-const caseBadge = (c) => (c.unresolved && c.holds ? `<span class="badge warn">${coarseWord(c)}</span>`
+// The one word for a ✓ that isn't one, or null: an FEA too coarse to see the wall (CALI-97), or a two-sided top
+// loaded only in the middle (CALI-94, #106 review). Every reader on the page asks this, so the next state is one line.
+const caveat = (c) => (!c || !c.holds ? null : c.unresolved ? coarseWord(c) : c.middle_only ? 'middle only' : null);
+const caseBadge = (c) => (caveat(c) ? `<span class="badge warn">${caveat(c)}</span>`
   : c.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>');
-const runCoarse = (run) => (run.holds ? (run.cases || []).find((c) => c.unresolved && c.holds) : null);
-const runBadge = (run) => (runCoarse(run) ? `<span class="badge warn">${coarseWord(runCoarse(run))}</span>`
+const runCoarse = (run) => (run.holds ? (run.cases || []).find((c) => caveat(c)) : null);
+const runBadge = (run) => (runCoarse(run) ? `<span class="badge warn">${caveat(runCoarse(run))}</span>`
   : run.holds ? '<span class="badge ok">holds</span>' : '<span class="badge bad">doesn\'t hold</span>');
-const runWord = (run) => (runCoarse(run) ? coarseWord(runCoarse(run)) : run.holds ? 'holds' : 'doesn\'t hold');
+const runWord = (run) => (runCoarse(run) ? caveat(runCoarse(run)) : run.holds ? 'holds' : 'doesn\'t hold');
 function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
   const pl = c.plate, f = c.fea || {};
@@ -2237,8 +2240,12 @@ async function showHeat(pid, run, index) {
     bar.hidden = false;
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →
         ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>`
-          : `<b style="color:var(${c.holds ? '--ok' : '--bad'})">${c.holds ? 'holds' : 'doesn\'t hold'}, ${sx(c.safety)}</b>`}
-        ${c.breaks_lb ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
+          : caveat(c)                       // no "holds", nor a breaking load, from a ✓ that isn't one
+            ? `<b style="color:var(--amber)">${caveat(c)}: ${c.middle_only && !c.unresolved
+              ? `the middle read ${sx(c.safety)}; the front edge, where people stand, isn't checked`
+              : `the FEA read ${sx(c.safety)}, too coarse to see its walls`}</b>`
+            : `<b style="color:var(${c.holds ? '--ok' : '--bad'})">${c.holds ? 'holds' : 'doesn\'t hold'}, ${sx(c.safety)}</b>`}
+        ${c.breaks_lb && !caveat(c) ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
       <div class="small muted" style="margin-top:2px">Colours: whittle's FEA <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span>
         0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${run.material.strength}). Decided by ${decided}.</div></div>
       <button id="stationClose" class="ghost">×</button>`;

@@ -136,3 +136,44 @@ def test_with_its_front_edge_foot_the_same_stool_is_a_fail_and_stays_one(tmp_pat
     part = [ln for ln in answers.answers(store, design_api.design_state(store), "stool")[1]["lines"]
             if ln.get("study") == "load"]
     assert part[0]["status"] == "bad" and part[0]["text"].startswith("Doesn't hold stepping on the front edge"), part
+
+
+# --- #106 review, round 2: the panel, the callout, the history, the picture reply and the chat's facts ----------
+def test_no_reader_says_holds_on_the_middle_only(tmp_path, monkeypatch):
+    import json
+    import os
+    import re
+    import shutil
+    import subprocess
+
+    from caliper import chat, pictures
+
+    store, rec = _kid(tmp_path, monkeypatch, MIXED_CENTRED, "middle")
+    # the page's state marks each case, and the history the study wrote says it
+    (shown,) = design_api.design_state(store)["load_runs"]
+    assert all(c.get("middle_only") for c in shown["cases"])
+    h = store.history("stool")[-1]
+    assert h["kind"] == "load" and h["holds"] and h["middle_only"] is True
+    # the chat answers from facts that say so
+    assert "CHECKED IN THE MIDDLE ONLY" in chat._facts(store, None)
+    # the picture reply (kid-facing)
+    text = pictures.reply({"subject": "T. rex", "size_in": [6.0, 4.0], "panel": "front", "safety": 2.2,
+                           "min_safety": 2, "holds": True, "middle_only": True})
+    assert "still holds" not in text and "times over" not in text and "a grown-up checks it" in text
+    # the page: the badges, the run's word and the history line, run in node; the callout asks the same caveat()
+    node = shutil.which("node") or os.path.expanduser("~/.nvm/versions/node/v22.17.1/bin/node")
+    if not os.path.exists(node):
+        pytest.skip("no node")
+    src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    consts = "".join(re.search(rf"^const {n} = .*?;\n(?=\S)", src, re.M | re.S).group(0)
+                     for n in ("coarseWord", "caveat", "caseBadge", "runCoarse", "runBadge", "runWord"))
+    hist = re.search(r"^function historyItem\(.*?^}\n", src, re.S | re.M).group(0)
+    script = "const esc = (s) => String(s);\n" + consts + hist + (
+        f"const run = {json.dumps(shown)}, c = run.cases[0];\n"
+        f"console.log(JSON.stringify([caseBadge(c), runBadge(run), runWord(run), historyItem({json.dumps(h)})]));")
+    got = json.loads(subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30, check=True).stdout)
+    assert got[:3] == ['<span class="badge warn">middle only</span>', '<span class="badge warn">middle only</span>',
+                       "middle only"], got
+    assert "strength check: checked in the middle only" in got[3] and "holds" not in got[3]
+    callout = re.search(r"^async function showHeat\(.*?^}\n", src, re.S | re.M).group(0)
+    assert "caveat(c)" in callout and "${c.breaks_lb && !caveat(c) ?" in callout

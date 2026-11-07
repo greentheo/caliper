@@ -672,7 +672,8 @@ def picture_part(store: DesignStore, part_id: str, subject: str, where: str = ""
     except (ValueError, ImportError) as e:
         return TurnResult(action="picture", ok=False, part=part_id, events=events, error=str(e),
                           reply=f"I couldn't put a {subject} on it: {e}.")
-    return TurnResult(action="picture", ok=got["ok"] and got.get("holds", True) is not False, part=part_id,
+    return TurnResult(action="picture", ok=got["ok"] and got.get("holds", True) is not False
+                      and not got.get("middle_only"), part=part_id,
                       version=got.get("version"), events=events, reply=got["reply"])
 
 
@@ -753,11 +754,16 @@ def _facts(store: DesignStore, scope: Optional[str]) -> str:
             promised = promised or bool(c.get("promise"))
     if promised:                                       # so a plain answer about strength can say it (CALI-86)
         out.append(f"what a strength verdict promises: {answers.PROMISE}")
+    from .consistency import bare_edge
+
     for run in load_study.list_runs(store)[:2]:
+        middle = bool(bare_edge(store, run["part"]))     # loaded in the middle only (CALI-94): no verdict to repeat
         for c in run.get("cases") or []:
             out.append(f"strength check of {run['part']} v{run['version']}: {c.get('name')} {c.get('lb')} lb x "
                        f"{c.get('factor')}: safety {c.get('safety')} ({c.get('governs')}), breaks near "
-                       f"{c.get('breaks_lb')} lb; needs {run.get('min_safety')}")
+                       f"{c.get('breaks_lb')} lb; needs {run.get('min_safety')}"
+                       + ("; CHECKED IN THE MIDDLE ONLY: the front edge, where people stand, isn't, so this is no "
+                          "verdict" if middle and c.get("holds") else ""))
         out += [f"strength note: {n}" for n in (run.get("notes") or [])[:4]]
     said = [e for e in store.log() if e.get("kind") in ("message", "reply")][-6:]
     out += [f"{'they said' if e['kind'] == 'message' else 'Caliper said'}: {(e.get('text') or e.get('reply') or '')[:600]}"

@@ -305,7 +305,10 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
     if checked:
         emit("step", "Checking the part as it's now built", step="recheck")
         run = L.study(store, part_id, min_safety=min_safety)
-        out.update({"safety": run["safety"], "holds": run["holds"], "run": run["id"]})
+        from .consistency import bare_edge
+
+        out.update({"safety": run["safety"], "holds": run["holds"], "run": run["id"],
+                    "middle_only": bool(bare_edge(store, part_id))})   # no "it still holds" from it (CALI-94)
     out["reply"] = reply(out)
     return out
 
@@ -320,6 +323,9 @@ def reply(got: dict) -> str:
         said += " I made it smaller to keep it strong."
     if got.get("safety") is None:
         return said + " It doesn't say what it must hold, so I couldn't check it's still strong."
+    if got["holds"] and got.get("middle_only"):
+        return said + (" Its strength was checked with a foot in the middle only, not at the front edge where people "
+                       "stand, so a grown-up checks it before anyone stands on it.")
     if got["holds"]:
         return said + f" It still holds, {got['safety']:g} times over (it needs {got['min_safety']:g})."
     return (said + f" ✗ Built, it reads {got['safety']:g} times over and needs {got['min_safety']:g}: "
