@@ -100,7 +100,7 @@ function follow(jobId, onEvent) {
     const finish = (p) => {
       if (done) return; done = true; if (es) es.close();
       p.status === 'done' ? resolve(p.result)
-        : reject(Object.assign(new Error(p.error || (p.status === 'cancelled' ? 'cancelled' : 'the job failed')),
+        : reject(Object.assign(new Error(plainly(p.error) || (p.status === 'cancelled' ? 'cancelled' : 'the job failed')),
           { errorId: p.error_id || '', status: p.status }));
     };
     const handle = (ev) => {
@@ -1199,16 +1199,19 @@ function goTo(id) {                   // open the card's numbers and bring that 
 // since the last card) across design, optimization, making and cost — each with how far to trust it.
 const TRUST = { measured: 'measured', model: 'a model (on the safe side)', rough: 'rough', guess: 'a guess' };
 // a goal's own limit beside its number (#137 item 5): "13.1 lb (cap 10 lb)"
-const goalLimit = (c) => (typeof c.limit === 'number' ? ` (${c.op === '<=' || c.op === '<' ? 'cap' : 'needs'} ${num(c.limit, c.unit)})` : '');
+// a scorecard number as the panel says it, at module level: goalLimit uses it too (#139 review: it called scoreView's
+// own num, so a goal with a number threw "num is not defined" and blanked the inspector)
+function scoreNum(v, u) {
+  if (v == null) return '—';
+  const n = typeof v === 'number' ? (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : `${+v.toFixed(2)}`) : esc(String(v));
+  return u === '$' ? `$${n}` : `${n}${u ? ' ' + esc(u) : ''}`;
+}
+const goalLimit = (c) => (typeof c.limit === 'number' ? ` (${c.op === '<=' || c.op === '<' ? 'cap' : 'needs'} ${scoreNum(c.limit, c.unit)})` : '');
 function scoreView(d) {
   const card = (d.scorecards || [])[0];
   const stale = card && (card.outdated     // scored the old way (CALI-111): its numbers aren't today's
     || d.parts.some((p) => card.versions && card.versions[p.id] !== undefined && card.versions[p.id] !== p.version));
-  const num = (v, u) => {
-    if (v == null) return '—';
-    const n = typeof v === 'number' ? (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : `${+v.toFixed(2)}`) : esc(String(v));
-    return u === '$' ? `$${n}` : `${n}${u ? ' ' + esc(u) : ''}`;
-  };
+  const num = scoreNum;
   const tag = (t) => t ? `<span class="badge" title="how far to trust it">${esc(TRUST[t] || t)}</span>` : '';
   // where a check came from (CALI-55): the person's words, an assumption, kept, or only proposed so far
   const from = (c) => c.source === 'stated' ? `<span class="badge ok" title="${esc(c.quote || '')}">you said</span>`
@@ -2317,7 +2320,7 @@ async function showHeat(pid, run, index) {
     const pl = c.plate && c.plate.done ? c.plate : null, f = c.fea || {};
     const decided = c.governs === 'plate' && pl
       ? `the plate check on the ${esc(pl.piece)}: ${fixed(pl.stress_mpa, 1)} MPa, with the grain the wrong way`
-      : `the FEA's peak: ${fixed(f.peak_mpa, 1)} MPa in the ${esc(f.in || 'part')}`;
+      : `the FEA's peak: ${fixed(f.peak_mpa, 1)} MPa ${esc(peakWhere(f))}`;   // never an old run's label (#139 review)
     const bar = $('stationBar');
     bar.hidden = false;
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →

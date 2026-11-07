@@ -166,10 +166,11 @@ def test_a_goal_says_its_cap():
     assert answers._against(cap, True) == ", over its 10 lb cap"
     assert answers._against(cap, False) == ", within its 10 lb cap"
     assert answers._against({"metric": "cost.usd", "op": ">=", "limit": 3}, True) == ", short of the $3 it needs"
-    out = _run(_page([], consts=["goalLimit"], extra=(
-        "function num(v, u) { return v + ' ' + u; }\n"
-        "out = [goalLimit({op: '<=', limit: 10, unit: 'lb'}), goalLimit({op: '>=', limit: 2, unit: 'x'}), goalLimit({})];")))
-    assert out == [" (cap 10 lb)", " (needs 2 x)", ""]
+    # unstubbed: goalLimit with the page's own helpers only (#139 review: a stub hid "num is not defined")
+    out = _run(_page(["scoreNum"], consts=["esc", "goalLimit"], extra=(
+        "out = [goalLimit({op: '<=', limit: 10, unit: 'lb'}), goalLimit({op: '>=', limit: 2, unit: '×'}), goalLimit({}),"
+        " goalLimit({op: '<=', limit: 145, unit: '$'})];")))
+    assert out == [" (cap 10 lb)", " (needs 2 ×)", "", " (cap $145)"]
 
 
 # --- 7. a disc on a ring gets its own plate check ---------------------------------------------------------------------
@@ -262,3 +263,32 @@ def test_an_old_run_s_seat_top_label_isn_t_shown_anywhere():
         "function len(mm) { return (mm / 25.4).toFixed(1) + ' in'; }\n"
         f"out = [peakWhere({json.dumps(old)}), peakWhere({json.dumps(new)}), peakWhere({{}})];")))
     assert out == ["around 27.8 in up", "in cone", "in the part"]
+
+
+
+def test_a_refused_job_reads_without_the_exception_s_name():
+    """#139 review: a carve refused by the server arrives as a failed job, and follow() rejected with its raw error, so
+    the panel said "⚠ ValueError: Can't carve it…" on main since #136. follow() passes it through plainly()."""
+    out = _run(_page(["follow"], consts=["plainly"], extra=(
+        "async function api() { return {events: [], status: 'error', error_id: 'e1', "
+        "error: \"ValueError: Can't carve it: it already fails (0.5 times over): make it hold first, then carve.\"}; }\n"
+        "try { await follow('j1', () => {}); out = 'resolved'; } catch (e) { out = [e.message, e.errorId, e.status]; }")))
+    assert out == ["Can't carve it: it already fails (0.5 times over): make it hold first, then carve.", "e1", "error"]
+
+
+def test_the_score_panel_and_goal_limit_render_together_unstubbed():
+    """The blocker as Theo would hit it: scoreView on a card with a numeric goal limit, with no stand-in for num."""
+    card = {"created": 1, "versions": {"i_want": 1}, "summary": {"pass": 1, "fail": 1},
+            "checks": [{"id": "w", "label": "keeps total weight down", "status": "fail", "value": 13.1, "unit": "lb",
+                        "op": "<=", "limit": 10}],
+            "objectives": [{"label": "weight", "value": 13.1, "unit": "lb"}], "notes": []}
+    design = {"scorecards": [card], "parts": [{"id": "i_want", "version": 7}], "goals": {"checks": []},
+              "has_goals": True}
+    out = _run(_page(["scoreView", "scoreNum"], consts=["esc", "TRUST", "goalLimit"], extra=(
+        f"out = scoreView({json.dumps(design)});")))
+    assert "13.1 lb (cap 10 lb)" in out
+
+
+def test_show_the_stress_names_no_old_label():
+    src = open(__file__.replace("tests/test_preflight_bar_stool.py", "src/caliper/web/static/design.js")).read()
+    assert "MPa ${esc(peakWhere(f))}" in src and "MPa in the ${esc(f.in" not in src

@@ -40,6 +40,11 @@ correction: the run's "seat top" was a mislabel.
   v7 again.
 - The reviewer's nit on #132: a carved step that doesn't close up is an amber dot (#136 draws dots by verdict), pinned.
 - Not here: P2 items 6, 9–12 (#89's wording pass), and a live first run (no key).
+- **#139 review, the blocker:** `goalLimit` called `scoreView`'s own `num`, so a goal with a number threw "num is not
+  defined" and blanked the inspector (a global stub in the test hid it). It's `scoreNum`, at module level, tested
+  unstubbed with `scoreView` itself. A refused job reads without its exception's name: `follow()` passes the job's
+  error through `plainly()` (main said "⚠ ValueError: Can't carve it…" since #136). *Show the stress* names the peak
+  by `peakWhere`, never an old run's "seat top".
 - Tests: tests/test_preflight_bar_stool.py (17), and touched suites' expectations for the new words. Stacked on #136
   (its too-thin words), on #132's one verdict.
 
