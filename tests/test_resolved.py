@@ -140,7 +140,8 @@ def test_a_fail_on_coarse_voxels_stays_a_fail(tmp_path, monkeypatch):
                                  "Check it again finer."), part["text"]
     (design,) = _work(store)
     assert design["status"] == "bad" and design["text"].startswith("✗ Holds a foot (40 lb), 2 times over (assumed)")
-    assert "The fail may be the model's" in design["text"]
+    # the same words as the part card, the same wall (#139's pass)
+    assert "where its wall is 4 mm, too thin for the voxels to see: the fail may be the model's" in design["text"]
     (shown,) = design_api.design_state(store)["load_runs"]
     text, ok = studies._headline("load", shown)
     assert ok is False and text.startswith("doesn't hold") and "the fail may be the model's" in text
