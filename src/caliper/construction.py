@@ -825,7 +825,9 @@ def with_printed(store: DesignStore, part_id: str, items: list, d: Optional[dict
         return items
     try:
         g = printed_solid(store, part_id, d)
-        if not g.is_volume:
+        from .measure import closed
+
+        if not closed(g) or not g.is_volume:  # raw: is_volume adds the winding; closed() the read-back (CALI-121)
             raise ValueError("its mesh isn't a closed solid")
     except Exception as e:  # noqa: BLE001 — said, and the weight unknown: never a lower total
         why = f"not checked: {e}" if str(e).startswith("its shape isn't closed") else f"{UNWEIGHED} ({e})"

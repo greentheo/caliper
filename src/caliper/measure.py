@@ -114,7 +114,7 @@ def clean(m: trimesh.Trimesh) -> trimesh.Trimesh:
         m = m.copy()
         m.update_faces(~flat)
         m.remove_unreferenced_vertices()
-    if not m.is_watertight:
+    if not closed(m):
         bodies = m.split(only_watertight=False)
         whole = [b for b in bodies if closed(b)]
         strays = [b for b in bodies if not closed(b) and b.area <= STRAY_SHARE * m.area]
@@ -133,11 +133,11 @@ def clean(m: trimesh.Trimesh) -> trimesh.Trimesh:
 def closed(m: trimesh.Trimesh) -> bool:
     """Closed as it will be read back: two vertices at one point (a pinch) are watertight in memory and merge in any
     STL round trip, after which it isn't (#124 review). Judged on a merged copy, so every reader agrees."""
-    if not m.is_watertight:
+    if not m.is_watertight:  # raw: closed() itself
         return False
     merged = m.copy()
     merged.merge_vertices()
-    return bool(merged.is_watertight)
+    return bool(merged.is_watertight)  # raw: closed() itself, on the merged copy
 
 
 def open_near(m: trimesh.Trimesh) -> Optional[str]:
@@ -191,12 +191,13 @@ def center_of_mass(g: Geometry) -> list[float]:
 # Topological (mesh)
 # ---------------------------------------------------------------------------
 def is_watertight(g: Geometry) -> bool:
-    return bool(g.require_mesh().is_watertight)
+    """Closed as it reads back (:func:`closed`, CALI-121): a pinch isn't, whatever trimesh says in memory."""
+    return closed(g.require_mesh())
 
 
 def is_manifold(g: Geometry) -> bool:
     m = g.require_mesh()
-    return bool(m.is_watertight and m.is_winding_consistent)
+    return bool(closed(m) and m.is_winding_consistent)
 
 
 def body_count(g: Geometry) -> int:
@@ -219,7 +220,7 @@ def body_count(g: Geometry) -> int:
             pass
     m = g.require_mesh()
     shells = m.split(only_watertight=False)
-    return int(sum(1 for s in shells if not s.is_watertight or s.volume > 0))
+    return int(sum(1 for s in shells if not closed(s) or s.volume > 0))
 
 
 # ---------------------------------------------------------------------------
