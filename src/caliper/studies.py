@@ -20,6 +20,8 @@ import datetime as dt
 import re
 from typing import Optional
 
+from . import verdicts
+
 #: What says a design moves through air, or air moves past it: a vehicle, a road speed, wind.
 AIR_WORDS = re.compile(r"\b(cars?|trucks?|vans?|vehicles?|trailers?|hitch\w*|tow(?:s|ed|ing)?|roof ?racks?|"
                        r"cargo box|drag|aero\w*|airflow|fairings?|wind(?:s|y)?|wind turbine|mph|km/?h|"
@@ -88,59 +90,64 @@ def _lb(v) -> str:
 
 def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
     """What a run came to, in one line, and whether that's good news (None: neither)."""
-    if kind == "load" and r.get("filled") and r.get("holds"):   # a block's number, not the part's: no "holds"
-        return (f"not trusted: it ran on a filled-in shape"
-                + (f" (the block read {round(r['safety'], 1):g}x)" if r.get("safety") is not None else "")), None
     if kind == "load":
         cases = r.get("cases") or []
         worst = min(cases, key=lambda c: c.get("safety") if c.get("safety") is not None else 1e9, default=None)
         if worst is None:
             return "no loads", None
+        v = verdicts.run(r)                     # one verdict (CALI-112): a ✗ stays a ✗, then not trusted, …
+        if v["kind"] == "untrusted":            # a block's number, not the part's: no "holds" (CALI-96)
+            return (f"not trusted: it ran on a filled-in shape"
+                    + (f" (the block read {round(r['safety'], 1):g}x)" if r.get("safety") is not None else "")), None
         what = (f"{worst['name']}: {round(worst['safety'], 1):g}x" if worst.get("safety") is not None
                 else worst["name"])
-        from . import load_study as L
-
-        coarse = [c for c in cases if c.get("safety") is not None and L.unresolved(r, c)]
-        if r.get("holds") and coarse:          # a ✓ on an FEA too coarse to see its walls is no ✓ (CALI-97)
-            word = "not checked: its walls are too thin for the voxels" if L.unchecked(r, coarse[0]) else \
+        coarse = [(c, x) for c, x in zip(cases, v["cases"]) if x["kind"] in ("unresolved", "unchecked")]
+        if coarse:                              # a ✓ on an FEA too coarse to see its walls is no ✓ (CALI-97)
+            word = "not checked: its walls are too thin for the voxels" if coarse[0][1]["kind"] == "unchecked" else \
                 "not resolved yet: too coarse to see its walls"
-            return f"{word} (the FEA read {round(coarse[0]['safety'], 1):g}x)", None
-        if r.get("filled"):                     # a ✗ on the block stays a ✗: the part as built is weaker still
-            what += ", on a filled-in shape: the part as built is weaker still"
-        elif worst in coarse:
-            what += ", and the fail may be the model's: the voxels can't see its walls"
-        return (("holds" if r.get("holds") else "doesn't hold") + f" — weakest {what}"
-                + (f" (needs {r.get('min_safety', 2):g}x)" if not r.get("holds") else ""), bool(r.get("holds")))
+            return f"{word} (the FEA read {round(coarse[0][0]['safety'], 1):g}x)", None
+        if v["kind"] == "fails":
+            if r.get("filled"):                 # a ✗ on the block stays a ✗: the part as built is weaker still
+                what += ", on a filled-in shape: the part as built is weaker still"
+            elif any(x.get("coarse") for x in v["cases"]):
+                what += ", and the fail may be the model's: the voxels can't see its walls"
+            return f"doesn't hold — weakest {what} (needs {r.get('min_safety', 2):g}x)", False
+        if v["kind"] == "holds":
+            return f"holds — weakest {what}", True
+        return f"{v['word']} — weakest {what}", None
     if kind == "lighten" and r.get("filled"):
         text, _ = _headline("lighten", {k: v for k, v in r.items() if k != "filled"})
         return "not trusted, on a filled-in shape: " + text, None              # no step of it holds (CALI-96)
     if kind == "lighten":
         st = r.get("stations", [])
-        best = max((x for x in st if x.get("holds")), key=lambda x: x["saved_lb"], default=None)
+        # a thinner sheet's number is an estimate: never the lightest that holds (#132 review)
+        best = max((x for x in st if verdicts.lighten_step(x)["counts_as_pass"]), key=lambda x: x["saved_lb"],
+                   default=None)
         if best is None or not best["saved_lb"]:
             return "nothing lighter holds", False
-        out = next((x for x in st if not x.get("holds")), None)
-        return (f"up to {best['saved_lb']:g} lb lighter" + (f" in {best['label']} sheet (an estimate)" if best.get("estimate") else "")
-                + f", still {round(best['safety'], 1):g}x" + (f"; runs out at step {out['index']}" if out else "")), True
+        out = next((x for x in st if verdicts.station(x)["kind"] == "fails"), None)
+        return (f"up to {best['saved_lb']:g} lb lighter, still {round(best['safety'], 1):g}x"
+                + (f"; runs out at step {out['index']}" if out else "")), True
     if kind == "carve" and r.get("status") == "failed":    # it stopped on an error, and says which (CALI-103)
         return f"failed after {len(r.get('stations') or [])} of {r.get('steps', '?')} steps: {r.get('error', '')}", False
     if kind == "carve" and r.get("status") == "cancelled":  # stopped from its panel; what it finished (CALI-101)
         st = r.get("stations") or []
-        best = next((x for x in st if x["index"] == r.get("best")), None)
+        best = next((x for x in st if x["index"] == r.get("best")), None)  # search: the printed part's lightest
+        held = best is not None and verdicts.carve_step(best, r.get("filled"))["counts_as_pass"]   # #132 review
         return (f"cancelled after {len(st)} of {r.get('steps', '?')} steps"
                 + (f": the lightest that held, step {best['index']}, {best['saved_g']} g less filament"
-                   if best and best.get("saved_g") else "")), None
+                   if held and best.get("saved_g") else "")), None
     if kind == "carve" and r.get("status") == "running":   # still going, or it died partway (CALI-103)
         return f"not finished: {len(r.get('stations') or [])} of {r.get('steps', '?')} steps checked", None
     if kind == "carve":
         st = r.get("stations", [])
-        best = next((x for x in st if x["index"] == r.get("best")), None)
+        best = next((x for x in st if x["index"] == r.get("best")), None)  # search: judged below, whole and all
         from . import carve
 
         carved = (f"{best['removed']:.0%} {carve.share(r)} carved away, {best['saved_g']} g less filament, still "
                   f"{round(best['safety'], 1):g}x" if best and best["saved_g"] else "")
         first = st[0] if st else {}
-        if first and not first.get("whole_holds"):
+        if first and not verdicts.station(first, whole=True)["counts_as_pass"]:
             # the part fails where carving can't reach: that's the verdict, never a green line (CALI-86)
             whole = first.get("whole")
             return ("doesn't hold as it is: " + (f"{round(whole, 1):g}x" if whole is not None else "not checked")
@@ -148,13 +155,13 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
                     + (f"; carving the printed part: {carved}" if carved else "")), False
         if not carved:
             return "nothing could come off and still hold", False
-        if not best.get("whole_holds", True):
+        if "whole_holds" in best and not verdicts.station(best, whole=True)["counts_as_pass"]:
             # the printed part holds at this step, but carving it makes the whole part fail (CALI-86)
             return (f"{carved}, but the whole part is then {round(best['whole'], 1):g}x, and it needs "
                     f"{r.get('min_safety', 2):g}x"), False
         return carved, True
     if kind == "frame":
-        ok = [s for s in r.get("stations", []) if s.get("safety", 0) >= r.get("min_safety", 0)]
+        ok = [s for s in r.get("stations", []) if verdicts.meets(s.get("safety"), r.get("min_safety"))["counts_as_pass"]]
         if not ok:
             best = max(r.get("stations", []), key=lambda s: s.get("safety", 0), default={})
             return f"no tubes reach {r.get('min_safety')}x (best {best.get('safety', '?')}x)", False
@@ -196,13 +203,12 @@ def _headline(kind: str, r: dict) -> tuple[str, Optional[bool]]:
         unresolved = s.get("unresolved") or 0                       # nor is not resolved (CALI-110)
         return (f"{s.get('pass', 0)} pass · {s.get('fail', 0)} fail" + (f" · {untrusted} not trusted" if untrusted else "")
                 + (f" · {unresolved} not resolved" if unresolved else ""),
-                not s.get("fail") and not untrusted and not unresolved)
+                verdicts.summary(s)["counts_as_pass"])              # one verdict (CALI-112)
     if kind == "release":
-        s = (r.get("card") or {}).get("summary") or {}
-        why = ("a check fails" if s.get("fail") or not s else "a check isn't trusted yet" if s.get("untrusted")
-               else "a strength check isn't resolved" if s.get("unresolved") else "a check isn't settled")
-        return (f"release {r.get('id')} · {'ready to cut' if r.get('ready') else 'not ready: ' + why}"
-                f" · ~${round(r.get('shopping_usd') or 0)} to buy"), bool(r.get("ready"))
+        why = verdicts.summary((r.get("card") or {}).get("summary"))["why"] or "a check isn't settled"
+        ready = verdicts.release(r, {})["kind"] == "holds"      # the row's own staleness is index()'s (above)
+        return (f"release {r.get('id')} · {'ready to cut' if ready else 'not ready: ' + why}"
+                f" · ~${round(r.get('shopping_usd') or 0)} to buy"), ready
     return "", None
 
 
@@ -230,6 +236,8 @@ def index(store, runs: dict[str, list[dict]], parts: list[dict], air: Optional[d
                 if filled(store, part):                   # the part as it is now, not a flag the run kept (CALI-96)
                     r = {**r, "filled": True}
             row["headline"], row["ok"] = _headline(kind, r)
+            if row.get("stale") and row["ok"]:        # an older version's green isn't the part as it is (#132 review)
+                row["ok"] = None
             rows.append(row)
     rows.sort(key=lambda x: x["created"] or 0, reverse=True)
     whole = [{"kind": k, "label": KINDS[k][0], "what": KINDS[k][1], "ready": bool(parts), "why": "no parts yet"}

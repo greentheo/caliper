@@ -80,7 +80,7 @@ def test_a_t_rex_on_the_side_is_cut_and_it_still_holds(stool):
                        emit=lambda k, t="", **d: heard.append(d.get("step")))
     assert got["ok"] and got["panel"] in ("left", "right") and got["version"] == 2
     assert heard == ["fit", "check", "cut", "recheck"]
-    assert got["holds"] and got["safety"] >= got["min_safety"] and got["predicted"] is not None
+    assert got["verdict"]["kind"] == "holds" and got["safety"] >= got["min_safety"] and got["predicted"] is not None
     w, h = got["size_in"]
     assert 3 < w < 7.5 and 3 < h < 6.5                                  # inside the side's rim (10 x 9 in, 1 1/2 in rim)
     assert got["reply"].startswith("✓ I cut a T-rex") and "still holds" in got["reply"]

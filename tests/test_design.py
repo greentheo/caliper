@@ -127,7 +127,11 @@ def test_report_is_snapshotted_with_the_revision(store):
     store.write_part("carriage", _script(), report={"all_pass": False, "results": []})
     with open(os.path.join(store.version_dir("carriage", 1), "report.json")) as f:
         assert json.load(f)["all_pass"] is False
-    assert store.history("carriage")[-1]["result"] == "fail"
+    # nothing checked is "nothing checked yet", never a fail (#132 review); a failure is
+    assert store.history("carriage")[-1]["result"] == "waiting"
+    assert store.history("carriage")[-1]["word"] == "nothing checked yet"
+    store.write_part("carriage", _script(), report={"all_pass": False, "results": [{"id": "a", "status": "fail"}]})
+    assert store.history("carriage")[-1]["result"] == "fails"
 
 
 def test_part_ids_must_be_identifiers(store):

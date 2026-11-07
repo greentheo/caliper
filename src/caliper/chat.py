@@ -506,7 +506,7 @@ def _offer_promotion(store: DesignStore, part_id: str, feedback: str, *, use_llm
     if got.proposal is not None:
         promote.park(store, got.proposal)
         _emit(events, on_event, "proposed", f"{got.proposal.id}: {got.proposal.expr}",
-              part=part_id, assertion=got.proposal.id, holds_now=got.proposal.holds_now)
+              part=part_id, assertion=got.proposal.id, holds_now=got.proposal.holds_now)  # producer: carried
         return got.proposal, got.proposal.describe()
 
     fb = (feedback or "").lower()
@@ -611,11 +611,14 @@ def _accept(store: DesignStore, proposal, events: list[Event], on_event) -> Turn
              "Every future revision is measured against it; if something breaks it, I'll say so."]
     for _, cid, cexpr in proposal.conflicts:
         lines.append(f"\u21ba Retired **{cid}** (`{cexpr}`) — it couldn't hold alongside this one.")
-    if not proposal.holds_now:
+    from . import verdicts
+
+    now = verdicts.rule(proposal.holds_now)
+    if now["kind"] == "fails":
         lines.append("\u26a0 Note: it does **not** hold right now — so the design reads as failing until "
                      "we fix it. Tell me to have a go.")
     report, part_errors = _measure_design(store)
-    return TurnResult(action="accept", ok=proposal.holds_now, part=proposal.part,
+    return TurnResult(action="accept", ok=now["counts_as_pass"], part=proposal.part,
                       report=report, part_errors=part_errors, proposal=proposal,
                       events=events, reply="\n".join(lines))
 
@@ -642,18 +645,27 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
     except (ValueError, ImportError) as e:
         return TurnResult(action="carve", ok=False, part=part_id, events=events, error=str(e),
                           reply=f"I couldn't carve it: {e}.")
-    best = next((x for x in rec["stations"] if x["index"] == rec["best"]), None)
+    from . import consistency, verdicts
+
+    best = next((x for x in rec["stations"] if x["index"] == rec["best"]), None)  # search: the printed part's lightest
+    v = verdicts.carve_step(best, consistency.filled(store, part_id)) if best else None   # what it says (#132 review)
     said = []
     if rec.get("weak"):
         said.append(f"⚠ {rec['weak']}")
-    if best and best["saved_g"]:
+    if best and best["saved_g"] and not v["counts_as_pass"]:
+        said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. It could come off down to step "
+                    f"{best['index']} ({best['saved_g']} g less filament), but that isn't a part that holds: "
+                    + (f"the whole part is then {best.get('whole')}x." if v["kind"] == "fails" else f"{v['word']}.")
+                    + " Fix that first.")
+    elif best and best["saved_g"]:
         said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. The lightest that holds is step "
                     f"{best['index']}: {best['removed']:.0%} {carve.share(rec)} carved away, {best['saved_g']} g less filament, "
                     f"about {best['safety']:g} times over (printed parts are a rough model). It's on the 3D view: **Carve it like this** to make it the "
                     f"part's shape (under *Will it work? → the numbers*, with every step).")
     else:
         said.append("Nothing could come off it and still hold.")
-    return TurnResult(action="carve", ok=True, part=part_id, events=events, reply="\n\n".join(said))
+    return TurnResult(action="carve", ok=bool(v and v["counts_as_pass"]), part=part_id, events=events,
+                      reply="\n\n".join(said))
 
 
 def picture_part(store: DesignStore, part_id: str, subject: str, where: str = "", *, points=None, events=None,
@@ -677,8 +689,10 @@ def picture_part(store: DesignStore, part_id: str, subject: str, where: str = ""
     except (ValueError, ImportError) as e:
         return TurnResult(action="picture", ok=False, part=part_id, events=events, error=str(e),
                           reply=f"I couldn't put a {subject} on it: {e}.")
-    return TurnResult(action="picture", ok=got["ok"] and got.get("holds", True) is not False
-                      and not got.get("unresolved"), part=part_id,
+    from . import verdicts
+
+    checked = got.get("safety") is not None            # one verdict (CALI-112): only a ✓ with nothing over it is ok
+    return TurnResult(action="picture", ok=got["ok"] and (not checked or verdicts.of(got)["counts_as_pass"]), part=part_id,
                       version=got.get("version"), events=events, reply=got["reply"])
 
 
@@ -759,14 +773,21 @@ def _facts(store: DesignStore, scope: Optional[str]) -> str:
             promised = promised or bool(c.get("promise"))
     if promised:                                       # so a plain answer about strength can say it (CALI-86)
         out.append(f"what a strength verdict promises: {answers.PROMISE}")
+    from . import consistency, verdicts
+
     for run in load_study.list_runs(store)[:2]:
+        filled = consistency.filled(store, run["part"])
+        part = store.design.part(run["part"])
+        older = part is None or run.get("version") != part.version      # an older run says so (#132 review)
         for c in run.get("cases") or []:
+            v = verdicts.case(run, c, filled=filled, stale=older)   # one verdict (CALI-112): the chat repeats it
             out.append(f"strength check of {run['part']} v{run['version']}: {c.get('name')} {c.get('lb')} lb x "
-                       f"{c.get('factor')}: safety {c.get('safety')} ({c.get('governs')}), breaks near "
-                       f"{c.get('breaks_lb')} lb; needs {run.get('min_safety')}"
+                       f"{c.get('factor')}: verdict {v['word'].upper()}; safety {c.get('safety')} ({c.get('governs')}), "
+                       f"breaks near {c.get('breaks_lb')} lb; needs {run.get('min_safety')}"
                        # never a verdict to repeat: the FEA couldn't see the wall (CALI-110)
                        + ("; NOT RESOLVED: the voxels were too coarse to see its walls, so this number is no verdict"
-                          if load_study.unresolved(run, c) else ""))
+                          if v["kind"] in ("unresolved", "unchecked") or v.get("coarse") else "")
+                       + ("; NOT TRUSTED: it ran on a filled-in shape" if v["kind"] == "untrusted" else ""))
         out += [f"strength note: {n}" for n in (run.get("notes") or [])[:4]]
     said = [e for e in store.log() if e.get("kind") in ("message", "reply")][-6:]
     out += [f"{'they said' if e['kind'] == 'message' else 'Caliper said'}: {(e.get('text') or e.get('reply') or '')[:600]}"
@@ -975,7 +996,7 @@ def plan_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = 
     P.save(store, after, "review")
     gone = P.dropped_line(after)
     return TurnResult("plan", "Changed the plan: " + "; ".join(said) + ".\n\n" + P.headline(after, store.design.name)
-                      + (f" ({gone[0].upper() + gone[1:]}.)" if gone else ""), events=events)
+                      + (f" ({gone[0].upper() + gone[1:]}.)" if gone else "") + P.said_aside(after), events=events)
 
 
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
