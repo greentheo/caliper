@@ -253,7 +253,7 @@ def test_a_rule_that_measures_nothing_is_decided_when_it_s_planned(expr, note):
     plan = _fixed_ok(TURBINE)
     plan["rules"].append({"id": "same", "expr": expr})
     got = P.validate(plan)
-    assert "same" not in [r.id for r in got.rules] and got.notes == [f"same (by the numbers: {expr})"]
+    assert "same" not in [r.id for r in P.binding(got)] and got.notes == [f"same ({expr})"]   # a note, not a check
 
 
 def test_one_that_contradicts_the_plan_is_refused_and_one_of_literals_is_dropped():

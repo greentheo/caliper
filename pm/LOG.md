@@ -17,6 +17,14 @@ Format: `### YYYY-MM-DD · CALI-N · title` then what changed, tests, and the co
   is the planner's 26.82 m/s (or the "m" it wrote for a speed); skeleton units take m/s, km/h and mph.
 - `tests/test_plan_numbers.py` (15; 14 fail on main), the camper's rule verbatim; #117's tests updated (a numbers-only
   rule is a note, a contradiction or left out; refused twice, the plan stands). design.js v=64.
+- **#130 review:** deciding a rule uses the checks' own `approx` and `within`, and any error while deciding is that
+  rule's fault (`PlanError(rule=…)`: retried, then left out and said), never the plan's. **A decided rule is plan
+  data:** it stays in `rules` (never a check: `binding()` and the card's checks leave it out), its note is worked out
+  on every validate, and what's left out is the plan's `left_out` field, so a revision shows both to the planner and
+  "make the frame tube 3 in" is refused with "the frame tube fits the receiver, but tube_size <= receiver is false
+  (tube_size 76.2 mm, …)", the plan as it was (a revision never drops a rule). A speed goes by its unit, never its
+  name ("m" is a length). The card says "by the numbers" and a check's name once. Tests pin a note's whole path
+  (the reply, the saved plan, the card, Keep) and the refused edit.
 
 ### 2026-11-07 · CALI-115 (#117) · The planner's live-run findings, before #3b builds on plans
 - **Fixed only for what you have:** a `fixed` part whose words say it's made (welded, printed, cut, plasma-cut, to

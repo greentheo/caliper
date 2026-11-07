@@ -115,28 +115,28 @@ class Plan(_Base):
     skeleton: list[SkeletonValue] = Field(default_factory=list)
     mates: list[PlanMate] = Field(default_factory=list)
     rules: list[PlanRule] = Field(default_factory=list)
+    #: checks left out, each with why (CALI-119): plan data, so the review says them and a revision sees them
+    left_out: list[str] = Field(default_factory=list)
     #: parts validation dropped: the floor, the ground, the room (#117)
     _dropped: list = PrivateAttr(default_factory=list)
-    #: rules over the plan's own numbers that hold, as notes (CALI-119)
-    _notes: list = PrivateAttr(default_factory=list)
-    #: checks left out, each with why (CALI-119): said in the review, never a silent drop
-    _dropped_rules: list = PrivateAttr(default_factory=list)
 
     @property
     def dropped(self) -> list[str]:
         return list(self._dropped)
 
     @property
-    def notes(self) -> list[str]:
-        return list(self._notes)
+    def dropped_rules(self) -> list[str]:
+        return list(self.left_out)
 
     @property
-    def dropped_rules(self) -> list[str]:
-        return list(self._dropped_rules)
+    def notes(self) -> list[str]:
+        """The rules over the plan's own numbers, as notes (CALI-119): they stay in ``rules`` (#130 review: plan data,
+        so a revision sees them and they're decided again), and they're never checks."""
+        return [f"{r.why or r.id.replace('_', ' ')} ({r.expr})" for r in self.rules if numbers_only(r, self)]
 
     def _carry(self, other: "Plan") -> "Plan":
-        """This plan with ``other``'s dropped parts, notes and left-out checks (a copy doesn't keep them)."""
-        self._dropped, self._notes, self._dropped_rules = other.dropped, other.notes, other.dropped_rules
+        """This plan with ``other``'s dropped parts (a copy doesn't keep them)."""
+        self._dropped = other.dropped
         return self
 
     def ids(self) -> list[str]:
@@ -196,27 +196,35 @@ def validate(data, drop_bad_rules: bool = False) -> Plan:
     dup = next((r for r in rule_ids if rule_ids.count(r) > 1), None)
     if dup:
         raise PlanError(f"two checks are both called {dup!r}")
-    kept, notes, left = [], [], []
+    kept, left = [], []
     for r in plan.rules:
         try:
             try:
                 _check_rule(r, set(ids), set(names))
-            except _NumbersOnly:                 # decided now (CALI-119): a note, a contradiction, or nothing
-                note = _by_the_numbers(r, plan)
-                if note:
-                    notes.append(note)
-                else:
+            except _NumbersOnly:                 # decided now, every validate (CALI-119): a note, a contradiction
+                if not _by_the_numbers(r, plan):
                     left.append(f"the check {r.id!r} ({r.expr}): it reads only numbers")
-                continue
+                    continue
             kept.append(r)
         except PlanError as e:
             if not drop_bad_rules:
                 raise PlanError(str(e), rule=r.id) from e
-            left.append(f"the check {r.id!r} ({r.expr}): {e}")       # one rule never sinks the plan (CALI-119)
-    out = plan.model_copy(update={"rules": kept})._carry(plan)
-    out._notes, out._dropped_rules = notes, left
+            said = str(e).removeprefix(f"the check {r.id!r} ")          # the check named once (#130 review)
+            left.append(f"the check {r.id!r} ({r.expr}): {said}")       # one rule never sinks the plan (CALI-119)
+    out = plan.model_copy(update={"rules": kept, "left_out": list(dict.fromkeys([*plan.left_out, *left]))})
     order(out)                                   # a cycle is refused here: the plan's, not a rule's
-    return out
+    return out._carry(plan)
+
+
+def numbers_only(rule: "PlanRule", plan: "Plan") -> bool:
+    """A rule that reads only the plan's own numbers: a note, decided when it's planned, never a check."""
+    try:
+        tree = ast.parse(rule.expr, mode="eval")
+    except SyntaxError:
+        return False
+    ids = set(plan.ids())
+    return not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in MEASURES
+                   for n in ast.walk(tree)) and not any(isinstance(n, ast.Name) and n.id in ids for n in ast.walk(tree))
 
 
 def _by_the_numbers(rule: "PlanRule", plan: "Plan") -> Optional[str]:
@@ -224,18 +232,27 @@ def _by_the_numbers(rule: "PlanRule", plan: "Plan") -> Optional[str]:
     the contradiction; over literals alone, None (it says nothing about this plan)."""
     from .evaluate import safe_eval
 
+    from . import tolerance
+
     tree = ast.parse(rule.expr, mode="eval")
-    read = [n.id for n in ast.walk(tree) if isinstance(n, ast.Name)]
+    names = {s.name for s in plan.skeleton}
+    read = [n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in names]
     if not read:
         return None
     values = skeleton_values(plan.skeleton)
-    if safe_eval(rule.expr, {**values, "abs": abs, "min": min, "max": max}):
-        return f"{rule.why or rule.id.replace('_', ' ')} (by the numbers: {rule.expr})"
+    try:                                         # the checks' own functions; any error is this rule's (#130 review)
+        holds = safe_eval(rule.expr, {**values, "abs": abs, "min": min, "max": max,
+                                      "approx": tolerance.approx, "within": tolerance.within})
+    except Exception as e:  # noqa: BLE001 — a rule that can't be decided is its fault, never the plan's
+        raise PlanError(f"the check {rule.id!r} can't be decided by the numbers ({rule.expr}): {e}", rule=rule.id) from e
+    if holds:
+        return f"{rule.why or rule.id.replace('_', ' ')} ({rule.expr})"
     said = ", ".join(f"{n} {values[n]:g} " + ("mm" if mm(plan.value(n)) is not None else plan.value(n).unit)
                      for n in dict.fromkeys(read))
     lengths = any(mm(plan.value(n)) is not None for n in read)
-    raise PlanError(f"the check {rule.id!r} contradicts the plan's own numbers: {rule.expr} is false ({said})"
-                    + ("; lengths in a check read in mm" if lengths else ""), rule=rule.id)
+    what = rule.why or rule.id.replace("_", " ")
+    raise PlanError(f"the check {rule.id!r} contradicts the plan's own numbers: {what}, but {rule.expr} is false "
+                    f"({said})" + ("; lengths in a check read in mm" if lengths else ""), rule=rule.id)
 
 
 def _ground(p: PlanPart) -> bool:
@@ -439,14 +456,9 @@ def _said_numbers(said: str) -> list[tuple[float, str]]:
     return out
 
 
-def _speedish(s: SkeletonValue) -> bool:
-    """A speed the planner wrote in "m" (#127: design_wind_speed_ms = 26.82 m): read as m/s."""
-    return s.unit == "m" and bool(re.search(r"speed|_ms$|_mps$|wind|gust", s.name))
-
-
 def _was_said(s: SkeletonValue, said: list[tuple[float, str]]) -> bool:
-    unit = "m/s" if _speedish(s) else s.unit
-    v = None if _speedish(s) else mm(s)
+    unit = s.unit                              # by the unit, never the name (#130 review: "rotor_d" read as a speed)
+    v = mm(s)
     want = ((v, "mm") if v is not None else (s.value * SAME[unit][1], SAME[unit][0]) if unit in SAME
             else (s.value, unit))
     return any(u == want[1] and abs(x - want[0]) <= max(0.005 * abs(want[0]), 1e-9) for x, u in said)
@@ -478,7 +490,7 @@ def classify(plan: Plan, said: str, prior: Optional[Plan] = None) -> Plan:
 def binding(plan: Plan) -> list[PlanRule]:
     """The rules that are enforced: stated or kept, reading no number that's only assumed."""
     assumed = {s.name for s in plan.skeleton if s.source == "assumed"}
-    return [r for r in plan.rules if r.source != "assumed"
+    return [r for r in plan.rules if r.source != "assumed" and not numbers_only(r, plan)      # a note isn't a check
             and not ({n.id for n in ast.walk(ast.parse(r.expr, mode="eval")) if isinstance(n, ast.Name)} & assumed)]
 
 
@@ -532,8 +544,7 @@ def save(store, plan: Plan, status: str = "review") -> None:
     store.design.plan = {"status": status, "parts": [p.model_dump() for p in plan.parts], "order": order(plan),
                          "rules": [r.model_dump() for r in plan.rules],
                          **({"dropped": plan.dropped} if plan.dropped else {}),
-                         **({"notes": plan.notes} if plan.notes else {}),
-                         **({"dropped_rules": plan.dropped_rules} if plan.dropped_rules else {})}
+                         **({"left_out": plan.left_out} if plan.left_out else {})}
     store.save()
 
 
@@ -545,9 +556,8 @@ def load(store) -> Optional[Plan]:
     mates = [{"between": m.between, "kind": m.kind, "value": m.value} for m in store.assembly.mates
              if m.id.startswith("plan_")]
     plan = Plan.model_validate({"parts": rec["parts"], "skeleton": store.design.skeleton or [], "mates": mates,
-                                "rules": rec.get("rules") or []})
+                                "rules": rec.get("rules") or [], "left_out": rec.get("left_out") or []})
     plan._dropped = list(rec.get("dropped") or [])
-    plan._notes, plan._dropped_rules = list(rec.get("notes") or []), list(rec.get("dropped_rules") or [])
     return plan
 
 
@@ -648,7 +658,8 @@ def _tool() -> dict:
             "input_schema": Plan.model_json_schema()}
 
 
-def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[Plan] = None) -> Plan:
+def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[Plan] = None,
+         drop: bool = True) -> Plan:
     """One plan from the planner, validated and classified. A refused plan is asked for once more, with the reason
     (#117: one "=" for "==" threw the camper's whole plan away); refused again, the reason is raised."""
     from .chat import DEFAULT_MODEL
@@ -666,7 +677,7 @@ def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[
         try:
             if got is None:
                 raise PlanError("the planner didn't answer with a plan")
-            return classify(validate(got, drop_bad_rules=attempt == 2), said, prior)
+            return classify(validate(got, drop_bad_rules=drop and attempt == 2), said, prior)
         except PlanError as e:
             if attempt == 2:
                 raise
@@ -694,5 +705,7 @@ def revise(store, said: str, *, client=None, model: Optional[str] = None) -> tup
     after = _ask(client, model, "The plan now:\n" + json.dumps(before.model_dump(), indent=1)
                  + f"\n\nThe person said: {said}\n\nAnswer with the whole plan as it should now be. Change only what "
                    "they asked for; keep every other part, number and check as it is.",
-                 words(store) + "\n" + said, prior=before)
+                 words(store) + "\n" + said, prior=before, drop=False)   # an edit that contradicts a note is refused
+    if not after.left_out and before.left_out:   # what was left out stays said through an edit
+        after = after.model_copy(update={"left_out": before.left_out})._carry(after)
     return before, after

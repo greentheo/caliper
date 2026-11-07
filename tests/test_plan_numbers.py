@@ -36,15 +36,18 @@ def _with(rule_expr):
 
 def test_a_numbers_only_rule_that_holds_is_a_note_not_a_check():
     plan = P.validate(_with("tube_size <= receiver"))
-    assert [r.id for r in plan.rules] == ["box_on_frame"]
-    assert plan.notes == ["the frame tube fits the receiver (by the numbers: tube_size <= receiver)"]
+    # plan data (#130 review): it stays in the rules, decided again each validate; never a check
+    assert [r.id for r in plan.rules] == ["frame_tube_fits_receiver", "box_on_frame"]
+    assert [r.id for r in P.binding(plan)] == [] or "frame_tube_fits_receiver" not in [r.id for r in P.binding(plan)]
+    assert plan.notes == ["the frame tube fits the receiver (tube_size <= receiver)"]
 
 
 def test_one_that_doesn_t_hold_refuses_the_plan_with_the_contradiction():
     with pytest.raises(P.PlanError) as e:
         P.validate(_with("tube_size > receiver"))
-    assert ("the check 'frame_tube_fits_receiver' contradicts the plan's own numbers: tube_size > receiver is false "
-            "(tube_size 50.8 mm, receiver 50.8 mm)") in str(e.value), str(e.value)
+    assert ("the check 'frame_tube_fits_receiver' contradicts the plan's own numbers: the frame tube fits the "
+            "receiver, but tube_size > receiver is false (tube_size 50.8 mm, receiver 50.8 mm)") in str(e.value), str(e.value)
+    assert e.value.rule == "frame_tube_fits_receiver"
 
 
 def test_the_camper_s_rule_verbatim_says_what_a_number_reads_as_in_a_check():
@@ -59,6 +62,7 @@ def test_a_rule_of_literals_alone_is_dropped_and_said():
     plan = P.validate(_with("25.4 == 25.4"))
     assert [r.id for r in plan.rules] == ["box_on_frame"]
     assert plan.dropped_rules == ["the check 'frame_tube_fits_receiver' (25.4 == 25.4): it reads only numbers"]
+    assert plan.left_out == plan.dropped_rules                  # plan data: saved, and a revision sees it
 
 
 @pytest.mark.parametrize("bad,why", [
@@ -101,12 +105,21 @@ def test_a_plan_level_fault_still_falls_back_to_one_part(tmp_path):
     assert got["steps"]["plan"].startswith("planning it in several parts didn't work (the parts mount on each other")
 
 
-@pytest.mark.parametrize("value,unit", [(26.82, "m/s"), (60, "mph"), (96.56, "km/h"), (26.82, "m")])
+@pytest.mark.parametrize("value,unit", [(26.82, "m/s"), (60, "mph"), (96.56, "km/h")])
 def test_60_mph_is_the_person_s_number_in_any_unit(value, unit):
     plan = P.validate({"parts": [{"id": "rotor", "what": "a printed rotor", "made": "printed"}],
                        "skeleton": [{"name": "design_wind_speed_ms", "value": value, "unit": unit}]})
     got = P.classify(plan, "A wind turbine that survives a 60 mph gust.")
     assert got.skeleton[0].source == "stated", (value, unit)
+
+
+def test_a_speed_goes_by_its_unit_not_its_name():
+    """#130 review: "m" isn't a speed, whatever the name says ("rotor_d" read as one); a length in m is a length."""
+    plan = P.validate({"parts": [{"id": "rotor", "what": "a printed rotor", "made": "printed"}],
+                       "skeleton": [{"name": "design_wind_speed_ms", "value": 26.82, "unit": "m"},
+                                    {"name": "rotor_d", "value": 0.6, "unit": "m"}]})
+    got = P.classify(plan, "A wind turbine that survives a 60 mph gust, a 600 mm rotor.")
+    assert [s.source for s in got.skeleton] == ["assumed", "stated"]
 
 
 @pytest.mark.parametrize("value,unit", [(90.7, "kg"), (200, "lb")])
@@ -118,3 +131,54 @@ def test_200_lb_is_the_person_s_number_in_kg_too(value, unit):
 
 def test_the_planner_is_told():
     assert "decided when it's planned" in P.SYSTEM and "m/s" in P.SYSTEM
+
+
+# --- #130 review --------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("expr,note", [("approx(tube_size, receiver)", True), ("within(tube_size, 40, 60)", True)])
+def test_the_checks_own_functions_decide_a_rule_by_the_numbers(expr, note):
+    plan = P.validate(_with(expr))
+    assert plan.notes == [f"the frame tube fits the receiver ({expr})"]
+
+
+def test_an_error_deciding_a_rule_is_the_rule_s_fault_never_the_plan_s():
+    with pytest.raises(P.PlanError) as e:
+        P.validate(_with("tube_size / 0 > 1"))
+    assert e.value.rule == "frame_tube_fits_receiver" and "can't be decided by the numbers" in str(e.value)
+    plan = P.validate(_with("tube_size / 0 > 1"), drop_bad_rules=True)
+    assert plan.ids() == ["cargo_box", "frame"] and plan.left_out[0].startswith("the check 'frame_tube_fits_receiver'")
+
+
+def test_a_note_through_the_review_the_saved_plan_the_card_and_keep(tmp_path):
+    """The four steps a note takes after validate (the surviving mutants): the reply says it, it's saved, the card
+    shows it apart from the checks, and keeping another check keeps it."""
+    from caliper import design_api
+
+    store = DesignStore.create(CAMPER_SAID, base=str(tmp_path / "designs"))
+    got = firstrun.build(store, use_llm=True, client=fake(_with("tube_size <= receiver")), author=_never,
+                         strength=False)
+    note = "the frame tube fits the receiver (tube_size <= receiver)"
+    assert f"By the numbers: {note}." in got["reply"]
+    assert P.load(store).notes == [note]
+    shown = design_api.design_state(store)["plan"]
+    assert shown["notes"] == [note] and "frame_tube_fits_receiver" not in [c["id"] for c in shown["checks"]]
+    P.keep(store, "box_on_frame")
+    assert P.load(store).notes == [note]
+    assert "frame_tube_fits_receiver" not in [a.id for a in store.assembly.assertions]      # a note, never a check
+
+
+def test_an_edit_a_note_contradicts_is_refused_with_it_never_a_silent_drop(tmp_path):
+    """"make the frame tube 3 in": the note says it fits the 2 in receiver; the edit is refused, the plan as it was."""
+    from caliper import chat
+
+    store = DesignStore.create(CAMPER_SAID, base=str(tmp_path / "designs"))
+    store.design.display_units = "in"
+    store.save()
+    firstrun.build(store, use_llm=True, client=fake(_with("tube_size <= receiver")), author=_never, strength=False)
+    wider = _with("tube_size <= receiver")
+    wider["skeleton"][0]["value"] = 3
+    client = fake(wider)
+    got = chat.turn(store, "make the frame tube 3 in", client=client, use_llm=True)
+    assert got.action == "plan" and not got.ok
+    assert "the frame tube fits the receiver, but tube_size <= receiver is false (tube_size 76.2 mm" in got.reply
+    assert '"tube_size <= receiver"' in client.plan_calls()[0]["messages"][0]["content"]       # the planner saw it
+    assert P.load(store).value("tube_size").value == 2 and P.load(store).notes        # as it was

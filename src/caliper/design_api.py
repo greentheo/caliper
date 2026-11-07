@@ -220,7 +220,7 @@ def _plan(store: DesignStore) -> Optional[dict]:
             # an assumed check is shown as one, with a Keep; only what was said or kept is enforced (CALI-115)
             "checks": [{"id": r.id, "expr": r.expr, "why": r.why,
                         "source": r.source if r in P.binding(pl) else "assumed"}
-                       for r in pl.rules]
+                       for r in pl.rules if not P.numbers_only(r, pl)]          # a note is said apart, never a check
                       + [{"id": f"{m.kind}", "expr": f"{m.between[0]} and {m.between[1]}", "source": "mate"}
                          for m in pl.mates]}
 
