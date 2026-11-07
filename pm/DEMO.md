@@ -573,6 +573,14 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
 2. With no shop yet: answer the bed-size question "256 x 256 x 256 mm, PETG". Under *Requirements*: "Add a 256 × 256 ×
    256 mm printer (PETG) to your shop?" — **Add it** writes it to your shop (Shop shows it); **No** leaves it.
 3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_shop_questions.py`.
+
+### 2026-11-07 · Build it on a reviewed plan builds its parts, in order (CALI-35 #3b)
+1. With a key, plan the turbine ("…a 7 ft mast…, for a generator I already have"), review it, and press **Build it**:
+   the base, then the mast, then what goes on it, one at a time, each narrated as it's built with its checks between
+   parts ("The mast: built (mast_height ✓)"); the generator is yours, not designed.
+2. A part that won't build stops there: the ones before it stay, and **Build it** again carries on from it.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_build_plan.py`.
+
 ### 2026-11-07 · No card reads greener than the newest strength check (CALI-123 #138)
 1. Open the bar stool (a copy of Theo's): the design card's *Will it work?* says "✗ Holds a 250 lb person sitting…:
    last checked on v4: 1.7x, needs 2x · v7 not checked yet", as the part card does; no "2.58x" from the v1 card.
