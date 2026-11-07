@@ -913,6 +913,10 @@ function designView(d) {
     ${d.requirements.length ? '<ul class="list">' + d.requirements.map((r) => `<li>${esc(r.question)}
       <div><b>${esc(r.answer)}</b>${r.source === 'assumed' ? ' <span class="badge">assumed</span>' : ''}</div></li>`).join('') + '</ul>'
     : '<div class="empty">None yet.</div>'}
+    ${(d.shop_offers || []).map((o, i) => `<div class="small" style="margin-top:6px">${esc(o.text)}
+      ${o.kind === 'note' ? `<button class="ghost small" data-shopoffer="${i}" data-add="0">OK</button>`
+        : `<button class="ghost small" data-shopoffer="${i}" data-add="1">Add it</button>
+      <button class="ghost small" data-shopoffer="${i}" data-add="0">No</button>`}</div>`).join('')}
     ${d.plan ? `<h4>The plan <span class="badge">${d.plan.status === 'review' ? 'to review' : 'saved'}</span></h4>
       <ol class="list">${d.plan.parts.map((x) => `<li><b>${esc(x.id.replace(/_/g, ' '))}</b>
         ${x.role === 'fixed' ? (x.source === 'assumed' ? '<span class="badge">assumed: you have it? say if not</span>' : '<span class="badge ref">you have it</span>') : ''}${x.built ? '<span class="badge ok">built</span>' : ''}
@@ -1409,6 +1413,15 @@ function wireInspector(p) {
   showMarks();
   wireCards();
   // keep a check the planner assumed: it's enforced from then on (CALI-115)
+  // an answer about the shop goes to the shop, on a yes (CALI-124)
+  document.querySelectorAll('#inspector [data-shopoffer]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        S.design = await api('POST', `/api/designs/${S.slug}/shop-offer`, { index: +b.dataset.shopoffer, add: b.dataset.add === '1' });
+        renderInspector();
+      } catch (e) { showErr(e.message); }
+    };
+  });
   document.querySelectorAll('#inspector [data-plankeep]').forEach((b) => {
     b.onclick = async () => {
       try {
@@ -2163,15 +2176,21 @@ function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
   const pl = c.plate, f = c.fea || {};
   const holds = p.untrusted ? untrustedBadge(p) : caseBadge(c);     // a filled-in shape wins (CALI-96, then 97)
-  const plate = !pl ? '' : pl.done
-    ? (pl.support === 'ring'
+  // the plate or beam check's number its verdict rests on (the worse grain's), in the verdict's colour and, where it
+  // isn't settled, its word: never green on a not-trusted, unresolved or older case (#122, #132)
+  const plNum = (n) => `<b style="color:var(--${verdictTone(pl.verdict)})">${sx(n)}${pl.verdict && !settled(pl.verdict) ? ` (${esc(pl.verdict.word)})` : ''}</b>`;
+  const plate = !pl ? '' : !pl.done
+    ? `<div class="muted small" style="margin-top:4px">No plate check for ${esc(pl.piece)}: ${esc(pl.why)}.</div>`
+    : pl.as === 'beam'      // a top on two sides: a beam, not a plate held all round (CALI-116)
+      ? `<div class="small" style="margin-top:4px"><b>Beam check</b> — ${esc(pl.piece)}: ${esc(pl.why)} ·
+        ${plNum(pl.safety_across)} with the grain unknown · sags ${len(pl.deflection_mm, 3)}</div>`
+    : pl.support === 'ring'  // a disc on a ring (#137 item 7)
       ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, a round plate held at its ring's outer edge (${len(pl.ring_mm)} across),
-        edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety_across)}</b> across the grain, ${sx(pl.safety)} along it
+        edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → ${plNum(pl.safety_across)} across the grain, ${sx(pl.safety)} along it
         · sags ${len(pl.deflection_mm, 3)} <span class="muted">(Roark; needs an engineer's check)</span></div>`
       : `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
-        ${sx(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`)
-    : `<div class="muted small" style="margin-top:4px">No plate check for ${esc(pl.piece)}: ${esc(pl.why)}.</div>`;
+        ${plNum(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`;
   const fea = f.supported === false ? `<div class="small" style="color:var(--bad)">${esc(c.why)}</div>`
     : `<div class="small" style="margin-top:4px"><b>whittle FEA</b> — works hardest ${esc(peakWhere(f))}
         (${fixed(f.peak_mpa, 1)} MPa → ${sx(f.safety)}) · gives ${len(f.deflection_mm, 3)}</div>`;
