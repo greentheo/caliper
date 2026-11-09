@@ -111,9 +111,46 @@ def test_a_part_that_fails_is_offered_what_would_make_it_hold_never_lighter(tmp_
     stool = _store(tmp_path / "s", BOX_STOOL, "stool")
     _check(stool, "stool", 1.4, plate={**_plate(t=12.7), "safety_across": 1.4})
     (line,) = _offers(stool, "stool")
-    assert line["text"] == ("Make the top from 5/8 in instead of 1/2 in: it holds then, about 2.3 times over by the "
-                            "plate check.")
+    assert line["text"] == ("Make the top from 5/8 in instead of 1/2 in: that panel holds then, about 2.3 times over "
+                            "by the plate check.")
     assert line["action"] == "use_t" and line["say"] == "Make the top from 5/8 in instead of 1/2 in"
+
+
+def test_a_thicker_sheet_is_offered_only_where_it_would_make_it_hold(tmp_path, monkeypatch):
+    """Not for a load the FEA governs (a thicker sheet may not fix it), nor on a check that left the front edge out."""
+    from caliper import consistency
+
+    stool = _store(tmp_path / "a", BOX_STOOL, "stool")
+    _check(stool, "stool", 1.4, plate={**_plate(t=12.7), "safety_across": 1.4})
+    assert len(_offers(stool, "stool")) == 1
+    monkeypatch.setattr(consistency, "bare_edge", lambda store, pid: "no foot at its front edge")
+    assert _offers(stool, "stool") == []
+    monkeypatch.undo()
+    fea = _store(tmp_path / "b", BOX_STOOL, "stool")
+    _check(fea, "stool", 1.4, plate=None)                                # fails, and the FEA governs
+    assert _offers(fea, "stool") == []
+
+
+def test_every_load_on_a_panel_has_to_hold_at_the_offered_sheet(tmp_path):
+    """The thinnest sheet that holds the worst load on the panel, not just the first load listed."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 3.1, plate=_plate())
+    run = load_study.default_check(store, "stool")
+    heavy = json.loads(json.dumps(run["cases"][0]))
+    heavy["name"] = "a heavier foot"
+    for b in heavy["plate"]["by_thickness"]:
+        b["safety_across"] = round(b["safety_across"] * 0.8, 2)         # 5/8 in: 1.84, under the 2 it needs
+    run["cases"].append(heavy)
+    _save(load_study.runs_dir(store), run)
+    assert [ln for ln in _offers(store, "stool") if ln["action"] == "use_t"] == []      # 3/4 in is the thinnest
+
+
+def test_ten_or_more_reads_more_than_10_never_a_bigger_number(tmp_path):
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 14.0)
+    _carved(store, "tube", whole=14.0, safety=12.3)
+    (line,) = _offers(store, "tube")
+    assert line["text"].endswith("still more than 10 times over.")
 
 
 # --- the cheapest first: a thinner sheet, then a lightening ------------------------------------------------------------

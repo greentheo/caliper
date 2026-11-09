@@ -56,34 +56,40 @@ def _settled_check(store: DesignStore, p: dict, run: Optional[dict]) -> bool:
 
 
 def _sheet_offers(run: dict, fails: bool) -> list[dict]:
-    """From the plate check on this version's run: the thinnest sheet that still holds (or, failing, the thinnest that
-    would), its number the plate check's own, never the FEA's."""
-    out, seen = [], set()
+    """From the plate check on this version's run: for each panel the plate check governs, the thinnest sheet that still
+    holds every load on it (or, failing, the thinnest that would), its number the plate check's own, never the FEA's.
+    A panel with a load the FEA governs is left out: its number at another thickness isn't known. Failing, nothing is
+    offered if a load fails that the plate check doesn't govern: a thicker sheet may not fix that."""
+    from .answers import _times
+
+    cases = [c for c in run.get("cases") or [] if c.get("safety") is not None]
     need = run.get("min_safety") or 2
-    for c in run.get("cases") or []:
+    if fails and any(not c.get("holds") and c.get("governs") != "plate" for c in cases):
+        return []
+    panels: dict = {}
+    for c in cases:
         pl = c.get("plate") or {}
-        if not pl.get("done") or c.get("governs") != "plate" or pl.get("piece") in seen:
+        if pl.get("done") and pl.get("piece"):
+            panels.setdefault(pl["piece"], []).append(c)
+    out = []
+    for piece, on in panels.items():
+        if any(c.get("governs") != "plate" for c in on):
             continue
-        seen.add(pl["piece"])
-        now = pl.get("thickness_mm")
-        rows = [b for b in pl.get("by_thickness") or [] if b.get("safety_across") is not None]
-        label_now = next((b["label"] for b in rows if abs(b["thickness_mm"] - now) < 0.01), f"{now:g} mm")
-        if fails:
-            ok = sorted((b for b in rows if b["thickness_mm"] > now + 0.01 and b["safety_across"] >= need),
-                        key=lambda b: b["thickness_mm"])
-            if ok:
-                b = ok[0]
-                out.append(_line(f"Make the {pl['piece']} from {b['label']} instead of {label_now}: it holds then, "
-                                 f"about {b['safety_across']:.1f} times over by the plate check.", "use_t",
-                                 say=f"Make the {pl['piece']} from {b['label']} instead of {label_now}"))
-        else:
-            ok = sorted((b for b in rows if b["thickness_mm"] < now - 0.01 and b["safety_across"] >= need),
-                        key=lambda b: b["thickness_mm"])
-            if ok:
-                b = ok[0]
-                out.append(_line(f"Make the {pl['piece']} from {b['label']} instead of {label_now}: still about "
-                                 f"{b['safety_across']:.1f} times over by the plate check.", "use_t",
-                                 say=f"Make the {pl['piece']} from {b['label']} instead of {label_now}"))
+        now = on[0]["plate"].get("thickness_mm")
+        tables = [{round(b["thickness_mm"], 2): b for b in c["plate"].get("by_thickness") or []
+                   if b.get("safety_across") is not None} for c in on]
+        common = sorted(set.intersection(*(set(t) for t in tables))) if tables else []
+        worst = {t: min(tb[t]["safety_across"] for tb in tables) for t in common}
+        label = {t: tables[0][t]["label"] for t in common}
+        label_now = next((label[t] for t in common if abs(t - now) < 0.01), f"{now:g} mm")
+        ok = [t for t in common if worst[t] >= need and (t > now + 0.01 if fails else t < now - 0.01)]
+        if not ok:
+            continue
+        t = min(ok)
+        said = f"Make the {piece} from {label[t]} instead of {label_now}"
+        out.append(_line(f"{said}: that panel holds then, {_times(worst[t], about=True)} by the plate check."
+                         if fails else f"{said}: still {_times(worst[t], about=True)} by the plate check.",
+                         "use_t", say=said))
     return out
 
 
@@ -91,8 +97,10 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
     """Make it better, for one part: card lines, cheapest real improvement first. [] where there's nothing to offer
     (a reference, nothing it must hold)."""
     from . import carve as K
+    from . import consistency
     from . import load_study as L
     from . import verdicts
+    from .answers import _times
 
     p = next((x for x in state.get("parts") or [] if x["id"] == pid), None)
     if p is None or p.get("role") == "fixed" or not p.get("loads") or not p.get("built"):
@@ -100,7 +108,9 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
     blocked = p.get("blocked") if "blocked" in p else L.blocked(store, pid)
     run = L.default_check(store, pid)
     if blocked and blocked.get("why") == "already_fails":       # what would make it hold, never lighter
-        return _sheet_offers(run, fails=True) if run else []
+        # on a filled-in shape, or with the front edge not checked, "it holds then" isn't known
+        known = run and not p.get("untrusted") and not consistency.bare_edge(store, pid)
+        return _sheet_offers(run, fails=True) if known else []
     settled = _settled_check(store, p, run)
     results, invites = [], []
     if settled:
@@ -115,7 +125,7 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
             if settled and best and best.get("saved_g") and v and v["counts_as_pass"]:
                 results.append(_line(
                     f"Carve the {name} where it isn't working: {best['removed']:.0%} {K.share(done)} carved away, "
-                    f"{best['saved_g']:,} g less filament, still about {best['safety']:.1f} times over.", "carve_use",
+                    f"{best['saved_g']:,} g less filament, still {_times(best['safety'], about=True)}.", "carve_use",
                     run=done["id"], station=best["index"]))
         elif not any(r.get("status") in (None, "running") for r in mine):
             secs = (run or {}).get("seconds")
@@ -133,7 +143,7 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
             if settled and best:
                 results.append(_line(
                     f"Lighten it with holes where the wood isn't working: {best['saved_lb']:g} lb lighter, still "
-                    f"about {best['safety']:.1f} times over.", "lighten_use", run=done["id"], station=best["index"]))
+                    f"{_times(best['safety'], about=True)}.", "lighten_use", run=done["id"], station=best["index"]))
         else:
             invites.append(_line("Lighten it with holes where the wood isn't working: it takes a few minutes.",
                                  "lighten"))
