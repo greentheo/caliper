@@ -32,6 +32,7 @@ import uuid
 from typing import Callable, Optional
 
 from .design import DesignStore
+from .one_study import one_at_a_time
 from .runs import newest_first
 
 #: Member ends closer than this are one joint.
@@ -418,6 +419,7 @@ def runs_dir(store: DesignStore) -> str:
     return os.path.join(store.root, "frames")
 
 
+@one_at_a_time
 def study(store: DesignStore, part_id: str, *, load_lb: float = 100.0, factor: float = 2.5,
           min_safety: float = 3.5, on_groups=("rails",), catalogs: Optional[dict] = None,
           emit: Optional[Callable] = None, from_design: bool = False, payload_lb: float = 100.0,

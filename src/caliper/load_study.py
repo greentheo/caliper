@@ -33,6 +33,7 @@ import numpy as np
 from . import construction as C
 from . import materials as M
 from .design import DesignStore
+from .one_study import one_at_a_time
 from .runs import newest_first
 
 LB = 4.4482216152605          # newtons per pound-force
@@ -1018,6 +1019,7 @@ NOTES = [
 ]
 
 
+@one_at_a_time
 def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
           emit: Optional[Callable] = None, spacing: Optional[float] = None) -> dict:
     """Every load the part declares, through whittle's FEA and the plate check. Returns the run record."""
