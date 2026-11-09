@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import re
 import tokenize
+from fractions import Fraction
 from typing import Optional
 
 from . import aero
@@ -115,10 +116,14 @@ def listing(store: DesignStore, pid: str) -> list[dict]:
 
 
 def _said(value: float, unit: str) -> str:
+    """A number as it was set, exactly: the record of an exact edit never rounds it (3/8 in, not 0.4 in)."""
     if unit == "in":
-        from .answers import _len
-
-        return _len(value * IN, True)
+        n = round(value * 32)
+        if abs(value * 32 - n) > 0.001:
+            return f"{value:.4f}".rstrip("0").rstrip(".") + " in"
+        whole, rest = divmod(n, 32)
+        frac = str(Fraction(rest, 32)) if rest else ""
+        return f"{whole or ''} {frac}".strip() + " in" if whole or frac else "0 in"
     return f"{value:g} {unit}".strip()
 
 
@@ -161,18 +166,10 @@ def _probe(name: str, asked_mm: float, geometry) -> str:
     return f"its shape changed; whether its {name} is exactly {asked_mm:g} mm isn't measured"
 
 
-def set_value(store: DesignStore, pid: str, name: str, value: float, unit: Optional[str] = None) -> dict:
-    """Set one ``PARAMS`` entry by hand: no Claude call. Returns ``{version, said, value, moved, report, failed}``;
-    raises ValueError, saying why, for a name it doesn't have, a unit it can't read, a value outside its range, or a
-    value the part won't build with (nothing written then)."""
-    from . import sandbox
-
-    entries = {e["name"]: e for e in listing(store, pid)}
-    if name not in entries:
-        raise ValueError(f"'{pid}' has no number called {name!r}")
-    e = entries[name]
-    plain = name.replace("_", " ")
-    notes: list[str] = []
+def _to_script(e: dict, value: float, unit: Optional[str]) -> tuple[float, str, list[str]]:
+    """One typed number as its script keeps it: ``(number, how it's said, notes)``. Raises ValueError, saying why, for
+    a unit it can't read or a value outside its range."""
+    name, plain, notes = e["name"], e["name"].replace("_", " "), []
     if e["unit"] == "mm":                         # only a length converts (#147 review)
         unit = unit or "mm"
         if unit not in TO_MM:
@@ -198,36 +195,75 @@ def set_value(store: DesignStore, pid: str, name: str, value: float, unit: Optio
         unit_said = e["unit"] or ""
         raise ValueError(f"{name} must be between {lo_hi[0]:g} and {lo_hi[1]:g} {unit_said}".rstrip()
                          + f": {_said(float(value), unit) if e['unit'] == 'mm' else f'{mm:g}'} is outside it")
-    from . import load_study
+    said = (_said(float(value), unit) if e["unit"] == "mm" else f"{mm:g} deg" if e["unit"] == "deg" else f"{mm:g}")
+    return mm, said, notes
+
+
+def set_values(store: DesignStore, pid: str, changes: list[dict]) -> dict:
+    """Set a part's numbers by hand, ``[{name, value, unit}]``, as one change: no Claude call, built once with all of
+    them, one new version, all or none (numbers that only work together can't leave a half-way part). Returns
+    ``{version, said, value, moved, report, failed, notes, warning}``; raises ValueError, saying why, for a name it doesn't have, a
+    unit it can't read, a value outside its range, or values the part won't build with (nothing written then)."""
+    from . import load_study, sandbox
+
+    if not changes:
+        raise ValueError("there's no number to set")
+    names = [c["name"] for c in changes]
+    if len(set(names)) < len(names):
+        raise ValueError("one of those numbers is set twice")
+    entries = {e["name"]: e for e in listing(store, pid)}
+    for name in names:
+        if name not in entries:
+            raise ValueError(f"'{pid}' has no number called {name!r}")
+    got = [(c["name"], *_to_script(entries[c["name"]], c["value"], c.get("unit"))) for c in changes]
+    notes = [n for *_, ns in got for n in ns]
+    values = {name: mm for name, mm, _, _ in got}
+    said_each = [f"{name} to {s}" for name, _, s, _ in got]
+    joined = said_each[0] if len(said_each) == 1 else ", ".join(said_each[:-1]) + " and " + said_each[-1]
+    said = f"set {joined} by hand"
     script = store.read_script(pid)
-    new = aero.set_params(script, {name: mm})        # the rewrite the skeleton's drive makes too (#143)
+    new = aero.set_params(script, values)            # the rewrite the skeleton's drive makes too (#143)
     # built first, from its own PARAMS (builds never override, #143): a value it won't build with isn't written
     built = sandbox.run_script(new, {})
     if not built.ok:
         tail = [ln for ln in (built.feedback or "").strip().splitlines() if ln.strip()]
-        raise ValueError(f"it won't build with {name} at {_said(float(value), unit)}: "
+        raise ValueError(f"it won't build with {', '.join(said_each)}: "
                          f"{tail[-1].strip() if tail else 'the build failed'}")
     try:
         before = _shape(store.part_geometry(pid))
     except Exception:  # noqa: BLE001 — a part that didn't build before: whether it moved isn't known
         before = None
-    said = (_said(float(value), unit) if e["unit"] == "mm" else
-             f"{mm:g} deg" if e["unit"] == "deg" else f"{mm:g}")
-    version = store.write_part(pid, new, action="params", feedback=f"set {name} to {said} by hand",
-                               extra={"params": {name: [e["value"], round(mm, 3)]}},
+    version = store.write_part(pid, new, action="params", feedback=said,
+                               extra={"params": {n: [entries[n]["value"], round(mm, 3)] for n, mm in values.items()}},
                                built=(new, {}, built.geometry))      # its trial build is this version's (#97)
     after = _shape(store.part_geometry(pid))
     report, errors = store.evaluate(tolerant=True)
     moved = before is None or after != before
-    if moved and e["read"] and e["unit"] == "mm":  # a partial clamp, against a probe where one exists (#107)
-        probe = _probe(name, mm, built.geometry)
-        if probe:
-            notes.append(probe)
+    if moved:
+        for name, mm in values.items():              # a partial clamp, against a probe where one exists (#107)
+            if entries[name]["read"] and entries[name]["unit"] == "mm":
+                probe = _probe(name, mm, built.geometry)
+                if probe:
+                    notes.append(probe)
     if load_study.list_runs(store, pid):           # its strength check is of the older shape now (#147 review)
         notes.append(f"strength: check the {pid.replace('_', ' ')} again")
-    return {"version": version, "said": f"set {name} to {said} by hand", "value": round(mm, 3), "notes": notes,
-            "moved": moved, "read": e["read"], "report": report, "failed": errors or {},
-            # a value the build ignores or clamps, said (#107)
-            "warning": (None if moved and e["read"] else
-                        f"{name} isn't used by the part's build, so setting it changed nothing" if not e["read"] else
-                        f"the part's shape didn't change: its build clamps or ignores {name} at {said}")}
+    return {"version": version, "said": said, "value": round(got[-1][1], 3), "notes": notes, "moved": moved,
+            "read": all(entries[n]["read"] for n in values), "report": report, "failed": errors or {},
+            "warning": _ignored(entries, values, got, moved)}
+
+
+def _ignored(entries: dict, values: dict, got: list, moved: bool) -> Optional[str]:
+    """A value the build ignores or clamps, said (#107): those its build never reads, or, if nothing moved, the rest."""
+    unread = [n for n in values if not entries[n]["read"]]
+    if unread:
+        return (f"{' and '.join(unread)} {'is' if len(unread) == 1 else 'are'}n't used by the part's build, so setting "
+                f"{'it' if len(unread) == 1 else 'them'} changed nothing")
+    if not moved:
+        each = " and ".join(f"{n} at {s}" for n, _, s, _ in got)
+        return f"the part's shape didn't change: its build clamps or ignores {each}"
+    return None
+
+
+def set_value(store: DesignStore, pid: str, name: str, value: float, unit: Optional[str] = None) -> dict:
+    """Set one number by hand: :func:`set_values` with one change."""
+    return set_values(store, pid, [{"name": name, "value": value, "unit": unit}])

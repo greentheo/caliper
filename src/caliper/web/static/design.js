@@ -861,12 +861,142 @@ async function createDesign(prompt) {
 }
 
 // ------------------------------------------------------------------------------- inspector
+// ------------------------------------------------------------- a part's numbers, set by hand (#108, the mockup)
+// Exact numbers, no Claude call. Lengths in the person's units; what's typed is sent as typed and the server converts,
+// checks and builds. Rebuild writes everything changed as one version.
+const paramKey = (p) => `${S.slug}/${p.id}/${p.version}/${S.design.display_units}`;
+function inchText(mm) {
+  const inch = mm / IN, x32 = Math.round(inch * 32);
+  if (Math.abs(inch * 32 - x32) > 0.02) return `${+inch.toFixed(3)}`;
+  const whole = Math.floor(x32 / 32), rest = x32 - whole * 32, g = gcd(rest, 32);
+  return rest ? `${whole ? `${whole} ` : ''}${rest / g}/${32 / g}` : `${whole}`;
+}
+const isLength = (e) => e.unit === 'mm';
+const paramText = (e, v) => (isLength(e) && inches() ? inchText(v) : `${+Number(v).toFixed(3)}`);
+const paramUnit = (e) => (isLength(e) ? (inches() ? 'in' : 'mm') : e.unit === 'deg' ? 'deg' : '');
+// a number in plain words: its comment, unless the comment is only a quantity ("12 in", "~10.5", "18 in base"); then its name
+const PARAM_WORD = { dia: 'diameter', bot: 'bottom', t: 'thickness', r: 'radius', h: 'height', w: 'width', d: 'diameter' };
+function paramName(e) {
+  const note = (e.note || '').replace(/\s*\([^)]*$/, '')
+    .replace(/^~?\d[\d./]*(\s+\d+\/\d+)?\s*(mm|in\b|inch(es)?\b|"|″)?\s*/i, '')
+    .replace(/[\s(]*\b(mm|in|inches|deg|degrees)\b\)?\.?\s*$/i, '').trim();
+  const said = note.split(/\s+/).length >= 2 ? note : e.name.split('_').map((w) => PARAM_WORD[w] || w).join(' ');
+  return said.charAt(0).toUpperCase() + said.slice(1);
+}
+// what's typed, as a number and (for a length) its unit: 12.7, 1/2, 1 1/4, 3 mm, 2"; null if it isn't one
+function readNumber(text, e) {
+  let t = String(text).trim(), unit;
+  if (isLength(e)) {
+    const m = t.match(/^(.*?)\s*(mm|in|"|″)$/i);
+    if (m) { t = m[1]; unit = m[2].toLowerCase() === 'mm' ? 'mm' : 'in'; } else unit = inches() ? 'in' : 'mm';
+  }
+  const f = t.match(/^(?:(\d+)\s+)?(\d+)\/(\d+)$/);
+  if (f) return +f[3] ? { value: +(f[1] || 0) + +f[2] / +f[3], ...(unit ? { unit } : {}) } : null;
+  return /^-?(\d+\.?\d*|\.\d+)$/.test(t) ? { value: +t, ...(unit ? { unit } : {}) } : null;
+}
+function paramRange(e) {
+  if (!e.range) return '';
+  const u = paramUnit(e);
+  return `${paramText(e, e.range[0])} to ${paramText(e, e.range[1])}${u ? ` ${u}` : ''}`;
+}
+// why this can't be sent, or '': the server checks again and has the last word
+function paramProblem(e, read) {
+  if (!read) return "That isn't a number.";
+  if (e.unit === 'count' && !Number.isInteger(read.value)) return 'A whole number.';
+  const v = read.unit === 'in' ? read.value * IN : read.value;
+  return e.range && (v < e.range[0] - 1e-9 || v > e.range[1] + 1e-9) ? `Must be ${paramRange(e)}.` : '';
+}
+function paramRows(st) {
+  return st.list.map((e) => {
+    const shown = paramText(e, e.value), draft = st.drafts[e.name], text = draft != null ? draft : shown;
+    const changed = text.trim() !== shown, read = changed ? readNumber(text, e) : null;
+    return { e, shown, text, changed, read, problem: changed ? paramProblem(e, read) : '' };
+  });
+}
+function paramsHtml(p, st, done) {
+  const rows = paramRows(st), dirty = rows.filter((r) => r.changed), blocked = dirty.some((r) => r.problem);
+  const body = rows.map(({ e, shown, text, changed, problem }) => {
+    const u = paramUnit(e), note = problem || [changed ? `was ${shown}${u ? ` ${u}` : ''}` : '', paramRange(e),
+      e.read ? '' : "its build doesn't use this"].filter(Boolean).join(' · ');
+    return `<div class="prow${changed ? ' changed' : ''}${problem ? ' bad' : ''}">
+      <label for="param-${esc(e.name)}" title="${esc(e.name)}">${esc(paramName(e))}</label>
+      <input id="param-${esc(e.name)}" data-param="${esc(e.name)}" value="${esc(text)}" autocomplete="off" spellcheck="false"${st.saving ? ' disabled' : ''}>
+      <span class="punit">${esc(u)}</span></div>${note ? `<div class="pnote${problem ? ' bad' : ''}">${esc(note)}</div>` : ''}`;
+  }).join('');
+  const foot = dirty.length ? `<div class="pfoot"><span class="small muted">Rebuilds as v${p.version + 1}, then re-checks the whole design.</span>
+    <button class="primary" data-param-rebuild="1"${blocked || st.saving ? ' disabled' : ''}>${st.saving ? 'Rebuilding…' : 'Rebuild'}</button></div>` : '';
+  const said = done && done.part === p.id && done.version === p.version ? `<div class="pdone">v${done.version} written: ${esc(done.said)}.</div>
+    ${done.warning ? `<div class="pnote warn">${esc(done.warning)}.</div>` : ''}${(done.notes || []).map((n) => `<div class="pnote">${esc(n)}.</div>`).join('')}` : '';
+  return `<section class="params"><div class="phead"><b>Parameters</b><span class="small muted">set by hand, no Claude call</span></div>
+    ${body}${foot}${st.err ? `<div class="pnote bad">${esc(st.err)}</div>` : ''}${said}</section>`;
+}
+function paramView(p) {
+  if (!p || !p.scripted || p.role === 'fixed') return '';
+  const st = S.params && S.params.key === paramKey(p) ? S.params : null;
+  if (!st) { setTimeout(() => loadParams(p), 0); return ''; }
+  return st.list && st.list.length ? paramsHtml(p, st, S.paramsDone) : '';
+}
+async function loadParams(p) {
+  const key = paramKey(p);
+  if (S.params && S.params.key === key) return;
+  S.params = { key, list: null, drafts: {}, saving: false, err: null };
+  let list = [];
+  try { list = (await api('GET', `/api/designs/${S.slug}/parts/${p.id}/params`)).params; } catch (e) { /* no numbers to set */ }
+  if (S.params.key !== key) return;
+  S.params.list = list;
+  drawParams(p);
+  const said = document.querySelector('#paramBox .pdone');          // the redraw went back to the top of the cards
+  if (said) said.scrollIntoView({ block: 'center' });
+}
+let paramRefocus = false;
+function refocusParam(id, at) {
+  const el = $(id);
+  if (!el) return;
+  paramRefocus = true; el.focus(); el.setSelectionRange(at[0], at[1]); paramRefocus = false;
+}
+function drawParams(p) {
+  const box = $('paramBox');
+  if (!box) return;
+  const was = document.activeElement, id = was && was.dataset && was.dataset.param ? was.id : null;
+  const at = id ? [was.selectionStart, was.selectionEnd] : null;
+  box.innerHTML = paramView(p);
+  if (id) refocusParam(id, at);
+}
+async function rebuildParams(p) {
+  const st = S.params, rows = paramRows(st).filter((r) => r.changed);
+  if (!rows.length || st.saving || rows.some((r) => r.problem)) return;
+  st.saving = true; st.err = null; drawParams(p);
+  try {
+    const got = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/params`, { values: rows.map((r) => ({
+      name: r.e.name, value: r.read.value, ...(r.read.unit ? { unit: r.read.unit } : {}) })) });
+    S.paramsDone = { part: p.id, version: got.version, said: got.said, warning: got.warning, notes: got.notes };
+    S.design = got.design;
+    render();
+  } catch (e) { st.saving = false; st.err = plainly(e.message); drawParams(p); }
+}
+function wireParams(p) {
+  const box = $('paramBox');
+  if (!box || !p) return;
+  box.oninput = (e) => {
+    if (!e.target.dataset.param || !S.params) return;
+    S.params.drafts[e.target.dataset.param] = e.target.value; S.params.err = null; S.paramsDone = null;
+    drawParams(p);
+  };
+  // a click selects the number, so typing replaces it: after the click's own caret, and never when a redraw puts it back
+  box.addEventListener('focusin', (e) => { const el = e.target; if (el.dataset.param && !paramRefocus) setTimeout(() => el.select(), 0); });
+  box.onclick = (e) => { if (e.target.closest('[data-param-rebuild]')) rebuildParams(p); };
+  box.onkeydown = (e) => { if (e.key === 'Enter' && e.target.dataset.param) { e.preventDefault(); rebuildParams(p); } };
+}
+
 function renderInspector() {
   const el = $('inspector'), d = S.design;
   if (!d) return;
   const p = S.scope && d.parts.find((x) => x.id === S.scope);
+  const was = document.activeElement, typing = was && was.dataset && was.dataset.param ? [was.id, was.selectionStart, was.selectionEnd] : null;
   el.innerHTML = p ? partView(p) : designView(d);
   wireInspector(p);
+  wireParams(p || (d.parts.length === 1 ? d.parts[0] : null));
+  if (typing) refocusParam(typing[0], typing.slice(1));   // a redraw mid-number
 }
 
 // one rule on a part, with its verdict as measured on this version, and what it measured where it doesn't hold
@@ -947,7 +1077,8 @@ function designView(d) {
   const buy = d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : '';
   const make = `<h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>`;
   return `<h2>${esc(d.name)} ${status}</h2>
-    ${cardsView({ what, work, buy, make })}`;
+    ${cardsView({ what, work, buy, make })}
+    ${d.parts.length === 1 ? `<div id="paramBox">${paramView(d.parts[0])}</div>` : ''}`;
 }
 
 // ------------------------------------------------------------- the four questions (spec step 1)
@@ -1411,7 +1542,8 @@ function partView(p) {
     <div id="cutplanBox">${cutplanView(p)}</div>` : '';
   return `<h2>${esc(p.id)} ${origin}</h2>
     <div class="muted small">v${p.version}</div>
-    ${cardsView({ what, work, buy, make })}`;
+    ${cardsView({ what, work, buy, make })}
+    <div id="paramBox">${paramView(p)}</div>`;
 }
 
 function wireInspector(p) {

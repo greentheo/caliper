@@ -266,3 +266,18 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
   border-radius: 8px; padding: 6px 9px; margin: 4px 0 8px; }
 .trial-chart circle[data-carve] { cursor: pointer; }
 .trial-chart circle.on { stroke: var(--ink); stroke-width: 2; }
+
+/* --- a part's numbers, set by hand (#108) ------------------------------------- */
+.params { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
+.phead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+.prow { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.prow label { flex: 1 1 auto; font-size: 13px; min-width: 0; }
+.prow input { width: 96px; flex: none; text-align: right; background: #0c0f13; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+.prow.changed input { border-color: var(--accent); }
+.prow.bad input { border-color: var(--bad); }
+.punit { width: 28px; flex: none; font-size: 12px; color: var(--muted); }
+.pnote { font-size: 12px; line-height: 1.4; color: var(--muted); }
+.pnote.bad { color: var(--bad); }
+.pnote.warn { color: var(--amber); }
+.pfoot { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; }
+.pdone { font-size: 12px; color: var(--ok); margin-top: 6px; }
