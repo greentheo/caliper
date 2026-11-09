@@ -31,7 +31,7 @@ def _minutes(m: float) -> str:
 
 
 def _line(text: str, action: str, **kw) -> dict:
-    return {"text": text, "status": "info", "study": "load", "action": action, "better": True, **kw}
+    return {"text": text, "status": "info", "action": action, "better": True, **kw}   # not a strength verdict: no study
 
 
 def _printed_name(store: DesignStore, pid: str) -> str:
@@ -60,11 +60,12 @@ def _sheet_offers(run: dict, fails: bool) -> list[dict]:
     holds every load on it (or, failing, the thinnest that would), its number the plate check's own, never the FEA's.
     A panel with a load the FEA governs is left out: its number at another thickness isn't known. Failing, nothing is
     offered if a load fails that the plate check doesn't govern: a thicker sheet may not fix that."""
+    from . import verdicts
     from .answers import _times
 
     cases = [c for c in run.get("cases") or [] if c.get("safety") is not None]
     need = run.get("min_safety") or 2
-    if fails and any(not c.get("holds") and c.get("governs") != "plate" for c in cases):
+    if fails and any(verdicts.case(run, c)["kind"] == "fails" and c.get("governs") != "plate" for c in cases):
         return []
     panels: dict = {}
     for c in cases:
@@ -82,7 +83,8 @@ def _sheet_offers(run: dict, fails: bool) -> list[dict]:
         worst = {t: min(tb[t]["safety_across"] for tb in tables) for t in common}
         label = {t: tables[0][t]["label"] for t in common}
         label_now = next((label[t] for t in common if abs(t - now) < 0.01), f"{now:g} mm")
-        ok = [t for t in common if worst[t] >= need and (t > now + 0.01 if fails else t < now - 0.01)]
+        ok = [t for t in common if verdicts.meets(worst[t], need)["counts_as_pass"]
+              and (t > now + 0.01 if fails else t < now - 0.01)]
         if not ok:
             continue
         t = min(ok)
@@ -120,7 +122,7 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
         mine = [r for r in state.get("carve_runs") or [] if r["part"] == pid and r.get("version") == p["version"]]
         done = next((r for r in mine if r.get("status") == "done"), None)
         if done is not None:
-            best = next((st for st in done.get("stations") or [] if st["index"] == done.get("best")), None)
+            best = next((st for st in done.get("stations") or [] if st["index"] == done.get("best")), None)  # search
             v = verdicts.carve_step(best, p.get("untrusted"), done) if best else None
             if settled and best and best.get("saved_g") and v and v["counts_as_pass"]:
                 results.append(_line(

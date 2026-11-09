@@ -75,7 +75,8 @@ def test_a_printed_part_that_holds_is_invited_to_carve_with_what_it_takes(tmp_pa
     (line,) = _offers(store, "tube")
     assert line["text"] == ("Carve the tube where it isn't working, to use less filament: it takes at least about "
                             "45 min at this size.")                              # 60 s × 45
-    assert line["action"] == "carve" and line["better"] and line["status"] == "info" and line["study"] == "load"
+    assert line["action"] == "carve" and line["better"] and line["status"] == "info"
+    assert "study" not in line                                         # not a strength verdict, to any reader of those
 
 
 def test_after_a_carve_it_gives_the_result_to_use(tmp_path):
