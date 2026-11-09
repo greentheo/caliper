@@ -1149,11 +1149,15 @@ def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Op
     if aw["kind"] == "remove":
         if store.design.part(pid or "") is None:
             return TurnResult(action="remove", ok=False, part=pid, events=events, reply=f"There's no {pid} to remove.")
-        trash.remove(store, pid)
+        got = trash.remove(store, pid)
         report, part_errors = _measure_design(store)
+        went = [f"rule {r}" for r in got["rules"]] + [f"mate {m}" for m in got["mates"]]
+        with_it = (f", and its {', '.join(went[:-1]) + ' and ' + went[-1] if len(went) > 1 else went[0]} went with it"
+                   if went else "")
         return TurnResult(action="remove", ok=True, part=pid, events=events, report=report, part_errors=part_errors,
-                          reply=f"Removed {pid}: its files are in the design's trash (say \"put back {pid}\" to "
-                                f"restore it)." + (f"\n\nThe design checks: {report.said()}." if report is not None else ""))
+                          reply=f"Removed {pid}: its files are in the design's trash{with_it} (say \"put back {pid}\" "
+                                f"to restore {'them all' if went else 'it'})."
+                                + (f"\n\nThe design checks: {report.said()}." if report is not None else ""))
     message = (f"Change it so it meets its rule {aw['rule']}: {aw['expr']}. Change only what that needs."
                if aw["kind"] == "fix_rule" else aw["message"])
     return refine_part(store, pid, message, author=kw["author"], client=kw["client"], max_rounds=kw["max_rounds"],

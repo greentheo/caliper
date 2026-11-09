@@ -86,7 +86,9 @@ def test_a_part_is_removed_after_asking_once_and_put_back(store):
     assert ask.action == "ask" and ask.reply == "Remove carriage? Its files go to the design's trash, so it can be put back."
     assert store.design.part("carriage") is not None                                  # asked, not done
     gone = chat.turn(store, "yes", use_llm=False, classifier=_never)
-    assert gone.action == "remove" and gone.ok and 'say "put back carriage" to restore it' in gone.reply
+    assert gone.action == "remove" and gone.ok
+    assert gone.reply.startswith("Removed carriage: its files are in the design's trash, and its mate "
+                                 'carriage_misses_rail went with it (say "put back carriage" to restore them all).')
     store = DesignStore.load(store.root)
     assert store.design.part("carriage") is None
     assert [p.id for p in store.assembly.parts] == ["rail"] and store.assembly.mates == []   # its mate went with it
@@ -183,3 +185,61 @@ def test_a_stated_grain_goes_to_the_trash_with_its_part_and_comes_back(bench):
     assert bench.design.grain == {}
     trash.restore(bench, pid="bench")
     assert grain.stated(DesignStore.load(bench.root), "bench") == said
+
+
+
+# --- #153 review: only a bare answer counts; removal covers the plan and says what went; restore never overwrites ------
+
+@pytest.mark.parametrize("said,means", [
+    ("yes", True), ("Yes.", True), ("ok", True), ("go ahead", True), ("have a go", True), ("yes please", True),
+    ("yes, please", True), ("no", False), ("No!", False), ("no, leave it", False), ("no thanks", False),
+    ("yes, but make it taller", None), ("no, make it wider", None), ("ok thanks", None),
+    ("keep it but make it wider", None), ("do it with the grain", None),
+])
+def test_only_a_bare_answer_counts(said, means):
+    assert awaiting.reads(said) is means
+
+
+@pytest.mark.parametrize("said", ["yes, but make it taller", "no, make it wider", "ok thanks"])
+def test_a_qualified_answer_removes_nothing_and_goes_on_as_a_request(store, said):
+    chat.turn(store, "remove the rail", use_llm=False, classifier=_never)
+    got = chat.turn(store, said, use_llm=False, author=_author(_box(dx=200, dy=12)), max_rounds=1)
+    assert got.action not in ("remove", "ask") and "Kept rail" not in got.reply
+    assert store.design.part("rail") is not None and trash.listing(store) == []
+    assert awaiting.pending(store) is None
+
+
+def test_removal_covers_the_plan_and_says_what_went(store):
+    """"Build it again" authors any planned part with no built version: a removed one has to leave the plan."""
+    from caliper import plan as P
+    from caliper.spec import Assertion
+
+    store.design.plan = {"status": "built", "parts": [{"id": "rail", "what": "the rail"},
+                                                      {"id": "carriage", "what": "the carriage", "mounts_on": ["rail"]}],
+                         "rules": [{"id": "above", "expr": "bbox(rail).max_z < bbox(carriage).max_z"},
+                                   {"id": "short", "expr": "bbox(carriage).max_z < 100"}]}
+    store.assembly.assertions.append(Assertion(id="clear", expr="min_clearance(carriage, rail) >= 1"))
+    store.save()
+    was = store.design.plan
+    chat.turn(store, "remove rail", use_llm=False, classifier=_never)
+    gone = chat.turn(store, "yes", use_llm=False, classifier=_never)
+    assert ("and its rule clear, rule above and mate carriage_misses_rail went with it (say \"put back rail\" to restore "
+            "them all).") in gone.reply
+    store = DesignStore.load(store.root)
+    assert [p["id"] for p in store.design.plan["parts"]] == ["carriage"]
+    assert [r["id"] for r in store.design.plan["rules"]] == ["short"] and store.assembly.assertions == []
+    assert P.order(P.load(store)) == ["carriage"]                                     # Build it again won't author it
+    chat.turn(store, "put back rail", use_llm=False, classifier=_never)
+    store = DesignStore.load(store.root)
+    assert store.design.plan == was and [a.id for a in store.assembly.assertions] == ["clear"]
+    assert [m.id for m in store.assembly.mates] == ["carriage_misses_rail"]
+
+
+def test_put_back_never_overwrites_a_part_of_that_name(store):
+    trash.remove(store, "rail")
+    mine = _box(dx=77, dy=12)
+    store.write_part("rail", mine, intent="a new rail")
+    got = chat.turn(store, "put back rail", use_llm=False, classifier=_never)
+    assert got.action == "restore" and not got.ok and "already has a part 'rail'" in got.reply
+    assert store.read_script("rail") == mine and store.design.part("rail").version == 1
+    assert [t["part"] for t in trash.listing(store)] == ["rail"]                      # still there to put back later

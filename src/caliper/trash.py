@@ -3,7 +3,8 @@
 Nothing could remove a part: ``revert_part`` can't roll back a part's first version, and a second cone authored by
 mistake would have stayed in the bar stool for good. Removing one moves its folder (script, versions, spec, history)
 to the design's ``trash/``, with what named it (its assembly entry, the mates and rules on it, the grain said for its
-panels), and takes it out of the design; restoring puts all of it back. Never deleted outright.
+panels, its place in the plan and the plan's rules on it), and takes it out of the design; restoring puts all of it
+back. Never deleted outright. Out of the plan too (#153 review), or "Build it again" would author it anew.
 """
 
 from __future__ import annotations
@@ -34,9 +35,51 @@ def listing(store: DesignStore) -> list[dict]:
     return out
 
 
-def remove(store: DesignStore, pid: str) -> dict:
-    """Take a part out of the design, its files to the trash. Returns ``{id, part, mates, rules}``."""
+def _names_it(expr: str, pid: str) -> bool:
     from .assembly import _names
+
+    try:
+        return pid in _names(expr or "")
+    except Exception:  # noqa: BLE001 — a rule that won't parse names nothing
+        return False
+
+
+def _out_of_plan(store: DesignStore, pid: str) -> Optional[dict]:
+    """Take a part out of the design's plan, and what the plan says about it; what comes back on restore."""
+    plan = store.design.plan
+    parts = (plan or {}).get("parts") or []
+    at = next((i for i, p in enumerate(parts) if p.get("id") == pid), None)
+    if at is None:
+        return None
+    every = plan.get("rules") or []
+    rules = [{"at": i, "rule": r} for i, r in enumerate(every) if _names_it(r.get("expr"), pid)]
+    mounted = [p["id"] for p in parts if pid in (p.get("mounts_on") or [])]
+    gone = {x["at"] for x in rules}
+    store.design.plan = {**plan, "rules": [r for i, r in enumerate(every) if i not in gone],
+                         "parts": [{**p, "mounts_on": [m for m in p["mounts_on"] if m != pid]} if p.get("mounts_on")
+                                   else p for i, p in enumerate(parts) if i != at]}
+    return {"part": parts[at], "index": at, "rules": rules, "mounted": mounted}
+
+
+def _into_plan(store: DesignStore, was: dict) -> None:
+    plan = store.design.plan
+    if not plan:
+        return
+    pid = was["part"]["id"]
+    parts = [{**p, "mounts_on": [*(p.get("mounts_on") or []), pid]} if p.get("id") in was["mounted"] else p
+             for p in plan.get("parts") or [] if p.get("id") != pid]
+    parts.insert(min(was["index"], len(parts)), was["part"])
+    rules = list(plan.get("rules") or [])
+    have = {r.get("id") for r in rules}
+    for x in sorted(was["rules"], key=lambda x: x["at"]):      # each back where it was
+        if x["rule"].get("id") not in have:
+            rules.insert(min(x["at"], len(rules)), x["rule"])
+    store.design.plan = {**plan, "parts": parts, "rules": rules}
+
+
+def remove(store: DesignStore, pid: str) -> dict:
+    """Take a part out of the design and its plan, its files to the trash. Returns ``{id, part, mates, rules}``: what
+    went with it, by id."""
     from .design import _invalidate_build_cache
 
     entry = store.design.part(pid)
@@ -51,13 +94,14 @@ def remove(store: DesignStore, pid: str) -> dict:
     if os.path.isdir(store.part_dir(pid)):
         shutil.move(store.part_dir(pid), os.path.join(here, "part"))
     asm = store.assembly
-    named = lambda expr: pid in _names(expr)                       # noqa: E731
     mates = [m for m in asm.mates if pid in m.between]
-    rules = [a for a in asm.assertions if named(a.expr)]
+    rules = [a for a in asm.assertions if _names_it(a.expr, pid)]
+    planned = _out_of_plan(store, pid)
     meta = {"part": entry.model_dump(), "removed": time.time(),
             "assembly": next((p.model_dump() for p in asm.parts if p.id == pid), None),
             "mates": [m.model_dump() for m in mates], "rules": [a.model_dump(by_alias=True) for a in rules],
-            "grain": (store.design.grain or {}).get(pid) if hasattr(store.design, "grain") else None}
+            "grain": (store.design.grain or {}).get(pid) if hasattr(store.design, "grain") else None,
+            "plan": planned}
     with open(os.path.join(here, "removed.json"), "w") as f:
         json.dump(meta, f, indent=2, default=str)
     store.design.parts = [p for p in store.design.parts if p.id != pid]
@@ -68,7 +112,9 @@ def remove(store: DesignStore, pid: str) -> dict:
         store.design.grain = {k: v for k, v in store.design.grain.items() if k != pid}
     store.save()
     store.append_log({"kind": "trash", "action": "removed", "part": pid, "id": tid})
-    return {"id": tid, "part": pid, "mates": [m.id for m in mates], "rules": [a.id for a in rules]}
+    named = [a.id for a in rules] + [x["rule"]["id"] for x in (planned or {}).get("rules") or []
+                                     if x["rule"]["id"] not in {a.id for a in rules}]
+    return {"id": tid, "part": pid, "mates": [m.id for m in mates], "rules": named}
 
 
 def restore(store: DesignStore, tid: Optional[str] = None, pid: Optional[str] = None) -> dict:
@@ -85,7 +131,7 @@ def restore(store: DesignStore, tid: Optional[str] = None, pid: Optional[str] = 
     with open(os.path.join(here, "removed.json")) as f:
         meta = json.load(f)
     pid = meta["part"]["id"]
-    if store.design.part(pid) is not None:
+    if store.design.part(pid) is not None or os.path.exists(store.part_dir(pid)):    # never over a part of that name
         raise ValueError(f"the design already has a part {pid!r}: rename or remove it first")
     if os.path.isdir(os.path.join(here, "part")):
         shutil.move(os.path.join(here, "part"), store.part_dir(pid))
@@ -99,6 +145,8 @@ def restore(store: DesignStore, tid: Optional[str] = None, pid: Optional[str] = 
     asm.assertions += [Assertion.model_validate(a) for a in meta.get("rules") or []]
     if meta.get("grain") and hasattr(store.design, "grain"):
         store.design.grain = {**(store.design.grain or {}), pid: meta["grain"]}
+    if meta.get("plan"):
+        _into_plan(store, meta["plan"])
     store.save()
     shutil.rmtree(here, ignore_errors=True)
     store.append_log({"kind": "trash", "action": "restored", "part": pid, "id": tid})

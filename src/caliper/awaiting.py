@@ -8,7 +8,8 @@ already does (``promote.pending``), and the next turn reads a go-ahead or a no a
 - ``remove``: "Remove conical_skirt? Its files go to the design's trash." (yes removes it);
 - ``repeat``: a request that matches what the last revision just did (yes does it again on top).
 
-Anything else lets the question lapse: the turn goes on as ever.
+Only a message that is just the go-ahead or the no answers it. Anything else lets the question lapse: the turn goes on
+as ever, as its own request.
 """
 
 from __future__ import annotations
@@ -21,10 +22,12 @@ from typing import Optional
 
 from .design import DesignStore
 
-#: a go-ahead: Caliper's own "Tell me to have a go", and the short ways to say yes
-_GO = re.compile(r"\b(have a go|have a try|go ahead|go for it|try it|fix it|do it|do that|yes|yep|yeah|sure|ok|okay|"
-                 r"please do|make it so|again)\b", re.I)
-_NO = re.compile(r"\b(no|nope|don'?t|do not|skip|leave it|not now|nah|forget it|cancel|keep it)\b", re.I)
+#: the whole message is the answer, or it isn't one (#153 review: "yes, but make it taller" removed the part, and "ok
+#: thanks" read as yes); punctuation aside, and a "please" either side of a go-ahead
+_GO = re.compile(r"(?:please )?(?:have a go|have a try|go ahead|go for it|try it|fix it|do it|do it again|do that|yes|yep|"
+                 r"yeah|sure|ok|okay|please do|make it so|again)(?: please)?")
+_NO = re.compile(r"(?:no|nope|nah)(?: thanks| thank you| leave it| keep it| don'?t| skip it| forget it)?|don'?t|do not|"
+                 r"skip|skip it|leave it|not now|forget it|cancel|keep it")
 
 
 def path(store: DesignStore) -> str:
@@ -53,14 +56,11 @@ def clear(store: DesignStore) -> None:
 
 
 def reads(message: str) -> Optional[bool]:
-    """A short go-ahead (True), a no (False), or not an answer to the question (None): a longer message is its own
-    request, never taken as yes."""
-    text = (message or "").strip().lower()
-    if not text or len(text.split()) > 6:
-        return None
-    go, no = _GO.search(text), _NO.search(text)
-    if no and not go:
-        return False
-    if go and not no:
+    """A bare go-ahead (True), a bare no (False), or not an answer (None): the whole message has to be the answer, or
+    it's its own request. Nothing is removed or built on a qualified yes."""
+    text = " ".join(re.sub(r"[^\w' ]+", " ", (message or "").lower()).split())
+    if _GO.fullmatch(text):
         return True
+    if _NO.fullmatch(text):
+        return False
     return None

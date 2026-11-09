@@ -24,6 +24,14 @@ second cone would have had no way out; the foot flange widened by 1 in twice.
 - Tests: tests/test_have_a_go.py (11, stubbed: have a go after a failing accept, five ways, refines that part and never
   authors one; anything else lapses; every "Tell me to"/"say" routed; remove asks, removes, trashes, the cards drop it,
   put back restores it with its mate; no keeps it; a reference part; v2's instruction on v2 asks, not v3).
+- **#153 review:** only a bare answer counts: the whole message has to be the go-ahead or the no (punctuation aside,
+  "yes please" allowed). "yes, but make it taller", "no, make it wider" and "ok thanks" aren't answers: the question
+  lapses and the message goes on as a request, so nothing is removed on a qualified yes. Removal covers the plan: the
+  part, the plan's rules naming it and other parts' `mounts_on` come out of `design.plan` and back on restore, each
+  where it was, or "Build it again" would author it anew. The reply names what went ("and its rule clear and mate
+  carriage_misses_rail went with it"). `restore` never goes over a part of that name. With main's grain: what Caliper's
+  waiting on is read first, and "cut the top with the grain" isn't an answer, so it still reaches the which-way
+  question. Tests: 35; mutants (no plan, no rules, overwrite, an unanchored yes) each fail.
 
 ### 2026-11-07 · CALI-104 (#97) · The cards right after a revision don't build or slice the part again
 Measured first, on copies of Theo's bar stool (v7) and step stool at main: warm cards were already under #97's 2 s
