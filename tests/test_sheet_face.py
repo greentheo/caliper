@@ -82,6 +82,18 @@ def test_a_sheet_stacked_on_another_declared_sheet_isn_t_flagged():
     assert _result(declared, two).passed
 
 
+def test_solid_beyond_an_outline_that_is_another_declared_sheet_isn_t_flagged():
+    """Two sheets glued face to face, each outlined at the joint: what's beyond each outline is the other sheet."""
+    two = trimesh.creation.box((300, 300, 2 * T))
+    two.apply_translation((0, 0, 100 - T))
+    pcs = consistency.shapes({"construction": [
+        {"name": "lower", "kind": "sheet", "material": "plywood", "thickness": T, "outline": _outline(100 - T)},
+        {"name": "upper", "kind": "sheet", "material": "plywood", "thickness": T, "outline": _outline(100 - T)}]})
+    consistency._sides(two, pcs)
+    pcs[0]["sides"], pcs[1]["sides"] = [-1.0], [1.0]
+    assert consistency._on_its_face(two, pcs, consistency.tolerance(two)).passed
+
+
 def test_a_small_offset_is_tessellation_not_a_mistake():
     assert _result(_declared(100 - 1.0), _seat_on_a_post()).passed
 
