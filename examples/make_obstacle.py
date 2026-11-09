@@ -3,7 +3,7 @@
     python examples/make_obstacle.py
 
 Positioned at x∈[42,62] so the default 60mm corner bracket's horizontal flange overlaps it; the
-`caliper fit` loop then shrinks the bracket until it clears the block. See pm/DEMO.md.
+`caliper fit` loop then shrinks the bracket until it clears the block. See pm/demo/ (`make demo-log`).
 """
 
 import trimesh

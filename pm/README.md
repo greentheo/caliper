@@ -11,20 +11,20 @@ to its issue.
 |---|---|---|
 | [GitHub issues](https://github.com/greentheo/caliper/issues) | Open work: one issue per task, acceptance criteria in the body, milestones and labels for priority and area. | The board |
 | [`BOARD.md`](BOARD.md), [`TASKS.md`](TASKS.md) | Frozen 2026-10-29: the board and task cards for M0–M6. | Archive |
-| [`LOG.md`](LOG.md) | Append-only, dated record of what shipped, with commit hashes and measurements. | Standup / changelog |
-| [`DEMO.md`](DEMO.md) | Demo & testing log — current capabilities + the exact commands to try each shipped thing. | Release notes / "how to try it" |
+| [`log/`](log/) | Dated record of what shipped, with its measurements: one file per entry (`make log`; [`LOG.md`](LOG.md) says how to name them). | Standup / changelog |
+| [`DEMO.md`](DEMO.md), [`demo/`](demo/) | Current capabilities, and the exact commands to try each shipped thing: one file per entry in `demo/` (`make demo-log`). | Release notes / "how to try it" |
 
 ## Conventions
 
 - **Task ids** are `CALI-N` and stay in the issue title (`CALI-48 · The shop: …`); the next new id is the
   highest one in use plus one.
-- **Definition of done:** the issue's acceptance criteria met, tests green (`pytest`, and CI on the PR), a `LOG.md`
-  entry written with the commit hash, **and `DEMO.md` updated** — refresh "current capabilities" and
+- **Definition of done:** the issue's acceptance criteria met, tests green (`pytest`, and CI on the PR), a `pm/log/`
+  entry written, **and a `pm/demo/` entry added** — refresh "current capabilities" and
   add a demo-log entry with the exact command(s) the human can run to try the new work.
 - Every meaningful change is a commit naming the task and its issue: `CALI-48 (#4): plasma bed check`.
   A PR that finishes one says `Closes #4`.
 - When you pick up work: assign yourself the issue, then code.
-- When you finish: append a `LOG.md` entry, update `DEMO.md` (capabilities + how-to-try), commit, and
+- When you finish: add a `pm/log/` entry and a `pm/demo/` entry (and refresh `DEMO.md`'s capabilities if they changed), commit, and
   close the issue (or let the PR close it).
 
 ## Workflow loop (how a task flows)
@@ -33,7 +33,7 @@ to its issue.
 pick an issue ──► assign it ──► code + tests ──► pytest green ──► PR, CI green
       ▲                                                                   │
       │                                                                   ▼
- next issue ◄── append LOG.md + update DEMO.md ◄── merge (Closes #N) ◄── review (nightshift/)
+ next issue ◄── add pm/log + pm/demo entries ◄── merge (Closes #N) ◄── review (nightshift/)
 ```
 
 The `nightshift/` scaffolding automates the right edge of that loop: run the iteration, run the

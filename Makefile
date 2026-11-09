@@ -1,6 +1,6 @@
 # Caliper — dev entrypoints. The loop is the product; these keep the dev loop tight.
 # No activation needed: targets resolve the env python (override with CALIPER_PY=...).
-.PHONY: test review loop board fmt run gen refine run-llm refine-llm fit serve install tools
+.PHONY: log demo-log test review loop board fmt run gen refine run-llm refine-llm fit serve install tools
 
 CALIPER_PY ?= $(firstword $(wildcard /opt/anaconda3/envs/caliper/bin/python $(HOME)/anaconda3/envs/caliper/bin/python $(HOME)/miniforge3/envs/caliper/bin/python) python)
 
@@ -58,6 +58,12 @@ insert: ## author a part between two interfaces (needs ANTHROPIC_API_KEY): make 
 
 serve:  ## launch the webapp (3D viewer + refine loop): make serve  [PORT=8000]
 	$(CALIPER_PY) -m caliper.cli serve --port $(or $(PORT),8000)
+
+log:    ## the work log, newest first (one file per entry in pm/log/)
+	@for f in $$(ls -r pm/log/*.md); do cat "$$f"; echo; done
+
+demo-log: ## the demo log, newest first (one file per entry in pm/demo/)
+	@for f in $$(ls -r pm/demo/*.md); do cat "$$f"; echo; done
 
 test:   ## regression guard: pytest only
 	bash nightshift/hooks/regression_guard.sh
