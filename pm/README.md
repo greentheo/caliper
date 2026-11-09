@@ -11,7 +11,7 @@ to its issue.
 |---|---|---|
 | [GitHub issues](https://github.com/greentheo/caliper/issues) | Open work: one issue per task, acceptance criteria in the body, milestones and labels for priority and area. | The board |
 | [`BOARD.md`](BOARD.md), [`TASKS.md`](TASKS.md) | Frozen 2026-10-29: the board and task cards for M0–M6. | Archive |
-| [`log/`](log/) | Dated record of what shipped, with commit hashes and measurements: one file per entry (`make log`; [`LOG.md`](LOG.md) says how to name them). | Standup / changelog |
+| [`log/`](log/) | Dated record of what shipped, with its measurements: one file per entry (`make log`; [`LOG.md`](LOG.md) says how to name them). | Standup / changelog |
 | [`DEMO.md`](DEMO.md), [`demo/`](demo/) | Current capabilities, and the exact commands to try each shipped thing: one file per entry in `demo/` (`make demo-log`). | Release notes / "how to try it" |
 
 ## Conventions

@@ -19,7 +19,7 @@ def test_the_shared_files_hold_no_entries(shared):
 
 @pytest.mark.parametrize("folder", ["pm/log", "pm/demo"])
 def test_every_entry_is_one_file_named_for_its_date(folder):
-    entries = sorted((ROOT / folder).iterdir())
+    entries = sorted(f for f in (ROOT / folder).iterdir() if not f.name.startswith("."))  # .DS_Store and the like
     assert entries
     for f in entries:                                                  # make log only reads top-level .md files
         assert f.is_file() and f.suffix == ".md", f"{f.name}: an entry is a .md file directly in {folder}"
