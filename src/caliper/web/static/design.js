@@ -957,7 +957,8 @@ function designView(d) {
 const QUESTIONS = [['what', 'What is it?'], ['work', 'Will it work?'], ['buy', 'What do I buy?'], ['make', 'How do I make it?']];
 const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' };
 const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox', trial: 'trialBox',
-  carve: 'loadBox' };                 // the carve's panel is under Will it hold? (#89 item 6)
+  carve: 'loadBox', lighten: 'loadBox', carve_use: 'loadBox', lighten_use: 'loadBox', use_t: 'loadBox' };
+// Make it better's lines (#92) go to the panel where each is run or used; their own design waits for Theo's mockup                 // the carve's panel is under Will it hold? (#89 item 6)
 function numbersOpen(k) { try { return localStorage.getItem(`caliper.numbers.${k}`) === '1'; } catch (e) { return false; } }
 function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${k}`, on ? '1' : '0'); } catch (e) { /* private window */ } }
 
