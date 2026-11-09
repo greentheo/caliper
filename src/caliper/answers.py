@@ -139,6 +139,37 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     return ""
 
 
+def _grain_lines(store: DesignStore, pid: str, run: dict, stale: bool, filled: Optional[str] = None,
+                 edge: bool = False) -> list[dict]:
+    """A beam's face grain (CALI-126): the advice where the person hasn't said which way it's cut (a grain the designer
+    wrote is only assumed: it never moves the verdict), and "check it again" where they have and the check predates
+    it. Never a greener number from a grain nobody said, and the advice's number only from a case whose own verdict
+    is settled (it holds or fails): never one checked in the middle only, too coarse, on a block or an older version."""
+    from . import grain as G
+
+    said, out, seen = G.stated(store, pid), [], set()
+    for c in run.get("cases") or []:
+        pl = c.get("plate") or {}
+        piece = pl.get("piece")
+        if pl.get("as") != "beam" or not pl.get("done") or piece in seen:
+            continue
+        if c.get("safety") is None or verdicts.case(run, c, filled=filled, stale=stale, edge=edge)["kind"] not in (
+                "holds", "fails"):
+            continue
+        seen.add(piece)
+        mine = said.get(piece)
+        if mine and pl.get("grain") != mine["grain"]:
+            out.append(_line(f"You said: {G.line(piece, mine)[0].lower()}{G.line(piece, mine)[1:]} Check it holds "
+                             f"again to use it.", "warn", study="load"))
+        elif not mine and not stale and pl.get("safety") is not None and pl.get("safety_across") is not None \
+                and pl["safety"] > pl["safety_across"]:
+            way = G.phrase(G.runs(pl.get("span_axis"), "along"), "along")      # the one phrase (#151 review)
+            out.append(_line(f"Cut the {piece} with its {way} and it's about {_times(pl['safety'])}, not "
+                             f"{_times(pl['safety_across'])}: keep that under Will it hold? and it goes on the cut "
+                             f"list.", "info", study="load"))
+    return out
+
+
 def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool, inches: bool,
                edge: bool = False) -> dict:
     """The part card's line for one load case: its words from its one verdict (CALI-112)."""
@@ -333,6 +364,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         for c in run["cases"]:
             if c.get("safety") is not None:
                 work.append(_case_line(pid, run, c, filled, stale, inches, edge=bool(edge)))
+        work += _grain_lines(store, pid, run, stale, filled, bool(edge))
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
                        and h.get("action") == "failed" and h.get("version") == p["version"]), None)
@@ -413,7 +445,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     how = []
     if report and p.get("role") != "fixed":
         try:
-            mk = making.plan(store, pid)
+            mk = making.plan(store, pid, wait=False)       # the slicer never holds a card (#97)
         except Exception:  # noqa: BLE001
             mk = None
         if mk:
@@ -424,8 +456,14 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                 how.append(_line(f"With {_and(['your ' + t for t in tools])}: {n} piece{'s' if n != 1 else ''}"
                                  + (f", {holes} hole{'s' if holes != 1 else ''}" if holes else "") + ".", "ok"))
             for pr in mk["printed"]:
-                how.append(_line(f"Print it in {pr['material'].upper()}: {pr['pieces']} piece"
-                                 f"{'s' if pr['pieces'] != 1 else ''}, about {pr['hours']:g} h.", "ok"))
+                n = f"{pr['pieces']} piece{'s' if pr['pieces'] != 1 else ''}"
+                how.append(_line(f"Print it in {pr['material'].upper()}: {n}; print time: working it out…", "info",
+                                 working=True) if pr.get("pending") else       # the slicer's still at it (#97)
+                           _line(f"Print it in {pr['material'].upper()}: {n}; print time: the slicer couldn't work it "
+                                 f"out: {_why(pr)}.", "warn") if pr.get("hours") is None else
+                           _line(f"Print it in {pr['material'].upper()}: {n}, about {pr['hours']:g} h"
+                                 + (f" (a rough guess; the slicer couldn't work it out: {_why(pr)})"
+                                    if pr.get("slicer_failed") else "") + ".", "ok"))
             why: dict = {}
             for x in mk["missing"]:
                 why.setdefault(x["why"], []).append(x["name"])
@@ -551,6 +589,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     if tested:                                         # the worst real test, which outranks the prediction (CALI-86)
         out["strength.test"] = min(tested, key=lambda t: ORDER.index(t["status"]))
     weight = usd = missing = hours = 0.0
+    slicing, unsliced = False, ""
     weighed, unweighed = False, None
     for p in state["parts"]:
         if not p.get("built") or p.get("role") == "fixed":
@@ -567,9 +606,14 @@ def measured(store: DesignStore, state: dict) -> dict:
             weight += rep["mass_lb"]
         usd += _cost(store, p["id"], rep) or 0.0
         try:
-            mk = making.plan(store, p["id"])
+            mk = making.plan(store, p["id"], wait=False)   # the slicer never holds a card (#97)
             missing += len(mk["missing"])
-            hours += sum(x["hours"] for x in mk["printed"])
+            if mk.get("pending"):
+                slicing = True
+            gone = next((x for x in mk["printed"] if x.get("hours") is None and x.get("slicer_failed")), None)
+            if gone is not None:                  # no number for one part: the total is unknown, said (rule 6)
+                unsliced = unsliced or f"print time: the slicer couldn't work it out: {_why(gone)}"
+            hours += sum(x["hours"] for x in mk["printed"] if x.get("hours") is not None)
         except Exception:  # noqa: BLE001
             pass
     if weighed:
@@ -577,9 +621,19 @@ def measured(store: DesignStore, state: dict) -> dict:
                     "make.not_in_shop": missing})
         if unweighed:
             out["weight.unweighed"] = unweighed
-        if hours:
+        if slicing:                                # a part still slicing: no total, said (#97, rule 6)
+            out["print.pending"] = "print time: working it out…"
+        elif unsliced:
+            out["print.unknown"] = unsliced
+        elif hours:
             out["print.hours"] = round(hours, 1)
     return out
+
+
+def _why(pr: dict) -> str:
+    """Why the slicer gave no number, from its own words ("walls + infill at rough speeds (the slicer timed out)")."""
+    said = pr.get("from") or ""
+    return said[said.rfind("(") + 1:].rstrip(")") if "(" in said else said or "no reason given"
 
 
 def _against(c: dict, failed: bool, unit: str = "") -> str:
@@ -647,6 +701,12 @@ def held_to(state: dict, now: dict) -> list[dict]:
             continue
         if v is None and c["metric"] in scored:
             v, late = scored[c["metric"]], stale
+        if v is None and c["metric"].startswith("print.") and now.get("print.pending"):
+            out.append(_line(f"{label}{assumed}: {now['print.pending']}", "info", working=True))
+            continue
+        if v is None and c["metric"].startswith("print.") and now.get("print.unknown"):
+            out.append(_line(f"{label}{assumed}: {now['print.unknown']}.", "warn"))
+            continue
         if v is None:
             how = ("Check it holds" if c["metric"].startswith("strength") else "Score it")
             out.append(_line(f"{label}{assumed}: not checked yet. {how}.", "warn",

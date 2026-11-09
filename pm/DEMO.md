@@ -575,6 +575,26 @@ push/twist the cap to pan/dolly/rotate. Mouse-orbit is always the fallback.
    again, on top of v2?".
 4. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_have_a_go.py`.
 
+### 2026-11-07 · The cards right after a change (CALI-104 #97)
+1. Open the bar stool (a copy) and change something in the chat ("make the seat 2% wider"). The cards redraw in a few
+   seconds, not twenty: *How do I make it?* says "Print it in PETG: 3 pieces; print time: working it out…", then
+   fills in the hours on its own.
+2. A print-time goal says "print time: working it out…" until then, never a number.
+3. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_cards_speed.py`.
+
+### 2026-11-07 · A sheet's grain, as you say it (CALI-126 #150)
+1. On a part whose top rests on two sides, **Check it holds**: the Beam check line says "the grain unknown: the weaker
+   way", and *Will it work?* gives the advice ("Cut the top with its face grain running front to back and it's about
+   …").
+2. Press **Keep: cut it with its face grain running front to back, from one support to the other**, or say "cut the
+   top with the grain front to back": the card says "Check it holds again to use it", and the cut plan says "↔ Cut the
+   top with its face grain running front to back, from one support to the other." ("cut the top with the grain" alone
+   asks which way.)
+3. **Make the cut plan again**: the top is laid with that grain along the sheet's length ("The layout below lays it
+   that way"), or the plan says it can't be and to lay it out by hand.
+4. **Check it holds** again: the Beam check reads "with its face grain running front to back, from one support to the
+   other, as you said", and the build book's cut lists carry the same line.
+5. Offline: `PYTHONPATH=src python -m pytest -rs tests/test_grain.py`.
 ### 2026-11-07 · Follow-ups from the 11/07 reviews (CALI-125 #148)
 1. Give a part a rule whose probe can't be measured: *Will it work?* leads with "✗ Breaks its rule …, not measured:
    …", never a ✓.

@@ -142,3 +142,44 @@ def test_v2_s_instruction_again_on_v2_asks_and_doesn_t_make_v3(store):
     yes = chat.turn(store, "yes", use_llm=False, author=_author(_box(dx=60, dy=20, y=40)), max_rounds=2,
                     classifier=_never)
     assert yes.action == "refine" and yes.version == 3                                # said yes: done again
+
+
+# --- beside #151's grain: what Caliper's waiting on is read first, and a grain request isn't an answer to it ------------
+
+@pytest.fixture
+def bench(tmp_path):
+    from .test_beam_width import TOP
+
+    s = DesignStore.create("a bench", base=str(tmp_path / "designs"))
+    s.write_part("bench", TOP, intent="a bench")
+    return s
+
+
+def test_a_grain_request_lets_the_question_lapse_and_still_asks_which_way(bench):
+    awaiting.park(bench, "fix_rule", part="bench", rule="wide", expr="bbox.dx >= 1000")
+    got = chat.turn(bench, "cut the top with the grain", use_llm=False, classifier=_never)
+    assert got.action == "grain" and not got.ok
+    assert got.reply == "I couldn't keep that grain: which way: front to back, or side to side?."
+    assert awaiting.pending(bench) is None
+
+
+def test_have_a_go_still_routes_by_what_s_pending_on_a_design_with_sheets(bench):
+    from .test_beam_width import TOP
+
+    awaiting.park(bench, "fix_rule", part="bench", rule="wide", expr="bbox.dx >= 1000")
+    got = chat.turn(bench, "have a go", use_llm=False, classifier=_never, author=_author(TOP), max_rounds=1)
+    assert got.action == "refine" and got.part == "bench"
+    (msg,) = [e for e in bench.log() if e.get("kind") == "message" and e.get("text") == "have a go"]
+    assert msg["routed_by"] == "pending"
+
+
+def test_a_stated_grain_goes_to_the_trash_with_its_part_and_comes_back(bench):
+    from caliper import grain
+
+    grain.state(bench, "bench", "top", "along", said="along the span")
+    said = grain.stated(bench, "bench")
+    trash.remove(bench, "bench")
+    bench = DesignStore.load(bench.root)
+    assert bench.design.grain == {}
+    trash.restore(bench, pid="bench")
+    assert grain.stated(DesignStore.load(bench.root), "bench") == said

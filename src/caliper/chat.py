@@ -492,8 +492,11 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
 
     uncarved = carve.carved(store.read_script(part_id))   # a carve fits the shape it was carved from (CALI-82)
     script = carve.uncarve(res.script)[0]
+    from .authoring import params_from_spec
+
     version = store.write_part(part_id, script, feedback=message, action="refine",
-                               report=report_dict, intent=described)
+                               report=report_dict, intent=described,
+                               built=(res.script, params_from_spec(spec), res.geometry))
     _emit(events, on_event, "wrote", f"{part_id} → v{version}", part=part_id, version=version)
 
     after, part_errors = _measure_design(store)
@@ -614,8 +617,11 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     stored = Spec(part=part_id, intent=intent, parameters=spec.parameters,
                   assertions=[a.model_copy() for a in spec.assertions])
     report_dict = res.report.to_dict() if res.report is not None else None
+    from .authoring import params_from_spec
+
     version = store.write_part(part_id, res.script, intent=intent, spec=stored, action="author",
-                               feedback=intent, report=report_dict)
+                               feedback=intent, report=report_dict,
+                               built=(res.script, params_from_spec(spec), res.geometry))
     _emit(events, on_event, "wrote", f"{part_id} → v{version}", part=part_id, version=version)
 
     after, part_errors = _measure_design(store)
@@ -1175,6 +1181,25 @@ def _repeats(store: DesignStore, pid: str, message: str) -> Optional[str]:
             f"it again, or no to leave it.")
 
 
+def _grain_said(store: DesignStore, message: str, scope: Optional[str]) -> Optional[TurnResult]:
+    """A sheet's face grain the person states (CALI-126): kept in the design, said back as the maker will read it.
+    Deterministic, no Claude call; None when the message isn't about a grain."""
+    from . import grain
+
+    try:
+        got = grain.from_chat(store, message, scope)
+    except ValueError as e:
+        return TurnResult(action="grain", reply=f"I couldn't keep that grain: {e}.", ok=False)
+    if got is None:
+        return None
+    if "why" in got:
+        return TurnResult(action="grain", reply=f"I couldn't keep that grain: {got['why']}.", ok=False)
+    return TurnResult(action="grain", part=got["part"], ok=True,
+                      reply=f"Kept: {grain.line(got['piece'], got['entry'])[0].lower()}"
+                            f"{grain.line(got['piece'], got['entry'])[1:]} It's on the cut list and in the build book; "
+                            f"check it holds again and the Beam check uses it.")
+
+
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
          use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
          on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False) -> TurnResult:
@@ -1242,6 +1267,15 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
             store.append_log({"kind": "reply", "action": "skeleton", "ok": result.ok, "reply": result.reply})
             _emit(events, on_event, "done", "skeleton", ok=result.ok)
             return result
+
+    said = _grain_said(store, message, scope)          # "cut the seat with the grain front to back" (CALI-126)
+    if said is not None:
+        if not logged:
+            store.append_log({"kind": "message", "text": message, "scope": scope, "action": "grain",
+                              "part": said.part, "routed_by": "grain"})
+        store.append_log({"kind": "reply", "action": "grain", "part": said.part, "ok": said.ok, "reply": said.reply})
+        _emit(events, on_event, "done", "grain", ok=said.ok, part=said.part)
+        return said
 
     intent = classify(store, message, scope, use_llm=use_llm, client=client, classifier=classifier)
     _emit(events, on_event, "classified", f"{intent.action}"

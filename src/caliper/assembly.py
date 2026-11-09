@@ -169,6 +169,31 @@ def _resolve_source(source: str, base_dir: str) -> str:
 
 
 _PART_CACHE: dict = {}   # (abspath, mtime) -> built Geometry in LOCAL frame (B-rep kept)
+#: CALI-104 (#97): a revision's own build, offered for the version it wrote: (abspath, mtime) -> (the script's hash,
+#: Geometry). Taken only if the file there is that exact script, so it can never serve another version's shape.
+_OFFERED: dict = {}
+
+
+def _sha(script: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(script.encode()).hexdigest()
+
+
+def offer(path: str, script: str, params: Optional[dict], geometry) -> bool:
+    """A revision built ``script`` (in the sandbox, as :func:`_build_py_local` builds it) and wrote it to ``path``: keep
+    that build for this version, so the cards right after don't build it again (#97: ~6 s on the bar stool). Only a
+    build with no params (the cards build with none), of the file's exact text, not a carved one. True if kept."""
+    if geometry is None or params or not os.path.exists(path):
+        return False
+    with open(path) as f:
+        text = f.read()
+    if text != script or _CARVED.search(script):
+        return False
+    _OFFERED[(os.path.abspath(path), os.path.getmtime(path))] = (_sha(script), geometry)
+    while len(_OFFERED) > 8:                      # a few parts' worth: a geometry is large
+        _OFFERED.pop(next(iter(_OFFERED)))
+    return True
 
 
 def _build_py_local(path: str) -> Geometry:
@@ -186,6 +211,10 @@ def _build_py_local(path: str) -> Geometry:
         return cached
     with open(path) as f:
         script = f.read()
+    got = _OFFERED.pop(key, None)                  # the revision's own build of this exact text (#97)
+    if got is not None and got[0] == _sha(script):
+        _PART_CACHE[key] = got[1]
+        return got[1]
     carved = _carved(path, script)
     if carved is not None:                         # a printed part carved by the strength study (CALI-82)
         _PART_CACHE[key] = carved
