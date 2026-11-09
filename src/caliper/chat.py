@@ -1174,7 +1174,8 @@ def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Op
                if aw["kind"] == "fix_rule" else aw["message"])
     return refine_part(store, pid, message, author=kw["author"], client=kw["client"], max_rounds=kw["max_rounds"],
                        events=events, on_event=on_event, use_llm=kw["use_llm"], drafter=kw["drafter"],
-                       promote_feedback=kw["promote_feedback"])
+                       # fixing a rule it already has: never an offer to lock a looser copy of it (#153)
+                       promote_feedback=kw["promote_feedback"] and aw["kind"] != "fix_rule")
 
 
 _DIRECTION = re.compile(r"\b(wider|narrower|taller|shorter|thicker|thinner|longer|deeper|shallower|bigger|smaller|"

@@ -34,3 +34,5 @@ second cone would have had no way out; the foot flange widened by 1 in twice.
   that part's entry and returns with it, and the reply says so ("The rule clear waits for carriage, which is still in
   the trash"): no check on a part that isn't there, nothing lost. The plan's rules and `mounts_on` do the same, in
   either order, and the plan keeps its original order while anything's out.
+- **#153's one live run (Theo's OK):** routing was right, but the reply then offered to lock a looser copy of the rule it
+  was fixing. A go-ahead to fix a rule no longer offers to promote anything (pinned: no proposal parked).

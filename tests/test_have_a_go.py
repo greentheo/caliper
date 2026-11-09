@@ -367,3 +367,20 @@ def test_the_plan_s_rules_come_back_in_their_order_whichever_goes_first(store):
     trash.restore(store, pid="carriage")
     trash.restore(store, pid="rail")
     assert DesignStore.load(store.root).design.plan == was
+
+
+def test_fixing_a_rule_never_offers_to_lock_a_copy_of_it(store, monkeypatch):
+    """#153's one live run: "have a go" fixed the rule, then offered to lock min_wall >= 2.85 - 0.15, a looser copy."""
+    _accept_a_failing_rule(store)
+    asked = []
+    real = chat._offer_promotion
+
+    def spy(*a, **k):
+        asked.append(k.get("enabled"))
+        return real(*a, **k)
+
+    monkeypatch.setattr(chat, "_offer_promotion", spy)
+    got = chat.turn(store, "have a go", use_llm=False, classifier=_never, author=_author(_box(dx=60, dy=20, y=40)),
+                    max_rounds=2)
+    assert got.action == "refine" and asked == [False] and got.proposal is None
+    assert promote.pending(store) is None
