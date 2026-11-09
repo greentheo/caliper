@@ -10,7 +10,7 @@ positions them with `position:` so the parts stack:
     base  40x40x4   on the ground        (z -2..2)
 
 post bottom (z=2) meets base top (z=2); cap bottom (z=32) meets post top (z=32) — two `touch` mates,
-and no pair interferes. See pm/DEMO.md.
+and no pair interferes. See pm/demo/ (`make demo-log`).
 """
 
 import trimesh

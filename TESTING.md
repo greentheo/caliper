@@ -1,7 +1,7 @@
 # Caliper — testing guide
 
 A hands-on walkthrough of everything built so far, how to exercise it, and what you should see.
-Companion to [`pm/DEMO.md`](pm/DEMO.md) (chronological log) — this file is the "try it in order" guide.
+Companion to [`pm/DEMO.md`](pm/DEMO.md) (and its [`pm/demo/`](pm/demo/) entries, `make demo-log`) — this file is the "try it in order" guide.
 
 > **The one idea:** measurement is the source of truth. Every feature ends in a *measured* report
 > (`✓ / ✗` per assertion), not a render you have to eyeball.
@@ -15,7 +15,7 @@ Companion to [`pm/DEMO.md`](pm/DEMO.md) (chronological log) — this file is the
 ## 0. Setup (once)
 
 ```bash
-# Python env with OCCT/CadQuery (see pm/LOG.md for how it was built)
+# Python env with OCCT/CadQuery (see pm/log/2026-06-11-0005-cali-0-canonical-occt-env-via-micromamba-zero-activatio.md for how it was built)
 which python   # should be /opt/anaconda3/envs/caliper/bin/python  (or activate that env)
 
 # Claude API key for the LLM paths (gen / insert / authored fit & refine).

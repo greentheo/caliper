@@ -10,7 +10,7 @@ without checking adds latency and false confidence and nothing else.
 
 Read [README.md](README.md) and every other role doc — you can't coordinate
 seats whose jobs you don't know — then the specs the README lists, the GitHub
-milestones (the roadmap) and the latest entries in [pm/LOG.md](../pm/LOG.md).
+milestones (the roadmap) and the latest entries in [`pm/log/`](../pm/log/) (`make log`).
 
 | | |
 |---|---|
