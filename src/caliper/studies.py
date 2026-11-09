@@ -289,10 +289,11 @@ def menu(p: dict, air: Optional[dict] = None) -> list[dict]:
              "say what it must carry (“it has to hold me, 200 lb, standing on top”) and the designer adds "
              "its loads()" if not p.get("loads") else "it doesn't say what it's built from (construction())"),
         item("lighten", p.get("loads") and p.get("built") and not p.get("framed") and p.get("sheets", True)
-             and not (p.get("blocked") or {}).get("lighten"),
+             and not p.get("printed") and not (p.get("blocked") or {}).get("lighten"),
              roll if mesh else "a frame is lightened by sizing its tubes" if p.get("framed")
              else "check what it must hold first (its loads())" if not p.get("loads")
              else "it has no sheet pieces: a printed part is carved" if not p.get("sheets", True)
+             else "its printed part is carved, not lightened with holes" if p.get("printed")
              else (p.get("blocked") or {}).get("lighten") or "it doesn't say what it's built from (construction())"),
         # a printed part is carved free-form where it isn't working (#92); the Carve button's own test (#144)
         item("carve", p.get("loads") and p.get("built") and p.get("printed") and not p.get("carved")

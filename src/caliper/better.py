@@ -21,13 +21,19 @@ from typing import Optional
 
 from .design import DesignStore
 
-#: a carve takes at least this many of its default check's time (the page's CARVE_PER_CHECK_AT_LEAST, #102)
+#: a carve takes at least this many of its default check's time (#102)
 CARVE_PER_CHECK = 45
 
 
 def _minutes(m: float) -> str:
-    return (f"{max(1, round(m))} min" if m < 60 else
-            f"{m / 60:.1f}".rstrip("0").rstrip(".") + " h")
+    """A time as the page says one (its ``minutesText``)."""
+    return "1 min" if m < 1.5 else f"{round(m)} min" if m < 75 else "an hour" if m < 100 else f"{m / 60:.1f} hours"
+
+
+def carve_takes(run: Optional[dict]) -> Optional[str]:
+    """What a carve takes at least, from its default check: the one wording, for the card and the Carve button (#157)."""
+    secs = (run or {}).get("seconds")
+    return f"at least about {_minutes(secs * CARVE_PER_CHECK / 60)} at this size" if secs else None
 
 
 def _line(text: str, action: str, **kw) -> dict:
@@ -58,24 +64,29 @@ def _settled_check(store: DesignStore, p: dict, run: Optional[dict]) -> bool:
 def _sheet_offers(run: dict, fails: bool) -> list[dict]:
     """From the plate check on this version's run: for each panel the plate check governs, the thinnest sheet that still
     holds every load on it (or, failing, the thinnest that would), its number the plate check's own, never the FEA's.
-    A panel with a load the FEA governs is left out: its number at another thickness isn't known. Failing, nothing is
-    offered if a load fails that the plate check doesn't govern: a thicker sheet may not fix that."""
+    A panel with a load the FEA governs, or one not settled, is left out: its number at another thickness isn't known.
+    Failing, only a panel that fails is offered (never more material on one that holds), and nothing at all if a load
+    fails that the plate check doesn't govern: a thicker sheet may not fix that."""
     from . import verdicts
     from .answers import _times
 
-    cases = [c for c in run.get("cases") or [] if c.get("safety") is not None]
+    every = run.get("cases") or []
+    judged = {id(c): verdicts.case(run, c)["kind"] for c in every}
+    cases = [c for c in every if c.get("safety") is not None]
     need = run.get("min_safety") or 2
-    if fails and any(verdicts.case(run, c)["kind"] == "fails" and c.get("governs") != "plate" for c in cases):
+    if fails and any(judged[id(c)] == "fails" and c.get("governs") != "plate" for c in cases):
         return []
     panels: dict = {}
-    for c in cases:
+    for c in every:
         pl = c.get("plate") or {}
         if pl.get("done") and pl.get("piece"):
             panels.setdefault(pl["piece"], []).append(c)
     out = []
     for piece, on in panels.items():
-        if any(c.get("governs") != "plate" for c in on):
-            continue
+        if any(c.get("governs") != "plate" or judged[id(c)] not in ("holds", "fails") for c in on):
+            continue                                    # the FEA's, or not settled: its number elsewhere isn't known
+        if fails and not any(judged[id(c)] == "fails" for c in on):
+            continue                                    # it already holds: more material for nothing
         now = on[0]["plate"].get("thickness_mm")
         tables = [{round(b["thickness_mm"], 2): b for b in c["plate"].get("by_thickness") or []
                    if b.get("safety_across") is not None} for c in on]
@@ -113,6 +124,8 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
         # on a filled-in shape, or with the front edge not checked, "it holds then" isn't known
         known = run and not p.get("untrusted") and not consistency.bare_edge(store, pid)
         return _sheet_offers(run, fails=True) if known else []
+    if blocked and blocked.get("why") == "unchecked":           # everything else comes from the check
+        return [_line("Check it holds first: what would make it better comes from that.", "load")]
     settled = _settled_check(store, p, run)
     results, invites = [], []
     if settled:
@@ -130,12 +143,10 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
                     f"{best['saved_g']:,} g less filament, still {_times(best['safety'], about=True)}.", "carve_use",
                     run=done["id"], station=best["index"]))
         elif not any(r.get("status") in (None, "running") for r in mine):
-            secs = (run or {}).get("seconds")
             invites.append(_line(f"Carve the {name} where it isn't working, to use less filament: it takes "
-                                 + (f"at least about {_minutes(secs * CARVE_PER_CHECK / 60)} at this size"
-                                    if secs else "a while (check it holds first, and the time comes from that)")
-                                 + ".", "carve"))
-    if p.get("sheets") and not (blocked or {}).get("lighten") and not p.get("framed"):
+                                 f"{carve_takes(run) or 'a while'}.", "carve"))
+    # a printed part is carved: it has no Lighten panel, and the study refuses walls the carve can't see either
+    if p.get("sheets") and not p.get("printed") and not (blocked or {}).get("lighten") and not p.get("framed"):
         mine = [r for r in state.get("lighten_runs") or [] if r["part"] == pid and r.get("version") == p["version"]]
         done = mine[0] if mine else None
         if done is not None:

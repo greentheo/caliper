@@ -70,7 +70,8 @@ def _plate(t=19.05, rows=((12.7, "1/2 in", 1.4), (15.875, "5/8 in", 2.3), (19.05
 
 def test_a_printed_part_that_holds_is_invited_to_carve_with_what_it_takes(tmp_path):
     store = _store(tmp_path, TUBE, "tube")
-    assert _offers(store, "tube") == []                            # no check yet: blocked, "check it holds first"
+    (first,) = _offers(store, "tube")                              # no check yet: only that (#157 review)
+    assert first["text"] == "Check it holds first: what would make it better comes from that." and first["action"] == "load"
     _check(store, "tube", 3.0)
     (line,) = _offers(store, "tube")
     assert line["text"] == ("Carve the tube where it isn't working, to use less filament: it takes at least about "
@@ -203,3 +204,94 @@ def test_studies_lists_carve_for_a_printed_part_and_lighten_for_a_sheet_one(tmp_
     _check(fails, "tube", 1.2)
     menu = {m["kind"]: m for m in studies.menu(design_api.design_state(fails)["parts"][0])}
     assert not menu["carve"]["ready"] and menu["carve"]["why"].startswith("it already fails")
+
+
+# --- #157 review -------------------------------------------------------------------------------------------------------
+
+def test_before_a_check_the_only_line_is_check_it_first(tmp_path):
+    """On Theo's stool (no check of v7) the card said "Lighten it with holes…", a dead end."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    assert [ln["action"] for ln in _offers(store, "stool")] == ["load"]
+
+
+def test_a_printed_part_is_never_offered_lighten(tmp_path):
+    """Plywood on printed sides: the page has no Lighten panel for a printed part, and Studies says so."""
+    from .test_mixed import MIXED
+
+    store = _store(tmp_path, MIXED, "stool")
+    _check(store, "stool", 3.0)
+    assert not [ln for ln in _offers(store, "stool") if "lighten" in ln["action"]]
+    menu = {m["kind"]: m for m in studies.menu(design_api.design_state(store)["parts"][0])}
+    assert not menu["lighten"]["ready"] and menu["lighten"]["why"] == "its printed part is carved, not lightened with holes"
+
+
+def _with_cases(store, pid, cases, safety):
+    _check(store, pid, safety)
+    run = load_study.default_check(store, pid)
+    run["cases"] = cases
+    _save(load_study.runs_dir(store), run)
+
+
+def _case(name, safety, need=NEED, governs="plate", plate=None):
+    return {"name": name, "lb": 40, "factor": 2.0, "safety": safety, "holds": safety is not None and safety >= need,
+            "governs": governs, "plate": plate, "fea": {"supported": True, "safety": 50.0, "deflection_mm": 0.1}}
+
+
+def _on(piece, t=12.7, rows=((12.7, "12 mm", 1.2), (18.0, "18 mm", 2.4))):
+    return {**_plate(t=t, rows=rows), "piece": piece, "safety_across": rows[0][2]}
+
+
+def test_only_the_panel_that_fails_is_offered_more_material(tmp_path):
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _with_cases(store, "stool", [_case("on the top", 1.2, plate=_on("top")),
+                                 _case("on the shelf", 2.5, plate=_on("shelf", rows=((12.7, "12 mm", 2.5), (18.0, "18 mm", 5.0))))], 1.2)
+    (line,) = _offers(store, "stool")
+    assert line["text"].startswith("Make the top from 18 mm instead of 12 mm: that panel holds then")
+
+
+def test_nothing_is_offered_if_a_load_fails_that_the_plate_check_doesn_t_govern(tmp_path):
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _with_cases(store, "stool", [_case("on the top", 1.2, plate=_on("top")), _case("the frame", 1.1, governs="fea")], 1.1)
+    assert _offers(store, "stool") == []
+
+
+def test_a_panel_with_a_load_the_fea_governs_is_left_out(tmp_path):
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    both = _plate()
+    _with_cases(store, "stool", [_case("a foot", 3.1, plate=both), _case("a shove", 3.5, governs="fea", plate=both)], 3.1)
+    assert not [ln for ln in _offers(store, "stool") if ln["action"] == "use_t"]
+
+
+def test_an_unknown_case_on_a_failing_panel_quotes_nothing(tmp_path):
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _with_cases(store, "stool", [_case("on the top", 1.2, plate=_on("top")),
+                                 _case("not reached", None, plate=_on("top"))], 1.2)
+    assert _offers(store, "stool") == []
+
+
+@pytest.mark.parametrize("minutes,words", [(1, "1 min"), (60, "60 min"), (80, "an hour"), (99, "an hour"), (120, "2.0 hours")])
+def test_the_card_and_the_carve_button_say_the_same_time(tmp_path, minutes, words):
+    from .test_carve_click import _page, _run
+
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 3.0)
+    run = load_study.default_check(store, "tube")
+    run["seconds"] = minutes * 60 / better.CARVE_PER_CHECK
+    _save(load_study.runs_dir(store), run)
+    (line,) = _offers(store, "tube")
+    p = design_api.design_state(store)["parts"][0]
+    assert p["carve_takes"] == f"at least about {words} at this size" and p["carve_takes"] in line["text"]
+    out = _run(_page(["carveTime", "carveBlocked"], ["minutesText"], (
+        "const carveRuns = () => [];\n" f"out = carveTime({json.dumps({'id': 'tube', 'carve_takes': p['carve_takes']})});")))
+    assert out == p["carve_takes"]
+
+
+def test_the_time_goes_by_the_default_check_not_a_finer_one(tmp_path):
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 3.0, spacing=2.3, rid="20261107-000100-finer")
+    run = load_study.default_check(store, "tube")
+    _save(load_study.runs_dir(store), {**run, "seconds": 2350.0, "created": 9.0})
+    _check(store, "tube", 3.0, spacing=4.6, rid="20261107-000000-default")
+    default = next(r for r in load_study.list_runs(store, "tube") if r["id"].endswith("default"))
+    _save(load_study.runs_dir(store), {**default, "seconds": 20.0})
+    assert better.carve_takes(load_study.default_check(store, "tube")) == "at least about 15 min at this size"
