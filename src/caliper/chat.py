@@ -1109,12 +1109,14 @@ def _remove_or_restore(store: DesignStore, message: str, scope: Optional[str], *
         if pid is None:
             return None
         try:
-            trash.restore(store, pid=pid)
+            got = trash.restore(store, pid=pid)
         except ValueError as e:
             return TurnResult(action="restore", ok=False, part=pid, events=events, reply=f"I couldn't put it back: {e}.")
         report, part_errors = _measure_design(store)
         return TurnResult(action="restore", ok=True, part=pid, events=events, report=report, part_errors=part_errors,
                           reply=f"Put back the {pid.replace('_', ' ')} ({pid}), as it was."
+                                + (f" {got['waiting'][0][0].upper()}{'; '.join(got['waiting'])[1:]}."
+                                   if got["waiting"] else "")
                                 + (f"\n\nThe design checks: {report.said()}." if report is not None else ""))
     m = _REMOVE.match(message or "")
     if m:

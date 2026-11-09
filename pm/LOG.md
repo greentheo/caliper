@@ -35,6 +35,10 @@ second cone would have had no way out; the foot flange widened by 1 in twice.
 - **"Which way?" is parked too:** after "which way: front to back, or side to side?" for one sheet, a bare "front to
   back", "side to side", "along" or "across" states that piece's grain (read against the span the last check measured).
   One turn only; "front to back, and make it taller" isn't an answer, so it clears and goes on as a request.
+- **Two parts in the trash, one put back (#153 re-check):** a mate or rule naming a part still in the trash waits in
+  that part's entry and returns with it, and the reply says so ("The rule clear waits for carriage, which is still in
+  the trash"): no check on a part that isn't there, nothing lost. The plan's rules and `mounts_on` do the same, in
+  either order, and the plan keeps its original order while anything's out.
 
 ### 2026-11-07 · CALI-104 (#97) · The cards right after a revision don't build or slice the part again
 Measured first, on copies of Theo's bar stool (v7) and step stool at main: warm cards were already under #97's 2 s

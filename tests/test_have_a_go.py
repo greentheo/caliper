@@ -299,3 +299,71 @@ def test_a_direction_with_no_measured_span_says_so(bench):
     got = chat.turn(bench, "front to back", use_llm=False, classifier=_never)
     assert got.action == "grain" and not got.ok and "Check it holds first" in got.reply
     assert grain.stated(bench, "bench") == {}
+
+
+# --- #153 re-check: two parts in the trash, one put back: what names the other waits for it, and nothing is lost --------
+
+def _shared(store):
+    from caliper.spec import Assertion
+
+    store.assembly.assertions.append(Assertion(id="clear", expr="min_clearance(carriage, rail) >= 1"))
+    store.save()
+
+
+@pytest.mark.parametrize("first,second", [("rail", "carriage"), ("carriage", "rail")])
+@pytest.mark.parametrize("gone_first", ["rail", "carriage"])
+def test_put_back_one_of_two_loses_nothing_and_fails_no_check(store, gone_first, first, second):
+    _shared(store)
+    trash.remove(store, gone_first)
+    trash.remove(store, "carriage" if gone_first == "rail" else "rail")
+    store = DesignStore.load(store.root)
+    got = chat.turn(store, f"put back {first}", use_llm=False, classifier=_never)
+    store = DesignStore.load(store.root)
+    assert got.ok and store.assembly.mates == [] and store.assembly.assertions == []     # nothing names what isn't here
+    assert "failing" not in got.reply and (got.report is None or got.report.all_pass), got.reply
+    if first == gone_first:                                                              # they were in its entry: held
+        assert (f"The mate carriage_misses_rail waits for {second}, which is still in the trash" in got.reply
+                or f"The rule clear waits for {second}, which is still in the trash" in got.reply), got.reply
+        assert f"mate carriage_misses_rail waits for {second}" in got.reply.lower()
+        assert f"rule clear waits for {second}" in got.reply.lower()
+    chat.turn(store, f"put back {second}", use_llm=False, classifier=_never)
+    store = DesignStore.load(store.root)
+    assert [m.id for m in store.assembly.mates] == ["carriage_misses_rail"]
+    assert [a.id for a in store.assembly.assertions] == ["clear"] and trash.listing(store) == []
+
+
+@pytest.mark.parametrize("gone_first", ["rail", "carriage"])
+@pytest.mark.parametrize("back_first", ["rail", "carriage"])
+def test_the_plan_comes_back_whole_whichever_order(store, gone_first, back_first):
+    from caliper import plan as P
+
+    store.design.plan = {"status": "built", "parts": [{"id": "rail", "what": "the rail"},
+                                                      {"id": "carriage", "what": "the carriage", "mounts_on": ["rail"]}],
+                         "rules": [{"id": "above", "expr": "bbox(rail).max_z < bbox(carriage).max_z"},
+                                   {"id": "short", "expr": "bbox(carriage).max_z < 100"}]}
+    store.save()
+    was = store.design.plan
+    other = {"rail": "carriage", "carriage": "rail"}
+    trash.remove(store, gone_first)
+    trash.remove(store, other[gone_first])
+    store = DesignStore.load(store.root)
+    trash.restore(store, pid=back_first)
+    store = DesignStore.load(store.root)
+    assert P.order(P.load(store)) == [back_first]                                     # never names a part it hasn't got
+    assert not [r for r in store.design.plan["rules"] if other[back_first] in r["expr"]]
+    trash.restore(store, pid=other[back_first])
+    store = DesignStore.load(store.root)
+    assert store.design.plan == was and P.order(P.load(store)) == ["rail", "carriage"]
+
+
+def test_the_plan_s_rules_come_back_in_their_order_whichever_goes_first(store):
+    store.design.plan = {"status": "built", "parts": [{"id": "rail", "what": "the rail"}, {"id": "carriage", "what": "c"}],
+                         "rules": [{"id": "a", "expr": "bbox(rail).max_z < 900"}, {"id": "b", "expr": "bbox(carriage).max_z < 900"},
+                                   {"id": "c", "expr": "bbox(rail).min_z > -900"}]}
+    store.save()
+    was = store.design.plan
+    trash.remove(store, "carriage")
+    trash.remove(store, "rail")
+    trash.restore(store, pid="carriage")
+    trash.restore(store, pid="rail")
+    assert DesignStore.load(store.root).design.plan == was

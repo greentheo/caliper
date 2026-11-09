@@ -56,25 +56,78 @@ def _out_of_plan(store: DesignStore, pid: str) -> Optional[dict]:
     mounted = [p["id"] for p in parts if pid in (p.get("mounts_on") or [])]
     gone = {x["at"] for x in rules}
     store.design.plan = {**plan, "rules": [r for i, r in enumerate(every) if i not in gone],
+                         # the order they were in, while anything's out: a position in a shrunk list doesn't say it
+                         "parts_were": plan.get("parts_were") or [p.get("id") for p in parts],
+                         "rules_were": plan.get("rules_were") or [r.get("id") for r in every],
                          "parts": [{**p, "mounts_on": [m for m in p["mounts_on"] if m != pid]} if p.get("mounts_on")
                                    else p for i, p in enumerate(parts) if i != at]}
     return {"part": parts[at], "index": at, "rules": rules, "mounted": mounted}
 
 
-def _into_plan(store: DesignStore, was: dict) -> None:
+def _as_they_were(plan: dict, key: str, was: str) -> dict:
+    """The plan's parts or rules in their order before anything was removed; that record goes once they're all back."""
+    order = plan.get(was)
+    if not order:
+        return plan
+    rank = {x: i for i, x in enumerate(order)}
+    items = sorted(plan.get(key) or [], key=lambda x: rank.get(x.get("id"), len(rank)))    # stable: a new one stays last
+    out = {**plan, key: items}
+    if set(order) <= {x.get("id") for x in items}:
+        out.pop(was)
+    return out
+
+
+def _trashed(store: DesignStore, tid: str) -> dict:
+    """The parts still in the trash, each to its newest entry: not this entry, and none that's back in the design."""
+    out: dict = {}
+    for t in listing(store):
+        if t["id"] != tid and t["part"] not in out and store.design.part(t["part"]) is None:
+            out[t["part"]] = t["id"]
+    return out
+
+
+def _hold(store: DesignStore, tid: str, key: str, item) -> None:
+    """Keep something that names a part still in the trash in that part's entry: it comes back when that part does."""
+    path = os.path.join(root(store), tid, "removed.json")
+    with open(path) as f:
+        meta = json.load(f)
+    meta.setdefault("held", {}).setdefault(key, []).append(item)
+    with open(path, "w") as f:
+        json.dump(meta, f, indent=2, default=str)
+
+
+def _into_plan(store: DesignStore, was: dict, others: dict) -> None:
+    """The part back in the plan, where it was. What it mounts on, or what mounts on it, that's still in the trash waits
+    in that part's entry: the build order can't name a part the plan hasn't got."""
     plan = store.design.plan
     if not plan:
         return
-    pid = was["part"]["id"]
-    parts = [{**p, "mounts_on": [*(p.get("mounts_on") or []), pid]} if p.get("id") in was["mounted"] else p
-             for p in plan.get("parts") or [] if p.get("id") != pid]
-    parts.insert(min(was["index"], len(parts)), was["part"])
+    part, pid = dict(was["part"]), was["part"]["id"]
+    here = {p.get("id") for p in plan.get("parts") or []} | {pid}
+    if part.get("mounts_on"):
+        for m in part["mounts_on"]:
+            if m not in here and m in others:
+                _hold(store, others[m], "mounted", pid)
+        part["mounts_on"] = [m for m in part["mounts_on"] if m in here]
+    for o in was["mounted"]:
+        if o not in here and o in others:
+            _hold(store, others[o], "mounts_on", pid)
+    parts = [{**p, "mounts_on": [*(p.get("mounts_on") or []), pid]} if p.get("id") in was["mounted"]
+             and pid not in (p.get("mounts_on") or []) else p for p in plan.get("parts") or [] if p.get("id") != pid]
+    parts.insert(min(was["index"], len(parts)), part)
+    store.design.plan = _as_they_were({**plan, "parts": parts}, "parts", "parts_were")
+
+
+def _plan_rules_back(store: DesignStore, items: list) -> None:
+    plan = store.design.plan
+    if not plan:
+        return
     rules = list(plan.get("rules") or [])
     have = {r.get("id") for r in rules}
-    for x in sorted(was["rules"], key=lambda x: x["at"]):      # each back where it was
+    for x in sorted(items, key=lambda x: x["at"]):             # each back where it was
         if x["rule"].get("id") not in have:
             rules.insert(min(x["at"], len(rules)), x["rule"])
-    store.design.plan = {**plan, "parts": parts, "rules": rules}
+    store.design.plan = _as_they_were({**plan, "rules": rules}, "rules", "rules_were")
 
 
 def remove(store: DesignStore, pid: str) -> dict:
@@ -119,7 +172,8 @@ def remove(store: DesignStore, pid: str) -> dict:
 
 def restore(store: DesignStore, tid: Optional[str] = None, pid: Optional[str] = None) -> dict:
     """Put a removed part back, as it was (its files, its assembly entry, its mates and rules). By the trash's id, or
-    the newest removal of that part."""
+    the newest removal of that part. A mate or rule that names a part still in the trash waits in that part's entry,
+    and comes back with it (``waiting`` says which): never a check on a part that isn't there, and nothing lost."""
     from .assembly import Assertion, Mate, Part
     from .design import DesignPart
 
@@ -139,15 +193,45 @@ def restore(store: DesignStore, tid: Optional[str] = None, pid: Optional[str] = 
     asm = store.assembly
     if meta.get("assembly"):
         asm.parts.append(Part.model_validate(meta["assembly"]))
+    from .assembly import _names
+
+    held = meta.get("held") or {}
+    others, waits = _trashed(store, tid), {}                 # what names a part still in the trash waits for it (#153)
+
+    def named(expr: str) -> set:
+        try:
+            return _names(expr or "")
+        except Exception:  # noqa: BLE001 — a rule that won't parse names nothing
+            return set()
+
+    def waiting(kind: str, what: str, names, key: str, item) -> bool:
+        gone = next((n for n in sorted(names) if n in others), None)
+        if gone is None:
+            return False
+        _hold(store, others[gone], key, item)
+        waits[what] = f"the {kind} {what} waits for {gone}, which is still in the trash"
+        return True
+
     ids = {p.id for p in asm.parts}
-    back = [Mate.model_validate(m) for m in meta.get("mates") or [] if all(x in ids for x in m["between"])]
+    back = []
+    for m in [*(meta.get("mates") or []), *(held.get("mates") or [])]:
+        if not waiting("mate", m["id"], m["between"], "mates", m) and all(x in ids for x in m["between"]):
+            back.append(Mate.model_validate(m))
     asm.mates += back
-    asm.assertions += [Assertion.model_validate(a) for a in meta.get("rules") or []]
+    for a in [*(meta.get("rules") or []), *(held.get("rules") or [])]:
+        if not waiting("rule", a["id"], named(a["expr"]), "rules", a):
+            asm.assertions.append(Assertion.model_validate(a))
     if meta.get("grain") and hasattr(store.design, "grain"):
         store.design.grain = {**(store.design.grain or {}), pid: meta["grain"]}
-    if meta.get("plan"):
-        _into_plan(store, meta["plan"])
+    was = meta.get("plan")
+    if was:
+        part = {**was["part"]}
+        if held.get("mounts_on"):
+            part["mounts_on"] = [*(part.get("mounts_on") or []), *held["mounts_on"]]
+        _into_plan(store, {**was, "part": part, "mounted": [*was["mounted"], *(held.get("mounted") or [])]}, others)
+    _plan_rules_back(store, [x for x in [*((was or {}).get("rules") or []), *(held.get("plan_rules") or [])]
+                             if not waiting("rule", x["rule"]["id"], named(x["rule"].get("expr")), "plan_rules", x)])
     store.save()
     shutil.rmtree(here, ignore_errors=True)
     store.append_log({"kind": "trash", "action": "restored", "part": pid, "id": tid})
-    return {"id": tid, "part": pid, "mates": [m.id for m in back]}
+    return {"id": tid, "part": pid, "mates": [m.id for m in back], "waiting": list(waits.values())}
