@@ -33,7 +33,7 @@ def _save(folder, rec):
         json.dump(rec, f)
 
 
-def _check(store, pid, safety, *, plate=None, thinnest=10.0, spacing=2.0, rid="20261107-000000-check"):
+def _check(store, pid, safety, *, plate=None, thinnest=10.0, spacing=2.0, rid="20261107-000000-check", **extra):
     """A strength run on this version: the FEA governs (resolved: 5 voxels across its walls), or the plate check."""
     case = {"name": "a foot", "lb": 40, "factor": 2.0, "safety": safety, "holds": safety >= NEED,
             "governs": "plate" if plate else "fea", "plate": plate,
@@ -41,7 +41,7 @@ def _check(store, pid, safety, *, plate=None, thinnest=10.0, spacing=2.0, rid="2
     _save(load_study.runs_dir(store), {"id": rid, "part": pid, "version": store.design.part(pid).version,
                                         "created": 1.0, "seconds": 60.0, "min_safety": NEED, "safety": safety,
                                         "holds": safety >= NEED, "spacing_mm": spacing, "thinnest_mm": thinnest,
-                                        "across": thinnest / spacing, "cases": [case]})
+                                        "across": thinnest / spacing, "cases": [case], **extra})
 
 
 def _carved(store, pid, *, whole=3.0, safety=2.6, saved=644):
@@ -70,7 +70,9 @@ def _plate(t=19.05, rows=((12.7, "1/2 in", 1.4), (15.875, "5/8 in", 2.3), (19.05
 
 def test_a_printed_part_that_holds_is_invited_to_carve_with_what_it_takes(tmp_path):
     store = _store(tmp_path, TUBE, "tube")
-    assert _offers(store, "tube") == []                            # no check yet: blocked, "check it holds first"
+    (waits,) = _offers(store, "tube")                              # no check yet: blocked, and it says why
+    assert waits["disabled"] and waits["button"] == "Carve it"
+    assert waits["cost"] == "Check it holds first: a carve starts from its strength check."
     _check(store, "tube", 3.0)
     (line,) = _offers(store, "tube")
     assert line["text"] == ("Carve the tube where it isn't working, to use less filament: it takes at least about "
@@ -203,3 +205,76 @@ def test_studies_lists_carve_for_a_printed_part_and_lighten_for_a_sheet_one(tmp_
     _check(fails, "tube", 1.2)
     menu = {m["kind"]: m for m in studies.menu(design_api.design_state(fails)["parts"][0])}
     assert not menu["carve"]["ready"] and menu["carve"]["why"].startswith("it already fails")
+
+
+# --- the page's shape, per the mockup Theo approved -------------------------------------------------------------------
+
+THIN = ("its thinnest walls, 0.25 mm in the cone skirt, are too thin for the strength check to see: at this size it sees "
+        "walls from 9.2 mm on, so check it by hand or with a test piece instead.")
+
+
+@pytest.mark.parametrize("extra", [{"thin_said": THIN}, {"thin_said": "older words", "sees_mm": 9.2}])
+def test_walls_too_thin_for_the_check_get_what_would_let_it_see_them(tmp_path, extra):
+    """The bar stool: the check can't see its walls. The first offer is what fixes that; Carve waits, and says so."""
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 3.0, thinnest=0.25, spacing=2.3, too_thin=True, thinnest_where={"piece": "cone skirt"}, **extra)
+    wall, carve_it = _offers(store, "tube")
+    assert wall["lead"] == "Make the cone skirt walls 9.2 mm so the check can see them"
+    assert wall["cost"] == "It takes more filament. Then the check runs at a size it can trust."
+    assert wall["button"] == "Try it" and wall["action"] == "use_t" and not wall.get("disabled")
+    assert wall["say"] == "Make the walls of the cone skirt at least 9.2 mm thick so the strength check can see them"
+    assert carve_it["disabled"] and carve_it["action"] == "carve" and carve_it["lead"] == "Carve the tube where it isn't working"
+    assert carve_it["cost"] == "At least about 45 min at this size. It waits for a check it can trust."
+
+
+def test_every_offer_has_its_lead_cost_button_and_part(tmp_path):
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 3.0)
+    _carved(store, "tube")
+    (line,) = _offers(store, "tube")
+    assert line["lead"] == "Carve the tube where it isn't working" and line["button"] == "Use it" and line["part"] == "tube"
+    assert line["cost"] == "61% of the printed part carved away, 644 g less filament, still about 2.6 times over."
+    assert line["text"] == f"{line['lead']}: {line['cost']}"                 # the same, as one sentence
+
+
+def _page_of(extra):
+    from .test_carve_click import _page, _run
+
+    return _run(_page(["qlines", "betterLines", "useBetter"], consts=["esc"], extra=extra))
+
+
+CARD = ("const GOTO = {load: 'loadBox'};\n"
+        "const c = {key: 'work', lines: [{text: 'Holds a foot.', status: 'ok', study: 'load'},\n"
+        "  {better: true, status: 'info', lead: 'Make the top thinner', cost: 'Still about 2.3 times over.', button: 'Try it',\n"
+        "   action: 'use_t', say: 'Make it thinner', part: 'p'},\n"
+        "  {better: true, status: 'info', lead: 'Carve the cone', cost: 'It waits for a check it can trust.', button: 'Carve it',\n"
+        "   action: 'carve', part: 'p', disabled: true}]};\n")
+
+
+def test_the_card_draws_a_make_it_better_section_with_buttons():
+    html = _page_of(CARD + "out = qlines(c);")
+    assert html.count('class="qbetter-h">Make it better<') == 1 and html.count('class="qoffer"') == 2
+    assert 'Make the top thinner.<span class="qoffer-c">Still about 2.3 times over.</span>' in html
+    assert 'data-better="1" data-card="work">Try it</button>' in html
+    assert 'data-better="2" data-card="work" disabled>Carve it</button>' in html
+    assert html.count('class="qline') == 1                                  # the offers aren't drawn as verdict lines too
+    assert _page_of("const GOTO = {}; out = qlines({key: 'w', lines: [{text: 'a', status: 'ok'}]});").count("qbetter") == 0
+
+
+@pytest.mark.parametrize("line,called", [
+    ("{action: 'use_t', say: 'Make it thinner', part: 'p'}", ["send:Make it thinner:p"]),
+    ("{action: 'carve', part: 'p'}", ["scope:p", "goto:loadBox", "carve:p"]),
+    ("{action: 'lighten', part: 'p'}", ["scope:p", "goto:loadBox", "lighten:p"]),
+    ("{action: 'carve_use', part: 'p', run: 'r1', station: 3}", ["scope:p", "goto:loadBox", "adopt:p:r1:3:carve"]),
+    ("{action: 'lighten_use', part: 'p', run: 'r2', station: 1}", ["scope:p", "goto:loadBox", "adopt:p:r2:1:lighten"]),
+    ("{action: 'carve', part: 'p', disabled: true}", []),
+])
+def test_each_button_goes_through_what_its_panel_already_does(line, called):
+    got = _page_of(
+        "const calls = []; const S = {scope: null, design: {parts: [{id: 'p'}]}};\n"
+        "function send(t, s) { calls.push(`send:${t}:${s}`); } function setScope(p) { S.scope = p; calls.push(`scope:${p}`); }\n"
+        "function goTo(b) { calls.push(`goto:${b}`); } function runCarve(p) { calls.push(`carve:${p.id}`); }\n"
+        "function runLighten(p) { calls.push(`lighten:${p.id}`); }\n"
+        "function adoptStation(p, r, i, k) { calls.push(`adopt:${p}:${r}:${i}:${k}`); }\n"
+        f"await useBetter({line}); out = calls;")
+    assert got == called

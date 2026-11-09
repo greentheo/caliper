@@ -1087,6 +1087,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
                              "load to a support."))
             else:
                 record["too_thin"] = True
+                record["sees_mm"] = round(RESOLVE_MIN * ctx["finest"], 1)      # the wall the check can see, at this size
                 if ctx.get("thin_said"):                  # where, and what to change (#136 review)
                     record["thin_said"] = ctx["thin_said"]
                 notes.append(f"{seen} {RESOLVE_MIN:g} across would take more voxels than a study of a part this "

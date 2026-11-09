@@ -957,8 +957,7 @@ function designView(d) {
 const QUESTIONS = [['what', 'What is it?'], ['work', 'Will it work?'], ['buy', 'What do I buy?'], ['make', 'How do I make it?']];
 const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' };
 const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox', trial: 'trialBox',
-  carve: 'loadBox', lighten: 'loadBox', carve_use: 'loadBox', lighten_use: 'loadBox', use_t: 'loadBox' };
-// Make it better's lines (#92) go to the panel where each is run or used; their own design waits for Theo's mockup                 // the carve's panel is under Will it hold? (#89 item 6)
+  carve: 'loadBox' };                 // the carve's panel is under Will it hold? (#89 item 6)
 function numbersOpen(k) { try { return localStorage.getItem(`caliper.numbers.${k}`) === '1'; } catch (e) { return false; } }
 function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${k}`, on ? '1' : '0'); } catch (e) { /* private window */ } }
 
@@ -971,11 +970,34 @@ function answersKey() {               // what the answers depend on: a change to
 function qlines(c) {
   if (!c) return '<div class="qline muted"><span class="spin"></span>answering…</div>';
   if (!c.lines.length) return `<div class="qline muted">${esc(c.hint || 'Nothing to say yet.')}</div>`;
-  return c.lines.map((ln, i) => `<div class="qline q-${ln.status}${i === 0 ? ' top' : ''}${GOTO[ln.study || ln.action] ? ' go' : ''}"
+  const offers = c.lines.filter((ln) => ln.better);
+  return c.lines.filter((ln) => !ln.better).map((ln, i) => `<div class="qline q-${ln.status}${i === 0 ? ' top' : ''}${GOTO[ln.study || ln.action] ? ' go' : ''}"
     ${GOTO[ln.study || ln.action] ? `data-goto="${GOTO[ln.study || ln.action]}"` : ''}>${esc(ln.text)}</div>
     ${(ln.links || []).length ? `<div class="qlinks">${ln.links.map((l) => `<a class="btn" href="${esc(l.url)}" target="_blank"
       rel="noopener">${esc(l.label)}</a>`).join('')}</div>` : ''}`).join('')
+    + betterLines(c, offers)
     + (c.promise ? `<div class="qpromise">${esc(c.promise)}</div>` : '');
+}
+// Make it better (#92, the mockup Theo approved): what would improve it, what that costs, and a button for it
+function betterLines(c, offers) {
+  if (!offers.length) return '';
+  return `<div class="qbetter"><div class="qbetter-h">Make it better</div>${offers.map((ln) => {
+    const i = c.lines.indexOf(ln);
+    return `<div class="qoffer"><div class="qoffer-t">${esc(ln.lead)}.<span class="qoffer-c">${esc(ln.cost)}</span></div>
+      <button class="ghost" data-better="${i}" data-card="${esc(c.key)}"${ln.disabled ? ' disabled' : ''}>${esc(ln.button)}</button></div>`;
+  }).join('')}</div>`;
+}
+// each goes through what its panel already does: the chat, the carve, the lightening, or taking a step
+async function useBetter(ln) {
+  const p = S.design.parts.find((x) => x.id === ln.part);
+  if (!p || ln.disabled) return;
+  if (ln.action === 'use_t') return send(ln.say, ln.part);
+  if (S.scope !== ln.part) setScope(ln.part);                 // their panels are the part's, under its numbers
+  goTo('loadBox');
+  if (ln.action === 'carve') return runCarve(p);
+  if (ln.action === 'lighten') return runLighten(p);
+  if (ln.action === 'carve_use') return adoptStation(p.id, ln.run, ln.station, 'carve');
+  if (ln.action === 'lighten_use') return adoptStation(p.id, ln.run, ln.station, 'lighten');
 }
 
 // the viewport follows the question (spec step 4): the stress for "will it work", the pieces for "what do I buy"
@@ -1190,6 +1212,13 @@ function wireCards() {
   document.querySelectorAll('#inspector details.numbers').forEach((dt) => { dt.ontoggle = () => keepNumbersOpen(dt.dataset.card, dt.open); });
   document.querySelectorAll('#inspector .qcard .qhead').forEach((h) => { h.onclick = () => focusCard(h.parentElement.dataset.card); });
   document.querySelectorAll('#inspector .qline[data-goto]').forEach((ln) => { ln.onclick = () => goTo(ln.dataset.goto); });
+  document.querySelectorAll('#inspector [data-better]').forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();                                    // the card's head has its own click
+      const c = ((S.answers && S.answers.cards) || []).find((x) => x.key === b.dataset.card);
+      if (c) useBetter(c.lines[+b.dataset.better]);
+    };
+  });
 }
 function goTo(id) {                   // open the card's numbers and bring that panel into view
   const box = $(id);
@@ -2840,7 +2869,8 @@ function clearStation(keepBar) {
   if (S.design) paint();
 }
 async function adoptStation(pid, wid, index, kind) {
-  $('adoptBtn').disabled = true;
+  const go = $('adoptBtn');                         // none when it's Make it better's Use it (#92)
+  if (go) go.disabled = true;
   try {
     await api('POST', `/api/designs/${S.slug}/${STUDY_PATH[kind] || 'whittle'}/${wid}/adopt`, { station: index });
     clearStation();
@@ -2850,7 +2880,7 @@ async function adoptStation(pid, wid, index, kind) {
       const p = S.design.parts.find((x) => x.id === pid);
       if (p && $('lGo')) runLoad(p);
     }
-  } catch (e) { showErr(e.message); $('adoptBtn').disabled = false; }
+  } catch (e) { showErr(e.message); if (go) go.disabled = false; }
 }
 
 // ------------------------------------------------------------- the studies page (CALI-70)

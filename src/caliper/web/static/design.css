@@ -266,3 +266,11 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
   border-radius: 8px; padding: 6px 9px; margin: 4px 0 8px; }
 .trial-chart circle[data-carve] { cursor: pointer; }
 .trial-chart circle.on { stroke: var(--ink); stroke-width: 2; }
+
+/* Make it better, on Will it work? (#92, the mockup Theo approved) */
+.qbetter { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.qbetter-h { font-size: 12px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); }
+.qoffer { display: flex; gap: 10px; align-items: flex-start; }
+.qoffer-t { flex: 1 1 auto; font-size: 13px; line-height: 1.5; color: #c9d4de; }
+.qoffer-c { display: block; color: var(--muted); }
+.qoffer button { white-space: nowrap; padding: 6px 10px; }

@@ -12,7 +12,10 @@ work?* as suggestions with a cost, not tools. Each line here is one improvement 
 - **Then an invitation,** with what it takes: a carve (a printed part) or a lightening (sheet walls), offered only
   where :func:`load_study.blocked` allows it, the one test the Carve button and the card both read (#144).
 
-The page draws these as card lines (``better: True``), each going to its panel; its design waits for Theo's mockup.
+Each is ``{text, lead, cost, button, action, part, better: True}``: the page draws the lead, the cost beneath it and a
+button (the mockup Theo approved); ``text`` is the same as one sentence. Where :func:`load_study.blocked` stops a carve
+for anything but a part that already fails, the line stays, ``disabled``, its cost saying why it waits; and walls too
+thin for the check get what would let the check see them.
 """
 
 from __future__ import annotations
@@ -30,8 +33,10 @@ def _minutes(m: float) -> str:
             f"{m / 60:.1f}".rstrip("0").rstrip(".") + " h")
 
 
-def _line(text: str, action: str, **kw) -> dict:
-    return {"text": text, "status": "info", "action": action, "better": True, **kw}   # not a strength verdict: no study
+def _line(lead: str, cost: str, button: str, action: str, **kw) -> dict:
+    """One offer: what to do, what it costs, and the button for it. Not a strength verdict: no study."""
+    return {"text": f"{lead}: {cost[:1].lower()}{cost[1:]}", "lead": lead, "cost": cost, "button": button,
+            "status": "info", "action": action, "better": True, **kw}
 
 
 def _printed_name(store: DesignStore, pid: str) -> str:
@@ -89,10 +94,19 @@ def _sheet_offers(run: dict, fails: bool) -> list[dict]:
             continue
         t = min(ok)
         said = f"Make the {piece} from {label[t]} instead of {label_now}"
-        out.append(_line(f"{said}: that panel holds then, {_times(worst[t], about=True)} by the plate check."
-                         if fails else f"{said}: still {_times(worst[t], about=True)} by the plate check.",
-                         "use_t", say=said))
+        out.append(_line(said, f"{'That panel holds then' if fails else 'Still'}{',' if fails else ''} "
+                               f"{_times(worst[t], about=True)} by the plate check.", "Try it", "use_t", say=said))
     return out
+
+
+def _seen_from(run: dict) -> Optional[float]:
+    """The wall the check can see at this size, in mm: on the run, or (a run from before it was kept) in its words."""
+    import re
+
+    if run.get("sees_mm"):
+        return run["sees_mm"]
+    m = re.search(r"(?:walls must be at least|sees walls from) ([\d.]+) mm", run.get("thin_said") or "")
+    return float(m.group(1)) if m else None
 
 
 def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
@@ -112,12 +126,27 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
     if blocked and blocked.get("why") == "already_fails":       # what would make it hold, never lighter
         # on a filled-in shape, or with the front edge not checked, "it holds then" isn't known
         known = run and not p.get("untrusted") and not consistency.bare_edge(store, pid)
-        return _sheet_offers(run, fails=True) if known else []
+        return [{**ln, "part": pid} for ln in _sheet_offers(run, fails=True)] if known else []
     settled = _settled_check(store, p, run)
     results, invites = [], []
     if settled:
         results += _sheet_offers(run, fails=False)
     name = _printed_name(store, pid)
+    secs = (run or {}).get("seconds")
+    takes = f"at least about {_minutes(secs * CARVE_PER_CHECK / 60)} at this size" if secs else ""
+    if (blocked or {}).get("why") == "too_thin" and p.get("printed") and _seen_from(run):
+        from .answers import _wall
+
+        wall, where = _seen_from(run), ((run.get("thinnest_where") or {}).get("piece") or name)   # mm, as walls are said
+        results.append(_line(f"Make the {where} walls {_wall(wall)} so the check can see them",
+                             "It takes more filament. Then the check runs at a size it can trust.", "Try it", "use_t",
+                             say=f"Make the walls of the {where} at least {wall:g} mm thick so the strength check can "
+                                 f"see them"))
+    if p.get("printed") and not p.get("carved") and (blocked or {}).get("carve"):
+        waits = ("It waits for a check it can trust." if blocked["why"] == "too_thin"
+                 else f"{blocked['carve'][:1].upper()}{blocked['carve'][1:]}.")
+        invites.append(_line(f"Carve the {name} where it isn't working", (f"{takes[:1].upper()}{takes[1:]}. " if takes else "")
+                             + waits, "Carve it", "carve", disabled=True))
     if p.get("printed") and not p.get("carved") and not (blocked or {}).get("carve"):
         mine = [r for r in state.get("carve_runs") or [] if r["part"] == pid and r.get("version") == p["version"]]
         done = next((r for r in mine if r.get("status") == "done"), None)
@@ -126,15 +155,14 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
             v = verdicts.carve_step(best, p.get("untrusted"), done) if best else None
             if settled and best and best.get("saved_g") and v and v["counts_as_pass"]:
                 results.append(_line(
-                    f"Carve the {name} where it isn't working: {best['removed']:.0%} {K.share(done)} carved away, "
-                    f"{best['saved_g']:,} g less filament, still {_times(best['safety'], about=True)}.", "carve_use",
-                    run=done["id"], station=best["index"]))
+                    f"Carve the {name} where it isn't working",
+                    f"{best['removed']:.0%} {K.share(done)} carved away, {best['saved_g']:,} g less filament, still "
+                    f"{_times(best['safety'], about=True)}.", "Use it", "carve_use", run=done["id"],
+                    station=best["index"]))
         elif not any(r.get("status") in (None, "running") for r in mine):
-            secs = (run or {}).get("seconds")
-            invites.append(_line(f"Carve the {name} where it isn't working, to use less filament: it takes "
-                                 + (f"at least about {_minutes(secs * CARVE_PER_CHECK / 60)} at this size"
-                                    if secs else "a while (check it holds first, and the time comes from that)")
-                                 + ".", "carve"))
+            invites.append(_line(f"Carve the {name} where it isn't working, to use less filament",
+                                 f"It takes {takes or 'a while (check it holds first, and the time comes from that)'}.",
+                                 "Carve it", "carve"))
     if p.get("sheets") and not (blocked or {}).get("lighten") and not p.get("framed"):
         mine = [r for r in state.get("lighten_runs") or [] if r["part"] == pid and r.get("version") == p["version"]]
         done = mine[0] if mine else None
@@ -144,9 +172,10 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
             best = max(ok, key=lambda st: st["saved_lb"], default=None)
             if settled and best:
                 results.append(_line(
-                    f"Lighten it with holes where the wood isn't working: {best['saved_lb']:g} lb lighter, still "
-                    f"{_times(best['safety'], about=True)}.", "lighten_use", run=done["id"], station=best["index"]))
+                    "Lighten it with holes where the wood isn't working",
+                    f"{best['saved_lb']:g} lb lighter, still {_times(best['safety'], about=True)}.", "Use it",
+                    "lighten_use", run=done["id"], station=best["index"]))
         else:
-            invites.append(_line("Lighten it with holes where the wood isn't working: it takes a few minutes.",
-                                 "lighten"))
-    return results + invites
+            invites.append(_line("Lighten it with holes where the wood isn't working", "It takes a few minutes.",
+                                 "Lighten it", "lighten"))
+    return [{**ln, "part": pid} for ln in results + invites]
