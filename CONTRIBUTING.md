@@ -34,7 +34,7 @@ After changing Python, restart the server.
 - **Done** means:
   - the issue's acceptance criteria are met;
   - new behaviour has a test, and CI is green;
-  - a new file in [`pm/log/`](pm/log/) says what changed, the numbers, and the commit;
+  - a new file in [`pm/log/`](pm/log/) says what changed and the numbers;
   - a new file in [`pm/demo/`](pm/demo/) says how to try it. See [`pm/LOG.md`](pm/LOG.md) for how to name them.
 - Match the code around you: its naming, its comment density, and docstrings that explain why. Ruff is set
   to a line length of 100.

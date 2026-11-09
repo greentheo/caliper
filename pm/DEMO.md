@@ -2,7 +2,7 @@
 
 **What you can run today, and exactly how to try each thing that's shipped.**
 Updated after every bit of work (it's part of the definition of done — see [`README.md`](README.md)).
-Newest demos first.
+The demo log is one file per entry in [`demo/`](demo/); `make demo-log` prints it, newest first.
 
 ---
 
@@ -138,7 +138,7 @@ and now **iterates to fix failing measurements** too (CALI-17), not just build e
 ## ⚙️ One-time setup
 
 ```bash
-# Build the OCCT env (micromamba — Anaconda's classic solver stalls on cadquery; see pm/LOG.md)
+# Build the OCCT env (micromamba — Anaconda's classic solver stalls on cadquery; see log/2026-06-11-0005-cali-0-canonical-occt-env-via-micromamba-zero-activatio.md)
 curl -Ls https://micro.mamba.pm/api/micromamba/osx-arm64/latest | tar -xj -C /tmp bin/micromamba
 /tmp/bin/micromamba create -p /opt/anaconda3/envs/caliper -c conda-forge -y python=3.11 cadquery
 /opt/anaconda3/envs/caliper/bin/python -m pip install -r requirements-pip.txt

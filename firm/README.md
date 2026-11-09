@@ -73,8 +73,7 @@ GitHub Issues on `greentheo/caliper`, via `gh`.
 - **The owner's conventions win where they differ from the firm's defaults:** issue titles keep the id
   (`CALI-84 · …`; the next id is the highest in use + 1); branches `cali-N-short-name`; commits
   `CALI-N (#issue): what and why`, ending with the `Co-Authored-By` line; PR bodies end with the Claude Code
-  line and say `Closes #N`. **Every PR adds a file to [`pm/log/`](../pm/log/)** (what changed, tests,
-  commit hash) **and one to [`pm/demo/`](../pm/demo/)** (how the owner tries it), one file per entry: see [`pm/LOG.md`](../pm/LOG.md).
+  line and say `Closes #N`. **Every PR adds a file to [`pm/log/`](../pm/log/)** (what changed, tests) **and one to [`pm/demo/`](../pm/demo/)** (how the owner tries it), one file per entry: see [`pm/LOG.md`](../pm/LOG.md).
   `pm/BOARD.md` and `pm/TASKS.md` are frozen history.
 - Noticed something else? File it (`gh issue create`, label it, say how you found it). Don't fix it in the
   PR you're on.

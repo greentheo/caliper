@@ -19,7 +19,7 @@ to its issue.
 - **Task ids** are `CALI-N` and stay in the issue title (`CALI-48 · The shop: …`); the next new id is the
   highest one in use plus one.
 - **Definition of done:** the issue's acceptance criteria met, tests green (`pytest`, and CI on the PR), a `pm/log/`
-  entry written with the commit hash, **and a `pm/demo/` entry added** — refresh "current capabilities" and
+  entry written, **and a `pm/demo/` entry added** — refresh "current capabilities" and
   add a demo-log entry with the exact command(s) the human can run to try the new work.
 - Every meaningful change is a commit naming the task and its issue: `CALI-48 (#4): plasma bed check`.
   A PR that finishes one says `Closes #4`.
