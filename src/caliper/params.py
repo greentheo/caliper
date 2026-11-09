@@ -214,7 +214,8 @@ def set_value(store: DesignStore, pid: str, name: str, value: float, unit: Optio
     said = (_said(float(value), unit) if e["unit"] == "mm" else
              f"{mm:g} deg" if e["unit"] == "deg" else f"{mm:g}")
     version = store.write_part(pid, new, action="params", feedback=f"set {name} to {said} by hand",
-                               extra={"params": {name: [e["value"], round(mm, 3)]}})
+                               extra={"params": {name: [e["value"], round(mm, 3)]}},
+                               built=(new, {}, built.geometry))      # its trial build is this version's (#97)
     after = _shape(store.part_geometry(pid))
     report, errors = store.evaluate(tolerant=True)
     moved = before is None or after != before

@@ -492,8 +492,11 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
 
     uncarved = carve.carved(store.read_script(part_id))   # a carve fits the shape it was carved from (CALI-82)
     script = carve.uncarve(res.script)[0]
+    from .authoring import params_from_spec
+
     version = store.write_part(part_id, script, feedback=message, action="refine",
-                               report=report_dict, intent=described)
+                               report=report_dict, intent=described,
+                               built=(res.script, params_from_spec(spec), res.geometry))
     _emit(events, on_event, "wrote", f"{part_id} → v{version}", part=part_id, version=version)
 
     after, part_errors = _measure_design(store)
@@ -614,8 +617,11 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     stored = Spec(part=part_id, intent=intent, parameters=spec.parameters,
                   assertions=[a.model_copy() for a in spec.assertions])
     report_dict = res.report.to_dict() if res.report is not None else None
+    from .authoring import params_from_spec
+
     version = store.write_part(part_id, res.script, intent=intent, spec=stored, action="author",
-                               feedback=intent, report=report_dict)
+                               feedback=intent, report=report_dict,
+                               built=(res.script, params_from_spec(spec), res.geometry))
     _emit(events, on_event, "wrote", f"{part_id} → v{version}", part=part_id, version=version)
 
     after, part_errors = _measure_design(store)

@@ -1180,6 +1180,10 @@ async function loadAnswers() {
     card.querySelector('.qlines').innerHTML = qlines(c);
   }
   wireCards();
+  // a print time still being worked out (#97): ask again until it's in, while the same cards are showing
+  if ((S.answers.cards || []).some((c) => c.lines.some((ln) => ln.working))) {
+    setTimeout(() => { if (S.answers && S.answers.key === key && S.answers.cards) { S.answers = null; loadAnswers(); } }, 4000);
+  }
 }
 function wireCards() {
   document.querySelectorAll('#inspector details.numbers').forEach((dt) => { dt.ontoggle = () => keepNumbersOpen(dt.dataset.card, dt.open); });
