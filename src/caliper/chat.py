@@ -474,8 +474,8 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     was = _volume(store, part_id)
 
     _emit(events, on_event, "authoring", f"revising {part_id}…", part=part_id)
-    # ``measured`` is true of this version, so it goes to the designer and not into the part's record (#158)
-    res = authoring.refine_authored(spec, script, message + measured, max_rounds=max_rounds,
+    # ``measured`` is true of this version: to the designer's first round only, never into the part's record (#158)
+    res = authoring.refine_authored(spec, script, message, max_rounds=max_rounds, measured=measured,
                                     ref_base=store.root, author=author, client=client)
 
     if res.geometry is None:                      # never built — don't write a broken part

@@ -113,7 +113,7 @@ def _in_script(store: DesignStore, pid: str, at: list) -> list:
 def to_fix(store: DesignStore, pid: str, rule_id: str) -> str:
     """What the designer is told about a failing rule it's asked to fix (#158), measured on the version it is now: how
     far off, and for a wall where, in the script's own mm (a design's units and its placing are the person's). "" for a
-    rule that's gone or isn't failing. Told to the designer only: it's true of this version, not of the part."""
+    rule that's gone or isn't failing. Told to the designer's first round only: it's true of this version, not the part."""
     from .answers import _wall
 
     r = next((x for x in measured(store, pid) if x["id"] == rule_id), None)

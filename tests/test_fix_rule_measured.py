@@ -142,3 +142,71 @@ def test_a_rule_that_holds_now_is_not_said_to_have_failed(store):
     store.write_spec("plate", spec)
     part_rules._SEEN.clear()
     assert part_rules.to_fix(store, "plate", "wide") == ""
+
+
+# --- #165 review ---------------------------------------------------------------------------------------------------
+def test_only_the_first_round_hears_the_measurement(store):
+    """A location is true of the script as it stands: round 2 has changed it, so it would be told an old place as "now"."""
+    _lock(store, "wall", "min_wall >= 100")
+    rounds = []
+
+    def author(spec, feedback, prior):
+        rounds.append((spec.intent, feedback))
+        return _box(dx=60, dy=20)
+
+    chat.turn(store, "have a go", use_llm=False, classifier=_never, author=author, max_rounds=2)
+    assert len(rounds) == 2
+    assert "Measured on it now" in rounds[0][1] and "Measured on it now" not in rounds[1][1]
+    assert "Measured on it now" not in rounds[0][0] and "Measured on it now" not in rounds[1][0]
+    assert "wall: min_wall >= 100" in rounds[1][0]                       # the request itself carries on
+
+
+#: the thin fin off to one side, so a turn moves it somewhere a turn can't hide
+FIN_OFF = ("def build(params):\n"
+           "    import cadquery as cq\n"
+           "    return (cq.Workplane('XY').box(60, 120, 10)\n"
+           "            .union(cq.Workplane('XY').box(2, 40, 30).translate((0, 40, 20))))\n")
+
+
+def _pose(store, position, rotation):
+    part = next(p for p in store.assembly.parts if p.id == "plate")
+    part.position, part.rotation = position, rotation
+    store.save()
+
+
+def test_a_turned_and_moved_part_is_told_in_its_script_s_own_coordinates(store):
+    store.write_part("plate", FIN_OFF, intent="a plate with a fin")
+    _lock(store, "wall", "min_wall >= 100")
+    _pose(store, (1000.0, 0.0, 500.0), (0.0, 0.0, 90.0))
+    told = {}
+
+    def author(spec, feedback, prior):
+        told["prompt"] = feedback
+        return FIN_OFF
+
+    chat.turn(store, "have a go", use_llm=False, classifier=_never, author=author, max_rounds=1)
+    x, y, z = (float(v) for v in re.search(r"at x (\S+), y (\S+), z (\S+) mm", told["prompt"]).groups())
+    assert abs(x) <= 1.5 and 20 <= y <= 60 and 5 <= z <= 35, told["prompt"]
+
+
+def test_a_part_only_turned_is_measured_again(store):
+    store.write_part("plate", FIN_OFF, intent="a plate with a fin")
+    _lock(store, "wall", "min_wall >= 100")
+    before = next(r for r in part_rules.measured(store, "plate") if r["id"] == "wall")["where"]
+    assert abs(before[0]) <= 1.5
+    _pose(store, next(p for p in store.assembly.parts if p.id == "plate").position, (0.0, 0.0, 90.0))
+    after = next(r for r in part_rules.measured(store, "plate") if r["id"] == "wall")["where"]
+    assert -60 <= after[0] <= -20 and abs(after[1]) <= 1.5               # x came from y; no stale answer from before the turn
+
+
+def test_a_rule_that_errors_at_the_go_ahead_says_it_couldn_t_be_measured(store):
+    from caliper.spec import Assertion
+
+    _lock(store, "wide", "bbox.dx >= 500")
+    spec = store.read_spec("plate")
+    spec.assertions.append(Assertion(id="odd", expr="no_such_measure >= 1"))
+    store.write_spec("plate", spec)
+    part_rules._SEEN.clear()
+    awaiting.park(store, "fix_rule", part="plate", rule="odd", expr="no_such_measure >= 1")
+    prompt = _go(store)
+    assert "It couldn't be measured just now:" in prompt and "Measured on it now" not in prompt
