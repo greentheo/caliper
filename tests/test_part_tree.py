@@ -199,7 +199,7 @@ function saveTreeName(p, k) { calls.push(['save', p, k]); }
 const TREE = { slug: undefined, parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, last: null };
 const pieceId = (pid, key) => `${pid}/${key}`;
 const EYE_ON = 'EYE-ON', EYE_OFF = 'EYE-OFF';
-const view = (over) => ({ parts: new Set(), pieces: new Set(), open: true, rename: null, scope: null, piece: null, ...over });
+const view = (over) => ({ parts: new Set(), pieces: new Set(), open: true, rename: null, scope: null, piece: null, oneBody: false, cant: null, ...over });
 const btn = (dataset) => ({ dataset });
 """
 _DESIGN = """{ parts: [
@@ -339,3 +339,90 @@ def test_nothing_about_hiding_reaches_the_server():
         from .test_carve_click import _fn
 
         assert "api(" not in _fn(src, name) and "fetch(" not in _fn(src, name)
+
+
+# --- #161 review: the tree doesn't offer what it can't do ------------------------------------------------------------
+def test_a_part_that_can_t_be_drawn_as_pieces_says_why_and_its_eyes_are_off():
+    got = _page("""const h = treeHtml(S.design, view({ pieces: new Set(['i_want/seat top']),
+                     cant: (p) => (p === 'i_want' ? "its shape isn't closed near z 40 mm" : null) }));
+                   return { h, off: (h.match(/trow piece[^"]* off/g) || []).length };""")
+    assert "can't draw this part's pieces: its shape isn't closed near z 40 mm" in got["h"]
+    assert 'data-eye="i_want" data-key=' not in got["h"] and got["off"] == 0   # no row says hidden about what's on screen
+    assert 'data-eye="i_want">' in got["h"]                                 # the whole part's eye still works
+
+
+def test_in_one_body_a_piece_eye_is_off_and_no_row_says_hidden():
+    got = _page("""const h = treeHtml(S.design, view({ pieces: new Set(['i_want/seat top']), oneBody: true }));
+                   return { h, off: (h.match(/trow piece[^"]* off/g) || []).length };""")
+    assert "disabled" in got["h"] and 'data-eye="i_want" data-key=' not in got["h"] and got["off"] == 0
+    assert "can't draw" not in got["h"]
+
+
+def test_with_pieces_drawn_the_eyes_work():
+    got = _page("""return { h: treeHtml(S.design, view()) };""")
+    assert 'data-eye="i_want" data-key="seat top"' in got["h"] and "disabled" not in got["h"]
+
+
+def test_a_part_s_name_is_escaped_in_the_tree():
+    got = _page("""S.design.parts[0].name = '<b>x</b>';
+                   return { h: treeHtml(S.design, view()) };""")
+    assert "&lt;b&gt;x&lt;/b&gt;" in got["h"] and "<b>x</b>" not in got["h"]
+
+
+def test_a_failed_piece_gives_the_route_s_words(tmp_path):
+    from .test_carve_click import _fn, _node
+
+    src = open(JS).read()
+    script = """const S = { slug: 'x' };
+function fetch() { return Promise.resolve({ ok: false, status: 422, json: async () => ({ detail: "its shape isn't closed" }) }); }
+""" + _fn(src, "loadPieces") + """
+loadPieces({ id: 'p', version: 1, pieces: [{ key: 'a' }] }).then(() => console.log('no'), (e) => console.log(e.message));"""
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.stdout.strip() == "its shape isn't closed", got.stderr
+
+
+def test_the_route_says_422_with_the_words_where_a_piece_can_t_be_cut(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    store = _store(tmp_path)
+    monkeypatch.setenv("CALIPER_DESIGNS", os.path.dirname(store.root))
+    monkeypatch.setattr(tree, "mesh", lambda *a: (_ for _ in ()).throw(ValueError("its shape isn't closed near z 40 mm")))
+    c, slug = TestClient(create_app()), os.path.basename(store.root)
+    got = c.get(f"/api/designs/{slug}/parts/bench/piece.stl", params={"key": "top"})
+    assert got.status_code == 422 and got.json()["detail"] == "its shape isn't closed near z 40 mm"
+
+
+def test_the_cut_list_and_the_pattern_page_read_the_label():
+    from caliper import cutplan, patterns
+
+    text = cutplan.cutlist_text({"id": "r1", "part": "step_stool", "name": "Step stool", "sticks": [], "sheets": []})
+    assert text.startswith("CUT LIST — Step stool (r1)")
+    assert cutplan.cutlist_text({"id": "r1", "part": "old", "sticks": [], "sheets": []}).startswith("CUT LIST — old (r1)")
+    assert "A stool: Step stool, for hand tools" in patterns.index_html("A stool", "Step stool", [], 0)
+
+
+def test_another_design_s_part_of_the_same_name_is_drawn_again():
+    """Found checking #161: two designs each with an i_want at v8 kept the first one's pieces."""
+    from .test_carve_click import _fn, _node
+
+    src = open(JS).read()
+    script = """let S = { slug: 'a', design: null }, loads = 0, drops = [];
+const pieces3d = new Map([['i_want', { version: 8, byKey: new Map() }]]), noPieces = new Map([['other', { version: 1, why: 'x' }]]);
+const dropPieces = (p) => { pieces3d.delete(p); drops.push(p); }, scene = { add() {} }, plainly = (m) => m, renderTree = () => {};
+let piecesOf = 'a';
+async function loadPieces() { loads += 1; return new Map(); }
+""" + _fn(src, "syncPieces") + """
+const design = { parts: [{ id: 'i_want', version: 8, role: 'part', pieces: [{ key: 'a' }] }] };
+S.design = design;
+(async () => {
+  await syncPieces(design); const same = loads;
+  S.slug = 'b';
+  await syncPieces(design);
+  console.log(JSON.stringify({ same, after: loads, drops, stale: noPieces.size }));
+})();"""
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    out = json.loads(got.stdout)
+    assert out["same"] == 0 and out["after"] == 1 and out["drops"][0] == "i_want" and out["stale"] == 0

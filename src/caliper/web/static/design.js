@@ -191,16 +191,21 @@ function renameRow(part, key, draft) {
 function treeHtml(design, view) {
   const rows = design.parts.map((p) => {
     const fixed = p.role === 'fixed', off = view.parts.has(p.id);
+    const cant = view.cant ? view.cant(p.id, p.version) : null, oneBody = view.oneBody || !!cant;   // no piece eye can act then
     const editing = view.rename && view.rename.part === p.id;
     const head = `<div class="trow part${view.scope === p.id && !view.piece ? ' on' : ''}${fixed ? ' ref' : ''}${off ? ' off' : ''}">
       <button class="eye" aria-label="Show or hide the whole part" data-eye="${esc(p.id)}">${off ? EYE_OFF : EYE_ON}</button>
       <button class="tname" data-sel="${esc(p.id)}"${fixed ? ' data-fixed="1"' : ''}>${esc(p.name || p.id)}</button>
       <span class="side">${fixed ? 'reference' : `v${p.version}`}</span></div>`
-      + (editing && view.rename.key == null ? renameRow(p.id, null, view.rename.draft) : '');
+      + (editing && view.rename.key == null ? renameRow(p.id, null, view.rename.draft) : '')
+      + (cant ? `<div class="tcant">can't draw this part's pieces: ${esc(cant)}</div>` : '');
     const pieces = (p.pieces || []).map((pc) => {
-      const pcOff = off || view.pieces.has(pieceId(p.id, pc.key));
+      const pcOff = off || (!oneBody && view.pieces.has(pieceId(p.id, pc.key)));
+      const eye = oneBody
+        ? `<button class="eye" disabled title="${cant ? "this part can't be drawn as pieces" : 'drawn as one body: choose its pieces to hide one'}" aria-label="Can't hide a piece while it's one body">${EYE_ON}</button>`
+        : `<button class="eye" aria-label="Show or hide this piece" data-eye="${esc(p.id)}" data-key="${esc(pc.key)}">${pcOff ? EYE_OFF : EYE_ON}</button>`;
       return `<div class="trow piece${view.scope === p.id && view.piece === pc.key ? ' on' : ''}${fixed ? ' ref' : ''}${pcOff ? ' off' : ''}">
-        <button class="eye" aria-label="Show or hide this piece" data-eye="${esc(p.id)}" data-key="${esc(pc.key)}">${pcOff ? EYE_OFF : EYE_ON}</button>
+        ${eye}
         <span class="swatch" aria-hidden="true" style="background:${esc(fixed ? '#9aa4ad' : pc.color)}"></span>
         <button class="tname" data-sel="${esc(p.id)}" data-key="${esc(pc.key)}"${fixed ? ' data-fixed="1"' : ''}>${esc(pc.name)}</button>
         <span class="side">${esc(pc.material)}</span></div>`
@@ -220,7 +225,9 @@ function renderTree() {
   box.hidden = !parts.length;
   if (!parts.length || document.activeElement === $('treeName')) return;       // never over a name being typed
   const t = seen();
-  box.innerHTML = treeHtml(S.design, { parts: t.parts, pieces: t.pieces, open: t.open, rename: t.rename, scope: S.scope, piece: S.piece });
+  const cant = (pid, version) => { const n = noPieces.get(pid); return n && n.version === version ? n.why : null; };
+  box.innerHTML = treeHtml(S.design, { parts: t.parts, pieces: t.pieces, open: t.open, rename: t.rename, scope: S.scope, piece: S.piece,
+    oneBody: t.oneBody, cant });
   if (t.rename && $('treeName')) { $('treeName').focus(); $('treeName').select(); }
 }
 async function saveTreeName(part, key) {
@@ -289,7 +296,7 @@ const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(1, 0.
 let grid = null;
 const meshes = new Map();       // part id -> THREE.Mesh
 const pieces3d = new Map();     // part id -> {version, byKey: piece -> THREE.Mesh}: the part as its pieces (#94)
-const noPieces = new Map();     // part id -> the version that can't be drawn as pieces: one body, as ever
+const noPieces = new Map();     // part id -> {version, why} that can't be drawn as pieces: one body, and the tree says why
 let stationMesh = null;         // a whittle station shown in place of its part
 const loader = new STLLoader();
 
@@ -397,7 +404,10 @@ function dropPieces(pid) {
 async function loadPieces(p) {
   const got = await Promise.all(p.pieces.map(async (pc) => {
     const r = await fetch(`/api/designs/${S.slug}/parts/${p.id}/piece.stl?key=${encodeURIComponent(pc.key)}&v=${p.version}`);
-    if (!r.ok) throw new Error(`${p.id}/${pc.key}: HTTP ${r.status}`);
+    if (!r.ok) {
+      const said = await r.json().catch(() => ({}));
+      throw new Error(typeof said.detail === 'string' ? said.detail : `the server answered ${r.status}`);
+    }
     return [pc, await r.arrayBuffer()];
   }));
   const byKey = new Map();
@@ -410,20 +420,22 @@ async function loadPieces(p) {
   }
   return byKey;
 }
+let piecesOf = null;              // the design they're of: two designs can both have a part called i_want at v8
 async function syncPieces(design) {
+  if (piecesOf !== S.slug) { [...pieces3d.keys()].forEach(dropPieces); noPieces.clear(); piecesOf = S.slug; }
   const want = new Map(design.parts.filter((p) => (p.pieces || []).length && p.role !== 'fixed').map((p) => [p.id, p]));
   for (const [pid, s] of pieces3d) if (!want.has(pid) || want.get(pid).version !== s.version) dropPieces(pid);
-  await Promise.all([...want.values()].filter((p) => !pieces3d.has(p.id) && noPieces.get(p.id) !== p.version).map(async (p) => {
+  await Promise.all([...want.values()].filter((p) => !pieces3d.has(p.id) && (noPieces.get(p.id) || {}).version !== p.version).map(async (p) => {
     try {
       const byKey = await loadPieces(p);
       if (!S.design || !S.design.parts.some((x) => x.id === p.id && x.version === p.version)) return;   // it moved on
       dropPieces(p.id);
       for (const m of byKey.values()) scene.add(m);
       pieces3d.set(p.id, { version: p.version, byKey });
-    } catch (e) { noPieces.set(p.id, p.version); }
+    } catch (e) { noPieces.set(p.id, { version: p.version, why: plainly(e.message) }); renderTree(); }
   }));
 }
-$('oneBody').onclick = () => { TREE.oneBody = !TREE.oneBody; keepTree(); paint(); };
+$('oneBody').onclick = () => { TREE.oneBody = !TREE.oneBody; keepTree(); paint(); renderTree(); };
 
 // ------------------------------------------------------------- how it's built, in 3D (CALI-52)
 // A part shown as built: every panel, stick, tube and plate where it sits, in layers you can switch off.
@@ -1838,7 +1850,7 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.shopOpen) { S.s
 // holes, and that read as a bug)
 function previewNote(p) {
   return S.station && S.station.part === p.id && (S.design.lighten_runs || []).some((r) => r.id === S.station.run)
-    ? `<div class="note-warn small">These are of the ${esc(p.id)} as it is, without the step you're previewing.
+    ? `<div class="note-warn small">These are of the ${esc(p.name || p.id)} as it is, without the step you're previewing.
         <b>Cut these holes</b> (in the bar under the 3D view) to make it part of it, then make them again.</div>` : '';
 }
 function patternView(p) {
@@ -2671,7 +2683,7 @@ function frameResults(p, run, runs) {
       `<option value="${k}" ${r.id === run.id ? 'selected' : ''}>${esc(frameLabel(r))}</option>`).join('')}</select>`
       : `<b>Last sizing</b> · ${esc(frameLabel(run))}`}</div>
     <div class="card" style="margin-top:8px">
-      ${c ? `<div class="small" style="margin-bottom:6px">Carrying <b>${lbs(c.mass_lb)}</b> — ${c.parts.map((x) => `${esc(x.part)} ${lbs(x.mass_lb)}`).join(', ')} —
+      ${c ? `<div class="small" style="margin-bottom:6px">Carrying <b>${lbs(c.mass_lb)}</b> — ${c.parts.map((x) => `${esc((S.design.parts.find((q) => q.id === x.part) || {}).name || x.part)} ${lbs(x.mass_lb)}`).join(', ')} —
         each piece where it sits; the floor takes it sideways to the nearest tube (up to ${len(c.reach_in * IN, 1)} away).</div>` : ''}
       <b>As drawn</b>: ${d.mass_lb} lb of steel · weakest member <b>${d.safety}x</b> (${esc(d.governing.member)}, ${esc(d.governing.case)}) ·
       sags ${len(d.deflection_mm, 2)} at ×${run.factor}<br>
@@ -3064,7 +3076,7 @@ function studiesView(d) {
     <table class="st studies-table"><tr><th>when</th><th>study</th><th>on</th><th>what it came to</th><th></th></tr>
       ${rows.map((r) => `<tr class="pick" data-go-kind="${r.kind}" data-go-part="${esc(r.part || '')}" data-go-run="${esc(r.id || '')}">
         <td class="when">${when(r.created)}</td><td>${esc(r.label)}</td>
-        <td>${r.part ? `${esc(r.part)} <span class="muted">v${r.version ?? '?'}</span>` : '<span class="muted">the design</span>'}
+        <td>${r.part ? `${esc((parts.find((x) => x.id === r.part) || {}).name || r.part)} <span class="muted">v${r.version ?? '?'}</span>` : '<span class="muted">the design</span>'}
           ${r.stale ? ' <span class="badge bad" title="it has changed since this ran">changed since</span>' : ''}</td>
         <td style="color:${r.ok === true ? 'var(--ok)' : r.ok === false ? 'var(--bad)' : 'inherit'}">${esc(r.headline)}</td>
         <td><button>Open</button></td></tr>`).join('')}</table>`
