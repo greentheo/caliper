@@ -119,6 +119,30 @@ _WAY = re.compile(r"\b(side to side|left to right|right to left|front to back|ba
                   r"\b(along|across)\s+the\s+(?:span|gap)\b", re.I)
 
 
+def _keep(store: DesignStore, pid: str, piece: str, way: Optional[str], grain: Optional[str], said: str) -> dict:
+    """Keep what was said: ``grain`` as said (along or across the span), or ``way`` in the part's own directions, read
+    against the span the last beam check measured. ``{"why": …}`` where that isn't known."""
+    if not grain:
+        axis = (beam_of(store, pid, piece) or {}).get("span_axis")
+        if axis is None:
+            return {"why": f"which way does the {piece} span? Check it holds first, then say it again (or say "
+                           f"\"along the span\" or \"across the span\")"}
+        grain = "along" if _WORD_AXIS[way.lower()] == axis else "across"
+    return {"part": pid, "piece": piece, "grain": grain, "entry": state(store, pid, piece, grain.lower(), said=said)}
+
+
+#: the whole of an answer to "which way?", punctuation aside (#153: a parked question, as "have a go" is)
+_BARE = re.compile(r"(front to back|back to front|side to side|left to right|right to left|up and down)|"
+                   r"(along|across)(?: the (?:span|gap))?")
+
+
+def answer(store: DesignStore, pid: str, piece: str, message: str) -> Optional[dict]:
+    """The reply to Caliper's "which way?" for this piece: kept, or None unless the whole message is the direction
+    ("front to back, and make it taller" is a request of its own)."""
+    m = _BARE.fullmatch(" ".join(re.sub(r"[^\w ]+", " ", (message or "").lower()).split()))
+    return None if m is None else _keep(store, pid, piece, m.group(1), m.group(2), message)
+
+
 def from_chat(store: DesignStore, message: str, scope: Optional[str] = None) -> Optional[dict]:
     """A grain the person says in the chat, for a sheet it can name: ``{part, piece, grain, entry}`` once kept, or
     ``{"why": …}`` when it can't be placed (said, never guessed), or None when the message isn't about a grain."""
@@ -144,20 +168,12 @@ def from_chat(store: DesignStore, message: str, scope: Optional[str] = None) -> 
             if name and (name.lower().replace("_", " ") in text or (words and all(w in text for w in words))):
                 found.append((p.id, name))
     if m is None:                                # a grain with no way: asked, never left to the designer (#151)
-        return {"why": "which way: front to back, or side to side?"} if found else None
+        return {"why": "which way: front to back, or side to side?",     # one sheet: the reply answers for it (#153)
+                **({"ask": {"part": found[0][0], "piece": found[0][1]}} if len(found) == 1 else {})} if found else None
     if not found:
         return {"why": "which sheet? Name it as its part does (its sheets are on the part's card)"}
     if len(found) > 1:
         return {"why": "that names " + ", ".join(f"the {n} of the {p.replace('_', ' ')}" for p, n in found)
                        + ": say which one"}
     (pid, piece), = found
-    if m.group(2):
-        grain = m.group(2).lower()
-    else:
-        pl = beam_of(store, pid, piece)
-        axis = (pl or {}).get("span_axis")
-        if axis is None:
-            return {"why": f"which way does the {piece} span? Check it holds first, then say it again (or say "
-                           f"\"along the span\" or \"across the span\")"}
-        grain = "along" if _WORD_AXIS[m.group(1).lower()] == axis else "across"
-    return {"part": pid, "piece": piece, "grain": grain, "entry": state(store, pid, piece, grain, said=message)}
+    return _keep(store, pid, piece, m.group(1), m.group(2), message)

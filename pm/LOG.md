@@ -32,6 +32,9 @@ second cone would have had no way out; the foot flange widened by 1 in twice.
   carriage_misses_rail went with it"). `restore` never goes over a part of that name. With main's grain: what Caliper's
   waiting on is read first, and "cut the top with the grain" isn't an answer, so it still reaches the which-way
   question. Tests: 35; mutants (no plan, no rules, overwrite, an unanchored yes) each fail.
+- **"Which way?" is parked too:** after "which way: front to back, or side to side?" for one sheet, a bare "front to
+  back", "side to side", "along" or "across" states that piece's grain (read against the span the last check measured).
+  One turn only; "front to back, and make it taller" isn't an answer, so it clears and goes on as a request.
 
 ### 2026-11-07 · CALI-104 (#97) · The cards right after a revision don't build or slice the part again
 Measured first, on copies of Theo's bar stool (v7) and step stool at main: warm cards were already under #97's 2 s

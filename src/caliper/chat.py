@@ -1135,6 +1135,16 @@ def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Op
     aw = awaiting.pending(store)
     if aw is None:
         return None
+    if aw["kind"] == "grain_way":                      # "which way?": a bare direction answers it, for that piece
+        from . import grain
+
+        awaiting.clear(store)
+        try:
+            got = grain.answer(store, aw["part"], aw["piece"], message)
+        except ValueError as e:                        # the part or sheet has gone since it asked
+            return TurnResult(action="grain", ok=False, part=aw["part"], events=kw["events"],
+                              reply=f"I couldn't keep that grain: {e}.")
+        return None if got is None else _grain_reply(got)
     yes = awaiting.reads(message)
     awaiting.clear(store)
     if yes is None:
@@ -1196,6 +1206,16 @@ def _grain_said(store: DesignStore, message: str, scope: Optional[str]) -> Optio
         return TurnResult(action="grain", reply=f"I couldn't keep that grain: {e}.", ok=False)
     if got is None:
         return None
+    if got.get("ask"):                                 # "which way?": the reply answers for this piece (#153)
+        from . import awaiting
+
+        awaiting.park(store, "grain_way", **got["ask"])
+    return _grain_reply(got)
+
+
+def _grain_reply(got: dict) -> TurnResult:
+    from . import grain
+
     if "why" in got:
         return TurnResult(action="grain", reply=f"I couldn't keep that grain: {got['why']}.", ok=False)
     return TurnResult(action="grain", part=got["part"], ok=True,

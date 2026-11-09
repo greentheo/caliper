@@ -162,7 +162,7 @@ def test_a_grain_request_lets_the_question_lapse_and_still_asks_which_way(bench)
     got = chat.turn(bench, "cut the top with the grain", use_llm=False, classifier=_never)
     assert got.action == "grain" and not got.ok
     assert got.reply == "I couldn't keep that grain: which way: front to back, or side to side?."
-    assert awaiting.pending(bench) is None
+    assert awaiting.pending(bench)["kind"] == "grain_way"                       # the rule's question lapsed; this one's parked
 
 
 def test_have_a_go_still_routes_by_what_s_pending_on_a_design_with_sheets(bench):
@@ -243,3 +243,59 @@ def test_put_back_never_overwrites_a_part_of_that_name(store):
     assert got.action == "restore" and not got.ok and "already has a part 'rail'" in got.reply
     assert store.read_script("rail") == mine and store.design.part("rail").version == 1
     assert [t["part"] for t in trash.listing(store)] == ["rail"]                      # still there to put back later
+
+
+# --- #153: "which way?" is parked too: a bare direction answers it, for that piece, for one turn ------------------------
+
+@pytest.fixture
+def checked(bench):
+    from .test_grain import _beam, _run_with
+
+    _run_with(bench, _beam(bench))                                                # its span runs front to back
+    return bench
+
+
+@pytest.mark.parametrize("said,grain_is", [("front to back", "along"), ("Side to side.", "across"), ("along", "along"),
+                                           ("across", "across"), ("along the span", "along")])
+def test_a_bare_direction_answers_which_way_for_that_piece(checked, said, grain_is):
+    from caliper import grain
+
+    asked = chat.turn(checked, "cut the top with the grain", use_llm=False, classifier=_never)
+    assert asked.reply == "I couldn't keep that grain: which way: front to back, or side to side?."
+    got = chat.turn(checked, said, use_llm=False, classifier=_never)
+    assert got.action == "grain" and got.ok and got.part == "bench" and got.reply.startswith("Kept: cut the top with its")
+    assert grain.stated(checked, "bench")["top"]["grain"] == grain_is
+    (msg,) = [e for e in checked.log() if e.get("kind") == "message" and e.get("text") == said]
+    assert msg["routed_by"] == "pending" and awaiting.pending(checked) is None
+
+
+def test_a_direction_and_a_request_isn_t_an_answer(checked):
+    from caliper import grain
+
+    from .test_beam_width import TOP
+
+    chat.turn(checked, "cut the top with the grain", use_llm=False, classifier=_never)
+    got = chat.turn(checked, "front to back, and make it taller", use_llm=False, author=_author(TOP), max_rounds=1)
+    assert got.action != "grain" and grain.stated(checked, "bench") == {}
+    assert awaiting.pending(checked) is None
+
+
+def test_which_way_lasts_one_turn(checked):
+    from caliper import grain
+
+    from .test_beam_width import TOP
+
+    chat.turn(checked, "cut the top with the grain", use_llm=False, classifier=_never)
+    chat.turn(checked, "what's it made of?", use_llm=False)
+    assert awaiting.pending(checked) is None
+    got = chat.turn(checked, "front to back", use_llm=False, author=_author(TOP), max_rounds=1)
+    assert got.action != "grain" and grain.stated(checked, "bench") == {}
+
+
+def test_a_direction_with_no_measured_span_says_so(bench):
+    from caliper import grain
+
+    chat.turn(bench, "cut the top with the grain", use_llm=False, classifier=_never)
+    got = chat.turn(bench, "front to back", use_llm=False, classifier=_never)
+    assert got.action == "grain" and not got.ok and "Check it holds first" in got.reply
+    assert grain.stated(bench, "bench") == {}

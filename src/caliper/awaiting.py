@@ -7,6 +7,7 @@ already does (``promote.pending``), and the next turn reads a go-ahead or a no a
 - ``fix_rule``: an accepted rule that doesn't hold yet ("have a go" refines that part to meet it);
 - ``remove``: "Remove conical_skirt? Its files go to the design's trash." (yes removes it);
 - ``repeat``: a request that matches what the last revision just did (yes does it again on top).
+- ``grain_way``: "which way: front to back, or side to side?" (a bare direction states that piece's grain, #153).
 
 Only a message that is just the go-ahead or the no answers it. Anything else lets the question lapse: the turn goes on
 as ever, as its own request.
