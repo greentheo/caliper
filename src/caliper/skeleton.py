@@ -88,10 +88,11 @@ def drive(store: DesignStore, skeleton: list, said: str = "") -> dict:
                 continue
             scripts[pid] = aero.set_params(script, {n: new_mm})
             out["rebuilt"].setdefault(pid, []).append(n)
+    builds: dict = {}
     for pid, script in scripts.items():             # every part built with its new numbers first
         if pid in out["refused"]:
             continue
-        built = sandbox.run_script(script, {})
+        built = builds[pid] = sandbox.run_script(script, {})
         if not built.ok:
             tail = [ln for ln in (built.feedback or "").strip().splitlines() if ln.strip()]
             out["refused"][pid] = f"it won't build with it: {tail[-1].strip() if tail else 'the build failed'}"
@@ -104,7 +105,8 @@ def drive(store: DesignStore, skeleton: list, said: str = "") -> dict:
         said_n = "; ".join(f"{n} set to {after[n]['value']:g} {after[n]['unit']}"
                            + (f" ({_mm(after[n]):g} mm)" if after[n]["unit"] != "mm" else "") for n in names)
         store.write_part(pid, scripts[pid], action="skeleton", feedback=said_n + " by the skeleton",
-                         extra={"skeleton": {n: list(changed[n]) for n in names}, **({"asked": said} if said else {})})
+                         extra={"skeleton": {n: list(changed[n]) for n in names}, **({"asked": said} if said else {})},
+                         built=(scripts[pid], {}, builds[pid].geometry) if builds.get(pid) else None)
         if load_study.list_runs(store, pid):
             out["strength"].append(pid)              # its strength check is of the older shape now
     out["report"], errors = store.evaluate(tolerant=True)
