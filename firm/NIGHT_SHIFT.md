@@ -3,7 +3,7 @@
 **Night shift turns a ready issue into a tested pull request.** Autonomous: work without asking for input,
 and leave what you can't resolve as a written question on the issue rather than a guess.
 
-Read [README.md](README.md), then the specs it lists, then [`pm/LOG.md`](../pm/LOG.md)'s last few entries
+Read [README.md](README.md), then the specs it lists, then the last few entries of `make log`
 (what was just built, and why). For anything the designer writes, read
 [`src/caliper/part_scripts.md`](../src/caliper/part_scripts.md): it's the designer's reference, word for word.
 
@@ -77,7 +77,7 @@ Post the one count on every PR it covers.
 - The body opens with `— night shift`, then: what changed, how you verified it (commands and results, what
   you clicked), what you could **not** verify, anything that changes a verdict or a saved design, and
   `Closes #N`. It ends with the Claude Code line.
-- `pm/LOG.md` and `pm/DEMO.md` are updated in the PR (see README).
+- The PR adds its entry files to `pm/log/` and `pm/demo/` (see README). It doesn't edit `pm/LOG.md`.
 - **Never merge, never push to `main`.**
 - Move the issue to `stage: review`, drop `in-progress`, and tell the foreman the PR is up.
 
