@@ -462,7 +462,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                            _line(f"Print it in {pr['material'].upper()}: {n}; print time: the slicer couldn't work it "
                                  f"out: {_why(pr)}.", "warn") if pr.get("hours") is None else
                            _line(f"Print it in {pr['material'].upper()}: {n}, about {pr['hours']:g} h"
-                                 + (f" (a rough guess; the slicer couldn't work it out: {_why(pr)})"
+                                 + (f" ({pr['rough']} of {pr['pieces']} pieces is a rough guess: {_why(pr)})"
+                                    if 0 < pr.get("rough", 0) < pr["pieces"] else
+                                    f" (a rough guess; the slicer couldn't work it out: {_why(pr)})"
                                     if pr.get("slicer_failed") else "") + ".", "ok"))
             why: dict = {}
             for x in mk["missing"]:

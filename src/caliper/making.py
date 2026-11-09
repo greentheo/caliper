@@ -68,12 +68,14 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
                             "pinned": len(parts) > 1, "files": each, "pending": True, "hours": None,
                             "filament_g": None, "usd": None, "trust": None, "from": printing.WORKING["from"]})
             continue
+        rough = [e for e in each if e.get("trust") == "rough"]   # the group is as rough as its roughest piece (#160)
         printed.append({"name": pc["name"], "material": pc["material"], "pieces": len(parts),
                         "pinned": len(parts) > 1, "files": each,
                         "hours": round(sum(e["hours"] for e in each), 1),
                         "filament_g": round(sum(e["filament_g"] for e in each)),
-                        "usd": round(sum(e["usd"] for e in each), 2), "trust": each[0]["trust"],
-                        "from": each[0]["from"], "slicer_failed": any(e.get("slicer_failed") for e in each)})
+                        "usd": round(sum(e["usd"] for e in each), 2), "trust": (rough or each)[0]["trust"],
+                        "from": (rough or each)[0]["from"], "rough": len(rough),
+                        "slicer_failed": any(e.get("slicer_failed") for e in each)})
     by_how: dict = {}
     for p in pieces:
         if p["ok"]:
