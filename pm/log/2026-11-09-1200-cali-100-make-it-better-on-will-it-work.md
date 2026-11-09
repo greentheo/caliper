@@ -17,5 +17,10 @@ The carve and the lightening lived one click down, and Studies never listed Carv
   button refuses.
 - **The page is minimal until Theo's seen the mockup:** the lines are ordinary card lines that go to the strength
   panel, where Carve, Lighten and "Use" already are. No new controls.
-- Tests: tests/test_make_it_better.py (11). Mutants (ignoring `blocked`, no settled filter, invitations first) each
-  fail one.
+- **#157 review:** before any check, the only line is "Check it holds first": no Carve, no Lighten. A printed part is
+  never offered Lighten (it has no Lighten panel; Studies says "its printed part is carved, not lightened with holes").
+  A failing part's thicker sheet is offered only for a panel that fails, and a panel with a load the FEA governs or a
+  case not settled quotes nothing. The carve's time is one wording, sent by the server (`carve_takes`), read by both
+  the card and the Carve button.
+- Tests: tests/test_make_it_better.py (23). Mutants (ignoring `blocked`, no settled filter, invitations first, a
+  non-plate fail, an FEA-governed panel, a panel that holds, an unknown case, no check, Lighten on printed) each fail.
