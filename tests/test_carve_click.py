@@ -311,13 +311,13 @@ console.log(JSON.stringify({ first, again, asked }));
 
 def test_a_redraw_while_a_carve_runs_keeps_its_panel_and_the_button_stays_off():
     """#93 item 3: a redraw replaced the progress panel with an empty one, and the button came back enabled."""
-    out = _run(_page(["carveView", "carveChart", "carveProgress", "carveTime", "carveBlocked", "defaultCheck"],
-                     ["CARVE_PER_CHECK_AT_LEAST", "minutesText", "ran", "verdictTone", "holdsHere"], """
+    out = _run(_page(["carveView", "carveChart", "carveProgress", "carveTime", "carveBlocked"],
+                     ["minutesText", "ran", "verdictTone", "holdsHere"], """
 const esc = (s) => String(s);
 const S = { carveJob: {}, station: null };
 const carveRuns = () => [];
 const loadRuns = () => [{ version: 3, spacing_mm: 4.6, seconds: 90, cases: [{ fea: { supported: true } }] }];
-const p = { id: 'stool', version: 3, carved: false };
+const p = { id: 'stool', version: 3, carved: false, carve_takes: 'at least about 68 min at this size' };
 const before = carveView(p);
 S.carveJob.stool = { job: 'j1', text: 'step 2: 20% of the printed part carved away', step: 2, steps: 7, progress: 0.4,
                      t0: Date.now() - 600000, p0t: Date.now() - 300000, p0: 0.1 };
@@ -350,7 +350,7 @@ def test_the_label_goes_by_this_version_s_default_check_and_never_promises_a_tim
     """#102 review, the blocker: "about 10 min" for a tube whose sweep alone took 30; "3 min" or "42 h" on the bar stool,
     from whichever check was latest. It goes by this version's default-voxel check (a finer one asked for is always
     finer), says "at least" until a carve has finished, and says nothing when the check didn't connect."""
-    out = _run(_page(["carveTime", "carveBlocked", "defaultCheck"], ["CARVE_PER_CHECK_AT_LEAST", "minutesText"], """
+    out = _run(_page(["carveTime", "carveBlocked"], ["minutesText"], """
 const S = {};
 const p = { id: 'stool', version: 3 };
 let carves = [], checks = [];
@@ -358,9 +358,9 @@ const carveRuns = () => carves, loadRuns = () => checks;
 const joined = [{ fea: { supported: true } }], cut = [{ fea: { supported: false } }];
 out = {};
 out.none = carveTime(p);
-checks = [{ version: 3, spacing_mm: 2.3, seconds: 2350, cases: joined },        // a finer run, the latest
-          { version: 3, spacing_mm: 4.6, seconds: 20, cases: joined },
-          { version: 2, spacing_mm: 9.0, seconds: 1, cases: joined }];           // an older version
+checks = [{ version: 3, spacing_mm: 2.3, seconds: 2350, cases: joined },
+          { version: 3, spacing_mm: 4.6, seconds: 20, cases: joined }];
+p.carve_takes = 'at least about 15 min at this size';                          // the server's words (#157)
 out.floor = carveTime(p);
 checks[1].cases = cut;
 p.blocked = { why: 'unsupported', carve: "its voxels don't connect the load to a support yet, so a carve can't run" };
@@ -375,7 +375,7 @@ p.blocked = { why: 'too_thin', carve: "Its walls are too thin for the voxel chec
 out.thin = carveTime(p);
 """))
     assert out["none"] == "check it holds first: how long it takes comes from that"
-    assert out["floor"] == "at least about 15 min at this size"                 # 20 s x 45, never 2350 s x anything
+    assert out["floor"] == "at least about 15 min at this size"                 # read as sent: test_make_it_better works it out
     assert out["cut"] == "its voxels don't connect the load to a support yet, so a carve can't run"
     assert out["done"] == "about 30 min at this size, as its last carve took"
     assert out["blocked"] == out["cut"]                                       # #102's note: the reason, not a time

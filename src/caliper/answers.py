@@ -489,6 +489,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                 how.append(_line("Make the patterns to print or project.", "info", action="patterns"))
     elif p.get("role") != "fixed":
         how.append(_line("Not known yet: it doesn't say what it's built from.", "warn"))
+    from . import better
+
+    work += better.offers(store, state, pid)        # Make it better, where the person looks (#92)
     return [_card("what", "What is it?", what),
             _card("work", "Will it work?", work, "Say what it must do and I'll check it."),
             _card("buy", "What do I buy?", buy),
@@ -818,6 +821,8 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     elif not work and not broken:
         work.append(_line("Nothing to hold it to yet: say what it must do.", "warn"))
     work = broken + work
+    if solo:                                         # one part: its Make it better here too, no selecting first (#92)
+        work += [ln for ln in solo["work"]["lines"] if ln.get("better")]
 
     buy = list(solo["buy"]["lines"]) if solo else []
     if now.get("cost.usd") and not solo:

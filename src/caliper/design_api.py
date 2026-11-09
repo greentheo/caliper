@@ -18,7 +18,7 @@ from typing import Optional
 
 from pydantic import BaseModel, field_validator
 
-from . import (aero, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, grain,
+from . import (aero, better, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, grain,
                lighten,
                load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, verdicts)
 from . import whittle_bridge as wb
@@ -313,6 +313,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "loads": "def loads(" in script,      # what it must hold: a strength study (CALI-54)
             # printed, whole or the rest beside its sheets: carved free-form, not lightened with holes (CALI-82)
             "printed": bool(re.search(r"""["']kind["']\s*:\s*["']printed["']""", script)),
+            # sheet pieces: lightened with holes (a printed part is carved) (#92)
+            "sheets": bool(re.search(r"""["']kind["']\s*:\s*["']sheet["']""", script)),
             "carved": "CARVED" in script,
             # its strength rests on a filled-in solid (or a shape that couldn't be checked): no "holds" (CALI-96)
             "untrusted": consistency.filled(store, p.id) if "def loads(" in script else None,
@@ -385,6 +387,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
                 h["verdict"] = verdicts.history(h)
     for p in parts:                           # what stops a carve or a lightening: the card's offer reads it too (#144)
         p["blocked"] = load_study.blocked(store, p["id"])
+        p["carve_takes"] = better.carve_takes(load_study.default_check(store, p["id"]))   # one wording (#157)
     current = {p["id"]: p["version"] for p in parts}
     for rel in runs["release"]:                # ready, as made and for the parts as they are now (#132 review)
         rel["verdict"] = verdicts.release(rel, current)

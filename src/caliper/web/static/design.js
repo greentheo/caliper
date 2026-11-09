@@ -957,7 +957,8 @@ function designView(d) {
 const QUESTIONS = [['what', 'What is it?'], ['work', 'Will it work?'], ['buy', 'What do I buy?'], ['make', 'How do I make it?']];
 const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' };
 const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox', trial: 'trialBox',
-  carve: 'loadBox' };                 // the carve's panel is under Will it hold? (#89 item 6)
+  carve: 'loadBox', lighten: 'loadBox', carve_use: 'loadBox', lighten_use: 'loadBox', use_t: 'loadBox' };
+// Make it better's lines (#92) go to the panel where each is run or used; their own design waits for Theo's mockup                 // the carve's panel is under Will it hold? (#89 item 6)
 function numbersOpen(k) { try { return localStorage.getItem(`caliper.numbers.${k}`) === '1'; } catch (e) { return false; } }
 function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${k}`, on ? '1' : '0'); } catch (e) { /* private window */ } }
 
@@ -2074,15 +2075,8 @@ function paintCarve(pid) {
 // A carve's time over its strength check's isn't a constant: 47 on the printed box, 67 on the mixed stool, about 65 on
 // the bar stool's sweep, about 190 on the reviewer's tube (#102 review). So until a carve of the part has finished,
 // the label is a floor, "at least about N min", from the low end; after one, that carve's own time.
-const CARVE_PER_CHECK_AT_LEAST = 45;
 const minutesText = (min) => (min < 1.5 ? '1 min' : min < 75 ? `${Math.round(min)} min` : min < 100 ? 'an hour'
   : `${(min / 60).toFixed(1)} hours`);
-// the check to go by: this version's at the default voxels. A finer run asked for (CALI-97) is always finer than the
-// default, so it's the coarsest at this version, never the latest whatever its voxels
-function defaultCheck(p) {
-  const at = loadRuns(p.id).filter((r) => r.version === p.version && r.seconds);
-  return at.length ? at.reduce((a, r) => (r.spacing_mm > a.spacing_mm ? r : a)) : null;
-}
 // what stops a carve (or a lightening) before it starts, in words, or '' (CALI-106, #101; #102's note): it already
 // fails (#137 item 3), its walls are too thin (#136), its voxels don't connect. The server's one test
 // (load_study.blocked), which the card's carve offer reads too, so the two can't disagree (#144 review)
@@ -2093,9 +2087,7 @@ function carveTime(p) {
   if (carveBlocked(p)) return carveBlocked(p);
   const done = carveRuns(p.id).find((r) => r.status === 'done' && r.seconds);
   if (done) return `about ${minutesText(done.seconds / 60)} at this size, as its last carve took`;
-  const check = defaultCheck(p);
-  if (!check) return 'check it holds first: how long it takes comes from that';
-  return `at least about ${minutesText(check.seconds * CARVE_PER_CHECK_AT_LEAST / 60)} at this size`;
+  return p.carve_takes || 'check it holds first: how long it takes comes from that';   // the server's words, as the card's
 }
 function wireCarve(p) {
   if ($('carveGo')) $('carveGo').onclick = () => runCarve(p);
