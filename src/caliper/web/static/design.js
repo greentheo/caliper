@@ -14,6 +14,7 @@ const IN = 25.4;
 const S = {
   slug: null,          // the open design
   design: null,        // its last state from the server
+  running: {},         // a load check or Lighten this page started and is following, by kind and part (#159)
   scope: null,         // the selected part (the chat is about it), or null = the whole design
   busy: false,         // a turn is in flight
   station: null,       // {run, index} when previewing a whittle station in the viewport
@@ -963,7 +964,9 @@ function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${
 
 function answersKey() {               // what the answers depend on: a change to any of it asks again
   const d = S.design;
+  const runs = (list) => (list || []).map((r) => [r.id, r.status]);   // a finished carve or Lighten changes the offers (#159)
   return JSON.stringify([S.slug, S.scope, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
+    runs(d.carve_runs), runs(d.lighten_runs),
     (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
     (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey]);
 }
@@ -991,7 +994,10 @@ function betterLines(c, offers) {
 async function useBetter(ln) {
   const p = S.design.parts.find((x) => x.id === ln.part);
   if (!p || ln.disabled) return;
-  if (ln.action === 'use_t') return send(ln.say, ln.part);
+  if (ln.action === 'use_t') {
+    if (!S.claude) { showErr("Changing it needs Claude, which isn't set up here."); return; }   // not the SDK's own error
+    return send(ln.say, ln.part);
+  }
   if (S.scope !== ln.part) setScope(ln.part);                 // their panels are the part's, under its numbers
   goTo('loadBox');
   if (ln.action === 'load') return runLoad(p);
@@ -2310,6 +2316,11 @@ function wireLoad(p) {
 }
 
 async function runLighten(p) {
+  if (S.running[`lighten:${p.id}`]) return;        // already asked: a second click does nothing
+  S.running[`lighten:${p.id}`] = true;
+  try { await startLighten(p); } finally { delete S.running[`lighten:${p.id}`]; }
+}
+async function startLighten(p) {
   const prog = $('lightProgress'), go = $('lightGo');
   go.disabled = true;
   prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="lightMsg">starting…</div>';
@@ -2333,6 +2344,11 @@ async function runLighten(p) {
 }
 
 async function runLoad(p, spacing) {
+  if (S.running[`load:${p.id}`]) return;           // already asked: the card's button and the panel's are two ways in
+  S.running[`load:${p.id}`] = true;
+  try { await startLoad(p, spacing); } finally { delete S.running[`load:${p.id}`]; }
+}
+async function startLoad(p, spacing) {
   const prog = $('lProgress'), go = $('lGo');
   go.disabled = true;
   if ($('lFiner')) $('lFiner').disabled = true;

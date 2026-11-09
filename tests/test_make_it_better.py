@@ -87,7 +87,8 @@ def test_after_a_carve_it_gives_the_result_to_use(tmp_path):
     _carved(store, "tube")
     (line,) = _offers(store, "tube")
     assert line["text"] == ("Carve the tube where it isn't working: 61% of the printed part carved away, 644 g less "
-                            "filament, still about 2.6 times over.")
+                            "filament, still about 2.6 times over by the carve's own check. Using it re-checks it, and that's "
+                            "the number to go by.")
     assert line["action"] == "carve_use" and line["station"] == 1
 
 
@@ -153,7 +154,7 @@ def test_ten_or_more_reads_more_than_10_never_a_bigger_number(tmp_path):
     _check(store, "tube", 14.0)
     _carved(store, "tube", whole=14.0, safety=12.3)
     (line,) = _offers(store, "tube")
-    assert line["text"].endswith("still more than 10 times over.")
+    assert "still more than 10 times over by the carve's own check." in line["text"]
 
 
 # --- the cheapest first: a thinner sheet, then a lightening ------------------------------------------------------------
@@ -174,7 +175,7 @@ def test_the_cheapest_real_improvement_comes_first(tmp_path):
     got = _offers(store, "stool")
     assert [ln["action"] for ln in got] == ["use_t", "lighten_use"]
     assert got[1]["text"] == ("Lighten it with holes where the wood isn't working: 1.8 lb lighter, still about 2.4 "
-                              "times over.")
+                              "times over by the lightening's own check. Using it re-checks it, and that's the number to go by.")
 
 
 def test_the_card_and_a_one_part_design_s_card_carry_them(tmp_path):
@@ -214,17 +215,48 @@ THIN = ("its thinnest walls, 0.25 mm in the cone skirt, are too thin for the str
 
 
 @pytest.mark.parametrize("extra", [{"thin_said": THIN}, {"thin_said": "older words", "sees_mm": 9.2}])
-def test_walls_too_thin_for_the_check_get_what_would_let_it_see_them(tmp_path, extra):
-    """The bar stool: the check can't see its walls. The first offer is what fixes that; Carve waits, and says so."""
+def test_a_thin_named_piece_gets_how_thick_rounded_up_and_says_a_finer_check_follows(tmp_path, extra):
+    """#159 review: a real 9.2 mm wall came back still too thin (the true figure was 9.207), and the next click was no
+    verdict either: it never says the check will settle it."""
     store = _store(tmp_path, TUBE, "tube")
     _check(store, "tube", 3.0, thinnest=0.25, spacing=2.3, too_thin=True, thinnest_where={"piece": "cone skirt"}, **extra)
     wall, carve_it = _offers(store, "tube")
-    assert wall["lead"] == "Make the cone skirt walls 9.2 mm so the check can see them"
-    assert wall["cost"] == "It takes more filament. Then the check runs at a size it can trust."
+    assert wall["lead"] == "Make the cone skirt 9.3 mm thick so a finer check can see it"
+    assert wall["cost"].startswith("It takes more filament, and then a finer check: ")
+    assert "trust" not in wall["cost"]
     assert wall["button"] == "Try it" and wall["action"] == "use_t" and not wall.get("disabled")
-    assert wall["say"] == "Make the walls of the cone skirt at least 9.2 mm thick so the strength check can see them"
+    assert wall["say"] == "Make the cone skirt at least 9.3 mm thick so the strength check can see it"
     assert carve_it["disabled"] and carve_it["action"] == "carve" and carve_it["lead"] == "Carve the tube where it isn't working"
     assert carve_it["cost"] == "At least about 45 min at this size. It waits for a check it can trust."
+
+
+#: as a real check records it: a sliver at a point, not a piece (#159 review: the fixture's {"piece": …} hid this)
+REAL_WHERE = {"at": [12.3, -4.5, 409.0]}
+
+
+def test_a_thin_spot_that_isn_t_a_piece_says_where_and_promises_nothing(tmp_path):
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 3.0, thinnest=0.25, spacing=2.3, too_thin=True, thinnest_where=REAL_WHERE, sees_mm=9.2)
+    spot, carve_it = _offers(store, "tube")
+    assert spot["lead"] == "The thinnest spot is 0.25 mm, around z 409 mm: thicken it or make the openings smaller"
+    assert spot["cost"] == "It takes more filament. The strength check can see walls from 9.3 mm at this size."
+    assert "around z 409 mm" in spot["say"] and "9.3 mm" in spot["say"] and spot["action"] == "use_t"
+    assert carve_it["disabled"]
+
+
+def test_theo_s_stool_a_fail_too_coarse_to_judge_reaches_the_screen(tmp_path):
+    """0.53x on a run too coarse to see its walls: before this, already_fails returned nothing at all."""
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 0.53, thinnest=0.25, spacing=4.6, too_thin=True, thinnest_where=REAL_WHERE, sees_mm=9.2)
+    spot, carve_it = _offers(store, "tube")
+    assert spot["lead"].startswith("The thinnest spot is 0.25 mm") and carve_it["disabled"]
+    assert carve_it["cost"].endswith("It waits for a check it can trust.")
+
+
+def test_a_fail_on_a_settled_run_stays_as_it_was(tmp_path):
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 0.53)
+    assert _offers(store, "tube") == []
 
 
 def test_every_offer_has_its_lead_cost_button_and_part(tmp_path):
@@ -233,7 +265,8 @@ def test_every_offer_has_its_lead_cost_button_and_part(tmp_path):
     _carved(store, "tube")
     (line,) = _offers(store, "tube")
     assert line["lead"] == "Carve the tube where it isn't working" and line["button"] == "Use it" and line["part"] == "tube"
-    assert line["cost"] == "61% of the printed part carved away, 644 g less filament, still about 2.6 times over."
+    assert line["cost"] == ("61% of the printed part carved away, 644 g less filament, still about 2.6 times over by the "
+                            "carve's own check. Using it re-checks it, and that's the number to go by.")
     assert line["text"] == f"{line['lead']}: {line['cost']}"                 # the same, as one sentence
 
 
@@ -272,7 +305,7 @@ def test_the_card_draws_a_make_it_better_section_with_buttons():
 ])
 def test_each_button_goes_through_what_its_panel_already_does(line, called):
     got = _page_of(
-        "const calls = []; const S = {scope: null, design: {parts: [{id: 'p'}]}};\n"
+        "const calls = []; const S = {claude: true, scope: null, design: {parts: [{id: 'p'}]}};\n"
         "function send(t, s) { calls.push(`send:${t}:${s}`); } function setScope(p) { S.scope = p; calls.push(`scope:${p}`); }\n"
         "function goTo(b) { calls.push(`goto:${b}`); } function runCarve(p) { calls.push(`carve:${p.id}`); }\n"
         "function runLighten(p) { calls.push(`lighten:${p.id}`); }\n"
@@ -371,3 +404,70 @@ def test_the_time_goes_by_the_default_check_not_a_finer_one(tmp_path):
     default = next(r for r in load_study.list_runs(store, "tube") if r["id"].endswith("default"))
     _save(load_study.runs_dir(store), {**default, "seconds": 20.0})
     assert better.carve_takes(load_study.default_check(store, "tube")) == "at least about 15 min at this size"
+
+
+# --- #159 review: the card follows the runs, one click one run, no SDK error -------------------------------------------
+def _page(names: tuple, head: str, body: str) -> dict:
+    import json
+    import subprocess
+
+    from .test_carve_click import _fn, _node
+
+    src = open(_JS).read()
+    script = head + "\n".join(_fn(src, n) for n in names) + f"\n(async () => {{ const out = await (async () => {{ {body} }})();\nconsole.log(JSON.stringify(out)); }})();"
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    return json.loads(got.stdout)
+
+
+_JS = os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")
+
+
+def test_a_finished_carve_or_lighten_asks_the_cards_again():
+    head = """const S = { slug: 'x', scope: 'p', shopKey: 0, design: { parts: [], carve_runs: [{ id: 'a', status: 'running' }], lighten_runs: [] } };\n"""
+    got = _page(("answersKey",), head, """const a = answersKey();
+        S.design.carve_runs = [{ id: 'a', status: 'done' }];
+        const b = answersKey();
+        S.design.lighten_runs = [{ id: 'l', status: 'done' }];
+        return { a, b, c: answersKey() };""")
+    assert len({got["a"], got["b"], got["c"]}) == 3
+
+
+_RUNS = """const S = { slug: 'x', running: {}, loadRun: {}, design: {} };
+const esc = (s) => String(s);
+let posts = 0, release;
+const gate = new Promise((r) => { release = r; });
+const el = () => ({ disabled: false, innerHTML: '', value: '2', querySelector: () => null });
+const $ = () => el();
+const api = async () => { posts += 1; return { job_id: 'j' }; };
+const follow = async () => { await gate; };
+const clearStation = () => {}, refresh = async () => {}, loadRuns = () => [], lightenRuns = () => [], showHeat = () => {}, holdsHere = () => false, showStation = () => {};
+"""
+
+
+@pytest.mark.parametrize("name,inner", [("runLoad", "startLoad"), ("runLighten", "startLighten")])
+def test_a_second_click_starts_nothing(name, inner):
+    got = _page((name, inner), _RUNS, f"""const p = {{ id: 'p' }};
+        const first = {name}(p), second = {name}(p);
+        await second;
+        const during = posts;
+        release();
+        await first;
+        await {name}(p);
+        return {{ during, after: posts }};""")
+    assert got == {"during": 1, "after": 2}                                 # and once it's over, another may start
+
+
+_BETTER = """const S = { claude: CLAUDE, design: { parts: [{ id: 'p' }] } };
+const errs = [], sent = [];
+const showErr = (m) => errs.push(m), send = (t, s) => sent.push([t, s]);
+const setScope = () => {}, goTo = () => {}, runLoad = () => {}, runCarve = () => {}, runLighten = () => {}, adoptStation = () => {};
+"""
+
+
+@pytest.mark.parametrize("claude,errs,sent", [(False, 1, 0), (True, 0, 1)])
+def test_try_it_with_no_key_says_so_and_sends_nothing(claude, errs, sent):
+    got = _page(("useBetter",), _BETTER.replace("CLAUDE", "true" if claude else "false"),
+                """await useBetter({ part: 'p', action: 'use_t', say: 'thicken it' }); return { errs, sent };""")
+    assert len(got["errs"]) == errs and len(got["sent"]) == sent
+    assert not errs or "isn't set up here" in got["errs"][0]

@@ -14,3 +14,9 @@ Theo approved the mockup: *"looks great, love the layout."* Stacked on the serve
 - Tests: tests/test_make_it_better.py (+11: the wall offer from a new run and an old one, Carve disabled, each offer's
   shape, the card's section run in node, each button's route). In the browser on a copy of the stool with its check
   set to the mockup's state: it matches, Carve is disabled, no console or server errors.
+- **#159 review (reviewer-2 ran the real check, not the edited record):**
+  - The wall offer stops promising. A real 9.2 mm wall came back still too thin, because the thin spot on the stool isn't the wall `wall_t` sets. Where the thin spot is a point (a real run's `{"at": …}`) it now says where and what to do; "make it N" is only for a named piece, rounded up, and it says a finer check follows and what that costs.
+  - Theo's stool reaches the screen: a fail on a run too coarse to see its walls gets the thin-spot line and Carve off with why. A fail on a settled run is as it was.
+  - Carve and Lighten runs are in `answersKey()`, so a finished run updates the card and a stale "Carve it" can't start a second carve.
+  - "Use it" quotes say they're the study's own check and that using it re-checks.
+  - `runLoad` and `runLighten` take one click; "Try it" with no key says Claude isn't set up here.
