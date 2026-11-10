@@ -842,7 +842,8 @@ def _status(card: dict) -> str:
     untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0
     edge = s.get("edge") or 0
     rest = s["unknown"] - untrusted - unresolved - edge
-    why = [f"{s['fail']} check(s) fail" if s["fail"] else "", f"{untrusted} not trusted" if untrusted else "",
+    open_ = s.get("unsettled") or 0
+    why = [f"{s['fail']} check(s) fail" + (f" ({open_} not settled: too coarse to see its walls)" if open_ else "") if s["fail"] else "", f"{untrusted} not trusted" if untrusted else "",
            f"{unresolved} not resolved" if unresolved else "",          # an FEA too coarse to see its walls (CALI-110)
            f"{edge} checked in the middle only, not at the front edge" if edge else "",       # (CALI-94)
            f"{rest} unknown" if rest else ""]
@@ -862,6 +863,8 @@ def _safety_cell(c: dict) -> tuple[str, str]:
         return "checked in the middle only, not at the front edge", "—"
     if kind not in ("holds", "fails"):               # any other kind: its word, never a number to build on
         return _e((c.get("verdict") or {}).get("word") or "not checked"), "—"
+    if (c.get("verdict") or {}).get("coarse"):       # a ✗ stays a ✗, not as a settled number (#191)
+        return f"about {_num(c.get('safety'))}x, not settled: too coarse to see its walls", "—"
     return f"{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x", breaks
 
 
