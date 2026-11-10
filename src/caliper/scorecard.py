@@ -55,7 +55,7 @@ def cards_dir(store: DesignStore) -> str:
 
 #: How the card weighs and scores. A card filed by an older scorer is out of date even at the same versions: the
 #: release scores again, the page says so (CALI-111: cards before 2 left printed pieces out of weight.total_lb).
-SCORER = 2
+SCORER = 3
 
 
 def list_cards(store: DesignStore, limit: int = 20) -> list[dict]:
