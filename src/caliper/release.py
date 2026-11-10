@@ -866,11 +866,16 @@ def _safety_cell(c: dict) -> tuple[str, str]:
         return "not resolved: too coarse to see its walls", "—"
     if kind == "edge":                               # where people stand wasn't loaded (CALI-94)
         return "checked in the middle only, not at the front edge", "—"
-    if kind not in ("holds", "fails"):               # any other kind: its word, never a number to build on
+    if kind not in verdicts.SETTLED:                 # any other kind: its word, never a number to build on
         return _e((c.get("verdict") or {}).get("word") or "not checked"), "—"
     if (c.get("verdict") or {}).get("coarse"):       # a ✗ stays a ✗, not as a settled number (#191)
-        return f"about {_num(c.get('safety'))}x, not settled: too coarse to see its walls", "—"
-    return f"{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x", breaks
+        from .answers import safety_num            # the one formatter (#208 review): 1.995 never reads 2
+
+        return f"about {safety_num(c['safety'], c.get('min_safety'))}x, not settled: too coarse to see its walls", "—"
+    # the number as the cards say it (#64 item 9): the "carrying" column says what it's against (lb × factor)
+    from .answers import _times
+
+    return _e(_times(c["safety"], bool(c.get("rough")), c.get("min_safety")).replace(" times over", "x")), breaks
 
 
 def _mark(status: str) -> str:
@@ -1085,7 +1090,7 @@ def _strength(store: DesignStore, versions: dict) -> dict:
 
             edge = bool(bare_edge(store, pid))               # loaded in the middle only (CALI-94)
             out[pid] = [{**{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")},
-                         "rough": load_study.rough(run, c), "verdict": verdicts.case(run, c, filled=why, edge=edge)}
+                         "min_safety": run.get("min_safety"), "rough": load_study.rough(run, c), "verdict": verdicts.case(run, c, filled=why, edge=edge)}
                         for c in run["cases"]]
     return out
 

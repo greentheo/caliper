@@ -87,7 +87,9 @@ def _run_rec(fea, **kw):
 def test_a_fail_among_walls_the_voxels_can_t_see_says_where_and_how_sure():
     run = _run_rec({"at": [-46.0, 165.7, 389.0], "in": "cone", "wall_mm": 0.25, "safety": 0.53})
     text = answers._case_line("i_want", run, run["cases"][0], None, False, True)["text"]
-    assert text == ("Doesn't hold 250 lb person seated: only 0.5 times over, and it needs 2. Its worst stress, in one "
+    # what N is against, as every reader says it (#64 item 9)
+    assert text == ("Doesn't hold 250 lb person seated: only 0.5 times over 375 lb (250 lb, 1.5 times over), and it "
+                    "needs 2. Its worst stress, in one "
                     "run at 4.6 mm voxels, is in the cone around z 15.3 in, where its wall is 0.25 mm, too thin for the "
                     "voxels to see: the fail may be the model's. A hand check or a printed test piece is the way to know.")
 
@@ -169,7 +171,7 @@ def test_a_goal_says_its_cap():
     assert answers._against(cap, False) == ", within its 10 lb cap"
     assert answers._against({"metric": "cost.usd", "op": ">=", "limit": 3}, True) == ", short of the $3 it needs"
     # unstubbed: goalLimit with the page's own helpers only (#139 review: a stub hid "num is not defined")
-    out = _run(_page(["scoreNum"], consts=["esc", "goalLimit"], extra=(
+    out = _run(_page(["scoreNum", "safetyNum"], consts=["esc", "goalLimit"], extra=(
         "out = [goalLimit({op: '<=', limit: 10, unit: 'lb'}), goalLimit({op: '>=', limit: 2, unit: '×'}), goalLimit({}),"
         " goalLimit({op: '<=', limit: 145, unit: '$'})];")))
     assert out == [" (cap 10 lb)", " (needs 2 ×)", "", " (cap $145)"]

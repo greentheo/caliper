@@ -1261,7 +1261,7 @@ def already_fails(store: DesignStore, part_id: str) -> Optional[str]:
     worst = min((c for c in rec.get("cases") or [] if c.get("safety") is not None), key=lambda c: c["safety"],
                 default=None)
     where, _ = worst_at(rec, worst, store.design.display_units == "in") if worst else ("", None)
-    times = _times(rec["safety"]) if rec.get("safety") is not None else "as checked"
+    times = _times(rec["safety"], need=rec.get("min_safety")) if rec.get("safety") is not None else "as checked"
     if v.get("coarse") or (worst is not None and unresolved(rec, worst)):      # as the strength line says it (#139)
         return (f"its check says it fails ({times}, a coarse run: the fail may be the model's"
                 + (f"; {where}" if where else "") + "): make it hold first")

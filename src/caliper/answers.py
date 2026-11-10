@@ -11,6 +11,7 @@ study to draw itself. A verdict from an older version says so.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Optional
 
@@ -24,20 +25,60 @@ ORDER = ("bad", "warn", "ok", "info")
 #: What a strength verdict promises and what it doesn't (CALI-59), said wherever one is shown.
 PROMISE = ("A prediction, not a certificate: it rests on the loads it was given and on textbook strengths for "
            "the material. Real wood varies and so do joints, so test it gently before you trust it with a person.")
+#: A chat reply that quotes a strength number points to the promise (CALI-88, #64 item 16).
+PROMISE_POINTER = "That's a prediction, not a certificate: its card says what it rests on."
 
 
 def _len(mm: float, inches: bool) -> str:
     return f"{mm / IN:.1f} in".replace(".0 in", " in") if inches else f"{mm:.0f} mm"
 
 
-def _times(x: float, about: bool = False) -> str:
+#: Within this share of its limit, either way, a safety is said to two places (CALI-88, #64 item 1).
+NEAR_LIMIT = 1.1
+
+
+def _times(x: float, about: bool = False, need: Optional[float] = None) -> str:
     """3.1 -> "3.1 times over"; the kid's reading of a safety factor. ``about``: the printed model's rough number
-    (CALI-97), "about 3.1 times over"; 10 or more is "more than 10 times over" either way, never "about more than"
-    (#144 review)."""
-    n = round(x, 1)
-    if n >= 10:
+    (CALI-97), "about 3.1 times over"; 10.0 or more is "more than 10 times over" either way, never "about more than"
+    (#144 review). ``need``: the limit it's judged against. Within 10% of it either way, it's said to two places,
+    cut, so a fail never reads as its limit (rule 6: 1.96 against 2 read "only 2 times over, and it needs 2"); a
+    fail further under is cut to one place. Nothing under 10 rounds up to "more than 10" (CALI-88, #64 item 1)."""
+    if x >= 10:
         return "more than 10 times over"
-    return ("about " if about else "") + f"{n:g} times over"
+    return ("about " if about else "") + f"{safety_num(x, need)} times over"
+
+
+def safety_num(x: float, need: Optional[float] = None) -> str:
+    """A safety factor's number, as every reader says it (#208 review: one formatter, server and page; the page's
+    ``safetyNum`` is the same rule): within 10% of ``need`` either way, two places, cut; a fail further under, one
+    place, cut (1.67 is 1.6, not 1.7); else one place, rounded, but never up to 10. So no reader rounds a fail up
+    to its limit: 1.995 against 2 is 1.99, 0.999 against 1 is 0.99."""
+    if need is not None and need / NEAR_LIMIT < x < need * NEAR_LIMIT:
+        n = math.floor(x * 100 + 1e-9) / 100           # near the line: the places that tell it from the line
+    elif need is not None and x < need:
+        n = math.floor(x * 10 + 1e-9) / 10             # a fail well under: one place, cut
+    else:
+        n = math.floor(x * 10 + 0.5) / 10                 # half up, as the page's Math.floor: the same float ops
+        if n >= 10 and x < 10:
+            n = math.floor(x * 10) / 10
+    return f"{n:g}"
+
+
+def over(c: dict, need: Optional[float] = None, about: bool = False) -> str:
+    """A case's safety as every reader says it (CALI-88, #64 item 9): "3.1 times over", against the load with its
+    factor, and, where the factor isn't 1, what that is: "3.1 times over 400 lb (200 lb, twice over)". So a reader
+    who multiplies 3.1 by Dad's 200 lb isn't misled: the card, the kid's book, the trial panel and the build book
+    quote the same number against the same thing. (Against the load itself, 6.2 here, is the owner's to switch to.)"""
+    return _times(c["safety"], about, need) + against(c)
+
+
+def against(c: dict, also: str = "") -> str:
+    """What "N times over" is against, where a case's factor isn't 1: " 400 lb (200 lb, twice over)", with ``also``
+    inside the brackets ("; it needs 2, assumed"). The design card says it as the part card does (#208 review)."""
+    lb, factor = c.get("lb"), c.get("factor") or 1.0
+    if not lb or factor == 1:
+        return f" ({also.lstrip('; ')})" if also else ""
+    return f" {lb * factor:,.0f} lb ({lb:g} lb, {'twice' if factor == 2 else f'{factor:g} times'} over{also})"
 
 
 def _sentence(text: str, most: int = 120) -> str:
@@ -160,7 +201,7 @@ def _grain_lines(store: DesignStore, pid: str, run: dict, stale: bool, filled: O
         if pl.get("as") != "beam" or not pl.get("done") or piece in seen:
             continue
         if c.get("safety") is None or verdicts.case(run, c, filled=filled, stale=stale, edge=edge)["kind"] not in (
-                "holds", "fails"):
+                verdicts.SETTLED):
             continue
         seen.add(piece)
         mine = said.get(piece)
@@ -196,11 +237,13 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
         # never "holds" for it (#132's guard): the case, then what was and wasn't checked
         return _line(f"{c['name'][:1].upper() + c['name'][1:]}: {MIDDLE_ONLY}." + older, "warn", study="load")
     # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
-    rough = L.rough(run, c)
+    rough, need = L.rough(run, c), run.get("min_safety")
     if v["kind"] == "holds":
-        text = f"Holds {c['name'].lower()}, {_times(c['safety'], rough)}."
+        text = f"Holds {c['name'].lower()}, {over(c, need, rough)}."
+    elif v["kind"] == "close":                       # amber: it holds, near the line (CALI-88, #64 item 2)
+        text = f"Holds {c['name'].lower()}, {over(c, need, rough)}: close to the {need:g} it needs."
     elif v["kind"] == "fails":
-        text = f"Doesn't hold {c['name'].lower()}: only {_times(c['safety'], rough)}, and it needs {run['min_safety']:g}."
+        text = f"Doesn't hold {c['name'].lower()}: only {over(c, need, rough)}, and it needs {run['min_safety']:g}."
         if filled:                                   # a ✗ stays a ✗: the block failed, the part is weaker
             text += filled_fail(filled)
         else:                                        # where it fails first, and how sure (#137 item 2)
@@ -210,10 +253,10 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
             # a second opinion by hand on the panel it lands on (#137 item 7: the seat on its ring)
             how = (f", as a round plate held at its ring's outer edge ({_len(pl['ring_mm'], inches)} across)"
                    if pl.get("support") == "ring" else "")
-            text += f" By hand, the {pl['piece']} on its own{how}: {_times(pl['safety_across'])}."
+            text += f" By hand, the {pl['piece']} on its own{how}: {_times(pl['safety_across'], need=need)}."
     else:                                            # any other kind: its word, never a ✓ (CALI-112)
-        text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {_times(c['safety'], rough)}."
-    return _line(text + older, v["status"], study="load",
+        text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {_times(c['safety'], rough, need)}."
+    return _line(text + older, v["status"], study="load", **({"close": True} if v["kind"] == "close" else {}),
                  **({"rough": L.ROUGH} if rough else {}))
 
 
@@ -299,7 +342,9 @@ def rests_on_model(metric: str) -> bool:
 def _card(key: str, q: str, lines: list[dict], hint: str = "") -> dict:
     card = {"key": key, "q": q, "status": _worst(lines) if lines else "info", "lines": lines, "hint": hint}
     # any verdict resting on a model (a strength or frame study, or the scorecard's checks) says what it promises
-    if any((ln.get("study") in ("load", "frame") or ln.get("model")) and ln["status"] in ("ok", "bad") for ln in lines):
+    # (a close pass is amber, and a verdict all the same: #208 review)
+    if any((ln.get("study") in ("load", "frame") or ln.get("model")) and (ln["status"] in ("ok", "bad") or ln.get("close"))
+           for ln in lines):
         card["promise"] = PROMISE + "".join(f" {r}" for r in dict.fromkeys(ln["rough"] for ln in lines if ln.get("rough")))
     return card
 
@@ -423,9 +468,11 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             # an older frame run (or one from before it recorded its version) isn't the frame as it is (#132 review)
             v = verdicts.meets(d["safety"], frames[0].get("min_safety"),
                                stale=frames[0].get("version") != p["version"])
-            work.append(_line(f"The frame holds, {_times(d['safety'])}." if v["kind"] == "holds" else
-                              f"The frame read {_times(d['safety'])} on an older version: check it again." if v["kind"] == "stale" else
-                              f"The frame is too weak as drawn: {_times(d['safety'])}, it needs "
+            work.append(_line(f"The frame holds, {_times(d['safety'], need=frames[0].get('min_safety'))}"
+                              + (f": close to the {frames[0].get('min_safety'):g} it needs." if v["kind"] == "close" else ".")
+                              if v["kind"] in ("holds", "close") else
+                              f"The frame read {_times(d['safety'], need=frames[0].get('min_safety'))} on an older version: check it again." if v["kind"] == "stale" else
+                              f"The frame is too weak as drawn: {_times(d['safety'], need=frames[0].get('min_safety'))}, it needs "
                               f"{frames[0].get('min_safety')}.", v["status"], study="frame"))
     mine = {r["id"] for r in p.get("rules") or []}
     rules = [r for r in (state.get("report") or {}).get("results", []) if r.get("id") in mine]
@@ -572,7 +619,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     if failed:                                         # ...and a ✗ on one says it, as the part card does (#139)
         out["strength.coarse_fail"] = fail_hedge(*failed[0], inches).strip() or coarse(failed[0][0], inches, holds=False)
     # a breaking load from a run that can't see its walls isn't one to read, and never the rest's smallest (#191 review)
-    gone = next(((r, v) for (r, c), (_, v) in zip(cases, said) if c.get("breaks_lb") and (v["kind"] not in ("holds", "fails") or v.get("coarse"))), None)
+    gone = next(((r, v) for (r, c), (_, v) in zip(cases, said) if c.get("breaks_lb") and (v["kind"] not in verdicts.SETTLED or v.get("coarse"))), None)
     if gone:
         out["strength.no_breaks"] = coarse(gone[0], inches, holds=gone[1]["kind"] != "fails")
     if any(L.rough(r, c) for r, c in cases):
@@ -610,6 +657,11 @@ def measured(store: DesignStore, state: dict) -> dict:
         out["strength.edge"] = consistency.MIDDLE_ONLY[0].upper() + consistency.MIDDLE_ONLY[1:] + "."
     if safeties:
         out["strength.safety"] = min(safeties)
+        # the case that number is, for what it's against (#208 review: the design card as the part card says it)
+        worst = min(((r, c) for r, c in cases if c.get("safety") is not None
+                     and (c.get("fea") or {}).get("supported") is not False), key=lambda rc: rc[1]["safety"], default=None)
+        if worst is not None and abs(worst[1]["safety"] - out["strength.safety"]) < 1e-9:
+            out["strength.case"] = {"lb": worst[1].get("lb"), "factor": worst[1].get("factor")}
     if breaks:
         if "strength.no_breaks" not in out:
             out["strength.breaks_lb"] = min(breaks)
@@ -689,14 +741,23 @@ def _against(c: dict, failed: bool, unit: str = "") -> str:
     return f", short of the {said} it needs" if failed else f", against the {said} it needs"
 
 
-def _num(metric: str, v: float, unit: str = "", about: bool = False) -> str:
+_NEED = re.compile(r",\s*(?:(?:twice|\d+(?:\.\d+)?\s*(?:times|×))\s*over|\d+(?:\.\d+)?\s*[×x]\s*safety)\s*$", re.I)
+
+
+def _without_need(label: str) -> str:
+    """A strength goal's label without the factor it needs ("holds Dad (200 lb), 2 times over" -> "holds Dad
+    (200 lb)"): its line says the factor after the number it does, so it isn't read as the number (#64 item 15)."""
+    return _NEED.sub("", label).rstrip()
+
+
+def _num(metric: str, v: float, unit: str = "", about: bool = False, need: Optional[float] = None) -> str:
     from .goals import METRICS
 
     unit = METRICS.get(metric, ("", unit, ""))[1] or unit
     if unit == "$":
         return f"${v:,.0f}"
     if unit == "×":                                         # as the part card says it (#144: "0.5 times over")
-        return _times(v, about)
+        return _times(v, about, need)
     if v == 1 and unit.endswith("s") and unit not in ("lbs",):
         unit = unit[:-1]                                    # 1 sheet, 1 piece
     return ("about " if about else "") + f"{v:g} {unit}".strip()
@@ -736,7 +797,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
             # the newest run, with its age, over an older card's number: never greener than it (#138 item 1)
             verdict = verdicts.goal(verdicts.compare(last["safety"], c.get("op", ">="), c["limit"]), stale=True)
             out.append(_line(f"{'✗' if verdict['kind'] == 'fails' else '!'} {label}{assumed}: last checked on "
-                             f"v{last['version']}: {_times(last['safety'])}"
+                             f"v{last['version']}: {_times(last['safety'], need=c['limit'])}"
                              + (f", needs {c['limit']:g}" if verdict["kind"] == "fails" else
                                 ", checked in the middle only" if last.get("edge") else "")
                              + f" · v{last['now']} not checked yet.", verdict["status"], study="load",
@@ -774,7 +835,9 @@ def held_to(state: dict, now: dict) -> list[dict]:
         verdict = verdicts.goal(met, untrusted=untrue, unresolved=(now.get("strength.unresolved") or now.get("strength.coarse_fail")) if strength else None,
                                 edge=bool(now.get("strength.edge")) if strength else False,       # (CALI-94)
                                 stale=late or bool(older),
-                                incomplete=now.get("strength.unchecked") if strength else None, estimate=guess)
+                                incomplete=now.get("strength.unchecked") if strength else None, estimate=guess,
+                                close=c["metric"] == "strength.safety" and c.get("op", ">=") == ">="    # amber (CALI-88)
+                                and verdicts.near(v, c["limit"]))
         if verdict["kind"] == "estimate":
             out.append(_line(f"! {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}, {guess}.", "warn"))
             continue
@@ -791,7 +854,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
                              study="load", model=rests_on_model(c["metric"])))
             continue
         # the printed model's number says "about", as the part card says it (CALI-97); _times owns it (#144 review)
-        num = _num(c['metric'], v, units.get(c['metric'], ''), about=bool(strength and now.get("strength.rough")))
+        num = _num(c['metric'], v, units.get(c['metric'], ''), about=bool(strength and now.get("strength.rough")),
+                   need=c.get("limit") if isinstance(c.get("limit"), (int, float)) else None)
         failed = verdict["kind"] == "fails"
         why = (filled_fail(untrue) if failed and untrue   # still ✗
                else f" {now['strength.coarse_fail']}" if failed and strength and now.get("strength.coarse_fail") else "")
@@ -802,9 +866,15 @@ def held_to(state: dict, now: dict) -> list[dict]:
         # never a ✓ for an older check or score (#132 review): it says when, and what to do
         later = (" (scored before the last change: score it again)." if late
                  else f" ({older})." if verdict["kind"] == "stale" and older else "." + why)
-        out.append(_line(f"{'✗' if failed else '✓' if verdict['kind'] == 'holds' else '!'} {label}{assumed}: {num}"
-                         + _against(c, failed, units.get(c['metric'], '')) + later,
-                         "warn" if late else verdict["status"],
+        mark = '✗' if failed else '✓' if verdict['kind'] == 'holds' else '!'
+        if c["metric"] == "strength.safety" and isinstance(c.get("limit"), (int, float)):
+            # what it does, then what it needs: "2 times over (assumed): 3.11x" read as holding 2 times over (#64 item 15)
+            need = f"; it needs {c['limit']:g}{', assumed' if assumed else ''}"
+            said = f"{mark} {_without_need(label)}, {num}" + against(now.get("strength.case") or {}, need)
+        else:
+            said = f"{mark} {label}{assumed}: {num}" + _against(c, failed, units.get(c['metric'], ''))
+        out.append(_line(said + later,
+                         "warn" if late else verdict["status"], **({"close": True} if verdict["kind"] == "close" else {}),
                          study="load" if c["metric"].startswith("strength") else None,
                          model=rests_on_model(c["metric"])))
     return out

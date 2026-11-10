@@ -143,7 +143,8 @@ def test_a_failed_test_overrides_the_prediction_on_both_cards(tmp_path):
     pr = trials.predict(store, "step_stool")
     must = pr["lb"] * pr["factor"]
     trials.record(store, "step_stool", 150, broke=True)
-    said = f"It broke at 150 lb in your test. We predicted it would hold {must:,.0f}."
+    said = (f"It broke at 150 lb in your test. It had to hold {must:,.0f} ({pr['lb']:g} lb, twice over for "
+            f"{pr['case'].lower()}), and we predicted about {pr['breaks_lb']:,.0f}.")
     part = answers.answers(store, design_api.design_state(store), "step_stool")[1]
     assert part["status"] == "bad"
     assert not [ln for ln in part["lines"] if ln["status"] == "ok" and ln["text"].startswith("Holds")], part["lines"]

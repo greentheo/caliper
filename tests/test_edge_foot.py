@@ -226,7 +226,7 @@ def test_the_last_checked_line_says_middle_only():
 @pytest.mark.parametrize("x,about,said", [
     (3.14, False, "3.1 times over"), (3.14, True, "about 3.1 times over"),
     (12.0, False, "more than 10 times over"), (12.0, True, "more than 10 times over"),     # never "about more than"
-    (9.96, True, "more than 10 times over"),
+    (9.96, True, "about 9.9 times over"),          # "more than 10" only from 10.0 (CALI-88, #64 item 1)
 ])
 def test_times_owns_about(x, about, said):
     assert answers._times(x, about) == said
