@@ -314,6 +314,7 @@ def test_a_redraw_while_a_carve_runs_keeps_its_panel_and_the_button_stays_off():
     out = _run(_page(["carveView", "carveChart", "carveProgress", "carveTime", "carveBlocked"],
                      ["minutesText", "ran", "verdictTone", "holdsHere"], """
 const esc = (s) => String(s);
+const carveKey = (pid) => pid;
 const S = { carveJob: {}, station: null };
 const carveRuns = () => [];
 const loadRuns = () => [{ version: 3, spacing_mm: 4.6, seconds: 90, cases: [{ fea: { supported: true } }] }];
@@ -386,6 +387,7 @@ out.thin = carveTime(p);
 PANEL = ["runCarve", "followCarve", "carveProgress", "paintCarve", "wireCarve"]
 STUBS = """
 const ran = () => '';
+const carveKey = (pid) => pid;
 const S = { carveJob: {}, scope: 'stool', design: {} };
 const esc = (s) => String(s), $ = () => null, showErr = () => {}, clearStation = () => {}, showStation = () => {};
 const document = { querySelectorAll: () => [] };
