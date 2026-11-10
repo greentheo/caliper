@@ -93,3 +93,14 @@ def test_only_a_body_cut_to_fit_the_bed_is_pinned():
     assert len(cut) >= 2 and printing.pinned(cut)
     whole = printing.split(trimesh.creation.box((50, 50, 50)), bed)
     assert len(whole) == 1 and not printing.pinned(whole)
+
+
+def test_a_panels_glue_line_comes_from_its_material():
+    """Item 15: every non-wood panel was told "foam-safe adhesive": acrylic and aluminium need other words, and where
+    the right words aren't known, there are none."""
+    from caliper import release
+
+    foam = release.fasten_panels([{"material": "xps"}, {"material": "plywood"}])
+    assert "foam-safe adhesive" in foam and "trim the inside corners" in foam
+    other = release.fasten_panels([{"material": "acrylic"}])
+    assert "adhesive" not in other and "glue" not in other.lower() and "Fasten them" in other, other
