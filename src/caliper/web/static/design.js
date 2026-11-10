@@ -1086,8 +1086,10 @@ function renderThread() {
   wireClarify();
   if ($('buildFirst')) {
     $('buildFirst').onclick = async () => {
+      const go = $('buildFirst');
+      go.disabled = true;                              // a double click starts one build (#66 item 1)
       try { followBuild((await api('POST', `/api/designs/${S.slug}/build`)).job_id); }
-      catch (e) { showErr(e.message); }
+      catch (e) { showErr(e.message); go.disabled = false; }
     };
   }
   if (typeof d.claude === 'boolean') S.claude = d.claude;

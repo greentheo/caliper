@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import threading
 from typing import Optional, Union
 
 from pydantic import BaseModel, field_validator
@@ -202,6 +203,8 @@ def _lock(slug: str) -> str:
 
 #: The first build each design has running (CALI-59), so a page that reloads mid-build follows it again.
 _FIRST: dict[str, str] = {}
+#: "Is one running?" and the submit are one step: two presses at the same instant start one build (#66 item 1).
+_FIRST_MU = threading.Lock()
 
 
 #: What a new design's first build needs and nothing else here can do: Claude (CALI-91). Said, not failed.
@@ -217,9 +220,15 @@ def _claude() -> bool:
 def first_build(slug: str):
     """Start a design's first build (it has no parts yet): what it's held to, the part, its strength check,
     its patterns, its score. Returns the job; one at a time per design."""
-    running = RUNNER.get(_FIRST.get(slug, ""))
-    if running is not None and not running.over:
-        return running
+    with _FIRST_MU:
+        running = RUNNER.get(_FIRST.get(slug, ""))
+        if running is not None and not running.over:
+            return running
+        return _submit_first(slug)
+
+
+def _submit_first(slug: str):
+    """The first build's job, submitted (under :data:`_FIRST_MU`)."""
 
     def work(j):
         store = DesignStore.load(slug)
