@@ -89,7 +89,7 @@ def _sheet_offers(run: dict, fails: bool) -> list[dict]:
             panels.setdefault(pl["piece"], []).append(c)
     out = []
     for piece, on in panels.items():
-        if any(c.get("governs") != "plate" or judged[id(c)] not in ("holds", "fails") for c in on):
+        if any(c.get("governs") != "plate" or judged[id(c)] not in verdicts.SETTLED for c in on):
             continue                                    # the FEA's, or not settled: its number elsewhere isn't known
         if fails and not any(judged[id(c)] == "fails" for c in on):
             continue                                    # it already holds: more material for nothing

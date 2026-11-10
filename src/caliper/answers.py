@@ -56,6 +56,18 @@ def _times(x: float, about: bool = False, need: Optional[float] = None) -> str:
     return ("about " if about else "") + f"{n:g} times over"
 
 
+def over(c: dict, need: Optional[float] = None, about: bool = False) -> str:
+    """A case's safety as every reader says it (CALI-88, #64 item 9): "3.1 times over", against the load with its
+    factor, and, where the factor isn't 1, what that is: "3.1 times over 400 lb (200 lb, twice over)". So a reader
+    who multiplies 3.1 by Dad's 200 lb isn't misled: the card, the kid's book, the trial panel and the build book
+    quote the same number against the same thing. (Against the load itself, 6.2 here, is the owner's to switch to.)"""
+    said = _times(c["safety"], about, need)
+    lb, factor = c.get("lb"), c.get("factor") or 1.0
+    if lb and factor != 1:
+        said += f" {lb * factor:,.0f} lb ({lb:g} lb, {'twice' if factor == 2 else f'{factor:g} times'} over)"
+    return said
+
+
 def _sentence(text: str, most: int = 120) -> str:
     """The first sentence, ending in a full stop, for a top line: a description can be a paragraph of build
     instructions."""
@@ -176,7 +188,7 @@ def _grain_lines(store: DesignStore, pid: str, run: dict, stale: bool, filled: O
         if pl.get("as") != "beam" or not pl.get("done") or piece in seen:
             continue
         if c.get("safety") is None or verdicts.case(run, c, filled=filled, stale=stale, edge=edge)["kind"] not in (
-                "holds", "fails"):
+                verdicts.SETTLED):
             continue
         seen.add(piece)
         mine = said.get(piece)
@@ -214,11 +226,11 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
     rough, need = L.rough(run, c), run.get("min_safety")
     if v["kind"] == "holds":
-        text = f"Holds {c['name'].lower()}, {_times(c['safety'], rough, need)}."
+        text = f"Holds {c['name'].lower()}, {over(c, need, rough)}."
     elif v["kind"] == "close":                       # amber: it holds, near the line (CALI-88, #64 item 2)
-        text = f"Holds {c['name'].lower()}, {_times(c['safety'], rough, need)}: close to the {need:g} it needs."
+        text = f"Holds {c['name'].lower()}, {over(c, need, rough)}: close to the {need:g} it needs."
     elif v["kind"] == "fails":
-        text = f"Doesn't hold {c['name'].lower()}: only {_times(c['safety'], rough, need)}, and it needs {run['min_safety']:g}."
+        text = f"Doesn't hold {c['name'].lower()}: only {over(c, need, rough)}, and it needs {run['min_safety']:g}."
         if filled:                                   # a ✗ stays a ✗: the block failed, the part is weaker
             text += filled_fail(filled)
         else:                                        # where it fails first, and how sure (#137 item 2)
@@ -592,7 +604,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     if failed:                                         # ...and a ✗ on one says it, as the part card does (#139)
         out["strength.coarse_fail"] = fail_hedge(*failed[0], inches).strip() or coarse(failed[0][0], inches, holds=False)
     # a breaking load from a run that can't see its walls isn't one to read, and never the rest's smallest (#191 review)
-    gone = next(((r, v) for (r, c), (_, v) in zip(cases, said) if c.get("breaks_lb") and (v["kind"] not in ("holds", "fails") or v.get("coarse"))), None)
+    gone = next(((r, v) for (r, c), (_, v) in zip(cases, said) if c.get("breaks_lb") and (v["kind"] not in verdicts.SETTLED or v.get("coarse"))), None)
     if gone:
         out["strength.no_breaks"] = coarse(gone[0], inches, holds=gone[1]["kind"] != "fails")
     if any(L.rough(r, c) for r, c in cases):

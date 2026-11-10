@@ -120,7 +120,10 @@ def test_the_same_tube_seen_finely_reads_as_its_safety_says_with_about(tmp_path,
 
     said = _times(rec["cases"][0]["safety"], about=True, need=2)          # "about 3.1 times over", or "more than 10 times over"
     (part,) = _work(store, "tube")
-    assert part["text"] in (f"Holds a foot, {said}.", f"Doesn't hold a foot: only {said}, and it needs 2."), part["text"]
+    from caliper.answers import over
+
+    case = over(rec["cases"][0], 2, True)                         # with what it's against (#64 item 9)
+    assert part["text"] in (f"Holds a foot, {case}.", f"Doesn't hold a foot: only {case}, and it needs 2."), part["text"]
     (design,) = _work(store)
     assert f", {said} (it needs 2" in design["text"] and "about more than" not in design["text"], design["text"]   # (#144 review)
 

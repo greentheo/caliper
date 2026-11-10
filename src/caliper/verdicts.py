@@ -32,6 +32,9 @@ KINDS = {
 #: A pass at or under this many times its limit is amber, ``close``: it holds, but near the line (the four-questions
 #: spec's proposal, "within 25% of the limit"; the owner may change the band). CALI-88, #64 item 2.
 CLOSE = 1.25
+#: The kinds with a number a person may build on (it holds, close to the line or not, or it fails), and the passes.
+SETTLED = ("holds", "close", "fails")
+PASSES = ("holds", "close")
 #: Worst first: a run, or a design, is its worst case.
 RANK = list(KINDS)
 

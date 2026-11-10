@@ -56,7 +56,7 @@ MOST_STEPS = 40
 def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     """For the worst load the part was checked for: the sag at each step to where it should break, as a range,
     and what to measure it with. None without a strength check on this version."""
-    from . import load_study as L
+    from . import answers, load_study as L
 
     run = _run(store, part_id)
     if run is None:
@@ -88,6 +88,9 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
             "breaks_lb": breaks,                                        # None: not a number to test against (#191 review)
             "steps": steps, "per_lb_mm": [round(lo, 6), round(hi, 6)],
             "measure_with": measure_with(hi * case["lb"]),
+            # its safety as the card says it, against the same thing (#64 item 9); not a number to test against
+            # where the break isn't settled
+            "over": None if L.unresolved(run, case) else answers.over(case, run.get("min_safety")),
             "basis": ("from an FEA too coarse to see its walls, so a rough guess until it's checked finer: "
                       if L.unresolved(run, case) else "")                       # said, not hidden (CALI-110)
                      + "linear to breaking: the FEA's sag (joints solid, the stiff end)"

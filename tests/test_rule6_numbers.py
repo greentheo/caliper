@@ -35,7 +35,7 @@ def test_a_fail_line_never_says_the_limit_it_missed():
     v = verdicts.case(run, c)
     assert v["kind"] == "fails" and v["short"] == "doesn't hold 1.9x", v["short"]   # the badge, cut not rounded
     text = answers._case_line("stool", run, c, None, False, True)["text"]
-    assert "only 1.96 times over, and it needs 2" in text, text
+    assert "only 1.96 times over 400 lb (200 lb, twice over), and it needs 2" in text, text
 
 
 # --- item 2: a pass close to the line is amber ----------------------------------------------------------------------
@@ -60,7 +60,7 @@ def test_a_pass_within_a_quarter_of_its_limit_is_amber(safety, kind, status):
 def test_the_card_line_says_how_close():
     run = _run(2.4)
     line = answers._case_line("stool", run, run["cases"][0], None, False, True)
-    assert line["status"] == "warn" and line["text"] == "Holds dad stepping up, 2.4 times over: close to the 2 it needs.", line
+    assert line["status"] == "warn" and line["text"] == "Holds dad stepping up, 2.4 times over 400 lb (200 lb, twice over): close to the 2 it needs.", line
     far = _run(2.6)
     assert answers._case_line("stool", far, far["cases"][0], None, False, True)["status"] == "ok"
 
@@ -118,3 +118,22 @@ def test_a_carves_reply_rounds_as_the_card_does_and_points_to_the_promise(monkey
     store.write_part("p", "def build(params):\n    return None\n", intent="x")
     said = chat.carve_part(store, "p").reply
     assert "about 2.04 times over" in said and answers.PROMISE_POINTER in said, said
+
+
+# --- item 9: one way of saying it, everywhere a person reads it -----------------------------------------------------
+
+def test_the_card_the_kids_book_the_trial_panel_and_the_build_book_say_the_same(tmp_path):
+    """The kids' test page said "3.1 times over" while the trial page said ~6.2x of 200 lb: one number, against one
+    thing. The foreman's pick (#64, option B): the safety against the load with its factor, as the cards always said
+    it, with what that is said beside it, so 3.1 x 200 lb isn't read as where it breaks."""
+    from caliper import design_api, kidbook, release, samples, trials
+
+    store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
+    said = "3.1 times over 400 lb (200 lb, twice over)"
+    card = [ln["text"] for ln in answers.answers(store, design_api.design_state(store), "step_stool")[1]["lines"]]
+    assert f"Holds 200 lb adult stepping up, {said}." in card, card
+    strength = release._strength(store, {p.id: p.version for p in store.design.parts})
+    assert said in kidbook._strength_page(strength, ["step_stool"])["say"]
+    assert trials.predict(store, "step_stool")["over"] == said
+    (c,) = strength["step_stool"]
+    assert release._safety_cell(c)[0] == "3.1x" and (c["lb"], c["factor"]) == (200, 2)   # its row says "200 lb × 2"
