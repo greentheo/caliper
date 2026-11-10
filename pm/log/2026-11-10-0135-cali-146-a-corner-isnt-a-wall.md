@@ -16,4 +16,6 @@
 | stool copy, 6 mm, as drawn | i_want | 0.246 unchanged | 0.222 unchanged | 1 | fail, unchanged | real sliver |
 | stool copy, 6 mm, openings cut clean | i_want | 1.798 → 4.433 | 0.323 → 4.292 | 36 | **fail 1.798 → pass 4.433** | the only verdict that changes: the low readings were corner skims, and the next real wall is about 4.3 mm at the foot arc |
 
+The camper sample's scorecard is re-scored, so it doesn't ship out of date: every check and metric came out the same as the old card.
+
 **Not verified.** Stored strength runs keep the thinnest wall they recorded until they're run again; that errs thin. The whole suite is CI's.
