@@ -196,7 +196,13 @@ def summary(store: DesignStore, part_id: str, inches: bool = True) -> Optional[d
     if broke:
         at, breaks = broke["load_lb"], pred.get("breaks_lb")
         if must and at < must:                              # a fail, whatever was predicted (rule 6)
-            return {"text": f"It broke at {at:,.0f} lb in your test. We predicted it would hold {must:,.0f}.",
+            # what it had to hold is the load times its factor, not the prediction; the prediction is the number
+            # #42's calibration needs, so it's said too, or that it wasn't settled (CALI-88, #64 item 13)
+            had = (f"It had to hold {must:,.0f} ({pred['lb']:g} lb, {_times_over(pred.get('factor', 1.0))} for "
+                   f"{pred.get('case', 'its load').lower()})")
+            return {"text": f"It broke at {at:,.0f} lb in your test. {had}"
+                            + (f", and we predicted about {breaks:,.0f}." if breaks else
+                               "; where it would break wasn't settled."),
                     "status": "bad", "broke": True}
         if breaks and at < MATCHES * breaks:
             held = (f" It still held the {must:,.0f} lb it must hold ({pred['lb']:g} lb, "
