@@ -38,6 +38,17 @@ def rough_said(rough: int, pieces: int, said: str) -> str:
     return f"a rough guess: {why}" if why == "no slicer installed" else f"a rough guess; the slicer couldn't work it out: {why}"
 
 
+def _too_big_said(pieces: int, over: list, volume, inches: bool) -> str:
+    """What doesn't fit, in the person's units: the piece that's furthest over, against the printer."""
+    from .answers import _len
+
+    worst = max(over, key=lambda m: float(max(m.extents)))
+    size = " x ".join(_len(float(v), inches) for v in sorted(worst.extents, reverse=True))
+    bed = " x ".join(_len(float(v), inches) for v in volume)
+    cut = f"cut into {pieces} pieces, one is still {size}" if pieces > 1 else f"it's {size}"
+    return f"{cut}, and your printer takes {bed}: it needs sectioning another way, or a bigger printer"
+
+
 def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_dir: Optional[str] = None,
          wait: bool = True) -> dict:
     """How this part is made in the shop. ``out_dir`` keeps a printed part's pieces as STLs there. ``wait=False``
@@ -60,6 +71,10 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
         mesh = C.printed_solid(store, part_id)            # the sides, for a plywood top on printed sides
         volume = printer.get("volume_mm") or (256, 256, 256)
         parts = printing.split(mesh, volume)
+        over = printing.too_big(parts, volume)
+        if over:                                          # never ok on a piece that doesn't fit (#179, rule 6)
+            pc["ok"], pc["why"] = False, _too_big_said(len(parts), over, volume, store.design.display_units == "in")
+            continue
         keep = out_dir or tempfile.mkdtemp(prefix="caliper-print-")
         os.makedirs(keep, exist_ok=True)
         each = []
