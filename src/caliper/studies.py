@@ -154,7 +154,7 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
         best = next((x for x in st if x["index"] == r.get("best")), None)  # search: the printed part's lightest
         held = best is not None and verdicts.carve_step(best, r.get("filled"), r)["counts_as_pass"]   # #132, #101
         return (f"cancelled after {len(st)} of {r.get('steps', '?')} steps"
-                + (f": the lightest that held, step {best['index']}, {best['saved_g']} g less filament"
+                + (f": the step to use, step {best['index']}, {best['saved_g']} g less filament"
                    if held and best.get("saved_g") else "")), None
     if kind == "carve" and r.get("status") == "running":   # still going, or it died partway (CALI-103)
         return f"not finished: {len(r.get('stations') or [])} of {r.get('steps', '?')} steps checked", None
@@ -172,6 +172,8 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
             return ("doesn't hold as it is: " + (f"{round(whole, 1):g}x" if whole is not None else "not checked")
                     + f", needs {r.get('min_safety', 2):g}x" + (f" (the {first['weakest']})" if first.get("weakest") else "")
                     + (f"; carving the printed part: {carved}" if carved else "")), False
+        if not carved and (r.get("offer") or {}).get("offers") is False:   # nothing to use, and why (#167)
+            return r["offer"]["said"], None
         if not carved:
             return "nothing could come off and still hold", False
         if "whole_holds" in best and verdicts.station(best, whole=True)["kind"] == "fails":

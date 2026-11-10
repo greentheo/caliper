@@ -585,7 +585,21 @@ def load_run(store: DesignStore, rid: str) -> Optional[dict]:
     if not os.path.exists(path):
         return None
     with open(path) as f:
-        return json.load(f)
+        rec = json.load(f)
+    rec["offer"] = _offered(rec)
+    return rec
+
+
+def _offered(rec: dict) -> Optional[dict]:
+    """The step to offer of a lightening (:mod:`caliper.use_step`). Holes don't thin a sheet, so what the re-check can see is the run's own."""
+    from . import use_step, verdicts
+
+    steps = rec.get("stations") or []
+    ok = [{**st, "seen": True} for st in steps if st.get("saved_lb") and verdicts.lighten_step(st, None, rec)["counts_as_pass"]]
+    first = next((st for st in steps if st.get("index") == 0 and st.get("safety") is not None), None)
+    # no ``worth``: holes come out of a sheet that's bought whole, so a Lightening saves weight and no money
+    return use_step.choose(ok, float(rec.get("min_safety") or L.MIN_SAFETY), "saved_lb", lambda st: f"{st['saved_lb']:g} lb lighter",
+                           as_drawn=use_step.own(first) if first else None)
 
 
 def station_path(store: DesignStore, rid: str, index: int) -> str:

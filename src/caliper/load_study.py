@@ -232,6 +232,16 @@ def _thin(declared: dict, mesh, pieces: list[dict]) -> tuple[list, Optional[floa
     return thin, walls, where
 
 
+def would_see(declared: dict, mesh, pieces: list[dict]) -> dict:
+    """Can a check of this shape, at the voxels it would use, see its thinnest wall? ``{"thin_mm", "seen"}`` (#167: what decides how far
+    a re-check lands from a study's own number)."""
+    thins, walls, _ = _thin(declared, mesh, pieces)
+    if not thins:
+        return {"thin_mm": None, "seen": True}
+    spacing, _ = spacing_for(pieces, float(abs(mesh.volume)), float(max(mesh.extents)), walls)
+    return {"thin_mm": round(min(thins), 2), "seen": _sees(min(thins) / spacing)}
+
+
 def study_spacing(declared: dict, mesh, pieces: list[dict]) -> tuple[float, Optional[str]]:
     """The voxel size the strength check analyses this part at (:func:`spacing_for`), from what it declares."""
     _, walls, _ = _thin(declared, mesh, pieces)
