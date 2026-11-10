@@ -303,6 +303,15 @@ class Hole:
     depth: float
 
 
+class NotMeasured(NotImplementedError, ValueError):
+    """A measurement this part can't have: the evaluator reads it as not checked ("deferred"), never a pass. Still a
+    ValueError, as holes() raised before, for any caller that catches that."""
+
+
+#: Said when a part has no B-rep to find holes in (CALI-90, #66 item 5: [] and 0 passed "largest_through_bore <= 5").
+MESH_HOLES = "not measured: the part is a mesh (carved, whittled or imported), with no B-rep to find holes in"
+
+
 def holes(g: Geometry) -> list[Hole]:
     """Inventory of cylindrical features (holes/bores), detected on the B-rep.
 
@@ -310,8 +319,7 @@ def holes(g: Geometry) -> list[Hole]:
     Each interior cylindrical face is reported as a :class:`Hole` (diameter = 2·radius).
     """
     if g.solid is None:
-        raise ValueError("holes() needs a B-rep solid (Geometry.from_cadquery). Mesh-only hole "
-                         "detection is not part of the MVP subset.")
+        raise NotMeasured(MESH_HOLES)
     return _holes_from_cadquery(g.solid)
 
 
@@ -381,8 +389,7 @@ def holes_matching(
 
 def largest_through_bore(g: Geometry) -> float:
     """Diameter of the largest cylindrical bore (0.0 if none detected)."""
-    hs = holes(g) if g.solid is not None else []
-    return max((h.diameter for h in hs), default=0.0)
+    return max((h.diameter for h in holes(g)), default=0.0)      # a mesh: NotMeasured, never a silent 0
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +403,7 @@ def largest_through_bore(g: Geometry) -> float:
 def holes_world(g: Geometry) -> list[Hole]:
     """Holes of ``g`` with center + axis transformed into the assembly (world) frame by ``g.pose``."""
     if g.solid is None:
-        return []
+        raise NotMeasured(MESH_HOLES)
     hs = _holes_from_cadquery(g.solid)
     T = getattr(g, "pose", None)
     if T is None or np.allclose(T, np.eye(4)):
