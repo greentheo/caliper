@@ -225,24 +225,33 @@ def _ring(p: dict, cells: np.ndarray, shape) -> np.ndarray:
     return ndimage.binary_dilation(gone, iterations=1)
 
 
-def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
-    """A panel stood on that already has holes (from ``HOLES``): the plate formula doesn't apply to it, so it's
-    judged as the lightening study judges one: solved once with its holes filled (the plate check's
-    calibration, and the stress where each hole is), then as it is, with each hole's edge at KT_HOLE times
-    that stress and the rest by the FEA, both scaled by the calibration."""
-    from scipy import ndimage
+def _in_plane(p: dict, h) -> "Polygon":
+    """A hole's 3D outline (points on the panel's face) in the panel's own (u, v) plane."""
     from shapely.geometry import Polygon
 
-    holed = [pc for pc in ctx["pieces"] if pc["kind"] == "sheet" and pc.get("holes") and len(pc["polys"]) == 1
-             and _loaded_face_on(pc, ctx["loads"], ctx["tol"])]
-    if not holed or not r.supported:
-        return case
-    ls, s, mat = ctx["ls"], ctx["spacing"], ctx["mat"]
-    filled = ls.solid.copy()
-    for pc in holed:                                     # the panel as if it were solid
+    h = np.asarray(h, float)
+    return Polygon(np.stack([(h - p["o"]) @ p["u"], (h - p["o"]) @ p["v"]], axis=1))
+
+
+def picture_edge(p: dict, polys: list, stress: np.ndarray, solid: np.ndarray, s: float, allow: float) -> float:
+    """A picture's edge in a wall (CALI-88, #64 item 5; rule 6's safe side, the foreman's call): judged as a holed
+    top's holes are, KT_HOLE times the stress the panel had there solid. The voxel FEA alone reads low at a sharp
+    re-entrant edge; a picture's outline is smoothed to corners of at least 1/8 in, so the round-hole factor
+    applies. ``polys``: the picture's outlines in the panel's plane. The safety at its edge, or inf."""
+    cells = _covered(p, polys, s)
+    edge = float(np.max(np.where(cells, _column_stress(p, stress, solid), 0.0)))
+    return allow / (KT_HOLE * edge) if edge > 0 else np.inf
+
+
+def _fill(ls, s: float, pieces: list, filled: np.ndarray, key: str = "holes") -> None:
+    """The pieces' holes (``key``) filled back in, in ``filled``: the panels as if they were solid."""
+    from shapely.geometry import Polygon
+
+    for pc in pieces:
         o, u, v, n, _ = _frame(pc["polys"][0])
         n = n * pc["sides"][0]
-        for h in pc["holes"]:
+        for h in pc.get(key) or []:
+            h = np.asarray(h, float)
             box = Polygon(np.stack([(h - o) @ u, (h - o) @ v], axis=1))
             x0, y0, x1, y1 = box.bounds
             for x in np.arange(x0, x1 + s, s / 2):
@@ -252,14 +261,37 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
                             ix = np.round((o + x * u + y * v + w * n - np.asarray(ls.grid.origin)) / s).astype(int)
                             if np.all(ix >= 0) and np.all(ix < filled.shape):
                                 filled[tuple(ix)] = True
+
+
+def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
+    """A panel stood on that already has holes (from ``HOLES``): the plate formula doesn't apply to it, so it's
+    judged as the lightening study judges one: solved once with its holes filled (the plate check's
+    calibration, and the stress where each hole is), then as it is, with each hole's edge at KT_HOLE times
+    that stress and the rest by the FEA, both scaled by the calibration.
+
+    A wall with a picture cut out of it (nobody stands on it; CALI-88, #64 item 5) is judged the same way at the
+    picture's edge: KT_HOLE times the stress the wall had there solid (:func:`picture_edge`). Its rest is the FEA's
+    as it is, and the plate check of the panel stood on (which has no holes) still applies."""
+    from scipy import ndimage
+
+    sheets = [pc for pc in ctx["pieces"] if pc["kind"] == "sheet" and len(pc["polys"]) == 1]
+    holed = [pc for pc in sheets if pc.get("holes") and _loaded_face_on(pc, ctx["loads"], ctx["tol"])]
+    pictured = [pc for pc in sheets if pc.get("pictures") and pc not in holed]
+    if not (holed or pictured) or not r.supported:
+        return case
+    ls, s, mat = ctx["ls"], ctx["spacing"], ctx["mat"]
     cache = ctx.setdefault("_filled", {})                  # the filled solve, once per load
     if i not in cache:
+        filled = ls.solid.copy()
+        _fill(ls, s, holed, filled)                        # the panels as if they were solid
+        _fill(ls, s, pictured, filled, key="pictures")
         held, ls.solid = ls.solid, filled                  # the panels' columns, mapped on the filled part
         try:
-            cache[i] = (ls.solver().solve(filled), {p["name"]: p for p in panels(ctx, stood_on=True)})
+            cache[i] = (ls.solver().solve(filled), {p["name"]: p for p in panels(ctx, stood_on=True)},
+                        {p["name"]: p for p in panels(ctx, stood_on=False)}, filled)
         finally:
             ls.solid = held
-    r0, tops = cache[i]
+    r0, tops, walls, filled = cache[i]
     near = ndimage.binary_dilation(ctx["attach"], iterations=1)
     load, worst, allow = ctx["loads"][i], None, mat["strength"] * mat["across"]
     pl = L.plate_check(ctx["pieces"], load, mat, ctx["tol"])
@@ -269,21 +301,35 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
             continue
         peak0 = _panel_peak(p, r0.von_mises, r0.solid, near)
         k = max(1.0, pl["stress_mpa"] / peak0) if pl and pl.get("done") and pl["piece"] == pc["name"] and peak0 > 0 else 1.0
-        cells = _covered(p, [Polygon(np.stack([(h - p["o"]) @ p["u"], (h - p["o"]) @ p["v"]], axis=1))
-                             for h in pc["holes"]], s)
+        cells = _covered(p, [_in_plane(p, h) for h in pc["holes"]], s)
         peak = _panel_peak(p, r.von_mises, r.solid, near, _ring(p, cells, filled.shape))
         before = _column_stress(p, r0.von_mises, filled)
         edge = float(np.max(np.where(cells, before, 0.0)))
         mine = min(allow / (peak * k) if peak > 0 else np.inf, allow / (KT_HOLE * edge * k) if edge > 0 else np.inf)
         worst = mine if worst is None else min(worst, mine)
-    if worst is None or not np.isfinite(worst):
-        return case
-    fea = (case.get("fea") or {}).get("safety")
-    safety = round(min(worst, fea) if fea else worst, 2)
-    plate = dict(pl or {}, done=False, why="it has holes, so the plate formula doesn't apply; the FEA does, "
-                                           "calibrated against it on the panel solid")
-    case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety, "plate": plate,  # producer
-                 "breaks_lb": round(case["lb"] * case["factor"] * safety, -1)})
+    edges = {}
+    wall_allow = ((ctx.get("plate_mat") or mat)["strength"] * (ctx.get("plate_mat") or mat)["across"])
+    for pc in pictured:
+        p = walls.get(pc["name"])
+        if p is not None:
+            edges[pc["name"]] = picture_edge(p, [_in_plane(p, h) for h in pc["pictures"]], r0.von_mises, filled, s,
+                                             wall_allow)
+    pic = min(edges.values(), default=np.inf)
+    if worst is not None and np.isfinite(worst):
+        fea = (case.get("fea") or {}).get("safety")
+        safety = round(min(worst, fea, pic) if fea else min(worst, pic), 2)
+        plate = dict(pl or {}, done=False, why="it has holes, so the plate formula doesn't apply; the FEA does, "
+                                               "calibrated against it on the panel solid")
+        case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety, "plate": plate,  # producer
+                     "breaks_lb": round(case["lb"] * case["factor"] * safety, -1)})
+    elif np.isfinite(pic) and case.get("safety") is not None and pic < case["safety"]:
+        safety = round(pic, 2)                             # the picture's edge governs; the plate check stands as it is
+        case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety,  # producer
+                     "breaks_lb": round(case["lb"] * case["factor"] * safety, -1)})
+    if edges:
+        name = min(edges, key=edges.get)
+        case["picture_edge"] = {"piece": name, "safety": round(float(edges[name]), 2) if np.isfinite(edges[name]) else None,
+                                "kt": KT_HOLE}
     return case
 
 
