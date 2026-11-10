@@ -27,6 +27,7 @@ from typing import Callable, Optional
 from . import construction as C
 from . import materials as M
 from .design import DesignStore
+from .jobs import Cancelled
 
 GOALS = "scorecard.yaml"
 LB = 0.224809                      # lbf per N
@@ -171,7 +172,7 @@ def cost_and_waste(store: DesignStore, reports: dict, cutplans: dict) -> dict:
 # ---------------------------------------------------------------------------
 # The card
 # ---------------------------------------------------------------------------
-def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
+def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[Callable[[], None]] = None) -> dict:
     """Score the design as it stands, file the card, and return it.
 
     Bump :data:`SCORER` whenever a metric's meaning changes (what it counts, how it's weighed): every card filed
@@ -230,6 +231,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         script = store.read_script(p.id) if store.is_scripted(p.id) else ""
         if "def members(" not in script or "def supports(" not in script:
             continue
+        if stop:
+            stop()
         emit("frame", f"analysing {p.id}")
         a = frame_study.analyse(store, p.id, payload_lb=payload, walls=bool(settings.get("walls", True)), emit=emit)
         _metric(metrics, "frame.safety", a["safety"], "×", f"{p.id}'s weakest member on a ×{a['factor']:g} bump "
@@ -378,7 +381,9 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         if run is None:
             emit("strength", f"checking what {p.id} must hold")
             try:
-                run = load_study.study(store, p.id, emit=emit)
+                run = load_study.study(store, p.id, emit=emit, stop=stop)
+            except Cancelled:                 # asked to stop: not a check that couldn't run (#178 review)
+                raise
             except Exception as e:  # noqa: BLE001 — a check that can't run is unknown, not a crash
                 _metric(metrics, f"strength.{p.id}.error", str(e), "", f"{p.id}'s strength couldn't be checked",
                         "model", "strength")
