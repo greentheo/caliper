@@ -255,3 +255,95 @@ def test_a_point_on_a_mesh_is_said_without_script_coordinates():
 
 def test_nothing_picked_leaves_the_message_alone():
     assert _page("return { t: aboutPick(null, 'make it taller') };") == {"t": "make it taller"}
+
+
+# --- #172 review ------------------------------------------------------------------------------------------------------
+def test_an_edge_on_a_placed_part_says_where_its_script_drew_it():
+    pose = [[1, 0, 0, 1000], [0, 1, 0, 0], [0, 0, 1, 500], [0, 0, 0, 1]]
+    for e in features.of_solid(cq.Workplane("XY").box(40, 20, 10), pose)["edges"]:
+        assert e["centre"][0] - e["local"][0] == pytest.approx(1000) and e["centre"][2] - e["local"][2] == pytest.approx(500)
+
+
+def test_a_part_that_doesn_t_build_gets_a_422_in_its_own_words(store, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    monkeypatch.setenv("CALIPER_DESIGNS", os.path.dirname(store.root))
+    monkeypatch.setattr(features, "for_part", lambda *a: (_ for _ in ()).throw(RuntimeError("box() got a bad width")))
+    c, slug = TestClient(create_app()), os.path.basename(store.root)
+    got = c.get(f"/api/designs/{slug}/parts/box/features.json")
+    assert got.status_code == 422 and got.json()["detail"] == "box() got a bad width"
+
+
+_CHOOSE = """
+const PICK = { mode: 'face', parts: new Map(), overlay: null, turn: 0 };
+const S = { scope: 'p', pick: null };
+const ray = { ray: { at: 'click', clone() { return { at: this.at }; }, copy(r) { this.at = r.at; } } };
+const camera = { clone: () => ({}) }, renderer = { domElement: { getBoundingClientRect: () => ({}) } };
+class G { setAttribute() {} setIndex() {} }
+const THREE = { BufferGeometry: G, Float32BufferAttribute: class {} };
+const drawn = []; const drawPick = () => drawn.push(ray.ray.at);
+function clearPick() { S.pick = null; PICK.turn += 1; }
+const setScope = () => {}, renderScope = () => {}, plainly = (m) => m, pointSaid = (p) => 'point';
+const hints = []; const pickHint = (t) => hints.push(t);
+let finish, fail; const waits = [];
+const features = () => new Promise((r, x) => waits.push({ r, x }));
+const face = { id: 'f1', said: 'face: x', local: [0, 0, 0], verts: [], tris: [] };
+const facePicked = () => (ray.ray.at === 'click' ? face : null), edgePicked = () => null;
+const hit = { object: { userData: { partId: 'p' } }, point: { x: 0, y: 0, z: 0 } };
+"""
+
+
+def _pick_page(body: str) -> dict:
+    import subprocess
+
+    from .test_carve_click import _fn, _node
+
+    src = open(JS).read()
+    script = _CHOOSE + _fn(src, "choose") + f"\n(async () => {{ const out = await (async () => {{ {body} }})(); console.log(JSON.stringify(out)); }})();"
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    return json.loads(got.stdout)
+
+
+def test_moving_the_mouse_during_the_first_load_doesn_t_lose_the_pick():
+    got = _pick_page("""const go = choose({}, hit);
+        ray.ray.at = 'somewhere else';                       // the pointer moved
+        waits[0].r({ faces: [face], edges: [] }); await go;
+        return { pick: S.pick && S.pick.id, drawn };""")
+    assert got == {"pick": "f1", "drawn": ["click"]}
+
+
+def test_only_the_last_of_two_clicks_counts():
+    got = _pick_page("""const a = choose({}, hit), b = choose({}, hit);
+        waits[0].r({ faces: [face], edges: [] }); waits[1].r({ faces: [face], edges: [] });
+        await a; await b;
+        return { drawn: drawn.length };""")
+    assert got == {"drawn": 1}
+
+
+def test_a_pick_cleared_during_the_wait_stays_cleared():
+    got = _pick_page("""const go = choose({}, hit);
+        clearPick();
+        waits[0].r({ faces: [face], edges: [] }); await go;
+        return { pick: S.pick, drawn: drawn.length };""")
+    assert got == {"pick": None, "drawn": 0}
+
+
+def test_a_part_that_can_t_be_picked_says_so():
+    got = _pick_page("""const go = choose({}, hit);
+        waits[0].x(new Error("it won't build")); await go;
+        return { hints };""")
+    assert got == {"hints": ["can't pick on it: it won't build"]}
+
+
+def test_the_words_are_kept_per_unit():
+    from .test_carve_click import _fn
+
+    assert "S.design.display_units" in _fn(open(JS).read(), "features")
+
+
+def test_the_pick_has_its_own_chip_and_clear():
+    html = open(os.path.join(os.path.dirname(JS), "index.html")).read()
+    assert 'id="pickChip"' in html and 'id="pickClear"' in html and "pickbar-top" in html and ">Pick<" in html

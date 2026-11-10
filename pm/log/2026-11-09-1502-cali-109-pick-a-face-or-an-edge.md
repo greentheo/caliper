@@ -12,5 +12,6 @@ clarify what I'm talking about?"
 - **The message carries the pick:** "About this edge: … (at x, y, z mm in the script's coordinates): fillet this".
 - Not yet: `NearestToPointSelector` guidance in part_scripts.md, and the check that the change landed on the pick (slice c).
   No live designer run has used a pick: live runs wait for Theo's word after #155.
-- Tests: tests/test_features.py (33). Mutants each fail (triangle lookup, edges through the part, no pixel limit, a corner
+- Tests: tests/test_features.py (41). Mutants each fail (triangle lookup, edges through the part, no pixel limit, a corner
   flipped, no pose, a cache that ignores placing).
+- **#172 review:** a pick survives moving the mouse during the first load (the click's ray and camera are kept), and only the last of several clicks counts, so no orphan ring. The chip's words follow the page's units. A part that doesn't build gets a 422 in its own words and the hint stops saying "working". The bar is across the top of the view, labelled "Pick", with each mode's hint, and there are two chips, blue for the part and amber for the pick, with a × for the pick alone.

@@ -60,6 +60,8 @@
         <div id="scopeRow" class="scope-row" hidden>
           <span class="muted small">talking about</span>
           <span id="scopeChip" class="chip"></span>
+          <span id="pickChip" class="chip pick" hidden></span>
+          <button type="button" id="pickClear" class="pick-x" aria-label="Clear the pick" hidden>×</button>
           <button type="button" id="scopeClear" class="x" title="back to the whole design">×</button>
         </div>
         <div class="composer-row">
@@ -73,13 +75,15 @@
 
     <section class="view">
       <div id="viewer"></div>
+      <div class="pickbar-top"><span class="pick-label">Pick</span>
+        <div id="pickBar" class="pickbar" role="group" aria-label="Pick"><button class="ghost on" data-pick="part">Part</button><button class="ghost" data-pick="face">Face</button><button class="ghost" data-pick="edge">Edge</button></div>
+        <span id="pickHint" class="pick-hint">Click a part</span></div>
       <div id="tip" class="tip" hidden></div>
       <div id="stationBar" class="station-bar" hidden></div>
       <div id="layers" class="layers" hidden></div>
       <div class="viewbar">
         <button id="fitView" class="ghost" title="fit everything in view (F)">⤢ fit</button>
         <button id="oneBody" class="ghost" title="draw each part as one body, or as its pieces in their materials">one body</button>
-        <div id="pickBar" class="pickbar" role="group" aria-label="Pick"><button class="ghost on" data-pick="part">Part</button><button class="ghost" data-pick="face">Face</button><button class="ghost" data-pick="edge">Edge</button></div>
         <span id="viewHint" class="muted small"></span>
       </div>
     </section>

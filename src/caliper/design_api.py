@@ -706,6 +706,8 @@ def router():
             return features.with_words(features.for_part(store, pid), store.design.display_units == "in")
         except KeyError:
             raise HTTPException(404, f"no part {pid!r}")
+        except Exception as e:  # noqa: BLE001 — a part that doesn't build has no faces to pick: said, as for its pieces (#172)
+            raise HTTPException(422, str(e))
 
     @r.get("/api/designs/{slug}/parts/{pid}/piece.stl")
     def part_piece_stl(slug: str, pid: str, key: str):

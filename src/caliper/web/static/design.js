@@ -617,7 +617,7 @@ function pick(e) {
 
 // ------------------------------------------------------------- pick a face or an edge (#109, the mockup's bar)
 // Part, Face or Edge: a click in Face or Edge says which, and the chat says what it picked. The ids are this version's.
-const PICK = { mode: 'part', parts: new Map(), overlay: null };
+const PICK = { mode: 'part', parts: new Map(), overlay: null, turn: 0 };
 const pickKey = (pid, version) => `${S.slug}/${pid}/${version}`;
 // which face a triangle of the merged mesh belongs to: ``starts`` holds each face's first triangle
 function faceOfTriangle(starts, tri) {
@@ -651,6 +651,7 @@ function aboutPick(pick, text) {
 }
 function clearPick() {
   S.pick = null;
+  PICK.turn += 1;                                 // a pick still on its way is off too
   if (PICK.overlay) { scene.remove(PICK.overlay); PICK.overlay.geometry.dispose(); PICK.overlay = null; }
 }
 // a face sits on the part (its far side stays hidden); an edge and a point draw over everything, so they can be seen
@@ -661,11 +662,11 @@ function drawPick(geometry, onSurface) {
   scene.add(m);
   PICK.overlay = m;
 }
-async function features(pid) {
-  const part = S.design.parts.find((p) => p.id === pid), key = pickKey(pid, part.version);
-  if (!PICK.parts.has(key)) {
-    const hint = $('viewHint');
-    hint.textContent = 'working out its faces and edges…';
+const PICK_HINTS = { part: 'Click a part', face: 'Click a face', edge: 'Click an edge' };
+function pickHint(text) { $('pickHint').textContent = text || PICK_HINTS[PICK.mode]; }
+async function loadFeatures(pid) {
+  pickHint('working out its faces and edges…');
+  try {
     const got = await api('GET', `/api/designs/${S.slug}/parts/${pid}/features.json`);
     const pos = [], index = [], starts = [];
     let at = 0;
@@ -678,36 +679,47 @@ async function features(pid) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setIndex(index);
-    PICK.parts.set(key, { ...got, starts, mesh: got.mesh ? null : new THREE.Mesh(g), solidMesh: !!got.mesh });
-    hint.textContent = '';
-  }
-  return PICK.parts.get(key);
+    return { ...got, starts, mesh: got.mesh ? null : new THREE.Mesh(g), solidMesh: !!got.mesh };
+  } finally { pickHint(); }                       // whatever happened, it's stopped working
+}
+// asked once per part, version and unit, however many clicks wait on it
+async function features(pid) {
+  const part = S.design.parts.find((p) => p.id === pid), key = `${pickKey(pid, part.version)}/${S.design.display_units}`;
+  if (!PICK.parts.has(key)) PICK.parts.set(key, loadFeatures(pid));
+  try { return await PICK.parts.get(key); } catch (e) { PICK.parts.delete(key); throw e; }
 }
 function facePicked(data, hit) {
   const near = 0.01 * hit.distance + 1;
   const at = ray.intersectObject(data.mesh, false).find((h) => h.distance >= hit.distance - near);
   return at ? data.faces[faceOfTriangle(data.starts, at.faceIndex)] : null;
 }
-function edgePicked(data, hit, e) {
-  const rect = renderer.domElement.getBoundingClientRect(), v = new THREE.Vector3();
+function edgePicked(data, hit, e, seen) {
+  const { rect, camera: view } = seen, v = new THREE.Vector3();
   const project = (p) => {
     v.set(p[0], p[1], p[2]);
-    const d = v.distanceTo(camera.position);
-    v.project(camera);
+    const d = v.distanceTo(view.position);
+    v.project(view);
     return { x: (v.x + 1) * rect.width / 2, y: (1 - v.y) * rect.height / 2, d };
   };
   return nearestEdge(data.edges, project, { x: e.clientX - rect.left, y: e.clientY - rect.top }, 12, hit ? 1.01 * hit.distance + 1 : Infinity);
 }
 async function choose(e, hit) {
   const pid = hit ? hit.object.userData.partId : S.scope, point = hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+  // the click as it was: the pointer and the camera can move while the first pick works out its faces (#172)
+  const seen = { ray: ray.ray.clone(), camera: camera.clone(), rect: renderer.domElement.getBoundingClientRect() };
   if (S.scope !== pid) setScope(pid);
   clearPick();
-  $('viewHint').textContent = '';
+  const turn = PICK.turn;                         // only the last click counts
   let data;
-  try { data = await features(pid); } catch (err) { showErr(plainly(err.message)); return; }
+  try { data = await features(pid); } catch (err) {
+    if (turn === PICK.turn) pickHint(`can't pick on it: ${plainly(err.message)}`);
+    return;
+  }
+  if (turn !== PICK.turn) return;
+  ray.ray.copy(seen.ray);
   if (!hit && (data.solidMesh || PICK.mode === 'face')) return;   // only an edge can be picked from just off the part
   if (data.solidMesh) {                                   // carved, whittled, imported: no faces to name
-    S.pick = { part: pid, kind: 'point', said: pointSaid(point), local: null };
+    S.pick = { part: pid, kind: 'point', said: pointSaid(point), local: null, point };
     drawPick(new THREE.SphereGeometry(Math.max(2, 0.006 * hit.distance), 12, 12).translate(...point));
   } else if (PICK.mode === 'face') {
     const f = facePicked(data, hit);
@@ -718,8 +730,8 @@ async function choose(e, hit) {
     g.setIndex(f.tris);
     drawPick(g, true);
   } else {
-    const edge = edgePicked(data, hit, e);
-    if (!edge) { $('viewHint').textContent = 'no edge there: click closer to one'; renderScope(); return; }
+    const edge = edgePicked(data, hit, e, seen);
+    if (!edge) { pickHint('no edge there: click closer to one'); renderScope(); return; }
     S.pick = { part: pid, kind: 'edge', id: edge.id, said: edge.said, local: edge.local };
     const curve = new THREE.CatmullRomCurve3(edge.points.map((p) => new THREE.Vector3(...p)));
     drawPick(new THREE.TubeGeometry(curve, Math.max(2, edge.points.length * 2), Math.max(1, 0.003 * camera.position.distanceTo(new THREE.Vector3(...edge.centre))), 6, false));
@@ -730,8 +742,22 @@ function setPickMode(mode) {
   PICK.mode = mode;
   if (mode === 'part') clearPick();
   document.querySelectorAll('#pickBar [data-pick]').forEach((b) => b.classList.toggle('on', b.dataset.pick === mode));
+  pickHint();
   renderScope();
 }
+// the words go to the designer, so they follow the page's units (#172)
+async function respeak() {
+  const was = S.pick;
+  if (!was) return;
+  if (was.kind === 'point') was.said = pointSaid(was.point);
+  else {
+    const data = await features(was.part);
+    const got = (was.kind === 'face' ? data.faces : data.edges).find((x) => x.id === was.id);
+    if (got) was.said = got.said;
+  }
+  renderScope();
+}
+$('pickClear').onclick = () => { clearPick(); renderScope(); };   // only the pick: the part stays
 $('pickBar').onclick = (e) => { const b = e.target.closest('[data-pick]'); if (b) setPickMode(b.dataset.pick); };
 
 // ------------------------------------------------------------------------------- the session
@@ -785,6 +811,7 @@ $('unitSeg').onclick = async (e) => {
   if (!u || !S.slug || u === S.design.display_units) return;
   S.design = await api('PATCH', `/api/designs/${S.slug}`, { display_units: u });
   render(); frame();
+  respeak();
 };
 
 function setScope(pid, piece) {
@@ -801,7 +828,9 @@ function renderScope() {
   const part = S.scope && S.design ? S.design.parts.find((p) => p.id === S.scope) : null;
   const named = part ? part.name || part.id : S.scope;
   const piece = part && S.piece ? (part.pieces || []).find((x) => x.key === S.piece) : null;
-  $('scopeChip').textContent = named ? (S.pick ? `${named} · ${S.pick.said}` : piece ? `${named} · ${piece.name}` : named) : '';
+  $('scopeChip').textContent = named ? (piece ? `${named} · ${piece.name}` : named) : '';
+  $('pickChip').hidden = $('pickClear').hidden = !S.pick;
+  $('pickChip').textContent = S.pick ? S.pick.said : '';
   $('msg').placeholder = S.scope
     ? `What should change about ${piece ? piece.name : named}?`
     : (S.design && S.design.parts.length
@@ -1037,7 +1066,7 @@ $('composer').onsubmit = (e) => {
   const text = $('msg').value;
   $('msg').value = '';
   const said = aboutPick(S.pick, aboutPiece(text));
-  if (S.pick) clearPick();
+  if (S.pick) { clearPick(); renderScope(); }
   send(said, S.scope);
 };
 $('msg').addEventListener('keydown', (e) => {
