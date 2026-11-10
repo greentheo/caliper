@@ -407,6 +407,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     saw_nothing = False               # a check that saw no stress at all (#202): not the same as one too coarse to see a wall
     unsure = None                     # a ✓ on an FEA too coarse to see the wall: no pass from it (CALI-110)
     unsettled = None                  # a ✗ on one: a ✗ stays a ✗, and says the fail may be the model's (#191)
+    uncut, recheck = False, None      # a run made before the rounding fix, and one of its cases on its limit (#214)
     no_breaks = None                  # a breaking load from a run that can't see the wall isn't one to read
     loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
     left = []                         # parts whose strength isn't known: never left out of the verdict (#132 review)
@@ -442,6 +443,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                         + next((f": {c['why']}" for c in run["cases"]
                                 if (c.get("fea") or {}).get("supported") is False and c.get("why")), ""))
         said = [(c, verdicts.case(run, c)) for c in run["cases"]]
+        uncut = uncut or not run.get("cut")
+        recheck = recheck or (verdicts.UNCUT if any(v["kind"] == "recheck" for _, v in said) else None)
         sure = [(c, v) for c, v in said if v["kind"] in ("holds", "fails") and not v.get("coarse")]
         breaks = [c["breaks_lb"] for c, _ in sure if c.get("breaks_lb")]
         hedged = next(((c, v) for c, v in said if v["kind"] == "fails" and v.get("coarse")), None)
@@ -521,7 +524,10 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                                 edge=bool(edgeless) if strength else False,             # the middle only (CALI-94)
                                 incomplete="; ".join(left) if strength and left else None,
                                 estimate=m["source"] if m and m.get("trust") == "rough" and c["metric"].startswith("print.")
-                                else None)
+                                else None,
+                                # an old number on its limit, the run's or this goal's own (#214 review)
+                                recheck=(recheck or (verdicts.UNCUT if number and verdicts.goal_on_limit(
+                                    uncut, c["metric"], v, lim, op) else None)) if strength else None)
         status = verdicts.STATUS[verdict["kind"]]
         if verdict["kind"] == "estimate":     # a rough print time runs low: never a pass (#166)
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None, "trust": "rough",

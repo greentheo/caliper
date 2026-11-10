@@ -1052,7 +1052,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
                  "holds": bool(safety is not None and safety >= min_safety),  # producer
                  # where it's predicted to break, placed the same way: linear to failure, as wood is
                  # close to; the joints aren't modelled and may go first
-                 "breaks_lb": round(load["lb"] * load["factor"] * safety, -1) if safety else None})
+                 "breaks_lb": V.cut_lb(load["lb"] * load["factor"] * safety) if safety else None})   # cut (#214)
     if any(pc.get("holes") for pc in ctx["pieces"] if pc["kind"] == "sheet"):
         from .lighten import judge_holed       # a panel stood on with holes: not by the plate formula (CALI-73)
 

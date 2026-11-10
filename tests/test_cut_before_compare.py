@@ -171,7 +171,8 @@ def _old(safety=2.0, cut=False):
 def test_an_old_run_on_its_limit_says_check_again_and_a_new_one_holds():
     old, new = _old(), _old(cut=True)
     v = verdicts.case(old, old["cases"][0])
-    assert v["kind"] == "stale" and not v["counts_as_pass"] and "check it again" in v["why"], v
+    assert v["kind"] == "recheck" and v["word"] == "check it again" and not v["counts_as_pass"], v
+    assert v["why"] == "made before a rounding fix, and it sits exactly on its limit"
     assert verdicts.case(new, new["cases"][0])["kind"] in ("holds", "close")
     assert verdicts.case(_old(2.4), _old(2.4)["cases"][0])["kind"] == "holds"       # off its limit: as it was
     assert verdicts.needs_recheck(old) and not verdicts.needs_recheck(new)
@@ -180,7 +181,7 @@ def test_an_old_run_on_its_limit_says_check_again_and_a_new_one_holds():
 def test_an_old_carve_step_on_its_limit_says_check_again():
     run = {"min_safety": 2.0}
     st = {"index": 1, "safety": 2.0, "holds": True, "whole": 2.5, "whole_holds": True, "saved_g": 10}  # producer
-    assert verdicts.carve_step(st, None, run)["kind"] == "stale"
+    assert verdicts.carve_step(st, None, run)["kind"] == "recheck"
     assert verdicts.carve_step(st, None, {**run, "cut": True})["counts_as_pass"]
 
 
@@ -205,3 +206,62 @@ def test_a_build_package_doesnt_reuse_an_old_run_on_its_limit(tmp_path, monkeypa
     except Exception:  # noqa: BLE001 — the rest of the scorecard isn't what's tested here
         pass
     assert ran == ["stool"]
+
+
+# --- #214 review, round 2: every reader that gives a ✓ asks, and says why -----------------------------------------
+
+def _old_stool(tmp_path):
+    """The sample stool with its stored run edited to sit on 2.0, made before the fix (no marker): step-stool-2's."""
+    import glob
+    import json
+
+    from caliper import load_study as L
+    from caliper import samples
+
+    store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
+    (f,) = [p for p in glob.glob(os.path.join(L.runs_dir(store), "**", "*.json"), recursive=True)
+            if json.load(open(p)).get("part") == "step_stool"][:1]
+    rec = json.load(open(f))
+    rec.pop("cut", None)
+    rec["safety"] = 2.0
+    for c in rec["cases"]:
+        c.update({"safety": 2.0, "holds": True})            # producer: an edited old record
+        if (c.get("plate") or {}).get("done"):
+            c["plate"]["safety_across"] = 2.0
+    json.dump(rec, open(f, "w"))
+    return store
+
+
+def test_an_old_run_on_its_limit_never_ticks_the_design_card_and_says_why(tmp_path):
+    from caliper import answers, design_api, release, studies
+    from caliper import load_study as L
+
+    store = _old_stool(tmp_path)
+    state = design_api.design_state(store)
+    lines = [ln for c in answers.answers(store, state) for ln in c["lines"] if "Holds Dad" in ln["text"]]
+    assert lines and not lines[0]["text"].startswith("✓") and lines[0]["status"] == "warn", lines
+    assert "check it again, made before a rounding fix, and it sits exactly on its limit" in lines[0]["text"], lines
+    part = [ln["text"] for ln in answers.answers(store, state, "step_stool")[1]["lines"] if ln.get("study") == "load"]
+    assert part[0].endswith(": check it again, 2 times over: made before a rounding fix, and it sits exactly on its "
+                            "limit."), part
+    run = L.list_runs(store, "step_stool")[0]
+    head = studies._headline("load", run)[0]
+    assert head.startswith("check it again — weakest") and head.endswith(": " + verdicts.UNCUT), head
+    assert answers.measured(store, state)["strength.recheck"] == verdicts.UNCUT        # the card's own flag, not only the goal's
+    c = {**run["cases"][0], "verdict": verdicts.case(run, run["cases"][0])}
+    assert release._safety_cell(c) == ("check it again: made before a rounding fix, and it sits exactly on its limit", "—")
+
+
+def test_a_goals_own_limit_counts_and_a_breaking_load_within_its_rounding(tmp_path):
+    assert verdicts.goal_on_limit(True, "strength.safety", 2.5, 2.5)
+    assert not verdicts.goal_on_limit(False, "strength.safety", 2.5, 2.5)       # a new run on its limit is settled
+    assert not verdicts.goal_on_limit(True, "strength.safety", 2.6, 2.5)
+    assert verdicts.goal_on_limit(True, "strength.breaks_lb", 500, 500)
+    assert verdicts.goal_on_limit(True, "strength.breaks_lb", 504.9, 500) and not verdicts.goal_on_limit(True, "strength.breaks_lb", 505, 500)
+    assert verdicts.goal(True, recheck=verdicts.UNCUT)["kind"] == "recheck"
+    assert verdicts.goal(False, recheck=verdicts.UNCUT)["kind"] == "fails"               # a ✗ stays a ✗
+
+
+@pytest.mark.parametrize("x, got", [(496.0, 490.0), (500.0, 500.0), (509.9, 500.0), (1240.0, 1240.0)])
+def test_a_breaking_load_is_cut_to_the_10_lb_below(x, got):
+    assert verdicts.cut_lb(x) == got

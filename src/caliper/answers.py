@@ -211,6 +211,8 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
             how = (f", as a round plate held at its ring's outer edge ({_len(pl['ring_mm'], inches)} across)"
                    if pl.get("support") == "ring" else "")
             text += f" By hand, the {pl['piece']} on its own{how}: {_times(pl['safety_across'])}."
+    elif v["kind"] == "recheck":                     # its reason, not "older version" (#214 review)
+        text = f"{c['name'][:1].upper() + c['name'][1:]}: check it again, {_times(c['safety'], rough)}: {v['why']}."
     else:                                            # any other kind: its word, never a ✓ (CALI-112)
         text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {_times(c['safety'], rough)}."
     return _line(text + older, v["status"], study="load",
@@ -566,6 +568,10 @@ def measured(store: DesignStore, state: dict) -> dict:
              for c in r.get("cases") or [] if c.get("safety") is not None or L.blind(r, c)]
     inches = (state.get("display_units") or "in") == "in"
     said = [(r, verdicts.case(r, c)) for r, c in cases]
+    if any(not r.get("cut") for r, _ in cases):
+        out["strength.uncut"] = True                   # made before the rounding fix (#214 review)
+    if any(v["kind"] == "recheck" for _, v in said):
+        out["strength.recheck"] = verdicts.UNCUT
     held = [r for r, v in said if v["kind"] in ("unresolved", "unchecked")]
     if held:                                           # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
         out["strength.unresolved"] = coarse(held[0], inches)
@@ -609,6 +615,7 @@ def measured(store: DesignStore, state: dict) -> dict:
                                            for r in state.get("load_runs") or []) and consistency.bare_edge(store, pid)]
     if edged:                                          # loaded in the middle only (CALI-94, #106 review)
         out["strength.edge"] = consistency.MIDDLE_ONLY[0].upper() + consistency.MIDDLE_ONLY[1:] + "."
+    # a run made before the rounding fix: its number on a goal's limit isn't settled either (#214 review)
     if safeties:
         out["strength.safety"] = min(safeties)
     if breaks:
@@ -775,7 +782,11 @@ def held_to(state: dict, now: dict) -> list[dict]:
         verdict = verdicts.goal(met, untrusted=untrue, unresolved=(now.get("strength.unresolved") or now.get("strength.coarse_fail")) if strength else None,
                                 edge=bool(now.get("strength.edge")) if strength else False,       # (CALI-94)
                                 stale=late or bool(older),
-                                incomplete=now.get("strength.unchecked") if strength else None, estimate=guess)
+                                incomplete=now.get("strength.unchecked") if strength else None, estimate=guess,
+                                # an old number on its limit, the run's or this goal's own (#214 review)
+                                recheck=(now.get("strength.recheck") or (verdicts.UNCUT if verdicts.goal_on_limit(
+                                    bool(now.get("strength.uncut")), c["metric"], v, c.get("limit"), c.get("op", ">="))
+                                    else None)) if strength else None)
         if verdict["kind"] == "estimate":
             out.append(_line(f"! {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}, {guess}.", "warn"))
             continue
@@ -802,7 +813,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
             continue
         # never a ✓ for an older check or score (#132 review): it says when, and what to do
         later = (" (scored before the last change: score it again)." if late
-                 else f" ({older})." if verdict["kind"] == "stale" and older else "." + why)
+                 else f" ({older})." if verdict["kind"] == "stale" and older
+                 else f": check it again, {verdict['why']}." if verdict["kind"] == "recheck" else "." + why)
         out.append(_line(f"{'✗' if failed else '✓' if verdict['kind'] == 'holds' else '!'} {label}{assumed}: {num}"
                          + _against(c, failed, units.get(c['metric'], '')) + later,
                          "warn" if late else verdict["status"],

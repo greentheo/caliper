@@ -341,7 +341,7 @@ def judged(case: dict, raw: float, min_safety: float, **extra) -> dict:
     #213; #214 review: one place for judge_holed, the lightening's re-judge and a picture's edge)."""
     safety = V.cut(raw)
     case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety, **extra,  # producer
-                 "breaks_lb": round(case["lb"] * case["factor"] * safety, -1)})
+                 "breaks_lb": V.cut_lb(case["lb"] * case["factor"] * safety)})
     return case
 
 
