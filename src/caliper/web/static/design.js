@@ -162,7 +162,7 @@ function md(text) {
   return esc(text)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-    .replace(/(^|[\s(])_([^_\n]+)_(?=[\s.,;:)!?]|$)/g, '$1<i>$2</i>')
+    .replace(/(^|[\s(])_((?:[^_\n]|(?<=\w)_(?=\w))+)_(?=[\s.,;:)!?]|$)/g, '$1<i>$2</i>')
     .replace(/\n/g, '<br>');
 }
 const pct = (v) => (v == null ? '—' : `${Math.round(v * 100)}%`);
@@ -1128,11 +1128,13 @@ async function send(text, scope, pick, shown) {
   if (S.busy || S.opening || !text.trim()) return;      // never to a design that isn't on screen yet (#173)
   if (!S.slug) return createDesign(text);
   S.busy = true; $('send').disabled = true;
+  const sent = S.pick;                          // the pick this message is about: one made while it's answered isn't it
   const live = liveTurn(shown || text, scope);
   try {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}), ...(shown ? { shown } : {}) });
     await follow(job_id, (ev) => live.step(ev));
     S.busy = false;
+    if (shown && S.pick === sent) clearPick();                     // it's been used; after an error it stays, so asking again doesn't mean picking again
     await refresh();
   } catch (e) {
     live.fail(e.message, e.errorId);
@@ -1147,7 +1149,6 @@ $('composer').onsubmit = (e) => {
   $('msg').value = '';
   const shown = S.pick ? `About this ${S.pick.said}: ${text}` : null;     // their own bubble: no coordinates (#181)
   const said = aboutPick(S.pick, aboutPiece(text)), pick = pickPosted(text);
-  if (S.pick) { clearPick(); renderScope(); }
   send(said, S.scope, pick, shown);
 };
 $('msg').addEventListener('keydown', (e) => {
@@ -1307,7 +1308,7 @@ const isLength = (e) => e.unit === 'mm';
 const paramText = (e, v) => (isLength(e) && inches() ? inchText(v) : `${+Number(v).toFixed(3)}`);
 const paramUnit = (e) => (isLength(e) ? (inches() ? 'in' : 'mm') : e.unit === 'deg' ? 'deg' : '');
 // a number in plain words: its comment, unless the comment is only a quantity ("12 in", "~10.5", "18 in base"); then its name
-const PARAM_WORD = { dia: 'diameter', bot: 'bottom', t: 'thickness', r: 'radius', h: 'height', w: 'width' };
+const PARAM_WORD = { dia: 'diameter', bot: 'bottom', t: 'thickness', r: 'radius', h: 'height', w: 'width', d: 'depth', l: 'length' };
 function paramName(e) {
   const note = (e.note || '').replace(/\s*\([^)]*\)?\s*$/, '')
     .replace(/^~?\d[\d./]*(\s+\d+\/\d+)?\s*(mm|in\b|inch(es)?\b|"|″)?\s*/i, '')
@@ -1542,7 +1543,7 @@ function answersKey() {               // what the answers depend on: a change to
   return JSON.stringify([S.slug, S.scope, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
     runs(d.carve_runs), runs(d.lighten_runs),
     (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
-    (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey]);
+    (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey, d.display_units]);
 }
 function qlines(c) {
   if (!c) return '<div class="qline muted"><span class="spin"></span>answering…</div>';
@@ -1971,7 +1972,7 @@ function wireRelease() {
       const { job_id } = await api('POST', `/api/designs/${S.slug}/release`);
       await trackJob(job_id, { kind: 'release', part: null, text: 'bringing the cut plans and scorecard up to date…' }).done;
       await refresh();
-    } catch (e) { prog.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`; go.disabled = false; }
+    } catch (e) { prog.innerHTML = jobEnded(e); go.disabled = false; }
   };
 }
 
@@ -2507,7 +2508,8 @@ function showMarks() {
   const c = S.scope && S.built[S.scope];
   const b = S.scope ? (c && c.balance) : (S.balance && S.balance.data);
   const cog = S.scope ? (c && c.report && c.report.cog) : (b && b.mass_kg ? b.cog : null);
-  const size = Math.max(contentBox().getSize(new THREE.Vector3()).length() / 160, 8);
+  const across = contentBox().getSize(new THREE.Vector3()).length();
+  const size = Math.max(across / 160, Math.min(8, across / 25));    // 8 mm would cover most of a small part
   const dot = (at, color) => {
     const m = new THREE.Mesh(new THREE.SphereGeometry(size, 20, 14),
       new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true }));
@@ -2613,6 +2615,12 @@ function carveChart(p, run) {
 }
 // a refusal as a person reads it: the server's reason without the exception's name ("ValueError: …", #136 review)
 const plainly = (msg) => String(msg ?? '').replace(/^[A-Za-z_.]*(Error|Exception):\s*/, '');
+// a long job's ending that isn't a result: a person's own Cancel isn't an error, and a server that's away is said in words
+function jobEnded(e) {
+  if (e.status === 'cancelled') return '<div class="small muted" style="margin-top:6px">Cancelled.</div>';
+  const said = /Failed to fetch|NetworkError|Load failed/.test(e.message) ? 'The server isn\'t answering. Its work may have stopped: this will read again when it\'s back.' : plainly(e.message);
+  return `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(said)}</div>`;
+}
 const carveKey = (pid) => `${S.slug}/${pid}`;
 // CALI-101: one click, one carve. The job is kept in S.carveJob[part] from the click until it ends, so the button
 // stays disabled, a redraw draws the panel again (steps, bar, time left, Cancel), and a reload finds it by
@@ -2942,7 +2950,7 @@ async function startLighten(p, again) {
     if (S.slug !== slug) return;
     await refresh().catch(() => {});              // a 409: the card as it now is, and the reason beside it
     const said = $('lightProgress');
-    if (said) said.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(plainly(e.message))}</div>`;
+    if (said) said.innerHTML = jobEnded(e);
     if ($('lightGo') && !trackedFor('lighten', p.id)) $('lightGo').disabled = false;
   }
 }
@@ -2981,10 +2989,10 @@ function rereadWhenBack(slug, tries) {
   if (S.slug !== slug) return;
   refresh().catch(() => { if (tries > 1) setTimeout(() => rereadWhenBack(slug, tries - 1), 3000); });
 }
-// while something runs, ask the record: another tab's job appears, and one the server no longer has can't hold the page.
+// ask the record: another tab's job appears, and one the server no longer has can't hold the page.
 // Gone twice running before it's dropped: a job's last event can still be on its way
 async function pollRunning() {
-  if (!S.slug || !jobsHere().length) return;
+  if (!S.slug || !S.design || document.hidden) return;         // nothing followed yet still looks: another tab's job shows here
   const slug = S.slug;
   let got;
   try { got = await api('GET', `/api/designs/${slug}/running`); } catch (e) { return; }     // following it says when it's gone
@@ -3055,6 +3063,7 @@ $('paneTabs').onclick = (e) => {
 };
 setPane('chat');
 $('inspector').addEventListener('click', cancelJob);
+$('inspector').addEventListener('toggle', paintJobs, true);    // folded or unfolded mid-wait: toggle doesn't bubble, so captured
 setInterval(pollRunning, 5000);
 async function runLoad(p, spacing) {
   const key = `load:${S.slug}/${p.id}`;            // by design and part: part ids repeat across designs (#175)
@@ -3085,7 +3094,7 @@ async function startLoad(p, spacing) {
     if (S.slug !== slug) return;
     await refresh().catch(() => {});      // a 409 from a stale tab: the card as it now is, and it follows the job that's running
     const said = $('lProgress');
-    if (said) said.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    if (said) said.innerHTML = jobEnded(e);
     if ($('lGo') && !trackedFor('load', p.id)) $('lGo').disabled = false;
   }
 }
@@ -3146,7 +3155,8 @@ async function showHeat(pid, run, index) {
             : settled(c.verdict)           // the verdict's word and colour (CALI-112): never green unless it holds
               ? `<b style="color:var(--${verdictTone(c.verdict)})">${esc(c.verdict.word)}, ${sx(c.safety)}</b>`
               : `<b style="color:var(--amber)">${esc(c.verdict ? c.verdict.word : 'not checked yet')}: the check read ${sx(c.safety)}</b>`}
-        ${c.breaks_lb && settled(c.verdict) ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}</div>
+        ${c.breaks_lb && settled(c.verdict) ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}
+        ${run.version !== partOf(pid).version ? `· <b style="color:var(--amber)">from v${run.version}: the part has changed since</b>` : ''}</div>
       <div class="small muted" style="margin-top:2px">Colours: whittle's FEA <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span>
         0–${fixed(top, 1)} MPa (${esc(run.material.name)} breaks near ${fixed(run.material.strength, 1)} MPa). Decided by ${decided}.</div></div>
       <button id="stationClose" class="ghost">×</button>`;
