@@ -348,8 +348,10 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         if strays:                                   # what the mesh left out, said once (CALI-118)
             what.append(_line(f"I {strays}: it enclosed nothing and weighs nothing.", "info"))
         if off:
-            what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"fix its shape to "
-                              f"match its pieces\" and I'll revise it.", "bad"))
+            fix = (consistency.remedy(off[0].detail) if off[0].id == "construction_on_its_face"
+                   else "fix its shape to match its pieces")
+            what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"{fix}\" and I'll revise it.",
+                              "bad"))
         if edge:                               # a load case it's missing: a warning, the round passed (CALI-94)
             what.append(_line(edge[0].upper() + edge[1:] + ".", "warn", study="load"))
 
