@@ -844,7 +844,8 @@ def _facts(store: DesignStore, scope: Optional[str]) -> str:
                 out.append(f"{pid or 'the design'} · {c['q']} {ln['text']}")
             promised = promised or bool(c.get("promise"))
     if promised:                                       # so a plain answer about strength can say it (CALI-86)
-        out.append(f"what a strength verdict promises: {answers.PROMISE}")
+        out.append("what a strength verdict promises: "
+                   + answers.promise(store, [scope] if scope else [p.id for p in store.design.parts]))   # (#64 item 14)
     from . import consistency, verdicts
 
     for run in load_study.list_runs(store)[:2]:

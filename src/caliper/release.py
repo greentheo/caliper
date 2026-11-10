@@ -895,6 +895,12 @@ def _headlines(metrics: dict) -> list[tuple[str, str]]:
             + [("frame.yield_x", "frame yields at × its load"), ("drag.lbf", "drag at speed")])
 
 
+def _promise(store: DesignStore, parts: list) -> str:
+    from .answers import promise
+
+    return promise(store, parts)
+
+
 def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], notes: list[str]) -> str:
     """The build book, as one printable page."""
 
@@ -920,7 +926,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
            f"<div class='nums'>{nums}</div>"]
     from .answers import PROMISE
 
-    out.append(f"<p class='note'><b>What the numbers promise.</b> {_e(PROMISE)}</p>")       # CALI-59
+    out.append(f"<p class='note'><b>What the numbers promise.</b> {_e(rec.get('promise') or PROMISE)}</p>")   # CALI-59
     if notes:
         out.append("<h3>Before you cut</h3><ul>" + "".join(f"<li>{_e(n)}</li>" for n in notes) + "</ul>")
     # what to buy
@@ -1284,6 +1290,7 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
            "names": {p.id: p.label for p in store.design.parts if p.label},
            "grain": {pid: n for pid, n in said.items() if n},       # which way to cut each panel (CALI-126)
            "slug": os.path.basename(store.root), "versions": versions,
+           "promise": _promise(store, [p.id for p in built]),        # worded for what it's made of (#64 item 14)
            "card": {"created": card["created"], "summary": card["summary"]},
            "ready": verdicts.summary(card["summary"])["counts_as_pass"],      # one verdict (CALI-112)
            "cutplans": {pid: plan["id"] for pid, plan in plans.items()},

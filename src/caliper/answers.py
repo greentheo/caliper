@@ -26,6 +26,46 @@ PROMISE = ("A prediction, not a certificate: it rests on the loads it was given 
            "the material. Real wood varies and so do joints, so test it gently before you trust it with a person.")
 
 
+#: Wood, for what a promise says varies (a sheet or a stick of these).
+WOODS = ("plywood", "lumber", "softwood", "hardwood", "mdf", "osb")
+
+
+def promise(store: DesignStore, parts) -> str:
+    """:data:`PROMISE`, worded for what the parts are made of (CALI-88, #64 item 14): wood, a print, both, or any
+    other material. An all-printed box's began "Real wood varies"."""
+    made = set()
+    for pid in parts:
+        try:
+            items = C.declared(store, pid).get("construction") or []
+        except Exception:  # noqa: BLE001 — a part whose script won't say: the general words, never a wrong one
+            items = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            made.add("printed" if it.get("kind") == "printed" else "wood" if it.get("material") in WOODS else "other")
+    if made == {"wood"} or not made:
+        return PROMISE
+    wood, printed, other = "wood" in made, "printed" in made, "other" in made
+    # what it rests on; "rough" is said where a verdict is (a line's own ``rough``), not here: a mixed part whose
+    # plywood governs isn't rough (CALI-97)
+    rests = []
+    if wood or other:
+        rests.append("textbook strengths for the " + ("materials" if wood and other else "wood" if wood else "material"))
+    if printed:
+        rests.append("a model of the print")
+    if wood:
+        also = (["prints"] if printed else []) + (["the other materials"] if other else []) + ["joints"]
+        varies = "Real wood varies, and so do " + (", ".join(also[:-1]) + " and " + also[-1] if len(also) > 1 else also[0])
+    elif printed and not other:
+        varies = "Printers, infill and the bond between a print's layers vary"
+    elif printed:
+        varies = "Prints, materials and joints vary"
+    else:
+        varies = "The material and its joints vary"
+    return (f"A prediction, not a certificate: it rests on the loads it was given and on {' and '.join(rests)}. "
+            f"{varies}, so test it gently before you trust it with a person.")
+
+
 def _len(mm: float, inches: bool) -> str:
     return f"{mm / IN:.1f} in".replace(".0 in", " in") if inches else f"{mm:.0f} mm"
 
@@ -296,11 +336,11 @@ def rests_on_model(metric: str) -> bool:
     return m.startswith(("strength.", "frame.")) or m.endswith("safety") or "yield" in m
 
 
-def _card(key: str, q: str, lines: list[dict], hint: str = "") -> dict:
+def _card(key: str, q: str, lines: list[dict], hint: str = "", promised: str = PROMISE) -> dict:
     card = {"key": key, "q": q, "status": _worst(lines) if lines else "info", "lines": lines, "hint": hint}
     # any verdict resting on a model (a strength or frame study, or the scorecard's checks) says what it promises
     if any((ln.get("study") in ("load", "frame") or ln.get("model")) and ln["status"] in ("ok", "bad") for ln in lines):
-        card["promise"] = PROMISE + "".join(f" {r}" for r in dict.fromkeys(ln["rough"] for ln in lines if ln.get("rough")))
+        card["promise"] = promised + "".join(f" {r}" for r in dict.fromkeys(ln["rough"] for ln in lines if ln.get("rough")))
     return card
 
 
@@ -513,7 +553,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         if isinstance(ln, dict) and ln.get("text"):
             ln["text"] = tree.relabelled(store, pid, ln["text"])
     return [_card("what", "What is it?", what),
-            _card("work", "Will it work?", work, "Say what it must do and I'll check it."),
+            _card("work", "Will it work?", work, "Say what it must do and I'll check it.", promise(store, [pid])),
             _card("buy", "What do I buy?", buy),
             _card("make", "How do I make it?", how, "Say what it's built from and I'll plan the making.")]
 
@@ -911,7 +951,8 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     else:
         make.append(_line("Or make the whole build package: the build book, cut lists and drawings.", "info",
                           action="release"))
-    return [_card("what", "What is it?", what), _card("work", "Will it work?", work),
+    return [_card("what", "What is it?", what),
+            _card("work", "Will it work?", work, promised=promise(store, [p.id for p in store.design.parts])),
             _card("buy", "What do I buy?", buy), _card("make", "How do I make it?", make)]
 
 
