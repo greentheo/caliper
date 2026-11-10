@@ -158,6 +158,124 @@ function md(text) {
 const pct = (v) => (v == null ? '—' : `${Math.round(v * 100)}%`);
 const fixed = (v, d) => (v == null ? '—' : Number(v).toFixed(d));
 
+// ------------------------------------------------------------- the part tree (#94, the mockup Theo approved)
+// Every part and its pieces: a colour by material (the legend), an eye, click to select, double-click to rename.
+// What's hidden is this viewer's: kept in the browser, per design, and still in every check.
+const TREE = { slug: undefined, parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, last: null };
+const pieceId = (pid, key) => `${pid}/${key}`;
+function seen() {
+  if (TREE.slug !== S.slug) {
+    TREE.slug = S.slug;
+    let kept = {};
+    try { kept = JSON.parse(localStorage.getItem(`caliper-tree:${S.slug}`)) || {}; } catch (e) { /* none, or none allowed */ }
+    TREE.parts = new Set(kept.parts || []); TREE.pieces = new Set(kept.pieces || []);
+    TREE.open = kept.open !== false; TREE.oneBody = !!kept.oneBody; TREE.rename = null;
+  }
+  return TREE;
+}
+function keepTree() {
+  try {
+    localStorage.setItem(`caliper-tree:${S.slug}`, JSON.stringify({ parts: [...TREE.parts], pieces: [...TREE.pieces],
+      open: TREE.open, oneBody: TREE.oneBody }));
+  } catch (e) { /* the tree still works for this visit */ }
+}
+function isHidden(pid, key) {
+  const t = seen();
+  return t.parts.has(pid) || (key != null && t.pieces.has(pieceId(pid, key)));
+}
+const EYE_ON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+const EYE_OFF = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 3l18 18"></path><path d="M10.6 5.1A10.8 10.8 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.9 8.3 2 12 2 12s3.5 7 10 7c1.8 0 3.4-.5 4.8-1.2"></path></svg>';
+function renameRow(part, key, draft) {
+  return `<div class="trename"><input id="treeName" aria-label="New name" value="${esc(draft)}" maxlength="60" data-rename-input="1">
+    <button class="primary" data-rename-save="1" data-part="${esc(part)}"${key != null ? ` data-key="${esc(key)}"` : ''}>Rename</button></div>`;
+}
+function treeHtml(design, view) {
+  const rows = design.parts.map((p) => {
+    const fixed = p.role === 'fixed', off = view.parts.has(p.id);
+    const cant = view.cant ? view.cant(p.id, p.version) : null, oneBody = view.oneBody || !!cant;   // no piece eye can act then
+    const editing = view.rename && view.rename.part === p.id;
+    const head = `<div class="trow part${view.scope === p.id && !view.piece ? ' on' : ''}${fixed ? ' ref' : ''}${off ? ' off' : ''}">
+      <button class="eye" aria-label="Show or hide the whole part" data-eye="${esc(p.id)}">${off ? EYE_OFF : EYE_ON}</button>
+      <button class="tname" data-sel="${esc(p.id)}"${fixed ? ' data-fixed="1"' : ''}>${esc(p.name || p.id)}</button>
+      <span class="side">${fixed ? 'reference' : `v${p.version}`}</span></div>`
+      + (editing && view.rename.key == null ? renameRow(p.id, null, view.rename.draft) : '')
+      + (cant ? `<div class="tcant">can't draw this part's pieces: ${esc(cant)}</div>` : '');
+    const pieces = (p.pieces || []).map((pc) => {
+      const pcOff = off || (!oneBody && view.pieces.has(pieceId(p.id, pc.key)));
+      const eye = oneBody
+        ? `<button class="eye" disabled title="${cant ? "this part can't be drawn as pieces" : 'drawn as one body: choose its pieces to hide one'}" aria-label="Can't hide a piece while it's one body">${EYE_ON}</button>`
+        : `<button class="eye" aria-label="Show or hide this piece" data-eye="${esc(p.id)}" data-key="${esc(pc.key)}">${pcOff ? EYE_OFF : EYE_ON}</button>`;
+      return `<div class="trow piece${view.scope === p.id && view.piece === pc.key ? ' on' : ''}${fixed ? ' ref' : ''}${pcOff ? ' off' : ''}">
+        ${eye}
+        <span class="swatch" aria-hidden="true" style="background:${esc(fixed ? '#9aa4ad' : pc.color)}"></span>
+        <button class="tname" data-sel="${esc(p.id)}" data-key="${esc(pc.key)}"${fixed ? ' data-fixed="1"' : ''}>${esc(pc.name)}</button>
+        <span class="side">${esc(pc.material)}</span></div>`
+        + (editing && view.rename.key === pc.key ? renameRow(p.id, pc.key, view.rename.draft) : '');
+    }).join('');
+    return head + pieces;
+  }).join('');
+  const legend = (design.legend || []).length ? `<div class="tlegend"><div class="tlegend-h">Materials</div>${design.legend.map((m) =>
+    `<div class="tlegend-r"><span class="swatch" aria-hidden="true" style="background:${esc(m.color)}"></span>${esc(m.label)} · ${m.count} piece${m.count === 1 ? '' : 's'}</div>`).join('')}</div>` : '';
+  return `<div class="tree-head"><button class="fold" data-fold="1" aria-expanded="${view.open}">${view.open ? '▾' : '▸'} Parts</button>
+    <span class="note">hidden pieces are still checked</span></div>${view.open ? rows + legend : ''}`;
+}
+function renderTree() {
+  const box = $('tree');
+  if (!box) return;
+  const parts = S.design ? S.design.parts : [];
+  box.hidden = !parts.length;
+  if (!parts.length || document.activeElement === $('treeName')) return;       // never over a name being typed
+  const t = seen();
+  const cant = (pid, version) => { const n = noPieces.get(pid); return n && n.version === version ? n.why : null; };
+  box.innerHTML = treeHtml(S.design, { parts: t.parts, pieces: t.pieces, open: t.open, rename: t.rename, scope: S.scope, piece: S.piece,
+    oneBody: t.oneBody, cant });
+  if (t.rename && $('treeName')) { $('treeName').focus(); $('treeName').select(); }
+}
+async function saveTreeName(part, key) {
+  const label = $('treeName').value;
+  $('treeName').blur();
+  TREE.rename = null;
+  try {
+    S.design = await api('POST', `/api/designs/${S.slug}/parts/${part}/label`, key != null ? { label, piece: key } : { label });
+  } catch (e) { showErr(plainly(e.message)); }
+  render();
+}
+// one listener for the tree, so a redraw between the two clicks of a double-click can't lose it
+function treeClick(el, now) {
+  const d = el.dataset, t = seen();
+  if (d.fold) { t.open = !t.open; keepTree(); renderTree(); return 'fold'; }
+  if (d.renameSave) { saveTreeName(d.part, d.key != null ? d.key : null); return 'save'; }
+  if (d.eye) {
+    const set = d.key != null ? t.pieces : t.parts, id = d.key != null ? pieceId(d.eye, d.key) : d.eye;
+    if (set.has(id)) set.delete(id); else set.add(id);
+    keepTree(); renderTree(); paint();
+    return 'eye';
+  }
+  if (d.sel) {
+    const id = pieceId(d.sel, d.key != null ? d.key : ''), again = t.last && t.last.id === id && now - t.last.at < 400;
+    t.last = again ? null : { id, at: now };
+    if (again && !d.fixed) {
+      const p = S.design.parts.find((x) => x.id === d.sel);
+      const pc = d.key != null ? (p.pieces || []).find((x) => x.key === d.key) : null;
+      t.rename = { part: d.sel, key: d.key != null ? d.key : null, draft: pc ? pc.name : (p.label || p.name || p.id) };
+      renderTree();
+      return 'rename';
+    }
+    setScope(d.sel, d.key != null ? d.key : null);
+    return 'select';
+  }
+  return null;
+}
+$('tree').addEventListener('click', (e) => {
+  const el = e.target.closest('button');
+  if (el) treeClick(el, Date.now());
+});
+$('tree').addEventListener('keydown', (e) => {
+  if (!e.target.dataset.renameInput) return;
+  if (e.key === 'Enter') { e.preventDefault(); e.target.parentElement.querySelector('[data-rename-save]').click(); }
+  if (e.key === 'Escape') { TREE.rename = null; e.target.blur(); renderTree(); }
+});
+
 // ------------------------------------------------------------------------------------- viewer
 const viewer = $('viewer');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -178,6 +296,8 @@ const fill = new THREE.DirectionalLight(0xffffff, 0.35); fill.position.set(1, 0.
 
 let grid = null;
 const meshes = new Map();       // part id -> THREE.Mesh
+const pieces3d = new Map();     // part id -> {version, byKey: piece -> THREE.Mesh}: the part as its pieces (#94)
+const noPieces = new Map();     // part id -> {version, why} that can't be drawn as pieces: one body, and the tree says why
 let stationMesh = null;         // a whittle station shown in place of its part
 const loader = new STLLoader();
 
@@ -194,6 +314,7 @@ resize();
 function contentBox() {
   const box = new THREE.Box3();
   for (const m of meshes.values()) if (m.visible) box.expandByObject(m);
+  for (const s of pieces3d.values()) for (const m of s.byKey.values()) if (m.visible) box.expandByObject(m);
   if (stationMesh) box.expandByObject(stationMesh);
   return box;
 }
@@ -267,10 +388,55 @@ async function syncParts(design, refit) {
   const results = await Promise.allSettled(loads);
   const failed = results.filter((x) => x.status === 'rejected');
   if (failed.length) showErr(failed.map((f) => f.reason.message).join(' · '));
+  await syncPieces(design);
   paint();
   refreshBuilt3d(design);
   if (refit || (loads.length && meshes.size === loads.length)) frame();
 }
+
+// ------------------------------------------------------------- a part as its pieces, in their materials (#94)
+function dropPieces(pid) {
+  const s = pieces3d.get(pid);
+  if (!s) return;
+  for (const m of s.byKey.values()) { scene.remove(m); m.geometry.dispose(); m.material.dispose(); }
+  pieces3d.delete(pid);
+}
+// every piece or none: a part that can't be cut into its pieces stays one body (a shape that isn't closed, say)
+async function loadPieces(p) {
+  const got = await Promise.all(p.pieces.map(async (pc) => {
+    const r = await fetch(`/api/designs/${S.slug}/parts/${p.id}/piece.stl?key=${encodeURIComponent(pc.key)}&v=${p.version}`);
+    if (!r.ok) {
+      const said = await r.json().catch(() => ({}));
+      throw new Error(typeof said.detail === 'string' ? said.detail : `the server answered ${r.status}`);
+    }
+    return [pc, await r.arrayBuffer()];
+  }));
+  const byKey = new Map();
+  for (const [pc, buf] of got) {
+    const geom = loader.parse(buf);
+    geom.computeVertexNormals();
+    const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: pc.color, metalness: 0.08, roughness: 0.6 }));
+    mesh.userData = { partId: p.id, piece: pc.key, color: pc.color };
+    byKey.set(pc.key, mesh);
+  }
+  return byKey;
+}
+let piecesOf = null;              // the design they're of: two designs can both have a part called i_want at v8
+async function syncPieces(design) {
+  if (piecesOf !== S.slug) { [...pieces3d.keys()].forEach(dropPieces); noPieces.clear(); piecesOf = S.slug; }
+  const want = new Map(design.parts.filter((p) => (p.pieces || []).length && p.role !== 'fixed').map((p) => [p.id, p]));
+  for (const [pid, s] of pieces3d) if (!want.has(pid) || want.get(pid).version !== s.version) dropPieces(pid);
+  await Promise.all([...want.values()].filter((p) => !pieces3d.has(p.id) && (noPieces.get(p.id) || {}).version !== p.version).map(async (p) => {
+    try {
+      const byKey = await loadPieces(p);
+      if (!S.design || !S.design.parts.some((x) => x.id === p.id && x.version === p.version)) return;   // it moved on
+      dropPieces(p.id);
+      for (const m of byKey.values()) scene.add(m);
+      pieces3d.set(p.id, { version: p.version, byKey });
+    } catch (e) { noPieces.set(p.id, { version: p.version, why: plainly(e.message) }); renderTree(); }
+  }));
+}
+$('oneBody').onclick = () => { TREE.oneBody = !TREE.oneBody; keepTree(); paint(); renderTree(); };
 
 // ------------------------------------------------------------- how it's built, in 3D (CALI-52)
 // A part shown as built: every panel, stick, tube and plate where it sits, in layers you can switch off.
@@ -386,7 +552,8 @@ function paint() {
     const sel = S.scope === pid;
     m.material.emissive.setHex(sel ? 0x1f6feb : 0x000000);
     m.material.emissiveIntensity = sel ? 0.55 : 0;
-    m.visible = !(S.station && S.station.part === pid);
+    const asPieces = drawnAsPieces(pid);
+    m.visible = !(S.station && S.station.part === pid) && !asPieces && !seen().parts.has(pid);
     // while previewing one part's design, fade the rest — the box would otherwise hide the frame
     const fade = !!S.station && S.station.part !== pid;
     const ghost = built3d.has(pid);            // shown as built: the solid is a faint ghost you can still click
@@ -396,6 +563,22 @@ function paint() {
     m.material.opacity = ghost ? (S.showSolid ? 0.25 : 0.04) : fade ? Math.min(0.18, base.opacity) : base.opacity;
     m.material.depthWrite = !transparent;
   }
+  for (const [pid, s] of pieces3d) {
+    const on = drawnAsPieces(pid), hurt = hit.has(pid);
+    for (const [key, m] of s.byKey) {
+      m.visible = on && !isHidden(pid, key);
+      m.material.color.set(hurt ? 0xf85149 : m.userData.color);
+      const sel = S.scope === pid && (!S.piece || S.piece === key);
+      m.material.emissive.setHex(sel ? 0x1f6feb : 0x000000);
+      m.material.emissiveIntensity = sel ? 0.4 : 0;
+    }
+  }
+  const b = $('oneBody');
+  if (b) { b.textContent = TREE.oneBody ? 'its pieces' : 'one body'; b.hidden = !pieces3d.size; }
+}
+// a part is drawn as its pieces when they're there, and not while a study's step or the built view stands in for it
+function drawnAsPieces(pid) {
+  return pieces3d.has(pid) && !TREE.oneBody && !built3d.has(pid) && !S.station;
 }
 
 // click a part to talk about it; click empty space to go back to the whole design
@@ -415,7 +598,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   const hit = pick(e);
   if (!hit) { tip.hidden = true; return; }
   const p = S.design.parts.find((x) => x.id === hit.object.userData.partId);
-  tip.textContent = p ? `${p.id}${p.intent ? ' — ' + p.intent : ''}` : '';
+  tip.textContent = p ? `${p.name || p.id}${p.intent ? ' — ' + p.intent : ''}` : '';
   const rect = viewer.getBoundingClientRect();
   tip.style.left = `${e.clientX - rect.left + 14}px`;
   tip.style.top = `${e.clientY - rect.top + 10}px`;
@@ -426,7 +609,8 @@ function pick(e) {
   const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1,
     -((e.clientY - rect.top) / rect.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
-  const hits = ray.intersectObjects([...meshes.values()].filter((m) => m.visible), false);
+  const pieces = [...pieces3d.values()].flatMap((s) => [...s.byKey.values()]);
+  const hits = ray.intersectObjects([...meshes.values(), ...pieces].filter((m) => m.visible), false);
   return hits[0] || null;
 }
 
@@ -465,7 +649,7 @@ async function refresh() {
 }
 
 function render() {
-  renderUnits(); renderThread(); renderInspector(); renderScope(); paint(); renderStudies();
+  renderUnits(); renderTree(); renderThread(); renderInspector(); renderScope(); paint(); renderStudies();
   $('viewHint').textContent = S.design && S.design.parts.length
     ? (S.scope ? '' : 'click a part to talk about it')
     : '';
@@ -483,8 +667,9 @@ $('unitSeg').onclick = async (e) => {
   render(); frame();
 };
 
-function setScope(pid) {
+function setScope(pid, piece) {
   S.scope = pid;
+  S.piece = piece || null;
   S.focus = null;
   if (S.station && S.station.part !== pid) clearStation();
   render();
@@ -492,9 +677,12 @@ function setScope(pid) {
 }
 function renderScope() {
   $('scopeRow').hidden = !S.scope;
-  $('scopeChip').textContent = S.scope || '';
+  const part = S.scope && S.design ? S.design.parts.find((p) => p.id === S.scope) : null;
+  const named = part ? part.name || part.id : S.scope;
+  const piece = part && S.piece ? (part.pieces || []).find((x) => x.key === S.piece) : null;
+  $('scopeChip').textContent = named ? (piece ? `${named} · ${piece.name}` : named) : '';
   $('msg').placeholder = S.scope
-    ? `What should change about ${S.scope}?`
+    ? `What should change about ${piece ? piece.name : named}?`
     : (S.design && S.design.parts.length
       ? 'Click a part to talk about it, or ask about the whole design…'
       : 'Tell me more about it, or ask a question…');
@@ -701,6 +889,12 @@ const STEP_TEXT = {
         : e.action === 'revert' ? `rolling ${e.part} back` : e.text),
 };
 
+// a piece picked in the tree: the part is the chat's scope, and the message says which piece (#94)
+function aboutPiece(text) {
+  const part = S.piece && S.design && S.design.parts.find((p) => p.id === S.scope);
+  const piece = part && (part.pieces || []).find((x) => x.key === S.piece);
+  return piece ? `About the ${piece.name}: ${text}` : text;
+}
 async function send(text, scope) {
   if (S.busy || !text.trim()) return;
   if (!S.slug) return createDesign(text);
@@ -721,7 +915,7 @@ $('composer').onsubmit = (e) => {
   e.preventDefault();
   const text = $('msg').value;
   $('msg').value = '';
-  send(text, S.scope);
+  send(aboutPiece(text), S.scope);
 };
 $('msg').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
@@ -933,7 +1127,7 @@ function designView(d) {
           ? ` <span class="badge">assumed: not checked until you keep it</span>${c.why ? ` <span class="muted">${esc(c.why)}</span>` : ''}
             <button class="ghost small" data-plankeep="${esc(c.id)}">Keep</button>` : ''}</li>`).join('') + '</ul>' : ''}` : ''}
     <h4>Parts</h4>
-    ${d.parts.length ? '<ul class="list">' + d.parts.map((p) => `<li><span class="partlink" data-part="${esc(p.id)}">${esc(p.id)}</span>
+    ${d.parts.length ? '<ul class="list">' + d.parts.map((p) => `<li><span class="partlink" data-part="${esc(p.id)}">${esc(p.name || p.id)}</span>
       <span class="muted small">v${p.version}</span>
       ${p.role === 'fixed' ? '<span class="badge ref">reference</span>' : ''}
       ${p.origin === 'whittled' ? '<span class="badge whittled">whittled</span>' : ''}
@@ -1445,7 +1639,7 @@ function partView(p) {
   const make = p.built ? `<div id="makingBox">${makingView(p)}</div>
     <div id="patternBox">${patternView(p)}</div>
     <div id="cutplanBox">${cutplanView(p)}</div>` : '';
-  return `<h2>${esc(p.id)} ${origin}</h2>
+  return `<h2>${esc(p.name || p.id)} ${origin}</h2>
     <div class="muted small">v${p.version}</div>
     ${cardsView({ what, work, buy, make })}`;
 }
@@ -1692,7 +1886,7 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.shopOpen) { S.s
 // holes, and that read as a bug)
 function previewNote(p) {
   return S.station && S.station.part === p.id && (S.design.lighten_runs || []).some((r) => r.id === S.station.run)
-    ? `<div class="note-warn small">These are of the ${esc(p.id)} as it is, without the step you're previewing.
+    ? `<div class="note-warn small">These are of the ${esc(p.name || p.id)} as it is, without the step you're previewing.
         <b>Cut these holes</b> (in the bar under the 3D view) to make it part of it, then make them again.</div>` : '';
 }
 function patternView(p) {
@@ -2535,7 +2729,7 @@ function frameResults(p, run, runs) {
       `<option value="${k}" ${r.id === run.id ? 'selected' : ''}>${esc(frameLabel(r))}</option>`).join('')}</select>`
       : `<b>Last sizing</b> · ${esc(frameLabel(run))}`}</div>
     <div class="card" style="margin-top:8px">
-      ${c ? `<div class="small" style="margin-bottom:6px">Carrying <b>${lbs(c.mass_lb)}</b> — ${c.parts.map((x) => `${esc(x.part)} ${lbs(x.mass_lb)}`).join(', ')} —
+      ${c ? `<div class="small" style="margin-bottom:6px">Carrying <b>${lbs(c.mass_lb)}</b> — ${c.parts.map((x) => `${esc((S.design.parts.find((q) => q.id === x.part) || {}).name || x.part)} ${lbs(x.mass_lb)}`).join(', ')} —
         each piece where it sits; the floor takes it sideways to the nearest tube (up to ${len(c.reach_in * IN, 1)} away).</div>` : ''}
       <b>As drawn</b>: ${d.mass_lb} lb of steel · weakest member <b>${d.safety}x</b> (${esc(d.governing.member)}, ${esc(d.governing.case)}) ·
       sags ${len(d.deflection_mm, 2)} at ×${run.factor}<br>
@@ -2915,7 +3109,7 @@ function studiesView(d) {
       <button class="x" id="studiesClose" title="back to the design (Esc)">×</button></div>
     <h4>Run a study</h4>
     <div class="menu">${parts.map((p) => `<div class="menu-part">
-        <div><span class="partlink" data-go-part="${esc(p.id)}">${esc(p.id)}</span> <span class="muted small">v${p.version} · ${esc(p.intent || '')}</span></div>
+        <div><span class="partlink" data-go-part="${esc(p.id)}">${esc(p.name || p.id)}</span> <span class="muted small">v${p.version} · ${esc(p.intent || '')}</span></div>
         <div class="menu-items">${(st.menu[p.id] || []).map((m) => item(m, p.id)).join('')}</div></div>`).join('')}
       <div class="menu-part"><div><b>The whole design</b></div>
         <div class="menu-items">${(st.design || []).map((m) => item(m, '')).join('')}</div></div></div>
@@ -2923,13 +3117,13 @@ function studiesView(d) {
     ${st.runs.length ? `<div class="filters"><select id="sfKind"><option value="">every kind</option>
         ${kinds.map(([k, l]) => `<option value="${k}" ${studyFilter.kind === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
       <select id="sfPart"><option value="">every part</option>
-        ${parts.map((p) => `<option value="${esc(p.id)}" ${studyFilter.part === p.id ? 'selected' : ''}>${esc(p.id)}</option>`).join('')}
+        ${parts.map((p) => `<option value="${esc(p.id)}" ${studyFilter.part === p.id ? 'selected' : ''}>${esc(p.name || p.id)}</option>`).join('')}
         <option value="*" ${studyFilter.part === '*' ? 'selected' : ''}>the whole design</option></select>
       <span class="muted small">${rows.length} shown</span></div>
     <table class="st studies-table"><tr><th>when</th><th>study</th><th>on</th><th>what it came to</th><th></th></tr>
       ${rows.map((r) => `<tr class="pick" data-go-kind="${r.kind}" data-go-part="${esc(r.part || '')}" data-go-run="${esc(r.id || '')}">
         <td class="when">${when(r.created)}</td><td>${esc(r.label)}</td>
-        <td>${r.part ? `${esc(r.part)} <span class="muted">v${r.version ?? '?'}</span>` : '<span class="muted">the design</span>'}
+        <td>${r.part ? `${esc((parts.find((x) => x.id === r.part) || {}).name || r.part)} <span class="muted">v${r.version ?? '?'}</span>` : '<span class="muted">the design</span>'}
           ${r.stale ? ' <span class="badge bad" title="it has changed since this ran">changed since</span>' : ''}</td>
         <td style="color:${r.ok === true ? 'var(--ok)' : r.ok === false ? 'var(--bad)' : 'inherit'}">${esc(r.headline)}</td>
         <td><button>Open</button></td></tr>`).join('')}</table>`

@@ -53,8 +53,9 @@ def _printed_name(store: DesignStore, pid: str) -> str:
         items = C.declared(store, pid).get("construction") or []
     except Exception:  # noqa: BLE001 — said with the part's own name
         items = []
-    return next((it.get("name") for it in items if isinstance(it, dict) and it.get("kind") == "printed"), None) \
-        or pid.replace("_", " ")
+    name = next((it.get("name") for it in items if isinstance(it, dict) and it.get("kind") == "printed"), None)
+    entry = store.design.part(pid)
+    return (store.design.piece_labels.get(pid) or {}).get(name) or name or (entry and entry.label) or pid.replace("_", " ")
 
 
 def _settled_check(store: DesignStore, p: dict, run: Optional[dict]) -> bool:
