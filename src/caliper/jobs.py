@@ -89,6 +89,11 @@ class Job:
                 "error_id": self.error_id, "stopping": self.stopping}
 
 
+#: the kinds of job that are long, or wait their turn for the one strength study at a time
+STUDIES = frozenset({"load", "lighten", "carve", "picture", "scorecard", "release", "whittle", "frame", "gussets", "aero", "firstrun"})
+#: what a job on a design is waiting for, when it's another job on that design that has it (#174)
+AHEAD = {"release": "the build package", "picture": "the picture", "cutplan": "the cut plan", "firstrun": "the first build", "chat": "the message before it"}
+
 #: Every runner made, held weakly: the app's RUNNER and any a test makes.
 RUNNERS = weakref.WeakSet()
 
@@ -99,9 +104,11 @@ class JobRunner:
     #: Called between an exclusive submit's check and its queueing, for a test that the two are one step (CALI-101).
     _between: Optional[Callable[[], None]] = None
 
-    def __init__(self, workers: int = 8):       # strength studies wait their turn on a worker (#163): enough for a chat too
+    def __init__(self, workers: int = 8, study_workers: int = 32):
         RUNNERS.add(self)                      # so a test can wait for every runner's jobs (CALI-97)
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="caliper-job")
+        # studies wait their turn on a worker (#163): on workers of their own, so a queue of them can't hold up a chat (#174)
+        self._studies = ThreadPoolExecutor(max_workers=study_workers, thread_name_prefix="caliper-study")
         self._jobs: dict[str, Job] = {}
         self._locks: dict[str, threading.Lock] = {}
         self._mu = threading.Lock()
@@ -127,7 +134,7 @@ class JobRunner:
                     self._between()
             self._jobs[job.id] = job
             key_lock = self._locks.setdefault(job.lock, threading.Lock())
-        self._pool.submit(self._run, job, fn, key_lock)
+        (self._studies if kind in STUDIES else self._pool).submit(self._run, job, fn, key_lock)
         return job
 
     def cancel(self, job_id: str) -> Optional[Job]:
@@ -174,7 +181,14 @@ class JobRunner:
         with self._mu:
             return self._locks.setdefault(key, threading.Lock())
 
+    def _ahead(self, job: Job) -> Optional[Job]:
+        with self._mu:
+            return next((j for j in self._jobs.values() if j.lock == job.lock and j is not job and j.status == "running"), None)
+
     def _run(self, job: Job, fn: Callable[[Job], Any], key_lock: threading.Lock) -> None:
+        if key_lock.locked():                 # not silence for as long as that takes: it can be hours (#174)
+            ahead = self._ahead(job)
+            job.emit("waiting", f"Waiting for {AHEAD.get(ahead.kind, 'another job') if ahead else 'another job'} on this design to finish.")
         with key_lock:
             with self._mu:
                 if job.status == "cancelled":                 # cancelled while it waited (CALI-101)
