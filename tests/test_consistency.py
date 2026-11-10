@@ -65,7 +65,7 @@ def _checked(script):
 
 def test_a_part_built_from_what_it_says_passes():
     got = _checked(STOOL)
-    assert set(got) == {"construction_inside", "construction_covers", "construction_volume"}
+    assert set(got) == {"construction_inside", "construction_on_its_face", "construction_covers", "construction_volume"}
     assert all(r.status == "pass" for r in got.values()), [r.detail for r in got.values()]
     assert got["construction_volume"].actual == pytest.approx(1.0, abs=0.02)
     assert got["construction_covers"].actual > 0.99
