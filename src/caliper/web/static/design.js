@@ -1636,7 +1636,7 @@ function trialView(p) {
   const chart = trialChart(pr, rows);
   return `<p class="small">Put the load where <b>${esc(pr.case)}</b> goes, in steps, and measure how far the middle of
       the ${esc(pr.where || 'top')} sags. Measure it with ${esc(pr.measure_with)}.
-      It should break at about <b>${(pr.breaks_lb || 0).toLocaleString()} lb</b>.</p>
+      ${pr.breaks_lb ? `It should break at about <b>${pr.breaks_lb.toLocaleString()} lb</b>.` : 'Where it would break isn\'t settled: the check was too coarse to see its walls.'}</p>
     ${chart}
     <table class="st"><tr><th>load</th><th>should sag</th><th>sagged</th><th></th></tr>
       ${show.map((st) => {

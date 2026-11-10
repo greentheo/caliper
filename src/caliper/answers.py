@@ -561,7 +561,11 @@ def measured(store: DesignStore, state: dict) -> dict:
         out["strength.unresolved"] = coarse(held[0], inches)
     failed = [(r, c, v) for (r, c), (_, v) in zip(cases, said) if v["kind"] == "fails" and v.get("coarse")]
     if failed:                                         # ...and a ✗ on one says it, as the part card does (#139)
-        out["strength.coarse_fail"] = fail_hedge(*failed[0], inches).strip()
+        out["strength.coarse_fail"] = fail_hedge(*failed[0], inches).strip() or coarse(failed[0][0], inches, holds=False)
+    # a breaking load from a run that can't see its walls isn't one to read, and never the rest's smallest (#191 review)
+    gone = next(((r, v) for (r, c), (_, v) in zip(cases, said) if c.get("breaks_lb") and (v["kind"] not in ("holds", "fails") or v.get("coarse"))), None)
+    if gone:
+        out["strength.no_breaks"] = coarse(gone[0], inches, holds=gone[1]["kind"] != "fails")
     if any(L.rough(r, c) for r, c in cases):
         out["strength.rough"] = True                   # the printed model's number: "about", as the part card says
     from . import consistency
@@ -597,7 +601,8 @@ def measured(store: DesignStore, state: dict) -> dict:
     if safeties:
         out["strength.safety"] = min(safeties)
     if breaks:
-        out["strength.breaks_lb"] = min(breaks)
+        if "strength.no_breaks" not in out:
+            out["strength.breaks_lb"] = min(breaks)
     from . import trials
 
     tested = [t for t in (trials.summary(store, pid) for pid in current) if t and t["status"] in ("bad", "warn")]
@@ -727,6 +732,9 @@ def held_to(state: dict, now: dict) -> list[dict]:
                              + f" · v{last['now']} not checked yet.", verdict["status"], study="load",
                              model=rests_on_model(c["metric"])))
             continue
+        if v is None and c["metric"] == "strength.breaks_lb" and now.get("strength.no_breaks"):
+            out.append(_line(f"! {label}{assumed}: {now['strength.no_breaks']}", "warn", study="load", model=rests_on_model(c["metric"])))
+            continue
         if v is None and c["metric"] in scored:
             v, late = scored[c["metric"]], stale
         if v is None and c["metric"].startswith("print.") and now.get("print.pending"):
@@ -750,7 +758,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
             guess = now.get("print.rough") if c["metric"] in now else (
                 f"{'partly ' if re.match(r'[0-9]+ of ', rough_scored[c['metric']]) else ''}a guess "
                 f"({rough_scored[c['metric']]})" if c["metric"] in rough_scored else None)
-        verdict = verdicts.goal(met, untrusted=untrue, unresolved=now.get("strength.unresolved") if strength else None,
+        verdict = verdicts.goal(met, untrusted=untrue, unresolved=(now.get("strength.unresolved") or now.get("strength.coarse_fail")) if strength else None,
                                 edge=bool(now.get("strength.edge")) if strength else False,       # (CALI-94)
                                 stale=late or bool(older),
                                 incomplete=now.get("strength.unchecked") if strength else None, estimate=guess)
@@ -766,7 +774,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
                              model=rests_on_model(c["metric"])))
             continue
         if verdict["kind"] == "unresolved":            # no ✓ on an FEA that can't see the wall (CALI-97)
-            out.append(_line(f"! {label}{assumed}: {now['strength.unresolved']}", "warn",
+            out.append(_line(f"! {label}{assumed}: {verdict['why']}", "warn",
                              study="load", model=rests_on_model(c["metric"])))
             continue
         # the printed model's number says "about", as the part card says it (CALI-97); _times owns it (#144 review)
@@ -848,7 +856,7 @@ def design(store: DesignStore, state: dict) -> list[dict]:
                 + [f"{edge} middle only"] * bool(edge) + [f"{waits} not checked yet"] * bool(waits)
                 + [f"{s.get('estimate')} a guess"] * bool(s.get("estimate")))
         work.append(_line(said + (
-            f", {s['fail']} fail: " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")
+            f", {s['fail']} fail" + (f" ({s['unsettled']} not settled: too coarse to see its walls)" if s.get("unsettled") else "") + ": " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")
             + (f"{',' if s['pass'] or fails else ':'} " + ", ".join(rest) if rest else "") + "."
             + (" (A part has changed since: score it again.)" if stale else ""),
             "bad" if fails else "warn" if stale or rest or not verdicts.summary(s)["counts_as_pass"] else "ok"))

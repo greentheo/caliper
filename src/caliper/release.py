@@ -448,8 +448,8 @@ def _say_stage(pid: str, layer: str, pcs: list[dict], plan: dict, ctx: dict) -> 
             files.append(f"{_router(pid, g)}/")
         paint = [c for p in pcs for c in p.get("covers") or [] if c == "paint"]
         if paint:
-            do.append("Paint its underside and seal the edges before anything goes on it — the road throws water "
-                      "at it.")
+            do.append("Paint its underside and seal the edges before anything goes on it"
+                      + (" — the road throws water at it." if ctx.get("hitched") else "."))
     elif layer == "skeleton":
         title = "The skeleton"
         sticks = sorted(pcs, key=lambda p: min(q[2] for poly, _ in p["polys"] for q in poly))
@@ -461,12 +461,15 @@ def _say_stage(pid: str, layer: str, pcs: list[dict], plan: dict, ctx: dict) -> 
         do.append("Glue and screw it together bottom up — the bottom rails to the floor, the posts, the top "
                   "rails, then the roof beams across — and check it square before the glue sets.")
     elif layer == "panels":
-        title = "End and side panels"
+        # #182: a stool's one seat top isn't "end and side panels", and has no joint of its own to screw
+        title = f"The {names[0].replace('_', ' ')}" if len(names) == 1 and not ctx.get("hitched") else "End and side panels"
         for g in _sheet_groups(plan, names):
             do.append(f"Cut the {', '.join(n.replace('_', ' ') for n in names if n in g['panels'])} from "
                       f"{g['label']} — {_router(pid, g)}/ (or by hand from the 1:1 pattern.pdf).")
             files.append(f"{_router(pid, g)}/")
-        if all(p.get("material") in ("plywood", "lumber") for p in pcs):
+        if len(pcs) == 1 and not ctx.get("hitched"):
+            do.append("Sand and ease its edges; it goes on with what it's fastened to, in a later step.")
+        elif all(p.get("material") in ("plywood", "lumber") for p in pcs):
             # wood: glued and screwed where they meet (CALI-79: the stool was told to use foam-safe adhesive)
             do.append("Glue and screw them together where they meet, a screw every 6 in along each joint (pilot "
                       "holes first); they're cut to the outside surface, so check each corner square as it goes on.")
@@ -508,6 +511,32 @@ def _end_short(e: dict) -> str:
     return "square"
 
 
+def _print_lines(pid: str, g: dict, ctx: dict) -> list[str]:
+    """Printing a piece and fitting it (#182: a stool's cone had no step at all). The fasteners aren't declared, so the book
+    says that rather than leaving them out without a word."""
+    name = g["name"].replace("_", " ")
+    pr = next((x for x in ((ctx.get("made") or {}).get(pid) or {}).get("printed") or [] if x["name"] == g["name"]), None)
+    if pr is None:
+        do = [f"The {name} can't be printed as it stands: \"Made in your shop\" says why."]
+    else:
+        n = pr["pieces"]
+        do = [f"Print the {name} in {g['material'].upper()}: {n} piece{'s' if n != 1 else ''}, the STLs in printer/{pid}/."]
+        if pr["pinned"]:
+            do.append("Glue 3 mm filament or 1/8 in dowel pins in the holes across each cut, and clamp the pieces until it sets.")
+    do.append(f"Fasten the {name} to the rest the way you settled with the designer. Caliper hasn't sized those fasteners, "
+              "so they aren't on the shopping list: add them.")
+    return do
+
+
+def _finish_lines(glass: bool, paint: float, welded: bool, hitched: bool) -> list[str]:
+    """The last step, for what this is: fibreglass, welds and a first drive only where there are any (#182)."""
+    gal = f" ({paint:.2f} gal of exterior paint in all)" if paint else ""
+    first = (f"Fill and fair the glass, then paint it: epoxy needs paint over it against the sun{gal}." if glass
+             else f"Paint it{gal}." if paint else "Sand the edges smooth, and seal or paint it if you want to.")
+    joints = "fixing and weld" if welded else "fixing"
+    return [first, f"Go over every {joints} once more before " + ("the first drive." if hitched else "anyone uses it.")]
+
+
 def steps(store: DesignStore, plans: dict, bom: dict, ctx: dict) -> tuple[list[dict], list[dict]]:
     """The assembly order: each step's title, what to do, its files, and what it puts on (to draw)."""
     from . import frame_study as F
@@ -546,6 +575,8 @@ def steps(store: DesignStore, plans: dict, bom: dict, ctx: dict) -> tuple[list[d
                  "squeegee it lean, and lightly sand once it has cured.",
                  "The glass is what makes the walls strong — the wall checks count on it."],
                 [], [{**p, "paint": GLASS} for p in skin], pid, "skin")
+        for g in bom.get(pid, {}).get("printed") or []:
+            add(f"Print and fit the {g['name'].replace('_', ' ')}", _print_lines(pid, g, ctx), [], [], pid, "printed")
     framed = [pid for pid in order if "def members(" in store.read_script(pid)]
     others = [pid for pid in order if pid not in framed]
     if framed and others:
@@ -568,11 +599,11 @@ def steps(store: DesignStore, plans: dict, bom: dict, ctx: dict) -> tuple[list[d
              + (f" The hardest-working fixing takes {f_lb:.0f} lbf on a bump." if f_lb else ""),
              "Seal each hole through the floor."],
             [], moving, None, "mount", arrows=arrows)
-    paint = sum(g.get("paint_gal", 0) for b in bom.values() for g in b.get("coverings", []))
+    coverings = [g for b in bom.values() for g in b.get("coverings", [])]
     add("Finish",
-        ["Fill and fair the glass, then paint it: epoxy needs paint over it against the sun"
-         + (f" ({paint:.2f} gal of exterior paint in all)." if paint else "."),
-         "Go over every fixing and weld once more before the first drive."],
+        _finish_lines(any(g["material"].startswith("fiberglass") for g in coverings),
+                      sum(g.get("paint_gal", 0) for g in coverings),
+                      any(p.get("tubes") or p.get("plates") for p in plans.values()), bool(ctx.get("hitched"))),
         [], [], None, "finish")
     return out, every
 
@@ -659,7 +690,11 @@ def shopping(store: DesignStore, plans: dict, bom: dict, lumps: dict, ctx: dict)
         qt = math.ceil(paint * 4)
         qty = f"{qt} qt" if qt < 4 else f"{math.ceil(paint)} gal"
         add("lumber yard / home center", "exterior paint", f"{qty} (uses {paint:.2f} gal)",
-            (qt / 4 if qt < 4 else math.ceil(paint)) * P["paint_per_gal"], "over the glass, under the floor")
+            (qt / 4 if qt < 4 else math.ceil(paint)) * P["paint_per_gal"], "over the glass, under the floor" if cloth else "the finish")
+    for b in bom.values():                     # by the solid's weight, as What do I buy? says it and prices it (#182)
+        for g in b.get("printed") or []:
+            add("filament", f"{g['label'].split(' ')[0]} filament", f"{g['filament_g']:.0f} g",
+                g["filament_g"] / 1000 * M.printed(g["material"])["usd_per_kg"], g["name"].replace("_", " "))
     screws = sum((b.get("fasteners") or {}).get("screws", 0) for b in bom.values())
     if screws:
         kinds = sorted({b["fasteners"]["screw"] for b in bom.values() if b.get("fasteners")})
@@ -809,7 +844,8 @@ def _status(card: dict, smaller: int = 0) -> str:
     untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0
     edge = s.get("edge") or 0
     rest = s["unknown"] - untrusted - unresolved - edge
-    why = [f"{s['fail']} check(s) fail" if s["fail"] else "", f"{untrusted} not trusted" if untrusted else "",
+    open_ = s.get("unsettled") or 0
+    why = [f"{s['fail']} check(s) fail" + (f" ({open_} not settled: too coarse to see its walls)" if open_ else "") if s["fail"] else "", f"{untrusted} not trusted" if untrusted else "",
            f"{unresolved} not resolved" if unresolved else "",          # an FEA too coarse to see its walls (CALI-110)
            f"{edge} checked in the middle only, not at the front edge" if edge else "",       # (CALI-94)
            f"{rest} unknown" if rest else ""]
@@ -829,6 +865,8 @@ def _safety_cell(c: dict) -> tuple[str, str]:
         return "checked in the middle only, not at the front edge", "—"
     if kind not in ("holds", "fails"):               # any other kind: its word, never a number to build on
         return _e((c.get("verdict") or {}).get("word") or "not checked"), "—"
+    if (c.get("verdict") or {}).get("coarse"):       # a ✗ stays a ✗, not as a settled number (#191)
+        return f"about {_num(c.get('safety'))}x, not settled: too coarse to see its walls", "—"
     return f"{'about ' if c.get('rough') else ''}{_num(c.get('safety'))}x", breaks
 
 
@@ -839,14 +877,26 @@ def _mark(status: str) -> str:
             if v["kind"] == "fails" else "?" if v["kind"] == "waiting" else f"<span class='fail'>{v['word']}</span>")
 
 
+def _hitched(metrics: dict) -> bool:
+    """A part declares where it's held, as the page's balance panel reads it. Every design has a total weight, and the scorecard
+    files it as the tongue's too, so that metric says nothing (#182: "13.3 lb on the tongue" of a bar stool)."""
+    return "hitch.moment_lbin" in metrics
+
+
+def _headlines(metrics: dict) -> list[tuple[str, str]]:
+    hitched = _hitched(metrics)
+    return ([("weight.total_lb", "all up, with the payload" if hitched else "all up")]
+            + ([("hitch.tongue_lb", "on the tongue")] if hitched else [])
+            + [("frame.yield_x", "frame yields at × its load"), ("drag.lbf", "drag at speed")])
+
+
 def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], notes: list[str]) -> str:
     """The build book, as one printable page."""
 
     m = card.get("metrics") or {}
     name = lambda pid: (rec.get("names") or {}).get(pid) or pid     # noqa: E731 — the name a person reads (#94)
     status = _status(card, len(rec.get("cut_smaller") or []))
-    big = [("weight.total_lb", "all up, with the payload"), ("hitch.tongue_lb", "on the tongue"),
-           ("frame.yield_x", "frame yields at × its load"), ("drag.lbf", "drag at speed")]
+    big = _headlines(m)
     nums = "".join(f"<div><b>{_num(m[k]['value'], m[k]['unit'])}</b><span>{_e(lab)}</span></div>"
                    for k, lab in big if k in m)
     nums += f"<div><b>${shop['usd']:,.0f}</b><span>to buy (a guess)</span></div>"
@@ -901,6 +951,9 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                               if pr["pinned"] else "")
                            + f"; about {pr['hours']:g} h, {pr['filament_g']:,} g, ${pr['usd']:.2f} "
                            f"({_e(pr.get('rough_said') or pr['from'])}). STLs in <code>printer/{_e(pid)}/</code>.</p>")
+        if any(m["printed"] for m in rec["making"].values()):
+            out.append("<p class='muted small'>That's the slicer's figure. The shopping list goes by the model's weight, as "
+                       "What do I buy? does, so the two can differ a little.</p>")
     out.append("<h2 class='page'>Cut lists</h2>")
     for said in rec.get("cut_smaller") or []:          # beside what it's about (#183 review)
         out.append(f"<p class='note'><b>Before you cut:</b> {_e(said)}</p>")
@@ -1093,6 +1146,20 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     rid = _next_id(store)
     root = os.path.join(releases_dir(store), rid)
     os.makedirs(root)
+    # how it's made in your shop (CALI-48): what cuts each piece, and printed parts fitted to the printer
+    from . import making
+
+    made = {}
+    for p in store.design.parts:
+        if p.id in versions and store.is_scripted(p.id) and C.declares(store.read_script(p.id)):
+            try:
+                mk = making.plan(store, p.id, out_dir=os.path.join(root, "printer", p.id))
+            except Exception:  # noqa: BLE001 — a part that can't be planned is left to its cut plan
+                continue
+            made[p.id] = {"by_how": mk["by_how"], "missing": [{"name": m["name"], "why": m["why"]} for m in mk["missing"]],
+                          "printed": mk["printed"], "shop_default": mk["shop_default"]}
+
+    ctx.update(hitched=_hitched(m), made=made)
     emit("drawing", "the assembly order")
     st, every = steps(store, plans, bom, ctx)
     ctx["jacks"] = sum(1 for p in every if p["layer"] == "jacks")
@@ -1117,19 +1184,6 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
             f.write(png)
     with open(os.path.join(root, "assembly", "finished.png"), "wb") as f:
         f.write(draw(View(every), [(every, "now")]))
-
-    # how it's made in your shop (CALI-48): what cuts each piece, and printed parts fitted to the printer
-    from . import making
-
-    made = {}
-    for p in store.design.parts:
-        if p.id in versions and store.is_scripted(p.id) and C.declares(store.read_script(p.id)):
-            try:
-                mk = making.plan(store, p.id, out_dir=os.path.join(root, "printer", p.id))
-            except Exception:  # noqa: BLE001 — a part that can't be planned is left to its cut plan
-                continue
-            made[p.id] = {"by_how": mk["by_how"], "missing": [{"name": m["name"], "why": m["why"]} for m in mk["missing"]],
-                          "printed": mk["printed"], "shop_default": mk["shop_default"]}
 
     # patterns for hand tools (CALI-48): every flat piece, for a jigsaw and a tape measure
     from . import patterns
