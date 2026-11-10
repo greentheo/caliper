@@ -602,6 +602,7 @@ def measured(store: DesignStore, state: dict) -> dict:
         out["strength.test"] = min(tested, key=lambda t: ORDER.index(t["status"]))
     weight = usd = missing = hours = 0.0
     slicing, unsliced, guessed, all_pieces, rough_pieces = False, "", "", 0, 0
+    unprintable, cant = "", []                     # a printed piece the shop can't make: no total (#179 review, rule 6)
     weighed, unweighed = False, None
     for p in state["parts"]:
         if not p.get("built") or p.get("role") == "fixed":
@@ -620,6 +621,8 @@ def measured(store: DesignStore, state: dict) -> dict:
         try:
             mk = making.plan(store, p["id"], wait=False)   # the slicer never holds a card (#97)
             missing += len(mk["missing"])
+            unprintable = unprintable or making.no_print_total(mk)
+            cant += [f"the {part_name(p)}'s {m['name']}: {m['why']}" for m in mk["missing"]]
             if mk.get("pending"):
                 slicing = True
             gone = next((x for x in mk["printed"] if x.get("hours") is None and x.get("slicer_failed")), None)
@@ -634,9 +637,13 @@ def measured(store: DesignStore, state: dict) -> dict:
     if weighed:
         out.update({"weight.total_lb": None if unweighed else round(weight, 1), "cost.usd": round(usd, 2),
                     "make.not_in_shop": missing})
+        if cant:
+            out["make.cant"] = cant
         if unweighed:
             out["weight.unweighed"] = unweighed
-        if slicing:                                # a part still slicing: no total, said (#97, rule 6)
+        if unprintable:                            # first: it stays this way however long the slicer takes
+            out["print.unknown"] = unprintable
+        elif slicing:                              # a part still slicing: no total, said (#97, rule 6)
             out["print.pending"] = "print time: working it out…"
         elif unsliced:
             out["print.unknown"] = unsliced
@@ -860,6 +867,9 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         buy.append(_line("Not known yet: no part says what it's built from.", "info"))
 
     make = [ln for ln in solo["make"]["lines"]] if solo else []
+    if now.get("make.not_in_shop") and not solo:   # the part's own card says this, and solo is that card
+        said = "; ".join(now["make.cant"][:3]) + (f"; and {len(now['make.cant']) - 3} more" if len(now["make.cant"]) > 3 else "")
+        make.append(_line(f"Your shop can't make {said}.", "bad"))
     rel = (state.get("releases") or [None])[0]
     if rel:
         url = f"/api/designs/{state['slug']}/releases/{rel['id']}/files/"
