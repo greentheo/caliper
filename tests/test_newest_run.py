@@ -247,7 +247,7 @@ def test_a_rule_whose_measurement_errors_is_a_fail_not_a_pass():
     store = SimpleNamespace(read_spec=lambda pid: Spec(part="cone", intent="a cone",
                                                        assertions=[Assertion(id="wall", expr="min_wall >= 2.85")]),
                             design=SimpleNamespace(part=lambda pid: SimpleNamespace(version=9), display_units="in"),
-                            root="/nowhere", part_geometry=broken)
+                            assembly=SimpleNamespace(parts=[]), root="/nowhere", part_geometry=broken)
     (r,) = part_rules.measured(store, "cone")
     assert r["status"] == "error" and r["verdict"]["kind"] == "fails" and not r["verdict"]["counts_as_pass"]
     assert r["said"] == "wall: not measured (the cone won't build)"

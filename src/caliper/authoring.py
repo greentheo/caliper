@@ -331,16 +331,18 @@ def refine_authored(
     ref_base: str = ".",
     author: Optional[Author] = None,
     client=None,
+    measured: str = "",
 ) -> ImproveResult:
     """Apply a natural-language change to an authored part by revising its script (CALI-22).
 
     The instruction is folded into ``spec.intent`` so it persists across revision rounds (otherwise a
     later round, fed only the failing-measurement summary, could quietly undo the requested edit).
+    ``measured`` (#158) goes to round 1 only: a location is true of the script as it stands, and a later round has moved on.
     """
     spec.intent = (spec.intent + "  " if spec.intent else "") + instruction
     feedback = (
         "Apply this change to the part below, keeping the existing measured checks passing (change as "
-        "little else as possible):\n  " + instruction
+        "little else as possible):\n  " + instruction + measured
     )
     return improve(spec, author=author, max_rounds=max_rounds, client=client,
                    seed_script=script, seed_feedback=feedback, ref_base=ref_base)

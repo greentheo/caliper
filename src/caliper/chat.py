@@ -438,7 +438,7 @@ def _emit(events: list[Event], on_event, kind: str, text: str, **data) -> None:
 
 def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, client=None,
                 max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
-                use_llm: bool = True, drafter=None, promote_feedback: bool = True) -> TurnResult:
+                use_llm: bool = True, drafter=None, promote_feedback: bool = True, measured: str = "") -> TurnResult:
     """Revise a part **that lives inside a design** and re-measure the whole thing.
 
     The gap CALI-29 exists to close. Everything here is plumbing around one existing call —
@@ -474,7 +474,8 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     was = _volume(store, part_id)
 
     _emit(events, on_event, "authoring", f"revising {part_id}…", part=part_id)
-    res = authoring.refine_authored(spec, script, message, max_rounds=max_rounds,
+    # ``measured`` is true of this version: to the designer's first round only, never into the part's record (#158)
+    res = authoring.refine_authored(spec, script, message, max_rounds=max_rounds, measured=measured,
                                     ref_base=store.root, author=author, client=client)
 
     if res.geometry is None:                      # never built — don't write a broken part
@@ -1172,8 +1173,11 @@ def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Op
                                 + (f"\n\nThe design checks: {report.said()}." if report is not None else ""))
     message = (f"Change it so it meets its rule {aw['rule']}: {aw['expr']}. Change only what that needs."
                if aw["kind"] == "fix_rule" else aw["message"])
+    from . import part_rules
+
     return refine_part(store, pid, message, author=kw["author"], client=kw["client"], max_rounds=kw["max_rounds"],
                        events=events, on_event=on_event, use_llm=kw["use_llm"], drafter=kw["drafter"],
+                       measured=part_rules.to_fix(store, pid, aw["rule"]) if aw["kind"] == "fix_rule" else "",
                        # fixing a rule it already has: never an offer to lock a looser copy of it (#153)
                        promote_feedback=kw["promote_feedback"] and aw["kind"] != "fix_rule")
 
