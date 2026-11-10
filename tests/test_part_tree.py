@@ -215,7 +215,7 @@ def _page(body: str) -> dict:
     from .test_carve_click import _fn, _node
 
     src = open(JS).read()
-    names = ("seen", "keepTree", "isHidden", "renameRow", "treeHtml", "treeClick")
+    names = ("seen", "keepTree", "isHidden", "renameRow", "treeRows", "underPart", "treeHtml", "treeClick")
     script = _PAGE.replace("DESIGN", _DESIGN) + "\n".join(_fn(src, n) for n in names) + f"\nconst out = (() => {{ {body} }})();\n" \
         "console.log(JSON.stringify(out));"
     got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)

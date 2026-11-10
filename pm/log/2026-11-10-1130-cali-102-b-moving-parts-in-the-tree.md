@@ -1,0 +1,3 @@
+### 2026-11-10 · CALI-102 (#94, slice b) · Moving parts in the tree
+
+Drag a part above or below another to reorder it, or onto another to sit under it. That's saved with the design, as display only: `part_tree` in `design.yaml`, read by nothing but the tree. No part's id, file, version or check changes, and the design's own list of parts stays in its order. A part's eye hides what sits under it too. Moving a *piece* into another part changes two scripts, so it stays with #3. The mockup Theo approved doesn't draw any of this, so the look follows the tree it did draw. Dragging needs a mouse: a phone's tree can't reorder. The whole suite is CI's.

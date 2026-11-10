@@ -186,6 +186,9 @@ class Design(_Base):
     #: (its parts, build order and status). The plan's mates and rules live in assembly.yaml with the rest.
     skeleton: Optional[list[dict]] = None
     plan: Optional[dict] = None
+    #: CALI-102 (#94, slice b): how the tree shows the parts, ``{"order": [part, ...], "parent": {part: part}}``. Display only: no script,
+    #: file, id, version or check reads it, so a move changes none of them
+    part_tree: dict = Field(default_factory=dict)
     #: CALI-102 (#94): the names people gave a part's pieces, ``{part: {piece: label}}``
     piece_labels: dict = Field(default_factory=dict)
     #: CALI-126 (#150): the sheets' face grain as the person said it, ``{part: {piece: {grain, runs, said}}}``: only

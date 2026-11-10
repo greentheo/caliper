@@ -199,12 +199,46 @@ function renameRow(part, key, draft) {
   return `<div class="trename"><input id="treeName" aria-label="New name" value="${esc(draft)}" maxlength="60" data-rename-input="1">
     <button class="primary" data-rename-save="1" data-part="${esc(part)}"${key != null ? ` data-key="${esc(key)}"` : ''}>Rename</button></div>`;
 }
+// the parts as the tree shows them (#94, slice b): [{ p, depth }], each followed by what sits under it. Display only
+function treeRows(design) {
+  const lay = design.tree || {}, ids = design.parts.map((p) => p.id), parent = lay.parent || {};
+  const saved = (lay.order || []).filter((i) => ids.includes(i));
+  const order = saved.concat(ids.filter((i) => !saved.includes(i)));
+  const out = [];
+  const walk = (id, depth) => {
+    out.push({ p: design.parts.find((x) => x.id === id), depth });
+    order.filter((k) => parent[k] === id).forEach((k) => walk(k, depth + 1));
+  };
+  order.filter((k) => !ids.includes(parent[k])).forEach((k) => walk(k, 0));
+  return out;
+}
+function underPart(design, id) {           // everything that sits under a part, however deep
+  const parent = (design.tree || {}).parent || {};
+  return design.parts.map((p) => p.id).filter((k) => { for (let at = parent[k]; at; at = parent[at]) if (at === id) return true; return false; });
+}
+// where a drop puts a part: before or after another, at that part's level, or into it. null if it's nowhere new (itself, or inside itself)
+function dropped(design, drag, target, zone) {
+  if (drag === target || underPart(design, drag).includes(target)) return null;
+  const lay = design.tree || {}, ids = design.parts.map((p) => p.id);
+  const parent = { ...(lay.parent || {}) };
+  const saved = (lay.order || []).filter((i) => ids.includes(i));
+  const order = saved.concat(ids.filter((i) => !saved.includes(i))).filter((i) => i !== drag);
+  order.splice(order.indexOf(target) + (zone === 'before' ? 0 : 1), 0, drag);
+  if (zone === 'into') parent[drag] = target;
+  else if (parent[target]) parent[drag] = parent[target];
+  else delete parent[drag];
+  return { order, parent };
+}
+function dropZone(e, row) {
+  const box = row.getBoundingClientRect(), y = (e.clientY - box.top) / (box.height || 1);
+  return y < 0.3 ? 'before' : y > 0.7 ? 'after' : 'into';
+}
 function treeHtml(design, view) {
-  const rows = design.parts.map((p) => {
+  const rows = treeRows(design).map(({ p, depth }) => {
     const fixed = p.role === 'fixed', off = view.parts.has(p.id);
     const cant = view.cant ? view.cant(p.id, p.version) : null, oneBody = view.oneBody || !!cant;   // no piece eye can act then
     const editing = view.rename && view.rename.part === p.id;
-    const head = `<div class="trow part${view.scope === p.id && !view.piece ? ' on' : ''}${fixed ? ' ref' : ''}${off ? ' off' : ''}">
+    const head = `<div class="trow part${view.scope === p.id && !view.piece ? ' on' : ''}${fixed ? ' ref' : ''}${off ? ' off' : ''}" draggable="true" data-drag="${esc(p.id)}">
       <button class="eye" aria-label="Show or hide the whole part" data-eye="${esc(p.id)}">${off ? EYE_OFF : EYE_ON}</button>
       <button class="tname" data-sel="${esc(p.id)}"${fixed ? ' data-fixed="1"' : ''}>${esc(p.name || p.id)}</button>
       <span class="side">${fixed ? 'reference' : `v${p.version}`}</span></div>`
@@ -222,7 +256,7 @@ function treeHtml(design, view) {
         <span class="side">${esc(pc.material)}</span></div>`
         + (editing && view.rename.key === pc.key ? renameRow(p.id, pc.key, view.rename.draft) : '');
     }).join('');
-    return head + pieces;
+    return `<div class="tpart" style="margin-left:${depth * 18}px">${head}${pieces}</div>`;
   }).join('');
   const legend = (design.legend || []).length ? `<div class="tlegend"><div class="tlegend-h">Materials</div>${design.legend.map((m) =>
     `<div class="tlegend-r"><span class="swatch" aria-hidden="true" style="background:${esc(m.color)}"></span>${esc(m.label)} · ${m.count} piece${m.count === 1 ? '' : 's'}</div>`).join('')}</div>` : '';
@@ -257,7 +291,8 @@ function treeClick(el, now) {
   if (d.renameSave) { saveTreeName(d.part, d.key != null ? d.key : null); return 'save'; }
   if (d.eye) {
     const set = d.key != null ? t.pieces : t.parts, id = d.key != null ? pieceId(d.eye, d.key) : d.eye;
-    if (set.has(id)) set.delete(id); else set.add(id);
+    const hide = !set.has(id);
+    (d.key != null ? [id] : [id, ...underPart(S.design, d.eye)]).forEach((x) => (hide ? set.add(x) : set.delete(x)));   // and what sits under it
     keepTree(); renderTree(); paint();
     return 'eye';
   }
@@ -280,6 +315,41 @@ $('tree').addEventListener('click', (e) => {
   const el = e.target.closest('button');
   if (el) treeClick(el, Date.now());
 });
+// drag a part to move it: above or below another, or onto it to sit under it. The tree only (#94, slice b)
+function clearDrop() {
+  document.querySelectorAll('#tree .drop-before, #tree .drop-after, #tree .drop-into').forEach((r) => r.classList.remove('drop-before', 'drop-after', 'drop-into'));
+}
+async function moveInTree(drag, target, zone) {
+  const next = dropped(S.design, drag, target, zone);
+  if (!next) return;
+  try {
+    S.design = await api('POST', `/api/designs/${S.slug}/tree`, next);
+  } catch (e) { showErr(plainly(e.message)); }
+  render();
+}
+$('tree').addEventListener('dragstart', (e) => {
+  const row = e.target.closest && e.target.closest('[data-drag]');
+  if (!row || TREE.rename) { e.preventDefault(); return; }
+  TREE.drag = row.dataset.drag;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', TREE.drag);
+});
+$('tree').addEventListener('dragover', (e) => {
+  const row = e.target.closest('[data-drag]');
+  clearDrop();
+  if (!row || !TREE.drag || !dropped(S.design, TREE.drag, row.dataset.drag, 'into')) return;
+  e.preventDefault();
+  row.classList.add(`drop-${dropZone(e, row)}`);
+});
+$('tree').addEventListener('drop', (e) => {
+  const row = e.target.closest('[data-drag]'), drag = TREE.drag;
+  clearDrop();
+  TREE.drag = null;
+  if (!row || !drag) return;
+  e.preventDefault();
+  moveInTree(drag, row.dataset.drag, dropZone(e, row));
+});
+$('tree').addEventListener('dragend', () => { TREE.drag = null; clearDrop(); });
 $('tree').addEventListener('keydown', (e) => {
   if (!e.target.dataset.renameInput) return;
   if (e.key === 'Enter') { e.preventDefault(); e.target.parentElement.querySelector('[data-rename-save]').click(); }
