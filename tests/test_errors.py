@@ -182,3 +182,32 @@ def test_a_failed_job_s_yaml_error_drops_its_excerpt_too():
     _wait(j)
     e = next(x for x in errors.recent(5) if x["id"] == j.error_id)
     assert "Emma" not in e["error"] + e["trace"] and "line 1, column" in e["error"]
+
+
+def test_errors_recorded_at_once_are_all_kept(tmp_path, monkeypatch):
+    """CALI-92 (#70 item 12): record() had no lock, and every writer shared one ".tmp": two at once could lose one,
+    or raise. A lock, and a temporary name of each writer's own."""
+    import threading
+
+    monkeypatch.setenv("CALIPER_ERRORS", str(tmp_path / "errors.jsonl"))
+    real_open = open
+    gate = threading.Barrier(8)
+
+    def slow_open(path, *a, **k):                  # every writer reaches its write together
+        if str(path).endswith(".tmp") or ".tmp" in os.path.basename(str(path)):
+            try:
+                gate.wait(timeout=0.5)
+            except threading.BrokenBarrierError:
+                pass
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr("builtins.open", slow_open)
+    said = []
+    threads = [threading.Thread(target=lambda k=k: said.append(errors.record("a job", f"boom {k}")["id"])) for k in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    monkeypatch.setattr("builtins.open", real_open)
+    kept = {e["id"] for e in errors.recent(50)}
+    assert len(said) == 8 and set(said) <= kept, (said, kept)

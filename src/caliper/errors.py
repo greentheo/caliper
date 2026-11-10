@@ -16,6 +16,7 @@ import os
 import platform
 import re
 import sys
+import threading
 import time
 import traceback
 import uuid
@@ -23,6 +24,8 @@ from typing import Optional
 from urllib.parse import quote
 
 KEEP = 50
+#: One writer at a time: two errors at once could lose one, or raise (CALI-92, #70 item 12).
+_MU = threading.Lock()
 #: Where a report goes when you choose to send it: a new issue, filled in, in your own browser.
 ISSUES = "https://github.com/greentheo/caliper/issues/new"
 #: GitHub refuses very long URLs; a report's traceback is cut to fit.
@@ -69,11 +72,13 @@ def record(where: str, error: str, trace: str = "") -> dict:
     try:
         p = path()
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        kept = recent(KEEP - 1)
-        with open(p + ".tmp", "w") as f:
-            for x in [*reversed(kept), e]:
-                f.write(json.dumps(x) + "\n")
-        os.replace(p + ".tmp", p)
+        tmp = f"{p}.{uuid.uuid4().hex[:8]}.tmp"          # its own: never another writer's half-written file
+        with _MU:
+            kept = recent(KEEP - 1)
+            with open(tmp, "w") as f:
+                for x in [*reversed(kept), e]:
+                    f.write(json.dumps(x) + "\n")
+            os.replace(tmp, p)
     except OSError:
         pass
     return e
