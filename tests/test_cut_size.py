@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from caliper import answers, consistency, construction, design_api, shop
+from caliper import answers, consistency, construction, design_api, release, scorecard, shop
 from caliper.design import DesignStore
 
 pytest.importorskip("cadquery")
@@ -91,3 +91,127 @@ def test_other_pieces_round_it_are_not_taken_for_more_of_this_one(store):
     more = "".join(f'{{"name": "{k}", "kind": "sheet", "material": "plywood", "thickness": 12.7, '
                    f'"outline": {[(x, y, 220) for x, y in v]}}},\n            ' for k, v in rims.items())
     assert _differs(store, _table(INSET).replace('{"name": "sides"', more + '{"name": "sides"')) == []
+
+
+# --- the review of #193: an edge that's right can't outvote one that's short ---------------------------------------------
+@pytest.mark.parametrize("why,outline,cut", [
+    ("short in length only, 10 each end", "[(10, 0, 220), (290, 0, 220), (290, 220, 220), (10, 220, 220)]", [280, 220]),
+    ("short in width only, 10 each side", "[(0, 10, 220), (300, 10, 220), (300, 210, 220), (0, 210, 220)]", [300, 200]),
+    ("20 short at one end only", "[(0, 0, 220), (280, 0, 220), (280, 220, 220), (0, 220, 220)]", [280, 220]),
+    ("20 short along one side only", "[(0, 0, 220), (300, 0, 220), (300, 200, 220), (0, 200, 220)]", [300, 200]),
+])
+def test_short_on_any_one_side_is_named(store, why, outline, cut):
+    (got,) = _differs(store, _table(outline))
+    assert sorted(round(v) for v in got["outline"]) == sorted(cut), why
+    assert sorted(round(v) for v in got["solid"]) == [220, 300], why
+
+
+def _shape(store, pts):
+    wp = f"cq.Workplane().polyline({pts}).close().extrude(12.7).translate((0, 0, 207.3))"
+    return _differs(store, _table(str([(x, y, 220) for x, y in pts]), top=wp))
+
+
+L = [(0, 0), (300, 0), (300, 100), (100, 100), (100, 220), (0, 220)]
+U = [(0, 0), (300, 0), (300, 220), (200, 220), (200, 80), (100, 80), (100, 220), (0, 220)]
+PLUS = [(100, 0), (200, 0), (200, 70), (300, 70), (300, 150), (200, 150), (200, 220), (100, 220), (100, 150), (0, 150), (0, 70), (100, 70)]
+COMB = [(0, 0), (300, 0), (300, 220), (250, 220), (250, 60), (200, 60), (200, 220), (150, 220), (150, 60), (100, 60), (100, 220), (0, 220)]
+STAR = [(150 + (130 if i % 2 == 0 else 60) * math.cos(math.pi * i / 5), 110 + (100 if i % 2 == 0 else 50) * math.sin(math.pi * i / 5)) for i in range(10)]
+
+
+@pytest.mark.parametrize("name,pts", [("L", L), ("U", U), ("plus", PLUS), ("comb", COMB), ("star", STAR)])
+def test_a_panel_cut_to_a_matching_shape_says_nothing(store, name, pts):
+    assert _shape(store, pts) == [], name
+
+
+@pytest.mark.parametrize("n", [16, 48])
+def test_a_true_polygon_of_a_round_seat_says_nothing(store, n):
+    r = 200.0
+    poly = [(150 + r * math.cos(2 * math.pi * i / n), 110 + r * math.sin(2 * math.pi * i / n), 220) for i in range(n)]
+    top = f"cq.Workplane().circle({r}).extrude(12.7).translate((150, 110, 207.3))"
+    assert _differs(store, _table(str(poly), top=top)) == []
+
+
+def test_a_kerf_on_one_side_says_nothing(store):
+    assert _differs(store, _table("[(0, 0, 220), (298, 0, 220), (298, 220, 220), (0, 220, 220)]")) == []
+
+
+def test_a_notch_in_the_outline_isn_t_a_smaller_panel(store):
+    """It's the same size overall, so there aren't two sizes to give."""
+    pts = [(0, 0), (140, 0), (140, 10), (160, 10), (160, 0), (300, 0), (300, 220), (0, 220)]
+    assert _differs(store, _table(str([(x, y, 220) for x, y in pts]))) == []
+
+
+# --- the size it states --------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("name,outline,cut", [("half size", "[(0, 0, 220), (150, 0, 220), (150, 110, 220), (0, 110, 220)]", [150, 110]),
+                                              ("100 in all round", "[(100, 100, 220), (200, 100, 220), (200, 120, 220), (100, 120, 220)]", [100, 20])])
+def test_a_big_shortfall_states_the_model_s_true_size(store, name, outline, cut):
+    (got,) = _differs(store, _table(outline))
+    assert sorted(round(v) for v in got["outline"]) == sorted(cut), name
+    assert [round(v) for v in sorted(got["solid"])] == [220, 300], name
+
+
+# --- wherever the sheet is used --------------------------------------------------------------------------------------------
+def test_the_scorecard_carries_it_as_a_warning_and_it_stops_nothing(store):
+    store.write_part("t", _table(INSET), intent="a table")
+    card = scorecard.compute(store)
+    (w,) = card["warnings"]
+    assert "The top you'd cut is" in w
+    assert not [c for c in card["checks"] if "you'd cut" in str(c)]
+    assert [c["id"] for c in card["checks"] if c["status"] == "fail"] == ["make:shop"]       # this shop has no printer: nothing of ours
+
+
+def test_a_matching_panel_has_no_warning(store):
+    store.write_part("t", _table(FULL), intent="a table")
+    assert scorecard.compute(store)["warnings"] == []
+
+
+def test_the_page_draws_the_warning():
+    import os
+
+    js = os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")
+    assert "(card.warnings || []).map(" in open(js).read()
+
+
+def _book(cut_smaller, s=None):
+    s = s or {"pass": 2, "fail": 0, "unknown": 0, "untrusted": 0, "unresolved": 0, "edge": 0, "proposed": 0}
+    return release._status({"summary": s, "checks": [{}, {}]}, cut_smaller)
+
+
+def test_the_book_can_t_say_ready_and_stay_quiet():
+    assert "Ready to cut" in _book(1) and "but 1 panel is cut smaller than the model: see the cut lists" in _book(1)
+    assert "but 2 panels are cut smaller" in _book(2)
+    assert "smaller" not in _book(0)
+
+
+def test_the_words_beside_the_cut_list():
+    src = open(release.__file__).read()
+    i = src.index("<h2 class='page'>Cut lists</h2>")
+    assert 'rec.get("cut_smaller")' in src[i:i + 200] and "Before you cut:" in src[i:i + 260]
+
+
+def test_the_release_works_it_out_for_itself_not_from_an_old_card():
+    src = open(release.__file__).read()
+    assert '"cut_smaller": consistency.cut_smaller(store, [p.id for p in built])' in src
+
+
+def test_a_short_stretch_under_an_inch_isn_t_the_panel_s_size(store):
+    """20 mm of one edge pulled in, at the outline's far side: a tab, not a smaller panel."""
+    pts = [(0, 0), (300, 0), (300, 100), (290, 100), (290, 120), (300, 120), (300, 220), (0, 220)]
+    assert _differs(store, _table(str([(x, y, 220) for x, y in pts]))) == []
+
+
+def test_a_tab_on_the_model_under_an_inch_wide_isn_t_the_panel_s_size(store):
+    """The model has a 20 mm wide tab the outline doesn't: its overall size differs, but it's a tab, not a smaller panel."""
+    tab = "cq.Workplane().box(300, 220, 12.7, centered=False).translate((0, 0, 207.3)).union(cq.Workplane().box(10, 20, 12.7, centered=False).translate((300, 100, 207.3)))"
+    assert _differs(store, _table(FULL, top=tab)) == []
+
+
+@pytest.mark.parametrize("name,pts", [("L", L), ("U", U), ("comb", COMB)])
+def test_an_outline_drawn_the_other_way_round_says_nothing_either(store, name, pts):
+    assert _shape(store, pts[::-1]) == [], name
+
+
+def test_an_outline_drawn_the_other_way_round_is_still_named_when_short(store):
+    (got,) = _differs(store, _table("[(10, 220, 220), (290, 220, 220), (290, 0, 220), (10, 0, 220)]"))
+    assert sorted(round(v) for v in got["solid"]) == [220, 300]
+

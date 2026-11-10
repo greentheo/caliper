@@ -39,6 +39,7 @@ import zipfile
 import zlib
 from typing import Callable, Optional
 
+from . import consistency
 from . import construction as C
 from . import materials as M
 from . import verdicts
@@ -796,13 +797,15 @@ def title(name: str) -> str:
     return first.rstrip(".") or name
 
 
-def _status(card: dict) -> str:
+def _status(card: dict, smaller: int = 0) -> str:
     """The book's header: ready to cut, or why not, each reason in its own words (CALI-96: "not trusted", not
     "unknown")."""
     s = card["summary"]
     if verdicts.summary(s)["counts_as_pass"]:            # one verdict (CALI-112)
         guess = ", print time is a guess" if s.get("estimate") else ""       # never a ✓, never in the way (#166)
-        return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass{guess}</span>'
+        but = (f", but {smaller} panel{' is' if smaller == 1 else 's are'} cut smaller than the model: see the cut lists"
+               if smaller else "")                                           # never a quiet "ready" over it (#183 review)
+        return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass{guess}{but}</span>'
     untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0
     edge = s.get("edge") or 0
     rest = s["unknown"] - untrusted - unresolved - edge
@@ -841,7 +844,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
 
     m = card.get("metrics") or {}
     name = lambda pid: (rec.get("names") or {}).get(pid) or pid     # noqa: E731 — the name a person reads (#94)
-    status = _status(card)
+    status = _status(card, len(rec.get("cut_smaller") or []))
     big = [("weight.total_lb", "all up, with the payload"), ("hitch.tongue_lb", "on the tongue"),
            ("frame.yield_x", "frame yields at × its load"), ("drag.lbf", "drag at speed")]
     nums = "".join(f"<div><b>{_num(m[k]['value'], m[k]['unit'])}</b><span>{_e(lab)}</span></div>"
@@ -899,6 +902,8 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                            + f"; about {pr['hours']:g} h, {pr['filament_g']:,} g, ${pr['usd']:.2f} "
                            f"({_e(pr.get('rough_said') or pr['from'])}). STLs in <code>printer/{_e(pid)}/</code>.</p>")
     out.append("<h2 class='page'>Cut lists</h2>")
+    for said in rec.get("cut_smaller") or []:          # beside what it's about (#183 review)
+        out.append(f"<p class='note'><b>Before you cut:</b> {_e(said)}</p>")
     for pid in rec.get("grain") or {}:                 # which way to cut each panel, as the person said (CALI-126)
         laid = {g["line"]: g for g in (plans.get(pid) or {}).get("grain") or []}
         for n in rec["grain"][pid]:
@@ -1199,7 +1204,7 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     from . import grain
 
     said = {p.id: grain.notes(store, p.id) for p in store.design.parts}
-    rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength, "making": made,
+    rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength, "making": made, "cut_smaller": consistency.cut_smaller(store, [p.id for p in built]),
            "names": {p.id: p.label for p in store.design.parts if p.label},
            "grain": {pid: n for pid, n in said.items() if n},       # which way to cut each panel (CALI-126)
            "slug": os.path.basename(store.root), "versions": versions,

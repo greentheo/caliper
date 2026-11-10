@@ -355,9 +355,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"{fix}\" and I'll revise it.",
                               "bad"))
         for s in smaller:                      # cut smaller than it's drawn: the cut list follows the outline (#183)
-            cut, drawn = (" x ".join(_len(v, inches) for v in s[k]) for k in ("outline", "solid"))
-            what.append(_line(f"The {s['name'].replace('_', ' ')} you'd cut is {cut}, but the model has it at {drawn}. The cut list and "
-                              "patterns follow the smaller outline; say which you want and I'll revise it.", "warn"))
+            what.append(_line(consistency.plan_said(s, inches), "warn"))
         if edge:                               # a load case it's missing: a warning, the round passed (CALI-94)
             what.append(_line(edge[0].upper() + edge[1:] + ".", "warn", study="load"))
 

@@ -282,32 +282,40 @@ def _on_its_face(mesh, pieces: list[dict], tol: float) -> AssertionResult:
 
 #: how far past its outline a panel's solid may run and still be the same size: a saw's kerf, a loose fit (#183)
 PLAN_TOL_MM = 3.0
-_REACH = np.array([1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0, 48.0, 64.0])
+#: how much of an outline has to be short before it's said: less than this is a tab, not the panel's size
+PLAN_MIN_RUN_MM = 25.0
+_NEAR = np.array([1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0, 48.0, 64.0])
 
 
 def _past_outline(mesh, points: np.ndarray, out: np.ndarray, pieces: list[dict], skip: dict) -> np.ndarray:
-    """How far the solid runs on from each point, along its ``out``, before it stops or another piece takes over."""
-    grid = points[:, None] + out[:, None] * _REACH[None, :, None]
-    solid = _signed(mesh, grid.reshape(-1, 3)).reshape(grid.shape[:2]) >= 0
-    theirs = _in_a_piece(grid.reshape(-1, 3), pieces, skip, 0.5).reshape(grid.shape[:2])
-    run = solid & ~theirs
-    ends = np.where(run.all(axis=1), run.shape[1], (~run).argmax(axis=1))
-    lo = np.where(ends > 0, _REACH[np.maximum(ends - 1, 0)], 0.0)
-    hi = np.where(ends < len(_REACH), _REACH[np.minimum(ends, len(_REACH) - 1)], _REACH[-1])
-    for _ in range(4):                                  # to about half a millimetre where it matters
-        mid = (lo + hi) / 2
-        q = points + out * mid[:, None]
-        inside = (_signed(mesh, q) >= 0) & ~_in_a_piece(q, pieces, skip, 0.5)
-        lo, hi = np.where(inside, mid, lo), np.where(inside, hi, mid)
-    return lo
+    """How far the solid runs on from each point, along its ``out``: to where it ends, or sooner where another piece takes over."""
+    from . import spatial
+
+    past = np.zeros(len(points))
+    inside = _signed(mesh, points) >= 0
+    if not inside.any():
+        return past
+    hit, ray, _ = spatial.intersects_location(mesh, points[inside], out[inside], multiple_hits=False)
+    ends = np.zeros(len(points))
+    ends[np.flatnonzero(inside)[ray]] = np.linalg.norm(hit - points[inside][ray], axis=1)
+    steps = np.sort(np.concatenate([np.repeat(_NEAR[None], len(points), axis=0), ends[:, None] * np.linspace(0, 1, 18)[1:-1]], axis=1), axis=1)
+    steps = np.where(steps < ends[:, None], steps, np.inf)
+    usable = np.isfinite(steps)
+    grid = points[:, None] + out[:, None] * np.where(usable, steps, 0.0)[:, :, None]
+    theirs = np.zeros(steps.shape, bool)
+    theirs[usable] = _in_a_piece(grid[usable], pieces, skip, 0.5)
+    first = np.where(theirs.any(axis=1), theirs.argmax(axis=1), -1)
+    took = np.where(first >= 0, steps[np.arange(len(points)), first], np.inf)
+    return np.minimum(ends, took)
 
 
 def plan_differs(declared: Optional[dict], geometry) -> list[dict]:
-    """The sheets whose outline is smaller than the solid they're part of, in plan: ``[{name, outline, solid}]``, the two sizes
-    in mm along the outline's own axes. Only where a printed rest takes whatever the pieces aren't: anywhere else that solid is
-    uncovered, and :func:`_covers` says so. The stool's seat was cut 16-sided and 11.2 in across from a 12 in round disk, and
-    the 0.8 in went to the printed rest with nothing to say so (#183). It's said, not failed: a panel set in a printed rim
-    looks the same, and only the person knows which they meant."""
+    """The sheets cut smaller than the solid they're part of, in plan: ``[{name, outline, solid}]``, the two sizes in mm along the
+    outline's own axes. Only where a printed rest takes whatever the pieces aren't: anywhere else that solid is uncovered, and
+    :func:`_covers` says so. The stool's seat was cut 16-sided and 11.2 in across from a 12 in round disk, and the 0.8 in went to
+    the printed rest with nothing to say so (#183). Edge by edge, so the edges that are right can't outvote the one that's short
+    (#183 review); and along the whole of an edge, so a chord of a true curve, on the curve at its ends, is the same size. It's
+    said, not failed: a panel set in a printed rim looks the same, and only the person knows which they meant."""
     if not declared or declared.get("error") or getattr(geometry, "mesh", None) is None:
         return []
     if not any(isinstance(it, dict) and it.get("kind") == "printed" and it.get("rest") for it in declared.get("construction") or []):
@@ -320,21 +328,51 @@ def plan_differs(declared: Optional[dict], geometry) -> list[dict]:
             continue
         poly, side = np.asarray(pc["polys"][0], float), pc["sides"][0]
         o, u, v, n, _ = _frame(poly)
-        mid = centre = poly.mean(axis=0)
+        u, v, n = (np.asarray(a, float) for a in (u, v, n))
+        flat = np.column_stack([(poly - o) @ u, (poly - o) @ v])
+        turning = 1.0 if np.sum(flat[:, 0] * np.roll(flat[:, 1], -1) - np.roll(flat[:, 0], -1) * flat[:, 1]) > 0 else -1.0
         edges = np.roll(poly, -1, axis=0) - poly
         lengths = np.linalg.norm(edges, axis=1)
-        each = np.maximum(1, np.round(48 * lengths / lengths.sum()).astype(int))
+        each = np.maximum(5, np.round(96 * lengths / lengths.sum()).astype(int))
         at = np.concatenate([poly[i] + edges[i] * ((np.arange(k) + 0.5) / k)[:, None] for i, k in enumerate(each)])
         along = np.concatenate([np.repeat(edges[i][None] / lengths[i], k, axis=0) for i, k in enumerate(each)])
-        away = np.cross(along, np.asarray(n, float))
-        away *= np.where(np.einsum("ij,ij->i", away, at - mid) < 0, -1.0, 1.0)[:, None]
-        points = at + np.asarray(n, float) * side * pc["thickness"] / 2 + away * 0.01
+        away = turning * np.cross(along, np.cross(u, v))
+        owner = np.repeat(np.arange(len(poly)), each)
+        points = at + n * side * pc["thickness"] / 2 + away * 0.01
         past = _past_outline(mesh, points, away, pieces, pc)
-        if np.mean(past > PLAN_TOL_MM) < 0.5:
+        short = [i for i in range(len(poly)) if np.percentile(past[owner == i], 10) > PLAN_TOL_MM]
+        if lengths[short].sum() < PLAN_MIN_RUN_MM:
             continue
-        reached = at + away * past[:, None]
-        size = lambda q: [float(np.ptp((q - centre) @ np.asarray(a, float))) for a in (u, v)]   # noqa: E731
-        out.append({"name": pc["name"], "outline": size(poly), "solid": size(reached)})
+        reached = np.concatenate([poly, at + away * past[:, None]])
+        size = lambda q: [float(np.ptp((q - o) @ a)) for a in (u, v)]   # noqa: E731
+        cut, drawn = size(poly), size(reached)
+        if max(b - a for a, b in zip(cut, drawn)) <= PLAN_TOL_MM:    # a notch in it, not a smaller panel: no two sizes to say
+            continue
+        out.append({"name": pc["name"], "outline": cut, "solid": drawn})
+    return out
+
+
+def plan_said(s: dict, inches: bool) -> str:
+    """One :func:`plan_differs` entry in words, the same on the card, the scorecard and the build book."""
+    from .answers import _len
+
+    cut, drawn = (" x ".join(_len(v, inches) for v in s[k]) for k in ("outline", "solid"))
+    return (f"The {s['name'].replace('_', ' ')} you'd cut is {cut}, but the model has it at {drawn}. The cut list and patterns follow "
+            "the smaller outline; say which you want and I'll revise it.")
+
+
+def cut_smaller(store, part_ids) -> list[str]:
+    """In words, every sheet here cut smaller than the model: for the scorecard and the build book (#183 review). A warning, so a
+    part that can't be read leaves nothing to say rather than stopping either."""
+    from . import construction as C
+
+    inches = store.design.display_units == "in"
+    out = []
+    for pid in part_ids:
+        try:
+            out += [plan_said(s, inches) for s in plan_differs(C.declared(store, pid), store.part_geometry(pid))]
+        except Exception:  # noqa: BLE001
+            continue
     return out
 
 
