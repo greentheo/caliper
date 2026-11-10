@@ -20,6 +20,7 @@ from typing import Optional
 from . import construction as C
 from . import materials as M
 from .design import DesignStore
+from .one_study import one_at_a_time
 
 KG_LB = 2.20462262
 LB = 4.4482216152605                 # N per lbf
@@ -51,9 +52,10 @@ def _floor(store: DesignStore, skip) -> Optional[dict]:
     return None
 
 
+@one_at_a_time
 def run(store: DesignStore, frame_id: str, *, person_lb: float = 200.0, gear_lb: float = 50.0,
         knee_lb: float = 150.0, factor: float = 1.5, mattress_in: float = 10.0, bare_in: float = 3.0,
-        walls: bool = True) -> dict:
+        walls: bool = True, emit=None) -> dict:
     """The parked cases, worst first, with the floor check."""
     from whittle import FrameStudy
 

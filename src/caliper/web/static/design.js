@@ -16,6 +16,7 @@ const S = {
   design: null,        // its last state from the server
   opening: null,       // the design on its way, while it loads (#173)
   scope: null,         // the selected part (the chat is about it), or null = the whole design
+  pick: null,          // a face, edge or point picked on it (#109): { part, kind, id, said, local }
   busy: false,         // a turn is in flight
   station: null,       // {run, index} when previewing a whittle station in the viewport
   whittle: { ok: false },
@@ -606,6 +607,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   if (!d || d[2] !== 0 || e.button !== 0) return;
   if (Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 5) return;    // an orbit drag, not a click
   const hit = pick(e);
+  if (PICK.mode !== 'part' && (hit || S.scope)) { choose(e, hit); return; }   // just off the silhouette is still its edge
   setScope(hit ? hit.object.userData.partId : null);
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
@@ -629,6 +631,151 @@ function pick(e) {
   const hits = ray.intersectObjects([...meshes.values(), ...pieces].filter((m) => m.visible), false);
   return hits[0] || null;
 }
+
+// ------------------------------------------------------------- pick a face or an edge (#109, the mockup's bar)
+// Part, Face or Edge: a click in Face or Edge says which, and the chat says what it picked. The ids are this version's.
+const PICK = { mode: 'part', parts: new Map(), overlay: null, turn: 0 };
+const pickKey = (pid, version) => `${S.slug}/${pid}/${version}`;
+// which face a triangle of the merged mesh belongs to: ``starts`` holds each face's first triangle
+function faceOfTriangle(starts, tri) {
+  let lo = 0, hi = starts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (starts[mid] <= tri) lo = mid; else hi = mid - 1;
+  }
+  return lo;
+}
+// the edge nearest the cursor on screen, within ``px``, among those in front of ``farthest`` (no edges through the part)
+function nearestEdge(edges, project, cursor, px, farthest) {
+  let best = null;
+  for (const e of edges) {
+    const pts = e.points.map(project);
+    for (let i = 0; i + 1 < pts.length; i += 1) {
+      const a = pts[i], b = pts[i + 1], dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+      const t = l2 ? Math.min(1, Math.max(0, ((cursor.x - a.x) * dx + (cursor.y - a.y) * dy) / l2)) : 0;
+      const d = Math.hypot(a.x + t * dx - cursor.x, a.y + t * dy - cursor.y), depth = a.d + t * (b.d - a.d);
+      if (d <= px && depth <= farthest && (!best || d < best.d)) best = { edge: e, d };
+    }
+  }
+  return best ? best.edge : null;
+}
+// a point on a part with no B-rep: where it is, in the design's units
+const pointSaid = (p) => `point on the surface: x ${len(p[0], 1)}, y ${len(p[1], 1)}, z ${len(p[2], 1)}`;
+// what goes to the designer: what was picked, and where in the script's own millimetres
+function aboutPick(pick, text) {
+  if (!pick) return text;
+  return `About this ${pick.said}${pick.local ? ` (at x ${pick.local[0]}, y ${pick.local[1]}, z ${pick.local[2]} mm in the script's coordinates)` : ''}: ${text}`;
+}
+function clearPick() {
+  S.pick = null;
+  PICK.turn += 1;                                 // a pick still on its way is off too
+  if (PICK.overlay) { scene.remove(PICK.overlay); PICK.overlay.geometry.dispose(); PICK.overlay = null; }
+}
+// a face sits on the part (its far side stays hidden); an edge and a point draw over everything, so they can be seen
+function drawPick(geometry, onSurface) {
+  const m = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ color: 0xf5a524, transparent: true, opacity: 0.75, depthTest: !!onSurface,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.DoubleSide }));
+  m.renderOrder = 10;
+  scene.add(m);
+  PICK.overlay = m;
+}
+const PICK_HINTS = { part: 'Click a part', face: 'Click a face', edge: 'Click an edge' };
+function pickHint(text) { $('pickHint').textContent = text || PICK_HINTS[PICK.mode]; }
+async function loadFeatures(pid) {
+  pickHint('working out its faces and edges…');
+  try {
+    const got = await api('GET', `/api/designs/${S.slug}/parts/${pid}/features.json`);
+    const pos = [], index = [], starts = [];
+    let at = 0;
+    for (const f of got.faces) {
+      starts.push(index.length / 3);
+      for (const v of f.verts) pos.push(v);
+      for (const i of f.tris) index.push(i + at);
+      at += f.verts.length / 3;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(index);
+    return { ...got, starts, mesh: got.mesh ? null : new THREE.Mesh(g), solidMesh: !!got.mesh };
+  } finally { pickHint(); }                       // whatever happened, it's stopped working
+}
+// asked once per part, version and unit, however many clicks wait on it
+async function features(pid) {
+  const part = S.design.parts.find((p) => p.id === pid), key = `${pickKey(pid, part.version)}/${S.design.display_units}`;
+  if (!PICK.parts.has(key)) PICK.parts.set(key, loadFeatures(pid));
+  try { return await PICK.parts.get(key); } catch (e) { PICK.parts.delete(key); throw e; }
+}
+function facePicked(data, hit) {
+  const near = 0.01 * hit.distance + 1;
+  const at = ray.intersectObject(data.mesh, false).find((h) => h.distance >= hit.distance - near);
+  return at ? data.faces[faceOfTriangle(data.starts, at.faceIndex)] : null;
+}
+function edgePicked(data, hit, e, seen) {
+  const { rect, camera: view } = seen, v = new THREE.Vector3();
+  const project = (p) => {
+    v.set(p[0], p[1], p[2]);
+    const d = v.distanceTo(view.position);
+    v.project(view);
+    return { x: (v.x + 1) * rect.width / 2, y: (1 - v.y) * rect.height / 2, d };
+  };
+  return nearestEdge(data.edges, project, { x: e.clientX - rect.left, y: e.clientY - rect.top }, 12, hit ? 1.01 * hit.distance + 1 : Infinity);
+}
+async function choose(e, hit) {
+  const pid = hit ? hit.object.userData.partId : S.scope, point = hit ? [hit.point.x, hit.point.y, hit.point.z] : null;
+  // the click as it was: the pointer and the camera can move while the first pick works out its faces (#172)
+  const seen = { ray: ray.ray.clone(), camera: camera.clone(), rect: renderer.domElement.getBoundingClientRect() };
+  if (S.scope !== pid) setScope(pid);
+  clearPick();
+  const turn = PICK.turn;                         // only the last click counts
+  let data;
+  try { data = await features(pid); } catch (err) {
+    if (turn === PICK.turn) pickHint(`can't pick on it: ${plainly(err.message)}`);
+    return;
+  }
+  if (turn !== PICK.turn) return;
+  ray.ray.copy(seen.ray);
+  if (!hit && (data.solidMesh || PICK.mode === 'face')) return;   // only an edge can be picked from just off the part
+  if (data.solidMesh) {                                   // carved, whittled, imported: no faces to name
+    S.pick = { part: pid, kind: 'point', said: pointSaid(point), local: null, point };
+    drawPick(new THREE.SphereGeometry(Math.max(2, 0.006 * hit.distance), 12, 12).translate(...point));
+  } else if (PICK.mode === 'face') {
+    const f = facePicked(data, hit);
+    if (!f) return;
+    S.pick = { part: pid, kind: 'face', id: f.id, said: f.said, local: f.local };
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(f.verts, 3));
+    g.setIndex(f.tris);
+    drawPick(g, true);
+  } else {
+    const edge = edgePicked(data, hit, e, seen);
+    if (!edge) { pickHint('no edge there: click closer to one'); renderScope(); return; }
+    S.pick = { part: pid, kind: 'edge', id: edge.id, said: edge.said, local: edge.local };
+    const curve = new THREE.CatmullRomCurve3(edge.points.map((p) => new THREE.Vector3(...p)));
+    drawPick(new THREE.TubeGeometry(curve, Math.max(2, edge.points.length * 2), Math.max(1, 0.003 * camera.position.distanceTo(new THREE.Vector3(...edge.centre))), 6, false));
+  }
+  renderScope();
+}
+function setPickMode(mode) {
+  PICK.mode = mode;
+  if (mode === 'part') clearPick();
+  document.querySelectorAll('#pickBar [data-pick]').forEach((b) => b.classList.toggle('on', b.dataset.pick === mode));
+  pickHint();
+  renderScope();
+}
+// the words go to the designer, so they follow the page's units (#172)
+async function respeak() {
+  const was = S.pick;
+  if (!was) return;
+  if (was.kind === 'point') was.said = pointSaid(was.point);
+  else {
+    const data = await features(was.part);
+    const got = (was.kind === 'face' ? data.faces : data.edges).find((x) => x.id === was.id);
+    if (got) was.said = got.said;
+  }
+  renderScope();
+}
+$('pickClear').onclick = () => { clearPick(); renderScope(); };   // only the pick: the part stays
+$('pickBar').onclick = (e) => { const b = e.target.closest('[data-pick]'); if (b) setPickMode(b.dataset.pick); };
 
 // ------------------------------------------------------------------------------- the session
 async function loadDesigns(select) {
@@ -717,9 +864,11 @@ $('unitSeg').onclick = async (e) => {
   if (!u || !S.slug || u === S.design.display_units) return;
   S.design = await api('PATCH', `/api/designs/${S.slug}`, { display_units: u });
   render(); frame();
+  respeak();
 };
 
 function setScope(pid, piece) {
+  clearPick();
   S.scope = pid;
   S.piece = piece || null;
   S.focus = null;
@@ -733,6 +882,8 @@ function renderScope() {
   const named = part ? part.name || part.id : S.scope;
   const piece = part && S.piece ? (part.pieces || []).find((x) => x.key === S.piece) : null;
   $('scopeChip').textContent = named ? (piece ? `${named} · ${piece.name}` : named) : '';
+  $('pickChip').hidden = $('pickClear').hidden = !S.pick;
+  $('pickChip').textContent = S.pick ? S.pick.said : '';
   $('msg').placeholder = S.scope
     ? `What should change about ${piece ? piece.name : named}?`
     : (S.design && S.design.parts.length
@@ -968,7 +1119,9 @@ $('composer').onsubmit = (e) => {
   if (S.opening) return;                        // what's typed stays
   const text = $('msg').value;
   $('msg').value = '';
-  send(aboutPiece(text), S.scope);
+  const said = aboutPick(S.pick, aboutPiece(text));
+  if (S.pick) { clearPick(); renderScope(); }
+  send(said, S.scope);
 };
 $('msg').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
@@ -1112,12 +1265,153 @@ async function createDesign(prompt) {
 }
 
 // ------------------------------------------------------------------------------- inspector
+// ------------------------------------------------------------- a part's numbers, set by hand (#108, the mockup)
+// Exact numbers, no Claude call. Lengths in the person's units; what's typed is sent as typed and the server converts,
+// checks and builds. Rebuild writes everything changed as one version.
+const paramKey = (p) => `${S.slug}/${p.id}/${p.version}/${S.design.display_units}`;
+function inchText(mm) {
+  const inch = mm / IN, x32 = Math.round(inch * 32);
+  if (Math.abs(inch * 32 - x32) > 0.02) return `${+inch.toFixed(3)}`;
+  const whole = Math.floor(x32 / 32), rest = x32 - whole * 32, g = gcd(rest, 32);
+  return rest ? `${whole ? `${whole} ` : ''}${rest / g}/${32 / g}` : `${whole}`;
+}
+const isLength = (e) => e.unit === 'mm';
+const paramText = (e, v) => (isLength(e) && inches() ? inchText(v) : `${+Number(v).toFixed(3)}`);
+const paramUnit = (e) => (isLength(e) ? (inches() ? 'in' : 'mm') : e.unit === 'deg' ? 'deg' : '');
+// a number in plain words: its comment, unless the comment is only a quantity ("12 in", "~10.5", "18 in base"); then its name
+const PARAM_WORD = { dia: 'diameter', bot: 'bottom', t: 'thickness', r: 'radius', h: 'height', w: 'width' };
+function paramName(e) {
+  const note = (e.note || '').replace(/\s*\([^)]*\)?\s*$/, '')
+    .replace(/^~?\d[\d./]*(\s+\d+\/\d+)?\s*(mm|in\b|inch(es)?\b|"|″)?\s*/i, '')
+    .replace(/[\s(]*\b(mm|in|inches|deg|degrees)\b\)?\.?\s*$/i, '').trim();
+  const said = note.split(/\s+/).length >= 2 ? note : e.name.split('_').map((w) => PARAM_WORD[w] || w).join(' ');
+  return said.charAt(0).toUpperCase() + said.slice(1);
+}
+// what's typed, as a number and (for a length) its unit: 12.7, 1/2, 1 1/4, 3 mm, 2"; null if it isn't one
+function readNumber(text, e) {
+  let t = String(text).trim(), unit;
+  if (isLength(e)) {
+    const m = t.match(/^(.*?)\s*(mm|in|"|″)$/i);
+    if (m) { t = m[1]; unit = m[2].toLowerCase() === 'mm' ? 'mm' : 'in'; } else unit = inches() ? 'in' : 'mm';
+  }
+  const f = t.match(/^(?:(\d+)\s+)?(\d+)\/(\d+)$/);
+  if (f) return +f[3] ? { value: +(f[1] || 0) + +f[2] / +f[3], ...(unit ? { unit } : {}) } : null;
+  return /^-?(\d+\.?\d*|\.\d+)$/.test(t) ? { value: +t, ...(unit ? { unit } : {}) } : null;
+}
+function paramRange(e) {
+  if (!e.range) return '';
+  const u = paramUnit(e);
+  return `${paramText(e, e.range[0])} to ${paramText(e, e.range[1])}${u ? ` ${u}` : ''}`;
+}
+// why this can't be sent, or '': the server checks again and has the last word
+function paramProblem(e, read) {
+  if (!read) return "That isn't a number.";
+  if (e.unit === 'count' && !Number.isInteger(read.value)) return 'A whole number.';
+  const v = read.unit === 'in' ? read.value * IN : read.value;
+  return e.range && (v < e.range[0] - 1e-9 || v > e.range[1] + 1e-9) ? `Must be ${paramRange(e)}.` : '';
+}
+function paramRows(st) {
+  return st.list.map((e) => {
+    const shown = paramText(e, e.value), draft = st.drafts[e.name], text = draft != null ? draft : shown;
+    const edited = text.trim() !== shown, read = edited ? readNumber(text, e) : null;
+    const v = read && (read.unit === 'in' ? read.value * IN : read.value);
+    const changed = edited && (!read || Math.abs(v - e.value) > 1e-6);          // 100.0 for 100, or 0.375 for 3/8, isn't a change (#171)
+    return { e, shown, text, changed, read, problem: changed ? paramProblem(e, read) : '' };
+  });
+}
+function paramsHtml(p, st, done) {
+  const rows = paramRows(st), dirty = rows.filter((r) => r.changed), blocked = dirty.some((r) => r.problem);
+  const body = rows.map(({ e, shown, text, changed, problem }) => {
+    const u = paramUnit(e), note = problem || [changed ? `was ${shown}${u ? ` ${u}` : ''}` : '', changed ? paramRange(e) : '',
+      e.read ? '' : "its build doesn't use this"].filter(Boolean).join(' · ');
+    return `<div class="prow${changed ? ' changed' : ''}${problem ? ' bad' : ''}">
+      <label for="param-${esc(e.name)}" title="${esc(e.name)}">${esc(paramName(e))}</label>
+      <input id="param-${esc(e.name)}" data-param="${esc(e.name)}" value="${esc(text)}" autocomplete="off" spellcheck="false"${st.saving ? ' disabled' : ''}>
+      <span class="punit">${esc(u)}</span></div>${note ? `<div class="pnote${problem ? ' bad' : ''}">${esc(note)}</div>` : ''}`;
+  }).join('');
+  const foot = dirty.length ? `<div class="pfoot"><span class="small muted">Rebuilds as v${p.version + 1}, then re-checks the whole design.</span>
+    <button class="primary" data-param-rebuild="1"${blocked || st.saving ? ' disabled' : ''}>${st.saving ? 'Rebuilding…' : 'Rebuild'}</button></div>` : '';
+  const said = done && done.part === p.id && done.version === p.version ? `<div class="pdone">v${done.version} written: ${esc(done.said)} set exactly as typed; the whole design re-measured.</div>
+    ${done.warning ? `<div class="pnote warn">${esc(done.warning)}.</div>` : ''}${(done.notes || []).map((n) => `<div class="pnote">${esc(n)}.</div>`).join('')}` : '';
+  return `<section class="params"><div class="phead"><b>Parameters</b><span class="small muted">set by hand, no Claude call</span></div>
+    ${body}${foot}${st.err ? `<div class="pnote bad">${esc(st.err)}</div>` : ''}${said}</section>`;
+}
+function paramView(p) {
+  if (!p || !p.scripted || p.role === 'fixed') return '';
+  if (p.carved) {                                     // its shape is the carve's mesh: numbers would only move its loads (#171)
+    return `<section class="params"><div class="phead"><b>Parameters</b></div>
+      <div class="pnote">It's been carved, so its numbers don't change its shape. Say "roll it back" to take the carve off and set them.</div></section>`;
+  }
+  const st = S.params && S.params.key === paramKey(p) ? S.params : null;
+  if (!st) { setTimeout(() => loadParams(p), 0); return ''; }
+  return st.list && st.list.length ? paramsHtml(p, st, S.paramsDone) : '';
+}
+async function loadParams(p) {
+  const key = paramKey(p);
+  if (S.params && S.params.key === key) return;
+  S.params = { key, list: null, drafts: {}, saving: false, err: null };
+  let list = [];
+  try { list = (await api('GET', `/api/designs/${S.slug}/parts/${p.id}/params`)).params; } catch (e) { /* no numbers to set */ }
+  if (S.params.key !== key) return;
+  S.params.list = list;
+  drawParams(p);
+  const said = document.querySelector('#paramBox .pdone');          // the redraw went back to the top of the cards
+  if (said) said.scrollIntoView({ block: 'center' });
+}
+let paramRefocus = false;
+function refocusParam(id, at) {
+  const el = $(id);
+  if (!el) return;
+  paramRefocus = true; el.focus(); el.setSelectionRange(at[0], at[1]); paramRefocus = false;
+}
+function drawParams(p) {
+  const box = $('paramBox');
+  if (!box) return;
+  const was = document.activeElement, id = was && was.dataset && was.dataset.param ? was.id : null;
+  const at = id ? [was.selectionStart, was.selectionEnd] : null;
+  box.innerHTML = paramView(p);
+  if (id) refocusParam(id, at);
+}
+// the plain names and the numbers as typed, as the mockup says it: no script names (#171)
+function paramsSaid(rows) {
+  return rows.map((r) => { const u = paramUnit(r.e); return `${paramName(r.e)} ${r.text.trim()}${u && !/[a-z"″]$/i.test(r.text.trim()) ? ` ${u}` : ''}`; }).join(', ');
+}
+async function rebuildParams(p) {
+  const st = S.params, rows = paramRows(st).filter((r) => r.changed);
+  if (!rows.length || st.saving || rows.some((r) => r.problem)) return;
+  st.saving = true; st.err = null; drawParams(p);
+  try {
+    const got = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/params`, { values: rows.map((r) => ({
+      name: r.e.name, value: r.read.value, ...(r.read.unit ? { unit: r.read.unit } : {}) })) });
+    S.paramsDone = { part: p.id, version: got.version, said: paramsSaid(rows), warning: got.warning, notes: got.notes };
+    S.design = got.design;
+    render();
+    await syncParts(S.design, false);             // the model on screen is the new one, not the one it was (#171)
+  } catch (e) { st.saving = false; st.err = plainly(e.message); drawParams(p); }
+}
+function wireParams(p) {
+  const box = $('paramBox');
+  if (!box || !p) return;
+  box.oninput = (e) => {
+    if (!e.target.dataset.param || !S.params) return;
+    S.params.drafts[e.target.dataset.param] = e.target.value; S.params.err = null; S.paramsDone = null;
+    drawParams(p);
+  };
+  // a click selects the number, so typing replaces it: after the click's own caret, and never when a redraw puts it back
+  box.addEventListener('focusin', (e) => { const el = e.target; if (el.dataset.param && !paramRefocus) setTimeout(() => el.select(), 0); });
+  box.onclick = (e) => { if (e.target.closest('[data-param-rebuild]')) rebuildParams(p); };
+  box.onkeydown = (e) => { if (e.key === 'Enter' && e.target.dataset.param) { e.preventDefault(); rebuildParams(p); } };
+}
+
 function renderInspector() {
   const el = $('inspector'), d = S.design;
   if (!d) return;
   const p = S.scope && d.parts.find((x) => x.id === S.scope);
+  const was = document.activeElement, typing = was && was.dataset && was.dataset.param ? [was.id, was.selectionStart, was.selectionEnd] : null;
   el.innerHTML = p ? partView(p) : designView(d);
   wireInspector(p);
+  wireParams(p || (d.parts.length === 1 ? d.parts[0] : null));
+  if (typing) refocusParam(typing[0], typing.slice(1));   // a redraw mid-number
 }
 
 // one rule on a part, with its verdict as measured on this version, and what it measured where it doesn't hold
@@ -1198,7 +1492,7 @@ function designView(d) {
   const buy = d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : '';
   const make = `<h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>`;
   return `<h2>${esc(d.name)} ${status}</h2>
-    ${cardsView({ what, work, buy, make })}`;
+    ${cardsView({ what, work, buy, make, params: d.parts.length === 1 ? `<div id="paramBox">${paramView(d.parts[0])}</div>` : '' })}`;
 }
 
 // ------------------------------------------------------------- the four questions (spec step 1)
@@ -1264,7 +1558,7 @@ function cardsView(groups) {
       ${k === 'what' && picturePart() ? '<div class="qlinks"><button class="btn" data-picture="1">🦖 Put a picture on it</button></div>' : ''}
       <details class="numbers" data-card="${k}" ${numbersOpen(k) ? 'open' : ''}><summary>the numbers</summary>
         ${groups[k] || '<div class="empty">Nothing here yet.</div>'}</details>
-    </section>`;
+    </section>${k === 'work' ? groups.params || '' : ''}`;
   }).join('');
 }
 // ------------------------------------------------------------------- test it (CALI-80)
@@ -1662,7 +1956,7 @@ function partView(p) {
     <div id="cutplanBox">${cutplanView(p)}</div>` : '';
   return `<h2>${esc(p.name || p.id)} ${origin}</h2>
     <div class="muted small">v${p.version}</div>
-    ${cardsView({ what, work, buy, make })}`;
+    ${cardsView({ what, work, buy, make, params: `<div id="paramBox">${paramView(p)}</div>` })}`;
 }
 
 function wireInspector(p) {
@@ -2538,6 +2832,7 @@ async function runLighten(p) {
     const runs = loadRuns(p.id);
     const { job_id } = await api('POST', `/api/designs/${S.slug}/lighten`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2 });
     await follow(job_id, (ev) => {
+      waitingCancel(prog, ev, job_id);
       const msg = $('lightMsg'), bar = prog.querySelector('.bar > i');
       if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
       if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
@@ -2553,6 +2848,16 @@ async function runLighten(p) {
   }
 }
 
+// a study waiting its turn behind another can be stopped, as a waiting carve can; gone as soon as it starts (#169)
+function waitingCancel(box, ev, jobId) {
+  const had = box.querySelector('.wait-cancel');
+  if (ev.kind !== 'waiting') { if (had) had.remove(); return; }
+  if (had) return;
+  const b = document.createElement('button');
+  b.className = 'ghost wait-cancel'; b.textContent = 'Cancel';
+  b.onclick = () => { b.disabled = true; api('POST', `/api/jobs/${jobId}/cancel`).catch((e) => showErr(e.message)); };
+  box.appendChild(b);
+}
 async function runLoad(p, spacing) {
   const prog = $('lProgress'), go = $('lGo');
   go.disabled = true;
@@ -2562,6 +2867,7 @@ async function runLoad(p, spacing) {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`,
       { part: p.id, min_safety: +$('lSafety').value || 2, ...(spacing ? { spacing_mm: spacing } : {}) });
     await follow(job_id, (ev) => {
+      waitingCancel(prog, ev, job_id);
       const msg = $('lMsg'), bar = prog.querySelector('.bar > i');
       if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
       if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
