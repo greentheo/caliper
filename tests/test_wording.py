@@ -132,7 +132,7 @@ def test_the_least_safety_box_is_never_blank():
 
 
 def test_a_check_that_just_ran_resets_the_test_beside_it():
-    fn = re.search(r"^async function runLoad\(.*?^}\n", _src(), re.S | re.M).group(0)
+    fn = re.search(r"^async function startLoad\(.*?^}\n", _src(), re.S | re.M).group(0)
     assert "S.trial = null;" in fn and fn.index("S.trial = null;") < fn.index("await refresh();")
 
 

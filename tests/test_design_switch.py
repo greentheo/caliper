@@ -7,6 +7,8 @@ import os
 import re
 import subprocess
 
+import pytest
+
 from .test_carve_click import _fn, _node
 
 JS = os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")
@@ -286,3 +288,24 @@ def test_new_design_during_a_load_ends_the_load():
 
     src = fn(open(JS).read(), "startNew")
     assert src.index("S.slug = null;") < src.index("doneLoading();") and "dropPieces" in src
+
+
+_GUARDS = """
+const S = { slug: 'a', running: {}, design: {} };
+let finish; const started = [];
+const startLoad = (p) => new Promise((r) => { started.push('load'); finish = r; });
+const startLighten = (p) => new Promise((r) => { started.push('lighten'); finish = r; });
+const takeStation = () => new Promise((r) => { started.push('adopt'); finish = r; });
+"""
+
+
+@pytest.mark.parametrize("fn,call", [("runLoad", "runLoad({ id: 'tube' })"), ("runLighten", "runLighten({ id: 'tube' })"),
+                                     ("adoptStation", "adoptStation('tube', 'r1', 1, 'carve')")])
+def test_a_running_job_on_one_design_doesn_t_stop_the_same_part_on_another(fn, call):
+    got = _run((fn,), f"""{call}; S.slug = 'a';
+        {call};
+        const same = started.length;
+        S.slug = 'b';
+        {call};
+        return {{ same, other: started.length }};""", _GUARDS)
+    assert got == {"same": 1, "other": 2}

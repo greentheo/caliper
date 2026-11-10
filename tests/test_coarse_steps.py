@@ -88,7 +88,7 @@ def test_the_page_disables_carve_and_lighten_with_the_reason():
     import os
 
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
-    assert "id=\"carveGo\" ${S.carveJob[carveKey(p.id)] || carveBlocked(p) ? 'disabled' : ''}" in src
+    assert "id=\"carveGo\"${run ? ' data-again=\"1\"' : ''} ${S.carveJob[carveKey(p.id)] || carveBlocked(p) ? 'disabled' : ''}" in src
     # the reason is the server's one test (#144 review), the words its own
     assert "return (p && p.blocked && p.blocked.carve) || '';" in src
     assert "return (p && p.blocked && p.blocked.lighten) || '';" in src
@@ -140,7 +140,7 @@ def test_the_too_thin_line_says_where_what_to_change_and_the_rule(tmp_path):
 
     assert re.match(r"its thinnest walls, 0\.(59|6) mm around z 2\d mm, are thinner than your rule", said), said
     assert said.endswith(" mm, are thinner than your rule shell_wall_thickness (at least 2.85 mm): thicken them to "
-                         "that. For a strength carve, walls must be at least " + f"{4 * ctx['finest']:.1f}" + " mm at "
+                         "that. For a strength carve, walls must be at least " + f"{load_study.sees_from(4 * ctx['finest']):.1f}" + " mm at "
                          "this size, so check it by hand or with a test piece instead."), said
     assert "nozzle" not in said                                    # 0.6 mm prints on a 0.4 mm nozzle
     # where no run a study may make can see them, resolution carries the words
@@ -150,13 +150,13 @@ def test_the_too_thin_line_says_where_what_to_change_and_the_rule(tmp_path):
     assert load_study.thin_words(_spool(tmp_path / "in"), "spool", 0.25, {"at": [0, 165, 410]}, 2.3, True) == (
         "its thinnest walls, 0.25 mm around z 16.1 in, are too thin for a 0.4 mm nozzle to print and for your rule "
         "shell_wall_thickness (at least 2.85 mm): thicken them to that. For a strength carve, walls must be at least "
-        "9.2 mm at this size, so check it by hand or with a test piece instead.")
+        "9.3 mm at this size, so check it by hand or with a test piece instead.")
     # with no rule and nothing to print, only the strength check's limit, in mm (#136 review: not "3/8 in")
     plain = DesignStore.create("a wood thing", base=str(tmp_path / "plain"))
     plain.write_part("spool", SPOOL_PLAIN, intent="a spool")
     assert load_study.thin_words(plain, "spool", 3.0, {"piece": "seat top"}, 2.3, False) == (
         "its thinnest walls, 3 mm in the seat top, are too thin for the strength check to see: at this size it sees walls from "
-        "9.2 mm on, so check it by hand or with a test piece instead.")
+        "9.3 mm on, so check it by hand or with a test piece instead.")
 
 
 def test_a_refused_carve_says_where_and_what_to_change(tmp_path, monkeypatch):
@@ -277,4 +277,4 @@ def test_lighten_on_a_coarse_run_says_not_resolved_not_nothing_holds():
     assert "Not checked: its walls are too thin for the voxels" in view("unchecked")
     assert "Nothing lighter still holds" not in view("unresolved")
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
-    assert "id=\"lightGo\" ${lightenBlocked(p) ? 'disabled' : ''}" in src                 # #137: one reason, both
+    assert "id=\"lightGo\"${run ? ' data-again=\"1\"' : ''} ${lightenBlocked(p) ? 'disabled' : ''}" in src                 # #137: one reason, both
