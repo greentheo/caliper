@@ -8,6 +8,7 @@ take turns. A strength number that can't be trusted is worse than one that's lat
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import threading
 from typing import Callable, Optional
@@ -29,6 +30,20 @@ def take_turn(emit: Optional[Callable] = None, stop: Optional[Callable[[], None]
         if stop:
             stop()
     return True
+
+
+@contextlib.contextmanager
+def my_turn(store, emit: Optional[Callable] = None, stop: Optional[Callable[[], None]] = None):
+    """This thread's turn, held for a block, for a caller that has to look at what's there once it has waited (#184: a build package
+    queued behind a strength check ran the same check again). Re-entrant, so a study inside it doesn't wait. One that waited
+    reads the design again, as :func:`one_at_a_time` does."""
+    waited = take_turn(emit, stop)
+    try:
+        if waited:
+            store.__dict__.update(type(store).load(store.root).__dict__)
+        yield
+    finally:
+        _TURN.release()
 
 
 def one_at_a_time(study: Callable) -> Callable:

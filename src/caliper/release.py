@@ -39,6 +39,7 @@ import zipfile
 import zlib
 from typing import Callable, Optional
 
+from . import consistency
 from . import construction as C
 from . import tree
 from . import materials as M
@@ -832,13 +833,15 @@ def title(name: str) -> str:
     return first.rstrip(".") or name
 
 
-def _status(card: dict) -> str:
+def _status(card: dict, smaller: int = 0) -> str:
     """The book's header: ready to cut, or why not, each reason in its own words (CALI-96: "not trusted", not
     "unknown")."""
     s = card["summary"]
     if verdicts.summary(s)["counts_as_pass"]:            # one verdict (CALI-112)
         guess = ", print time is a guess" if s.get("estimate") else ""       # never a ✓, never in the way (#166)
-        return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass{guess}</span>'
+        but = (f", but {smaller} panel{' is' if smaller == 1 else 's are'} cut smaller than the model: see the cut lists"
+               if smaller else "")                                           # never a quiet "ready" over it (#183 review)
+        return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass{guess}{but}</span>'
     untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0
     edge = s.get("edge") or 0
     rest = s["unknown"] - untrusted - unresolved - edge
@@ -893,7 +896,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
 
     m = card.get("metrics") or {}
     name = lambda pid: (rec.get("names") or {}).get(pid) or pid     # noqa: E731 — the name a person reads (#94)
-    status = _status(card)
+    status = _status(card, len(rec.get("cut_smaller") or []))
     big = _headlines(m)
     nums = "".join(f"<div><b>{_num(m[k]['value'], m[k]['unit'])}</b><span>{_e(lab)}</span></div>"
                    for k, lab in big if k in m)
@@ -953,6 +956,8 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
             out.append("<p class='muted small'>That's the slicer's figure. The shopping list goes by the model's weight, as "
                        "What do I buy? does, so the two can differ a little.</p>")
     out.append("<h2 class='page'>Cut lists</h2>")
+    for said in rec.get("cut_smaller") or []:          # beside what it's about (#183 review)
+        out.append(f"<p class='note'><b>Before you cut:</b> {_e(said)}</p>")
     for pid in rec.get("grain") or {}:                 # which way to cut each panel, as the person said (CALI-126)
         laid = {g["line"]: g for g in (plans.get(pid) or {}).get("grain") or []}
         for n in rec["grain"][pid]:
@@ -1092,7 +1097,22 @@ def _next_id(store: DesignStore) -> str:
 def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = True,
          timeout: float = 180.0, stop: Optional[Callable[[], None]] = None) -> dict:
     """Release the design as it stands: cut plans and scorecard brought up to date, everything for the shop
-    filed in one versioned folder, and its record returned."""
+    filed in one versioned folder, and its record returned. If a part changes while it waits, it starts again, so the labels, the
+    files, the source and the strength row all name one version (#184 review: v1's strength on v2's shape read "ready")."""
+    from . import scorecard
+
+    for _ in range(scorecard.AGAIN):
+        try:
+            return _make(store, emit=emit, pdf=pdf, timeout=timeout, stop=stop)
+        except scorecard.Moved:
+            store.__dict__.update(type(store).load(store.root).__dict__)
+            if emit:
+                emit("waiting", "A part changed while this waited: starting again.")
+    raise ValueError("the design kept changing while this waited: make the package again when it's settled")
+
+
+def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = True,
+          timeout: float = 180.0, stop: Optional[Callable[[], None]] = None) -> dict:
     from . import cutplan, scorecard
 
     emit = emit or (lambda *a, **k: None)
@@ -1138,6 +1158,8 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
         bom[p.id] = r["bom"]
         lumps[p.id] = [row for row in C.takeoff(C._items(C.declared(store, p.id))) if row["kind"] == "lump"]
 
+    if {p.id: p.version for p in type(store).load(store.root).design.parts} != versions:
+        raise scorecard.Moved()             # the score waited, or a part was revised beside it: everything above is of what's gone
     stop()                                  # the last step that can stop: nothing's been written yet
     rid = _next_id(store)
     root = os.path.join(releases_dir(store), rid)
@@ -1254,7 +1276,7 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     from . import grain
 
     said = {p.id: grain.notes(store, p.id) for p in store.design.parts}
-    rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength, "making": made,
+    rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength, "making": made, "cut_smaller": consistency.cut_smaller(store, [p.id for p in built]),
            "names": {p.id: p.label for p in store.design.parts if p.label},
            "grain": {pid: n for pid, n in said.items() if n},       # which way to cut each panel (CALI-126)
            "slug": os.path.basename(store.root), "versions": versions,
