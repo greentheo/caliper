@@ -74,6 +74,9 @@ def main() -> int:
         import cadquery as cq  # noqa: F401 — available to the authored script via the namespace
 
         ns: dict = {"cq": cq}
+        from caliper.pick_helpers import edge_at
+
+        ns["edge_at"] = edge_at                  # a picked edge, by true distance (#177)
         exec(compile(script, "<authored_part>", "exec"), ns)  # noqa: S102 — sandboxed subprocess
         builder = ns.get("build")
         if not callable(builder):

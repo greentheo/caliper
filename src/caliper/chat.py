@@ -436,9 +436,20 @@ def _emit(events: list[Event], on_event, kind: str, text: str, **data) -> None:
         on_event(ev)
 
 
+def _features_of(store: DesignStore, part_id: str) -> Optional[dict]:
+    """A part's faces and edges, or None if they can't be worked out: then what landed where can't be said."""
+    from . import features
+
+    try:
+        return features.for_part(store, part_id)
+    except Exception:  # noqa: BLE001 — the change stands; only the check of it is lost
+        return None
+
+
 def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, client=None,
                 max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
-                use_llm: bool = True, drafter=None, promote_feedback: bool = True, measured: str = "") -> TurnResult:
+                use_llm: bool = True, drafter=None, promote_feedback: bool = True, measured: str = "",
+                pick: Optional[dict] = None) -> TurnResult:
     """Revise a part **that lives inside a design** and re-measure the whole thing.
 
     The gap CALI-29 exists to close. Everything here is plumbing around one existing call —
@@ -467,6 +478,7 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
         return TurnResult(action="error", ok=False, part=part_id, events=events,
                           error=f"{part_id} has no script to revise", reply=reply)
 
+    picked_from = _features_of(store, part_id) if pick else None    # the part as it was picked on (#109)
     before, _ = _measure_design(store)
     spec = _working_spec(store, part_id, entry.intent)
     script = store.read_script(part_id)
@@ -509,13 +521,25 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
                      volumes=(was, _volume(store, part_id)))
     if uncarved:
         reply += "\n\n" + carve.DROPPED
+    on_pick = None
+    if pick:                                        # did it land on what was picked? Only what can be measured is said
+        from . import features
+
+        check = features.landed(picked_from, _features_of(store, part_id), pick, message, store.design.display_units == "in")
+        on_pick = check["landed"]
+        short = on_pick is False or on_pick == features.PARTIAL      # what was asked for didn't happen
+        if short:                                   # the same words next time are a retry, not "v2 already did that" (#177)
+            store.append_history(part_id, {"kind": "pick_missed", "version": version})
+        # a miss comes first and the turn isn't a success: never a tick above "it isn't on what you picked" (rule 6)
+        reply = (f"{'!' if on_pick == features.PARTIAL else chr(0x2717)} {check['said']}\n\n{reply.replace(chr(0x2713) + ' ', '', 1)}"
+                 if short else f"{reply}\n\n{check['said']}")
     proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
                                        drafter=drafter, enabled=promote_feedback,
                                        events=events, on_event=on_event)
     if offer:
         reply += "\n\n" + offer
 
-    return TurnResult(action="refine", ok=bool(res.ok) and not broke, part=part_id, version=version,
+    return TurnResult(action="refine", ok=bool(res.ok) and not broke and on_pick not in (False, "partial"), part=part_id, version=version,
                       part_report=res.report, report=after, broke=broke, fixed=fixed,
                       part_errors=part_errors, proposal=proposal, events=events, reply=reply)
 
@@ -1178,6 +1202,7 @@ def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Op
     return refine_part(store, pid, message, author=kw["author"], client=kw["client"], max_rounds=kw["max_rounds"],
                        events=events, on_event=on_event, use_llm=kw["use_llm"], drafter=kw["drafter"],
                        measured=part_rules.to_fix(store, pid, aw["rule"]) if aw["kind"] == "fix_rule" else "",
+                       pick=aw.get("pick"),                  # a parked repeat keeps its pick: "yes" runs the same check (#177)
                        # fixing a rule it already has: never an offer to lock a looser copy of it (#153)
                        promote_feedback=kw["promote_feedback"] and aw["kind"] != "fix_rule")
 
@@ -1191,6 +1216,8 @@ def _repeats(store: DesignStore, pid: str, message: str) -> Optional[str]:
     flange widened 1 in twice): the same words, or the same numbers and the same directions. None otherwise."""
     entry = store.design.part(pid)
     last = next((h for h in reversed(store.history(pid)) if h.get("kind") == "revision"), None) if entry else None
+    if entry and any(h.get("kind") == "pick_missed" and h.get("version") == entry.version for h in store.history(pid)):
+        return None                                 # it didn't do that: it missed (#177)
     if not last or last.get("action") != "refine" or last.get("version") != entry.version or not last.get("feedback"):
         return None
     norm = lambda s: re.sub(r"[^a-z0-9.]+", " ", s.lower()).strip()                   # noqa: E731
@@ -1233,7 +1260,8 @@ def _grain_reply(got: dict) -> TurnResult:
 
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
          use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
-         on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False) -> TurnResult:
+         on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False,
+         pick: Optional[dict] = None) -> TurnResult:
     """One conversational turn: route the message, make the move, measure the whole design, reply.
 
     ``scope`` is the part the user clicked (``None`` = the design). ``author``/``classifier``/
@@ -1321,10 +1349,10 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
     if again is not None:                          # the last revision already did this: asked first (#98)
         from . import awaiting
 
-        awaiting.park(store, "repeat", part=intent.part, message=message)
+        awaiting.park(store, "repeat", part=intent.part, message=message, pick=pick)
         result = TurnResult(action="ask", ok=True, part=intent.part, events=events, reply=again)
     elif intent.action == "refine" and intent.part:
-        result = refine_part(store, intent.part, message, author=author, client=client,
+        result = refine_part(store, intent.part, message, author=author, client=client, pick=pick,
                              max_rounds=max_rounds, events=events, on_event=on_event,
                              use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
     elif intent.action == "revert" and intent.part:

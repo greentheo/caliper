@@ -347,3 +347,511 @@ def test_the_words_are_kept_per_unit():
 def test_the_pick_has_its_own_chip_and_clear():
     html = open(os.path.join(os.path.dirname(JS), "index.html")).read()
     assert 'id="pickChip"' in html and 'id="pickClear"' in html and "pickbar-top" in html and ">Pick<" in html
+
+
+# --- #109, slices b and c; #177 review: did it land, on real solids ----------------------------------------------------
+from caliper.pick_helpers import edge_at  # noqa: E402
+
+NS = cq.selectors.NearestToPointSelector
+
+
+def _box_solid():
+    return cq.Workplane("XY").box(40, 20, 10)
+
+
+def _foot():
+    """The bar stool in small: a foot flange with a cone on it. Its rim and the concave ring are concentric."""
+    return cq.Workplane("XY").circle(30).extrude(10).union(cq.Workplane("XY").add(cq.Solid.makeCone(20, 12, 40, pnt=cq.Vector(0, 0, 10))))
+
+
+def _ring(got, *, corner, z):
+    return next(e for e in got["edges"] if e["type"] == "circle" and e["corner"] == corner and e["centre"][2] == pytest.approx(z))
+
+
+def _outcome(solid_a, solid_b, edge, words, inches=False, kind="edge"):
+    before, after = features.of_solid(solid_a), features.of_solid(solid_b)
+    fid = edge(before)["id"]
+    return features.landed(before, after, {"kind": kind, "id": fid, "text": words}, words, inches)
+
+
+_TOP_FRONT = (0, -10, 5)
+_TOP_BACK = (0, 10, 5)
+_front = lambda got: next(e for e in got["edges"] if e["type"] == "line" and e["centre"] == pytest.approx(_TOP_FRONT, abs=0.01))  # noqa: E731
+
+
+def _filleted(at, r):
+    return _box_solid().edges(NS(at)).fillet(r)
+
+
+def test_the_guide_names_edge_at_and_the_face_s_centre():
+    text = open(os.path.join(os.path.dirname(features.__file__), "part_scripts.md")).read()
+    assert "edge_at(result, (x, y, z)).fillet(r)" in text and 'centerOption="CenterOfMass"' in text
+    assert "About this edge" in text
+
+
+@pytest.mark.parametrize("solid", [_box_solid, _foot])
+def test_every_edge_returns_itself(solid):
+    """NearestToPointSelector measures to the centre, so concentric rings tie: the outer rim came back as the concave ring."""
+    made = solid()
+    shape = made.val()
+    got = features.of_solid(made)
+    for e, real in zip(got["edges"], shape.Edges()):
+        assert edge_at(made, tuple(e["local"])).val().hashCode() == real.hashCode(), e["id"]
+
+
+def test_edge_at_on_a_washer_tells_the_rings_apart():
+    washer = cq.Workplane("XY").circle(30).circle(10).extrude(5)
+    assert edge_at(washer, (-10, 0, 5)).val().radius() == pytest.approx(10)      # a point on the ring, not its seam's end
+    assert edge_at(washer, (-30, 0, 5)).val().radius() == pytest.approx(30)
+
+
+def test_edge_at_takes_a_fillet():
+    filleted = edge_at(_box_solid(), _TOP_FRONT).fillet(3)
+    assert abs(filleted.val().Volume() - _filleted(_TOP_FRONT, 3).val().Volume()) < 1e-6
+
+
+def test_edge_at_refuses_a_point_on_no_edge():
+    with pytest.raises(ValueError, match="no edge at"):
+        edge_at(_box_solid(), (0, 0, 5))
+
+
+def test_a_script_has_edge_at_to_hand():
+    from caliper import sandbox
+
+    script = "def build(params):\n    return edge_at(cq.Workplane('XY').box(40, 20, 10), (0, -10, 5)).fillet(3)\n"
+    assert sandbox.run_script(script, {}).ok
+
+
+def test_a_ring_s_point_is_on_it_and_its_centre_stays_the_centre():
+    ring = _ring(features.of_solid(_foot()), corner="inside", z=10)
+    assert ring["centre"][:2] == pytest.approx([0, 0], abs=0.01)
+    assert (ring["local"][0] ** 2 + ring["local"][1] ** 2) ** 0.5 == pytest.approx(20, abs=0.01)
+
+
+# what the issue asks: landed, on the exact edge
+def test_a_true_fillet_on_the_concave_ring_lands():
+    got = _outcome(_foot(), edge_at(_foot(), (-20, 0, 10)).fillet(1 / 2 * 25.4 / 3.0), lambda f: _ring(f, corner="inside", z=10), "fillet this 1/6 in")
+    assert got["landed"] is True and got["said"].startswith("Checked: the fillet is on the edge you picked")
+
+
+def test_a_half_inch_fillet_says_half_an_inch():
+    big = cq.Workplane("XY").circle(120).extrude(30).union(cq.Workplane("XY").add(cq.Solid.makeCone(80, 40, 200, pnt=cq.Vector(0, 0, 30))))
+    done = edge_at(big, (-80, 0, 30)).fillet(12.7)
+    got = _outcome(big, done, lambda f: _ring(f, corner="inside", z=30), "fillet this 1/2 in", inches=True)
+    assert got == {"said": "Checked: the fillet is on the edge you picked, 1/2 in.", "landed": True}
+
+
+@pytest.mark.parametrize("r", [0.2, 0.3, 0.5, 3])
+def test_small_fillets_land(r):
+    assert _outcome(_box_solid(), _filleted(_TOP_FRONT, r), _front, "fillet this")["landed"] is True
+
+
+@pytest.mark.parametrize("r", [1, 3])
+def test_a_ring_between_two_cones_lands_or_can_t_be_told_never_a_miss(r):
+    two = cq.Workplane("XZ").polyline([(0, 0), (40, 0), (25, 30), (40, 60), (0, 60)]).close().revolve(360, (0, 0, 0), (0, 1, 0))
+    done = edge_at(two, (-25, 0, 30)).fillet(r)
+    got = _outcome(two, done, lambda f: next(e for e in f["edges"] if e["type"] == "circle" and e["centre"][2] == pytest.approx(30)), "fillet this")
+    assert got["landed"] is not False
+
+
+# never landed
+def test_nothing_done_is_a_miss_and_offers_the_way_back():
+    got = _outcome(_box_solid(), _box_solid(), _front, "fillet this 3 mm")
+    assert got["landed"] is False and "still there" in got["said"] and "roll it back" in got["said"]
+
+
+def test_the_other_ring_filleted_is_a_miss_on_the_one_picked():
+    done = edge_at(_foot(), (-30, 0, 10)).fillet(2)        # the rim, and the concave ring was picked
+    got = _outcome(_foot(), done, lambda f: _ring(f, corner="inside", z=10), "fillet this 2 mm")
+    assert got["landed"] is False
+
+
+def test_a_neighbouring_edge_filleted_never_lands():
+    done = _box_solid().edges(NS((-20, 0, 5))).fillet(3)  # shares a corner with the picked edge and trims it
+    assert _outcome(_box_solid(), done, _front, "fillet this 3 mm")["landed"] is not True
+
+
+def test_a_chamfer_isn_t_a_fillet():
+    done = _box_solid().edges(NS(_TOP_FRONT)).chamfer(2)
+    assert _outcome(_box_solid(), done, _front, "fillet this 2 mm")["landed"] is not True
+
+
+def test_a_round_elsewhere_with_the_edge_chamfered_never_lands():
+    done = _box_solid().edges(NS(_TOP_FRONT)).chamfer(1).edges(NS(_TOP_BACK)).fillet(3)
+    assert _outcome(_box_solid(), done, _front, "fillet this 3 mm")["landed"] is not True
+
+
+def test_a_round_that_isn_t_between_the_edge_s_own_faces_never_lands():
+    """The picked edge chamfered, then the chamfer's top edge rounded: a new round, right there, but between other faces."""
+    done = _box_solid().edges(NS(_TOP_FRONT)).chamfer(3).edges(NS((0, -7, 5))).fillet(1)
+    assert _outcome(_box_solid(), done, _front, "fillet this 1 mm")["landed"] is not True
+
+
+def test_the_same_line_on_a_different_face_isn_t_demonstrably_the_same_edge():
+    """The picked edge's line is still there, but one of its faces has been tilted: it can't be called a miss."""
+    tilted = cq.Workplane("YZ").polyline([(-10, 5), (10, 5), (10, -5), (-15, -5)]).close().extrude(20, both=True)
+    got = _outcome(_box_solid(), tilted, _front, "fillet this 3 mm")
+    assert got["landed"] is None
+
+
+def test_a_resized_wall_isn_t_a_round():
+    """An old wall that moved isn't a new surface between the picked edge's own two faces."""
+    done = cq.Workplane("XY").box(40, 20, 12)
+    assert _outcome(_box_solid(), done, _front, "fillet this 3 mm")["landed"] is not True
+
+
+def test_can_t_tell_says_so_in_those_words_and_neither_passes_nor_fails():
+    got = _outcome(_box_solid(), _box_solid().edges(NS(_TOP_FRONT)).chamfer(2), _front, "fillet this 2 mm")
+    assert got == {"said": "I couldn't tell whether that landed on what you picked.", "landed": None}
+
+
+def test_a_stale_pick_can_t_be_told():
+    before = features.of_solid(_box_solid())
+    got = features.landed({**before, "version": 3}, before, {"kind": "edge", "id": "e0", "version": 2, "text": "fillet"}, "", False)
+    assert got["landed"] is None
+
+
+# sizes
+def test_the_wrong_size_says_both_and_doesn_t_call_it_checked():
+    got = _outcome(_box_solid(), _filleted(_TOP_FRONT, 3), _front, "fillet this 4 mm")
+    assert got["said"].startswith("It went on that edge, but it's 3 mm where you asked for 4 mm.") and got["landed"] == features.PARTIAL
+
+
+@pytest.mark.parametrize("text,mm", [("fillet this 1/2 in", 12.7), ("fillet this 1 1/4 in", 31.75), ("fillet 12.7 mm", 12.7), ('a 2" fillet', 50.8),
+                                     ("round it 1 cm", 10.0), ("leave 20 mm of flat then fillet 3 mm", 3.0), ("a 5 mm fillet here", 5.0),
+                                     ("make the fillet 3 mm: thanks", 3.0), ("fillet this", None), ("fillet this 1/0 in", None)])
+def test_the_size_asked(text, mm):
+    got = features._asked_mm(text)
+    assert got == (pytest.approx(mm) if mm else None)
+
+
+def test_a_small_round_says_a_size_a_person_can_read():
+    got = _outcome(_box_solid(), _filleted(_TOP_FRONT, 0.6), _front, "fillet this", inches=True)
+    assert "0 in" not in got["said"] and got["landed"] is True
+
+
+# holes
+def _top(f):
+    return next(x for x in f["faces"] if x["type"] == "plane" and x["centre"][2] == pytest.approx(5))
+
+
+def test_a_hole_through_the_picked_face_lands():
+    got = _outcome(_box_solid(), _box_solid().faces(">Z").workplane().hole(10), _top, "put a hole here", kind="face")
+    assert got == {"said": "Checked: there's a 10 mm hole through the face you picked.", "landed": True}
+
+
+def test_a_hole_of_the_wrong_size_says_both():
+    got = _outcome(_box_solid(), _box_solid().faces(">Z").workplane().hole(6), _top, "put a 10 mm hole here", kind="face")
+    assert got["said"].startswith("It went through that face, but it's 6 mm where you asked for 10 mm.")
+    assert got["landed"] == features.PARTIAL
+
+
+def test_a_blind_hole_from_the_other_side_isn_t_through_the_picked_face():
+    done = _box_solid().faces("<Z").workplane().hole(10, 4)
+    assert _outcome(_box_solid(), done, _top, "put a hole here", kind="face")["landed"] is not True
+
+
+def test_a_boss_on_the_picked_face_isn_t_a_hole():
+    done = _box_solid().faces(">Z").workplane().circle(5).extrude(8)
+    assert _outcome(_box_solid(), done, _top, "put a hole here", kind="face")["landed"] is not True
+
+
+def test_a_corner_fillet_isn_t_a_hole():
+    done = _box_solid().edges("|Z").fillet(3)
+    assert _outcome(_box_solid(), done, _top, "put a hole here", kind="face")["landed"] is not True
+
+
+def test_a_face_left_as_it_was_is_a_miss():
+    got = _outcome(_box_solid(), _box_solid(), _top, "put a hole here", kind="face")
+    assert got["landed"] is False and "no new hole" in got["said"]
+
+
+def test_a_hole_in_an_l_shaped_face_s_notch_isn_t_in_it():
+    ell = cq.Workplane("XY").polyline([(0, 0), (40, 0), (40, 20), (20, 20), (20, 40), (0, 40)]).close().extrude(10)
+    step = cq.Workplane("XY").box(20, 20, 5).translate((30, 30, 2.5))
+    both = ell.union(step)                                       # the notch is filled lower: its top is a different face
+    done = both.cut(cq.Workplane("XY").circle(2).extrude(5).translate((30, 30, 0)))
+    got = _outcome(both, done, lambda f: next(x for x in f["faces"] if x["type"] == "plane" and x["centre"][2] == pytest.approx(10) and x["centre"][0] < 25), "put a hole here", kind="face")
+    assert got["landed"] is not True
+
+
+# what's asked and of what
+@pytest.mark.parametrize("words", ["make it red", "chamfer this 2 mm", "remove this fillet"])
+def test_what_isn_t_a_fillet_can_t_be_told(words):
+    before = features.of_solid(_box_solid())
+    assert features.landed(before, before, {"kind": "edge", "id": "e0", "text": words}, words, False)["landed"] is None
+
+
+@pytest.mark.parametrize("before,after", [(None, {"faces": [], "edges": []}), ({"mesh": True, "faces": [], "edges": []}, {"faces": [], "edges": []})])
+def test_a_part_with_no_b_rep_can_t_be_told(before, after):
+    assert features.landed(before, after, {"kind": "edge", "id": "e0"}, "x: fillet 3 mm", False)["landed"] is None
+
+
+def test_the_size_in_the_pick_s_own_words_isn_t_the_size_asked():
+    before, after = features.of_solid(_box_solid()), features.of_solid(_filleted(_TOP_FRONT, 3))
+    pick = {"kind": "edge", "id": _front(before)["id"], "text": "round it"}
+    got = features.landed(before, after, pick, "About this edge: the line, 40 mm long (at x 0): round it", False)
+    assert got["said"] == "Checked: the fillet is on the edge you picked, 3 mm."
+
+
+# the turn
+_FILLET = ("def build(params):\n    return edge_at(cq.Workplane('XY').box(40, 20, 10), {at}).fillet(3)\n")
+_PLAIN = BOX
+
+
+def _refine(store, script, words="fillet this 3 mm"):
+    from caliper import chat
+
+    e = _front(features.for_part(store, "box"))
+    return chat.refine_part(store, "box", f"About this edge: x: {words}", author=lambda s, f, p: script, use_llm=False, max_rounds=1,
+                            promote_feedback=False, pick={"kind": "edge", "id": e["id"], "text": words})
+
+
+def test_a_miss_comes_first_and_the_turn_isn_t_a_success(store):
+    got = _refine(store, _PLAIN)
+    assert not got.ok and got.reply.startswith("✗ The edge you picked is still there")
+    assert "✓ " not in got.reply.split("\n")[0]
+
+
+def test_a_hit_stays_a_success(store):
+    got = _refine(store, _FILLET.format(at=_TOP_FRONT))
+    assert got.ok and "Checked: the fillet is on the edge you picked, 3 mm." in got.reply
+
+
+def test_can_t_tell_doesn_t_fail_the_turn_or_claim_a_hit(store):
+    got = _refine(store, _FILLET.format(at=_TOP_FRONT), words="make it red")
+    assert got.ok and features.NOT_MEASURED in got.reply and "Checked:" not in got.reply
+
+
+def _turn(store, words, script, pick, classifier=None):
+    from caliper import chat
+
+    return chat.turn(store, words, scope="box", author=lambda s, f, p: script, use_llm=False, max_rounds=1,
+                     promote_feedback=False, pick=pick)
+
+
+def test_a_miss_doesn_t_block_trying_again(store):
+    from caliper import awaiting
+
+    words = "fillet this edge 3 mm"
+    e = _front(features.for_part(store, "box"))
+    _turn(store, words, _PLAIN, {"kind": "edge", "id": e["id"], "text": words})
+    version = store.design.part("box").version
+    e2 = _front(features.for_part(store, "box"))
+    again = _turn(store, words, _FILLET.format(at=_TOP_FRONT), {"kind": "edge", "id": e2["id"], "text": words})
+    assert "already did that" not in again.reply and awaiting.pending(store) is None
+    assert again.action == "refine" and store.design.part("box").version == version + 1
+    assert "Checked: the fillet is on the edge you picked" in again.reply
+
+
+def test_a_parked_repeat_keeps_the_pick_and_yes_runs_the_same_check(store):
+    from caliper import awaiting, chat
+
+    words = "fillet this edge 3 mm"
+    e = _front(features.for_part(store, "box"))
+    first = _turn(store, words, _FILLET.format(at=_TOP_FRONT), {"kind": "edge", "id": e["id"], "text": words})
+    assert first.ok
+    e2 = _front(features.for_part(store, "box")) if False else None
+    pick = {"kind": "edge", "id": "e0", "text": words}
+    asked = _turn(store, words, _PLAIN, pick)
+    assert "already did that" in asked.reply and awaiting.pending(store)["pick"] == pick
+    yes = chat.turn(store, "yes", use_llm=False, author=lambda s, f, p: _PLAIN, max_rounds=1, promote_feedback=False)
+    assert yes.action == "refine" and ("edge you picked" in yes.reply or features.NOT_MEASURED in yes.reply) and e2 is None
+
+
+def test_the_page_sends_the_pick_with_the_message():
+    src = open(JS).read()
+    assert "send(said, S.scope, pick);" in src and "...(pick ? { pick } : {})" in src and "version: (S.design.parts.find" in src
+
+
+# --- #177 review, the last round ---------------------------------------------------------------------------------------
+def _at(got, point):
+    return next(e for e in got["edges"] if e["local"] == pytest.approx(list(point), abs=0.02))
+
+
+@pytest.mark.parametrize("size,pick,done", [
+    ((40, 20, 10), (-20, -10, 0), (-20, 0, 5)),          # the 10 mm vertical edge; the 20 mm top edge at its end
+    ((40, 10, 10), (-20, 0, 5), (0, -5, 5)),             # a short top edge; the long top front edge
+    ((60, 8, 5), (-30, -4, 0), (-30, 0, 2.5)),           # a 5 mm end edge; an 8 mm end edge
+])
+def test_a_short_edge_never_lands_from_a_neighbour_s_round(size, pick, done):
+    solid = cq.Workplane("XY").box(*size)
+    filleted = edge_at(solid, done).fillet(2)
+    got = _outcome(solid, filleted, lambda f: _at(f, pick), "fillet this 2 mm")
+    assert got["landed"] is not True and got["landed"] != features.PARTIAL
+
+
+def test_a_curved_edge_filleted_doesn_t_count_for_a_straight_pick():
+    half = cq.Workplane("XY").moveTo(-50, 0).threePointArc((0, 50), (50, 0)).close().extrude(10)
+    filleted = edge_at(half, (0, 50, 10)).fillet(1)
+    got = _outcome(half, filleted, lambda f: _at(f, (0, 0, 10)), "fillet this 1 mm")
+    assert got["landed"] is not True
+
+
+def test_a_straight_edge_s_own_round_still_lands_when_short():
+    solid = cq.Workplane("XY").box(40, 10, 10)
+    filleted = edge_at(solid, (-20, 0, 5)).fillet(2)
+    assert _outcome(solid, filleted, lambda f: _at(f, (-20, 0, 5)), "fillet this 2 mm")["landed"] is True
+
+
+def _pad(x):
+    return cq.Workplane("XY").box(20, 20, 10).translate((x, 0, 5))
+
+
+def _plane_at(f, x, z):
+    return next(p for p in f["faces"] if p["type"] == "plane" and p["centre"][2] == pytest.approx(z) and abs(p["centre"][0] - x) < 1)
+
+
+def test_a_hole_through_another_pad_on_the_same_plane_isn_t_through_the_picked_one():
+    base = cq.Workplane("XY").box(100, 20, 4).translate((0, 0, -2))
+    both = base.union(_pad(-30)).union(_pad(30))
+    done = both.cut(cq.Workplane("XY").circle(3).extrude(20, both=True).translate((30, 0, 0)))
+    got = _outcome(both, done, lambda f: _plane_at(f, -30, 10), "put a hole here", kind="face")
+    assert got["landed"] is not True and got["landed"] != features.PARTIAL
+
+
+def test_a_filled_and_drilled_notch_isn_t_in_the_picked_face():
+    ell = cq.Workplane("XY").polyline([(0, 0), (40, 0), (40, 20), (20, 20), (20, 40), (0, 40)]).close().extrude(10)
+    filled = ell.union(cq.Workplane("XY").box(20, 20, 10).translate((30, 30, 5)))
+    done = filled.cut(cq.Workplane("XY").circle(3).extrude(20).translate((30, 30, -5)))
+    before = features.of_solid(ell)
+    (top,) = [f for f in before["faces"] if f["type"] == "plane" and f["centre"][2] == pytest.approx(10)]
+    got = features.landed(before, features.of_solid(done), {"kind": "face", "id": top["id"], "text": "a hole"}, "", False)
+    assert got["landed"] is not True and got["landed"] != features.PARTIAL
+
+
+def test_a_post_across_a_channel_isn_t_a_hole():
+    channel = cq.Workplane("XY").box(60, 40, 30).cut(cq.Workplane("XY").box(60, 20, 30).translate((0, 0, 5)))
+    post = cq.Workplane("XZ").circle(4).extrude(20, both=True).translate((0, 0, 5))
+    done = channel.union(post)
+    got = _outcome(channel, done, lambda f: next(p for p in f["faces"] if p["type"] == "plane" and p["centre"][1] == pytest.approx(10)), "put a hole here", kind="face")
+    assert got["landed"] is not True
+
+
+def test_a_real_hole_s_wall_faces_its_axis_and_a_post_s_doesn_t():
+    plate = features.of_solid(cq.Workplane("XY").box(40, 40, 10).faces(">Z").workplane().hole(10))
+    rod = features.of_solid(cq.Workplane("XY").circle(5).extrude(20))
+    assert [f["hollow"] for f in plate["faces"] if f["type"] == "cylinder"] == [True]
+    assert [f["hollow"] for f in rod["faces"] if f["type"] == "cylinder"] == [False]
+
+
+def test_a_wrong_size_leads_the_reply_with_no_tick_and_the_turn_isn_t_ok(store):
+    got = _refine(store, _FILLET.format(at=_TOP_FRONT), words="fillet this 4 mm")
+    assert not got.ok and got.reply.startswith("! It went on that edge, but it's 3 mm where you asked for 4 mm.")
+    assert "✓ " not in got.reply.split("\n")[0]
+
+
+def test_a_wrong_size_doesn_t_block_trying_again(store):
+    from caliper import chat
+
+    _refine(store, _FILLET.format(at=_TOP_FRONT), words="fillet this 4 mm")
+    assert chat._repeats(store, "box", "About this edge: x: fillet this 4 mm") is None
+
+
+def test_sizes_that_round_the_same_are_said_in_mm():
+    assert features._both(3.0, 3.175, True) == ("3 mm", "3.175 mm")
+    assert features._both(3.0, 12.7, True) == ("1/8 in", "1/2 in")
+
+
+def test_a_build_has_edge_at_too(tmp_path):
+    """The design's own geometry: part_geometry runs the script through the sandbox runner."""
+    s = DesignStore.create("a box", base=str(tmp_path / "designs"))
+    s.write_part("box", "def build(params):\n    return edge_at(cq.Workplane('XY').box(40, 20, 10), (0, -10, 5)).fillet(3)\n", intent="a box")
+    assert s.part_geometry("box").require_mesh().is_volume
+
+
+def test_an_older_kept_file_is_worked_out_again(store):
+    """An old file has a ring's centre as its point, and edge_at refuses that."""
+    first = features.for_part(store, "box")
+    path = os.path.join(store.root, "parts", "box", "features-v1.json")
+    with open(path, "w") as f:
+        json.dump({**first, "schema": features.SCHEMA - 1, "faces": []}, f)
+    assert len(features.for_part(store, "box")["faces"]) == 6
+
+
+def test_when_the_picked_faces_are_gone_it_can_t_be_told():
+    after = cq.Workplane("XY").circle(30).extrude(40)
+    got = _outcome(_box_solid(), after, _front, "fillet this 3 mm")
+    assert got["landed"] is None
+
+
+@pytest.mark.parametrize("change", [lambda: _box_solid().faces(">Z").workplane().circle(5).extrude(8),
+                                    lambda: _box_solid().edges("|Z").fillet(3)])
+def test_a_changed_face_with_no_hole_can_t_be_told(change):
+    got = _outcome(_box_solid(), change(), _top, "put a hole here", kind="face")
+    assert got["landed"] is None
+
+
+def test_an_old_miss_doesn_t_excuse_a_repeat_of_a_later_version(store):
+    from caliper import chat
+
+    store.write_part("box", BOX.replace("40", "41"), feedback="fillet this 4 mm", action="refine", intent="a box")
+    store.append_history("box", {"kind": "pick_missed", "version": store.design.part("box").version - 1})
+    assert chat._repeats(store, "box", "fillet this 4 mm") is not None
+
+
+def test_a_cylinder_never_counts_for_a_curved_pick():
+    """A short arc beside a straight edge: the straight edge's round has its end on the arc's faces, and is in reach of it."""
+    solid = cq.Workplane("XY").moveTo(0, 0).lineTo(20, 0).threePointArc((21, 2), (20, 4)).lineTo(0, 4).close().extrude(10)
+    filleted = edge_at(solid, (10, 0, 10)).fillet(1.5)
+    arc = lambda f: next(e for e in f["edges"] if e["type"] == "circle" and e["local"][2] == pytest.approx(10))  # noqa: E731
+    assert "cylinder" in {f["type"] for f in features.of_solid(filleted)["faces"]}
+    assert _outcome(solid, filleted, arc, "fillet this 1.5 mm")["landed"] is not True
+
+
+def test_a_build_worker_has_edge_at_too():
+    """The warm worker a drag sweep builds on is a different runner, with its own namespace."""
+    from caliper.sandbox import BuildWorker
+
+    script = "def build(params):\n    return edge_at(cq.Workplane('XY').box(40, 20, 10), (0, -10, 5)).fillet(3)\n"
+    with BuildWorker(script, timeout=60) as worker:
+        assert worker.build({}) is not None
+
+
+# a hole begun on the picked face: a 300 mm plate, so a small hole barely changes the face's area
+def _plate():
+    return cq.Workplane("XY").box(300, 300, 20)
+
+
+def _plate_top(f):
+    return next(x for x in f["faces"] if x["type"] == "plane" and x["centre"][2] == pytest.approx(10))
+
+
+def _drill(depth=None):
+    tool = cq.Workplane("XY").circle(3).extrude(depth if depth else 40).translate((0, 0, 10 - (depth if depth else 40)))
+    return _plate().cut(tool)
+
+
+def test_a_blind_hole_begun_on_the_picked_face_can_t_be_told():
+    got = _outcome(_plate(), _drill(5), _plate_top, "put a hole here", kind="face")
+    assert got["landed"] is None and got["said"] == features.NOT_MEASURED
+
+
+def test_a_through_hole_with_a_sloped_far_side_can_t_be_told_not_a_miss():
+    wedge = cq.Workplane("XZ").polyline([(-150, -10), (150, -10), (150, 30), (-150, 10)]).close().extrude(150, both=True)
+    bottom = lambda f: next(x for x in f["faces"] if x["type"] == "plane" and x["centre"][2] == pytest.approx(-10))  # noqa: E731
+    done = wedge.cut(cq.Workplane("XY").circle(3).extrude(60).translate((0, 0, -20)))
+    assert _outcome(wedge, done, bottom, "put a hole here", kind="face")["landed"] is None
+
+
+def test_a_plain_through_hole_still_lands():
+    assert _outcome(_plate(), _drill(), _plate_top, "put a hole here", kind="face")["landed"] is True
+
+
+def test_nothing_done_on_a_big_plate_is_still_a_miss():
+    assert _outcome(_plate(), _plate(), _plate_top, "put a hole here", kind="face")["landed"] is False
+
+
+def test_a_boss_on_a_big_plate_isn_t_a_begun_hole():
+    done = _plate().faces(">Z").workplane().circle(3).extrude(8)
+    assert _outcome(_plate(), done, _plate_top, "put a hole here", kind="face")["landed"] is not True
+
+
+def test_a_hole_in_the_other_pad_is_still_a_miss():
+    base = cq.Workplane("XY").box(300, 60, 4).translate((0, 0, -2))
+    def pad(x):
+        return cq.Workplane("XY").box(120, 60, 10).translate((x, 0, 5))
+    both = base.union(pad(-80)).union(pad(80))
+    done = both.cut(cq.Workplane("XY").circle(3).extrude(20, both=True).translate((80, 0, 0)))
+    got = _outcome(both, done, lambda f: _plane_at(f, -80, 10), "put a hole here", kind="face")
+    assert got["landed"] is False
