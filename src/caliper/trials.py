@@ -91,7 +91,9 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
             "basis": ("from an FEA too coarse to see its walls, so a rough guess until it's checked finer: "
                       if L.unresolved(run, case) else "")                       # said, not hidden (CALI-110)
                      + "linear to breaking: the FEA's sag (joints solid, the stiff end)"
-                     + (" to the plate check's (edges free, the flexible end)" if flex is not None else "")}
+                     + ((" to the beam check's (resting on two edges, free to turn: the flexible end)" if plate.get("as") == "beam"
+                         else " to the plate check's (held all round, edges free to turn: the flexible end)")   # (#64 item 7)
+                        if flex is not None else "")}
 
 
 def record(store: DesignStore, part_id: str, load_lb: float, sag_mm: Optional[float] = None,

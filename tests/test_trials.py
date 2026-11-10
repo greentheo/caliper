@@ -261,3 +261,26 @@ def test_every_step_is_judged_and_the_worst_governs(checked):
     assert got["status"] == "warn" and "at 200 lb it sagged" in got["text"] and "more than we predicted" in got["text"]
     got = _only(checked, (200, {"sag_mm": (lo + hi) / 2 * 200}), (400, {"sag_mm": hi * 400 * 15}))
     assert got["status"] == "warn" and "at 400 lb" in got["text"]
+
+
+def _plate_run(kind):
+    plate = {"done": True, "piece": "top", "deflection_mm": 0.8, "deflection_across_mm": 0.8, "deflection_along_mm": 0.4}
+    if kind == "beam":
+        plate["as"] = "beam"
+    return {"id": "r1", "version": 1, "min_safety": 2.0, "spacing_mm": 3.0, "resolved": True, "safety": 3.0,
+            "cases": [{"name": "An adult stepping up", "lb": 200.0, "factor": 2.0, "safety": 3.0, "holds": True,  # producer
+                       "governs": "plate", "breaks_lb": 1200.0, "plate": plate,
+                       "fea": {"supported": True, "deflection_mm": 0.2, "safety": 3.5}}]}
+
+
+@pytest.mark.parametrize("kind, check", [("beam", "the beam check's (resting on two edges, free to turn"),
+                                         ("plate", "the plate check's (held all round, edges free to turn")])
+def test_the_predictions_basis_names_the_check_it_came_from(kind, check, monkeypatch, tmp_path):
+    """CALI-88 (#64 item 7): a beam-checked top's basis said "the plate check's (edges free…)". It names the check.
+    And the flexible end is the same grain's sag the verdict takes (the worse grain's here, none declared)."""
+    store = DesignStore.create("a stool", base=str(tmp_path))
+    store.write_part("top", "def build(params):\n    return None\n", intent="x")
+    monkeypatch.setattr(trials, "_run", lambda s, pid: _plate_run(kind))
+    pr = trials.predict(store, "top")
+    assert check in pr["basis"], pr["basis"]
+    assert pr["per_lb_mm"][1] == pytest.approx(0.8 / 400, abs=1e-6)     # across the grain: the worse, as breaks_lb takes
