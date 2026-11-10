@@ -72,6 +72,14 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     # "across" the span), else the worse grain's, so the prediction spans both (#122 review)
     grain = plate.get("grain") if plate.get("grain") in ("along", "across") else None
     sag = plate.get(f"deflection_{grain}_mm") if grain else None
+    weaker = False
+    if sag is None and plate.get("done") and plate.get("as") != "beam":
+        # a plate held all round writes its sag at the material's E, along the face grain, while its strength is
+        # taken across it: its sag across the grain, the weaker way, as its strength is (#209 review)
+        mat = run.get("material") or {}
+        ratio = (mat["E_across"] / mat["E"]) if mat.get("E_across") and mat.get("E") else mat.get("across", 1.0)
+        sag = plate.get("deflection_across_mm") or plate["deflection_mm"] / min(max(float(ratio), 1e-6), 1.0)
+        weaker = ratio < 1.0
     flex = (sag if sag is not None else plate["deflection_mm"]) / applied if plate.get("done") else None
     lo, hi = sorted([stiff, flex if flex is not None else stiff])
     breaks = None if L.unresolved(run, case) else case.get("breaks_lb")     # a plan isn't built up to a number nobody can read (#202)
@@ -92,7 +100,9 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
                       if L.unresolved(run, case) else "")                       # said, not hidden (CALI-110)
                      + "linear to breaking: the FEA's sag (joints solid, the stiff end)"
                      + ((" to the beam check's (resting on two edges, free to turn: the flexible end)" if plate.get("as") == "beam"
-                         else " to the plate check's (held all round, edges free to turn: the flexible end)")   # (#64 item 7)
+                         else " to the plate check's (held all round, edges free to turn"
+                        + (", the grain taken the weaker way, as its strength is" if weaker else "")
+                        + ": the flexible end)")   # (#64 item 7, #209 review)
                         if flex is not None else "")}
 
 
