@@ -33,7 +33,7 @@ def test_a_step_whose_walls_it_can_t_see_never_has_room():
 
 def test_when_it_can_t_see_any_step_it_says_so_up_front():
     got = _choose([(4.0, False), (3.06, False)])
-    assert got["kind"] == "unseen" and got["index"] == 1 and "may not settle" in got["said"] and "room" not in got["said"]
+    assert got["kind"] == "unseen" and got["offers"] is False and "couldn't settle" in got["said"] and "in the study" in got["said"] and "room" not in got["said"]
 
 
 def test_a_seen_step_short_of_the_floor_beats_an_unseen_one_past_it():
@@ -60,7 +60,7 @@ def test_it_goes_by_what_this_part_must_hold():
 
 def test_a_study_from_before_this_says_what_s_missing():
     got = _choose([(4.0, None), (3.0, None)])
-    assert got["kind"] == "unknown" and "didn't record" in got["said"] and got["index"] == 1
+    assert got["kind"] == "unknown" and got["offers"] is False and "didn't record" in got["said"] and "run the study again" in got["said"]
 
 
 def test_the_floor_is_called_a_rule_of_thumb_and_nothing_promises_a_ratio():
@@ -177,3 +177,97 @@ def test_a_thin_wall_isn_t_seen_at_the_voxels_a_check_would_use():
     sliver = trimesh.creation.box((1000, 1000, 1))
     got = L.would_see(declared, sliver, [])
     assert got["seen"] is False and got["thin_mm"] < 2.0
+
+
+# --- the last round -------------------------------------------------------------------------------------------------------
+def _worth(usd):
+    return lambda st: usd
+
+
+def test_where_the_walls_can_t_be_seen_there_s_nothing_to_click():
+    assert _choose([(23.4, False), (9.0, False)])["offers"] is False
+
+
+def test_a_step_it_can_see_is_offered():
+    assert _choose([(4.0, True)])["offers"] is True
+
+
+def test_under_a_dollar_there_s_no_button_and_it_says_what_it_would_save():
+    got = use_step.choose(_steps((5.68, True)), 2.0, "saved_g", _further, as_drawn=8.16, worth=_worth(0.22))
+    assert got["kind"] == "small" and got["offers"] is False
+    assert got["said"] == ("It would save about 22¢ of material, taking it from about 8.2 to 5.7 times over: too little to be worth a re-check, "
+                           "so it's left in the study.")
+
+
+def test_at_a_dollar_it_is_offered():
+    assert use_step.choose(_steps((5.68, True)), 2.0, "saved_g", _further, worth=_worth(use_step.USE_MIN_USD))["offers"] is True
+
+
+def test_the_dollar_is_a_named_number():
+    assert use_step.USE_MIN_USD == 1.0
+
+
+def test_where_it_can_t_be_priced_it_isn_t_judged_by_price():
+    assert use_step.choose(_steps((5.68, True)), 2.0, "saved_g", _further, worth=_worth(None))["offers"] is True
+
+
+def test_an_offer_says_the_strength_it_gives_up():
+    got = use_step.choose(_steps((5.68, True)), 2.0, "saved_g", _further, as_drawn=8.16, worth=_worth(13.0))
+    assert "That takes it from about 8.2 to 5.7 times over." in got["said"]
+
+
+def test_nearly_free_is_said():
+    got = use_step.choose(_steps((5.7, True)), 2.0, "saved_g", _further, as_drawn=5.75, worth=_worth(13.0))
+    assert "It comes at almost no cost in strength." in got["said"]
+
+
+def test_a_sliver_of_extra_isn_t_given_up():
+    steps = [{"index": 1, "safety": 3.01, "saved_lb": 3.35, "seen": True}, {"index": 2, "safety": 2.98, "saved_lb": 3.37, "seen": True}]
+    assert "got as far" not in use_step.choose(steps, 2.0, "saved_lb", _further)["said"]
+
+
+def test_a_carve_prices_its_filament_and_keeps_nothing_to_click_off_best(tmp_path):
+    import json
+
+    from caliper import carve
+    from caliper.design import DesignStore
+
+    s = DesignStore.create("x", base=str(tmp_path))
+    d = os.path.join(carve.runs_dir(s), "r1")
+    os.makedirs(d)
+    st = [{"index": 0, "removed": 0, "safety": 8.16, "whole": 8.16, "holds": True, "whole_holds": True, "saved_g": 0},
+          {"index": 1, "removed": 0.12, "safety": 5.68, "whole": 5.68, "holds": True, "whole_holds": True, "saved_g": 10, "seen": True}]
+    with open(os.path.join(d, "run.json"), "w") as f:
+        json.dump({"id": "r1", "part": "p", "status": "done", "min_safety": 2.0, "best": 1, "share": "printed", "material": "PETG (printed)", "stations": st}, f)
+    got = carve.load_run(s, "r1")
+    assert got["offer"]["offers"] is False and got["best"] is None and "22¢" in got["offer"]["said"]
+
+
+def test_a_big_carve_is_offered(tmp_path):
+    import json
+
+    from caliper import carve
+    from caliper.design import DesignStore
+
+    s = DesignStore.create("x", base=str(tmp_path))
+    d = os.path.join(carve.runs_dir(s), "r1")
+    os.makedirs(d)
+    st = [{"index": 0, "removed": 0, "safety": 8.0, "whole": 8.0, "holds": True, "whole_holds": True, "saved_g": 0},
+          {"index": 1, "removed": 0.12, "safety": 5.0, "whole": 5.0, "holds": True, "whole_holds": True, "saved_g": 600, "seen": True}]
+    with open(os.path.join(d, "run.json"), "w") as f:
+        json.dump({"id": "r1", "part": "p", "status": "done", "min_safety": 2.0, "best": 1, "share": "printed", "material": "PETG (printed)", "stations": st}, f)
+    got = carve.load_run(s, "r1")
+    assert got["offer"]["offers"] is True and got["best"] == 1
+
+
+def test_no_button_on_a_line_with_nothing_to_click():
+    js = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    assert "${ln.button ? `<button" in js
+
+
+def test_the_card_quotes_the_number_it_chose_by(tmp_path, monkeypatch):
+    from caliper import better
+
+    src = open(better.__file__).read()
+    assert "_times(offer['quote'], about=True)" in src and "_times(best['safety'], about=True)} by the carve" not in src
+

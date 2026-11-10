@@ -1562,7 +1562,7 @@ function betterLines(c, offers) {
   return `<div class="qbetter"><div class="qbetter-h">Make it better</div>${offers.map((ln) => {
     const i = c.lines.indexOf(ln);
     return `<div class="qoffer"><div class="qoffer-t">${esc(ln.lead)}.<span class="qoffer-c">${esc(ln.cost)}</span></div>
-      <button class="ghost" data-better="${i}" data-better-action="${esc(ln.action)}" data-better-part="${esc(ln.part)}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[carveKey(ln.part)]) ? ' disabled' : trackedFor(ln.action, ln.part) ? ' disabled data-job-off="1"' : ''}>${esc(ln.button)}</button></div>`;
+      ${ln.button ? `<button class="ghost" data-better="${i}" data-better-action="${esc(ln.action)}" data-better-part="${esc(ln.part)}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[carveKey(ln.part)]) ? ' disabled' : trackedFor(ln.action, ln.part) ? ' disabled data-job-off="1"' : ''}>${esc(ln.button)}</button>` : ''}</div>`;
   }).join('')}</div>`;
 }
 // each goes through what its panel already does: the chat, the carve, the lightening, or taking a step
@@ -2609,7 +2609,7 @@ function carveChart(p, run) {
         : best.verdict && (best.verdict.kind === 'unresolved' || best.verdict.kind === 'unchecked')    // #101
           ? `<b style="color:var(--amber)">${esc(best.verdict.word)}: the voxels were too coarse to see its walls, so no step can be said to hold yet</b>`
         : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a filled-in shape' : `the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
-      : 'Nothing could come off and still hold.'}
+      : run.offer ? '' : 'Nothing could come off and still hold.'}
       ${run.offer ? `<div class="${run.offer.kind === 'room' ? 'muted' : 'note-warn'} small" style="margin-top:4px">${esc(run.offer.said)}</div>` : ''}
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
     <div class="muted small">Click a step to see it; <b>Carve it like this</b> makes it the part's shape and checks it again.</div>`;

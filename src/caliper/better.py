@@ -209,7 +209,9 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
             offer = done.get("offer")
             best = next((st for st in done.get("stations") or [] if offer and st["index"] == offer["index"]), None)   # search
             v = verdicts.carve_step(best, p.get("untrusted"), done) if best else None
-            if settled and best and v["counts_as_pass"]:
+            if settled and best and v["counts_as_pass"] and not offer["offers"]:      # nothing to click: why, and it's in the study (#167)
+                results.append(_line(f"No step of the carve to use on the {name}", offer["said"], "", ""))
+            elif settled and best and v["counts_as_pass"]:
                 results.append(_line(
                     f"Carve the {name} where it isn't working",
                     f"{best['removed']:.0%} {K.share(done)} carved away, {best['saved_g']:,} g less filament, still "

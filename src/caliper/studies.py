@@ -166,6 +166,8 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
             return ("doesn't hold as it is: " + (f"{round(whole, 1):g}x" if whole is not None else "not checked")
                     + f", needs {r.get('min_safety', 2):g}x" + (f" (the {first['weakest']})" if first.get("weakest") else "")
                     + (f"; carving the printed part: {carved}" if carved else "")), False
+        if not carved and (r.get("offer") or {}).get("offers") is False:   # nothing to use, and why (#167)
+            return r["offer"]["said"], None
         if not carved:
             return "nothing could come off and still hold", False
         if "whole_holds" in best and verdicts.station(best, whole=True)["kind"] == "fails":

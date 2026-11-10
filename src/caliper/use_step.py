@@ -12,13 +12,19 @@ from typing import Callable, Optional
 
 #: how far a step's own number must clear what the part must hold: a rule of thumb, from the re-checks in #167
 USE_FLOOR = 1.5
+#: the least saving of material worth a button, in dollars. A judgment call, not a measurement: a carve costs a re-check, up to a third or so of
+#: the margin, and it comes off the next time the chat changes the part. Under this, the card says what it would save and leaves it in the study
+USE_MIN_USD = 1.0
 ROOM = ("It's the deepest step whose walls the re-check can see and that clears what it must hold by at least half again, which is a "
         "rule of thumb, not a prediction.")
 NO_ROOM = ("No step whose walls the re-check can see clears what it must hold by half again (a rule of thumb), so this one may not hold "
            "once it's re-checked.")
-UNSEEN = "The re-check can't see this step's walls at this size, so it may not settle whether it holds."
-UNKNOWN = "This study didn't record how thin each step's walls are, so the re-check may not settle it: run the study again to know."
+UNSEEN = "The re-check can't see the walls of any step at this size, so it couldn't settle whether one holds. The steps are in the study."
+UNKNOWN = ("This study didn't record how thin each step's walls are, so it can't say which step a re-check could settle: run the study again "
+           "to know. The steps are in the study.")
 SAID = {"room": ROOM, "no_room": NO_ROOM, "unseen": UNSEEN, "unknown": UNKNOWN}
+#: a deeper step only counts as given up if it saves this much more: "3.37 lb against 3.35" isn't worth a sentence
+GAVE_UP_BY = 1.05
 
 
 def own(st: dict) -> float:
@@ -26,9 +32,25 @@ def own(st: dict) -> float:
     return min(x for x in (st.get("safety"), st.get("whole")) if x is not None)
 
 
-def choose(steps: list[dict], need: float, saved: str, further: Callable[[dict], str]) -> Optional[dict]:
-    """The step to offer from those that pass, and what to say about it: ``{index, kind, quote, said, deepest}``. ``saved`` is what a step
-    saves; ``further`` says how far a step got, for what's given up."""
+def _money(usd: float) -> str:
+    return f"${usd:,.2f}" if usd >= 1 else f"{max(1, round(usd * 100))}¢"
+
+
+def _strength(as_drawn: Optional[float], quote: float) -> str:
+    """What the step costs in strength, in words: "" where the part as drawn wasn't checked."""
+    if as_drawn is None:
+        return ""
+    if quote >= 0.95 * as_drawn:
+        return "at almost no cost in strength"
+    return f"taking it from about {round(as_drawn, 1):g} to {round(quote, 1):g} times over"
+
+
+def choose(steps: list[dict], need: float, saved: str, further: Callable[[dict], str], *, as_drawn: Optional[float] = None,
+           worth: Optional[Callable[[dict], Optional[float]]] = None) -> Optional[dict]:
+    """The step to offer from those that pass, and what to say about it: ``{index, kind, quote, said, deepest, offers}``. ``saved`` is what
+    a step saves; ``further`` says how far a step got, for what's given up; ``as_drawn`` is the part's number before any of it; ``worth``
+    is what a step saves in dollars, where that's known. ``offers`` False: nothing to click. The re-check couldn't settle any step, or the
+    saving is too small to be worth it, and the card says which."""
     if not steps:
         return None
     seen = [st for st in steps if st.get("seen") is True]
@@ -40,6 +62,15 @@ def choose(steps: list[dict], need: float, saved: str, further: Callable[[dict],
     else:
         pick, kind = max(steps, key=own), "unknown" if any(st.get("seen") is None for st in steps) else "unseen"
     deepest = max(steps, key=lambda st: st[saved])
-    gave_up = deepest[saved] > pick[saved]
-    return {"index": pick["index"], "kind": kind, "quote": own(pick), "deepest": deepest["index"] if gave_up else None,
-            "said": SAID[kind] + (f" The study got as far as {further(deepest)}, and that step is there to choose." if gave_up else "")}
+    out = {"index": pick["index"], "kind": kind, "quote": own(pick), "deepest": None, "offers": False, "said": SAID[kind]}
+    if kind in ("unseen", "unknown"):
+        return out
+    cost = _strength(as_drawn, own(pick))
+    usd = worth(pick) if worth else None
+    if usd is not None and usd < USE_MIN_USD:
+        return {**out, "kind": "small", "said": f"It would save about {_money(usd)} of material{', ' + cost if cost else ''}: too little to be worth "
+                                                f"a re-check, so it's left in the study."}
+    gave_up = deepest[saved] > GAVE_UP_BY * pick[saved]
+    return {**out, "offers": True, "deepest": deepest["index"] if gave_up else None,
+            "said": SAID[kind] + (f" That takes it{cost[9:]}." if cost.startswith("taking it") else f" It comes {cost}." if cost else "")
+                    + (f" The study got as far as {further(deepest)}, and that step is there to choose." if gave_up else "")}

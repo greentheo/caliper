@@ -182,9 +182,10 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             if not holds and k > 0:
                 break                                                  # the chart stops where it runs out
         _judge(store, part_id, out, out_dir, s)
-        offer = _offered({"stations": out, "min_safety": min_safety, "share": "printed", **seen})
-        best = next((x for x in out if offer and x["index"] == offer["index"]), None) or max(   # search: nothing to save, so as drawn
-            (x for x in out if verdicts.station(x)["counts_as_pass"] and x.get("closed") is not False), key=lambda x: x["saved_g"], default=None)
+        offer = _offered({"stations": out, "min_safety": min_safety, "share": "printed", "material": mat["name"], **seen})
+        best = (next((x for x in out if offer["offers"] and x["index"] == offer["index"]), None) if offer   # search
+                else max((x for x in out if verdicts.station(x)["counts_as_pass"] and x.get("closed") is not False),    # nothing to save: as drawn
+                         key=lambda x: x["saved_g"], default=None))
         first = out[0]
 
         if verdicts.station(first, whole=True)["kind"] == "fails" and verdicts.station(first)["kind"] != "fails":
@@ -265,9 +266,16 @@ def _offered(rec: dict) -> Optional[dict]:
     from . import load_study as L
     from . import use_step
 
-    ok = [st for st in rec.get("stations") or [] if st.get("saved_g") and verdicts.carve_step(st, None, rec)["counts_as_pass"]]
+    from . import materials as M
+
+    steps = rec.get("stations") or []
+    ok = [st for st in steps if st.get("saved_g") and verdicts.carve_step(st, None, rec)["counts_as_pass"]]
+    per_kg = next((m["usd_per_kg"] for m in M.PRINTS.values() if m["name"] == rec.get("material")), None)
+    first = next((st for st in steps if st.get("index") == 0 and st.get("safety") is not None), None)
     return use_step.choose(ok, float(rec.get("min_safety") or L.MIN_SAFETY), "saved_g",
-                           lambda st: f"{st['removed']:.0%} carved away, {st['saved_g']:,} g less filament")
+                           lambda st: f"{st['removed']:.0%} carved away, {st['saved_g']:,} g less filament",
+                           as_drawn=use_step.own(first) if first else None,
+                           worth=(lambda st: st["saved_g"] / 1000.0 * per_kg) if per_kg else None)
 
 
 def _join(exact, printed):
@@ -341,7 +349,7 @@ def load_run(store: DesignStore, rid: str) -> Optional[dict]:
         rec = json.load(f)
     rec["offer"] = _offered(rec)              # one answer for the card, the panel, the chat and the 3D view (#167)
     if rec["offer"]:
-        rec["best"] = rec["offer"]["index"]           # producer: the step to offer, as use_step chooses it
+        rec["best"] = rec["offer"]["index"] if rec["offer"]["offers"] else None   # producer: the step to offer, if there's one
     return rec
 
 

@@ -17,3 +17,5 @@
 | step stool (Lighten) | step 8, 2.98 → 2.39 | step 7, 3.01 → 2.40 |
 
 It costs material: most carves now offer 12% where 35 to 47% was on the chart. The deeper steps are still there, and the card says how far the study got. The whole suite is CI's.
+
+Last round, from the review. Where the re-check can't see any step's walls there's no Use it and no "step to use": the card says it couldn't be settled at this size, and the steps stay in the study. A carve that would save under $1 of filament gets no button either: the card says what it would save and what it would cost in strength. That $1 is a judgment call, in `use_step.USE_MIN_USD`. On every carved part measured here the saving was under 50¢, so none of them gets a button now. An offer says the strength it gives up. A Lightening saves weight, not money (its sheet is bought whole), so the dollar doesn't apply to it.
