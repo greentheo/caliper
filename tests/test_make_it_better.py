@@ -238,8 +238,9 @@ def test_a_thin_spot_that_isn_t_a_piece_says_where_and_promises_nothing(tmp_path
     store = _store(tmp_path, TUBE, "tube")
     _check(store, "tube", 3.0, thinnest=0.25, spacing=2.3, too_thin=True, thinnest_where=REAL_WHERE, sees_mm=9.2)
     spot, carve_it = _offers(store, "tube")
-    assert spot["lead"] == "The thinnest spot is 0.25 mm, around z 409 mm: thicken it or make the openings smaller"
-    assert spot["cost"] == "It takes more filament. A finer check can see walls from 9.3 mm: at least about 8 min."
+    assert spot["lead"] == "The thinnest spot is 0.25 mm, around z 409 mm: thicken it or change the openings"
+    assert spot["cost"] == ("It takes more filament. If the numbers don't move it, it's how the openings are cut: that's a change to "
+                            "ask for in the chat. A finer check can see walls from 9.3 mm: at least about 8 min.")
     assert "around z 409 mm" in spot["say"] and "9.3 mm" in spot["say"] and spot["action"] == "use_t"
     assert carve_it["disabled"]
 
