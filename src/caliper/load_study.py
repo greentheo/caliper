@@ -343,7 +343,9 @@ def blind(run: dict, case: dict) -> bool:
     fea = case.get("fea") or {}
     if fea.get("supported") is not True or case.get("governs", "fea") != "fea":
         return False
-    if fea.get("safety") is None:
+    if "safety" not in fea:           # a case that doesn't say isn't one that saw nothing
+        return False
+    if fea["safety"] is None:
         return True
     material, nominal = run.get("material"), _nominal(case)
     strength = material.get("strength") if isinstance(material, dict) else None

@@ -234,3 +234,11 @@ def test_the_card_s_words_are_the_blind_ones():
     run = {"material": {"strength": 30.0}, "cases": [_case(5.5e7)]}
     assert answers.coarse(run) == L.BLIND
 
+
+def test_a_case_that_doesn_t_say_isn_t_one_that_saw_nothing():
+    """Every real run writes the FEA's safety, None where it read no stress. A record without it says nothing either way."""
+    c = _case(None)
+    del c["fea"]["safety"]
+    assert not L.blind({"material": {"strength": 30.0}}, c)
+    assert L.blind({"material": {"strength": 30.0}}, _case(None))
+
