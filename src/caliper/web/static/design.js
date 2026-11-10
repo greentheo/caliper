@@ -238,7 +238,7 @@ function treeHtml(design, view) {
     const fixed = p.role === 'fixed', off = view.parts.has(p.id);
     const cant = view.cant ? view.cant(p.id, p.version) : null, oneBody = view.oneBody || !!cant;   // no piece eye can act then
     const editing = view.rename && view.rename.part === p.id;
-    const head = `<div class="trow part${view.scope === p.id && !view.piece ? ' on' : ''}${fixed ? ' ref' : ''}${off ? ' off' : ''}" draggable="true" data-drag="${esc(p.id)}">
+    const head = `<div class="trow part${view.scope === p.id && !view.piece ? ' on' : ''}${fixed ? ' ref' : ''}${off ? ' off' : ''}"${view.canDrag === false ? '' : ` draggable="true" data-drag="${esc(p.id)}"`}>
       <button class="eye" aria-label="Show or hide the whole part" data-eye="${esc(p.id)}">${off ? EYE_OFF : EYE_ON}</button>
       <button class="tname" data-sel="${esc(p.id)}"${fixed ? ' data-fixed="1"' : ''}>${esc(p.name || p.id)}</button>
       <span class="side">${fixed ? 'reference' : `v${p.version}`}</span></div>`
@@ -256,12 +256,12 @@ function treeHtml(design, view) {
         <span class="side">${esc(pc.material)}</span></div>`
         + (editing && view.rename.key === pc.key ? renameRow(p.id, pc.key, view.rename.draft) : '');
     }).join('');
-    return `<div class="tpart" style="margin-left:${depth * 18}px">${head}${pieces}</div>`;
+    return `<div class="tpart" data-tpart="${esc(p.id)}" style="margin-left:${depth * 18}px">${head}${pieces}</div>`;
   }).join('');
   const legend = (design.legend || []).length ? `<div class="tlegend"><div class="tlegend-h">Materials</div>${design.legend.map((m) =>
     `<div class="tlegend-r"><span class="swatch" aria-hidden="true" style="background:${esc(m.color)}"></span>${esc(m.label)} · ${m.count} piece${m.count === 1 ? '' : 's'}</div>`).join('')}</div>` : '';
   return `<div class="tree-head"><button class="fold" data-fold="1" aria-expanded="${view.open}">${view.open ? '▾' : '▸'} Parts</button>
-    <span class="note">hidden pieces are still checked</span></div>${view.open ? rows + legend : ''}`;
+    <span class="note">${view.saying ? esc(view.saying) : `hidden pieces are still checked${view.canDrag === false ? '. Moving parts needs a wider window' : ''}`}</span></div>${view.open ? rows + legend : ''}`;
 }
 function renderTree() {
   const box = $('tree');
@@ -271,7 +271,7 @@ function renderTree() {
   if (!parts.length || document.activeElement === $('treeName')) return;       // never over a name being typed
   const t = seen();
   const cant = (pid, version) => { const n = noPieces.get(pid); return n && n.version === version ? n.why : null; };
-  box.innerHTML = treeHtml(S.design, { parts: t.parts, pieces: t.pieces, open: t.open, rename: t.rename, scope: S.scope, piece: S.pick ? null : S.piece,
+  box.innerHTML = treeHtml(S.design, { parts: t.parts, pieces: t.pieces, open: t.open, rename: t.rename, scope: S.scope, piece: S.pick ? null : S.piece, canDrag: !onPhone(), saying: TREE.saying,
     oneBody: t.oneBody, cant });
   if (t.rename && $('treeName')) { $('treeName').focus(); $('treeName').select(); }
 }
@@ -316,39 +316,65 @@ $('tree').addEventListener('click', (e) => {
   if (el) treeClick(el, Date.now());
 });
 // drag a part to move it: above or below another, or onto it to sit under it. The tree only (#94, slice b)
+const PHONE = window.matchMedia('(max-width: 700px)');   // the drawer (#200): moving a part needs a mouse
+function onPhone() { return PHONE.matches; }
+PHONE.addEventListener('change', () => renderTree());
 function clearDrop() {
   document.querySelectorAll('#tree .drop-before, #tree .drop-after, #tree .drop-into').forEach((r) => r.classList.remove('drop-before', 'drop-after', 'drop-into'));
 }
 async function moveInTree(drag, target, zone) {
   const next = dropped(S.design, drag, target, zone);
   if (!next) return;
+  const slow = setTimeout(() => { TREE.saying = 'Waiting for the job on this design to finish…'; renderTree(); }, 600);   // the lock can be minutes
   try {
     S.design = await api('POST', `/api/designs/${S.slug}/tree`, next);
+    const t = seen(), up = next.parent[drag];
+    if (up && t.parts.has(up)) {                  // under a hidden part, it's hidden as that part is
+      [drag, ...underPart(S.design, drag)].forEach((x) => t.parts.add(x));
+      keepTree();
+    }
   } catch (e) { showErr(plainly(e.message)); }
+  clearTimeout(slow);
+  TREE.saying = null;
   render();
 }
-$('tree').addEventListener('dragstart', (e) => {
+// where a drop would land, on screen: below a part means below everything that sits under it, so that's where the line goes
+function showDrop(row, zone) {
+  const id = row.dataset.drag;
+  if (zone !== 'after') { row.classList.add(`drop-${zone}`); return; }
+  const under = underPart(S.design, id), last = treeRows(S.design).map((r) => r.p.id).filter((x) => x === id || under.includes(x)).pop();
+  const block = document.querySelector(`#tree [data-tpart="${CSS.escape(last)}"]`);
+  (block || row).classList.add('drop-after');
+}
+function treeDragStart(e) {
   const row = e.target.closest && e.target.closest('[data-drag]');
-  if (!row || TREE.rename) { e.preventDefault(); return; }
+  if (!row || TREE.rename || onPhone()) { e.preventDefault(); return; }
   TREE.drag = row.dataset.drag;
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', TREE.drag);
-});
-$('tree').addEventListener('dragover', (e) => {
+}
+function treeDragOver(e) {
   const row = e.target.closest('[data-drag]');
   clearDrop();
   if (!row || !TREE.drag || !dropped(S.design, TREE.drag, row.dataset.drag, 'into')) return;
   e.preventDefault();
-  row.classList.add(`drop-${dropZone(e, row)}`);
-});
-$('tree').addEventListener('drop', (e) => {
+  showDrop(row, dropZone(e, row));
+}
+function treeDrop(e) {
   const row = e.target.closest('[data-drag]'), drag = TREE.drag;
   clearDrop();
   TREE.drag = null;
   if (!row || !drag) return;
   e.preventDefault();
   moveInTree(drag, row.dataset.drag, dropZone(e, row));
-});
+}
+function treeDragLeave(e) {
+  if (!e.relatedTarget || !$('tree').contains(e.relatedTarget)) clearDrop();
+}
+$('tree').addEventListener('dragstart', treeDragStart);
+$('tree').addEventListener('dragover', treeDragOver);
+$('tree').addEventListener('drop', treeDrop);
+$('tree').addEventListener('dragleave', treeDragLeave);
 $('tree').addEventListener('dragend', () => { TREE.drag = null; clearDrop(); });
 $('tree').addEventListener('keydown', (e) => {
   if (!e.target.dataset.renameInput) return;

@@ -345,8 +345,10 @@ class DesignStore:
                         "updated": store.design.updated})
         return sorted(out, key=lambda d: d["updated"], reverse=True)
 
-    def save(self) -> "DesignStore":
-        self.design.updated = _now()
+    def save(self, touched: bool = True) -> "DesignStore":
+        """``touched=False``: nothing about the design changed, only how it's shown, so it keeps its place in the picker (#94)."""
+        if touched:
+            self.design.updated = _now()
         os.makedirs(self.root, exist_ok=True)
         _write_atomic(self.design_path, self.design.to_yaml())
         _write_atomic(self.assembly_path, self.assembly.to_yaml())

@@ -141,7 +141,7 @@ def set_layout(store: DesignStore, order: list, parent: dict) -> dict:
             seen.add(at)
             at = parent.get(at)
     store.design.part_tree = {"order": list(order), "parent": dict(parent)}
-    store.save()
+    store.save(touched=False)
     return layout(store)
 
 
