@@ -88,6 +88,10 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
         store.append_log({"kind": "reply", "action": "author", "part": pid, "ok": False, "reply": res.reply,
                           "error": res.error})
         return {"part": pid, "ok": False, "steps": steps, "reply": res.reply}
+    entry = store.design.part(pid)                    # a one-part design's part is called what the design is (#94)
+    if entry is not None and not entry.label:
+        entry.label = store.design.name
+        store.save()
 
     if _llm(use_llm, client):
         # what it is, as built: the sentence said what it's for, the script says what it is
