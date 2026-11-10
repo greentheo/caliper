@@ -227,16 +227,24 @@ frame study, `shell(params, build=None)`, a list of
 ## A picked face or edge
 
 A request can begin "About this edge: … (at x, y, z mm in the script's coordinates): …". The person clicked that exact edge or
-face, so change that one and no other. Select it from the point it gives:
+face, so change that one and no other.
+
+For an edge, the point lies on it. Select it with `edge_at`, which is already in your script's namespace and measures true
+distance to the edge:
 
 ```python
-result = result.edges(cq.selectors.NearestToPointSelector((x, y, z))).fillet(r)     # an edge
-result = result.faces(cq.selectors.NearestToPointSelector((x, y, z))).workplane().hole(d)   # a face
+result = edge_at(result, (x, y, z)).fillet(r)
 ```
 
-The point is the edge's centre (a circle's centre, a line's middle) or the face's. Apply it at the step where that edge or
-face exists: after the bodies are joined, before anything that would remove it. Don't look for it by a `">Z"`-style
-selector, which can land on another edge. If the selector can't find it, raise with why.
+For a face, the point is its centre:
+
+```python
+result = result.faces(cq.selectors.NearestToPointSelector((x, y, z))).workplane(centerOption="CenterOfMass").hole(d)
+```
+
+Don't select an edge with `NearestToPointSelector` or a `">Z"`-style selector: concentric rings tie and it lands on another
+edge. Do it at the step where that edge or face exists, after the bodies are joined and before anything removes it. `edge_at`
+raises if no edge is at the point; let it.
 
 ## Keep them together
 

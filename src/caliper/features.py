@@ -26,6 +26,8 @@ from .design import OCCT, DesignStore
 LINEAR = 0.4
 ANGULAR = 0.35
 EDGE_POINTS = 24
+#: bumped when what's kept changes: an older file is worked out again
+SCHEMA = 2
 #: how far along a face to step to see which way it leaves an edge, mm
 STEP = 0.05
 
@@ -54,19 +56,21 @@ def _surface(face) -> dict:
 
     s, out = BRepAdaptor_Surface(face.wrapped), {}
     if s.GetType() == GeomAbs_Plane:
-        d = s.Plane().Axis().Direction()
-        out["axis"] = (d.X(), d.Y(), d.Z())
+        d, at = s.Plane().Axis().Direction(), s.Plane().Location()
+        out.update(axis=(d.X(), d.Y(), d.Z()), at=(at.X(), at.Y(), at.Z()))
     elif s.GetType() == GeomAbs_Cylinder:
         c = s.Cylinder()
-        d = c.Axis().Direction()
-        out.update(axis=(d.X(), d.Y(), d.Z()), radius=c.Radius())
+        d, at = c.Axis().Direction(), c.Location()
+        out.update(axis=(d.X(), d.Y(), d.Z()), radius=c.Radius(), at=(at.X(), at.Y(), at.Z()))
     elif s.GetType() == GeomAbs_Cone:
-        d = s.Cone().Axis().Direction()
-        out["axis"] = (d.X(), d.Y(), d.Z())
+        c = s.Cone()
+        d, at = c.Axis().Direction(), c.Apex()
+        out.update(axis=(d.X(), d.Y(), d.Z()), at=(at.X(), at.Y(), at.Z()), semi=c.SemiAngle())
     elif s.GetType() == GeomAbs_Torus:
         t = s.Torus()
-        d = t.Axis().Direction()
-        out.update(axis=(d.X(), d.Y(), d.Z()), minor=t.MinorRadius())   # a round on a circular edge: its radius is the minor
+        d, at = t.Axis().Direction(), t.Location()
+        out.update(axis=(d.X(), d.Y(), d.Z()), minor=t.MinorRadius(),   # a round on a circular edge: its radius is the minor
+                   major=t.MajorRadius(), at=(at.X(), at.Y(), at.Z()))
     return out
 
 
@@ -150,6 +154,12 @@ def of_solid(solid, pose=None) -> dict:
             row["radius"] = round(surf["radius"], 3)
         if "minor" in surf:
             row["minor"] = round(surf["minor"], 3)
+        if "major" in surf:
+            row["major"] = round(surf["major"], 3)
+        if "semi" in surf:
+            row["semi"] = round(surf["semi"], 6)
+        if "at" in surf:
+            row["at"] = _vec(_apply(pose, surf["at"]))
         out_faces.append(row)
     owners = TopTools_IndexedDataMapOfShapeListOfShape()
     TopExp.MapShapesAndAncestors_s(shape.wrapped, TopAbs_EDGE, TopAbs_FACE, owners)
@@ -168,7 +178,8 @@ def of_solid(solid, pose=None) -> dict:
         curve = _curve(e)
         mid = np.array(e.positionAt(0.5).toTuple())
         c = np.array(curve["centre"]) if "centre" in curve else mid
-        row = {"id": f"e{i}", "type": _EDGE_KIND.get(e.geomType(), "curve"), "centre": _vec(_apply(pose, c)), "local": _vec(c),
+        # ``local`` is a point on the edge: what edge_at needs, and a ring's centre is on no edge at all (#177 review)
+        row = {"id": f"e{i}", "type": _EDGE_KIND.get(e.geomType(), "curve"), "centre": _vec(_apply(pose, c)), "local": _vec(mid),
                "length": round(float(e.Length()), 2), "points": [_vec(p) for p in pts], "faces": [b[0] for b in beside],
                "corner": None}
         if "axis" in curve:
@@ -201,7 +212,7 @@ def for_part(store: DesignStore, pid: str) -> dict:
     try:
         with open(path) as f:
             got = json.load(f)
-        if got.get("placed") == stamp:
+        if got.get("placed") == stamp and got.get("schema") == SCHEMA:
             return got
     except (OSError, ValueError):
         pass
@@ -212,7 +223,7 @@ def for_part(store: DesignStore, pid: str) -> dict:
         pose = measure.pose_matrix(placed.position, placed.rotation) if placed else None
         with OCCT:
             out = {"mesh": False, **of_solid(geometry.solid, pose)}
-    out.update(part=pid, version=entry.version, placed=stamp)
+    out.update(part=pid, version=entry.version, placed=stamp, schema=SCHEMA)
     folder = os.path.dirname(path)
     for old in os.listdir(folder):
         if old.startswith("features-v") and old.endswith(".json"):
@@ -263,69 +274,162 @@ def said(features: dict, kind: str, fid: str, inches: bool) -> Optional[str]:
     return f"edge: the {e['type']}{where}{size}, {_length(e['centre'][2], inches)} up{corner}"
 
 
-# --- did the change land on the pick (#109, slice c) ------------------------------------------------------------------
-_ASKED = re.compile(r"(\d+\s+\d+/\d+|\d+/\d+|\d*\.\d+|\d+)\s*(mm|inch(?:es)?\b|in\b|\")", re.I)
-NOT_MEASURED = "I can't measure whether that change landed on what you picked."
+# --- did the change land on the pick (#109, slice c; #177 review) --------------------------------------------------------
+# Three outcomes, and the default is "couldn't tell". Landed and missed each need positive evidence about the picked edge
+# itself: not any new or moved face near it, and not some other ring that looks similar.
+NOT_MEASURED = "I couldn't tell whether that landed on what you picked."
+UNDO = ' Say "roll it back" to undo it.'
+_ASKED = re.compile(r"(\d+\s+\d+/\d+|\d+/\d+|\d*\.\d+|\d+)\s*(mm|cm|inch(?:es)?\b|in\b|\")", re.I)
+#: how close two curves or surfaces must be to be the same one, mm: to the rounding they're kept at
+SAME = 0.05
+_TO_MM = {"mm": 1.0, "cm": 10.0, "in": 25.4, '"': 25.4}
 
 
-def _asked_mm(text: str) -> Optional[float]:
-    """The length a request names, in mm: "1/2 in", "1 1/4 in", "12.7 mm". None if it names none."""
-    m = _ASKED.search(text)
-    if not m:
+def _asked_mm(text: str, word: str = "fillet|round") -> Optional[float]:
+    """The length a request asks for, in mm: the one written nearest the word it's about ("a 3 mm fillet", "leave 20 mm of
+    flat then fillet 3 mm"). None if it names none, or none that reads ("1/0 in")."""
+    near = re.search(rf"\b({word})", text, re.I)
+    found = list(_ASKED.finditer(text))
+    if not found:
         return None
-    number = sum(float(Fraction(part)) for part in m.group(1).split())
-    return number if m.group(2).lower() == "mm" else number * 25.4
+    at = near.end() if near else 0
+    m = min(found, key=lambda x: min(abs(x.start() - at), abs(x.end() - near.start()) if near else 1e9))
+    try:
+        number = sum(float(Fraction(part)) for part in m.group(1).split())
+    except (ValueError, ZeroDivisionError):
+        return None
+    unit = m.group(2).lower()
+    return number * _TO_MM["in" if unit.startswith("inch") else unit]
 
 
-def _new_faces(before: dict, after: dict) -> list[dict]:
-    def same(a, b):
-        return a["type"] == b["type"] and abs(a["area"] - b["area"]) <= 0.01 * max(a["area"], 1.0) \
-            and np.linalg.norm(np.subtract(a["centre"], b["centre"])) <= 0.5
+def _size(mm: float, inches: bool) -> str:
+    from .answers import _small_len
 
-    return [f for f in after["faces"] if not any(same(f, b) for b in before["faces"])]
+    return _small_len(mm, inches)
 
 
-def _fillet(before: dict, after: dict, edge: dict, asked: Optional[float], inches: bool) -> tuple[str, bool]:
-    still = any(e["type"] == edge["type"] and abs(e["length"] - edge["length"]) <= 0.01 * edge["length"]
-                and np.linalg.norm(np.subtract(e["centre"], edge["centre"])) <= 0.5 for e in after["edges"])
-    if still:
-        return "The edge you picked is still there, so the fillet didn't land on it.", False
-    points = np.array([*edge["points"], edge["centre"]], float)
-    rounds = []
-    for f in _new_faces(before, after):
-        r = f.get("minor") if f["type"] == "torus" else f.get("radius") if f["type"] == "cylinder" else None
-        if r and np.linalg.norm(points - np.asarray(f["centre"], float), axis=1).min() <= 2 * r + 1:
-            rounds.append(r)
-    if not rounds:
-        return "The edge you picked has changed, but I can't find a fillet on it.", False
-    r = min(rounds, key=lambda x: abs(x - asked)) if asked else rounds[0]
-    if asked and abs(r - asked) > max(0.02 * asked, 0.05):
-        return f"The fillet is on the edge you picked, but it's {_length(r, inches)}, not {_length(asked, inches)}.", False
-    return f"Checked: the fillet is on the edge you picked, {_length(r, inches)}.", True
+def _parallel(a, b) -> bool:
+    return abs(float(np.dot(np.asarray(a, float), np.asarray(b, float)))) > 0.9999
 
 
-def _hole(before: dict, after: dict, face: dict, inches: bool) -> tuple[str, Optional[bool]]:
-    if face["type"] != "plane" or "axis" not in face:
+def _same_surface(a: dict, b: dict) -> bool:
+    """The same surface, trimmed or not: the same plane, or the same cylinder, cone, torus or sphere. A spline has nothing
+    to compare by, so it's never demonstrably the same."""
+    if a["type"] != b["type"] or a["type"] not in ("plane", "cylinder", "cone", "torus", "sphere"):
+        return False
+    if "at" not in a or "at" not in b:
+        return False
+    gap = np.subtract(a["at"], b["at"])
+    if a["type"] == "sphere":
+        return abs(a.get("radius", 0) - b.get("radius", 0)) <= SAME and np.linalg.norm(gap) <= SAME
+    if not _parallel(a["axis"], b["axis"]):
+        return False
+    axis = np.asarray(a["axis"], float)
+    if a["type"] == "plane":
+        return abs(float(np.dot(gap, axis))) <= SAME
+    if a["type"] == "cylinder":
+        return abs(a["radius"] - b["radius"]) <= SAME and np.linalg.norm(np.cross(gap, axis)) <= SAME
+    if a["type"] == "cone":
+        return abs(a["semi"] - b["semi"]) <= 1e-4 and np.linalg.norm(gap) <= SAME
+    return abs(a["minor"] - b["minor"]) <= SAME and abs(a["major"] - b["major"]) <= SAME and np.linalg.norm(gap) <= SAME
+
+
+def _same_curve(a: dict, b: dict) -> bool:
+    if a["type"] != b["type"] or abs(a["length"] - b["length"]) > SAME:
+        return False
+    if a["type"] == "circle":
+        return abs(a["radius"] - b["radius"]) <= SAME and np.linalg.norm(np.subtract(a["centre"], b["centre"])) <= SAME \
+            and _parallel(a["axis"], b["axis"])
+    p, q = np.asarray(a["points"], float), np.asarray(b["points"], float)
+    if len(p) != len(q):
+        return False
+    return bool(np.abs(p - q).max() <= SAME or np.abs(p - q[::-1]).max() <= SAME)
+
+
+def _faces_by_id(features: dict) -> dict:
+    return {f["id"]: f for f in features["faces"]}
+
+
+def _is_new(face: dict, before: dict) -> bool:
+    return not any(_same_surface(face, b) for b in before["faces"])
+
+
+def _on(face: dict, points: np.ndarray, reach: float) -> bool:
+    """Every point within ``reach`` of the face's own triangles: the surface is where the edge was, all along it."""
+    import trimesh
+
+    mesh = trimesh.Trimesh(np.asarray(face["verts"], float).reshape(-1, 3), np.asarray(face["tris"], int).reshape(-1, 3),
+                           process=False)
+    _, gaps, _ = trimesh.proximity.closest_point(mesh, points)
+    return float(gaps.max()) <= reach
+
+
+def _fillet(before: dict, after: dict, edge: dict, asked: Optional[float], inches: bool) -> tuple[str, Optional[bool]]:
+    was, now = _faces_by_id(before), _faces_by_id(after)
+    own = [was[i] for i in edge["faces"] if i in was]
+    if len(own) != 2:
         return NOT_MEASURED, None
-    normal, centre = np.asarray(face["axis"], float), np.asarray(face["centre"], float)
-    verts = np.asarray(face["verts"], float).reshape(-1, 3)
-    low, high = verts.min(axis=0) - 0.5, verts.max(axis=0) + 0.5
-    for f in _new_faces(before, after):
-        if f["type"] != "cylinder" or "axis" not in f:
+    same = [e for e in after["edges"] if _same_curve(edge, e)]
+    for e in same:
+        beside = [now[i] for i in e["faces"] if i in now]
+        if len(beside) == 2 and all(any(_same_surface(f, g) for g in beside) for f in own):
+            return "The edge you picked is still there, so the fillet didn't land on it." + UNDO, False
+    if same:                                            # that curve's there, on faces it can't vouch for
+        return NOT_MEASURED, None
+    a, b = ([f["id"] for f in after["faces"] if _same_surface(side, f)] for side in own)
+    if not a or not b:
+        return NOT_MEASURED, None
+    meets: dict = {}
+    for e in after["edges"]:
+        for i in e["faces"]:
+            meets.setdefault(i, set()).update(x for x in e["faces"] if x != i)
+    points = np.asarray(edge["points"], float)
+    for f in after["faces"]:
+        if f["type"] not in ("cylinder", "torus", "surface") or not _is_new(f, before):
             continue
-        axis, at = np.asarray(f["axis"], float), np.asarray(f["centre"], float)
-        along = float(np.dot(axis, normal))
-        if abs(along) < 0.5:
+        if not meets.get(f["id"], set()) & set(a) or not meets.get(f["id"], set()) & set(b):
+            continue                                    # a round sits between the picked edge's own two faces
+        r = f.get("minor") if f["type"] == "torus" else f.get("radius")
+        if not _on(f, points, 3 * r + 0.5 if r else 0.5 * float(np.sqrt(f["area"]))):
             continue
-        hit = at + axis * float(np.dot(centre - at, normal)) / along
-        if np.all(hit >= low) and np.all(hit <= high):
-            return f"Checked: there's a {_length(2 * f['radius'], inches)} hole through the face you picked.", True
-    return "No new hole goes through the face you picked.", False
+        if r is None:
+            return "Checked: there's a fillet on the edge you picked.", True
+        if asked and abs(r - asked) > max(0.02 * asked, 0.05):
+            return f"The fillet is on the edge you picked, but it's {_size(r, inches)}, not {_size(asked, inches)}.", True
+        return f"Checked: the fillet is on the edge you picked, {_size(r, inches)}.", True
+    return NOT_MEASURED, None
+
+
+def _hole(before: dict, after: dict, face: dict, asked: Optional[float], inches: bool) -> tuple[str, Optional[bool]]:
+    if face["type"] != "plane":
+        return NOT_MEASURED, None
+    on_it = {f["id"] for f in after["faces"] if _same_surface(face, f)}
+    was_there = {f["id"] for f in after["faces"] if not _is_new(f, before)}
+    now = _faces_by_id(after)
+    for f in after["faces"]:
+        if f["type"] != "cylinder" or not _is_new(f, before):
+            continue
+        rims = [e for e in after["edges"] if f["id"] in e["faces"] and e["type"] == "circle"
+                and abs(e["length"] - 2 * np.pi * f["radius"]) <= 0.02 * e["length"]]
+        others = [next((x for x in e["faces"] if x != f["id"]), None) for e in rims]
+        if len(rims) < 2 or not any(x in on_it for x in others):
+            continue
+        if not all(x in was_there for x in others):     # a floor or a cap it made itself: blind, or a boss
+            continue
+        size = 2 * f["radius"]
+        if asked and abs(size - asked) > max(0.02 * asked, 0.05):
+            return f"There's a hole through the face you picked, but it's {_size(size, inches)}, not {_size(asked, inches)}.", True
+        return f"Checked: there's a {_size(size, inches)} hole through the face you picked.", True
+    same = [now[i] for i in on_it]
+    if any(abs(f["area"] - face["area"]) <= 0.01 * face["area"] and np.linalg.norm(np.subtract(f["centre"], face["centre"])) <= SAME
+           for f in same):
+        return "The face you picked has no new hole through it." + UNDO, False
+    return NOT_MEASURED, None
 
 
 def landed(before: Optional[dict], after: Optional[dict], pick: dict, message: str, inches: bool) -> dict:
-    """Did a change asked of a picked edge or face land on it? ``{"said": one line, "landed": True, False or None}``, None
-    where it can't be measured: only a fillet on an edge and a hole through a flat face can (#107)."""
+    """Did a change asked of a picked edge or face land on it? ``{"said": one line, "landed": True, False or None}``. None,
+    "couldn't tell", is the default: landed and missed each need positive evidence about the pick itself."""
     said, hit = _landed(before, after, pick, message, inches)
     return {"said": said, "landed": hit}
 
@@ -333,12 +437,16 @@ def landed(before: Optional[dict], after: Optional[dict], pick: dict, message: s
 def _landed(before, after, pick, message, inches) -> tuple[str, Optional[bool]]:
     if not before or not after or before.get("mesh") or after.get("mesh"):
         return NOT_MEASURED, None
-    asked_for = (message or "").rsplit(": ", 1)[-1].lower()
+    if pick.get("version") not in (None, before.get("version")):      # the ids are that version's
+        return NOT_MEASURED, None
+    words = (pick.get("text") or message or "").lower()
     kind, fid = pick.get("kind"), pick.get("id")
-    if kind == "edge" and re.search(r"\b(fillet|round)", asked_for):
+    if re.search(r"\b(remove|take off|delete|undo)\b", words) or "chamfer" in words:
+        return NOT_MEASURED, None
+    if kind == "edge" and re.search(r"\b(fillet|round)", words):
         edge = next((e for e in before["edges"] if e["id"] == fid), None)
-        return _fillet(before, after, edge, _asked_mm(asked_for), inches) if edge else (NOT_MEASURED, None)
-    if kind == "face" and re.search(r"\bhole", asked_for):
+        return _fillet(before, after, edge, _asked_mm(words), inches) if edge else (NOT_MEASURED, None)
+    if kind == "face" and re.search(r"\bhole", words):
         face = next((f for f in before["faces"] if f["id"] == fid), None)
-        return _hole(before, after, face, inches) if face else (NOT_MEASURED, None)
+        return _hole(before, after, face, _asked_mm(words, "hole"), inches) if face else (NOT_MEASURED, None)
     return NOT_MEASURED, None

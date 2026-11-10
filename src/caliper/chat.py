@@ -527,6 +527,8 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
 
         check = features.landed(picked_from, _features_of(store, part_id), pick, message, store.design.display_units == "in")
         on_pick = check["landed"]
+        if on_pick is False:                        # the same words next time are a retry, not "v2 already did that" (#177)
+            store.append_history(part_id, {"kind": "pick_missed", "version": version})
         # a miss comes first and the turn isn't a success: never a tick above "it isn't on what you picked" (rule 6)
         reply = (f"\u2717 {check['said']}\n\n{reply.replace(chr(0x2713) + ' ', '', 1)}" if on_pick is False
                  else f"{reply}\n\n{check['said']}")
@@ -1199,6 +1201,7 @@ def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Op
     return refine_part(store, pid, message, author=kw["author"], client=kw["client"], max_rounds=kw["max_rounds"],
                        events=events, on_event=on_event, use_llm=kw["use_llm"], drafter=kw["drafter"],
                        measured=part_rules.to_fix(store, pid, aw["rule"]) if aw["kind"] == "fix_rule" else "",
+                       pick=aw.get("pick"),                  # a parked repeat keeps its pick: "yes" runs the same check (#177)
                        # fixing a rule it already has: never an offer to lock a looser copy of it (#153)
                        promote_feedback=kw["promote_feedback"] and aw["kind"] != "fix_rule")
 
@@ -1212,6 +1215,8 @@ def _repeats(store: DesignStore, pid: str, message: str) -> Optional[str]:
     flange widened 1 in twice): the same words, or the same numbers and the same directions. None otherwise."""
     entry = store.design.part(pid)
     last = next((h for h in reversed(store.history(pid)) if h.get("kind") == "revision"), None) if entry else None
+    if entry and any(h.get("kind") == "pick_missed" and h.get("version") == entry.version for h in store.history(pid)):
+        return None                                 # it didn't do that: it missed (#177)
     if not last or last.get("action") != "refine" or last.get("version") != entry.version or not last.get("feedback"):
         return None
     norm = lambda s: re.sub(r"[^a-z0-9.]+", " ", s.lower()).strip()                   # noqa: E731
@@ -1343,7 +1348,7 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
     if again is not None:                          # the last revision already did this: asked first (#98)
         from . import awaiting
 
-        awaiting.park(store, "repeat", part=intent.part, message=message)
+        awaiting.park(store, "repeat", part=intent.part, message=message, pick=pick)
         result = TurnResult(action="ask", ok=True, part=intent.part, events=events, reply=again)
     elif intent.action == "refine" and intent.part:
         result = refine_part(store, intent.part, message, author=author, client=client, pick=pick,

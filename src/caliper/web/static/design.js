@@ -1065,7 +1065,7 @@ $('composer').onsubmit = (e) => {
   e.preventDefault();
   const text = $('msg').value;
   $('msg').value = '';
-  const said = aboutPick(S.pick, aboutPiece(text)), pick = S.pick && S.pick.id ? { kind: S.pick.kind, id: S.pick.id } : null;
+  const said = aboutPick(S.pick, aboutPiece(text)), pick = S.pick && S.pick.id ? { kind: S.pick.kind, id: S.pick.id, version: (S.design.parts.find((x) => x.id === S.pick.part) || {}).version, text } : null;
   if (S.pick) { clearPick(); renderScope(); }
   send(said, S.scope, pick);
 };
