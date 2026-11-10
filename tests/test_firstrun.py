@@ -30,6 +30,7 @@ def test_a_design_is_named_for_what_it_is_not_the_whole_sentence():
     ("A 12 mm plywood tray", "Plywood tray"),
     ("Can you make me a 2 ft x 3 ft garden bed", "Garden bed"),
     ("A 2x4 workbench for the garage", "2x4 workbench"),                  # a lumber size is its name, not a measurement
+    ("A 2 in 1 step stool", "2 in 1 step stool"),                          # "2 in 1" isn't a size (#211 review)
 ])
 def test_a_name_skips_a_requests_lead_and_a_leading_measurement(said, name):
     assert short_name(said) == name

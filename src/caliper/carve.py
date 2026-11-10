@@ -225,13 +225,16 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
              else f"{len(out)} steps: the printed part comes off, but {why}"   # #132 review
              if best is not None and best["saved_g"] else f"{len(out)} steps", run=rid, progress=1.0)
         return record
-    except Cancelled:
-        # asked to stop (CALI-101): the steps it finished, and the lightest of them that holds, as a partial run
-        # the lightest step whose printed part holds and closes up, as its verdict says (#132, #124)
+    except Cancelled as e:
+        # asked to stop (CALI-101), or past its time limit (#211 review: not "cancelled" when nobody did): the steps
+        # it finished, and the lightest of them that holds and closes up, as its verdict says (#132, #124)
+        limit = getattr(e, "limit_s", None)
         best = max((x for x in out if verdicts.station(x)["counts_as_pass"]), key=lambda x: x["saved_g"], default=None)
-        keep({**partial, "stations": out, "status": "cancelled", "best": best["index"] if best else None,
+        keep({**partial, "stations": out, "status": "timed_out" if limit else "cancelled",
+              **({"limit_s": limit} if limit else {}), "best": best["index"] if best else None,
               "seconds": round(time.time() - t0, 1)})
-        store.append_history(part_id, {"kind": "carve", "action": "cancelled", "run": rid, "stations": len(out)})
+        store.append_history(part_id, {"kind": "carve", "action": "timed out" if limit else "cancelled", "run": rid,
+                                       "stations": len(out)})
         raise
     except BaseException as e:
         # a carve that fails says so, with what it finished: it doesn't read "not finished" forever (CALI-103)

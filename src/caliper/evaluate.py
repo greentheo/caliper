@@ -288,6 +288,9 @@ class _Unmeasured:
 
     __lt__ = __le__ = __gt__ = __ge__ = __eq__ = __ne__ = _no
     __add__ = __radd__ = __sub__ = __rsub__ = __mul__ = __rmul__ = __truediv__ = __rtruediv__ = __float__ = _no
+    # read bare, negated or in any arithmetic it's not measured either: truthy, a bare rule passed (#211 review)
+    __bool__ = __neg__ = __pos__ = __abs__ = __pow__ = __rpow__ = __mod__ = __rmod__ = _no
+    __floordiv__ = __rfloordiv__ = __round__ = __int__ = __index__ = __trunc__ = __floor__ = __ceil__ = _no
     __hash__ = None
 
 

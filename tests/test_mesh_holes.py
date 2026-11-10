@@ -24,7 +24,11 @@ def test_a_mesh_parts_holes_are_not_measured_not_none(mesh_part):
     assert issubclass(measure.NotMeasured, NotImplementedError)       # the evaluator's "deferred"
 
 
-@pytest.mark.parametrize("expr", ["largest_through_bore <= 5", "largest_through_bore >= 8"])
+@pytest.mark.parametrize("expr", ["largest_through_bore <= 5", "largest_through_bore >= 8",
+                                  # a bare rule, its negation, and arithmetic: not measured either (#211 review)
+                                  "largest_through_bore", "not largest_through_bore", "largest_through_bore ** 2 < 25",
+                                  "-largest_through_bore < 0",
+                                  "largest_through_bore % 2 == 0"])
 def test_a_rule_on_a_mesh_parts_bore_is_not_checked_never_a_pass(mesh_part, expr):
     ctx = build_context(Spec(part="x"), mesh_part)
     got = evaluate_assertion(Assertion(id="bore", expr=expr), ctx)

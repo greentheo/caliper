@@ -69,6 +69,8 @@ class Job:
         self.finished: Optional[float] = None
         self.started: Optional[float] = None
         self.limit_s = LIMIT_S.get(kind)  # (#66 item 2)
+        self.waited_s = 0.0               # time spent waiting for the one study turn: not counted (#211 review)
+        self.waiting_since: Optional[float] = None
         self._mu = threading.Lock()
         self._stop = threading.Event()    # asked to stop (CALI-101)
 
@@ -96,8 +98,15 @@ class Job:
         steps, so a cancel takes effect there, with every finished step kept."""
         if self._stop.is_set():
             raise Cancelled()
-        if self.limit_s and self.started and time.time() - self.started > self.limit_s:
+        if self.limit_s and self.started and self.running_s() > self.limit_s:
             raise TimedOut(self.limit_s)
+
+    def running_s(self) -> float:
+        """How long it has worked: since it started, less the time it waited for its study turn (#211 review: two
+        carves queued behind a third ran out their clock waiting)."""
+        now = time.time()
+        waited = self.waited_s + (now - self.waiting_since if self.waiting_since else 0.0)
+        return now - (self.started or now) - waited
 
     def to_dict(self, after: int = 0) -> dict:
         return {"id": self.id, "kind": self.kind, "label": self.label, "status": self.status,

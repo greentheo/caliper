@@ -2674,8 +2674,10 @@ function carveView(p) {
     <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo"${run ? ' data-again="1"' : ''} ${S.carveJob[carveKey(p.id)] || carveBlocked(p) ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
       <span class="muted small">${esc(carveTime(p))}</span></div><div id="carveProgress">${carveProgress(p.id)}</div>`;
   if (!run) return head;
-  if (run.status === 'cancelled') {                // stopped from its panel: the steps it finished (CALI-101)
-    return `${head}<div class="small"><b>Cancelled</b> after ${run.stations.length} of ${run.steps} steps${run.stations.length
+  if (run.status === 'cancelled' || run.status === 'timed_out') {   // stopped: the steps it finished (CALI-101)
+    // past its limit isn't a cancel nobody made (#211 review)
+    const stopped = run.status === 'timed_out' ? `Stopped at its ${run.limit_s ? run.limit_s / 3600 : 6}-hour limit` : 'Cancelled';
+    return `${head}<div class="small"><b>${stopped}</b> after ${run.stations.length} of ${run.steps} steps${run.stations.length
       ? ': what it finished is below.' : ', before its first step.'}</div>${run.stations.length ? carveChart(p, run) : ''}`;
   }
   if (run.status === 'failed') {                   // it stopped on an error, and says which (CALI-103)
