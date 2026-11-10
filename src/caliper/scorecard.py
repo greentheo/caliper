@@ -26,6 +26,7 @@ from typing import Callable, Optional
 
 from . import construction as C
 from . import materials as M
+from . import one_study
 from .design import DesignStore
 from .jobs import Cancelled
 
@@ -381,7 +382,11 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
         if run is None:
             emit("strength", f"checking what {p.id} must hold")
             try:
-                run = load_study.study(store, p.id, emit=emit, stop=stop)
+                with one_study.my_turn(store, emit, stop):   # what it waited behind may be this very check (#184)
+                    now = store.design.part(p.id).version
+                    run = next((r for r in load_study.list_runs(store, p.id) if r.get("version") == now), None)
+                    if run is None:
+                        run = load_study.study(store, p.id, emit=emit, stop=stop)
             except Cancelled:                 # asked to stop: not a check that couldn't run (#178 review)
                 raise
             except Exception as e:  # noqa: BLE001 — a check that can't run is unknown, not a crash
