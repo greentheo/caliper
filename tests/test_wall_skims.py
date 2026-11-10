@@ -92,3 +92,27 @@ def test_the_line_is_at_five_degrees(monkeypatch, deg, kept):
 def test_a_solid_block_is_still_its_smallest_dimension():
     assert measure.min_wall_thickness(_mesh(cq.Workplane("XY").box(10, 20, 30))) == pytest.approx(10.0, abs=0.1)
     assert np.isfinite(measure.thinnest_wall(_window(0.0), samples=2000)[0])
+
+
+def _ridge(apex_deg: float):
+    """A block with a V ridge along its top, the apex ``apex_deg``: a thick part whose only thin spot could be the tip."""
+    half = np.radians(apex_deg / 2)
+    h = 30.0 / np.tan(half)
+    return _mesh(cq.Workplane("XZ").polyline([(-60, 0), (60, 0), (60, 30), (30, 30), (0, 30 + h), (-30, 30), (-60, 30)]).close().extrude(40))
+
+
+@pytest.mark.parametrize("apex", [86.0, 88.0])
+def test_a_v_ridge_within_5_degrees_of_square_reads_as_a_corner(apex):
+    """The foreman's call on #189: a ridge this close to square is left out with the corners, as the line at 5° says."""
+    assert measure.thinnest_wall(_ridge(apex), samples=N)[0] > 5.0
+
+
+def test_a_sharper_v_ridge_still_reads_thin():
+    assert measure.thinnest_wall(_ridge(80.0), samples=N)[0] < 2.0
+
+
+def test_the_scorer_was_bumped_for_the_new_reading():
+    from caliper import scorecard
+
+    assert scorecard.SCORER >= 3              # a card scored before this still has a corner's wall reading: it reads out of date
+
