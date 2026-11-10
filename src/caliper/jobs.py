@@ -241,12 +241,13 @@ class JobRunner:
             except Exception as e:  # noqa: BLE001 — every failure must reach the page, named
                 # the traceback's LAST line is the actual exception (the CALI-27 discipline)
                 tail = [ln for ln in traceback.format_exc().strip().splitlines() if ln.strip()]
-                job.error = f"{type(e).__name__}: {e}"
                 from . import errors
 
+                job.error = errors.scrub(f"{type(e).__name__}: {e}")   # the page shows it: no server's paths (#70 item 18)
                 # kept by its kind, never its label (a chat turn's label is the message, CALI-86), and before
-                # the job reads as failed, so whoever sees it fail has the error to report
-                job.error_id = errors.record_exception(errors.job_where(job.kind), e)["id"]
+                # the job reads as failed, so whoever sees it fail has the error to report; once, if its work kept it
+                kept = getattr(e, "_kept", None) or errors.record_exception(errors.job_where(job.kind), e)
+                job.error_id = kept["id"]
                 job.status = "error"
                 job.emit("error", job.error, trace=tail[-1] if tail else "")
             finally:

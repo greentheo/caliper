@@ -211,3 +211,48 @@ def test_errors_recorded_at_once_are_all_kept(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.open", real_open)
     kept = {e["id"] for e in errors.recent(50)}
     assert len(said) == 8 and set(said) <= kept, (said, kept)
+
+
+def test_a_running_jobs_error_is_scrubbed_as_a_report_is(tmp_path, monkeypatch):
+    """CALI-92 (#70 item 18): a job's live error, which the page shows, was str(e): a server's paths, once hosted."""
+    from caliper.jobs import JobRunner
+
+    monkeypatch.setenv("CALIPER_ERRORS", str(tmp_path / "errors.jsonl"))
+    home = os.path.expanduser("~")
+
+    def boom(job):
+        raise ValueError(f"no such file: {home}/designs/garden-bench-for-mum/run.json")
+
+    j = JobRunner().submit("carve", boom)
+    _wait(j)
+    assert j.status == "error" and home not in j.error and "garden-bench" not in j.error, j.error
+    assert j.error.startswith("ValueError: no such file: ~/designs/<design>"), j.error
+
+
+def test_a_failed_chat_turns_reply_is_the_plain_sentence_with_its_id(tmp_path, monkeypatch):
+    """CALI-92 (#70 item 18): the log's reply was the raw "I couldn't do that: {type}: {e}"."""
+    from fastapi.testclient import TestClient
+
+    from caliper import chat, design_api
+    from caliper.design import DesignStore
+    from caliper.jobs import JobRunner
+    from caliper.server import create_app
+
+    monkeypatch.setenv("CALIPER_ERRORS", str(tmp_path / "errors.jsonl"))
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    runner = JobRunner()
+    monkeypatch.setattr(design_api, "RUNNER", runner)
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+
+    def broken(*a, **k):
+        raise ValueError("/Users/someone/secret went wrong")
+
+    monkeypatch.setattr(chat, "turn", broken)
+    slug = os.path.basename(store.root)
+    r = TestClient(create_app()).post(f"/api/designs/{slug}/chat", json={"message": "make it taller"})
+    assert r.status_code == 200, r.text
+    j = runner.get(r.json()["job_id"])
+    _wait(j)
+    reply = [x for x in DesignStore.load(slug).log() if x.get("kind") == "reply"][-1]["reply"]
+    assert reply == errors.plain({"id": j.error_id}) and "secret" not in reply, reply
+    assert len([e for e in errors.recent(50) if e["id"] == j.error_id]) == 1 and len(errors.recent(50)) == 1   # kept once
