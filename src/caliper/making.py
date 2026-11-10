@@ -98,18 +98,18 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
             each.append({"file": name, **printing.estimate(path, pc["material"], volume, wait=wait)})
         if any(e.get("hours") is None and e.get("slicer_failed") for e in each):   # a crashed slice: said, no total
             printed.append({"name": pc["name"], "material": pc["material"], "pieces": len(parts),
-                            "pinned": len(parts) > 1, "files": each, "slicer_failed": True, "hours": None,
+                            "pinned": printing.pinned(parts), "files": each, "slicer_failed": True, "hours": None,
                             "filament_g": None, "usd": None, "trust": None,
                             "from": next(e["from"] for e in each if e.get("hours") is None)})
             continue
         if any(e.get("pending") for e in each):     # one piece still slicing: no total, never a part of one
             printed.append({"name": pc["name"], "material": pc["material"], "pieces": len(parts),
-                            "pinned": len(parts) > 1, "files": each, "pending": True, "hours": None,
+                            "pinned": printing.pinned(parts), "files": each, "pending": True, "hours": None,
                             "filament_g": None, "usd": None, "trust": None, "from": printing.WORKING["from"]})
             continue
         rough = [e for e in each if e.get("trust") == "rough"]   # the group is as rough as its roughest piece (#160)
         printed.append({"name": pc["name"], "material": pc["material"], "pieces": len(parts),
-                        "pinned": len(parts) > 1, "files": each,
+                        "pinned": printing.pinned(parts), "files": each,
                         "hours": round(sum(e["hours"] for e in each), 1),
                         "filament_g": round(sum(e["filament_g"] for e in each)),
                         "usd": round(sum(e["usd"] for e in each), 2), "trust": (rough or each)[0]["trust"],

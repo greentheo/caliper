@@ -73,3 +73,23 @@ setTimeout(() => {
 """)
     assert got == {"one": "patternBox", "clicked": ["stool"], "reached": True, "several": "", "none": [],
                    "release": "relBox", "relFromPart": "relBox"}, got
+
+
+def test_only_a_body_cut_to_fit_the_bed_is_pinned():
+    """Item 22: "2 pieces pinned together", when two printed sides were simply apart and nothing was cut."""
+    import trimesh
+
+    from caliper import printing
+
+    bed = (200.0, 200.0, 200.0)
+    a = trimesh.creation.box((20, 100, 100))
+    b = trimesh.creation.box((20, 100, 100))
+    b.apply_translation((400, 0, 0))                     # apart: 420 mm across a 200 mm bed, nothing joining them
+    apart = trimesh.util.concatenate([a, b])
+    parts = printing.split(apart, bed)
+    assert len(parts) >= 2 and not printing.pinned(parts), [p.metadata for p in parts]
+    bar = trimesh.creation.box((420, 60, 60))             # one body too long for the bed: cut, and pinned
+    cut = printing.split(bar, bed)
+    assert len(cut) >= 2 and printing.pinned(cut)
+    whole = printing.split(trimesh.creation.box((50, 50, 50)), bed)
+    assert len(whole) == 1 and not printing.pinned(whole)
