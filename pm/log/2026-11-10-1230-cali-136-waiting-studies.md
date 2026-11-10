@@ -1,0 +1,3 @@
+### 2026-11-10 · CALI-136 (#174) · Studies waiting their turn don't hold up a chat
+
+Studies wait their turn on a worker, and with 8 of them waiting a chat waited behind them. Long studies now have workers of their own (up to 32), and chats, questions and builds keep the 8. A study that's waiting says how long the one ahead has been running and how many others are waiting, every 30 seconds, naming no other design or part. It can't say when it will end, because nothing knows yet. A package or cut plan still holds its own design's lock while it waits, so a chat on that same design waits for it. The whole suite is CI's.
