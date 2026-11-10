@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import Optional
 
 import numpy as np
@@ -125,13 +126,17 @@ def _pins(mesh, axis: int, at: float):
 _SLICED: dict = {}
 #: CALI-104 (#97): slices started for a card that didn't wait, by the same key; their result lands in _SLICED
 _PENDING: set = set()
-#: a background slice that failed or timed out (#152 review): the cards take its rough number, said as rough and why,
-#: and stop asking; a caller that waits (the scorecard, the release) still slices again, as #140 asked
+#: a background slice that failed or timed out (#152 review), as ``(when, what to say)``: the cards take its rough
+#: number, said as rough and why, and stop asking for :data:`RETRY_AFTER` (#160: one timeout on a busy machine mustn't
+#: last until the server restarts); a caller that waits (the scorecard, the release) still slices again, as #140 asked
 _GAVE_UP: dict = {}
+#: seconds a remembered failure stands before one more background try: a slicer that always fails still starts rarely
+RETRY_AFTER = 600.0
 #: what a card shows while the slicer works: no number, never a stale or rough one as if final
 WORKING = {"pending": True, "hours": None, "filament_g": None, "usd": None, "trust": None,
            "from": "PrusaSlicer: working it out"}
-#: a slice in the background gives up sooner than one a caller waits on: a hung slicer is said, not waited on (#152)
+#: a slice in the background gives up sooner than one a caller waits on: a hung slicer is said, not waited on (#152).
+#: Measured from when its own slicer starts, so a slice waiting behind the worker's queue loses none of it (#160).
 BACKGROUND_TIMEOUT = 180.0
 _QUEUE = None
 
@@ -170,8 +175,9 @@ def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_IN
                slicer())
     if key in _SLICED:
         return dict(_SLICED[key])
-    if not wait and key in _GAVE_UP:
-        return dict(_GAVE_UP[key])
+    gave_up = _GAVE_UP.get(key) if not wait else None
+    if gave_up and time.monotonic() - gave_up[0] < RETRY_AFTER:
+        return dict(gave_up[1])
     if not wait and slicer():
         if key not in _PENDING:
             _PENDING.add(key)
@@ -182,19 +188,20 @@ def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_IN
             def later():
                 try:
                     got = _estimate(copy, material, volume_mm, infill, timeout=BACKGROUND_TIMEOUT)
-                    if got.pop("_retry", False):         # failed or hung: the card says so, once (#152 review)
-                        _GAVE_UP[key] = {**got, "slicer_failed": True}
+                    if got.pop("_retry", False):         # failed or hung: the card says so (#152 review)
+                        _GAVE_UP[key] = (time.monotonic(), {**got, "slicer_failed": True})
                     else:
                         _SLICED[key] = got
+                        _GAVE_UP.pop(key, None)
                 except Exception as e:  # noqa: BLE001 — a slice that crashed is said too, never restarted per ask
-                    _GAVE_UP[key] = {"hours": None, "filament_g": None, "usd": None, "trust": None,
-                                     "from": f"no estimate ({e})", "slicer_failed": True}
+                    _GAVE_UP[key] = (time.monotonic(), {"hours": None, "filament_g": None, "usd": None, "trust": None,
+                                                        "from": f"no estimate ({e})", "slicer_failed": True})
                 finally:
                     _PENDING.discard(key)
                     shutil.rmtree(keep, ignore_errors=True)
 
             _submit(later)
-        return dict(WORKING)
+        return dict(gave_up[1]) if gave_up else dict(WORKING)    # a retry shows what it had, not "working" again
     got = _estimate(stl_path, material, volume_mm, infill)
     if not got.pop("_retry", False):                  # a slicer that timed out isn't remembered (#140 review)
         _SLICED[key] = got
