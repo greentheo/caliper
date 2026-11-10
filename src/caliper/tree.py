@@ -115,6 +115,36 @@ def legend(parts: list[dict]) -> list[dict]:
     return list(seen.values())
 
 
+def layout(store: DesignStore) -> dict:
+    """How the tree shows the parts, for the parts there are now: ``{"order": [...], "parent": {child: parent}}``. A part with no place
+    yet comes last, and a part whose parent has gone comes back to the top."""
+    ids = [p.id for p in store.design.parts]
+    saved = store.design.part_tree or {}
+    order = [i for i in saved.get("order") or [] if i in ids]
+    return {"order": order + [i for i in ids if i not in order],
+            "parent": {c: p for c, p in (saved.get("parent") or {}).items() if c in ids and p in ids}}
+
+
+def set_layout(store: DesignStore, order: list, parent: dict) -> dict:
+    """Save where the parts sit in the tree. Display only (#94): it writes this and nothing else, so no part's id, file, version or
+    check moves. Raises ``ValueError`` for an order that isn't every part once, or a parent that would make a loop."""
+    ids = {p.id for p in store.design.parts}
+    if len(order) != len(ids) or set(order) != ids:
+        raise ValueError("that isn't every part once")
+    for child, up in parent.items():
+        if child not in ids or up not in ids:
+            raise ValueError(f"there's no part {child if child not in ids else up!r}")
+        seen, at = {child}, up
+        while at is not None:
+            if at in seen:
+                raise ValueError("a part can't go inside itself")
+            seen.add(at)
+            at = parent.get(at)
+    store.design.part_tree = {"order": list(order), "parent": dict(parent)}
+    store.save(touched=False)
+    return layout(store)
+
+
 def set_label(store: DesignStore, pid: str, label: str, piece: Optional[str] = None) -> str:
     """Rename a part, or one of its pieces (an empty name goes back to its id). The id never changes."""
     entry = store.design.part(pid)

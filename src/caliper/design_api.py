@@ -49,6 +49,11 @@ class ParamsSet(BaseModel):
     values: list[ParamSet]
 
 
+class TreeLayout(BaseModel):
+    order: list[str]                      # every part, once, in the order the tree shows them
+    parent: dict[str, str] = {}           # part -> the part it sits under, in the tree only (#94)
+
+
 class LabelSet(BaseModel):
     label: str = ""                       # "" goes back to its id
     piece: Optional[str] = None           # a piece of the part, or the part itself (CALI-102)
@@ -434,6 +439,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "shop_offers": clarify.offers(store),     # what the answers offered to add to the shop (CALI-124)
         "parts": parts,
         "legend": tree.legend(parts),          # what the tree's swatches mean (#94)
+        "tree": tree.layout(store),            # where the tree shows the parts: display only (#94, slice b)
         "mates": [{"id": m.id, "between": m.between, "kind": m.kind} for m in store.assembly.mates],
         "rules": [{"id": a.id, "expr": a.expr} for a in store.assembly.assertions],
         "report": report.to_dict() if report is not None else None,
@@ -709,6 +715,17 @@ def router():
                 raise HTTPException(422, str(e).strip("'\""))
             return {"version": got["version"], "said": got["said"], "warning": got["warning"], "notes": got["notes"],
                     "design": design_state(store)}
+
+    @r.post("/api/designs/{slug}/tree")
+    def set_tree(slug: str, req: TreeLayout):
+        """Move a part in the tree (#94): display only, so no part's id, file, version or check changes."""
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                tree.set_layout(store, req.order, req.parent)
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            return design_state(store)
 
     @r.post("/api/designs/{slug}/parts/{pid}/label")
     def set_part_label(slug: str, pid: str, req: LabelSet):
