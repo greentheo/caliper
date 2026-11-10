@@ -7,3 +7,4 @@ heading and sent messages to the other.
   race from #161's review (two designs can share a part's id and version).
 - Tests: tests/test_design_switch.py (9). Five mutants each fail. In the browser, on two scratch designs with the first held
   back 3 s: the page ended on the second, heading and dropdown agreeing.
+- **#173 review:** while a design loads the page isn't the old one: the new name at once, the model, tree and thread gone, "loading…", and the chat off until it lands, so a message can't go to a design other than the one on screen.

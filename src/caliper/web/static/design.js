@@ -14,6 +14,7 @@ const IN = 25.4;
 const S = {
   slug: null,          // the open design
   design: null,        // its last state from the server
+  opening: null,       // the design on its way, while it loads (#173)
   scope: null,         // the selected part (the chat is about it), or null = the whole design
   busy: false,         // a turn is in flight
   station: null,       // {run, index} when previewing a whittle station in the viewport
@@ -649,12 +650,35 @@ async function openDesign(slug) {
   S.slug = slug; S.scope = null; S.station = null;
   if (first) S.buildBubble = null;
   location.hash = encodeURIComponent(slug);
-  const got = await api('GET', `/api/designs/${slug}`);
+  if (first) showLoading(slug);
+  let got;
+  try { got = await api('GET', `/api/designs/${slug}`); } catch (e) { if (S.slug === slug) doneLoading(); throw e; }
   if (S.slug !== slug) return;                  // another design was chosen while this one loaded (#168)
   S.design = got;
-  if (first) { for (const m of meshes.values()) scene.remove(m); meshes.clear(); clearStation(); }
+  doneLoading();
   render();
   await syncParts(S.design, first);
+}
+// while a design loads the page isn't the old one: the new name, nothing of the old, and the chat off, so a message can't
+// go to a design other than the one on screen (#173)
+function showLoading(slug) {
+  S.opening = slug;
+  S.design = null;
+  for (const m of meshes.values()) scene.remove(m);
+  meshes.clear();
+  clearStation();
+  const pick = $('designPick').selectedOptions[0], name = pick && pick.value === slug ? pick.textContent : slug;
+  $('inspector').innerHTML = `<h2>${esc(name)}</h2><div class="muted small"><span class="spin"></span>loading…</div>`;
+  $('thread').innerHTML = '';
+  $('tree').hidden = true;
+  $('scopeRow').hidden = true;
+  $('viewHint').textContent = 'loading…';
+  $('msg').disabled = true; $('send').disabled = true;
+}
+function doneLoading() {
+  S.opening = null;
+  $('msg').disabled = false;
+  if (!S.busy) $('send').disabled = false;
 }
 
 async function refresh() {
@@ -915,7 +939,7 @@ function aboutPiece(text) {
   return piece ? `About the ${piece.name}: ${text}` : text;
 }
 async function send(text, scope) {
-  if (S.busy || !text.trim()) return;
+  if (S.busy || S.opening || !text.trim()) return;      // never to a design that isn't on screen yet (#173)
   if (!S.slug) return createDesign(text);
   S.busy = true; $('send').disabled = true;
   const live = liveTurn(text, scope);
@@ -932,6 +956,7 @@ async function send(text, scope) {
 }
 $('composer').onsubmit = (e) => {
   e.preventDefault();
+  if (S.opening) return;                        // what's typed stays
   const text = $('msg').value;
   $('msg').value = '';
   send(aboutPiece(text), S.scope);

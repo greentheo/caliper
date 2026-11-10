@@ -21,6 +21,8 @@ const log = [];
 const render = () => log.push(['render', S.design && S.design.slug]);
 const syncParts = async (d) => log.push(['sync', d.slug]);
 const clearStation = () => {};
+const showLoading = (slug) => { S.opening = slug; S.design = null; log.push(['loading', slug]); };
+const doneLoading = () => { S.opening = null; };
 const meshes = new Map(), scene = { add() {}, remove() {} };
 const location = {};
 const design = (slug) => ({ slug, parts: [] });
@@ -42,7 +44,7 @@ def test_the_slow_design_arrives_last_and_is_dropped():
         answer('slow', design('slow')); await a;
         return { open: S.slug, shown: S.design.slug, log };""")
     assert got["open"] == "quick" and got["shown"] == "quick"
-    assert got["log"] == [["render", "quick"], ["sync", "quick"]]
+    assert got["log"] == [["loading", "slow"], ["loading", "quick"], ["render", "quick"], ["sync", "quick"]]
 
 
 def test_back_to_the_first_design_shows_the_first_design():
@@ -136,3 +138,66 @@ def test_a_piece_failing_after_the_switch_says_nothing_about_the_new_design():
 def test_every_design_write_goes_through_the_guard():
     src = open(JS).read()
     assert re.search(r"^guardDesign\(S\);$", src, re.M)
+
+
+# --- #173 review: while it loads --------------------------------------------------------------------------------------
+_LOADING = """
+const S = { slug: 'old', scope: null, station: null, design: { slug: 'old', parts: [] }, opening: null, busy: false };
+const el = () => ({ innerHTML: '', hidden: false, textContent: '', disabled: false });
+const parts = { designPick: { selectedOptions: [{ value: 'new', textContent: 'New <stool>' }] }, inspector: el(), thread: el(), tree: el(),
+                scopeRow: el(), viewHint: el(), msg: el(), send: el() };
+const $ = (id) => parts[id];
+const esc = (s) => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const meshes = new Map([['p', {}]]), removed = [], scene = { remove: (m) => removed.push(m) };
+const clearStation = () => {};
+"""
+
+
+def test_the_new_design_s_name_goes_up_at_once_and_nothing_of_the_old_stays():
+    got = _run(("showLoading", "doneLoading"), """S.slug = 'new'; showLoading('new');
+        return { h: parts.inspector.innerHTML, design: S.design, thread: parts.thread.innerHTML, meshes: meshes.size,
+                 msg: parts.msg.disabled, send: parts.send.disabled, tree: parts.tree.hidden };""", _LOADING)
+    assert "New &lt;stool&gt;" in got["h"] and "loading" in got["h"]
+    assert got["design"] is None and got["thread"] == "" and got["meshes"] == 0 and got["tree"] is True
+    assert got["msg"] is True and got["send"] is True
+
+
+def test_the_chat_comes_back_when_it_lands():
+    got = _run(("showLoading", "doneLoading"), """S.slug = 'new'; showLoading('new'); doneLoading();
+        return { msg: parts.msg.disabled, send: parts.send.disabled, opening: S.opening };""", _LOADING)
+    assert got == {"msg": False, "send": False, "opening": None}
+
+
+def test_the_send_stays_off_while_a_message_is_going():
+    got = _run(("showLoading", "doneLoading"), """S.busy = true; showLoading('new'); doneLoading();
+        return { send: parts.send.disabled };""", _LOADING)
+    assert got == {"send": True}
+
+
+_SEND = """
+const S = { slug: 'new', opening: 'new', busy: false };
+const posts = [];
+const liveTurn = () => ({ step() {}, fail() {} });
+const api = async (m, u, b) => { posts.push([u, b.message]); return { job_id: 'j' }; };
+const follow = async () => {}, refresh = async () => {}, createDesign = () => {};
+const $ = () => ({ disabled: false });
+"""
+
+
+def test_a_held_message_can_t_go_to_a_design_not_on_screen():
+    got = _run(("send",), """await send('make it taller', null);
+        const held = posts.length;
+        S.opening = null;
+        await send('make it taller', null);
+        return { held, after: posts };""", _SEND)
+    assert got == {"held": 0, "after": [["/api/designs/new/chat", "make it taller"]]}
+
+
+def test_pieces_don_t_start_for_a_design_that_was_left():
+    got = _run(("syncParts",), """let pieces = 0;
+        const d = { parts: [{ id: 'p', version: 1, stl_url: 'x' }] };
+        const go = syncParts(d, false);
+        S.slug = 'b';
+        later[0](buf); await go;
+        return { asked };""", _LOADS.replace("const syncPieces = async () => {};", "let asked = 0; const syncPieces = async () => { asked += 1; };"))
+    assert got == {"asked": 0}
