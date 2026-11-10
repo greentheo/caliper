@@ -28,6 +28,7 @@ import re
 from typing import Optional
 
 from .design import DesignStore
+from .fasteners import PILOT_BIT
 
 IN = 25.4
 WOOD = ("plywood", "lumber")
@@ -176,6 +177,8 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
     tools = ["a pencil and a long ruler", "sandpaper"]
     hand = set(S.read().get("hand") or [])
     tools += [t for t in ("jigsaw", "drill") if t in hand or not hand]
+    if any(r for g in shop["groups"] for r in g["rows"] if "screw" in r["item"]):
+        tools.append(f"a {PILOT_BIT} drill bit for the pilot holes")      # (#64 item 8)
     tools += ["two clamps", "safety glasses (everyone)", "ear defenders (a jigsaw is loud)",
               "a grown-up for the saw and the drill"]
     pages.append({"title": "Get your things", "say": "Tick each one off when you have it.",
@@ -228,8 +231,8 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
             else:
                 n_screws = sum(screws_for(joints[tuple(sorted((pc["key"], a)))]) for a in against)
                 say = (f"Put glue on the edges where the {words[pc['key']]} touches {_together(against, wood, words)}. "
-                       f"A grown-up clamps it in place and drives "
-                       f"in {n_screws} screws with the drill, while you stand an arm's length behind with your safety "
+                       f"A grown-up clamps it in place, drills a {PILOT_BIT} pilot hole for each screw first so the "
+                       f"wood doesn't split, and drives in {n_screws} screws with the drill, while you stand an arm's length behind with your safety "
                        f"glasses and ear defenders on.")
             img = f"kids/step-{len(pages) + 1:02d}.png"
             with open(os.path.join(root, img), "wb") as f:
