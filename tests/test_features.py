@@ -501,3 +501,24 @@ def test_a_hit_stays_a_success(store):
 def test_what_can_t_be_measured_doesn_t_fail_the_turn_or_claim_a_hit(store):
     got = _refine(store, _FILLET.format(at=_TOP_FRONT), message="About this edge: x: make it red")
     assert got.ok and features.NOT_MEASURED in got.reply and "Checked:" not in got.reply
+
+
+def test_a_round_elsewhere_isn_t_a_fillet_on_the_picked_edge():
+    """The picked edge chamfered away, and a round put on another edge: the edge is gone, but no fillet is on it."""
+    plain = _box_with()
+    before = features.of_solid(plain)
+    e = _edge_at(before, at=_TOP_FRONT)
+    after = features.of_solid(plain.edges(cq.selectors.NearestToPointSelector(_TOP_FRONT)).chamfer(1)
+                              .edges(cq.selectors.NearestToPointSelector(_TOP_BACK)).fillet(3))
+    got = features.landed(before, after, {"kind": "edge", "id": e["id"]}, "x: fillet this 3 mm", False)
+    assert got == {"said": "The edge you picked has changed, but I can't find a fillet on it.", "landed": False}
+
+
+def test_a_hole_through_another_face_of_the_same_facing_isn_t_through_the_picked_one():
+    """Two tops, one higher: the hole's axis is parallel to the picked face's normal but misses that face."""
+    stepped = cq.Workplane("XY").box(40, 20, 10).union(cq.Workplane("XY").box(40, 20, 20).translate((40, 0, 5)))
+    before = features.of_solid(stepped)
+    (low,) = [f for f in before["faces"] if f["type"] == "plane" and f["centre"][2] == pytest.approx(5) and f["centre"][0] < 20]
+    after = features.of_solid(stepped.faces(">Z").workplane().center(40, 0).hole(10))   # over the high step, at x 40
+    got = features.landed(before, after, {"kind": "face", "id": low["id"]}, "x: put a hole here", False)
+    assert got == {"said": "No new hole goes through the face you picked.", "landed": False}

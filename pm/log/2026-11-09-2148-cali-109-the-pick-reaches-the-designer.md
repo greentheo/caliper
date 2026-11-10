@@ -10,4 +10,4 @@ clarify what I'm talking about?"
 - What can't be measured says so, and neither fails the turn nor claims a hit.
 - The page sends the pick with the message (`pick: {kind, id}`).
 - No live designer run: "fillet this 1/2 in" on the stool waits for #155 and Theo's word.
-- Tests: tests/test_features.py (60, the designer stubbed). Seven mutants each fail.
+- Tests: tests/test_features.py (62, the designer stubbed). Seven mutants each fail.
