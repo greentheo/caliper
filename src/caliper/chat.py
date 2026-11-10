@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from .design import DesignStore
+from .errors import scrubbed
 from .spec import Assertion, Spec
 
 DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
@@ -410,7 +411,7 @@ def classify(store: DesignStore, message: str, scope: Optional[str] = None, *,
         try:
             return llm_classify(store, message, scope, client=client)
         except Exception as e:  # noqa: BLE001 — routing must degrade, not crash the turn
-            print(f"[chat] LLM routing failed → offline: {type(e).__name__}: {e}", file=sys.stderr)
+            print(f"[chat] LLM routing failed → offline: {type(e).__name__}: {scrubbed(e)}", file=sys.stderr)
     return offline_classify(store, message, scope)
 
 
@@ -461,7 +462,7 @@ def _measure_design(store: DesignStore):
     try:
         return store.evaluate(tolerant=True)
     except Exception as e:  # noqa: BLE001 — a measurement failure must not swallow the user's change
-        return None, {"<design>": f"{type(e).__name__}: {e}"}
+        return None, {"<design>": f"{type(e).__name__}: {scrubbed(e)}"}
 
 
 def _design_line(report) -> str:
@@ -657,7 +658,7 @@ def _offer_promotion(store: DesignStore, part_id: str, feedback: str, *, use_llm
     try:
         got = promote.draft(store, part_id, feedback, use_llm=use_llm, client=client, drafter=drafter)
     except Exception as e:  # noqa: BLE001 — the user's edit already landed; an offer is a bonus
-        _emit(events, on_event, "error", f"could not draft an assertion: {e}", part=part_id)
+        _emit(events, on_event, "error", f"could not draft an assertion: {scrubbed(e)}", part=part_id)
         return None, ""
 
     if got.proposal is not None:
@@ -808,8 +809,8 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
     try:
         rec = carve.study(store, part_id, emit=lambda k, t="", **d: _emit(events, on_event, k, t, part=part_id, **d))
     except (ValueError, ImportError) as e:
-        return TurnResult(action="carve", ok=False, part=part_id, events=events, error=str(e),
-                          reply=f"I couldn't carve it: {e}.")
+        return TurnResult(action="carve", ok=False, part=part_id, events=events, error=scrubbed(e),
+                          reply=f"I couldn't carve it: {scrubbed(e)}.")
     from . import answers, consistency, verdicts
 
     best = next((x for x in rec["stations"] if x["index"] == rec["best"]), None)  # search: the printed part's lightest
@@ -856,8 +857,8 @@ def picture_part(store: DesignStore, part_id: str, subject: str, where: str = ""
         got = pictures.put(store, part_id, shape, subject=subject, where=where, strength=strength,
                            emit=lambda k, t="", **d: _emit(events, on_event, k, t, part=part_id, **d))
     except (ValueError, ImportError) as e:
-        return TurnResult(action="picture", ok=False, part=part_id, events=events, error=str(e),
-                          reply=f"I couldn't put a {subject} on it: {e}.")
+        return TurnResult(action="picture", ok=False, part=part_id, events=events, error=scrubbed(e),
+                          reply=f"I couldn't put a {subject} on it: {scrubbed(e)}.")
     from . import verdicts
 
     checked = got.get("safety") is not None            # one verdict (CALI-112): only a ✓ with nothing over it is ok
@@ -1017,7 +1018,7 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
 
     report, part_errors = _measure_design(store)
     for pid, err in part_errors.items():
-        lines.append(f"  ⚠ {pid} won't build: {err}")
+        lines.append(f"  ⚠ {pid} won't build: {scrubbed(err)}")
     if report is not None:
         failing = _fail_lines(report)
         lines.append("")
@@ -1132,7 +1133,7 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
         lines.append(_design_line(after).replace("measures green", "still measures green"))
     for pid, err in part_errors.items():
         if pid != part_id:
-            lines.append(f"⚠ {pid} won't build: {err}")
+            lines.append(f"⚠ {pid} won't build: {scrubbed(err)}")
     return "\n".join(lines)
 
 
@@ -1196,8 +1197,8 @@ def plan_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = 
     try:
         before, after = P.revise(store, message, client=client)
     except Exception as e:  # noqa: BLE001 — a change that can't be made or used leaves the plan as it was
-        return TurnResult("plan", f"I couldn't change the plan that way: {e}. It's as it was.", ok=False,
-                          events=events, error=str(e))
+        return TurnResult("plan", f"I couldn't change the plan that way: {scrubbed(e)}. It's as it was.", ok=False,
+                          events=events, error=scrubbed(e))
     inches = store.design.display_units == "in"
     said = P.changes(before, after, inches)
     if not said:
@@ -1237,7 +1238,7 @@ def _remove_or_restore(store: DesignStore, message: str, scope: Optional[str], *
         try:
             got = trash.restore(store, pid=pid)
         except ValueError as e:
-            return TurnResult(action="restore", ok=False, part=pid, events=events, reply=f"I couldn't put it back: {e}.")
+            return TurnResult(action="restore", ok=False, part=pid, events=events, reply=f"I couldn't put it back: {scrubbed(e)}.")
         report, part_errors = _measure_design(store)
         return TurnResult(action="restore", ok=True, part=pid, events=events, report=report, part_errors=part_errors,
                           reply=f"Put back the {pid.replace('_', ' ')} ({pid}), as it was."
@@ -1271,7 +1272,7 @@ def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Op
             got = grain.answer(store, aw["part"], aw["piece"], message)
         except ValueError as e:                        # the part or sheet has gone since it asked
             return TurnResult(action="grain", ok=False, part=aw["part"], events=kw["events"],
-                              reply=f"I couldn't keep that grain: {e}.")
+                              reply=f"I couldn't keep that grain: {scrubbed(e)}.")
         return None if got is None else _grain_reply(got)
     yes = awaiting.reads(message)
     awaiting.clear(store)
@@ -1338,7 +1339,7 @@ def _grain_said(store: DesignStore, message: str, scope: Optional[str]) -> Optio
     try:
         got = grain.from_chat(store, message, scope)
     except ValueError as e:
-        return TurnResult(action="grain", reply=f"I couldn't keep that grain: {e}.", ok=False)
+        return TurnResult(action="grain", reply=f"I couldn't keep that grain: {scrubbed(e)}.", ok=False)
     if got is None:
         return None
     if got.get("ask"):                                 # "which way?": the reply answers for this piece (#153)
@@ -1480,7 +1481,7 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
             said = goals.reply(goals.update(store, message, use_llm=use_llm, client=client))
         except Exception as e:  # noqa: BLE001 — the change landed; the checks catch up next turn
             said = ""
-            _emit(events, on_event, "error", f"couldn't update the scorecard's checks: {e}")
+            _emit(events, on_event, "error", f"couldn't update the scorecard's checks: {scrubbed(e)}")
         if said:
             result.reply = f"{result.reply}\n\n{said}" if result.reply else said
     _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)

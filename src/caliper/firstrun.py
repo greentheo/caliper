@@ -26,6 +26,7 @@ from typing import Callable, Optional
 
 from . import chat, goals, load_study, patterns
 from .design import DesignStore
+from .errors import scrubbed
 
 #: A reply leads with what fails, then what holds, then what's still to check.
 #: Worst first (#132 review): a fail, then a warning, then what holds, so the first reply's two lines never drop a
@@ -70,8 +71,8 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
     try:
         steps["goals"] = goals.reply(goals.update(store, SAID, use_llm=use_llm, client=client)) or "unchanged"
     except Exception as e:  # noqa: BLE001 — it builds without them; the cards say nothing's checked
-        steps["goals"] = f"failed: {e}"
-        emit("error", f"couldn't write down what it has to do: {e}")
+        steps["goals"] = f"failed: {scrubbed(e)}"
+        emit("error", f"couldn't write down what it has to do: {scrubbed(e)}")
 
     held = _plan(store, steps, emit, use_llm=use_llm, client=client, author=author)
     if held is not None:                       # a plan of several parts: the person reviews it first (CALI-35)
@@ -117,8 +118,8 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
                 (f"not checked: {c['why']}" for c in run.get("cases") or []
                  if (c.get("fea") or {}).get("supported") is False and c.get("why")), "no verdict")
         except Exception as e:  # noqa: BLE001 — the card says it's not checked yet, with the button
-            steps["strength"] = f"failed: {e}"
-            emit("error", f"couldn't check it holds: {e}")
+            steps["strength"] = f"failed: {scrubbed(e)}"
+            emit("error", f"couldn't check it holds: {scrubbed(e)}")
 
     try:
         flat = bool(patterns.pieces(store, pid))
@@ -130,8 +131,8 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
             rec = patterns.make(store, pid)
             steps["patterns"] = f"{rec['pages']} pages"
         except Exception as e:  # noqa: BLE001
-            steps["patterns"] = f"failed: {e}"
-            emit("error", f"couldn't draw the patterns: {e}")
+            steps["patterns"] = f"failed: {scrubbed(e)}"
+            emit("error", f"couldn't draw the patterns: {scrubbed(e)}")
     else:
         steps["patterns"] = "no flat pieces"
 
@@ -144,8 +145,8 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
             s_ = card["summary"]
             steps["score"] = f"{s_['pass']} pass, {s_['fail']} fail"
         except Exception as e:  # noqa: BLE001 — the card offers Score it
-            steps["score"] = f"failed: {e}"
-            emit("error", f"couldn't score it: {e}")
+            steps["score"] = f"failed: {scrubbed(e)}"
+            emit("error", f"couldn't score it: {scrubbed(e)}")
     else:
         steps["score"] = "nothing to hold it to"
 
@@ -178,8 +179,8 @@ def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, cli
     try:
         plan = P.propose(store, client=client)
     except Exception as e:  # noqa: BLE001 — a plan that can't be made or used: build it as one part, and say why
-        steps["plan"] = f"planning it in several parts didn't work ({e}): I built it as one"
-        emit("error", f"couldn't plan its parts: {e}")
+        steps["plan"] = f"planning it in several parts didn't work ({scrubbed(e)}): I built it as one"
+        emit("error", f"couldn't plan its parts: {scrubbed(e)}")
         return None
     if len(P.buildable(plan)) <= 1:            # what it stands on, or what you have, doesn't stop it for review (#117)
         gone = P.dropped_line(plan)

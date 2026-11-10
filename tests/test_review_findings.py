@@ -104,3 +104,17 @@ def test_a_panels_glue_line_comes_from_its_material():
     assert "foam-safe adhesive" in foam and "trim the inside corners" in foam
     other = release.fasten_panels([{"material": "acrylic"}])
     assert "adhesive" not in other and "glue" not in other.lower() and "Fasten them" in other, other
+
+
+def test_the_shopping_allowance_says_foam_safe_only_where_foam_is_glued(tmp_path, monkeypatch):
+    """#215 review: the hardware allowance said "foam-safe adhesive" whatever the part was made of."""
+    from caliper import construction as C
+    from caliper import release
+    from caliper.design import DesignStore
+
+    store = DesignStore.create("a box", base=str(tmp_path))
+    made = {"foamy": [{"kind": "sheet", "material": "xps"}], "plain": [{"kind": "sheet", "material": "plywood"}]}
+    monkeypatch.setattr(C, "declared", lambda s, pid, *a, **k: {"construction": made[pid]})
+    rows = release.shopping(store, {}, {}, {p: [{"label": "glue, screws & hardware"}] for p in made}, {})
+    said = [r["for"] for g in rows["groups"] for r in g["rows"] if "hardware" in r["item"]]
+    assert len(said) == 2 and "foam-safe adhesive" in said[0] and "foam" not in said[1] and "screws" in said[1], said

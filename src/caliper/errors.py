@@ -45,6 +45,11 @@ JOBS = {"chat": "a chat turn", "clarify": "a question about the design", "firstr
 #: A design's folder or address names it, and a design's name is the person's words (its slug comes from them).
 _DESIGN = re.compile(r"designs/[^/\s'\"]+")
 _HOMES = re.compile(r"/(?:Users|home)/[^/\s'\"]+")
+#: API keys and tokens by their shape: a key must never reach a report or the page (#215 review).
+_SECRETS = re.compile(r"\b(?:sk-[A-Za-z0-9_\-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
+                      r"|xox[abprs]-[A-Za-z0-9\-]{10,}|AKIA[0-9A-Z]{16})")
+#: ... and by where they're set, whatever they look like.
+_SECRET_ENV = re.compile(r"KEY|TOKEN|SECRET|PASSWORD", re.I)
 
 
 def job_where(kind: str) -> str:
@@ -54,7 +59,10 @@ def job_where(kind: str) -> str:
 def scrub(text: str) -> str:
     """Your home folder as ``~`` and any design's name as ``<design>``, so a report carries neither your user
     name nor anything you called a design."""
-    text = text or ""
+    text = _SECRETS.sub("<secret>", text or "")
+    for name, value in os.environ.items():
+        if _SECRET_ENV.search(name) and len(value) >= 12:
+            text = text.replace(value, "<secret>")
     custom = os.environ.get("CALIPER_DESIGNS")
     if custom:
         text = re.sub(re.escape(custom.rstrip("/")) + r"/[^/\s'\"]+", "designs/<design>", text)
@@ -63,6 +71,11 @@ def scrub(text: str) -> str:
         text = text.replace(home, "~")
     text = _HOMES.sub("~", text)                             # anyone's home folder, not just this one (CALI-86)
     return _DESIGN.sub("designs/<design>", text)
+
+
+def scrubbed(e) -> str:
+    """An exception (or its text) as a person or a report may read it (#215 review)."""
+    return scrub(str(e))
 
 
 def record(where: str, error: str, trace: str = "") -> dict:

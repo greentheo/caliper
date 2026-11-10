@@ -249,7 +249,7 @@ class JobRunner:
                 kept = getattr(e, "_kept", None) or errors.record_exception(errors.job_where(job.kind), e)
                 job.error_id = kept["id"]
                 job.status = "error"
-                job.emit("error", job.error, trace=tail[-1] if tail else "")
+                job.emit("error", job.error, trace=errors.scrub(tail[-1]) if tail else "")
             finally:
                 job.finished = time.time()
 

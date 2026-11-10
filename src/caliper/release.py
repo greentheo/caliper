@@ -45,6 +45,7 @@ from . import tree
 from . import materials as M
 from . import verdicts
 from .design import DesignStore
+from .errors import scrubbed
 
 #: The order a part goes together in, by the layers ``construction._layer`` sorts its pieces into.
 BUILD_ORDER = ["tubes", "gussets", "jacks", "floor", "skeleton", "panels", "shell", "patches"]
@@ -707,8 +708,10 @@ def shopping(store: DesignStore, plans: dict, bom: dict, lumps: dict, ctx: dict)
         for row in ls:
             if "plate" in (row.get("label") or ""):
                 continue
+            foam = any(isinstance(it, dict) and it.get("material") in FOAMS   # glue only where foam is glued (#215 review)
+                       for it in C.declared(store, pid).get("construction") or [])
             add("hardware", f"{row['label']}", "allowance", P["hardware_allowance"],
-                "foam-safe adhesive, screws, tape, bolts and fender washers")
+                ("foam-safe adhesive, " if foam else "") + "screws, tape, bolts and fender washers")
     if ctx.get("jacks"):
         rate = ctx.get("jack_rating")
         add("hardware", "trailer stabilizer jack" + (f", rated {rate:.0f} lb or more" if rate else ""),
@@ -769,7 +772,7 @@ def print_pdf(html_path: str, pdf_path: str, timeout: float = 120.0) -> Optional
                             "file://" + os.path.abspath(html_path)],
                            capture_output=True, timeout=timeout)
         except (subprocess.TimeoutExpired, OSError) as e:
-            return f"Chrome couldn't print it: {e}"
+            return f"Chrome couldn't print it: {scrubbed(e)}"
     return None if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0 else "Chrome printed nothing"
 
 
@@ -1278,7 +1281,7 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
         kids = None
         kept = errors.record_exception("a build package's kids' book", e)
         kids_error = {"error": kept["error"], "error_id": kept["id"]}
-        emit("error", f"couldn't make the kids' book: {e}")
+        emit("error", f"couldn't make the kids' book: {scrubbed(e)}")
     else:
         kids_error = None
 

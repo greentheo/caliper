@@ -256,3 +256,72 @@ def test_a_failed_chat_turns_reply_is_the_plain_sentence_with_its_id(tmp_path, m
     reply = [x for x in DesignStore.load(slug).log() if x.get("kind") == "reply"][-1]["reply"]
     assert reply == errors.plain({"id": j.error_id}) and "secret" not in reply, reply
     assert len([e for e in errors.recent(50) if e["id"] == j.error_id]) == 1 and len(errors.recent(50)) == 1   # kept once
+
+
+@pytest.mark.parametrize("secret", ["sk-ant-api03-AbCdEf0123456789_xyz-ABCDEFG", "sk-proj-abcdef0123456789abcdef",
+                                    "ghp_abcdefghijklmnopqrstuvwxyz0123456789", "github_pat_11ABCDE0_abcdefghij1234567890",
+                                    "gho_abcdefghijklmnopqrstuvwxyz0123456789", "xoxb-1234567890-abcdefghij",
+                                    "AKIAIOSFODNN7EXAMPLE"])
+def test_a_key_or_token_never_reaches_a_report_or_the_page(secret):
+    """#215 review: errors.scrub covered home folders and design names only: a key in an exception's text went
+    into job.error and the stored report."""
+    said = errors.scrub(f"401 from the API with key {secret} (try again)")
+    assert secret not in said and "<secret>" in said and said.endswith("(try again)"), said
+
+
+def test_a_key_set_in_the_environment_is_scrubbed_whatever_it_looks_like(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "plainlookingvalue123")
+    assert "plainlookingvalue123" not in errors.scrub("sent plainlookingvalue123 to the API")
+
+
+def test_ordinary_words_are_left_alone():
+    text = "ValueError: the task-ant skeleton and sk-8 board don't fit"
+    assert errors.scrub(text) == text
+
+
+KEY = "sk-ant-api03-AbCdEf0123456789_xyz"
+
+
+def test_the_live_event_through_the_jobs_route_carries_no_path_and_no_key(tmp_path, monkeypatch):
+    """#215 review: job.error was scrubbed, but the event beside it carried the raw last line of the trace."""
+    from fastapi.testclient import TestClient
+
+    from caliper import jobs, server
+
+    monkeypatch.setenv("CALIPER_ERRORS", str(tmp_path / "errors.jsonl"))
+    home = os.path.expanduser("~")
+
+    def boom(job):
+        raise ValueError(f"{home}/secret/path.py with {KEY}")
+
+    j = jobs.RUNNER.submit("carve", boom, lock="design:scrub")
+    _wait(j)
+    got = TestClient(server.create_app()).get(f"/api/jobs/{j.id}").json()
+    text = str(got)
+    assert home not in text and KEY not in text and "secret/path.py" in text, text
+    assert [e for e in got["events"] if e["kind"] == "error"][0]["trace"].startswith("ValueError: ~/secret/path.py")
+
+
+def test_a_raw_exception_in_a_first_build_or_a_chat_reply_is_scrubbed(tmp_path, monkeypatch):
+    from caliper import carve, chat, firstrun, goals
+    from caliper.design import DesignStore
+
+    store = DesignStore.create("a stool", base=str(tmp_path))
+    home = os.path.expanduser("~")
+
+    def boom(*a, **k):
+        raise ValueError(f"{home}/x with {KEY}")
+
+    heard = []
+    monkeypatch.setattr(goals, "update", boom)
+    monkeypatch.setattr(firstrun, "_author", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop here")), raising=False)
+    try:
+        firstrun.build(store, emit=lambda k, t="", **d: heard.append(t), strength=False, use_llm=False)
+    except Exception:  # noqa: BLE001 — only what it said before stopping is under test
+        pass
+    told = [t for t in heard if t.startswith("couldn't write down")]
+    assert told and KEY not in told[0] and home not in told[0], heard
+    monkeypatch.setattr(carve, "study", boom)
+    store.write_part("p", "def build(params):\n    return None\n", intent="x")
+    got = chat.carve_part(store, "p")
+    assert KEY not in got.reply and home not in got.reply and KEY not in got.error, got.reply
