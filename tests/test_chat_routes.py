@@ -135,3 +135,25 @@ def test_the_prompt_has_the_one_part_and_question_rules():
     s = chat._CLASSIFY_SYSTEM
     assert "on a design with one part changes that part" in s
     assert "A question stays a question" in s and "explain the build order" in s
+
+
+# --- #212, round 2: a words request whatever verb starts it; a size added is a revision ----------------------------
+
+@pytest.mark.parametrize("message", ["put it in plain English", "use plain words", "give it to me in plain English",
+                                     "turn that into plain English", "say it in simpler words", "put that in plain words"])
+@pytest.mark.parametrize("scoped", [True, False])
+def test_a_words_request_is_a_question_whatever_verb_starts_it(stool, message, scoped):
+    got = chat.offline_classify(stool, message, P if scoped else None)
+    assert got.action == "answer", (message, scoped, got)
+
+
+@pytest.mark.parametrize("message", ["add 2 inches to the height", "I need it 2 in wider", "add 10 mm to the depth"])
+@pytest.mark.parametrize("scoped", [True, False])
+def test_a_size_added_to_the_one_part_is_a_revision_not_a_new_part(stool, message, scoped):
+    got = chat.offline_classify(stool, message, P if scoped else None)
+    assert (got.action, got.part) == ("refine", P), (message, scoped, got)
+
+
+def test_a_words_request_with_a_size_in_it_is_still_the_change(stool):
+    got = chat.offline_classify(stool, "make it 2 in taller and put it in plain English", None)
+    assert (got.action, got.part) == ("refine", P), got

@@ -74,10 +74,16 @@ _CHANGE_VERBS = (r"(?:make|change|add|remove|move|use|set|put|cut|build|turn|swa
 #: the carriage"), and a question stays a question.
 _CHANGE = re.compile(r"(?:^|[,;.!]\s*(?:and\s+|then\s+|but\s+)?|\b(?:and|then|also|just|now)\s+)(?:please\s+)?"
                      + _CHANGE_VERBS + r"\b", re.I)
+#: (#212, round 2) a request for other words, whatever verb starts it: "put it in plain English", "use plain words",
+#: "turn that into plain English". A question, unless it also asks for a size or a direction.
+_WORDS = re.compile(r"\b(?:plain (?:english|words|language)|(?:simpler|plainer) (?:words|terms|language)|eli5)\b", re.I)
+#: (#212, round 2) a size added to what's there is a revision: "add 2 inches to the height", "I need it 2 in wider".
+_ADD_SIZE = re.compile(r"\badd\s+(?:another\s+)?\d[\d./ ]*\s*(?:in|inch|inches|mm|cm|ft|feet|foot|\")(?=\W|$)"
+                       r"|\bneed\s+(?:it|this|that|them)\b", re.I)
 #: (#212) a change to what's there: "make it wider", "use 1/2 in plywood"; not "make a bench", nor "add …".
 _MODIFY = re.compile(r"(?:^|[,;.!]\s*(?:and\s+|then\s+)?|\b(?:and|then|also|just|now)\s+)(?:please\s+)?"
                      r"(?:make(?!\s+(?:me\s+)?(?:a|an|another|some|new|second|one more)\b)|change|remove|move|use|set"
-                     r"|turn|swap|replace|widen|lengthen|shorten|thicken|raise|lower)\b", re.I)
+                     r"|turn|swap|replace|widen|lengthen|shorten|thicken|raise|lower)\b|" + _ADD_SIZE.pattern, re.I)
 #: (#65 item 3) "make it look like X": a question, answered with the picture offered; nothing changes.
 _LOOKS_LIKE = re.compile(r"\bmake\s+(?:it|this|that|them|the\s+\w+)\s+look\s+like\s+(?:a\s+|an\s+|the\s+)?"
                          r"(?P<subject>[\w\-' ]{2,40}?)\s*[.!]?$", re.I)
@@ -156,6 +162,8 @@ def _is_question(message: str) -> bool:
     w = _words(msg)
     if _EXPLAIN.search(msg) and not _CHANGE.search(msg):
         return True                                  # a question stays a question, whatever words are in it (#212)
+    if _WORDS.search(msg) and not _MEASURE.search(msg) and not _DIRECTION.search(msg):
+        return True                                  # other words, whatever verb asks for them (#212, round 2)
     return bool(w) and w[0] in _QUESTION_LEAD
 
 
@@ -281,7 +289,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
     if question:
         return Intent(action="answer", part=hit, note="reads as a question")
 
-    wants_new = bool(_NEW_THING.search(message or ""))
+    wants_new = bool(_NEW_THING.search(message or "")) and not _ADD_SIZE.search(message or "")   # a size added: a revision
     if not wants_new and len(ids) == 1 and _MODIFY.search(message or ""):
         # "make it 2 in wider" on a one-part design is that part, not a new one named "part" (#65)
         return Intent(action="refine", part=ids[0], note="a change, and the design has one part")
