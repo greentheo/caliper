@@ -132,38 +132,34 @@ def _shape(g) -> tuple:
     return (round(float(abs(m.volume)), 1), tuple(round(float(v), 2) for v in m.bounds.ravel()))
 
 
-def _probe(name: str, asked_mm: float, geometry) -> str:
-    """What the built part shows of a number where it can be measured (#147 review, #107's fillet: 12.7 asked, 6.3
-    built): a fillet's or a hole's radius from its solid's cylinders, a wall's thinnest measure. "" where they agree."""
-    from . import measure
-
+def _radii(geometry) -> set:
+    """The radii of a solid's cylinders, in mm: the fillets and holes it has."""
     try:
-        solid = geometry.solid
-        solid = solid.val() if hasattr(solid, "val") else solid
-    except Exception:  # noqa: BLE001
-        solid = None
-    lname = name.lower()
-    if solid is not None and ("fillet" in lname or "hole" in lname):
         from OCP.BRepAdaptor import BRepAdaptor_Surface  # type: ignore
 
-        radii = [BRepAdaptor_Surface(f.wrapped).Cylinder().Radius() for f in solid.Faces() if f.geomType() == "CYLINDER"]
-        if not radii:
-            return f"its shape changed; whether its {name} is exactly {asked_mm:g} mm isn't measured"
-        want = asked_mm / 2 if re.search(r"_d$|diameter|dia\b", lname) else asked_mm
-        got = min(radii, key=lambda r: abs(r - want))
-        if abs(got - want) > max(0.02 * want, 0.01):
-            built = got * 2 if want != asked_mm else got
-            return f"asked {asked_mm:g} mm, built {built:.3g} mm (the closest {'hole' if 'hole' in lname else 'fillet'})"
+        solid = geometry.solid
+        solid = solid.val() if hasattr(solid, "val") else solid
+        return {round(BRepAdaptor_Surface(f.wrapped).Cylinder().Radius(), 2) for f in solid.Faces() if f.geomType() == "CYLINDER"}
+    except Exception:  # noqa: BLE001 — not measured, so nothing's said
+        return set()
+
+
+def _probe(name: str, asked_mm: float, geometry, before) -> str:
+    """What the built part shows of a number, only where the measurement is that number's own (#107's fillet: 12.7 asked,
+    6.3 built; #171 review: "built 3 mm" named the mesh openings' corners, and "thinnest wall" a feathered lip elsewhere).
+    A fillet's or hole's radius that appeared when this one number changed is its own. Anything else says nothing."""
+    lname = name.lower()
+    if "fillet" not in lname and "hole" not in lname or before is None:
         return ""
-    if "wall" in lname or lname.endswith("_t") or "thick" in lname:
-        try:
-            got = measure.min_wall_thickness(geometry)
-        except Exception:  # noqa: BLE001
-            return ""
-        if got < asked_mm * 0.98:
-            return f"its thinnest wall is {got:.3g} mm, not {asked_mm:g}: whether this {name} is exactly that isn't measured"
+    made = _radii(geometry) - _radii(before)
+    if not made:
         return ""
-    return f"its shape changed; whether its {name} is exactly {asked_mm:g} mm isn't measured"
+    want = asked_mm / 2 if re.search(r"_d$|diameter|dia\b", lname) else asked_mm
+    got = min(made, key=lambda r: abs(r - want))
+    if abs(got - want) <= max(0.02 * want, 0.01):
+        return ""
+    built = got * 2 if want != asked_mm else got
+    return f"asked {asked_mm:g} mm, built {built:.3g} mm (the closest {'hole' if 'hole' in lname else 'fillet'})"
 
 
 def _to_script(e: dict, value: float, unit: Optional[str]) -> tuple[float, str, list[str]]:
@@ -211,11 +207,20 @@ def set_values(store: DesignStore, pid: str, changes: list[dict]) -> dict:
     names = [c["name"] for c in changes]
     if len(set(names)) < len(names):
         raise ValueError("one of those numbers is set twice")
+    from . import carve
+
+    if carve.carved(store.read_script(pid)):          # its shape is the carve's mesh: its numbers only move its loads (#171)
+        raise ValueError("it's been carved, so its numbers don't change its shape. Say \"roll it back\" to take the carve "
+                         "off, set them, then carve it again")
     entries = {e["name"]: e for e in listing(store, pid)}
     for name in names:
         if name not in entries:
             raise ValueError(f"'{pid}' has no number called {name!r}")
     got = [(c["name"], *_to_script(entries[c["name"]], c["value"], c.get("unit"))) for c in changes]
+    got = [g for g in got if abs(g[1] - float(entries[g[0]]["value"])) > 1e-6]      # the same number written otherwise (#171)
+    if not got:
+        return {"version": store.design.part(pid).version, "said": "nothing to change", "value": None, "notes": [],
+                "moved": False, "read": True, "report": None, "failed": {}, "warning": None}
     notes = [n for *_, ns in got for n in ns]
     values = {name: mm for name, mm, _, _ in got}
     said_each = [f"{name} to {s}" for name, _, s, _ in got]
@@ -227,24 +232,25 @@ def set_values(store: DesignStore, pid: str, changes: list[dict]) -> dict:
     built = sandbox.run_script(new, {})
     if not built.ok:
         tail = [ln for ln in (built.feedback or "").strip().splitlines() if ln.strip()]
-        raise ValueError(f"it won't build with {', '.join(said_each)}: "
-                         f"{tail[-1].strip() if tail else 'the build failed'}")
+        why = re.sub(r"^[A-Za-z_.]*(?:Error|Exception):\s*", "", tail[-1].strip()) if tail else "the build failed"
+        raise ValueError(f"it won't build with {', '.join(said_each)}: {why}")
     try:
-        before = _shape(store.part_geometry(pid))
+        was = store.part_geometry(pid)
+        before = _shape(was)
     except Exception:  # noqa: BLE001 — a part that didn't build before: whether it moved isn't known
-        before = None
+        was, before = None, None
     version = store.write_part(pid, new, action="params", feedback=said,
                                extra={"params": {n: [entries[n]["value"], round(mm, 3)] for n, mm in values.items()}},
                                built=(new, {}, built.geometry))      # its trial build is this version's (#97)
     after = _shape(store.part_geometry(pid))
     report, errors = store.evaluate(tolerant=True)
     moved = before is None or after != before
-    if moved:
-        for name, mm in values.items():              # a partial clamp, against a probe where one exists (#107)
-            if entries[name]["read"] and entries[name]["unit"] == "mm":
-                probe = _probe(name, mm, built.geometry)
-                if probe:
-                    notes.append(probe)
+    if moved and len(values) == 1:                   # a partial clamp, where the measurement can only be this number's (#107)
+        name, mm = next(iter(values.items()))
+        if entries[name]["read"] and entries[name]["unit"] == "mm":
+            probe = _probe(name, mm, built.geometry, was)
+            if probe:
+                notes.append(probe)
     if load_study.list_runs(store, pid):           # its strength check is of the older shape now (#147 review)
         notes.append(f"strength: check the {pid.replace('_', ' ')} again")
     return {"version": version, "said": said, "value": round(got[-1][1], 3), "notes": notes, "moved": moved,

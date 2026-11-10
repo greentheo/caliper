@@ -1069,9 +1069,9 @@ const isLength = (e) => e.unit === 'mm';
 const paramText = (e, v) => (isLength(e) && inches() ? inchText(v) : `${+Number(v).toFixed(3)}`);
 const paramUnit = (e) => (isLength(e) ? (inches() ? 'in' : 'mm') : e.unit === 'deg' ? 'deg' : '');
 // a number in plain words: its comment, unless the comment is only a quantity ("12 in", "~10.5", "18 in base"); then its name
-const PARAM_WORD = { dia: 'diameter', bot: 'bottom', t: 'thickness', r: 'radius', h: 'height', w: 'width', d: 'diameter' };
+const PARAM_WORD = { dia: 'diameter', bot: 'bottom', t: 'thickness', r: 'radius', h: 'height', w: 'width' };
 function paramName(e) {
-  const note = (e.note || '').replace(/\s*\([^)]*$/, '')
+  const note = (e.note || '').replace(/\s*\([^)]*\)?\s*$/, '')
     .replace(/^~?\d[\d./]*(\s+\d+\/\d+)?\s*(mm|in\b|inch(es)?\b|"|″)?\s*/i, '')
     .replace(/[\s(]*\b(mm|in|inches|deg|degrees)\b\)?\.?\s*$/i, '').trim();
   const said = note.split(/\s+/).length >= 2 ? note : e.name.split('_').map((w) => PARAM_WORD[w] || w).join(' ');
@@ -1103,14 +1103,16 @@ function paramProblem(e, read) {
 function paramRows(st) {
   return st.list.map((e) => {
     const shown = paramText(e, e.value), draft = st.drafts[e.name], text = draft != null ? draft : shown;
-    const changed = text.trim() !== shown, read = changed ? readNumber(text, e) : null;
+    const edited = text.trim() !== shown, read = edited ? readNumber(text, e) : null;
+    const v = read && (read.unit === 'in' ? read.value * IN : read.value);
+    const changed = edited && (!read || Math.abs(v - e.value) > 1e-6);          // 100.0 for 100, or 0.375 for 3/8, isn't a change (#171)
     return { e, shown, text, changed, read, problem: changed ? paramProblem(e, read) : '' };
   });
 }
 function paramsHtml(p, st, done) {
   const rows = paramRows(st), dirty = rows.filter((r) => r.changed), blocked = dirty.some((r) => r.problem);
   const body = rows.map(({ e, shown, text, changed, problem }) => {
-    const u = paramUnit(e), note = problem || [changed ? `was ${shown}${u ? ` ${u}` : ''}` : '', paramRange(e),
+    const u = paramUnit(e), note = problem || [changed ? `was ${shown}${u ? ` ${u}` : ''}` : '', changed ? paramRange(e) : '',
       e.read ? '' : "its build doesn't use this"].filter(Boolean).join(' · ');
     return `<div class="prow${changed ? ' changed' : ''}${problem ? ' bad' : ''}">
       <label for="param-${esc(e.name)}" title="${esc(e.name)}">${esc(paramName(e))}</label>
@@ -1119,13 +1121,17 @@ function paramsHtml(p, st, done) {
   }).join('');
   const foot = dirty.length ? `<div class="pfoot"><span class="small muted">Rebuilds as v${p.version + 1}, then re-checks the whole design.</span>
     <button class="primary" data-param-rebuild="1"${blocked || st.saving ? ' disabled' : ''}>${st.saving ? 'Rebuilding…' : 'Rebuild'}</button></div>` : '';
-  const said = done && done.part === p.id && done.version === p.version ? `<div class="pdone">v${done.version} written: ${esc(done.said)}.</div>
+  const said = done && done.part === p.id && done.version === p.version ? `<div class="pdone">v${done.version} written: ${esc(done.said)} set exactly as typed; the whole design re-measured.</div>
     ${done.warning ? `<div class="pnote warn">${esc(done.warning)}.</div>` : ''}${(done.notes || []).map((n) => `<div class="pnote">${esc(n)}.</div>`).join('')}` : '';
   return `<section class="params"><div class="phead"><b>Parameters</b><span class="small muted">set by hand, no Claude call</span></div>
     ${body}${foot}${st.err ? `<div class="pnote bad">${esc(st.err)}</div>` : ''}${said}</section>`;
 }
 function paramView(p) {
   if (!p || !p.scripted || p.role === 'fixed') return '';
+  if (p.carved) {                                     // its shape is the carve's mesh: numbers would only move its loads (#171)
+    return `<section class="params"><div class="phead"><b>Parameters</b></div>
+      <div class="pnote">It's been carved, so its numbers don't change its shape. Say "roll it back" to take the carve off and set them.</div></section>`;
+  }
   const st = S.params && S.params.key === paramKey(p) ? S.params : null;
   if (!st) { setTimeout(() => loadParams(p), 0); return ''; }
   return st.list && st.list.length ? paramsHtml(p, st, S.paramsDone) : '';
@@ -1156,6 +1162,10 @@ function drawParams(p) {
   box.innerHTML = paramView(p);
   if (id) refocusParam(id, at);
 }
+// the plain names and the numbers as typed, as the mockup says it: no script names (#171)
+function paramsSaid(rows) {
+  return rows.map((r) => { const u = paramUnit(r.e); return `${paramName(r.e)} ${r.text.trim()}${u && !/[a-z"″]$/i.test(r.text.trim()) ? ` ${u}` : ''}`; }).join(', ');
+}
 async function rebuildParams(p) {
   const st = S.params, rows = paramRows(st).filter((r) => r.changed);
   if (!rows.length || st.saving || rows.some((r) => r.problem)) return;
@@ -1163,9 +1173,10 @@ async function rebuildParams(p) {
   try {
     const got = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/params`, { values: rows.map((r) => ({
       name: r.e.name, value: r.read.value, ...(r.read.unit ? { unit: r.read.unit } : {}) })) });
-    S.paramsDone = { part: p.id, version: got.version, said: got.said, warning: got.warning, notes: got.notes };
+    S.paramsDone = { part: p.id, version: got.version, said: paramsSaid(rows), warning: got.warning, notes: got.notes };
     S.design = got.design;
     render();
+    await syncParts(S.design, false);             // the model on screen is the new one, not the one it was (#171)
   } catch (e) { st.saving = false; st.err = plainly(e.message); drawParams(p); }
 }
 function wireParams(p) {
@@ -1271,8 +1282,7 @@ function designView(d) {
   const buy = d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : '';
   const make = `<h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>`;
   return `<h2>${esc(d.name)} ${status}</h2>
-    ${cardsView({ what, work, buy, make })}
-    ${d.parts.length === 1 ? `<div id="paramBox">${paramView(d.parts[0])}</div>` : ''}`;
+    ${cardsView({ what, work, buy, make, params: d.parts.length === 1 ? `<div id="paramBox">${paramView(d.parts[0])}</div>` : '' })}`;
 }
 
 // ------------------------------------------------------------- the four questions (spec step 1)
@@ -1338,7 +1348,7 @@ function cardsView(groups) {
       ${k === 'what' && picturePart() ? '<div class="qlinks"><button class="btn" data-picture="1">🦖 Put a picture on it</button></div>' : ''}
       <details class="numbers" data-card="${k}" ${numbersOpen(k) ? 'open' : ''}><summary>the numbers</summary>
         ${groups[k] || '<div class="empty">Nothing here yet.</div>'}</details>
-    </section>`;
+    </section>${k === 'work' ? groups.params || '' : ''}`;
   }).join('');
 }
 // ------------------------------------------------------------------- test it (CALI-80)
@@ -1736,8 +1746,7 @@ function partView(p) {
     <div id="cutplanBox">${cutplanView(p)}</div>` : '';
   return `<h2>${esc(p.name || p.id)} ${origin}</h2>
     <div class="muted small">v${p.version}</div>
-    ${cardsView({ what, work, buy, make })}
-    <div id="paramBox">${paramView(p)}</div>`;
+    ${cardsView({ what, work, buy, make, params: `<div id="paramBox">${paramView(p)}</div>` })}`;
 }
 
 function wireInspector(p) {
