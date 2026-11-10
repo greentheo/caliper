@@ -14,7 +14,7 @@ const IN = 25.4;
 const S = {
   slug: null,          // the open design
   design: null,        // its last state from the server
-  running: {},         // a load check or Lighten this page started and is following, by kind and part (#159)
+  running: {},         // a load check, Lighten or step being taken, by kind, design and part (#159, #175)
   tracked: {},         // job id -> the long job this page is following, whichever way it found it (#178)
   opening: null,       // the design on its way, while it loads (#173)
   scope: null,         // the selected part (the chat is about it), or null = the whole design
@@ -26,7 +26,7 @@ const S = {
   aeroRun: {}, frameRun: {},         // part id -> which parametric study the inspector shows
   loadRun: {},         // part id -> which strength check the inspector shows (CALI-54)
   making: {},          // part id -> {key, data}: how it's made in your shop (CALI-48)
-  carveJob: {},        // part id -> the carve running for it: {job, text, progress, ...}; a redraw keeps it (CALI-101)
+  carveJob: {},        // design and part (carveKey) -> the carve running for it (#175: part ids repeat across designs): {job, text, progress, ...}; a redraw keeps it (CALI-101)
   shop: null, shopOpen: false, shopKey: 0,
   studies: false,      // the studies page is open (CALI-70)
   built: {},           // part id -> {version, tried, report, balance}: what it's built from (CALI-41)
@@ -1536,7 +1536,7 @@ function betterLines(c, offers) {
   return `<div class="qbetter"><div class="qbetter-h">Make it better</div>${offers.map((ln) => {
     const i = c.lines.indexOf(ln);
     return `<div class="qoffer"><div class="qoffer-t">${esc(ln.lead)}.<span class="qoffer-c">${esc(ln.cost)}</span></div>
-      <button class="ghost" data-better="${i}" data-better-action="${esc(ln.action)}" data-better-part="${esc(ln.part)}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[ln.part]) || trackedFor(ln.action, ln.part) ? ' disabled' : ''}>${esc(ln.button)}</button></div>`;
+      <button class="ghost" data-better="${i}" data-better-action="${esc(ln.action)}" data-better-part="${esc(ln.part)}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[carveKey(ln.part)]) || trackedFor(ln.action, ln.part) ? ' disabled' : ''}>${esc(ln.button)}</button></div>`;
   }).join('')}</div>`;
 }
 // each goes through what its panel already does: the chat, the carve, the lightening, or taking a step
@@ -2545,7 +2545,7 @@ function carveView(p) {
   const head = `<h5 style="margin:14px 0 4px">Carve it <span class="badge">printed, any shape</span></h5>
     <div class="muted small">A printer makes any shape, so the printed part can be carved wherever it isn't working: in steps,
       each one checked. ${p.carved ? 'It\'s carved now; carving again starts from its shape as drawn.' : ''}</div>
-    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo"${run ? ' data-again="1"' : ''} ${S.carveJob[p.id] || carveBlocked(p) ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
+    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo"${run ? ' data-again="1"' : ''} ${S.carveJob[carveKey(p.id)] || carveBlocked(p) ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
       <span class="muted small">${esc(carveTime(p))}</span></div><div id="carveProgress">${carveProgress(p.id)}</div>`;
   if (!run) return head;
   if (run.status === 'cancelled') {                // stopped from its panel: the steps it finished (CALI-101)
@@ -2555,7 +2555,7 @@ function carveView(p) {
   if (run.status === 'failed') {                   // it stopped on an error, and says which (CALI-103)
     return `${head}<div class="small"><b class="bad">The carve failed</b> after ${run.stations.length} of ${run.steps} steps: ${esc(run.error || '')}</div>`;
   }
-  if (run.status === 'running' && S.carveJob[p.id]) return head;   // the live panel says where it is (CALI-101)
+  if (run.status === 'running' && S.carveJob[carveKey(p.id)]) return head;   // the live panel says where it is (CALI-101)
   if (run.status === 'running') {                  // on disk as it goes: still running, or it stopped (CALI-103)
     return `${head}<div class="small">Not finished: ${run.stations.length} of ${run.steps} steps checked.</div>`;
   }
@@ -2587,26 +2587,31 @@ function carveChart(p, run) {
 }
 // a refusal as a person reads it: the server's reason without the exception's name ("ValueError: …", #136 review)
 const plainly = (msg) => String(msg ?? '').replace(/^[A-Za-z_.]*(Error|Exception):\s*/, '');
+const carveKey = (pid) => `${S.slug}/${pid}`;
 // CALI-101: one click, one carve. The job is kept in S.carveJob[part] from the click until it ends, so the button
 // stays disabled, a redraw draws the panel again (steps, bar, time left, Cancel), and a reload finds it by
 // design.carving. The server refuses a second carve of the design (409) whatever the page does.
 async function runCarve(p, again) {
-  if (S.carveJob[p.id]) return;                    // already asked: a second click, or a second handler, does nothing
-  S.carveJob[p.id] = { text: 'starting…', progress: 0, t0: Date.now() };
+  const key = carveKey(p.id);                      // held across the wait: the person can move to another design
+  if (S.carveJob[key]) return;                     // already asked: a second click, or a second handler, does nothing
+  S.carveJob[key] = { text: 'starting…', progress: 0, t0: Date.now() };
   paintCarve(p.id);
+  const slug = S.slug;
   try {
     const runs = loadRuns(p.id);
-    const { job_id } = await api('POST', `/api/designs/${S.slug}/carve`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2, again: !!again });
-    await followCarve(p, job_id);
+    const { job_id } = await api('POST', `/api/designs/${slug}/carve`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2, again: !!again });
+    await followCarve(p, job_id, false, key);
   } catch (e) {
-    delete S.carveJob[p.id];
+    delete S.carveJob[key];
+    if (S.slug !== slug) return;
     await refresh();                              // a 409: the carve that's running is in design.carving; it's followed
     const prog = $('carveProgress');
-    if (prog && !S.carveJob[p.id]) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(plainly(e.message))}</div>`;
+    if (prog && !S.carveJob[key]) prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(plainly(e.message))}</div>`;
   }
 }
-async function followCarve(p, jobId, stopping) {
-  const cj = S.carveJob[p.id] = { ...(S.carveJob[p.id] || { text: 'carving…', progress: 0, t0: Date.now() }), job: jobId };
+async function followCarve(p, jobId, stopping, keyed) {
+  const key = keyed || carveKey(p.id), slug = S.slug;
+  const cj = S.carveJob[key] = { ...(S.carveJob[key] || { text: 'carving…', progress: 0, t0: Date.now() }), job: jobId };
   if (stopping) cj.stopping = true;                // asked to stop before this page loaded (#102 review)
   paintCarve(p.id);
   try {
@@ -2620,15 +2625,17 @@ async function followCarve(p, jobId, stopping) {
         if (!cj.p0t && ev.progress > 0) { cj.p0t = Date.now(); cj.p0 = ev.progress; }
         cj.progress = ev.progress;
       }
-      paintCarve(p.id);
+      if (S.slug === slug) paintCarve(p.id);
     });
-    delete S.carveJob[p.id];
+    delete S.carveJob[key];
+    if (S.slug !== slug) return;                  // it finished while another design was open: that design's page shows it
     clearStation();
     await refresh();
     const run = carveRuns(p.id)[0];
     if (run && run.best) showStation(p.id, run, run.best);
   } catch (e) {
-    delete S.carveJob[p.id];
+    delete S.carveJob[key];
+    if (S.slug !== slug) return;
     await refresh();                              // a cancelled or failed carve: its record says how far it got
     if (e.status !== 'cancelled') {
       const prog = $('carveProgress');
@@ -2640,9 +2647,12 @@ async function followCarve(p, jobId, stopping) {
 // how long a carve has run, from its start, always shown: 9.5 min of a sweep said nothing (#137 item 4)
 const ran = (cj) => (cj && cj.t0 && !cj.stopping ? ` · running for ${minutesText((Date.now() - cj.t0) / 60000)}` : '');
 // the panel's time moves while nothing else does: the sweep before step 1 reports little
-setInterval(() => { for (const pid of Object.keys(S.carveJob || {})) paintCarve(pid); }, 30000);
+setInterval(() => {
+  const mine = `${S.slug}/`;
+  for (const key of Object.keys(S.carveJob || {})) if (key.startsWith(mine)) paintCarve(key.slice(mine.length));
+}, 30000);
 function carveProgress(pid) {
-  const cj = S.carveJob[pid];
+  const cj = S.carveJob[carveKey(pid)];
   if (!cj) return '';
   const pct = Math.round((cj.progress || 0) * 100);
   let left = '';
@@ -2661,12 +2671,12 @@ function paintCarve(pid) {
   if (S.scope !== pid) return;
   const part = ((S.design && S.design.parts) || []).find((x) => x.id === pid);
   // a carve its check blocks stays off after a job ends (#136 review: Cancel re-enabled "Carve it again")
-  if (go) go.disabled = !!S.carveJob[pid] || !!(part && carveBlocked(part));
+  if (go) go.disabled = !!S.carveJob[carveKey(pid)] || !!(part && carveBlocked(part));
   if (!prog) return;
   prog.innerHTML = carveProgress(pid);
   const stop = $('carveStop');
   if (stop) stop.onclick = async () => {
-    const cj = S.carveJob[pid];
+    const cj = S.carveJob[carveKey(pid)];
     if (!cj || !cj.job) return;
     cj.stopping = true;
     paintCarve(pid);
@@ -2695,7 +2705,7 @@ function carveTime(p) {
 function wireCarve(p) {
   if ($('carveGo')) $('carveGo').onclick = (e) => runCarve(p, e.target.dataset.again === '1');   // only "Carve it again" says so
   const on = S.design && S.design.carving;           // a carve running since before this page: follow it (CALI-101)
-  if (on && on.part === p.id && !S.carveJob[p.id]) followCarve(p, on.job, on.stopping);
+  if (on && on.part === p.id && !S.carveJob[carveKey(p.id)]) followCarve(p, on.job, on.stopping);
   paintCarve(p.id);
   document.querySelectorAll('#inspector [data-carve]').forEach((c) => {
     c.onclick = () => showStation(p.id, carveRuns(p.id)[0], +c.dataset.carve);
@@ -2883,9 +2893,10 @@ function wireLoad(p) {
 }
 
 async function runLighten(p, again) {
-  if (S.running[`lighten:${p.id}`]) return;        // already asked: a second click does nothing
-  S.running[`lighten:${p.id}`] = true;
-  try { await startLighten(p, again); } finally { delete S.running[`lighten:${p.id}`]; }
+  const key = `lighten:${S.slug}/${p.id}`;         // by design and part (#175)
+  if (S.running[key]) return;                      // already asked: a second click does nothing
+  S.running[key] = true;
+  try { await startLighten(p, again); } finally { delete S.running[key]; }
 }
 async function startLighten(p, again) {
   const prog = $('lightProgress'), go = $('lightGo');
@@ -2966,9 +2977,10 @@ $('inspector').addEventListener('click', (e) => {
   api('POST', `/api/jobs/${b.dataset.jobCancel}/cancel`).catch((err) => showErr(err.message));
 });
 async function runLoad(p, spacing) {
-  if (S.running[`load:${p.id}`]) return;           // already asked: the card's button and the panel's are two ways in
-  S.running[`load:${p.id}`] = true;
-  try { await startLoad(p, spacing); } finally { delete S.running[`load:${p.id}`]; }
+  const key = `load:${S.slug}/${p.id}`;            // by design and part: part ids repeat across designs (#175)
+  if (S.running[key]) return;                      // already asked: the card's button and the panel's are two ways in
+  S.running[key] = true;
+  try { await startLoad(p, spacing); } finally { delete S.running[key]; }
 }
 async function startLoad(p, spacing) {
   const prog = $('lProgress'), go = $('lGo');
@@ -3495,7 +3507,7 @@ function clearStation(keepBar) {
   if (S.design) paint();
 }
 async function adoptStation(pid, wid, index, kind) {
-  const once = `adopt:${wid}:${index}`;             // a double click takes the step once, and shows no false error (#159)
+  const once = `adopt:${S.slug}/${wid}:${index}`;             // a double click takes the step once, and shows no false error (#159)
   if (S.running[once]) return;
   S.running[once] = true;
   try { await takeStation(pid, wid, index, kind); } finally { delete S.running[once]; }

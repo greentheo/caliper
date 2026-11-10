@@ -88,7 +88,7 @@ def test_the_page_disables_carve_and_lighten_with_the_reason():
     import os
 
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
-    assert "id=\"carveGo\"${run ? ' data-again=\"1\"' : ''} ${S.carveJob[p.id] || carveBlocked(p) ? 'disabled' : ''}" in src
+    assert "id=\"carveGo\"${run ? ' data-again=\"1\"' : ''} ${S.carveJob[carveKey(p.id)] || carveBlocked(p) ? 'disabled' : ''}" in src
     # the reason is the server's one test (#144 review), the words its own
     assert "return (p && p.blocked && p.blocked.carve) || '';" in src
     assert "return (p && p.blocked && p.blocked.lighten) || '';" in src
@@ -226,7 +226,7 @@ def test_the_page_keeps_a_blocked_carve_off_after_a_job_ends():
 
     out = _run(_page(["paintCarve"], extra=(
         "const els = {carveGo: {disabled: false}}; function $(id) { return els[id]; }\n"
-        "const S = {scope: 'a', carveJob: {}, design: {parts: [{id: 'a'}]}};\n"
+        "const carveKey = (pid) => pid; const S = {scope: 'a', carveJob: {}, design: {parts: [{id: 'a'}]}};\n"
         "let blocked = 'too thin'; function carveBlocked() { return blocked; }\n"
         "paintCarve('a'); const off = els.carveGo.disabled; blocked = ''; paintCarve('a');\n"
         "out = [off, els.carveGo.disabled];")))
@@ -247,7 +247,7 @@ def test_a_refused_carve_on_the_page_reads_without_the_exception_s_name():
 
     out = _run(_page(["runCarve"], consts=["esc", "plainly"], extra=(
         "const els = {carveProgress: {innerHTML: ''}}; function $(id) { return els[id]; }\n"
-        "const S = {slug: 'd', carveJob: {}}; function paintCarve() {} function loadRuns() { return []; }\n"
+        "const carveKey = (pid) => pid; const S = {slug: 'd', carveJob: {}}; function paintCarve() {} function loadRuns() { return []; }\n"
         "async function refresh() {} async function followCarve() {}\n"
         "async function api() { throw new Error(\"ValueError: Can't carve it by strength: its walls…\"); }\n"
         "await runCarve({id: 'a'}); out = els.carveProgress.innerHTML;")))
