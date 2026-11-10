@@ -261,6 +261,8 @@ def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
     ✗, and says the fail may be the model's."""
     from . import load_study as L
 
+    if any(L.blind(run, c) for c in run.get("cases") or []):    # not its walls: it saw no stress at all (#202)
+        return L.BLIND
     walls = f"thinnest walls, {_wall(run.get('thinnest_mm') or 0)}{_thin_at(run, inches)}"   # which, and where (#139)
     if not holds:
         return (f"The fail may be the model's: the voxels can't see its {walls}. "

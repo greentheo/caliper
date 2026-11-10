@@ -110,6 +110,10 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
             return f"not checked: {unjoined[0].get('why') or 'its load never reached a support'}", None
         coarse = [(c, x) for c, x in zip(cases, v["cases"]) if x["kind"] in ("unresolved", "unchecked")
                   and (c.get("fea") or {}).get("supported") is not False]
+        from . import load_study as L
+
+        if any(L.blind(r, c) for c in cases):   # it saw no stress to judge by: no number to quote (#202)
+            return "not resolved: the check couldn't see any stress in it", None
         if coarse:                              # a ✓ on an FEA too coarse to see its walls is no ✓ (CALI-97)
             word = "not checked: its walls are too thin for the voxels" if coarse[0][1]["kind"] == "unchecked" else \
                 "not resolved yet: too coarse to see its walls"

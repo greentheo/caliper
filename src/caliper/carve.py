@@ -145,7 +145,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         try:
             sweep = ls.sweep(remove_up_to=remove_up_to, stations=stations, progress=swept)
         except ZeroDivisionError:              # whittle divides by the peak stress, and a step can read none (#202)
-            raise ValueError(f"Can't carve it: {L.NO_STRESS}.") from None
+            raise ValueError("Can't carve it: a step of the carve read no stress in the part, so it has nothing to go by.") from None
         density = M.printed(mat["key"])["density"] / 1000.0           # g/cm³, solid
         voxel_cm3 = ls.grid.voxel_volume / 1000.0
         printed0 = voxels0 = None

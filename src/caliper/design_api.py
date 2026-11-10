@@ -395,6 +395,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
                                  if cv["kind"] in ("holds", "fails") else cv)
             if load_study.unresolved(r, c):   # which coarse it is, for the panel's FEA line (CALI-97)
                 c["unresolved"] = "unresolved" if r.get("finer") else "unchecked"
+                c["blind"] = load_study.blind(r, c)    # it saw no stress, not a wall it couldn't see (#202)
         r["verdict"] = v
     for r in runs["carve"]:                   # a carve or lightening step, as the page shows it (#132 review)
         for st in r.get("stations") or []:

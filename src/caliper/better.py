@@ -202,7 +202,7 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
     if (blocked or {}).get("why") == "too_thin" and p.get("printed"):
         results += _carved_sliver(store, run) if p.get("carved") else _thin_line(store, run)
     if p.get("printed") and not p.get("carved") and (blocked or {}).get("carve"):
-        invites.append(_waiting_carve(name, takes, None if blocked["why"] == "too_thin"
+        invites.append(_waiting_carve(name, "" if blocked["why"] == "no_stress" else takes, None if blocked["why"] == "too_thin"
                                       else f"{blocked['carve'][:1].upper()}{blocked['carve'][1:]}."))
     if p.get("printed") and not p.get("carved") and not (blocked or {}).get("carve"):
         mine = [r for r in state.get("carve_runs") or [] if r["part"] == pid and r.get("version") == p["version"]]

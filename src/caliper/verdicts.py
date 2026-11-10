@@ -48,6 +48,10 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
     a two-sided top whose loads skip its free edge (#106: or the case says ``middle_only``); ``stale``: the run is
     of an older version."""
     safety = c.get("safety")
+    from .load_study import BLIND, blind
+
+    if blind(run, c):                                  # it saw no stress to judge by (#202): neither a ✓ nor a number to read
+        return _make("unresolved", safety, why=BLIND)
     if safety is None:
         return _make("waiting", why=c.get("why") or "")
     if (c.get("fea") or {}).get("supported") is False and c.get("governs", "fea") == "fea":
