@@ -36,7 +36,7 @@
   }
   </script>
 </head>
-<body>
+<body data-pane="chat">
   <header class="top">
     <h1>Caliper</h1>
     <select id="designPick" title="your designs"></select>
@@ -92,6 +92,12 @@
     <section id="studies" class="studies-page" hidden></section>
     <section id="shopPage" class="studies-page" hidden></section>
   </main>
+  <nav id="paneTabs" class="pane-tabs" aria-label="what's on screen">
+    <button id="treeTab" title="the parts and their pieces">Parts</button>
+    <button data-pane="view">View</button>
+    <button data-pane="chat">Chat</button>
+    <button data-pane="cards">Cards</button>
+  </nav>
 
   <script type="module" src="/design.js?v=dev"></script>
 </body>

@@ -3026,6 +3026,19 @@ function cancelJob(e) {
   b.disabled = true;
   api('POST', `/api/jobs/${b.dataset.jobCancel}/cancel`).catch((err) => showErr(err.message));
 }
+// a phone (#164): one pane at a time. The desktop's three columns don't read any of this
+function setPane(pane) {
+  document.body.dataset.pane = pane;
+  document.body.classList.remove('tree-open');
+  document.querySelectorAll('#paneTabs [data-pane]').forEach((b) => b.classList.toggle('on', b.dataset.pane === pane));
+}
+$('paneTabs').onclick = (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.id === 'treeTab') document.body.classList.toggle('tree-open');
+  else setPane(b.dataset.pane);
+};
+setPane('chat');
 $('inspector').addEventListener('click', cancelJob);
 setInterval(pollRunning, 5000);
 async function runLoad(p, spacing) {
