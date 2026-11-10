@@ -1071,8 +1071,7 @@ function renderThread() {
     html.push(`<div class="actions"><button class="primary" id="buildFirst">Build it</button>
       <span class="muted small">or say what to build first</span></div>`);
   }
-  const lastSaid = [...d.log].reverse().find((e) => e.kind === 'message' || e.kind === 'reply');
-  if (lastSaid && lastSaid.kind === 'reply' && lastSaid.reply && !d.proposal && !S.busy) {
+  if (simplerOffered(d)) {
     html.push(`<div class="actions simpler"><button class="ghost small" data-say="Say that again in simpler words, for a kid.">
       Say it simpler</button></div>`);
   }
@@ -1095,6 +1094,12 @@ function renderThread() {
   if (S.buildBubble) t.append(S.buildBubble);          // a redraw mid-build keeps its progress
   if (d.building && S.following !== d.building) followBuild(d.building);
   t.scrollTop = t.scrollHeight;
+}
+
+// "Say it simpler" needs Claude: offline the answer is the facts again (CALI-92, #70 item 13). After a reply, nothing pending.
+function simplerOffered(d) {
+  const lastSaid = [...d.log].reverse().find((e) => e.kind === 'message' || e.kind === 'reply');
+  return !!(d.claude && lastSaid && lastSaid.kind === 'reply' && lastSaid.reply && !d.proposal && !S.busy);
 }
 
 function clarifyCard(qs) {
