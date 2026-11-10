@@ -43,3 +43,33 @@ console.log(JSON.stringify({ fits: encodeURIComponent(cut).length <= 6500, last:
 """)
     assert got == {"fits": True, "last": True, "head": True, "fences": 2, "closed": True, "middle": True,
                    "short": "nothing to cut", "noFence": True}, got
+
+
+def _goto_page(src):
+    return ("const GOTO = { patterns: 'patternBox', load: 'loadBox', release: 'relBox' };\n"
+            + re.search(r"^const PART_PANELS = .*$", src, re.M).group(0) + "\n" + _fn(src, "gotoFor") + _fn(src, "goTo"))
+
+
+def test_a_goto_line_reaches_its_panel_from_either_view_or_isnt_a_link():
+    """Item 19: the design card's "Make the patterns…" pointed at a panel only the part view has: the click did
+    nothing. A goto selects the part first, if there's one to select; with several it isn't drawn as a link."""
+    src = open(JS).read()
+    got = _run(_goto_page(src) + r"""
+const boxes = {}; let scoped = [];
+const $ = (id) => boxes[id] || null;
+const S = { scope: null, design: { parts: [{ id: 'stool', role: 'part' }] } };
+function setScope(p) { scoped.push(p); S.scope = p; boxes.patternBox = p ? { previousElementSibling: null, closest: () => null, classList: { add() {}, remove() {} }, scrollIntoView() { boxes.scrolled = true; } } : undefined; }
+const one = gotoFor({ study: 'patterns' });
+goTo('patternBox');
+setTimeout(() => {
+  const clicked = [...scoped], reached = !!boxes.scrolled;
+  S.scope = null; S.design.parts.push({ id: 'lid', role: 'part' });
+  const several = gotoFor({ study: 'patterns' });
+  scoped = []; boxes.patternBox = undefined; goTo('patternBox');
+  const release = gotoFor({ action: 'release' });
+  S.scope = 'stool';
+  console.log(JSON.stringify({ one, clicked, reached, several, none: scoped, release, relFromPart: gotoFor({ action: 'release' }) }));
+}, 120);
+""")
+    assert got == {"one": "patternBox", "clicked": ["stool"], "reached": True, "several": "", "none": [],
+                   "release": "relBox", "relFromPart": "relBox"}, got

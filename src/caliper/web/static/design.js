@@ -1665,8 +1665,8 @@ function qlines(c) {
   if (!c) return '<div class="qline muted"><span class="spin"></span>answering…</div>';
   if (!c.lines.length) return `<div class="qline muted">${esc(c.hint || 'Nothing to say yet.')}</div>`;
   const offers = c.lines.filter((ln) => ln.better);
-  return c.lines.filter((ln) => !ln.better).map((ln, i) => `<div class="qline q-${ln.status}${i === 0 ? ' top' : ''}${GOTO[ln.study || ln.action] ? ' go' : ''}"
-    ${GOTO[ln.study || ln.action] ? `data-goto="${GOTO[ln.study || ln.action]}"` : ''}>${esc(ln.text)}</div>
+  return c.lines.filter((ln) => !ln.better).map((ln, i) => `<div class="qline q-${ln.status}${i === 0 ? ' top' : ''}${gotoFor(ln) ? ' go' : ''}"
+    ${gotoFor(ln) ? `data-goto="${gotoFor(ln)}"` : ''}>${esc(ln.text)}</div>
     ${(ln.links || []).length ? `<div class="qlinks">${ln.links.map((l) => `<a class="btn" href="${esc(l.url)}" target="_blank"
       rel="noopener">${esc(l.label)}</a>`).join('')}</div>` : ''}`).join('')
     + betterLines(c, offers)
@@ -1937,9 +1937,28 @@ function wireCards() {
     };
   });
 }
-function goTo(id) {                   // open the card's numbers and bring that panel into view
+// where a line's click goes, or '' (no link): a panel on a part's view needs a part to open, so with several parts and
+// none selected there's nowhere to go, and it isn't drawn as a link (CALI-92, #70 item 19)
+const PART_PANELS = new Set(['patternBox', 'loadBox', 'frameBox', 'trialBox']);
+function gotoFor(ln) {
+  const id = GOTO[ln.study || ln.action];
+  if (!id) return '';
+  if (PART_PANELS.has(id) && !S.scope && S.design.parts.filter((p) => p.role !== 'fixed').length !== 1) return '';
+  return id;
+}
+function goTo(id, again) {            // open the card's numbers and bring that panel into view
   const box = $(id);
-  if (!box) return;
+  if (!box) {                         // on the other view: go there first, once
+    if (again) return;
+    if (PART_PANELS.has(id) && !S.scope) {
+      const only = S.design.parts.filter((p) => p.role !== 'fixed');
+      if (only.length !== 1) return;
+      setScope(only[0].id);
+    } else if (id === 'relBox' && S.scope) setScope(null);
+    else return;
+    setTimeout(() => goTo(id, true), 50);
+    return;
+  }
   const dt = box.closest('details.numbers');
   if (dt && !dt.open) dt.open = true;
   (box.previousElementSibling || box).scrollIntoView({ behavior: 'smooth', block: 'start' });
