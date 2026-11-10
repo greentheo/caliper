@@ -452,8 +452,10 @@ def _volume(mesh, pieces: list[dict], strength: bool = False, tol: float = 2.0) 
             status="fail", passed=False, actual=round(loose if core else ratio, 3),
             margin=round(SOLID_IN_NO_PIECE - loose if core else ratio - VOLUME_MIN, 3),
             detail=(f"the solid ({solid / 1e6:.2f} L) is {1 / ratio:.1f}× what the pieces add up to, and "
-                    f"{loose:.0%} of it is in no piece: build() is filled in, and the strength check analyses the solid. Make build() the pieces themselves, "
-                    f"each panel as thick as its sheet and hollow between them, as it will really be built"))
+                    f"{loose:.0%} of it is in no piece: the solid has more in it than its pieces, so build() is filled in "
+                    f"or a piece isn't in construction(), and the strength check analyses the solid. Make build() the "
+                    f"pieces themselves, each panel as thick as its sheet and hollow between them, as it will really be "
+                    f"built, or add the missing piece (solid legs, say) to construction()"))   # either cause (#64 item 12)
     ok = ratio <= VOLUME_MAX
     return AssertionResult(
         id="construction_volume", expr=(f"the solid is its pieces ({VOLUME_MIN:g}–{VOLUME_MAX:g}× its volume)" if strength
