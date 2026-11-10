@@ -51,7 +51,7 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
     from .load_study import BLIND, blind
 
     if blind(run, c):                                  # it saw no stress to judge by (#202): neither a ✓ nor a number to read
-        return _make("unresolved", safety, why=BLIND)
+        return _make("unresolved", safety, why=BLIND, blind=True)
     if safety is None:
         return _make("waiting", why=c.get("why") or "")
     if (c.get("fea") or {}).get("supported") is False and c.get("governs", "fea") == "fea":

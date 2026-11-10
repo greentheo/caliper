@@ -375,7 +375,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         filled = consistency.filled(store, pid)              # the check ran on a block, not the part (CALI-96)
         edge = consistency.bare_edge(store, pid)             # where people stand wasn't loaded (CALI-94)
         for c in run["cases"]:
-            if c.get("safety") is not None:
+            if L.blind(run, c):                 # named, beside any that did read: one reason (#202)
+                work.append(_line(f"! {c['name'][:1].upper()}{c['name'][1:]}: {L.BLIND}", "warn", study="load"))
+            elif c.get("safety") is not None:
                 work.append(_case_line(part_name(p), run, c, filled, stale, inches, edge=bool(edge)))
         work += _grain_lines(store, pid, run, stale, filled, bool(edge))
     elif p.get("loads"):
@@ -560,7 +562,7 @@ def measured(store: DesignStore, state: dict) -> dict:
 
     latest = [next((r for r in state.get("load_runs") or [] if r["part"] == pid), None) for pid in current]
     cases = [(r, c) for r in latest if r and r.get("version") == current.get(r["part"])
-             for c in r.get("cases") or [] if c.get("safety") is not None]
+             for c in r.get("cases") or [] if c.get("safety") is not None or L.blind(r, c)]
     inches = (state.get("display_units") or "in") == "in"
     said = [(r, verdicts.case(r, c)) for r, c in cases]
     held = [r for r, v in said if v["kind"] in ("unresolved", "unchecked")]
@@ -581,7 +583,8 @@ def measured(store: DesignStore, state: dict) -> dict:
     # unchecked, or older; its number isn't in the min above, so the rest can't read as holding for it
     loaded = [p for p in state["parts"] if p.get("loads") and p.get("role") != "fixed"]
     runs = {pid: next((r for r in state.get("load_runs") or [] if r["part"] == pid), None) for pid in current}
-    unchecked = [p["id"] for p in loaded if runs.get(p["id"]) is None or ran_safety(runs[p["id"]]) is None]
+    unchecked = [p["id"] for p in loaded if runs.get(p["id"]) is None
+                 or (ran_safety(runs[p["id"]]) is None and not any(L.blind(runs[p["id"]], c) for c in runs[p["id"]].get("cases") or []))]
     said = {p["id"]: part_name(p) for p in state["parts"]}          # the names a person reads (#94)
     older = [p["id"] for p in loaded if p["id"] not in unchecked and runs[p["id"]].get("version") != p["version"]]
     # the newest strength run of a part changed since, with its verdict and age: what the design card says over an
@@ -749,6 +752,9 @@ def held_to(state: dict, now: dict) -> list[dict]:
             continue
         if v is None and c["metric"].startswith("print.") and now.get("print.unknown"):
             out.append(_line(f"{label}{assumed}: {now['print.unknown']}.", "warn"))
+            continue
+        if v is None and c["metric"].startswith("strength") and now.get("strength.unresolved"):   # it was checked, and can't say (#202)
+            out.append(_line(f"! {label}{assumed}: {now['strength.unresolved']}", "warn", study="load", model=rests_on_model(c["metric"])))
             continue
         if v is None:
             how = ("Check it holds" if c["metric"].startswith("strength") else "Score it")

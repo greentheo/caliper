@@ -860,6 +860,8 @@ def _safety_cell(c: dict) -> tuple[str, str]:
     kind = (c.get("verdict") or {}).get("kind")
     if kind == "untrusted":                          # the check ran on a block: no number to build on
         return "not trusted: checked on a filled-in shape", "—"
+    if (c.get("verdict") or {}).get("blind"):        # it saw no stress at all: not its walls (#202)
+        return "not resolved: the check couldn't see any stress", "—"
     if kind in ("unresolved", "unchecked"):          # too coarse to see its walls: no ✓ (CALI-110)
         return "not resolved: too coarse to see its walls", "—"
     if kind == "edge":                               # where people stand wasn't loaded (CALI-94)

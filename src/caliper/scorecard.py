@@ -174,6 +174,10 @@ def cost_and_waste(store: DesignStore, reports: dict, cutplans: dict) -> dict:
 # ---------------------------------------------------------------------------
 # The card
 # ---------------------------------------------------------------------------
+#: the trust label of a strength goal the check saw no stress for (#202): not "too coarse to see its walls", which isn't why
+NOT_SEEN = "not resolved: the check couldn't see any stress"
+
+
 class Moved(Exception):
     """A part changed while this waited its turn (#184 review): what's been worked out so far is of a design that's gone."""
 
@@ -391,6 +395,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     from . import load_study, verdicts
 
     worst = None
+    saw_nothing = False               # a check that saw no stress at all (#202): not the same as one too coarse to see a wall
     unsure = None                     # a ✓ on an FEA too coarse to see the wall: no pass from it (CALI-110)
     unsettled = None                  # a ✗ on one: a ✗ stays a ✗, and says the fail may be the model's (#191)
     no_breaks = None                  # a breaking load from a run that can't see the wall isn't one to read
@@ -420,7 +425,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         from .answers import ran_safety
 
         ran = ran_safety(run)                   # a load that never reached a support gives no number, not 0x (#138)
-        if ran is None:
+        saw_nothing = saw_nothing or any(load_study.blind(run, c) for c in run["cases"])    # #202: its one reason, everywhere
+        if ran is None and not any(load_study.blind(run, c) for c in run["cases"]):
             left.append(f"the {p.id.replace('_', ' ')}'s strength check gave no number"
                         + next((f": {c['why']}" for c in run["cases"]
                                 if (c.get("fea") or {}).get("supported") is False and c.get("why")), ""))
@@ -495,7 +501,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         if number:
             v, lim, op = float(m["value"]), float(c["limit"]), c.get("op", ">=")
             met = verdicts.compare(v, op, lim)
-        elif untrue and strength:             # no number, on a filled-in shape: not trusted, not merely unknown
+        elif (untrue or (saw_nothing and unsure)) and strength:    # no number, for a reason that's known: said, not merely unknown
             met = True
         else:
             met = None
@@ -514,11 +520,11 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                            "unit": m["unit"] if m else "", "trust": ("not trusted: its shape couldn't be checked" if str(untrue).startswith("couldn't")
                                     else "not trusted: a filled-in shape"), "note": untrue})   # which it is (#89)
         elif status == "unresolved":
-            checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
-                           "trust": "not resolved: too coarse to see its walls", "note": unsure or unsettled})
+            checks.append({**c, "status": status, "value": m["value"] if m else None, "unit": m["unit"] if m else "", "margin": None,
+                           "trust": NOT_SEEN if saw_nothing else "not resolved: too coarse to see its walls", "note": unsure or unsettled})
         elif status == "fail" and strength and (unsettled or unsure):     # a ✗ stays a ✗, not as a settled number (#191)
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
-                           "trust": "not resolved: too coarse to see its walls", "note": unsettled or unsure})
+                           "trust": NOT_SEEN if saw_nothing else "not resolved: too coarse to see its walls", "note": unsettled or unsure})
         elif status == "edge":                # loaded in the middle only (CALI-94): never a pass; a ✗ stays a fail
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "checked in the middle only", "note": MIDDLE_ONLY})

@@ -322,7 +322,8 @@ def resolution(ctx: dict) -> dict:
 
 
 #: how far below the load's own stress a peak may read before the check is taken to have seen nothing (#202): a load has to get through
-#: the part, so even spread wide the peak is a fair share of force over footprint. Not on the safety factor: a tiny load is a big one
+#: the part, so even spread wide the peak is a fair share of force over footprint. Not on the safety factor: a tiny load is a big one.
+#: A floor against nonsense and no more: one voxel layer of a thin foot can read 4 to 7 times high and stay well above it
 SEES_STRESS = 0.01
 
 
@@ -1191,11 +1192,13 @@ def default_check(store: DesignStore, part_id: str) -> Optional[dict]:
 
 
 #: what's said where the check saw no stress at all (#202), and why it can't: the two things to look at
-NO_STRESS = ("the check couldn't see any stress in this part at this size, so a carve has nothing to go by: either the piece under the load is "
-             "too thin for its voxels, or the load goes straight into what holds it. Look at where the load sits and how thick the part is there")
+NO_STRESS = ("the check couldn't see any stress in this part at this size, so a carve has nothing to go by: the piece under the load may be "
+             "too thin for its voxels, the load's patch may be smaller than the voxels, or the load may go straight into what holds it. "
+             "Look at where the load sits, how big it is and how thick the part is there")
 #: the same, on the card, in place of a verdict
-BLIND = ("Not resolved: the check couldn't see any stress in this part at this size. Either the piece under the load is too thin for its voxels, "
-         "or the load goes straight into what holds it. Look at where the load sits and how thick the part is there.")
+BLIND = ("Not resolved: the check couldn't see any stress in this part at this size. The piece under the load may be too thin for its voxels, "
+         "the load's patch may be smaller than the voxels, or the load may go straight into what holds it. Look at where the load sits, how "
+         "big it is and how thick the part is there.")
 
 
 def blocked(store: DesignStore, part_id: str) -> Optional[dict]:

@@ -2866,7 +2866,7 @@ function loadCase(p, run, c, i) {
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
-      ${c.blind ? `<div class="small" style="margin-top:2px">The check couldn't see any stress here: the piece under the load may be too thin for its voxels, or the load goes straight into what holds it.</div>`
+      ${c.blind ? `<div class="small" style="margin-top:2px">The check couldn't see any stress here: the piece under the load may be too thin for its voxels, the load's patch may be smaller than the voxels, or the load may go straight into what holds it.</div>`
       : c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety)}
         <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
         ${c.verdict && c.verdict.kind === 'fails' ? 'the fail may be the model\'s' : 'no verdict'} (it needs ${run.min_safety}x)</span></div>`
