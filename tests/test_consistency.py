@@ -189,7 +189,8 @@ def test_a_filled_box_round_its_panels_fails_when_its_strength_is_checked_in_3d(
     vol = got["construction_volume"]
     assert not vol.passed and vol.actual < 0.67 and "build() is filled in" in vol.detail
     # either cause, said (#64 item 12): the box stool's undeclared solid legs read as "filled in" alone
-    assert "the solid has more in it than its pieces" in vol.detail and "or a piece isn't in construction()" in vol.detail
+    assert "build() is filled in or a piece isn't in construction()" in vol.detail and "add the missing piece" in vol.detail
+    assert "the solid has more in it than its pieces" not in vol.detail          # said once, not three times (#209)
     # the same block without loads(): a shape kept for its outside, weighed from its pieces
     run = sandbox.run_script(filled.split("def loads(")[0], timeout=120)
     assert {r.id: r for r in consistency.check(run.declared, run.geometry)}["construction_volume"].passed

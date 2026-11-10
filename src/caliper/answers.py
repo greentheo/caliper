@@ -317,7 +317,10 @@ def filled_fail(why: Optional[str]) -> str:
     be checked against its pieces, that is said, not "a filled-in shape", which isn't known."""
     if (why or "").startswith(("couldn't", "Not trusted yet: I couldn't")):     # filled()'s, or untrusted()'s
         return " Its shape couldn't be checked against its pieces, so this number may not be the part's."
-    return " It ran on a filled-in shape, so the part as built is likely weaker."
+    # both causes, as the volume check says them (#64 item 12, #209 review): with a piece missing from construction()
+    # the solid may be the part as built
+    return (" It ran on a solid with more in it than its pieces: filled in, the part as built is likely weaker; or a "
+            "piece is missing from its construction.")
 
 
 def untrusted(pid: str, why: str = "") -> str:
@@ -325,8 +328,25 @@ def untrusted(pid: str, why: str = "") -> str:
     be checked against its pieces at all (which fails closed: never holding)."""
     if why.startswith("couldn't"):
         return f"Not trusted yet: I {why}, so I can't say the strength check ran on the part as built. Check it again."
-    return (f"Not trusted yet: the strength check ran on a filled-in shape, not the {pid.replace('_', ' ')} as built. "
-            f"Fix its shape first (say \"fix its shape to match its pieces\").")
+    return (f"Not trusted yet: the strength check ran on a solid with more in it than the {pid.replace('_', ' ')}'s "
+            f"pieces: its shape is filled in, or a piece is missing from its construction. Say \"{FIX_SHAPE}\" or "
+            f"\"{FIX_PIECE}\".")
+
+
+#: The two fixes for a solid with more in it than its pieces (#209 review): the shape, or the construction.
+FIX_SHAPE, FIX_PIECE = "fix its shape to match its pieces", "add the missing piece"
+
+
+def fix_for(check_id: str, detail: str) -> str:
+    """What to say to fix a shape that doesn't match its pieces: both fixes where the volume check can't tell which
+    it is (#209 review), the outline's own where a sheet is off its face, else the shape."""
+    from . import consistency
+
+    if check_id == "construction_on_its_face":
+        return f'Say "{consistency.remedy(detail)}"'
+    if check_id == "construction_volume":
+        return f'Say "{FIX_SHAPE}" (it\'s filled in) or "{FIX_PIECE}" (one isn\'t in its construction)'
+    return f'Say "{FIX_SHAPE}"'
 
 
 def rests_on_model(metric: str) -> bool:
@@ -392,10 +412,8 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         if strays:                                   # what the mesh left out, said once (CALI-118)
             what.append(_line(f"I {strays}: it enclosed nothing and weighs nothing.", "info"))
         if off:
-            fix = (consistency.remedy(off[0].detail) if off[0].id == "construction_on_its_face"
-                   else "fix its shape to match its pieces")
-            what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"{fix}\" and I'll revise it.",
-                              "bad"))
+            what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. {fix_for(off[0].id, off[0].detail)} "
+                              f"and I'll revise it.", "bad"))
         for s in smaller:                      # cut smaller than it's drawn: the cut list follows the outline (#183)
             what.append(_line(consistency.plan_said(s, inches), "warn"))
         if edge:                               # a load case it's missing: a warning, the round passed (CALI-94)
@@ -952,7 +970,8 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         make.append(_line("Or make the whole build package: the build book, cut lists and drawings.", "info",
                           action="release"))
     return [_card("what", "What is it?", what),
-            _card("work", "Will it work?", work, promised=promise(store, [p.id for p in store.design.parts])),
+            _card("work", "Will it work?", work,
+                  promised=promise(store, [p.id for p in store.design.parts]) if store is not None else PROMISE),
             _card("buy", "What do I buy?", buy), _card("make", "How do I make it?", make)]
 
 
