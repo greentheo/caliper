@@ -670,6 +670,18 @@ function aboutPick(pick, text) {
   if (!pick) return text;
   return `About this ${pick.told || pick.said}${pick.local ? ` (at x ${pick.local[0]}, y ${pick.local[1]}, z ${pick.local[2]} mm in the script's coordinates)` : ''}: ${text}`;
 }
+// what the landing check is told: the ids are the version the pick was made on (#196)
+function pickPosted(text) {
+  return S.pick && S.pick.id ? { kind: S.pick.kind, id: S.pick.id, version: S.pick.version, text } : null;
+}
+// a rebuild renumbers the faces and edges and moves them: a pick from before it is about something that's gone (#196)
+function dropOldPick() {
+  if (!S.pick || !S.design) return;
+  const part = S.design.parts.find((p) => p.id === S.pick.part);
+  if (part && part.version === S.pick.version) return;
+  clearPick();
+  pickHint('Rebuilt: click it again');
+}
 function clearPick() {
   S.pick = null;
   PICK.turn += 1;                                 // a pick still on its way is off too
@@ -741,12 +753,12 @@ async function choose(e, hit) {
   ray.ray.copy(seen.ray);
   if (!hit && (data.solidMesh || PICK.mode === 'face')) return;   // only an edge can be picked from just off the part
   if (data.solidMesh) {                                   // carved, whittled, imported: no faces to name
-    S.pick = { part: pid, kind: 'point', said: pointSaid(point), told: pointTold(point), local: null, point };
+    S.pick = { part: pid, kind: 'point', said: pointSaid(point), told: pointTold(point), local: null, point, version: data.version };
     drawPick(new THREE.SphereGeometry(Math.max(2, 0.006 * hit.distance), 12, 12).translate(...point));
   } else if (PICK.mode === 'face') {
     const f = facePicked(data, hit);
     if (!f) return;
-    S.pick = { part: pid, kind: 'face', id: f.id, said: f.said, local: f.local };
+    S.pick = { part: pid, kind: 'face', id: f.id, said: f.said, local: f.local, version: data.version };
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(f.verts, 3));
     g.setIndex(f.tris);
@@ -754,7 +766,7 @@ async function choose(e, hit) {
   } else {
     const edge = edgePicked(data, hit, e, seen);
     if (!edge) { pickHint('no edge there: click closer to one'); renderScope(); return; }
-    S.pick = { part: pid, kind: 'edge', id: edge.id, said: edge.said, local: edge.local };
+    S.pick = { part: pid, kind: 'edge', id: edge.id, said: edge.said, local: edge.local, version: data.version };
     const curve = new THREE.CatmullRomCurve3(edge.points.map((p) => new THREE.Vector3(...p)));
     drawPick(new THREE.TubeGeometry(curve, Math.max(2, edge.points.length * 2), Math.max(1, 0.003 * camera.position.distanceTo(new THREE.Vector3(...edge.centre))), 6, false));
   }
@@ -800,7 +812,7 @@ $('newBtn').onclick = startNew;
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
-  if (first) S.buildBubble = null;
+  if (first) { S.buildBubble = null; clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
   location.hash = encodeURIComponent(slug);
   if (first) showLoading(slug);
   let got;
@@ -854,6 +866,7 @@ async function refresh() {
 
 function render() {
   syncRunning();
+  dropOldPick();
   renderUnits(); renderTree(); renderThread(); renderInspector(); renderScope(); paint(); renderStudies();
   $('viewHint').textContent = S.design && S.design.parts.length
     ? (S.scope ? '' : 'click a part to talk about it')
@@ -1133,7 +1146,7 @@ $('composer').onsubmit = (e) => {
   const text = $('msg').value;
   $('msg').value = '';
   const shown = S.pick ? `About this ${S.pick.said}: ${text}` : null;     // their own bubble: no coordinates (#181)
-  const said = aboutPick(S.pick, aboutPiece(text)), pick = S.pick && S.pick.id ? { kind: S.pick.kind, id: S.pick.id, version: (S.design.parts.find((x) => x.id === S.pick.part) || {}).version, text } : null;
+  const said = aboutPick(S.pick, aboutPiece(text)), pick = pickPosted(text);
   if (S.pick) { clearPick(); renderScope(); }
   send(said, S.scope, pick, shown);
 };
@@ -1146,6 +1159,7 @@ function startNew() {
   // remember where we were: the button sits beside the design picker and is easy to hit by mistake
   const was = S.slug ? { slug: S.slug, name: S.design ? S.design.name : S.slug } : null;
   S.slug = null; S.design = null; S.scope = null; S.buildBubble = null;
+  clearPick(); pickHint();                        // nor to a design that doesn't exist yet (#196 review)
   for (const m of meshes.values()) scene.remove(m);
   meshes.clear(); clearStation();
   [...pieces3d.keys()].forEach(dropPieces);
