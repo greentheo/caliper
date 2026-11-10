@@ -49,6 +49,10 @@ def measure_with(sag_mm: float) -> str:
     return "a tape measure from the floor to the middle of the top, before and with the load"
 
 
+#: the most steps a test plan has, whatever it's asked to reach (#202: 66 million, from a check that saw no stress, held up the card)
+MOST_STEPS = 40
+
+
 def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     """For the worst load the part was checked for: the sag at each step to where it should break, as a range,
     and what to measure it with. None without a strength check on this version."""
@@ -57,7 +61,7 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     run = _run(store, part_id)
     if run is None:
         return None
-    cases = [c for c in run["cases"] if c.get("safety") is not None and c.get("fea", {}).get("supported")]
+    cases = [c for c in run["cases"] if c.get("safety") is not None and c.get("fea", {}).get("supported") and not L.blind(run, c)]   # #202
     if not cases:
         return None
     case = min(cases, key=lambda c: c["safety"])
@@ -70,8 +74,10 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     sag = plate.get(f"deflection_{grain}_mm") if grain else None
     flex = (sag if sag is not None else plate["deflection_mm"]) / applied if plate.get("done") else None
     lo, hi = sorted([stiff, flex if flex is not None else stiff])
-    breaks = case.get("breaks_lb")
-    step = 50 if (breaks or applied) <= 1500 else 100          # a sandbag at a time
+    breaks = None if L.unresolved(run, case) else case.get("breaks_lb")     # a plan isn't built up to a number nobody can read (#202)
+    top = breaks or applied * 2
+    step = 50 if top <= 1500 else 100                          # a sandbag at a time
+    step = max(step, math.ceil(top / MOST_STEPS / step) * step)   # and a plan a person could carry out
     # up to where it should break, no further: a stool predicted to go at 220 lb doesn't need 250 on it
     loads = sorted({x for x in {case["lb"], *range(step, int(breaks), step), math.ceil(breaks)} if x <= math.ceil(breaks)} if breaks
                    else {case["lb"], *range(step, int(applied * 2) + step, step)})
@@ -79,7 +85,7 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     return {"part": part_id, "version": run["version"], "run": run["id"], "case": case["name"], "lb": case["lb"],
             "factor": case["factor"],
             "where": plate.get("piece") if plate.get("done") else L.peak_in(case["fea"]),   # not an old label
-            "breaks_lb": None if L.unresolved(run, case) else breaks,   # not a number to test against (#191 review)
+            "breaks_lb": breaks,                                        # None: not a number to test against (#191 review)
             "steps": steps, "per_lb_mm": [round(lo, 6), round(hi, 6)],
             "measure_with": measure_with(hi * case["lb"]),
             "basis": ("from an FEA too coarse to see its walls, so a rough guess until it's checked finer: "

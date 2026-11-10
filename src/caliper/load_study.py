@@ -321,8 +321,44 @@ def resolution(ctx: dict) -> dict:
     return out
 
 
+#: how far below the load's own stress a peak may read before the check is taken to have seen nothing (#202): a load has to get through
+#: the part, so even spread wide the peak is a fair share of force over footprint. Not on the safety factor: a tiny load is a big one.
+#: A floor against nonsense and no more: one voxel layer of a thin foot can read 4 to 7 times high and stay well above it
+SEES_STRESS = 0.01
+
+
+def _nominal(c: dict) -> Optional[float]:
+    """The load's own stress: its force over the footprint it's pushed on, in MPa, or None where the case doesn't say."""
+    force, lo, hi = c.get("force_n"), c.get("lo"), c.get("hi")
+    if not (force and lo and hi):
+        return None
+    axis = max(range(3), key=lambda i: abs(force[i]))
+    a, b = [float(hi[i]) - float(lo[i]) for i in range(3) if i != axis]
+    return float(sum(f * f for f in force) ** 0.5) / (a * b) if a > 0 and b > 0 else None
+
+
+def blind(run: dict, case: dict) -> bool:
+    """The FEA ran and saw next to no stress for the load it was given: a bracket's 12 mm foot, loaded half way along, read 54,956,221
+    times over (#202). That's a check that saw nothing, not a part that holds. No number from it means the same."""
+    fea = case.get("fea") or {}
+    if fea.get("supported") is not True or case.get("governs", "fea") != "fea":
+        return False
+    if "safety" not in fea:           # a case that doesn't say isn't one that saw nothing
+        return False
+    if fea["safety"] is None:
+        return True
+    if not fea["safety"]:             # rounded to 0.00: the stress was huge, so it broke. The opposite of seeing nothing
+        return False
+    material, nominal = run.get("material"), _nominal(case)
+    strength = material.get("strength") if isinstance(material, dict) else None
+    return bool(strength and nominal) and float(strength) / float(fea["safety"]) < SEES_STRESS * nominal
+
+
 def unresolved(run: dict, case: dict) -> bool:
-    """A verdict the FEA governs at fewer than RESOLVE_MIN voxels across the thinnest wall: too coarse to see it."""
+    """A verdict the FEA governs at fewer than RESOLVE_MIN voxels across the thinnest wall: too coarse to see it. Or one that saw no
+    stress to judge by (:func:`blind`)."""
+    if blind(run, case):
+        return True
     thin, s = run.get("thinnest_mm"), run.get("spacing_mm")
     if case.get("governs") != "fea" or not (thin and s):
         return False
@@ -1159,6 +1195,16 @@ def default_check(store: DesignStore, part_id: str) -> Optional[dict]:
     return max(runs, key=lambda r: r.get("spacing_mm") or 0) if runs else None     # max keeps the first: the newest
 
 
+#: what's said where the check saw no stress at all (#202), and why it can't: the two things to look at
+NO_STRESS = ("the check couldn't see any stress in this part at this size, so a carve has nothing to go by: the piece under the load may be "
+             "too thin for its voxels, the load's patch may be smaller than the voxels, or the load may go straight into what holds it. "
+             "Look at where the load sits, how big it is and how thick the part is there")
+#: the same, on the card, in place of a verdict
+BLIND = ("Not resolved: the check couldn't see any stress in this part at this size. The piece under the load may be too thin for its voxels, "
+         "the load's patch may be smaller than the voxels, or the load may go straight into what holds it. Look at where the load sits, how "
+         "big it is and how thick the part is there.")
+
+
 def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
     """What stops a carve or a lightening before it starts, from its default check (#144 review: the card offered Carve
     on the bar stool while the Carve button refused it). The one test the Carve button, the Lighten button and the
@@ -1184,6 +1230,8 @@ def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
     if any((c.get("fea") or {}).get("supported") is False for c in rec.get("cases") or []):
         return {"why": "unsupported", "carve": "its voxels don't connect the load to a support yet, so a carve can't run",
                 "lighten": ""}               # a lightening's holes are checked by the hand checks too
+    if rec.get("cases") and all(blind(rec, c) for c in rec["cases"]):     # #202: one case that read stress is enough to carve by
+        return {"why": "no_stress", "carve": NO_STRESS, "lighten": ""}
     return None
 
 

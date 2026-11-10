@@ -2962,7 +2962,8 @@ function loadCase(p, run, c, i) {
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
-      ${c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety)}
+      ${c.blind ? `<div class="small" style="margin-top:2px">The check couldn't see any stress here: the piece under the load may be too thin for its voxels, the load's patch may be smaller than the voxels, or the load may go straight into what holds it.</div>`
+      : c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety)}
         <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
         ${c.verdict && c.verdict.kind === 'fails' ? 'the fail may be the model\'s' : 'no verdict'} (it needs ${run.min_safety}x)</span></div>`
       : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety)}</b>
@@ -3245,7 +3246,7 @@ async function showHeat(pid, run, index) {
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →
         ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>`
           : c.verdict && (c.verdict.kind === 'unresolved' || c.verdict.kind === 'unchecked')   // no "holds" (CALI-110)
-            ? `<b style="color:var(--amber)">${coarseWord(c)}: the FEA read ${sx(c.safety)}, too coarse to see its walls</b>`
+            ? `<b style="color:var(--amber)">${c.blind ? 'not resolved: the check couldn\'t see any stress here' : `${coarseWord(c)}: the FEA read ${sx(c.safety)}, too coarse to see its walls`}</b>`
             : c.verdict && c.verdict.kind === 'edge'     // the middle only (CALI-94): no "holds" where people stand
               ? `<b style="color:var(--amber)">middle only: the middle read ${sx(c.safety)}; the front edge, where people stand, isn't checked</b>`
             : settled(c.verdict)           // the verdict's word and colour (CALI-112): never green unless it holds
