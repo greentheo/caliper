@@ -658,3 +658,18 @@ def test_a_lighten_on_a_new_unchecked_version_is_no_repeat(tmp_path, post):
 def test_the_page_reads_finished_as_the_server_does(run, done):
     head = f"const S = {{ design: {{ parts: [{{ id: 'p', version: 3 }}], lighten_runs: [{run}] }} }};\n"
     assert _page(("studyDone",), head, "return { d: studyDone('lighten', 'p') };") == {"d": done}
+
+
+@pytest.mark.parametrize("status", ["cancelled", "failed", "running"])
+def test_a_carve_that_didn_t_finish_doesn_t_block_a_new_one(tmp_path, post, status):
+    """#159 review: a mutant dropping the status test counted a cancelled run as finished."""
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 3.0)
+    _save(carve.runs_dir(store), {"id": "20261107-000100-carve", "part": "tube", "kind": "carve", "created": 2.0, "status": status,
+                                  "version": store.design.part("tube").version, "stations": []})
+    assert post(store, "carve").status_code == 200
+
+
+def test_the_page_doesn_t_count_a_cancelled_run_as_finished():
+    head = "const S = { design: { parts: [{ id: 'p', version: 3 }], carve_runs: [{ part: 'p', version: 3, status: 'cancelled' }] } };\n"
+    assert _page(("studyDone",), head, "return { d: studyDone('carve', 'p') };") == {"d": False}
