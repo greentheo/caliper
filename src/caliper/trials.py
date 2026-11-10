@@ -53,6 +53,22 @@ def measure_with(sag_mm: float) -> str:
 MOST_STEPS = 40
 
 
+def _plate_material(store: DesignStore, part_id: str, piece: Optional[str]) -> Optional[dict]:
+    """The plate-checked piece's own material, as the strength check reads one (its grain ratio): a part of two
+    materials records its main one, and the bar stool's plywood seat sits on PETG (#209 review, round 3)."""
+    if not piece:
+        return None
+    from . import construction as C
+    from . import load_study as L
+
+    try:
+        item = next((it for it in C.declared(store, part_id).get("construction") or []
+                     if isinstance(it, dict) and it.get("name") == piece and it.get("material")), None)
+        return L.material([{"material": item["material"], "volume": 1.0}]) if item else None
+    except Exception:  # noqa: BLE001 — a part that can't say: the run's own material, as before
+        return None
+
+
 def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     """For the worst load the part was checked for: the sag at each step to where it should break, as a range,
     and what to measure it with. None without a strength check on this version."""
@@ -76,7 +92,7 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     if sag is None and plate.get("done") and plate.get("as") != "beam":
         # a plate held all round writes its sag at the material's E, along the face grain, while its strength is
         # taken across it: its sag across the grain, the weaker way, as its strength is (#209 review)
-        mat = run.get("material") or {}
+        mat = _plate_material(store, part_id, plate.get("piece")) or run.get("material") or {}
         ratio = (mat["E_across"] / mat["E"]) if mat.get("E_across") and mat.get("E") else mat.get("across", 1.0)
         sag = plate.get("deflection_across_mm") or plate["deflection_mm"] / min(max(float(ratio), 1e-6), 1.0)
         weaker = ratio < 1.0

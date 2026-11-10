@@ -306,3 +306,19 @@ def test_a_plate_checked_tops_sag_is_across_the_grain_as_its_strength_is(tmp_pat
     hi_200 = pr["per_lb_mm"][1] * 200 / 25.4
     assert 0.009 < hi_200 < 0.011, hi_200                                              # about 0.010 in at 200 lb
     assert "the grain taken the weaker way" in pr["basis"], pr["basis"]
+
+
+def test_a_mixed_parts_plate_takes_its_own_pieces_grain(tmp_path, monkeypatch):
+    """#209 review, round 3: the ratio came from the run's main material (a print: across 1.0), not the plate-checked
+    piece's (the mixed stool's plywood top: 0.5), so its sag stayed along the grain."""
+    from .test_mixed import MIXED
+
+    store = DesignStore.create("a stool", base=str(tmp_path))
+    store.write_part("stool", MIXED, intent="a stool")
+    run = _plate_run("plate")
+    run["material"] = {"key": "petg", "E": 2000.0, "across": 1.0}          # the part's main material: the print
+    run["cases"][0]["plate"]["piece"] = "top"                              # the plate: its plywood top
+    monkeypatch.setattr(trials, "_run", lambda s, pid: run)
+    pr = trials.predict(store, "stool")
+    assert pr["per_lb_mm"][1] == pytest.approx(0.4 / 0.5 / 400, rel=1e-3), pr["per_lb_mm"]
+    assert "the grain taken the weaker way" in pr["basis"]

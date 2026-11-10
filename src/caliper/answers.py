@@ -329,15 +329,22 @@ def untrusted(pid: str, why: str = "") -> str:
     if why.startswith("couldn't"):
         return f"Not trusted yet: I {why}, so I can't say the strength check ran on the part as built. Check it again."
     return (f"Not trusted yet: the strength check ran on a solid with more in it than the {pid.replace('_', ' ')}'s "
-            f"pieces: its shape is filled in, or a piece is missing from its construction. Say \"{FIX_SHAPE}\" or "
-            f"\"{FIX_PIECE}\".")
+            f"pieces: its shape is filled in, or a piece is missing from its construction. Say \"{fix_shape(pid)}\" or "
+            f"\"{fix_piece(pid)}\".")
 
 
 #: The two fixes for a solid with more in it than its pieces (#209 review): the shape, or the construction.
-FIX_SHAPE, FIX_PIECE = "fix its shape to match its pieces", "add the missing piece"
+def fix_shape(pid: str) -> str:
+    """The words to say to fix a part's shape, naming the part, so they reach it with nothing selected (#209 review:
+    "add the missing piece" typed from the design card authored a part named missing_piece)."""
+    return f"fix the shape of the {pid.replace('_', ' ')} to match its pieces"
 
 
-def fix_for(check_id: str, detail: str) -> str:
+def fix_piece(pid: str) -> str:
+    return f"add the missing piece to the {pid.replace('_', ' ')}"
+
+
+def fix_for(check_id: str, detail: str, pid: str = "part") -> str:
     """What to say to fix a shape that doesn't match its pieces: both fixes where the volume check can't tell which
     it is (#209 review), the outline's own where a sheet is off its face, else the shape."""
     from . import consistency
@@ -345,8 +352,8 @@ def fix_for(check_id: str, detail: str) -> str:
     if check_id == "construction_on_its_face":
         return f'Say "{consistency.remedy(detail)}"'
     if check_id == "construction_volume":
-        return f'Say "{FIX_SHAPE}" (it\'s filled in) or "{FIX_PIECE}" (one isn\'t in its construction)'
-    return f'Say "{FIX_SHAPE}"'
+        return f'Say "{fix_shape(pid)}" (it\'s filled in) or "{fix_piece(pid)}" (one isn\'t in its construction)'
+    return f'Say "{fix_shape(pid)}"'
 
 
 def rests_on_model(metric: str) -> bool:
@@ -412,7 +419,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         if strays:                                   # what the mesh left out, said once (CALI-118)
             what.append(_line(f"I {strays}: it enclosed nothing and weighs nothing.", "info"))
         if off:
-            what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. {fix_for(off[0].id, off[0].detail)} "
+            what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. {fix_for(off[0].id, off[0].detail, pid)} "
                               f"and I'll revise it.", "bad"))
         for s in smaller:                      # cut smaller than it's drawn: the cut list follows the outline (#183)
             what.append(_line(consistency.plan_said(s, inches), "warn"))
