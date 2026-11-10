@@ -7,8 +7,8 @@ one: can you cut a T-rex out of a panel and still hold Dad?
   from a drawing on the pad.
 - **Where it goes:** a panel nobody stands on (the front, or the one named: "on the side"), upright as you
   look at it from outside, as big as fits inside the glued rim and clear of the holes the panel already has.
-- **Made cuttable by hand:** nothing narrower than a jigsaw blade can turn round, no gap narrower than one,
-  and nothing inside it that would fall out (an eye). Drill a start hole inside it, then cut.
+- **Made cuttable by hand:** rounded so a scroll blade can follow it: no part or gap narrower than 1/4 in, every
+  corner rounded to at least 1/8 in, and nothing inside it that would fall out (an eye). Drill a start hole inside it, then cut.
 - **Checked:** the strength check is tried with it cut (the panel's cells taken out of the voxels, as the
   lightening study does). If it doesn't hold, the picture shrinks until it does, or it says it can't.
 - **Then it's cut:** written into the part's ``HOLES``, so the patterns, the CNC sheet and the strength check
@@ -187,7 +187,9 @@ def choose(found: list[dict], where: str = "") -> dict:
 
 
 def cuttable(poly):
-    """What a jigsaw can follow: nothing narrower than a blade turns round, no gap narrower, no islands."""
+    """What a jigsaw can follow: rounded so a scroll blade can follow it, no part or gap narrower than 1/4 in and
+    every corner, inside and out, rounded to at least 1/8 in (a close and an open by half :data:`MIN_FEATURE_MM`),
+    and no islands. Its outline is then simplified to within 0.3 mm (CALI-88, #64 item 11)."""
     from shapely.geometry import Polygon
 
     r = MIN_FEATURE_MM / 2
