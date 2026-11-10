@@ -418,8 +418,12 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
 
             unsure = coarse(run, store.design.display_units == "in")
         if ran is not None:
+            from .answers import coarse as _coarse
+
+            open_said = (unsettled if hedged else _coarse(run, inches)
+                         if any(v["kind"] in ("unresolved", "unchecked") for _, v in said) else None)      # this part's own (#191 review)
             _metric(metrics, f"strength.{p.id}.safety", ran, "×", f"{p.id}, its weakest load",
-                    "model", "strength check")
+                    "not resolved" if open_said else "model", "strength check", **({"note": open_said} if open_said else {}))
             worst = ran if worst is None else min(worst, ran)
         if breaks:
             prev = metrics.get("strength.breaks_lb", {}).get("value")
@@ -470,7 +474,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
         else:
             met = None
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-110)
-        verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=unsure if strength else None,
+        verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=(unsure or unsettled) if strength else None,
                                 edge=bool(edgeless) if strength else False,             # the middle only (CALI-94)
                                 incomplete="; ".join(left) if strength and left else None,
                                 estimate=m["source"] if m and m.get("trust") == "rough" and c["metric"].startswith("print.")
@@ -485,10 +489,10 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
                                     else "not trusted: a filled-in shape"), "note": untrue})   # which it is (#89)
         elif status == "unresolved":
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
-                           "trust": "not resolved: too coarse to see its walls", "note": unsure})
-        elif status == "fail" and strength and unsettled:     # a ✗ stays a ✗, not as a settled number (#191)
+                           "trust": "not resolved: too coarse to see its walls", "note": unsure or unsettled})
+        elif status == "fail" and strength and (unsettled or unsure):     # a ✗ stays a ✗, not as a settled number (#191)
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
-                           "trust": "not resolved: too coarse to see its walls", "note": unsettled})
+                           "trust": "not resolved: too coarse to see its walls", "note": unsettled or unsure})
         elif status == "edge":                # loaded in the middle only (CALI-94): never a pass; a ✗ stays a fail
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "checked in the middle only", "note": MIDDLE_ONLY})
