@@ -347,6 +347,8 @@ def blind(run: dict, case: dict) -> bool:
         return False
     if fea["safety"] is None:
         return True
+    if not fea["safety"]:             # rounded to 0.00: the stress was huge, so it broke. The opposite of seeing nothing
+        return False
     material, nominal = run.get("material"), _nominal(case)
     strength = material.get("strength") if isinstance(material, dict) else None
     return bool(strength and nominal) and float(strength) / float(fea["safety"]) < SEES_STRESS * nominal

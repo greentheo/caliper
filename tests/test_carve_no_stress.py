@@ -242,3 +242,18 @@ def test_a_case_that_doesn_t_say_isn_t_one_that_saw_nothing():
     assert not L.blind({"material": {"strength": 30.0}}, c)
     assert L.blind({"material": {"strength": 30.0}}, _case(None))
 
+
+def test_a_safety_that_rounds_to_nothing_is_a_part_that_broke():
+    """Zero is the opposite of a check that saw nothing: the stress was so high the number rounded away."""
+    run = {"material": {"strength": 30.0}, "min_safety": 2.0, "cases": []}
+    c = {**_case(0.0), "holds": False}
+    assert not L.blind(run, c) and verdicts.case(run, c)["kind"] == "fails"
+
+
+def test_the_bracket_under_a_huge_shove_reads_as_the_fail_it_is(tmp_path, monkeypatch):
+    """Real FEA: a load big enough that the safety rounds to 0.00, which raised ZeroDivisionError out of the study."""
+    s, run = _part(tmp_path, monkeypatch, ON_THE_UPRIGHT.replace('"lb": 20', '"lb": 2000000'))
+    c = run["cases"][0]
+    assert c["fea"]["safety"] == 0.0 and not L.blind(run, c)
+    assert verdicts.run(run)["kind"] == "fails" and L.blocked(s, "p")["why"] == "already_fails"
+
