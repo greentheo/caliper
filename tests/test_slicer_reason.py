@@ -280,3 +280,57 @@ def test_the_build_book_and_the_panel_give_the_count():
     assert "pr.get('rough_said') or pr['from']" in src
     js = open(os.path.join(os.path.dirname(release.__file__), "web", "static", "design.js")).read()
     assert re.search(r"esc\(x\.rough_said \|\| x\.from\)", js)
+
+
+# --- #166, the second round: a guess isn't a tick, and it doesn't stop a design being ready --------------------------
+def test_a_guess_is_never_called_a_strength_check_and_doesn_t_stop_ready():
+    from caliper import verdicts
+
+    v = verdicts.summary({"pass": 3, "fail": 0, "unknown": 0, "estimate": 1})
+    assert v["counts_as_pass"] and v["why"] == "" and v["guess"]
+    assert verdicts.STATUS["estimate"] != "unresolved"
+
+
+def test_a_guess_with_a_real_fail_is_still_a_fail():
+    from caliper import verdicts
+
+    assert verdicts.summary({"pass": 3, "fail": 1, "unknown": 0, "estimate": 1})["kind"] == "fails"
+
+
+def test_a_design_with_only_a_guess_and_nothing_failing_can_still_be_ready():
+    from caliper import verdicts
+
+    assert verdicts.summary({"pass": 0, "fail": 0, "unknown": 0, "estimate": 1})["counts_as_pass"]
+
+
+def test_nothing_checked_is_still_not_ready():
+    from caliper import verdicts
+
+    assert not verdicts.summary({"pass": 0, "fail": 0, "unknown": 0, "estimate": 0})["counts_as_pass"]
+
+
+def test_the_scorecard_counts_a_guess_apart_from_unknown(bar, monkeypatch):
+    goals.write(bar, {"checks": [{"id": "fast", "label": "prints in a day", "metric": "print.hours", "op": "<=",
+                                  "limit": 100, "source": "answered"}]})
+    card = _scored(bar, monkeypatch, GOOD, FAILED)
+    assert card["summary"]["estimate"] == 1 and card["summary"]["unknown"] == 0 and card["summary"]["unresolved"] == 0
+    (check,) = [c for c in card["checks"] if c.get("id") == "fast"]
+    assert check["status"] == "estimate"
+
+
+def test_the_build_book_is_ready_and_says_the_print_time_is_a_guess():
+    from caliper import release
+
+    got = release._status({"summary": {"pass": 3, "fail": 0, "unknown": 0, "estimate": 1}, "checks": [1, 2, 3, 4]})
+    assert "Ready to cut — 3 of 4 checks pass, print time is a guess" in got and "strength" not in got
+
+
+@pytest.mark.parametrize("source,word", [("1 of 2 pieces is a rough guess: the slicer timed out", "partly a guess"),
+                                         ("a rough guess: no slicer installed", ", a guess (")])
+def test_a_scored_filament_goal_says_partly_only_when_it_is(source, word):
+    state = {"parts": [], "scorecards": [{"versions": {}, "metrics": {
+        "print.filament_g": {"value": 360, "unit": "g", "trust": "rough", "source": source}}}],
+        "goals": {"checks": [{"id": "g", "label": "uses little", "metric": "print.filament_g", "op": "<=", "limit": 500,
+                              "source": "answered"}]}}
+    (line,) = answers.held_to(state, {})
+    assert word in line["text"] and line["status"] == "warn" and "✓" not in line["text"]

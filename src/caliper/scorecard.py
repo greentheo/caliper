@@ -488,10 +488,11 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             "objectives": objectives, "metrics": metrics, "cost": cw,
             "summary": {"pass": sum(c["status"] == "pass" for c in checks),
                         "fail": sum(c["status"] == "fail" for c in checks),
-                        "unknown": sum(c["status"] not in ("pass", "fail", "proposed") for c in checks),
+                        "unknown": sum(c["status"] not in ("pass", "fail", "proposed", "estimate") for c in checks),
                         "proposed": sum(c["status"] == "proposed" for c in checks),
                         "untrusted": sum(c["status"] == "untrusted" for c in checks),
                         "unresolved": sum(c["status"] == "unresolved" for c in checks),
+                        "estimate": sum(c["status"] == "estimate" for c in checks),
                         "edge": sum(c["status"] == "edge" for c in checks)}}
     os.makedirs(cards_dir(store), exist_ok=True)
     with open(os.path.join(cards_dir(store), time.strftime("%Y%m%d-%H%M%S") + ".json"), "w") as f:

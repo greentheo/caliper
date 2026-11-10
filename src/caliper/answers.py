@@ -11,6 +11,7 @@ study to draw itself. A verdict from an older version says so.
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from . import construction as C
@@ -735,7 +736,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
         guess = None
         if c["metric"].startswith("print."):           # a rough print time runs low: no ✓ on it (#166)
             guess = now.get("print.rough") if c["metric"] in now else (
-                f"a guess ({rough_scored[c['metric']]})" if c["metric"] in rough_scored else None)
+                f"{'partly ' if re.match(r'[0-9]+ of ', rough_scored[c['metric']]) else ''}a guess "
+                f"({rough_scored[c['metric']]})" if c["metric"] in rough_scored else None)
         verdict = verdicts.goal(met, untrusted=untrue, unresolved=now.get("strength.unresolved") if strength else None,
                                 edge=bool(now.get("strength.edge")) if strength else False,       # (CALI-94)
                                 stale=late or bool(older),
@@ -831,7 +833,8 @@ def design(store: DesignStore, state: dict) -> list[dict]:
                 else "No check has run yet" if waits and not untrusted and not unresolved and not edge
                 else "No check passes yet")
         rest = ([f"{untrusted} not trusted"] * bool(untrusted) + [f"{unresolved} not resolved"] * bool(unresolved)
-                + [f"{edge} middle only"] * bool(edge) + [f"{waits} not checked yet"] * bool(waits))
+                + [f"{edge} middle only"] * bool(edge) + [f"{waits} not checked yet"] * bool(waits)
+                + [f"{s.get('estimate')} a guess"] * bool(s.get("estimate")))
         work.append(_line(said + (
             f", {s['fail']} fail: " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")
             + (f"{',' if s['pass'] or fails else ':'} " + ", ".join(rest) if rest else "") + "."
@@ -860,7 +863,8 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         url = f"/api/designs/{state['slug']}/releases/{rel['id']}/files/"
         v = verdicts.release(rel, {p["id"]: p["version"] for p in state["parts"]})    # one verdict (#132 review)
         make.append(_line(f"Build package {rel['id']}: {len(rel['steps'])} steps, "
-                          + ("ready to cut." if v["kind"] == "holds" else
+                          + (("ready to cut; print time is a guess." if ((rel.get("card") or {}).get("summary") or {}).get("estimate")
+                              else "ready to cut.") if v["kind"] == "holds" else
                              "ready to cut as it was, but a part has changed since: make it again." if v["kind"] == "stale"
                              else f"not ready: {_why_not(rel)}."),
                           v["status"], action="release",

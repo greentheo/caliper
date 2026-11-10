@@ -115,15 +115,16 @@ def summary(s: Optional[dict]) -> dict:
         return _make("unresolved", why="a strength check isn't resolved")
     if s.get("edge"):
         return _make("edge", why="a strength check skipped the front edge")
-    if s.get("unknown") or not s.get("pass"):
+    if s.get("unknown") or not (s.get("pass") or s.get("estimate")):
         return _make("waiting", why="a check isn't settled")
-    return _make("holds", why="")
+    # a guessed print time isn't a ✓, and it doesn't stop a design being ready to cut (#166: with no slicer, nothing could be)
+    return _make("holds", why="", guess=bool(s.get("estimate")))
 
 
 # --- a goal held against a metric (the scorecard and the design card), and a number against what it needs ----------
 #: A verdict kind as a scorecard check's status.
 STATUS = {"holds": "pass", "fails": "fail", "untrusted": "untrusted", "unresolved": "unresolved",
-          "unchecked": "unresolved", "edge": "edge", "stale": "unknown", "waiting": "unknown", "estimate": "unresolved"}
+          "unchecked": "unresolved", "edge": "edge", "stale": "unknown", "waiting": "unknown", "estimate": "estimate"}
 
 
 def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Optional[str] = None,

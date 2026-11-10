@@ -801,7 +801,8 @@ def _status(card: dict) -> str:
     "unknown")."""
     s = card["summary"]
     if verdicts.summary(s)["counts_as_pass"]:            # one verdict (CALI-112)
-        return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass</span>'
+        guess = ", print time is a guess" if s.get("estimate") else ""       # never a ✓, never in the way (#166)
+        return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass{guess}</span>'
     untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0
     edge = s.get("edge") or 0
     rest = s["unknown"] - untrusted - unresolved - edge

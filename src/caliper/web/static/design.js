@@ -1410,7 +1410,7 @@ function scoreMark(c, stale, when) {
   if (c.status === 'fail') return '<span style="color:var(--bad)">✗</span>';
   if (stale && c.status === 'pass') return `<span style="color:var(--amber)" title="${esc(when)}">·</span>`;
   return c.status === 'pass' ? '✓' : c.status === 'proposed' ? '◇'
-    : c.status === 'unresolved' || c.status === 'untrusted' ? '<span style="color:var(--amber)">!</span>' : '?';
+    : c.status === 'unresolved' || c.status === 'untrusted' || c.status === 'estimate' ? '<span style="color:var(--amber)">!</span>' : '?';
 }
 // a goal's own limit beside its number (#137 item 5): "13.1 lb (cap 10 lb)"
 // a scorecard number as the panel says it, at module level: goalLimit uses it too (#139 review: it called scoreView's
