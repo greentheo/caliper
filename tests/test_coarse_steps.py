@@ -140,7 +140,7 @@ def test_the_too_thin_line_says_where_what_to_change_and_the_rule(tmp_path):
 
     assert re.match(r"its thinnest walls, 0\.(59|6) mm around z 2\d mm, are thinner than your rule", said), said
     assert said.endswith(" mm, are thinner than your rule shell_wall_thickness (at least 2.85 mm): thicken them to "
-                         "that. For a strength carve, walls must be at least " + f"{4 * ctx['finest']:.1f}" + " mm at "
+                         "that. For a strength carve, walls must be at least " + f"{load_study.sees_from(4 * ctx['finest']):.1f}" + " mm at "
                          "this size, so check it by hand or with a test piece instead."), said
     assert "nozzle" not in said                                    # 0.6 mm prints on a 0.4 mm nozzle
     # where no run a study may make can see them, resolution carries the words
@@ -150,13 +150,13 @@ def test_the_too_thin_line_says_where_what_to_change_and_the_rule(tmp_path):
     assert load_study.thin_words(_spool(tmp_path / "in"), "spool", 0.25, {"at": [0, 165, 410]}, 2.3, True) == (
         "its thinnest walls, 0.25 mm around z 16.1 in, are too thin for a 0.4 mm nozzle to print and for your rule "
         "shell_wall_thickness (at least 2.85 mm): thicken them to that. For a strength carve, walls must be at least "
-        "9.2 mm at this size, so check it by hand or with a test piece instead.")
+        "9.3 mm at this size, so check it by hand or with a test piece instead.")
     # with no rule and nothing to print, only the strength check's limit, in mm (#136 review: not "3/8 in")
     plain = DesignStore.create("a wood thing", base=str(tmp_path / "plain"))
     plain.write_part("spool", SPOOL_PLAIN, intent="a spool")
     assert load_study.thin_words(plain, "spool", 3.0, {"piece": "seat top"}, 2.3, False) == (
         "its thinnest walls, 3 mm in the seat top, are too thin for the strength check to see: at this size it sees walls from "
-        "9.2 mm on, so check it by hand or with a test piece instead.")
+        "9.3 mm on, so check it by hand or with a test piece instead.")
 
 
 def test_a_refused_carve_says_where_and_what_to_change(tmp_path, monkeypatch):

@@ -239,7 +239,7 @@ def test_a_thin_spot_that_isn_t_a_piece_says_where_and_promises_nothing(tmp_path
     _check(store, "tube", 3.0, thinnest=0.25, spacing=2.3, too_thin=True, thinnest_where=REAL_WHERE, sees_mm=9.2)
     spot, carve_it = _offers(store, "tube")
     assert spot["lead"] == "The thinnest spot is 0.25 mm, around z 409 mm: thicken it or make the openings smaller"
-    assert spot["cost"] == "It takes more filament. The strength check can see walls from 9.3 mm at this size."
+    assert spot["cost"] == "It takes more filament. A finer check can see walls from 9.3 mm: at least about 8 min."
     assert "around z 409 mm" in spot["say"] and "9.3 mm" in spot["say"] and spot["action"] == "use_t"
     assert carve_it["disabled"]
 
@@ -306,6 +306,7 @@ def test_the_card_draws_a_make_it_better_section_with_buttons():
 def test_each_button_goes_through_what_its_panel_already_does(line, called):
     got = _page_of(
         "const calls = []; const S = {claude: true, scope: null, design: {parts: [{id: 'p'}]}};\n"
+        "async function refresh() {} function studyDone() { return false; } function tellOffer() {}\n"
         "function send(t, s) { calls.push(`send:${t}:${s}`); } function setScope(p) { S.scope = p; calls.push(`scope:${p}`); }\n"
         "function goTo(b) { calls.push(`goto:${b}`); } function runCarve(p) { calls.push(`carve:${p.id}`); }\n"
         "function runLighten(p) { calls.push(`lighten:${p.id}`); }\n"
@@ -460,7 +461,8 @@ def test_a_second_click_starts_nothing(name, inner):
 
 _BETTER = """const S = { claude: CLAUDE, design: { parts: [{ id: 'p' }] } };
 const errs = [], sent = [];
-const showErr = (m) => errs.push(m), send = (t, s) => sent.push([t, s]);
+const tellOffer = (m) => errs.push(m), send = (t, s) => sent.push([t, s]);
+const refresh = async () => {}, studyDone = () => false;
 const setScope = () => {}, goTo = () => {}, runLoad = () => {}, runCarve = () => {}, runLighten = () => {}, adoptStation = () => {};
 """
 
@@ -471,3 +473,66 @@ def test_try_it_with_no_key_says_so_and_sends_nothing(claude, errs, sent):
                 """await useBetter({ part: 'p', action: 'use_t', say: 'thicken it' }); return { errs, sent };""")
     assert len(got["errs"]) == errs and len(got["sent"]) == sent
     assert not errs or "isn't set up here" in got["errs"][0]
+
+
+# --- #159, the second round -----------------------------------------------------------------------------------------
+def test_a_carved_part_s_sliver_points_back_at_the_carve(tmp_path):
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 3.0, thinnest=0.02, spacing=2.3, too_thin=True, thinnest_where=REAL_WHERE, sees_mm=9.2)
+    state = design_api.design_state(store)
+    state["parts"][0]["carved"] = True
+    got = better.offers(store, state, "tube")
+    assert len(got) == 1 and got[0]["button"] == "Roll it back" and got[0]["say"] == "roll it back"
+    assert "from the carve" in got[0]["lead"] and "thicken" not in got[0]["text"]
+
+
+@pytest.mark.parametrize("seen,said", [(9.2, 9.3), (9.207, 9.3), (4.0, 4.1)])
+def test_one_number_for_the_wall_and_it_s_rounded_up(seen, said):
+    assert load_study.sees_from(seen) == said
+
+
+def test_the_panel_says_the_card_s_number(tmp_path):
+    store = _store(tmp_path, TUBE, "tube")
+    words = load_study.thin_words(store, "tube", 0.25, {"at": [0, 0, 400]}, 2.302, True)
+    assert "walls must be at least 9.3 mm at this size" in words and "9.2" not in words
+
+
+_STALE = """const S = { claude: true, scope: 'p', design: { parts: [{ id: 'p', version: 3 }], carve_runs: [] } };
+const calls = [];
+const send = () => {}, setScope = () => {}, goTo = () => {}, runLoad = () => {}, adoptStation = () => {}, tellOffer = () => {};
+const runCarve = (p) => calls.push('carve'), runLighten = (p) => calls.push('lighten');
+let done = false;
+const refresh = async () => { if (done) S.design.carve_runs = [{ part: 'p', version: 3, status: 'done' }]; };
+"""
+
+
+def test_a_stale_tab_can_t_start_a_second_carve():
+    got = _page(("useBetter", "studyDone"), _STALE, """await useBetter({ part: 'p', action: 'carve' });
+        const first = calls.length; done = true;
+        await useBetter({ part: 'p', action: 'carve' });
+        return { first, after: calls.length };""")
+    assert got == {"first": 1, "after": 1}
+
+
+_STATION = """const S = { slug: 'x', running: {}, design: { parts: [] } };
+let posts = 0, release; const gate = new Promise((r) => { release = r; });
+const $ = () => null, STUDY_PATH = {}, clearStation = () => {}, showErr = () => {};
+const api = async () => { posts += 1; await gate; };
+const refresh = async () => {}, runLoad = () => {};
+"""
+
+
+def test_a_double_click_on_use_it_takes_the_step_once():
+    got = _page(("adoptStation", "takeStation"), _STATION, """const a = adoptStation('p', 'r', 1, 'other'), b = adoptStation('p', 'r', 1, 'other');
+        await b; const during = posts; release(); await a;
+        return { during };""")
+    assert got == {"during": 1}
+
+
+def test_carve_it_is_off_while_its_carve_runs():
+    head = """const S = { carveJob: { p: { text: 'x' } } };
+const esc = (s) => String(s);
+"""
+    got = _page(("betterLines",), head, """const line = { better: true, lead: 'Carve', cost: 'c', button: 'Carve it', action: 'carve', part: 'p' };
+        return { h: betterLines({ key: 'work', lines: [line] }, [line]) };""")
+    assert " disabled>Carve it" in got["h"]

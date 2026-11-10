@@ -20,3 +20,4 @@ Theo approved the mockup: *"looks great, love the layout."* Stacked on the serve
   - Carve and Lighten runs are in `answersKey()`, so a finished run updates the card and a stale "Carve it" can't start a second carve.
   - "Use it" quotes say they're the study's own check and that using it re-checks.
   - `runLoad` and `runLighten` take one click; "Try it" with no key says Claude isn't set up here.
+- **#159, second round:** the point line says a finer check is what it takes, with its cost. A tab left open re-reads the state before starting a carve or Lighten, so it can't start a second one. One number for the wall on one screen (rounded up, `load_study.sees_from`). A carved part's own sliver points at rolling back, not "thicken it". Use it takes one click, Carve it is off while its carve runs, and the no-key message has no "Report it…".

@@ -1181,16 +1181,33 @@ function betterLines(c, offers) {
   return `<div class="qbetter"><div class="qbetter-h">Make it better</div>${offers.map((ln) => {
     const i = c.lines.indexOf(ln);
     return `<div class="qoffer"><div class="qoffer-t">${esc(ln.lead)}.<span class="qoffer-c">${esc(ln.cost)}</span></div>
-      <button class="ghost" data-better="${i}" data-card="${esc(c.key)}"${ln.disabled ? ' disabled' : ''}>${esc(ln.button)}</button></div>`;
+      <button class="ghost" data-better="${i}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[ln.part]) ? ' disabled' : ''}>${esc(ln.button)}</button></div>`;
   }).join('')}</div>`;
 }
 // each goes through what its panel already does: the chat, the carve, the lightening, or taking a step
+// a carve or Lighten of this version that's already finished, as the server has it now
+function studyDone(action, pid) {
+  const p = S.design.parts.find((x) => x.id === pid);
+  const runs = S.design[action === 'carve' ? 'carve_runs' : 'lighten_runs'] || [];
+  return !!p && runs.some((r) => r.part === pid && r.version === p.version && r.status === 'done');
+}
+function tellOffer(text) {                  // a plain word beside the offers: nothing's gone wrong, so no Report it
+  const box = document.querySelector('#inspector .qbetter');
+  if (!box) return;
+  let say = box.querySelector('.qbetter-say');
+  if (!say) { say = document.createElement('div'); say.className = 'qbetter-say small muted'; box.appendChild(say); }
+  say.textContent = text;
+}
 async function useBetter(ln) {
   const p = S.design.parts.find((x) => x.id === ln.part);
   if (!p || ln.disabled) return;
   if (ln.action === 'use_t') {
-    if (!S.claude) { showErr("Changing it needs Claude, which isn't set up here."); return; }   // not the SDK's own error
+    if (!S.claude) { tellOffer("Changing it needs Claude, which isn't set up here."); return; }   // not an error to report
     return send(ln.say, ln.part);
+  }
+  if (ln.action === 'carve' || ln.action === 'lighten') {    // a tab left open: look again before hours of machine (#159)
+    await refresh();
+    if (studyDone(ln.action, ln.part)) return;               // the card it was clicked on is redrawn as it now is
   }
   if (S.scope !== ln.part) setScope(ln.part);                 // their panels are the part's, under its numbers
   goTo('loadBox');
@@ -1417,6 +1434,7 @@ function wireCards() {
     b.onclick = (e) => {
       e.stopPropagation();                                    // the card's head has its own click
       const c = ((S.answers && S.answers.cards) || []).find((x) => x.key === b.dataset.card);
+      if (c && c.lines[+b.dataset.better].action === 'carve') b.disabled = true;       // on while it isn't running only
       if (c) useBetter(c.lines[+b.dataset.better]);
     };
   });
@@ -3071,6 +3089,12 @@ function clearStation(keepBar) {
   if (S.design) paint();
 }
 async function adoptStation(pid, wid, index, kind) {
+  const once = `adopt:${wid}:${index}`;             // a double click takes the step once, and shows no false error (#159)
+  if (S.running[once]) return;
+  S.running[once] = true;
+  try { await takeStation(pid, wid, index, kind); } finally { delete S.running[once]; }
+}
+async function takeStation(pid, wid, index, kind) {
   const go = $('adoptBtn');                         // none when it's Make it better's Use it (#92)
   if (go) go.disabled = true;
   try {

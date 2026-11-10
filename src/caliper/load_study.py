@@ -267,6 +267,14 @@ def wall_rule(store: DesignStore, part_id: str) -> Optional[tuple[str, float]]:
     return None
 
 
+def sees_from(mm: float) -> float:
+    """The wall a check can see, to say: rounded up to the tenth, and past a recorded figure's own rounding (#159 review:
+    a true 9.207 said as 9.2 came back too thin). One number for the wall everywhere (#137 item 2)."""
+    import math
+
+    return math.ceil((mm + 0.05) * 10) / 10
+
+
 def thin_words(store: DesignStore, part_id: str, thin: float, where: dict, finest_mm: float,
                printed: bool) -> str:
     """Why a study can't run on walls this thin, where they are, and what to change (#136 review), said in two parts
@@ -281,7 +289,7 @@ def thin_words(store: DesignStore, part_id: str, thin: float, where: dict, fines
     inches = getattr(store.design, "display_units", "in") == "in"
     at = (f" in the {where['piece']}" if where.get("piece") else
           f" around z {_len(where['at'][2], inches)}" if where.get("at") else "")
-    head, sees = f"its thinnest walls, {_wall(thin)}{at}, are", RESOLVE_MIN * finest_mm
+    head, sees = f"its thinnest walls, {_wall(thin)}{at}, are", sees_from(RESOLVE_MIN * finest_mm)
     nozzle = DEFAULT_MACHINE.nozzle
     printing, rule = printed and thin < nozzle, wall_rule(store, part_id)
     need = rule if rule and thin < rule[1] else None

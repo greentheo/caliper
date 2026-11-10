@@ -300,3 +300,4 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
 .tlegend { margin: 8px 6px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
 .tlegend-h { font-size: 12px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
 .tlegend-r { display: flex; align-items: center; gap: 8px; font-size: 13px; margin-top: 3px; }
+.qbetter-say { margin-top: 6px; }

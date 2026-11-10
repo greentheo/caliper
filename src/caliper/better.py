@@ -20,7 +20,6 @@ thin for the check get what would let the check see them.
 
 from __future__ import annotations
 
-import math
 from typing import Optional
 
 from .design import DesignStore
@@ -132,6 +131,18 @@ def _waiting_carve(name: str, takes: str, why: Optional[str] = None) -> dict:
                  + (why or "It waits for a check it can trust."), "Carve it", "carve", disabled=True)
 
 
+def _carved_sliver(store: DesignStore, run: dict) -> list[dict]:
+    """A carved part's thin spot is the carve's own: a chat change drops the carve, so the way back is the carve's."""
+    from .answers import _thin_at, _wall
+
+    if not run.get("thinnest_mm"):
+        return []
+    at = _thin_at(run, store.design.display_units == "in")
+    return [_line(f"The thinnest spot is {_wall(run['thinnest_mm'])}{',' + at if at else ''}, from the carve",
+                  "Roll it back, or use an earlier step of the carve: changing it in the chat drops the carve.",
+                  "Roll it back", "use_t", say="roll it back")]
+
+
 def _thin_line(store: DesignStore, run: dict) -> list[dict]:
     """Walls too thin for the check to see (#159 review: "make the walls 9.2 mm" promised what a real run contradicts).
     Where the thin spot is a named piece a number sets, how thick to make it, rounded up; otherwise (a printed part's
@@ -142,17 +153,17 @@ def _thin_line(store: DesignStore, run: dict) -> list[dict]:
     thin, seen, inches = run.get("thinnest_mm"), _seen_from(run), store.design.display_units == "in"
     if not thin or not seen:
         return []
-    enough = math.ceil((seen + 0.05) * 10) / 10         # a recorded 9.2 can be a true 9.207: rounded up, and past it
+    enough = L.sees_from(seen)
+    secs = run.get("seconds")
+    then = f"at least about {_minutes(secs * L.FINER_BUDGET / 60)}" if secs else "it can take a while"
     piece = (run.get("thinnest_where") or {}).get("piece")
     if piece:
-        secs, finer = run.get("seconds"), L.FINER_BUDGET
-        then = f"at least about {_minutes(secs * finer / 60)}" if secs else "it can take a while"
         return [_line(f"Make the {piece} {_wall(enough)} thick so a finer check can see it",
                       f"It takes more filament, and then a finer check: {then}.", "Try it", "use_t",
                       say=f"Make the {piece} at least {enough:g} mm thick so the strength check can see it")]
     at = f",{_thin_at(run, inches)}" if _thin_at(run, inches) else ""
     return [_line(f"The thinnest spot is {_wall(thin)}{at}: thicken it or make the openings smaller",
-                  f"It takes more filament. The strength check can see walls from {_wall(enough)} at this size.", "Try it",
+                  f"It takes more filament. A finer check can see walls from {_wall(enough)}: {then}.", "Try it",
                   "use_t", say=f"The thinnest spot is {_wall(thin)}{at}: thicken it or make the openings near it smaller, "
                                f"so that it's at least {enough:g} mm")]
 
@@ -177,7 +188,7 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
         known = run and not p.get("untrusted") and not consistency.bare_edge(store, pid)
         got = _sheet_offers(run, fails=True) if known else []
         if run and run.get("too_thin") and p.get("printed"):    # a fail it was too coarse to judge: Theo's stool (#159)
-            got += _thin_line(store, run) + ([_waiting_carve(name, takes)] if not p.get("carved") else [])
+            got += _carved_sliver(store, run) if p.get("carved") else _thin_line(store, run) + [_waiting_carve(name, takes)]
         return [{**ln, "part": pid} for ln in got]
     if blocked and blocked.get("why") == "unchecked":           # everything else comes from the check
         return [_line("Check it holds first", "What would make it better comes from that.", "Check it holds", "load",
@@ -187,7 +198,7 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
     if settled:
         results += _sheet_offers(run, fails=False)
     if (blocked or {}).get("why") == "too_thin" and p.get("printed"):
-        results += _thin_line(store, run)
+        results += _carved_sliver(store, run) if p.get("carved") else _thin_line(store, run)
     if p.get("printed") and not p.get("carved") and (blocked or {}).get("carve"):
         invites.append(_waiting_carve(name, takes, None if blocked["why"] == "too_thin"
                                       else f"{blocked['carve'][:1].upper()}{blocked['carve'][1:]}."))
