@@ -347,3 +347,157 @@ def test_the_words_are_kept_per_unit():
 def test_the_pick_has_its_own_chip_and_clear():
     html = open(os.path.join(os.path.dirname(JS), "index.html")).read()
     assert 'id="pickChip"' in html and 'id="pickClear"' in html and "pickbar-top" in html and ">Pick<" in html
+
+
+# --- #109, slices b and c: the designer's guide, and did it land on the pick --------------------------------------------
+def _said(*a):
+    return features.landed(*a)["said"]
+
+
+def _box_with(**k):
+    return cq.Workplane("XY").box(40, 20, 10)
+
+
+def _edge_at(got, **want):
+    return next(e for e in got["edges"] if e["type"] == want.get("type", "line") and e["centre"] == pytest.approx(want["at"], abs=0.01))
+
+
+_TOP_FRONT = (0, -10, 5)
+_TOP_BACK = (0, 10, 5)
+
+
+def _filleted(at, r):
+    return _box_with().edges(cq.selectors.NearestToPointSelector(at)).fillet(r)
+
+
+def test_the_guide_says_how_to_select_a_pick():
+    text = open(os.path.join(os.path.dirname(features.__file__), "part_scripts.md")).read()
+    assert "NearestToPointSelector" in text and "About this edge" in text
+
+
+def test_a_fillet_on_the_picked_edge_is_confirmed():
+    before, after = features.of_solid(_box_with()), features.of_solid(_filleted(_TOP_FRONT, 3))
+    e = _edge_at(before, at=_TOP_FRONT)
+    said = _said(before, after, {"kind": "edge", "id": e["id"]}, "About this edge: x (at 0): fillet this 3 mm", False)
+    assert said == "Checked: the fillet is on the edge you picked, 3 mm."
+
+
+def test_a_fillet_on_another_edge_is_said_not_to_have_landed():
+    before, after = features.of_solid(_box_with()), features.of_solid(_filleted(_TOP_BACK, 3))
+    e = _edge_at(before, at=_TOP_FRONT)
+    said = _said(before, after, {"kind": "edge", "id": e["id"]}, "About this edge: x: fillet this 3 mm", False)
+    assert said == "The edge you picked is still there, so the fillet didn't land on it."
+
+
+def test_a_fillet_of_the_wrong_size_says_both():
+    before, after = features.of_solid(_box_with()), features.of_solid(_filleted(_TOP_FRONT, 3))
+    e = _edge_at(before, at=_TOP_FRONT)
+    said = _said(before, after, {"kind": "edge", "id": e["id"]}, "About this edge: x: fillet this 4 mm", False)
+    assert said == "The fillet is on the edge you picked, but it's 3 mm, not 4 mm."
+
+
+def test_the_size_in_the_pick_s_own_words_isn_t_the_size_asked():
+    before, after = features.of_solid(_box_with()), features.of_solid(_filleted(_TOP_FRONT, 3))
+    e = _edge_at(before, at=_TOP_FRONT)
+    said = _said(before, after, {"kind": "edge", "id": e["id"]}, "About this edge: the line, 40 mm long (at x 0): round it", False)
+    assert said == "Checked: the fillet is on the edge you picked, 3 mm."
+
+
+def test_a_round_on_a_circular_edge_is_a_torus_and_is_confirmed():
+    plain = cq.Workplane("XY").circle(30).extrude(10).faces(">Z").workplane().circle(15).extrude(30)
+    before = features.of_solid(plain)
+    (circle,) = [e for e in before["edges"] if e["corner"] == "inside" and e["type"] == "circle"]
+    after = features.of_solid(plain.edges(cq.selectors.NearestToPointSelector(tuple(circle["local"]))).fillet(4))
+    assert "torus" in {f["type"] for f in after["faces"]}
+    said = _said(before, after, {"kind": "edge", "id": circle["id"]}, "x: fillet this 4 mm", False)
+    assert said == "Checked: the fillet is on the edge you picked, 4 mm."
+
+
+def test_a_fraction_of_an_inch_is_the_size_asked():
+    assert features._asked_mm("fillet this 1/2 in") == pytest.approx(12.7)
+    assert features._asked_mm("fillet this 1 1/4 in") == pytest.approx(31.75)
+    assert features._asked_mm("fillet this 12.7 mm") == pytest.approx(12.7)
+    assert features._asked_mm("fillet this") is None
+
+
+def test_a_hole_through_the_picked_face_is_confirmed():
+    before = features.of_solid(_box_with())
+    after = features.of_solid(_box_with().faces(">Z").workplane().hole(10))
+    (top,) = [f for f in before["faces"] if f["centre"][2] == pytest.approx(5)]
+    said = _said(before, after, {"kind": "face", "id": top["id"]}, "x: put a hole here", False)
+    assert said == "Checked: there's a 10 mm hole through the face you picked."
+
+
+def test_a_hole_elsewhere_is_said_not_to_go_through_it():
+    before = features.of_solid(_box_with())
+    after = features.of_solid(_box_with().faces(">Z").workplane().hole(10))
+    (front,) = [f for f in before["faces"] if f["centre"][1] == pytest.approx(-10)]
+    said = _said(before, after, {"kind": "face", "id": front["id"]}, "x: put a hole here", False)
+    assert said == "No new hole goes through the face you picked."
+
+
+@pytest.mark.parametrize("pick,message", [({"kind": "edge", "id": "e0"}, "x: make it red"), ({"kind": "face", "id": "f0"}, "x: make it taller"),
+                                          ({"kind": "edge", "id": "e999"}, "x: fillet it 3 mm")])
+def test_what_can_t_be_measured_says_so(pick, message):
+    before = features.of_solid(_box_with())
+    assert features.landed(before, before, pick, message, False) == {"said": features.NOT_MEASURED, "landed": None}
+
+
+@pytest.mark.parametrize("before,after", [(None, {"faces": [], "edges": []}), ({"mesh": True, "faces": [], "edges": []}, {"faces": [], "edges": []})])
+def test_a_part_with_no_b_rep_can_t_be_measured(before, after):
+    assert features.landed(before, after, {"kind": "edge", "id": "e0"}, "x: fillet 3 mm", False)["landed"] is None
+
+
+def test_a_scoped_refine_with_a_pick_says_whether_it_landed(store):
+    from caliper import chat
+
+    before = features.for_part(store, "box")
+    e = _edge_at(before, at=_TOP_FRONT)
+    after = ("import cadquery as cq\n\ndef build(params):\n"
+             "    return cq.Workplane('XY').box(40, 20, 10).edges(cq.selectors.NearestToPointSelector((0, -10, 5))).fillet(3)\n")
+
+    def author(spec, feedback, prior):
+        return after
+
+    def never(*a, **k):
+        raise AssertionError("routed by the scope")
+
+    got = chat.refine_part(store, "box", "About this edge: x: fillet this 3 mm", author=author, use_llm=False, max_rounds=1,
+                           promote_feedback=False, pick={"kind": "edge", "id": e["id"]})
+    assert "Checked: the fillet is on the edge you picked, 3 mm." in got.reply
+
+
+def test_the_page_sends_the_pick_with_the_message():
+    src = open(JS).read()
+    assert "send(said, S.scope, pick);" in src and "...(pick ? { pick } : {})" in src
+
+
+_FILLET = ("import cadquery as cq\n\ndef build(params):\n"
+           "    return cq.Workplane('XY').box(40, 20, 10).edges(cq.selectors.NearestToPointSelector({at})).fillet(3)\n")
+
+
+def _refine(store, script, message="About this edge: x: fillet this 3 mm"):
+    from caliper import chat
+
+    e = _edge_at(features.for_part(store, "box"), at=_TOP_FRONT)
+    return chat.refine_part(store, "box", message, author=lambda s, f, p: script, use_llm=False, max_rounds=1,
+                            promote_feedback=False, pick={"kind": "edge", "id": e["id"]})
+
+
+def test_a_miss_comes_first_and_the_turn_isn_t_a_success(store):
+    """Rule 6: the designer filleted the wrong edge: no tick above it, and the turn doesn't read as done."""
+    got = _refine(store, _FILLET.format(at=_TOP_BACK))
+    assert not got.ok
+    assert got.reply.startswith("\u2717 The edge you picked is still there, so the fillet didn't land on it.")
+    assert "\u2713 " not in got.reply.split("\n")[0]
+
+
+def test_a_hit_stays_a_success(store):
+    got = _refine(store, _FILLET.format(at=_TOP_FRONT))
+    assert got.ok and "Checked: the fillet is on the edge you picked, 3 mm." in got.reply
+    assert not got.reply.startswith("\u2717")
+
+
+def test_what_can_t_be_measured_doesn_t_fail_the_turn_or_claim_a_hit(store):
+    got = _refine(store, _FILLET.format(at=_TOP_FRONT), message="About this edge: x: make it red")
+    assert got.ok and features.NOT_MEASURED in got.reply and "Checked:" not in got.reply

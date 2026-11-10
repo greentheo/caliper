@@ -224,6 +224,20 @@ frame study, `shell(params, build=None)`, a list of
 `{"name", "a", "b", "depth", "core", "core_t", "skins"}`, and its roof for the snow study,
 `roof(params, build=None)`. Their fields are documented in `frame_study.wall_section` and `snow.py`.
 
+## A picked face or edge
+
+A request can begin "About this edge: … (at x, y, z mm in the script's coordinates): …". The person clicked that exact edge or
+face, so change that one and no other. Select it from the point it gives:
+
+```python
+result = result.edges(cq.selectors.NearestToPointSelector((x, y, z))).fillet(r)     # an edge
+result = result.faces(cq.selectors.NearestToPointSelector((x, y, z))).workplane().hole(d)   # a face
+```
+
+The point is the edge's centre (a circle's centre, a line's middle) or the face's. Apply it at the step where that edge or
+face exists: after the bodies are joined, before anything that would remove it. Don't look for it by a `">Z"`-style
+selector, which can land on another edge. If the selector can't find it, raise with why.
+
 ## Keep them together
 
 When you change `build()`, change the declarations with it. Move a panel or a tube in one and you

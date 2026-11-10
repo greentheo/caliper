@@ -436,9 +436,20 @@ def _emit(events: list[Event], on_event, kind: str, text: str, **data) -> None:
         on_event(ev)
 
 
+def _features_of(store: DesignStore, part_id: str) -> Optional[dict]:
+    """A part's faces and edges, or None if they can't be worked out: then what landed where can't be said."""
+    from . import features
+
+    try:
+        return features.for_part(store, part_id)
+    except Exception:  # noqa: BLE001 — the change stands; only the check of it is lost
+        return None
+
+
 def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, client=None,
                 max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
-                use_llm: bool = True, drafter=None, promote_feedback: bool = True, measured: str = "") -> TurnResult:
+                use_llm: bool = True, drafter=None, promote_feedback: bool = True, measured: str = "",
+                pick: Optional[dict] = None) -> TurnResult:
     """Revise a part **that lives inside a design** and re-measure the whole thing.
 
     The gap CALI-29 exists to close. Everything here is plumbing around one existing call —
@@ -467,6 +478,7 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
         return TurnResult(action="error", ok=False, part=part_id, events=events,
                           error=f"{part_id} has no script to revise", reply=reply)
 
+    picked_from = _features_of(store, part_id) if pick else None    # the part as it was picked on (#109)
     before, _ = _measure_design(store)
     spec = _working_spec(store, part_id, entry.intent)
     script = store.read_script(part_id)
@@ -509,13 +521,22 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
                      volumes=(was, _volume(store, part_id)))
     if uncarved:
         reply += "\n\n" + carve.DROPPED
+    on_pick = None
+    if pick:                                        # did it land on what was picked? Only what can be measured is said
+        from . import features
+
+        check = features.landed(picked_from, _features_of(store, part_id), pick, message, store.design.display_units == "in")
+        on_pick = check["landed"]
+        # a miss comes first and the turn isn't a success: never a tick above "it isn't on what you picked" (rule 6)
+        reply = (f"\u2717 {check['said']}\n\n{reply.replace(chr(0x2713) + ' ', '', 1)}" if on_pick is False
+                 else f"{reply}\n\n{check['said']}")
     proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
                                        drafter=drafter, enabled=promote_feedback,
                                        events=events, on_event=on_event)
     if offer:
         reply += "\n\n" + offer
 
-    return TurnResult(action="refine", ok=bool(res.ok) and not broke, part=part_id, version=version,
+    return TurnResult(action="refine", ok=bool(res.ok) and not broke and on_pick is not False, part=part_id, version=version,
                       part_report=res.report, report=after, broke=broke, fixed=fixed,
                       part_errors=part_errors, proposal=proposal, events=events, reply=reply)
 
@@ -1233,7 +1254,8 @@ def _grain_reply(got: dict) -> TurnResult:
 
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
          use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
-         on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False) -> TurnResult:
+         on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False,
+         pick: Optional[dict] = None) -> TurnResult:
     """One conversational turn: route the message, make the move, measure the whole design, reply.
 
     ``scope`` is the part the user clicked (``None`` = the design). ``author``/``classifier``/
@@ -1324,7 +1346,7 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         awaiting.park(store, "repeat", part=intent.part, message=message)
         result = TurnResult(action="ask", ok=True, part=intent.part, events=events, reply=again)
     elif intent.action == "refine" and intent.part:
-        result = refine_part(store, intent.part, message, author=author, client=client,
+        result = refine_part(store, intent.part, message, author=author, client=client, pick=pick,
                              max_rounds=max_rounds, events=events, on_event=on_event,
                              use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
     elif intent.action == "revert" and intent.part:

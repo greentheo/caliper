@@ -35,6 +35,7 @@ class NewDesign(BaseModel):
 class ChatMessage(BaseModel):
     message: str
     scope: Optional[str] = None
+    pick: Optional[dict] = None           # the face or edge picked: {kind, id} (#109)
 
 
 class ParamSet(BaseModel):
@@ -617,7 +618,7 @@ def router():
             store = DesignStore.load(slug)
             before = len(store.log())
             try:
-                res = chat.turn(store, message, scope=req.scope or None, logged=True,
+                res = chat.turn(store, message, scope=req.scope or None, logged=True, pick=req.pick,
                                 on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
             except Exception as e:
                 # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87)

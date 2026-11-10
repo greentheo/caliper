@@ -1045,13 +1045,13 @@ function aboutPiece(text) {
   const piece = part && (part.pieces || []).find((x) => x.key === S.piece);
   return piece ? `About the ${piece.name}: ${text}` : text;
 }
-async function send(text, scope) {
+async function send(text, scope, pick) {
   if (S.busy || !text.trim()) return;
   if (!S.slug) return createDesign(text);
   S.busy = true; $('send').disabled = true;
   const live = liveTurn(text, scope);
   try {
-    const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope });
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}) });
     await follow(job_id, (ev) => live.step(ev));
     S.busy = false;
     await refresh();
@@ -1065,9 +1065,9 @@ $('composer').onsubmit = (e) => {
   e.preventDefault();
   const text = $('msg').value;
   $('msg').value = '';
-  const said = aboutPick(S.pick, aboutPiece(text));
+  const said = aboutPick(S.pick, aboutPiece(text)), pick = S.pick && S.pick.id ? { kind: S.pick.kind, id: S.pick.id } : null;
   if (S.pick) { clearPick(); renderScope(); }
-  send(said, S.scope);
+  send(said, S.scope, pick);
 };
 $('msg').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
