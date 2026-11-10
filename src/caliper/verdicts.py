@@ -13,7 +13,15 @@ edge); then an older version; then waiting; only then holds.
 
 from __future__ import annotations
 
+import math
 from typing import Optional
+
+def cut(x: float, places: int = 2) -> float:
+    """A safety kept to ``places``, cut toward safe, never rounded up (CALI-152, #213): stored as 2.0, a true 1.995
+    against 2 read "holds". Every producer that makes a verdict stores its number with this."""
+    k = 10 ** places
+    return math.floor(x * k + 1e-9) / k
+
 
 #: Every kind, best last: (status, the word a badge says, counts as a pass). A new state goes here and in RANK.
 KINDS = {

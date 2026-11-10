@@ -23,6 +23,7 @@ from typing import Optional
 import numpy as np
 
 from . import construction as C
+from . import verdicts as V
 from . import verdicts
 from .design import DesignStore
 
@@ -68,7 +69,7 @@ def moments(polygon: np.ndarray, weights: list[tuple[float, np.ndarray]], push: 
     overturning_push = push * lever
     total = overturning + overturning_push
     return {"restoring_nmm": round(restoring, 1), "overturning_nmm": round(total, 1),
-            "safety": round(restoring / total, 2) if total > 0 else None,
+            "safety": V.cut(restoring / total) if total > 0 else None,
             # the sideways push that would tip it: none at all when the downward loads alone already do
             "tips_at_n": max(round((restoring - overturning) / lever, 1), 0.0) if lever > 0 else None,
             "edge_mm": round(edge, 1)}

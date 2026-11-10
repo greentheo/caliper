@@ -30,6 +30,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from . import load_study as L
+from . import verdicts as V
 from .consistency import _frame
 from .design import DesignStore
 from .one_study import one_at_a_time
@@ -279,7 +280,7 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
     if worst is None or not np.isfinite(worst):
         return case
     fea = (case.get("fea") or {}).get("safety")
-    safety = round(min(worst, fea) if fea else worst, 2)
+    safety = V.cut(min(worst, fea) if fea else worst)              # cut, never up (#213)
     plate = dict(pl or {}, done=False, why="it has holes, so the plate formula doesn't apply; the FEA does, "
                                            "calibrated against it on the panel solid")
     case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety, "plate": plate,  # producer
@@ -438,7 +439,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
                         edge = max(float(np.max(np.where(x["cells"], before, 0.0))) for x in chosen[p["name"]])
                         mine = min(allow / (peak * kk), allow / (KT_HOLE * edge * kk) if edge > 0 else np.inf)
                         fea = (case.get("fea") or {}).get("safety")
-                        safety = round(min(mine, fea) if fea else mine, 2)
+                        safety = V.cut(min(mine, fea) if fea else mine)
                         case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety,  # producer
                                      "breaks_lb": round(case["lb"] * case["factor"] * safety, -1)})
             cases.append(case)
@@ -550,7 +551,7 @@ def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
         saved = base["saved_lb"] + (wood_g / 453.59237 - base["saved_lb"]) * (1 - ratio)
         out.append({"phase": "thinner", "estimate": True, "thickness_mm": t, "label": M.nominal(t),
                     "removed": base["removed"], "holes": base["holes"], "top_holes": base.get("top_holes", 0),
-                    "safety": round(worst, 2), "holds": worst >= min_safety, "saved_lb": round(saved, 2),  # producer
+                    "safety": V.cut(worst), "holds": worst >= min_safety, "saved_lb": round(saved, 2),  # producer
                     "from_step": base["index"], "cases": [], "panels": base["panels"]})
         if worst < min_safety:  # search
             break

@@ -32,6 +32,7 @@ import uuid
 from typing import Callable, Optional
 
 from .design import DesignStore
+from . import verdicts as V
 from .one_study import one_at_a_time
 from .runs import newest_first
 
@@ -327,7 +328,7 @@ def _summary(result, built: dict) -> dict:
     """What a person reads off one design: weight, worst member, sag, and what the hitch holds."""
     mouth = built["mouth"]
     out = {"mass_kg": round(float(result.mass), 2), "mass_lb": round(float(result.mass) * KG_LB, 1),
-           "safety": round(float(result.safety), 2),
+           "safety": V.cut(float(result.safety)),
            "governing": {"case": result.governing[0], "member": built["names"][result.governing[1]]},
            "deflection_mm": round(float(result.deflection), 1),
            "deflection_in": round(float(result.deflection) / 25.4, 2),
@@ -346,8 +347,8 @@ def _summary(result, built: dict) -> dict:
         v = max(float(abs(c.end_forces[k, i])) for c in result.cases.values() for i in (1, 2, 7, 8))
         tau = v / (ck["depth"] * ck["core_t"])
         foam = ck["core_shear"] / tau if tau > 0 else float("inf")
-        walls.append({"name": built["names"][k], "skin_safety": round(skin[0], 2),
-                      "foam_safety": round(min(foam, 999.0), 2), "safety": round(min(skin[0], foam), 2),
+        walls.append({"name": built["names"][k], "skin_safety": V.cut(skin[0]),
+                      "foam_safety": V.cut(min(foam, 999.0)), "safety": V.cut(min(skin[0], foam)),
                       "case": skin[1]})
     if walls:
         out["walls"] = walls
@@ -649,7 +650,7 @@ def gussets(store: DesignStore, part_id: str, *, thickness: float = 4.7625, plat
                     f.write(text)
             weld = m.get("weld_moment_nmm")
             rows.append({"index": i, "removed": round(float(st.removed), 3), "mass_kg": round(float(m["mass_kg"]), 3),
-                         "safety": round(float(m["safety_factor"]), 2), "stress_mpa": round(float(m["peak_stress_mpa"]), 1),
+                         "safety": V.cut(float(m["safety_factor"])), "stress_mpa": round(float(m["peak_stress_mpa"]), 1),
                          "deflection_mm": round(float(m["deflection_mm"]), 3), "holes": int(m.get("holes", 0)),
                          "relief": round(float(m["plate_share"]), 3),
                          "weld_lbin": None if weld is None else [round(float(w) / LBIN) for w in
