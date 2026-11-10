@@ -1096,7 +1096,22 @@ def _next_id(store: DesignStore) -> str:
 def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = True,
          timeout: float = 180.0, stop: Optional[Callable[[], None]] = None) -> dict:
     """Release the design as it stands: cut plans and scorecard brought up to date, everything for the shop
-    filed in one versioned folder, and its record returned."""
+    filed in one versioned folder, and its record returned. If a part changes while it waits, it starts again, so the labels, the
+    files, the source and the strength row all name one version (#184 review: v1's strength on v2's shape read "ready")."""
+    from . import scorecard
+
+    for _ in range(scorecard.AGAIN):
+        try:
+            return _make(store, emit=emit, pdf=pdf, timeout=timeout, stop=stop)
+        except scorecard.Moved:
+            store.__dict__.update(type(store).load(store.root).__dict__)
+            if emit:
+                emit("waiting", "A part changed while this waited: starting again.")
+    raise ValueError("the design kept changing while this waited: make the package again when it's settled")
+
+
+def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = True,
+          timeout: float = 180.0, stop: Optional[Callable[[], None]] = None) -> dict:
     from . import cutplan, scorecard
 
     emit = emit or (lambda *a, **k: None)
@@ -1142,6 +1157,8 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
         bom[p.id] = r["bom"]
         lumps[p.id] = [row for row in C.takeoff(C._items(C.declared(store, p.id))) if row["kind"] == "lump"]
 
+    if {p.id: p.version for p in type(store).load(store.root).design.parts} != versions:
+        raise scorecard.Moved()             # the score waited, or a part was revised beside it: everything above is of what's gone
     stop()                                  # the last step that can stop: nothing's been written yet
     rid = _next_id(store)
     root = os.path.join(releases_dir(store), rid)

@@ -27,6 +27,7 @@ from typing import Callable, Optional
 from . import consistency
 from . import construction as C
 from . import materials as M
+from . import one_study
 from .design import DesignStore
 from .jobs import Cancelled
 
@@ -173,11 +174,30 @@ def cost_and_waste(store: DesignStore, reports: dict, cutplans: dict) -> dict:
 # ---------------------------------------------------------------------------
 # The card
 # ---------------------------------------------------------------------------
+class Moved(Exception):
+    """A part changed while this waited its turn (#184 review): what's been worked out so far is of a design that's gone."""
+
+
+#: how many times it starts again for a design that keeps changing under it
+AGAIN = 3
+
+
 def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[Callable[[], None]] = None) -> dict:
-    """Score the design as it stands, file the card, and return it.
+    """Score the design as it stands, file the card, and return it. If a part changes while it waits its turn, it starts again
+    from the top, so one card names one set of versions.
 
     Bump :data:`SCORER` whenever a metric's meaning changes (what it counts, how it's weighed): every card filed
     before then reads out of date, the release scores again, and no "was" is set against it."""
+    for _ in range(AGAIN):
+        try:
+            return _compute(store, emit, stop)
+        except Moved:
+            if emit:
+                emit("waiting", "A part changed while this waited: scoring it again.")
+    raise ValueError("the design kept changing while this waited: score it again when it's settled")
+
+
+def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[Callable[[], None]] = None) -> dict:
     from . import aero, cutplan, frame_study
 
     emit = emit or (lambda *a, **k: None)
@@ -384,8 +404,13 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
         if run is None:
             emit("strength", f"checking what {p.id} must hold")
             try:
-                run = load_study.study(store, p.id, emit=emit, stop=stop)
-            except Cancelled:                 # asked to stop: not a check that couldn't run (#178 review)
+                with one_study.my_turn(store, emit, stop):   # what it waited behind may be this very check (#184)
+                    if {x.id: x.version for x in store.design.parts} != versions:     # it waited, and read the design again
+                        raise Moved()
+                    run = next((r for r in load_study.list_runs(store, p.id) if r.get("version") == p.version), None)
+                    if run is None:
+                        run = load_study.study(store, p.id, emit=emit, stop=stop)
+            except (Cancelled, Moved):        # asked to stop, or starting again: not a check that couldn't run (#178 review)
                 raise
             except Exception as e:  # noqa: BLE001 — a check that can't run is unknown, not a crash
                 _metric(metrics, f"strength.{p.id}.error", str(e), "", f"{p.id}'s strength couldn't be checked",
