@@ -231,9 +231,9 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
             else:
                 n_screws = sum(screws_for(joints[tuple(sorted((pc["key"], a)))]) for a in against)
                 say = (f"Put glue on the edges where the {words[pc['key']]} touches {_together(against, wood, words)}. "
-                       f"A grown-up clamps it in place, drills a {PILOT_BIT} pilot hole for each screw first so the "
-                       f"wood doesn't split, and drives in {n_screws} screws with the drill, while you stand an arm's length behind with your safety "
-                       f"glasses and ear defenders on.")
+                       f"A grown-up clamps it and drills a {PILOT_BIT} pilot hole for each screw, so the wood won't "
+                       f"split. Then the grown-up drives in {n_screws} screws. You stand an arm's length behind, in "
+                       f"your safety glasses and ear defenders.")      # short sentences, read aloud (#209 review)
             img = f"kids/step-{len(pages) + 1:02d}.png"
             with open(os.path.join(root, img), "wb") as f:
                 f.write(release.draw(view, [(done, "done"), ([new], "now")]))
