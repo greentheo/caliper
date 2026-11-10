@@ -73,7 +73,7 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     breaks = case.get("breaks_lb")
     step = 50 if (breaks or applied) <= 1500 else 100          # a sandbag at a time
     # up to where it should break, no further: a stool predicted to go at 220 lb doesn't need 250 on it
-    loads = sorted({case["lb"], *range(step, int(breaks), step), math.ceil(breaks)} if breaks
+    loads = sorted({x for x in {case["lb"], *range(step, int(breaks), step), math.ceil(breaks)} if x <= math.ceil(breaks)} if breaks
                    else {case["lb"], *range(step, int(applied * 2) + step, step)})
     steps = [{"lb": lb, "sag_mm": [round(lo * lb, 3), round(hi * lb, 3)]} for lb in loads]
     return {"part": part_id, "version": run["version"], "run": run["id"], "case": case["name"], "lb": case["lb"],

@@ -25,6 +25,10 @@ SOLID = ("sheet", "stick", "printed")
 MOST = 60
 
 
+#: words that follow a position, not a piece: "the front edge", "the top face"
+GEOMETRY = r"(?!\s+(?:edges?|corners?|faces?|sides?|walls?)\b)"
+
+
 def relabelled(store, pid: str, text: str) -> str:
     """``text`` with the part's pieces called what the person renamed them to (#185: "seat disk" stayed "seat top" on the cards and
     in the cut list, which keep the name the script gave them)."""
@@ -32,7 +36,9 @@ def relabelled(store, pid: str, text: str) -> str:
 
     for old, new in ((store.design.piece_labels or {}).get(pid) or {}).items():
         if new and new != old:
-            text = re.sub(r"(?<![\w])" + re.escape(old).replace("_", "[_ ]").replace(r"\ ", "[_ ]") + r"(?![\w])", new, text)
+            # a name is whatever was typed, so it's never read as a pattern; and "the front edge" isn't the piece called front
+            text = re.sub(r"(?<![\w])" + re.escape(old).replace("_", "[_ ]").replace(r"\ ", "[_ ]") + r"(?![\w])" + GEOMETRY,
+                          lambda _, to=new: to, text)
     return text
 
 

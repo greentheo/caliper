@@ -1115,12 +1115,13 @@ async function send(text, scope, pick, shown) {
   if (S.busy || S.opening || !text.trim()) return;      // never to a design that isn't on screen yet (#173)
   if (!S.slug) return createDesign(text);
   S.busy = true; $('send').disabled = true;
+  const sent = S.pick;                          // the pick this message is about: one made while it's answered isn't it
   const live = liveTurn(shown || text, scope);
   try {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}), ...(shown ? { shown } : {}) });
     await follow(job_id, (ev) => live.step(ev));
     S.busy = false;
-    if (shown) clearPick();                     // it's been used; after an error it stays, so asking again doesn't mean picking again
+    if (shown && S.pick === sent) clearPick();                     // it's been used; after an error it stays, so asking again doesn't mean picking again
     await refresh();
   } catch (e) {
     live.fail(e.message, e.errorId);
