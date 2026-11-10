@@ -162,6 +162,8 @@ class DesignPart(_Base):
     intent: str = ""
     version: int = 0
     origin: Literal["authored", "adopted", "imported", "whittled"] = "authored"
+    #: CALI-102 (#94): the name a person reads. The id that scripts, history, runs and files key on never changes.
+    label: Optional[str] = None
     created: str = Field(default_factory=_now)
     updated: str = Field(default_factory=_now)
 
@@ -184,6 +186,8 @@ class Design(_Base):
     #: (its parts, build order and status). The plan's mates and rules live in assembly.yaml with the rest.
     skeleton: Optional[list[dict]] = None
     plan: Optional[dict] = None
+    #: CALI-102 (#94): the names people gave a part's pieces, ``{part: {piece: label}}``
+    piece_labels: dict = Field(default_factory=dict)
     #: CALI-126 (#150): the sheets' face grain as the person said it, ``{part: {piece: {grain, runs, said}}}``: only
     #: these move a strength verdict, and the cut list and build book tell the maker (see :mod:`caliper.grain`)
     grain: dict = Field(default_factory=dict)
