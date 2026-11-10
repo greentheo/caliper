@@ -200,9 +200,7 @@ def test_what_to_say_moves_the_outline_not_the_shape(detail, said):
 
 
 def test_the_card_points_at_the_declared_piece(tmp_path):
-    import os
+    from caliper import answers, consistency
 
-    from caliper import answers
-
-    src = open(os.path.join(os.path.dirname(answers.__file__), "answers.py")).read()
-    assert 'consistency.remedy(off[0].detail) if off[0].id == "construction_on_its_face"' in src
+    detail = "the seat's outline is at its mid-plane"              # the card's fix for a piece off its face is its own
+    assert answers.fix_for("construction_on_its_face", detail, "stool") == f'Say "{consistency.remedy(detail)}"'
