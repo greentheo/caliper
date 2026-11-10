@@ -52,6 +52,12 @@ def fits(extents, volume) -> bool:
     return all(a <= b for a, b in zip(sorted(float(e) for e in extents), room))
 
 
+def too_big(parts: list, volume) -> list:
+    """The pieces that still don't fit the printer. ``split`` cuts across the longest axis only, so a wide part stays wide
+    (#179: the stool's 583 mm cone, on a 256 mm bed): how to section one of those is a design call, not this cut."""
+    return [m for m in parts if not fits(m.extents, volume)]
+
+
 def split(mesh, volume) -> list:
     """The part as pieces that each fit the printer, with pin holes across every cut."""
     import trimesh

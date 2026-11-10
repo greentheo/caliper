@@ -330,7 +330,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
     # can your shop make it (CALI-48): every piece routed to a tool or machine you have; printing costed
     from . import making
 
-    missing, hours, grams, planned, unplanned, guessed = [], 0.0, 0.0, 0, [], ""
+    missing, hours, grams, planned, unplanned, guessed, unprintable = [], 0.0, 0.0, 0, [], "", ""
     for pid in reports:
         try:
             mk = making.plan(store, pid)
@@ -339,6 +339,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             continue
         planned += 1
         missing += [f"{pid}: {m['name']} ({m['why']})" for m in mk["missing"]]
+        unprintable = unprintable or making.no_print_total(mk)
         hours += sum(x["hours"] for x in mk["printed"])
         grams += sum(x["filament_g"] for x in mk["printed"])
         guessed = guessed or next((x["rough_said"] for x in mk["printed"] if x.get("rough_said")), "")
@@ -353,7 +354,10 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                        "trust": "measured" if missing or settled else None,
                        "note": "; ".join((missing + [f"couldn't work out how to make {u}" for u in unplanned])[:6])})
         _metric(metrics, "make.not_in_shop", len(missing), "pieces", "pieces your shop can't make", "measured", "shop")
-    if grams:
+    if unprintable:                       # a printed piece the shop can't make: no total, and a goal on it says why (#179 review)
+        _metric(metrics, "print.hours", None, "h", "printing time, every printed piece", "model", "shop", note=unprintable)
+        _metric(metrics, "print.filament_g", None, "g", "filament, every printed piece", "model", "shop", note=unprintable)
+    elif grams:
         # any piece a guess: the total says so, and the build book can't call it "model, safe side" (#166)
         how, where = ("rough", guessed) if guessed else ("model", "slicer")
         _metric(metrics, "print.hours", round(hours, 1), "h", "printing time, every printed piece", how, where)

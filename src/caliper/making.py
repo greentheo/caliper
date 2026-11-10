@@ -38,6 +38,30 @@ def rough_said(rough: int, pieces: int, said: str) -> str:
     return f"a rough guess: {why}" if why == "no slicer installed" else f"a rough guess; the slicer couldn't work it out: {why}"
 
 
+def _too_big_said(pieces: int, over: list, volume, inches: bool) -> str:
+    """What doesn't fit, in the person's units: the piece that's furthest over, against the printer and its clearance. Only
+    a part that doesn't fit gets here, and ``split`` always cuts one of those: so there are always pieces to count."""
+    from . import printing
+    from .answers import _len
+
+    worst = max(over, key=lambda m: float(max(m.extents)))
+    size = " x ".join(_len(float(v), inches) for v in sorted(worst.extents, reverse=True))
+    bed = " x ".join(_len(float(v), inches) for v in volume)
+    many = f"all {pieces} are too big" if len(over) == pieces else f"{len(over)} of the {pieces} {'is' if len(over) == 1 else 'are'} too big"
+    return (f"cut into {pieces} pieces, {many}: the biggest is {size}, and your printer takes {bed}, less "
+            f"{_len(printing.BED_MARGIN_MM, inches)} clearance: section it differently, in the chat, or use a bigger printer")
+
+
+def no_print_total(mk: dict) -> str:
+    """Why a print total can't be given for this part: a printed piece it can't make isn't in ``printed``, so a sum over that
+    would read as the whole (#179 review, rule 6). "" where there's no such piece."""
+    gone = next((m for m in mk["missing"] if m["kind"] == "printed"), None)
+    if gone is None:
+        return ""
+    why = f"the {gone['name']} doesn't fit your printer" if gone.get("too_big") else f"your shop can't print the {gone['name']}"
+    return f"can't be worked out: {why}"
+
+
 def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_dir: Optional[str] = None,
          wait: bool = True) -> dict:
     """How this part is made in the shop. ``out_dir`` keeps a printed part's pieces as STLs there. ``wait=False``
@@ -60,6 +84,10 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
         mesh = C.printed_solid(store, part_id)            # the sides, for a plywood top on printed sides
         volume = printer.get("volume_mm") or (256, 256, 256)
         parts = printing.split(mesh, volume)
+        over = printing.too_big(parts, volume)
+        if over:                                          # never ok on a piece that doesn't fit (#179, rule 6)
+            pc["ok"], pc["too_big"], pc["why"] = False, True, _too_big_said(len(parts), over, volume, store.design.display_units == "in")
+            continue
         keep = out_dir or tempfile.mkdtemp(prefix="caliper-print-")
         os.makedirs(keep, exist_ok=True)
         each = []
