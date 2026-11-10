@@ -224,6 +224,28 @@ frame study, `shell(params, build=None)`, a list of
 `{"name", "a", "b", "depth", "core", "core_t", "skins"}`, and its roof for the snow study,
 `roof(params, build=None)`. Their fields are documented in `frame_study.wall_section` and `snow.py`.
 
+## A picked face or edge
+
+A request can begin "About this edge: … (at x, y, z mm in the script's coordinates): …". The person clicked that exact edge or
+face, so change that one and no other.
+
+For an edge, the point lies on it. Select it with `edge_at`, which is already in your script's namespace and measures true
+distance to the edge:
+
+```python
+result = edge_at(result, (x, y, z)).fillet(r)
+```
+
+For a face, the point is its centre:
+
+```python
+result = result.faces(cq.selectors.NearestToPointSelector((x, y, z))).workplane(centerOption="CenterOfMass").hole(d)
+```
+
+Don't select an edge with `NearestToPointSelector` or a `">Z"`-style selector: concentric rings tie and it lands on another
+edge. Do it at the step where that edge or face exists, after the bodies are joined and before anything removes it. `edge_at`
+raises if no edge is at the point; let it.
+
 ## Keep them together
 
 When you change `build()`, change the declarations with it. Move a panel or a tube in one and you
