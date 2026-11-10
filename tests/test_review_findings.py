@@ -26,3 +26,20 @@ console.log(JSON.stringify([
   simplerOffered({ claude: true, log: [{ kind: 'message' }] }), simplerOffered({ claude: true, proposal: {}, log: [reply] })]));
 """)
     assert got == [True, False, False, False], got
+
+
+def test_a_report_too_long_for_a_link_keeps_the_line_that_failed():
+    """Item 16: the page cut a long report from its end, which is the trace's last line, the one that failed."""
+    fn = _fn(open(JS).read(), "trimReport")
+    got = _run(fn + r"""
+const trace = Array.from({length: 600}, (_, k) => `  File "x.py", line ${k}, in f`).join('\n') + '\nValueError: the line that failed';
+const body = '**What broke:** a thing\n\n```\n' + trace + '\n```\nI was carving it.\n';
+const cut = trimReport(body, 6500);
+const short = trimReport('nothing to cut', 6500);
+const noFence = trimReport('x'.repeat(9000), 6500);
+console.log(JSON.stringify({ fits: encodeURIComponent(cut).length <= 6500, last: cut.includes('ValueError: the line that failed'),
+  head: cut.startsWith('**What broke:** a thing'), fences: (cut.match(/```/g) || []).length, closed: /\n```\nI was carving it\.\n$/.test(cut),
+  middle: cut.includes('…'), short, noFence: encodeURIComponent(noFence).length <= 6500 }));
+""")
+    assert got == {"fits": True, "last": True, "head": True, "fences": 2, "closed": True, "middle": True,
+                   "short": "nothing to cut", "noFence": True}, got

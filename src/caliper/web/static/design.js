@@ -83,13 +83,26 @@ async function reportError(errorId, message) {
       catch (e) { $('reportBody').select(); }
     };
     $('reportSend').onclick = () => {
-      let body = $('reportBody').value;
-      while (encodeURIComponent(body).length > 6500) body = body.slice(0, Math.floor(body.length * 0.9)) + '…';
+      const body = trimReport($('reportBody').value, 6500);
       const url = rep.url.split('&body=')[0] + '&body=' + encodeURIComponent(body);
       window.open(url, '_blank', 'noopener'); dlg.close();
     };
     dlg.showModal();
   } catch (e) { showErr('couldn\'t make the report: ' + e.message); }
+}
+// a report too long for a link: as the server cuts one (errors.report), the trace from its start, because its last
+// line is the one that failed, with the fence left closed; only then the words from the end (CALI-92, #70 item 16)
+function trimReport(body, most) {
+  const m = /^([\s\S]*?```\n)([\s\S]*)(\n```[\s\S]*)$/.exec(body);
+  if (m) {
+    let trace = m[2];
+    while (encodeURIComponent(m[1] + trace + m[3]).length > most && trace.length > 1) {
+      trace = '…' + trace.slice(Math.max(2, Math.floor(trace.length / 4)));
+    }
+    body = m[1] + trace + m[3];
+  }
+  while (encodeURIComponent(body).length > most) body = `${body.slice(0, Math.floor(body.length * 0.9))}…`;
+  return body;
 }
 function reportLink(errorId, message) {
   const b = document.createElement('button');
