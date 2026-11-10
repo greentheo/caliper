@@ -1,6 +1,6 @@
 {
-  "created": 1793238028.6425622,
-  "scorer": 2,
+  "created": 1794305349.4991958,
+  "scorer": 3,
   "versions": {
     "leaf_rear": 1,
     "frame": 26,
@@ -53,6 +53,7 @@
       "auto": true,
       "status": "pass",
       "value": 0,
+      "unit": "pieces it can't make",
       "margin": 0,
       "trust": "measured",
       "note": ""
@@ -179,8 +180,9 @@
       "value": 48.4,
       "unit": "lbf",
       "trust": "rough",
-      "was": 48.4,
-      "change": 0.0
+      "was": null,
+      "change": null,
+      "note": "scored differently since"
     },
     {
       "id": "weight",
@@ -190,8 +192,9 @@
       "value": 141.3,
       "unit": "lb",
       "trust": "model",
-      "was": 141.3,
-      "change": 0.0
+      "was": null,
+      "change": null,
+      "note": "scored differently since"
     },
     {
       "id": "hitch",
@@ -201,8 +204,9 @@
       "value": 3403,
       "unit": "lb\u00b7in",
       "trust": "model",
-      "was": 3403,
-      "change": 0
+      "was": null,
+      "change": null,
+      "note": "scored differently since"
     },
     {
       "id": "frame",
@@ -212,8 +216,9 @@
       "value": 1.93,
       "unit": "\u00d7",
       "trust": "model",
-      "was": 1.93,
-      "change": 0.0
+      "was": null,
+      "change": null,
+      "note": "scored differently since"
     },
     {
       "id": "steel",
@@ -223,8 +228,9 @@
       "value": 25.8,
       "unit": "lb",
       "trust": "model",
-      "was": 25.8,
-      "change": 0.0
+      "was": null,
+      "change": null,
+      "note": "scored differently since"
     },
     {
       "id": "cost",
@@ -234,8 +240,9 @@
       "value": 451.27,
       "unit": "$",
       "trust": "guess",
-      "was": 451.27,
-      "change": 0.0
+      "was": null,
+      "change": null,
+      "note": "scored differently since"
     },
     {
       "id": "waste",
@@ -245,8 +252,9 @@
       "value": 20.0,
       "unit": "%",
       "trust": "measured",
-      "was": 20.0,
-      "change": 0.0
+      "was": null,
+      "change": null,
+      "note": "scored differently since"
     },
     {
       "id": "sheets",
@@ -256,8 +264,9 @@
       "value": 5,
       "unit": "sheets",
       "trust": "measured",
-      "was": 5,
-      "change": 0
+      "was": null,
+      "change": null,
+      "note": "scored differently since"
     },
     {
       "id": "floor_bare",
@@ -267,8 +276,9 @@
       "value": 1.84,
       "unit": "\u00d7",
       "trust": "rough",
-      "was": 1.84,
-      "change": 0.0
+      "was": null,
+      "change": null,
+      "note": "scored differently since"
     },
     {
       "id": "jacks",
@@ -278,8 +288,9 @@
       "value": 287.7,
       "unit": "lb",
       "trust": "model",
-      "was": 287.7,
-      "change": 0.0
+      "was": null,
+      "change": null,
+      "note": "scored differently since"
     }
   ],
   "metrics": {
@@ -616,6 +627,8 @@
     "unknown": 0,
     "proposed": 0,
     "untrusted": 0,
-    "unresolved": 0
+    "unresolved": 0,
+    "estimate": 0,
+    "edge": 0
   }
 }

@@ -230,6 +230,12 @@ def body_count(g: Geometry) -> int:
 # ---------------------------------------------------------------------------
 # Features — wall thickness (mesh, ray-cast)
 # ---------------------------------------------------------------------------
+#: a ray that meets the face it ends on within this angle of parallel measured a corner, not a wall (#189). The stool's read 2° or
+#: less; 5° leaves room for a facet's error. Loosening this reads real walls as thicker: nothing changes it to get a part through
+SKIM_DEG = 5.0
+SKIM_SIN = float(np.sin(np.radians(SKIM_DEG)))
+
+
 def min_wall_thickness(g: Geometry, samples: int = 2000, seed: int = 0) -> float:
     """Smallest local material thickness (:func:`thinnest_wall`'s number)."""
     return thinnest_wall(g, samples, seed)[0]
@@ -261,8 +267,8 @@ def wall_samples(g: Geometry, samples: int = 2000, seed: int = 0) -> tuple[np.nd
     """Smallest local material thickness, by ray-casting inward from the surface.
 
     Method: sample points on the surface, step just inside along the inward normal, cast a ray
-    along the inward normal, and take the distance to the first opposite surface hit. The minimum
-    over samples approximates the thinnest wall. For a solid block this is its smallest dimension.
+    along the inward normal, and take the distance to the first opposite surface hit, leaving out a ray that only skims
+    the next face at a corner (:data:`SKIM_DEG`). The minimum over samples approximates the thinnest wall. For a solid block this is its smallest dimension.
     Approximate but deterministic (fixed seed); exact-enough for the printability assertion. Returns each sampled
     thickness and the middle of its ray (mm).
     """
@@ -275,11 +281,14 @@ def wall_samples(g: Geometry, samples: int = 2000, seed: int = 0) -> tuple[np.nd
     directions = -normals                  # cast inward
     from . import spatial
 
-    locations, index_ray, _ = spatial.intersects_location(m, origins, directions, multiple_hits=False)
+    locations, index_ray, index_tri = spatial.intersects_location(m, origins, directions, multiple_hits=False)
     if len(locations) == 0:
         return np.zeros(0), np.zeros((0, 3))
     dists = np.linalg.norm(locations - origins[index_ray], axis=1)
-    ok = dists > eps * 2
+    # a ray launched beside a square corner runs along the next face and meets it at a glance: that's the corner, not a wall.
+    # A wall's far side is met nearly head on, however close to a corner the ray starts
+    facing = np.abs(np.einsum("ij,ij->i", m.face_normals[index_tri], directions[index_ray]))
+    ok = (dists > eps * 2) & (facing >= SKIM_SIN)
     return dists[ok], (locations[ok] + origins[index_ray[ok]]) / 2
 
 
