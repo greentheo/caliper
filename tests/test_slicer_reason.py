@@ -10,7 +10,7 @@ import time
 import pytest
 import trimesh
 
-from caliper import answers, design_api, making, printing, shop
+from caliper import answers, design_api, goals, making, printing, shop
 from caliper.design import DesignStore
 
 from .test_cards_speed import _sliced
@@ -181,3 +181,102 @@ def test_a_queued_slice_isn_t_timed_out_by_its_wait(tmp_path, monkeypatch):
         printing.estimate(str(stl), "petg", (220, 220, 250), wait=False)
     _sliced(0)
     assert seen == [0.3, 0.3]
+
+
+# --- #166 review: a guess is never a pass ---------------------------------------------------------------------------
+@pytest.mark.parametrize("rough,pieces,said", [
+    (1, 3, "1 of 3 pieces is a rough guess: the slicer timed out"),
+    (2, 3, "2 of 3 pieces are a rough guess: the slicer timed out"),
+    (3, 3, "a rough guess; the slicer couldn't work it out: the slicer timed out"),
+    (0, 3, ""),
+])
+def test_how_much_is_a_guess_is_said_one_way(rough, pieces, said):
+    assert making.rough_said(rough, pieces, ROUGH["from"]) == said
+
+
+NO_SLICER = {**ROUGH, "from": "walls + infill at rough speeds (no slicer installed)"}
+
+
+def _goal(store, limit):
+    goals.write(store, {"checks": [{"id": "fast", "label": "prints in a day", "metric": "print.hours", "op": "<=",
+                                    "limit": limit, "source": "answered"}]})
+    state = design_api.design_state(store)
+    (line,) = [ln for ln in answers.held_to(state, answers.measured(store, state)) if "prints in a day" in ln["text"].lower()]
+    return line
+
+
+FAILED = {**ROUGH, "slicer_failed": True}
+
+
+def test_a_print_time_goal_with_a_rough_piece_is_no_tick(bar, monkeypatch):
+    _pieces(monkeypatch, GOOD, FAILED)
+    line = _goal(bar, 100)
+    assert line["status"] == "warn" and line["text"].startswith("! Prints in a day: ") and "✓" not in line["text"]
+    assert "partly a guess (1 of 2 pieces is a rough guess: the slicer timed out)" in line["text"]
+
+
+def test_every_piece_rough_is_a_guess_not_partly(bar, monkeypatch):
+    _pieces(monkeypatch, FAILED)
+    line = _goal(bar, 100)
+    assert line["status"] == "warn" and ", a guess (" in line["text"] and "partly" not in line["text"]
+
+
+def test_a_rough_time_over_its_limit_stays_a_cross(bar, monkeypatch):
+    """The real number is higher still, so a ✗ on a guess is certain."""
+    _pieces(monkeypatch, GOOD, FAILED)
+    assert _goal(bar, 1)["text"].startswith("✗")
+
+
+def test_a_sliced_time_gets_its_tick(bar, monkeypatch):
+    _pieces(monkeypatch, GOOD)
+    line = _goal(bar, 100)
+    assert line["text"].startswith("✓") and line["status"] == "ok"
+
+
+def test_with_no_slicer_the_card_says_it_s_a_guess_and_isn_t_green(bar, monkeypatch):
+    _pieces(monkeypatch, NO_SLICER)
+    how = next(c for c in answers.part(bar, design_api.design_state(bar), "bar") if c["key"] == "make")
+    line = next(ln for ln in how["lines"] if ln["text"].startswith("Print it in PETG"))
+    assert line["text"] == "Print it in PETG: 2 pieces, about 5 h (a rough guess: no slicer installed)."
+    assert line["status"] == "warn"
+
+
+def test_a_sliced_line_is_still_green(bar, monkeypatch):
+    _pieces(monkeypatch, GOOD)
+    how = next(c for c in answers.part(bar, design_api.design_state(bar), "bar") if c["key"] == "make")
+    assert next(ln for ln in how["lines"] if ln["text"].startswith("Print it in PETG"))["status"] == "ok"
+
+
+def _scored(store, monkeypatch, *results):
+    from caliper import scorecard
+
+    _pieces(monkeypatch, *results)
+    return scorecard.compute(store)
+
+
+def test_the_scorecard_says_rough_and_where_it_came_from(bar, monkeypatch):
+    goals.write(bar, {"checks": [{"id": "fast", "label": "prints in a day", "metric": "print.hours", "op": "<=",
+                                  "limit": 100, "source": "answered"}]})
+    card = _scored(bar, monkeypatch, GOOD, FAILED)
+    for name in ("print.hours", "print.filament_g"):
+        assert card["metrics"][name]["trust"] == "rough"
+        assert card["metrics"][name]["source"] == "1 of 2 pieces is a rough guess: the slicer timed out"
+    (check,) = [c for c in card["checks"] if c.get("id") == "fast"]
+    assert check["status"] != "pass" and check["trust"] == "rough" and "rough guess" in check["note"]
+
+
+def test_the_scorecard_keeps_model_for_a_sliced_time(bar, monkeypatch):
+    card = _scored(bar, monkeypatch, GOOD)
+    assert card["metrics"]["print.hours"]["trust"] == "model" and card["metrics"]["print.hours"]["source"] == "slicer"
+
+
+def test_the_build_book_and_the_panel_give_the_count():
+    import os
+    import re
+
+    from caliper import release
+
+    src = open(release.__file__).read()
+    assert "pr.get('rough_said') or pr['from']" in src
+    js = open(os.path.join(os.path.dirname(release.__file__), "web", "static", "design.js")).read()
+    assert re.search(r"esc\(x\.rough_said \|\| x\.from\)", js)

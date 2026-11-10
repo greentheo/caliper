@@ -895,7 +895,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                            + (" pinned together: glue 3 mm filament or 1/8 in dowel pins in the holes across each cut"
                               if pr["pinned"] else "")
                            + f"; about {pr['hours']:g} h, {pr['filament_g']:,} g, ${pr['usd']:.2f} "
-                           f"({_e(pr['from'])}). STLs in <code>printer/{_e(pid)}/</code>.</p>")
+                           f"({_e(pr.get('rough_said') or pr['from'])}). STLs in <code>printer/{_e(pid)}/</code>.</p>")
     out.append("<h2 class='page'>Cut lists</h2>")
     for pid in rec.get("grain") or {}:                 # which way to cut each panel, as the person said (CALI-126)
         laid = {g["line"]: g for g in (plans.get(pid) or {}).get("grain") or []}

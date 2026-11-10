@@ -27,6 +27,17 @@ def rows(store: DesignStore, part_id: str) -> list[dict]:
     return C.takeoff(items) if items else []
 
 
+def rough_said(rough: int, pieces: int, said: str) -> str:
+    """How much of a printed group's numbers are a guess, and why, in one wording for the card, the panel and the build
+    book (#160, #166): "" where every piece was sliced. ``said`` is the rough piece's ``from``, with its reason in brackets."""
+    if not rough:
+        return ""
+    why = said[said.rfind("(") + 1:].rstrip(")") if "(" in said else said or "no reason given"
+    if rough < pieces:
+        return f"{rough} of {pieces} pieces {'is' if rough == 1 else 'are'} a rough guess: {why}"
+    return f"a rough guess: {why}" if why == "no slicer installed" else f"a rough guess; the slicer couldn't work it out: {why}"
+
+
 def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_dir: Optional[str] = None,
          wait: bool = True) -> dict:
     """How this part is made in the shop. ``out_dir`` keeps a printed part's pieces as STLs there. ``wait=False``
@@ -75,6 +86,7 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
                         "filament_g": round(sum(e["filament_g"] for e in each)),
                         "usd": round(sum(e["usd"] for e in each), 2), "trust": (rough or each)[0]["trust"],
                         "from": (rough or each)[0]["from"], "rough": len(rough),
+                        "rough_said": rough_said(len(rough), len(parts), rough[0]["from"] if rough else ""),
                         "slicer_failed": any(e.get("slicer_failed") for e in each)})
     by_how: dict = {}
     for p in pieces:

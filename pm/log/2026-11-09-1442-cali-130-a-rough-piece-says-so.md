@@ -8,4 +8,5 @@ profile…)": a success label given as the reason for a failure, and it stayed u
   try, once however often it's asked, and keeps showing the rough number meanwhile rather than going back to "working".
   A success replaces it; another failure waits another 10 minutes.
 - **The 180 s limit starts with its own slicer.** That was already so (the worker applies it); now it's said and pinned.
-- Tests: tests/test_slicer_reason.py (11, stubbed). Seven mutants each fail.
+- Tests: tests/test_slicer_reason.py (24, stubbed). Seven mutants each fail.
+- **#166 review (rule 6):** a rough print time runs low, so a print-time goal with any rough piece is never a ✓: `verdicts.goal(estimate=)`, "partly a guess (1 of 3 pieces is a rough guess: …)". A ✗ stays a ✗. `print.hours` and `print.filament_g` read trust `rough` and say where from, so the build book can't print "model, safe side". The making panel and the build book use the card's words. With no slicer the card says it's a guess, and a guess is `warn`, never green.

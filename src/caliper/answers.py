@@ -462,10 +462,8 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                            _line(f"Print it in {pr['material'].upper()}: {n}; print time: the slicer couldn't work it "
                                  f"out: {_why(pr)}.", "warn") if pr.get("hours") is None else
                            _line(f"Print it in {pr['material'].upper()}: {n}, about {pr['hours']:g} h"
-                                 + (f" ({pr['rough']} of {pr['pieces']} pieces is a rough guess: {_why(pr)})"
-                                    if 0 < pr.get("rough", 0) < pr["pieces"] else
-                                    f" (a rough guess; the slicer couldn't work it out: {_why(pr)})"
-                                    if pr.get("slicer_failed") else "") + ".", "ok"))
+                                 + (f" ({pr['rough_said']})" if pr.get("rough_said") else "") + ".",
+                                 "warn" if pr.get("rough_said") else "ok"))        # a guess is never green (rule 6)
             why: dict = {}
             for x in mk["missing"]:
                 why.setdefault(x["why"], []).append(x["name"])
@@ -594,7 +592,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     if tested:                                         # the worst real test, which outranks the prediction (CALI-86)
         out["strength.test"] = min(tested, key=lambda t: ORDER.index(t["status"]))
     weight = usd = missing = hours = 0.0
-    slicing, unsliced = False, ""
+    slicing, unsliced, guessed, all_pieces, rough_pieces = False, "", "", 0, 0
     weighed, unweighed = False, None
     for p in state["parts"]:
         if not p.get("built") or p.get("role") == "fixed":
@@ -619,6 +617,9 @@ def measured(store: DesignStore, state: dict) -> dict:
             if gone is not None:                  # no number for one part: the total is unknown, said (rule 6)
                 unsliced = unsliced or f"print time: the slicer couldn't work it out: {_why(gone)}"
             hours += sum(x["hours"] for x in mk["printed"] if x.get("hours") is not None)
+            guessed = guessed or next((x["rough_said"] for x in mk["printed"] if x.get("rough_said")), "")
+            all_pieces += sum(x["pieces"] for x in mk["printed"] if x.get("hours") is not None)
+            rough_pieces += sum(x.get("rough", 0) for x in mk["printed"] if x.get("hours") is not None)
         except Exception:  # noqa: BLE001
             pass
     if weighed:
@@ -632,6 +633,8 @@ def measured(store: DesignStore, state: dict) -> dict:
             out["print.unknown"] = unsliced
         elif hours:
             out["print.hours"] = round(hours, 1)
+            if guessed:                            # any piece a guess: the total is never a ✓ (#166, rule 6)
+                out["print.rough"] = f"{'partly ' if rough_pieces < all_pieces else ''}a guess ({guessed})"
     return out
 
 
@@ -672,6 +675,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
     scored = {k: m.get("value") for k, m in ((card or {}).get("metrics") or {}).items()
               if isinstance(m.get("value"), (int, float)) and not isinstance(m.get("value"), bool)}
     units = {k: m.get("unit", "") for k, m in ((card or {}).get("metrics") or {}).items()}
+    rough_scored = {k: m.get("source") for k, m in ((card or {}).get("metrics") or {}).items() if m.get("trust") == "rough"}
     stale = bool(card) and (bool(card.get("outdated")) or any(
         card.get("versions", {}).get(p["id"]) not in (None, p["version"]) for p in state["parts"]))
     out = []
@@ -722,10 +726,17 @@ def held_to(state: dict, now: dict) -> list[dict]:
         untrue = now.get("strength.filled") if strength else None
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-97)
         older = now.get("strength.stale") if strength else None
+        guess = None
+        if c["metric"].startswith("print."):           # a rough print time runs low: no ✓ on it (#166)
+            guess = now.get("print.rough") if c["metric"] in now else (
+                f"a guess ({rough_scored[c['metric']]})" if c["metric"] in rough_scored else None)
         verdict = verdicts.goal(met, untrusted=untrue, unresolved=now.get("strength.unresolved") if strength else None,
                                 edge=bool(now.get("strength.edge")) if strength else False,       # (CALI-94)
                                 stale=late or bool(older),
-                                incomplete=now.get("strength.unchecked") if strength else None)
+                                incomplete=now.get("strength.unchecked") if strength else None, estimate=guess)
+        if verdict["kind"] == "estimate":
+            out.append(_line(f"! {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}, {guess}.", "warn"))
+            continue
         if verdict["kind"] == "untrusted":             # the verdict first; which check it is follows (#96 item 5)
             out.append(_line(f"{untrue} ({label[:1].lower() + label[1:]}{', assumed' if c.get('source') == 'assumed' else ''})", "warn",
                              study="load", model=rests_on_model(c["metric"])))

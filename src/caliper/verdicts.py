@@ -123,14 +123,16 @@ def summary(s: Optional[dict]) -> dict:
 # --- a goal held against a metric (the scorecard and the design card), and a number against what it needs ----------
 #: A verdict kind as a scorecard check's status.
 STATUS = {"holds": "pass", "fails": "fail", "untrusted": "untrusted", "unresolved": "unresolved",
-          "unchecked": "unresolved", "edge": "edge", "stale": "unknown", "waiting": "unknown"}
+          "unchecked": "unresolved", "edge": "edge", "stale": "unknown", "waiting": "unknown", "estimate": "unresolved"}
 
 
 def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Optional[str] = None,
-         edge: bool = False, stale: bool = False, incomplete: Optional[str] = None) -> dict:
+         edge: bool = False, stale: bool = False, incomplete: Optional[str] = None,
+         estimate: Optional[str] = None) -> dict:
     """A goal on a metric: ``met`` (None when there's no number). A ✗ stays a ✗ (a fail on a filled-in block is
     certain: the part as built is weaker still); then not trusted, not resolved, middle only, scored before the last
-    change, a part left out. ``untrusted``/``unresolved``/``incomplete`` are the words that say why, as ``why``:
+    change, a part left out, a number that's partly a guess (``estimate``, #166: a rough print time runs low, so a ✓
+    on it is what rule 6 forbids). ``untrusted``/``unresolved``/``incomplete``/``estimate`` say why, as ``why``:
     a design's verdict never leaves a part out (#132 review: a part unchecked, older or errored is that, so the
     rest can't read as holding for it)."""
     if met is None:                            # no number: not checked, and why where it's known
@@ -147,6 +149,8 @@ def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Op
         return _make("stale")
     if incomplete:
         return _make("waiting", why=incomplete)
+    if estimate:
+        return _make("estimate", why=estimate)
     return _make("holds")
 
 
