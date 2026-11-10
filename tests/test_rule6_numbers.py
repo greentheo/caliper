@@ -63,3 +63,25 @@ def test_the_card_line_says_how_close():
     assert line["status"] == "warn" and line["text"] == "Holds dad stepping up, 2.4 times over: close to the 2 it needs.", line
     far = _run(2.6)
     assert answers._case_line("stool", far, far["cases"][0], None, False, True)["status"] == "ok"
+
+
+# --- item 15: the design card's strength line says what it does, then what it needs ---------------------------------
+
+def test_the_design_cards_strength_line_reads_as_the_parts_does(tmp_path):
+    """"✓ Holds Dad (200 lb), 2 times over (assumed): 3.11x" read as if it held 2 times over: the 2 is what it
+    needs, 3.1 what it does (the foreman's walk at ea6adf1)."""
+    from caliper import design_api, samples
+
+    store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
+    lines = [ln["text"] for c in answers.answers(store, design_api.design_state(store)) for ln in c["lines"]]
+    assert "✓ Holds Dad (200 lb), 3.1 times over (it needs 2, assumed)." in lines, lines
+    assert not [t for t in lines if "2 times over (assumed)" in t], lines
+
+
+@pytest.mark.parametrize("label, head", [("holds Dad (200 lb), 2 times over", "holds Dad (200 lb)"),
+                                         ("holds Dad (200 lb), twice over", "holds Dad (200 lb)"),
+                                         ("holds Dad (200 lb), 2.5 times over", "holds Dad (200 lb)"),
+                                         ("Holds a 250 lb person sitting, 2× safety", "Holds a 250 lb person sitting"),
+                                         ("strong enough for the kids", "strong enough for the kids")])
+def test_a_strength_goals_label_loses_only_its_own_need(label, head):
+    assert answers._without_need(label) == head

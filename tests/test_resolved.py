@@ -118,11 +118,11 @@ def test_the_same_tube_seen_finely_reads_as_its_safety_says_with_about(tmp_path,
     assert rec["resolved"] and "finer" not in rec
     from caliper.answers import _times
 
-    said = _times(rec["cases"][0]["safety"], about=True)          # "about 3.1 times over", or "more than 10 times over"
+    said = _times(rec["cases"][0]["safety"], about=True, need=2)          # "about 3.1 times over", or "more than 10 times over"
     (part,) = _work(store, "tube")
     assert part["text"] in (f"Holds a foot, {said}.", f"Doesn't hold a foot: only {said}, and it needs 2."), part["text"]
     (design,) = _work(store)
-    assert f": {said}" in design["text"] and "about more than" not in design["text"], design["text"]   # (#144 review)
+    assert f", {said} (it needs 2" in design["text"] and "about more than" not in design["text"], design["text"]   # (#144 review)
 
 
 def test_two_across_isnt_enough_any_more(tmp_path, monkeypatch):
@@ -142,7 +142,8 @@ def test_a_fail_on_coarse_voxels_stays_a_fail(tmp_path, monkeypatch):
     assert part["text"].endswith("where its wall is 4 mm, too thin for the voxels to see: the fail may be the model's. "
                                  "Check it again finer."), part["text"]
     (design,) = _work(store)
-    assert design["status"] == "bad" and design["text"].startswith("✗ Holds a foot (40 lb), 2 times over (assumed)")
+    assert design["status"] == "bad" and design["text"].startswith("✗ Holds a foot (40 lb), about 0.")   # what it does, then what it needs (#64 item 15)
+    assert "(it needs 2, assumed)" in design["text"]
     # the same words as the part card, the same wall (#139's pass)
     assert "where its wall is 4 mm, too thin for the voxels to see: the fail may be the model's" in design["text"]
     (shown,) = design_api.design_state(store)["load_runs"]

@@ -707,6 +707,15 @@ def _against(c: dict, failed: bool, unit: str = "") -> str:
     return f", short of the {said} it needs" if failed else f", against the {said} it needs"
 
 
+_NEED = re.compile(r",\s*(?:(?:twice|\d+(?:\.\d+)?\s*(?:times|×))\s*over|\d+(?:\.\d+)?\s*[×x]\s*safety)\s*$", re.I)
+
+
+def _without_need(label: str) -> str:
+    """A strength goal's label without the factor it needs ("holds Dad (200 lb), 2 times over" -> "holds Dad
+    (200 lb)"): its line says the factor after the number it does, so it isn't read as the number (#64 item 15)."""
+    return _NEED.sub("", label).rstrip()
+
+
 def _num(metric: str, v: float, unit: str = "", about: bool = False, need: Optional[float] = None) -> str:
     from .goals import METRICS
 
@@ -823,8 +832,13 @@ def held_to(state: dict, now: dict) -> list[dict]:
         # never a ✓ for an older check or score (#132 review): it says when, and what to do
         later = (" (scored before the last change: score it again)." if late
                  else f" ({older})." if verdict["kind"] == "stale" and older else "." + why)
-        out.append(_line(f"{'✗' if failed else '✓' if verdict['kind'] == 'holds' else '!'} {label}{assumed}: {num}"
-                         + _against(c, failed, units.get(c['metric'], '')) + later,
+        mark = '✗' if failed else '✓' if verdict['kind'] == 'holds' else '!'
+        if c["metric"] == "strength.safety" and isinstance(c.get("limit"), (int, float)):
+            # what it does, then what it needs: "2 times over (assumed): 3.11x" read as holding 2 times over (#64 item 15)
+            said = f"{mark} {_without_need(label)}, {num} (it needs {c['limit']:g}{', assumed' if assumed else ''})"
+        else:
+            said = f"{mark} {label}{assumed}: {num}" + _against(c, failed, units.get(c['metric'], ''))
+        out.append(_line(said + later,
                          "warn" if late else verdict["status"],
                          study="load" if c["metric"].startswith("strength") else None,
                          model=rests_on_model(c["metric"])))
