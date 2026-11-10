@@ -264,6 +264,20 @@ def _carving(slug: str) -> Optional[dict]:
             if j is not None else None)
 
 
+def _running(slug: str) -> list[dict]:
+    """The strength checks, Lightens and build packages queued or running for this design, as ``carving`` is for a carve:
+    what a page draws from on load and on every redraw, so a study isn't lost to a switch, a reload or a redraw (#178)."""
+    out = []
+    for j in RUNNER.active():
+        if j.meta.get("slug") != slug or j.kind not in ("load", "lighten", "release"):
+            continue
+        said = j.since(0)
+        words = [ev["text"] for ev in said if ev.get("text") and ev.get("kind") != "started"]
+        out.append({"job": j.id, "kind": j.kind, "part": j.meta.get("part"), "text": words[-1] if words else "",
+                    "waiting": bool(said and said[-1].get("kind") == "waiting"), "stopping": j.stopping})
+    return out
+
+
 def _where(job) -> str:
     """How far a carve has got, from what it's said: "step 2 of 6", or what it's doing before its first step."""
     if job.status == "queued":
@@ -412,6 +426,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "claude": _claude(),                  # whether what's typed goes to Claude, and a build can run (CALI-91)
         "plan": _plan(store),                 # its parts, numbers and checks, before they're built (CALI-35)
         "carving": _carving(slug),            # the carve's job, while it runs (CALI-101)
+        "running": _running(slug),            # the other long jobs, while they run (#178)
         "display_units": d.display_units,
         "requirements": [r.model_dump() for r in d.requirements],
         "shop_offers": clarify.offers(store),     # what the answers offered to add to the shop (CALI-124)
@@ -823,7 +838,11 @@ def router():
             return load_study.study(s, req.part, min_safety=req.min_safety, spacing=req.spacing_mm,
                                     emit=lambda k, t="", **d: j.emit(k, t, **d), stop=j.check)
 
-        job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
+        try:
+            job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}",
+                                meta={"slug": slug, "part": req.part}, only=f"load:{slug}:{req.part}")
+        except Busy:
+            raise HTTPException(status_code=409, detail="A strength check of this part is already running.")
         return {"job_id": job.id}
 
     # -- test it (CALI-80): the prediction, and what the real one did ----------------------------------------
@@ -1059,7 +1078,11 @@ def router():
             return lighten.study(s, req.part, min_safety=req.min_safety,
                                  emit=lambda k, t="", **d: j.emit(k, t, **d), stop=j.check)
 
-        job = RUNNER.submit("lighten", work, label=f"lighten · {req.part}", lock=f"load:{slug}")
+        try:
+            job = RUNNER.submit("lighten", work, label=f"lighten · {req.part}", lock=f"load:{slug}",
+                                meta={"slug": slug, "part": req.part}, only=f"lighten:{slug}:{req.part}")
+        except Busy:
+            raise HTTPException(status_code=409, detail="A Lighten of this part is already running.")
         return {"job_id": job.id}
 
     @r.get("/api/designs/{slug}/lighten/{rid}/stations/{index}.stl")
@@ -1179,7 +1202,11 @@ def router():
         def work(j):
             return release.make(DesignStore.load(slug), emit=lambda k, t="", **d: j.emit(k, t, **d))
 
-        job = RUNNER.submit("release", work, label="build package", lock=_lock(slug))
+        try:
+            job = RUNNER.submit("release", work, label="build package", lock=_lock(slug), meta={"slug": slug},
+                                only=f"release:{slug}")
+        except Busy:
+            raise HTTPException(status_code=409, detail="A build package is already being made.")
         return {"job_id": job.id}
 
     @r.get("/api/designs/{slug}/releases/{rid}/files/{path:path}")

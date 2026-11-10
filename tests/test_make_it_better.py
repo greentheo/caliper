@@ -276,7 +276,8 @@ def _page_of(extra):
     return _run(_page(["qlines", "betterLines", "useBetter"], consts=["esc"], extra=extra))
 
 
-CARD = ("const GOTO = {load: 'loadBox'};\n"
+CARD = ("const trackedFor = () => null;\n"
+        "const GOTO = {load: 'loadBox'};\n"
         "const c = {key: 'work', lines: [{text: 'Holds a foot.', status: 'ok', study: 'load'},\n"
         "  {better: true, status: 'info', lead: 'Make the top thinner', cost: 'Still about 2.3 times over.', button: 'Try it',\n"
         "   action: 'use_t', say: 'Make it thinner', part: 'p'},\n"
@@ -442,6 +443,8 @@ const el = () => ({ disabled: false, innerHTML: '', value: '2', querySelector: (
 const $ = () => el();
 const api = async () => { posts += 1; return { job_id: 'j' }; };
 const follow = async () => { await gate; };
+const trackJob = () => ({ done: gate });
+const plainly = (m) => m;
 const clearStation = () => {}, refresh = async () => {}, loadRuns = () => [], lightenRuns = () => [], showHeat = () => {}, holdsHere = () => false, showStation = () => {};
 """
 

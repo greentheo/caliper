@@ -15,6 +15,7 @@ const S = {
   slug: null,          // the open design
   design: null,        // its last state from the server
   running: {},         // a load check or Lighten this page started and is following, by kind and part (#159)
+  tracked: {},         // job id -> the long job this page is following, whichever way it found it (#178)
   opening: null,       // the design on its way, while it loads (#173)
   scope: null,         // the selected part (the chat is about it), or null = the whole design
   pick: null,          // a face, edge or point picked on it (#109): { part, kind, id, said, local }
@@ -849,6 +850,7 @@ async function refresh() {
 }
 
 function render() {
+  syncRunning();
   renderUnits(); renderTree(); renderThread(); renderInspector(); renderScope(); paint(); renderStudies();
   $('viewHint').textContent = S.design && S.design.parts.length
     ? (S.scope ? '' : 'click a part to talk about it')
@@ -1338,7 +1340,7 @@ function paramsHtml(p, st, done) {
     ${body}${foot}${st.err ? `<div class="pnote bad">${esc(st.err)}</div>` : ''}${said}</section>`;
 }
 function paramView(p) {
-  if (!p || !p.scripted || p.role === 'fixed') return '';
+  if (!S.design || !p || !p.scripted || p.role === 'fixed') return '';
   if (p.carved) {                                     // its shape is the carve's mesh: numbers would only move its loads (#171)
     return `<section class="params"><div class="phead"><b>Parameters</b></div>
       <div class="pnote">It's been carved, so its numbers don't change its shape. Say "roll it back" to take the carve off and set them.</div></section>`;
@@ -1348,6 +1350,7 @@ function paramView(p) {
   return st.list && st.list.length ? paramsHtml(p, st, S.paramsDone) : '';
 }
 async function loadParams(p) {
+  if (!S.design) return;                          // the design was left while this waited its turn (#173's loading state)
   const key = paramKey(p);
   if (S.params && S.params.key === key) return;
   S.params = { key, list: null, drafts: {}, saving: false, err: null };
@@ -1409,10 +1412,11 @@ function renderInspector() {
   if (!d) return;
   const p = S.scope && d.parts.find((x) => x.id === S.scope);
   const was = document.activeElement, typing = was && was.dataset && was.dataset.param ? [was.id, was.selectionStart, was.selectionEnd] : null;
-  el.innerHTML = p ? partView(p) : designView(d);
+  el.innerHTML = `<div id="jobNote"></div>${p ? partView(p) : designView(d)}`;
   wireInspector(p);
   wireParams(p || (d.parts.length === 1 ? d.parts[0] : null));
   if (typing) refocusParam(typing[0], typing.slice(1));   // a redraw mid-number
+  paintJobs();
 }
 
 // one rule on a part, with its verdict as measured on this version, and what it measured where it doesn't hold
@@ -1532,7 +1536,7 @@ function betterLines(c, offers) {
   return `<div class="qbetter"><div class="qbetter-h">Make it better</div>${offers.map((ln) => {
     const i = c.lines.indexOf(ln);
     return `<div class="qoffer"><div class="qoffer-t">${esc(ln.lead)}.<span class="qoffer-c">${esc(ln.cost)}</span></div>
-      <button class="ghost" data-better="${i}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[ln.part]) ? ' disabled' : ''}>${esc(ln.button)}</button></div>`;
+      <button class="ghost" data-better="${i}" data-better-action="${esc(ln.action)}" data-better-part="${esc(ln.part)}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[ln.part]) || trackedFor(ln.action, ln.part) ? ' disabled' : ''}>${esc(ln.button)}</button></div>`;
   }).join('')}</div>`;
 }
 // each goes through what its panel already does: the chat, the carve, the lightening, or taking a step
@@ -1939,7 +1943,7 @@ function wireRelease() {
     prog.innerHTML = '<div class="small muted" id="relMsg">bringing the cut plans and scorecard up to date…</div>';
     try {
       const { job_id } = await api('POST', `/api/designs/${S.slug}/release`);
-      await follow(job_id, (ev) => { const m = $('relMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
+      await trackJob(job_id, { kind: 'release', part: null, text: 'bringing the cut plans and scorecard up to date…' }).done;
       await refresh();
     } catch (e) { prog.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`; go.disabled = false; }
   };
@@ -2890,12 +2894,7 @@ async function startLighten(p, again) {
   try {
     const runs = loadRuns(p.id);
     const { job_id } = await api('POST', `/api/designs/${S.slug}/lighten`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2, again: !!again });
-    await follow(job_id, (ev) => {
-      waitingCancel(prog, ev, job_id);
-      const msg = $('lightMsg'), bar = prog.querySelector('.bar > i');
-      if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
-      if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
-    });
+    await trackJob(job_id, { kind: 'lighten', part: p.id, text: 'starting…' }).done;
     clearStation();
     await refresh();
     const run = lightenRuns(p.id)[0];
@@ -2909,16 +2908,63 @@ async function startLighten(p, again) {
   }
 }
 
-// a study waiting its turn behind another can be stopped, as a waiting carve can; gone as soon as it starts (#169)
-function waitingCancel(box, ev, jobId) {
-  const had = box.querySelector('.wait-cancel');
-  if (ev.kind !== 'waiting') { if (had) had.remove(); return; }
-  if (had) return;
-  const b = document.createElement('button');
-  b.className = 'ghost wait-cancel'; b.textContent = 'Cancel';
-  b.onclick = () => { b.disabled = true; api('POST', `/api/jobs/${jobId}/cancel`).catch((e) => showErr(e.message)); };
-  box.appendChild(b);
+// ------------------------------------------------------------- what's running for this design (#178)
+// The design's record says what's running, as `carving` does for a carve. Drawn from that on load and on every redraw:
+// a study isn't lost to a switch of design, a reload, or another job finishing.
+const JOB_NAME = { load: 'Strength check', lighten: 'Lighten', release: 'Build package' };
+const JOB_BOX = { load: 'lProgress', lighten: 'lightProgress', release: 'relProgress' };
+const JOB_GO = { load: 'lGo', lighten: 'lightGo', release: 'relGo' };
+const jobsHere = () => Object.values(S.tracked).filter((t) => t.slug === S.slug);
+const trackedFor = (kind, part) => jobsHere().find((t) => t.kind === kind && (t.part || null) === (part || null));
+function trackJob(id, info) {
+  if (S.tracked[id]) return S.tracked[id];
+  const t = S.tracked[id] = { job: id, slug: S.slug, text: '', progress: null, waiting: false, ...info };
+  paintJobs();
+  t.done = follow(id, (ev) => {
+    if (ev.text && ev.kind !== 'started') t.text = ev.text;
+    if (typeof ev.progress === 'number') t.progress = ev.progress;
+    t.waiting = ev.kind === 'waiting';
+    paintJobs();
+  }).finally(() => { delete S.tracked[id]; paintJobs(); });
+  return t;
 }
+// what's on the record and this page isn't following yet: after a reload, or coming back to the design
+function syncRunning() {
+  for (const r of (S.design && S.design.running) || []) {
+    if (S.tracked[r.job]) continue;
+    const slug = S.slug, again = () => { if (S.slug === slug) refresh(); };
+    trackJob(r.job, { kind: r.kind, part: r.part, text: r.text, waiting: r.waiting }).done.then(again, again);
+  }
+}
+function jobHtml(t, named) {
+  const pct = typeof t.progress === 'number' ? Math.round(t.progress * 100) : null;
+  return `<div class="job-line">${pct != null ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ''}
+    <div class="small muted">${named ? `${esc(JOB_NAME[t.kind])}${t.part ? ` of ${esc(t.part)}` : ''}: ` : ''}${esc(t.text || 'running…')}
+    ${t.waiting ? `<button class="ghost wait-cancel" data-job-cancel="${esc(t.job)}">Cancel</button>` : ''}</div></div>`;
+}
+function paintJobs() {
+  const note = $('jobNote');
+  if (!note) return;
+  const lines = [];
+  for (const t of jobsHere()) {
+    const here = t.kind === 'release' || S.scope === t.part, box = here ? $(JOB_BOX[t.kind]) : null;
+    if (box) { box.innerHTML = jobHtml(t, false); box.dataset.job = t.job; } else lines.push(jobHtml(t, true));
+    const go = here && $(JOB_GO[t.kind]);
+    if (go) { go.disabled = true; go.title = 'It\'s running now'; }
+    if (t.kind === 'load' && here && $('lFiner')) $('lFiner').disabled = true;
+    document.querySelectorAll(`#inspector [data-better-action="${t.kind}"][data-better-part="${t.part}"]`).forEach((b) => { b.disabled = true; b.title = 'It\'s running now'; });
+  }
+  note.innerHTML = lines.join('');
+  for (const box of document.querySelectorAll('#inspector [data-job]')) {     // it's over: nothing left over from it
+    if (!S.tracked[box.dataset.job]) { box.innerHTML = ''; delete box.dataset.job; }
+  }
+}
+$('inspector').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-job-cancel]');
+  if (!b) return;
+  b.disabled = true;
+  api('POST', `/api/jobs/${b.dataset.jobCancel}/cancel`).catch((err) => showErr(err.message));
+});
 async function runLoad(p, spacing) {
   if (S.running[`load:${p.id}`]) return;           // already asked: the card's button and the panel's are two ways in
   S.running[`load:${p.id}`] = true;
@@ -2932,12 +2978,7 @@ async function startLoad(p, spacing) {
   try {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`,
       { part: p.id, min_safety: +$('lSafety').value || 2, ...(spacing ? { spacing_mm: spacing } : {}) });
-    await follow(job_id, (ev) => {
-      waitingCancel(prog, ev, job_id);
-      const msg = $('lMsg'), bar = prog.querySelector('.bar > i');
-      if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
-      if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
-    });
+    await trackJob(job_id, { kind: 'load', part: p.id, text: 'starting…' }).done;
     S.loadRun[p.id] = 0;
     S.trial = null;                       // the test is set beside the check that just ran, not the one before (#89)
     clearStation();
