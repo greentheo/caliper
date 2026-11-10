@@ -287,9 +287,11 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
             if poly is None:
                 break
         if predicted is not None and predicted < min_safety:  # search
+            from . import answers
+
             return {"ok": False, "panel": panel["name"], "subject": subject, "predicted": predicted,
                     "min_safety": min_safety, "reply": (
-                        f"A {subject} on the {panel['name']} would make it too weak: {predicted:g} times over at "
+                        f"A {subject} on the {panel['name']} would make it too weak: {answers._times(predicted, need=min_safety)} at "
                         f"best, and it needs {min_safety:g}. Try another panel (\"on the side\"), or a smaller one.")}
     emit("step", f"Cutting the {subject} out of the {panel['name']}", step="cut")
     entry = {"piece": panel["name"], "normal": [round(float(c), 6) for c in panel["inward"]],
@@ -321,6 +323,8 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
 
 
 def reply(got: dict) -> str:
+    from . import answers
+
     size = f"{got['size_in'][0]:g} × {got['size_in'][1]:g} in"
     if got.get("unchecked"):
         return (f"I cut a {got['subject']} {size} out of the {got['panel']}, but I couldn't check it still holds: "
@@ -338,9 +342,11 @@ def reply(got: dict) -> str:
                        "grown-up checks it again " + ("by hand or with a printed test piece" if got.get("too_thin")
                                                        else "finer") + " before anyone stands on it.")
     if v["counts_as_pass"]:                            # the ✓ only where it still holds (CALI-112)
-        return "✓ " + said + f" It still holds, {got['safety']:g} times over (it needs {got['min_safety']:g})."
+        return ("✓ " + said + f" It still holds, {answers._times(got['safety'], need=got['min_safety'])} (it needs "
+                f"{got['min_safety']:g}). {answers.PROMISE_POINTER}")
     if v["kind"] == "fails":
-        return (said + f" ✗ Built, it reads {got['safety']:g} times over and needs {got['min_safety']:g}: "
+        return (said + f" ✗ Built, it reads {answers._times(got['safety'], need=got['min_safety'])} and needs "
+                f"{got['min_safety']:g}: "
                 f"say **roll it back**, or try a smaller one.")
     if v["kind"] == "edge":                            # the middle only (CALI-94)
         return said + (" Its strength was checked with a foot in the middle only, not at the front edge where people "

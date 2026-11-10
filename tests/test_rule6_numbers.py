@@ -85,3 +85,36 @@ def test_the_design_cards_strength_line_reads_as_the_parts_does(tmp_path):
                                          ("strong enough for the kids", "strong enough for the kids")])
 def test_a_strength_goals_label_loses_only_its_own_need(label, head):
     assert answers._without_need(label) == head
+
+
+# --- item 16: a chat reply's strength number rounds as the cards do, and carries the promise ------------------------
+
+def _picture(safety):
+    return {"ok": True, "subject": "T-rex", "panel": "front", "size_in": [6, 8], "safety": safety, "min_safety": 2.0,
+            "holds": safety >= 2.0}  # producer: the picture's re-check, as pictures.put returns it
+
+
+def test_a_pictures_reply_rounds_as_the_card_does_and_points_to_the_promise():
+    from caliper import pictures
+
+    held = pictures.reply(_picture(3.11))
+    assert "It still holds, 3.1 times over (it needs 2)." in held and answers.PROMISE_POINTER in held, held
+    near = pictures.reply(_picture(2.04))
+    assert "2.04 times over" in near and answers.PROMISE_POINTER in near, near
+    failed = pictures.reply(_picture(1.96))
+    assert "it reads 1.96 times over and needs 2" in failed, failed      # never "2 times over and needs 2"
+
+
+def test_a_carves_reply_rounds_as_the_card_does_and_points_to_the_promise(monkeypatch, tmp_path):
+    from caliper import carve, chat
+    from caliper.design import DesignStore
+
+    from .test_studies import _carve
+
+    rec = {**_carve([2.5, 2.4, 2.3, 1.2]), "share": "printed", "id": "x", "part": "p", "notes": []}
+    rec["stations"][2]["safety"] = 2.04                           # the step it offers, close to its limit
+    monkeypatch.setattr(carve, "study", lambda *a, **k: rec)
+    store = DesignStore.create("a stool", base=str(tmp_path))
+    store.write_part("p", "def build(params):\n    return None\n", intent="x")
+    said = chat.carve_part(store, "p").reply
+    assert "about 2.04 times over" in said and answers.PROMISE_POINTER in said, said

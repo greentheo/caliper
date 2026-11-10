@@ -192,7 +192,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
 
         if verdicts.station(first, whole=True)["kind"] == "fails" and verdicts.station(first)["kind"] != "fails":
             # the part fails where the carve can't reach: say so first, it's the thing to fix
-            weak_note = (f"As it is, it doesn't hold: {first['whole']:g} times over, and it needs {min_safety:g}; the "
+            from . import answers
+
+            weak_note = (f"As it is, it doesn't hold: {answers._times(first['whole'], need=min_safety)}, and it needs {min_safety:g}; the "
                          f"weak link is the {first['weakest'] or 'wood'}, which carving the printed part doesn't change.")
         else:
             weak_note = ""

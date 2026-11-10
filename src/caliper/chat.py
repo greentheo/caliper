@@ -714,7 +714,7 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
     except (ValueError, ImportError) as e:
         return TurnResult(action="carve", ok=False, part=part_id, events=events, error=str(e),
                           reply=f"I couldn't carve it: {e}.")
-    from . import consistency, verdicts
+    from . import answers, consistency, verdicts
 
     best = next((x for x in rec["stations"] if x["index"] == rec["best"]), None)  # search: the printed part's lightest
     v = verdicts.carve_step(best, consistency.filled(store, part_id), rec) if best else None   # #132 review, #101
@@ -724,14 +724,14 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
     if best and best["saved_g"] and not v["counts_as_pass"]:
         said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. It could come off down to step "
                     f"{best['index']} ({best['saved_g']} g less filament), but that isn't a part that holds: "
-                    + (f"the whole part is then {best.get('whole')}x." if v["kind"] == "fails" else
+                    + (f"the whole part is then {answers._times(best['whole'], need=rec.get('min_safety'))}." if v["kind"] == "fails" and best.get("whole") is not None else
                        f"the voxels were too coarse to see its walls (not resolved): check it again finer first." if v["kind"] in ("unresolved", "unchecked") else f"{v['word']}.")
                     + " Fix that first.")
     elif best and best["saved_g"]:
         said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. The lightest that holds is step "
                     f"{best['index']}: {best['removed']:.0%} {carve.share(rec)} carved away, {best['saved_g']} g less filament, "
-                    f"about {best['safety']:g} times over (printed parts are a rough model). It's on the 3D view: **Carve it like this** to make it the "
-                    f"part's shape (under *Will it work? → the numbers*, with every step).")
+                    f"{answers._times(best['safety'], about=True, need=rec.get('min_safety'))} (printed parts are a rough model). It's on the 3D view: **Carve it like this** to make it the "
+                    f"part's shape (under *Will it work? → the numbers*, with every step). {answers.PROMISE_POINTER}")
     else:
         said.append("Nothing could come off it and still hold.")
     return TurnResult(action="carve", ok=bool(v and v["counts_as_pass"]), part=part_id, events=events,

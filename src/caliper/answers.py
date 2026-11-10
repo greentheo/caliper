@@ -25,6 +25,8 @@ ORDER = ("bad", "warn", "ok", "info")
 #: What a strength verdict promises and what it doesn't (CALI-59), said wherever one is shown.
 PROMISE = ("A prediction, not a certificate: it rests on the loads it was given and on textbook strengths for "
            "the material. Real wood varies and so do joints, so test it gently before you trust it with a person.")
+#: A chat reply that quotes a strength number points to the promise (CALI-88, #64 item 16).
+PROMISE_POINTER = "That's a prediction, not a certificate: its card says what it rests on."
 
 
 def _len(mm: float, inches: bool) -> str:
