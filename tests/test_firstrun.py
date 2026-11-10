@@ -23,6 +23,19 @@ def test_a_design_is_named_for_what_it_is_not_the_whole_sentence():
     assert len(short_name("a " + "very " * 30 + "long thing")) <= 40
 
 
+@pytest.mark.parametrize("said, name", [
+    ("I want to build a bike rack for three bikes", "Bike rack"),          # a request's lead (#144)
+    ("A 3/4 in plywood box for toys", "Plywood box"),                     # a leading measurement (#66 item 7)
+    ("a 1 1/2 in thick oak shelf", "Thick oak shelf"),
+    ("A 12 mm plywood tray", "Plywood tray"),
+    ("Can you make me a 2 ft x 3 ft garden bed", "Garden bed"),
+    ("A 2x4 workbench for the garage", "2x4 workbench"),                  # a lumber size is its name, not a measurement
+    ("A 2 in 1 step stool", "2 in 1 step stool"),                          # "2 in 1" isn't a size (#211 review)
+])
+def test_a_name_skips_a_requests_lead_and_a_leading_measurement(said, name):
+    assert short_name(said) == name
+
+
 def _author(s, feedback=None, prior=None):
     return BOX_STOOL
 
