@@ -20,7 +20,7 @@ from pydantic import BaseModel, field_validator
 
 from . import (aero, better, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, grain,
                lighten,
-               load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, verdicts)
+               load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, tree, verdicts)
 from . import whittle_bridge as wb
 from .design import DesignStore
 from .jobs import RUNNER, Busy, stream
@@ -45,6 +45,11 @@ class ParamSet(BaseModel):
 
 class ParamsSet(BaseModel):
     values: list[ParamSet]
+
+
+class LabelSet(BaseModel):
+    label: str = ""                       # "" goes back to its id
+    piece: Optional[str] = None           # a piece of the part, or the part itself (CALI-102)
 
 
 class GrainSet(BaseModel):
@@ -324,6 +329,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "untrusted": consistency.filled(store, p.id) if "def loads(" in script else None,
             "suggest": {k: aero.suggest(k, v, ranges) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
+            "label": p.label, "name": p.label or p.id,      # the name a person reads; the id never changes (#94)
+            "pieces": tree.pieces(store, p.id) if construction.declares(script) else [],
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
             "stl_url": f"/api/designs/{slug}/parts/{p.id}.stl?v={p.version}",
             "bbox": _bbox(store, p.id, geo),
@@ -408,6 +415,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "requirements": [r.model_dump() for r in d.requirements],
         "shop_offers": clarify.offers(store),     # what the answers offered to add to the shop (CALI-124)
         "parts": parts,
+        "legend": tree.legend(parts),          # what the tree's swatches mean (#94)
         "mates": [{"id": m.id, "between": m.between, "kind": m.kind} for m in store.assembly.mates],
         "rules": [{"id": a.id, "expr": a.expr} for a in store.assembly.assertions],
         "report": report.to_dict() if report is not None else None,
@@ -682,6 +690,34 @@ def router():
                 raise HTTPException(422, str(e).strip("'\""))
             return {"version": got["version"], "said": got["said"], "warning": got["warning"], "notes": got["notes"],
                     "design": design_state(store)}
+
+    @r.post("/api/designs/{slug}/parts/{pid}/label")
+    def set_part_label(slug: str, pid: str, req: LabelSet):
+        """Rename a part or a piece (#94). A label only: the id, its files and its history stay as they are."""
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                tree.set_label(store, pid, req.label, req.piece)
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            return design_state(store)
+
+    @r.get("/api/designs/{slug}/parts/{pid}/piece.stl")
+    def part_piece_stl(slug: str, pid: str, key: str):
+        """One piece as a solid for the viewport (#94). 404 for no such piece; 422 where it can't be cut (say, a shape
+        that isn't closed): the page then draws the part as one body."""
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(404, f"no part {pid!r}")
+        try:
+            got = tree.mesh(store, pid, key)
+        except KeyError:
+            raise HTTPException(404, f"{pid} has no piece {key!r}")
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        if got is None:
+            raise HTTPException(404, f"{pid} has no piece {key!r}")
+        return Response(got.export(file_type="stl"), media_type="model/stl")
 
     @r.post("/api/designs/{slug}/parts/{pid}/grain")
     def set_part_grain(slug: str, pid: str, req: GrainSet):
