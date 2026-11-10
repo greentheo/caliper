@@ -97,7 +97,7 @@ class JobRunner:
     #: Called between an exclusive submit's check and its queueing, for a test that the two are one step (CALI-101).
     _between: Optional[Callable[[], None]] = None
 
-    def __init__(self, workers: int = 4):
+    def __init__(self, workers: int = 8):       # strength studies wait their turn on a worker (#163): enough for a chat too
         RUNNERS.add(self)                      # so a test can wait for every runner's jobs (CALI-97)
         self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="caliper-job")
         self._jobs: dict[str, Job] = {}
