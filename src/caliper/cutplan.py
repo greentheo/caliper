@@ -300,7 +300,8 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
     for it in items:
         if it.get("kind") == "sheet":
             groups.setdefault((it["material"], round(float(it["thickness"]), 3)), []).append(it)
-    record = {"id": rid, "part": part_id, "version": store.design.part(part_id).version,
+    record = {"id": rid, "part": part_id, "name": store.design.part(part_id).label or part_id,
+              "version": store.design.part(part_id).version,
               "created": time.time(), "build": d.get("build") or {},
               "unfolder": unfold_dir(), "sheets": [],
               "sticks": stick_cuts(C.takeoff([it for it in items if not (it.get("kind") == "stick"
@@ -382,7 +383,7 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
 
 def cutlist_text(record: dict) -> str:
     """The sticks as a shop cut list, inches first."""
-    lines = [f"CUT LIST — {record['part']} ({record['id']})", ""]
+    lines = [f"CUT LIST — {record.get('name') or record['part']} ({record['id']})", ""]
     for g in record.get("grain") or []:                # which way to cut a panel, as the person said (CALI-126)
         lines.append(g["line"] + ("" if g["follows"] else f" The layout doesn't follow it ({g['why']}): lay it out "
                                                           f"by hand."))
