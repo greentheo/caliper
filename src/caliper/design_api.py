@@ -702,6 +702,19 @@ def router():
                 raise HTTPException(422, str(e))
             return design_state(store)
 
+    @r.get("/api/designs/{slug}/parts/{pid}/features.json")
+    def part_features(slug: str, pid: str):
+        """The part's faces and edges with ids, for picking one (#109). Worked out once per version."""
+        from . import features
+
+        store = load(slug)
+        try:
+            return features.with_words(features.for_part(store, pid), store.design.display_units == "in")
+        except KeyError:
+            raise HTTPException(404, f"no part {pid!r}")
+        except Exception as e:  # noqa: BLE001 — a part that doesn't build has no faces to pick: said, as for its pieces (#172)
+            raise HTTPException(422, str(e))
+
     @r.get("/api/designs/{slug}/parts/{pid}/piece.stl")
     def part_piece_stl(slug: str, pid: str, key: str):
         """One piece as a solid for the viewport (#94). 404 for no such piece; 422 where it can't be cut (say, a shape
