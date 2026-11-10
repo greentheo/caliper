@@ -652,7 +652,7 @@ async function openDesign(slug) {
   location.hash = encodeURIComponent(slug);
   if (first) showLoading(slug);
   let got;
-  try { got = await api('GET', `/api/designs/${slug}`); } catch (e) { if (S.slug === slug) doneLoading(); throw e; }
+  try { got = await api('GET', `/api/designs/${slug}`); } catch (e) { if (S.slug === slug) loadFailed(slug, e); return; }
   if (S.slug !== slug) return;                  // another design was chosen while this one loaded (#168)
   S.design = got;
   doneLoading();
@@ -661,19 +661,28 @@ async function openDesign(slug) {
 }
 // while a design loads the page isn't the old one: the new name, nothing of the old, and the chat off, so a message can't
 // go to a design other than the one on screen (#173)
+function pickedName(slug) {                     // its name as the dropdown has it, before its own state lands
+  const pick = $('designPick').selectedOptions[0];
+  return pick && pick.value === slug ? pick.textContent : slug;
+}
 function showLoading(slug) {
   S.opening = slug;
   S.design = null;
   for (const m of meshes.values()) scene.remove(m);
   meshes.clear();
+  [...pieces3d.keys()].forEach(dropPieces);
   clearStation();
-  const pick = $('designPick').selectedOptions[0], name = pick && pick.value === slug ? pick.textContent : slug;
-  $('inspector').innerHTML = `<h2>${esc(name)}</h2><div class="muted small"><span class="spin"></span>loading…</div>`;
+  $('inspector').innerHTML = `<h2>${esc(pickedName(slug))}</h2><div class="muted small"><span class="spin"></span>loading…</div>`;
   $('thread').innerHTML = '';
   $('tree').hidden = true;
   $('scopeRow').hidden = true;
   $('viewHint').textContent = 'loading…';
   $('msg').disabled = true; $('send').disabled = true;
+}
+// it couldn't be opened: says why, and the chat stays off, as there's no design on screen to talk about
+function loadFailed(slug, e) {
+  $('inspector').innerHTML = `<h2>${esc(pickedName(slug))}</h2><div class="note-warn small">Couldn't open it: ${esc(plainly(e.message))}</div>`;
+  $('viewHint').textContent = '';
 }
 function doneLoading() {
   S.opening = null;
@@ -972,6 +981,9 @@ function startNew() {
   S.slug = null; S.design = null; S.scope = null; S.buildBubble = null;
   for (const m of meshes.values()) scene.remove(m);
   meshes.clear(); clearStation();
+  [...pieces3d.keys()].forEach(dropPieces);
+  doneLoading();                                  // whatever was loading is dropped when it lands (#173)
+  $('viewHint').textContent = '';
   history.replaceState(null, '', location.pathname);
   $('inspector').innerHTML = `<div class="empty">The answers show up here: what it is, whether it works, what to
     buy and how to make it.</div>`;
