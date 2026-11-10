@@ -284,7 +284,8 @@ def test_every_offer_has_its_lead_cost_button_and_part(tmp_path):
 def _page_of(extra):
     from .test_carve_click import _page, _run
 
-    return _run(_page(["qlines", "betterLines", "useBetter"], consts=["esc"], extra=extra))
+    return _run(_page(["qlines", "betterLines", "useBetter", "gotoFor"], consts=["esc", "PART_PANELS"],
+                      extra=("" if "const S" in extra else "const S = {scope: 'p', design: {parts: []}};\n") + extra))
 
 
 CARD = ("const trackedFor = () => null;\n"
