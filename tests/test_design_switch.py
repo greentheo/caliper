@@ -7,6 +7,8 @@ import os
 import re
 import subprocess
 
+import pytest
+
 from .test_carve_click import _fn, _node
 
 JS = os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")
@@ -206,6 +208,58 @@ def test_pieces_don_t_start_for_a_design_that_was_left():
     assert got == {"asked": 0}
 
 
+# --- #175: a carve belongs to its design --------------------------------------------------------------------------------
+_CARVES = """
+const S = { slug: 'a', carveJob: {}, scope: 'tube', design: { parts: [{ id: 'tube' }] } };
+const carveKey = (pid) => `${S.slug}/${pid}`;
+const esc = (s) => String(s), minutesText = () => '1 min', ran = () => '';
+const posts = [], paints = [];
+const paintCarve = (p) => paints.push(p);
+let finish;
+const follow = () => new Promise((r) => { finish = r; });
+const clearStation = () => {}, carveRuns = () => [], showStation = () => {};
+let refreshed = 0; const refresh = async () => { refreshed += 1; };
+const $ = () => null, plainly = (m) => m, loadRuns = () => [];
+const api = async () => ({ job_id: 'j1' });
+"""
+
+
+def test_a_carve_on_one_design_doesn_t_show_on_another_with_the_same_part():
+    got = _run(("carveProgress",), """S.carveJob[carveKey('tube')] = { job: 'j1', text: 'carving', progress: 0.5 };
+        const here = carveProgress('tube');
+        S.slug = 'b';
+        return { here: here.includes('carveStop'), there: carveProgress('tube') };""", _CARVES)
+    assert got == {"here": True, "there": ""}
+
+
+def test_two_designs_each_can_carve_a_part_of_the_same_name():
+    got = _run(("runCarve", "followCarve"), """runCarve({ id: 'tube' });
+        await null; await null;
+        S.slug = 'b';
+        const before = Object.keys(S.carveJob);
+        return { before };""", _CARVES)
+    assert got == {"before": ["a/tube"]}
+
+
+def test_a_carve_finishing_after_the_design_was_left_doesn_t_touch_the_one_on_screen():
+    got = _run(("followCarve",), """const go = followCarve({ id: 'tube' }, 'j1');
+        S.slug = 'b';
+        finish(); await go;
+        return { left: Object.keys(S.carveJob), refreshed };""", _CARVES)
+    assert got == {"left": [], "refreshed": 0}
+
+
+def test_a_carve_finishing_on_the_design_on_screen_redraws():
+    got = _run(("followCarve",), """const go = followCarve({ id: 'tube' }, 'j1');
+        finish(); await go;
+        return { refreshed };""", _CARVES)
+    assert got == {"refreshed": 1}
+
+
+def test_the_key_has_the_design_in_it():
+    assert re.search(r"const carveKey = \(pid\) => `\$\{S\.slug\}/\$\{pid\}`;", open(JS).read())
+
+
 def test_a_load_that_fails_says_why():
     got = _run(("loadFailed", "doneLoading", "showLoading", "pickedName"), """loadFailed('new', new Error('no such design'));
         return { h: parts.inspector.innerHTML, hint: parts.viewHint.textContent };""", _LOADING)
@@ -234,3 +288,24 @@ def test_new_design_during_a_load_ends_the_load():
 
     src = fn(open(JS).read(), "startNew")
     assert src.index("S.slug = null;") < src.index("doneLoading();") and "dropPieces" in src
+
+
+_GUARDS = """
+const S = { slug: 'a', running: {}, design: {} };
+let finish; const started = [];
+const startLoad = (p) => new Promise((r) => { started.push('load'); finish = r; });
+const startLighten = (p) => new Promise((r) => { started.push('lighten'); finish = r; });
+const takeStation = () => new Promise((r) => { started.push('adopt'); finish = r; });
+"""
+
+
+@pytest.mark.parametrize("fn,call", [("runLoad", "runLoad({ id: 'tube' })"), ("runLighten", "runLighten({ id: 'tube' })"),
+                                     ("adoptStation", "adoptStation('tube', 'r1', 1, 'carve')")])
+def test_a_running_job_on_one_design_doesn_t_stop_the_same_part_on_another(fn, call):
+    got = _run((fn,), f"""{call}; S.slug = 'a';
+        {call};
+        const same = started.length;
+        S.slug = 'b';
+        {call};
+        return {{ same, other: started.length }};""", _GUARDS)
+    assert got == {"same": 1, "other": 2}
