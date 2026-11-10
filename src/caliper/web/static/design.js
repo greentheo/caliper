@@ -1658,7 +1658,7 @@ function betterLines(c, offers) {
   return `<div class="qbetter"><div class="qbetter-h">Make it better</div>${offers.map((ln) => {
     const i = c.lines.indexOf(ln);
     return `<div class="qoffer"><div class="qoffer-t">${esc(ln.lead)}.<span class="qoffer-c">${esc(ln.cost)}</span></div>
-      <button class="ghost" data-better="${i}" data-better-action="${esc(ln.action)}" data-better-part="${esc(ln.part)}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[carveKey(ln.part)]) ? ' disabled' : trackedFor(ln.action, ln.part) ? ' disabled data-job-off="1"' : ''}>${esc(ln.button)}</button></div>`;
+      ${ln.button ? `<button class="ghost" data-better="${i}" data-better-action="${esc(ln.action)}" data-better-part="${esc(ln.part)}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[carveKey(ln.part)]) ? ' disabled' : trackedFor(ln.action, ln.part) ? ' disabled data-job-off="1"' : ''}>${esc(ln.button)}</button>` : ''}</div>`;
   }).join('')}</div>`;
 }
 // each goes through what its panel already does: the chat, the carve, the lightening, or taking a step
@@ -2699,13 +2699,14 @@ function carveChart(p, run) {
       <text x="${W - 10}" y="${y(run.min_safety) - 3}" text-anchor="end">needs ${run.min_safety}x</text>
       <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="1.5"/>${dots}
       <text x="24" y="${H - 3}">as drawn</text><text x="${W - 10}" y="${H - 3}" text-anchor="end">${carveShare(run)} carved away →</text></svg>
-    <div class="small">${best && best.saved_g ? `The lightest step where the printed part holds: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% ${carveShare(run)}
+    <div class="small">${best && best.saved_g ? `The step to use: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% ${carveShare(run)}
       carved away, <b>${best.saved_g} g</b> less filament, the printed part ${best.safety}x;
       ${holdsHere(best) ? `the whole part ${best.whole}x`
         : best.verdict && (best.verdict.kind === 'unresolved' || best.verdict.kind === 'unchecked')    // #101
           ? `<b style="color:var(--amber)">${esc(best.verdict.word)}: the voxels were too coarse to see its walls, so no step can be said to hold yet</b>`
         : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a filled-in shape' : `the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
-      : 'Nothing could come off and still hold.'}
+      : run.offer ? '' : 'Nothing could come off and still hold.'}
+      ${run.offer ? `<div class="${run.offer.kind === 'room' ? 'muted' : 'note-warn'} small" style="margin-top:4px">${esc(run.offer.said)}</div>` : ''}
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
     <div class="muted small">Click a step to see it; <b>Carve it like this</b> makes it the part's shape and checks it again.</div>`;
 }
@@ -2858,7 +2859,8 @@ function lightenRuns(pid) { return (S.design.lighten_runs || []).filter((r) => r
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
   const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
-  const best = run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
+  const best = run && run.offer ? run.stations.find((x) => x.index === run.offer.index)     // the step the card offers (#167)
+    : run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
   const out = run && run.stations.find((x) => x.verdict && x.verdict.kind === 'fails');
   // steps the check was too coarse to call: their verdict's word, never "nothing lighter holds" (#136 review)
   const unsure = run && !best && run.stations.find((x) => x.index && x.verdict && ['unresolved', 'unchecked'].includes(x.verdict.kind));
@@ -2874,7 +2876,7 @@ function lightenView(p) {
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
-        : `The lightest that holds: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety)}.`)
+        : `The step to use: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
       : unsure ? (unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
         : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.')
       : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety)}).` : ''}
@@ -3041,8 +3043,7 @@ async function startLighten(p, again) {
     clearStation();
     await refresh();
     const run = lightenRuns(p.id)[0];
-    const best = run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
-    if (best && best.index) showStation(p.id, run, best.index);
+    if (run && run.offer) showStation(p.id, run, run.offer.index);        // the step the card offers (#167)
   } catch (e) {
     if (S.slug !== slug) return;
     await refresh().catch(() => {});              // a 409: the card as it now is, and the reason beside it

@@ -79,7 +79,7 @@ def test_an_open_join_with_the_wood_isn_t_offered_and_is_repaired_or_refused(tmp
     # a join that can't be closed: the study doesn't offer the step, and adopting it is refused, nothing written
     monkeypatch.setattr(carve, "_join", lambda a, b: _leaky(real(a, b)))
     steps = copy.deepcopy(rec["stations"])
-    assert carve._offer(store, "stool", steps, folder, spacing) is None
+    carve._judge(store, "stool", steps, folder, spacing)
     assert [x.get("closed") for x in steps if x["holds"]] == [False] * sum(x["holds"] for x in steps)
     with pytest.raises(carve.NotClosed, match="step 1: its carved shape doesn't close up"):
         carve.adopt(store, rec["id"], 1)

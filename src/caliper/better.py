@@ -123,8 +123,6 @@ def _seen_from(run: dict) -> Optional[float]:
 
 #: beside a one-click Use it: what's quoted is the study's own number, and the rebuilt part's check is the one that counts
 _RECHECK = "Using it re-checks it, and that's the number to go by."
-
-
 def _waiting_carve(name: str, takes: str, why: Optional[str] = None) -> dict:
     """The carve, offered and off: what it would take, and what it's waiting for."""
     return _line(f"Carve the {name} where it isn't working", (f"{takes[:1].upper()}{takes[1:]}. " if takes else "")
@@ -208,13 +206,16 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
         mine = [r for r in state.get("carve_runs") or [] if r["part"] == pid and r.get("version") == p["version"]]
         done = next((r for r in mine if r.get("status") == "done"), None)
         if done is not None:
-            best = next((st for st in done.get("stations") or [] if st["index"] == done.get("best")), None)  # search
+            offer = done.get("offer")
+            best = next((st for st in done.get("stations") or [] if offer and st["index"] == offer["index"]), None)   # search
             v = verdicts.carve_step(best, p.get("untrusted"), done) if best else None
-            if settled and best and best.get("saved_g") and v and v["counts_as_pass"]:
+            if settled and best and v["counts_as_pass"] and not offer["offers"]:      # nothing to click: why, and it's in the study (#167)
+                results.append(_line(f"No step of the carve to use on the {name}", offer["said"], "", ""))
+            elif settled and best and v["counts_as_pass"]:
                 results.append(_line(
                     f"Carve the {name} where it isn't working",
                     f"{best['removed']:.0%} {K.share(done)} carved away, {best['saved_g']:,} g less filament, still "
-                    f"{_times(best['safety'], about=True)} by the carve's own check. {_RECHECK}", "Use it", "carve_use",
+                    f"{_times(offer['quote'], about=True)} by the carve's own check. {offer['said']} {_RECHECK}", "Use it", "carve_use",
                     run=done["id"],
                     station=best["index"]))
         elif not any(r.get("status") in (None, "running") for r in mine):
@@ -225,14 +226,13 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
         mine = [r for r in state.get("lighten_runs") or [] if r["part"] == pid and r.get("version") == p["version"]]
         done = mine[0] if mine else None
         if done is not None:
-            ok = [st for st in done.get("stations") or [] if st.get("saved_lb")
-                  and verdicts.lighten_step(st, p.get("untrusted"), done)["counts_as_pass"]]
-            best = max(ok, key=lambda st: st["saved_lb"], default=None)
-            if settled and best:
+            offer = done.get("offer")
+            best = next((st for st in done.get("stations") or [] if offer and st["index"] == offer["index"]), None)   # search
+            if settled and best and verdicts.lighten_step(best, p.get("untrusted"), done)["counts_as_pass"]:
                 results.append(_line(
                     "Lighten it with holes where the wood isn't working",
-                    f"{best['saved_lb']:g} lb lighter, still {_times(best['safety'], about=True)} by the lightening's own "
-                    f"check. {_RECHECK}", "Use it", "lighten_use", run=done["id"], station=best["index"]))
+                    f"{best['saved_lb']:g} lb lighter, still {_times(offer['quote'], about=True)} by the lightening's own "
+                    f"check. {offer['said']} {_RECHECK}", "Use it", "lighten_use", run=done["id"], station=best["index"]))
         else:
             invites.append(_line("Lighten it with holes where the wood isn't working", "It takes a few minutes.",
                                  "Lighten it", "lighten"))
