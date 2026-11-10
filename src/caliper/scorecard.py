@@ -431,7 +431,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                         + next((f": {c['why']}" for c in run["cases"]
                                 if (c.get("fea") or {}).get("supported") is False and c.get("why")), ""))
         said = [(c, verdicts.case(run, c)) for c in run["cases"]]
-        sure = [(c, v) for c, v in said if v["kind"] in ("holds", "fails") and not v.get("coarse")]
+        sure = [(c, v) for c, v in said if v["kind"] in verdicts.SETTLED and not v.get("coarse")]
         breaks = [c["breaks_lb"] for c, _ in sure if c.get("breaks_lb")]
         hedged = next(((c, v) for c, v in said if v["kind"] == "fails" and v.get("coarse")), None)
         inches = store.design.display_units == "in"

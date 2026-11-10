@@ -393,11 +393,11 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             # settled (it holds or fails): never green on a not-trusted, unresolved or older case (#132 review)
             for b in ((c.get("plate") or {}).get("by_thickness") or []):
                 b["verdict"] = (verdicts.meets(b.get("safety_across"), r.get("min_safety"))
-                                if cv["kind"] in ("holds", "fails") else cv)
+                                if cv["kind"] in verdicts.SETTLED else cv)
             pl = c.get("plate") or {}
             if pl.get("done"):                # the plate or beam check's own number, the worse grain's (#122, CALI-116)
                 pl["verdict"] = (verdicts.meets(pl.get("safety_across"), r.get("min_safety"))
-                                 if cv["kind"] in ("holds", "fails") else cv)
+                                 if cv["kind"] in verdicts.SETTLED else cv)
             if load_study.unresolved(r, c):   # which coarse it is, for the panel's FEA line (CALI-97)
                 c["unresolved"] = "unresolved" if r.get("finer") else "unchecked"
                 c["blind"] = load_study.blind(r, c)    # it saw no stress, not a wall it couldn't see (#202)

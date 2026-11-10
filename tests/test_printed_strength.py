@@ -82,7 +82,11 @@ def test_a_printed_part_s_verdict_says_about(store, tmp_path, monkeypatch):
     line = next(ln for ln in answers.answers(store, design_api.design_state(store), "box")[1]["lines"]
                 if ln.get("study") == "load")
     # the reviewer's wording (#71 rework, item 6): "about" on the top line, the caveat one click down by the promise
-    assert line["text"].startswith("Holds a foot, about ") and line["text"].endswith(" times over."), line["text"]
+    # with what it's against (#64 item 9), and, close to its limit, amber and says so (#64 item 2)
+    import re
+
+    assert re.fullmatch(r"Holds a foot, about [\d.]+ times over 80 lb \(40 lb, twice over\)(: close to the 2 it needs)?\.",
+                        line["text"]), line["text"]
     work = answers.answers(store, design_api.design_state(store), "box")[1]
     assert "Printed parts are a rough model" in work["promise"]
     # worded for the print where a person meets it: the part card and the chat's facts (#64 item 14, #209 review)
