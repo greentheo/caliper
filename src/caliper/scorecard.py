@@ -24,6 +24,7 @@ import os
 import time
 from typing import Callable, Optional
 
+from . import consistency
 from . import construction as C
 from . import materials as M
 from .design import DesignStore
@@ -520,6 +521,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
     unsettled_n = sum(c["status"] == "fail" and str(c.get("trust") or "").startswith("not resolved") for c in checks)   # (#191)
     card = {"created": time.time(), "scorer": SCORER, "versions": versions, "settings": settings, "checks": checks,
             "notes": g.get("notes") or [],
+            "warnings": consistency.cut_smaller(store, list(reports)),     # (#183 review) said, and in nobody's way
             "objectives": objectives, "metrics": metrics, "cost": cw,
             "summary": {"pass": sum(c["status"] == "pass" for c in checks),
                         "fail": sum(c["status"] == "fail" for c in checks),

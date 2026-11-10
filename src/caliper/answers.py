@@ -340,12 +340,13 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
 
             geom = store.part_geometry(pid)                  # cached by the assembly (path, mtime)
             said = consistency.check(C.declared(store, pid), geom)
+            smaller = consistency.plan_differs(C.declared(store, pid), geom)
             off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
             edge = next((r.detail for r in said if r.id == "loads_edge" and r.detail), "")   # (CALI-94)
             meta = geom.require_mesh().metadata
             strays = _strays(meta, inches) if meta.get("strays") else None
         except Exception:  # noqa: BLE001 — the card says what it can
-            off, strays, edge = [], None, ""
+            off, strays, edge, smaller = [], None, "", []
         if strays:                                   # what the mesh left out, said once (CALI-118)
             what.append(_line(f"I {strays}: it enclosed nothing and weighs nothing.", "info"))
         if off:
@@ -353,6 +354,8 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                    else "fix its shape to match its pieces")
             what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"{fix}\" and I'll revise it.",
                               "bad"))
+        for s in smaller:                      # cut smaller than it's drawn: the cut list follows the outline (#183)
+            what.append(_line(consistency.plan_said(s, inches), "warn"))
         if edge:                               # a load case it's missing: a warning, the round passed (CALI-94)
             what.append(_line(edge[0].upper() + edge[1:] + ".", "warn", study="load"))
 
