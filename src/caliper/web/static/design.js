@@ -877,11 +877,17 @@ function setScope(pid, piece) {
   render();
   if (pid) $('msg').focus();
 }
+// the piece the chat is about. A pick says what it's about itself, and it may be on another piece than the one selected (#181)
+function pieceInScope() {
+  if (S.pick) return null;
+  const part = S.piece && S.design ? S.design.parts.find((p) => p.id === S.scope) : null;
+  return (part && (part.pieces || []).find((x) => x.key === S.piece)) || null;
+}
 function renderScope() {
   $('scopeRow').hidden = !S.scope;
   const part = S.scope && S.design ? S.design.parts.find((p) => p.id === S.scope) : null;
   const named = part ? part.name || part.id : S.scope;
-  const piece = part && S.piece ? (part.pieces || []).find((x) => x.key === S.piece) : null;
+  const piece = pieceInScope();
   $('scopeChip').textContent = named ? (piece ? `${named} · ${piece.name}` : named) : '';
   $('pickChip').hidden = $('pickClear').hidden = !S.pick;
   $('pickChip').textContent = S.pick ? S.pick.said : '';
@@ -1095,8 +1101,7 @@ const STEP_TEXT = {
 
 // a piece picked in the tree: the part is the chat's scope, and the message says which piece (#94)
 function aboutPiece(text) {
-  const part = S.piece && S.design && S.design.parts.find((p) => p.id === S.scope);
-  const piece = part && (part.pieces || []).find((x) => x.key === S.piece);
+  const piece = pieceInScope();
   return piece ? `About the ${piece.name}: ${text}` : text;
 }
 async function send(text, scope) {
