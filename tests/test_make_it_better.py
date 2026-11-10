@@ -52,7 +52,7 @@ def _carved(store, pid, *, whole=3.0, safety=2.6, saved=644):
         "stations": [{"index": 0, "removed": 0.0, "safety": 3.0, "holds": True, "whole": 3.0, "whole_holds": True,
                       "saved_g": 0},
                      {"index": 1, "removed": 0.61, "safety": safety, "holds": safety >= NEED, "whole": whole,
-                      "whole_holds": whole >= NEED, "saved_g": saved}]})
+                      "whole_holds": whole >= NEED, "saved_g": saved, "seen": True}]})
 
 
 def _offers(store, pid):
@@ -87,8 +87,7 @@ def test_after_a_carve_it_gives_the_result_to_use(tmp_path):
     _carved(store, "tube")
     (line,) = _offers(store, "tube")
     assert line["text"] == ("Carve the tube where it isn't working: 61% of the printed part carved away, 644 g less "
-                            "filament, still about 2.6 times over by the carve's own check. No step has room to spare, and re-checks "
-                            "have read up to a third lower, so this one may not hold once it's re-checked. Using it re-checks it, "
+                            "filament, still about 2.6 times over by the carve's own check. No step whose walls the re-check can see clears what it must hold by half again (a rule of thumb), so this one may not hold once it's re-checked. Using it re-checks it, "
                             "and that's the number to go by.")
     assert line["action"] == "carve_use" and line["station"] == 1
 
@@ -176,8 +175,7 @@ def test_the_cheapest_real_improvement_comes_first(tmp_path):
     got = _offers(store, "stool")
     assert [ln["action"] for ln in got] == ["use_t", "lighten_use"]
     assert got[1]["text"] == ("Lighten it with holes where the wood isn't working: 1.8 lb lighter, still about 2.4 "
-                              "times over by the lightening's own check. No step has room to spare, and re-checks have read up to a third "
-                              "lower, so this one may not hold once it's re-checked. Using it re-checks it, and that's the number to go by.")
+                              "times over by the lightening's own check. No step whose walls the re-check can see clears what it must hold by half again (a rule of thumb), so this one may not hold once it's re-checked. Using it re-checks it, and that's the number to go by.")
 
 
 def test_the_card_and_a_one_part_design_s_card_carry_them(tmp_path):
@@ -270,8 +268,7 @@ def test_every_offer_has_its_lead_cost_button_and_part(tmp_path):
     (line,) = _offers(store, "tube")
     assert line["lead"] == "Carve the tube where it isn't working" and line["button"] == "Use it" and line["part"] == "tube"
     assert line["cost"] == ("61% of the printed part carved away, 644 g less filament, still about 2.6 times over by the "
-                            "carve's own check. No step has room to spare, and re-checks have read up to a third lower, so this one may "
-                            "not hold once it's re-checked. Using it re-checks it, and that's the number to go by.")
+                            "carve's own check. No step whose walls the re-check can see clears what it must hold by half again (a rule of thumb), so this one may not hold once it's re-checked. Using it re-checks it, and that's the number to go by.")
     assert line["text"] == f"{line['lead']}: {line['cost']}"                 # the same, as one sentence
 
 

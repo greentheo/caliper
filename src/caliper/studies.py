@@ -148,7 +148,7 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
         best = next((x for x in st if x["index"] == r.get("best")), None)  # search: the printed part's lightest
         held = best is not None and verdicts.carve_step(best, r.get("filled"), r)["counts_as_pass"]   # #132, #101
         return (f"cancelled after {len(st)} of {r.get('steps', '?')} steps"
-                + (f": the lightest that held, step {best['index']}, {best['saved_g']} g less filament"
+                + (f": the step to use, step {best['index']}, {best['saved_g']} g less filament"
                    if held and best.get("saved_g") else "")), None
     if kind == "carve" and r.get("status") == "running":   # still going, or it died partway (CALI-103)
         return f"not finished: {len(r.get('stations') or [])} of {r.get('steps', '?')} steps checked", None

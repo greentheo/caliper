@@ -181,7 +181,10 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             keep({**partial, "stations": out})
             if not holds and k > 0:
                 break                                                  # the chart stops where it runs out
-        best = _offer(store, part_id, out, out_dir, s)
+        _judge(store, part_id, out, out_dir, s)
+        offer = _offered({"stations": out, "min_safety": min_safety, "share": "printed", **seen})
+        best = next((x for x in out if offer and x["index"] == offer["index"]), None) or max(   # search: nothing to save, so as drawn
+            (x for x in out if verdicts.station(x)["counts_as_pass"] and x.get("closed") is not False), key=lambda x: x["saved_g"], default=None)
         first = out[0]
 
         if verdicts.station(first, whole=True)["kind"] == "fails" and verdicts.station(first)["kind"] != "fails":
@@ -193,7 +196,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         record = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(), **seen,
                   "version": store.design.part(part_id).version, "min_safety": min_safety,
                   "material": mat["name"], "spacing_mm": round(s, 2), "seconds": round(time.time() - t0, 1),
-                  "stations": out, "best": best["index"] if best else None, "weak": weak_note,
+                  "stations": out, "best": best["index"] if best else None, "offer": offer, "weak": weak_note,
                   "share": "printed",                     # removed is the printed part's share (CALI-86); older runs: the solid's
                   "status": "done", "steps": stations,
                   "notes": [*([weak_note] if weak_note else []),
@@ -210,7 +213,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         v = verdicts.carve_step(best, consistency.filled(store, part_id), record) if best is not None else None
         why = ("too coarse to see its walls" if v and v["kind"] in ("unresolved", "unchecked")    # #101
                else "the whole part doesn't hold" if v and v["kind"] == "fails" else v["word"] if v else "")
-        emit("done", f"{len(out)} steps: the lightest that holds saves {best['saved_g']} g"
+        emit("done", f"{len(out)} steps: the step to use saves {best['saved_g']} g"
              if v and v["counts_as_pass"] and best["saved_g"]
              else f"{len(out)} steps: the printed part comes off, but {why}"   # #132 review
              if best is not None and best["saved_g"] else f"{len(out)} steps", run=rid, progress=1.0)
@@ -236,11 +239,12 @@ def _station_mesh(mesh):
     return trimesh.Trimesh(np.asarray(mesh.vertices, float), np.asarray(mesh.faces, int), process=True)
 
 
-def _offer(store: DesignStore, part_id: str, out: list, out_dir: str, spacing: float) -> Optional[dict]:
-    """The step to offer: the lightest that holds and whose part, as adopting it would build it, closes up. One that
-    doesn't is marked (``closed: False``, with why) and the next lightest is tried. The part's script is built
-    once for all of them (#124 review)."""
+def _judge(store: DesignStore, part_id: str, out: list, out_dir: str, spacing: float) -> None:
+    """Every step that passes, built as adopting it would build it: one that doesn't close up is marked (``closed: False``, with why),
+    and the rest say how thin their walls are and whether a re-check could see them. The script is built once for all (#124 review)."""
+    from . import load_study as L
     from . import sandbox
+    from .consistency import shapes
 
     built = None
     for x in sorted((x for x in out if verdicts.station(x)["counts_as_pass"]), key=lambda x: -x["saved_g"]):
@@ -249,11 +253,21 @@ def _offer(store: DesignStore, part_id: str, out: list, out_dir: str, spacing: f
             if not built.ok:
                 raise ValueError(f"'{part_id}' won't build to carve: {built.error}")
         try:
-            _adopted(store, part_id, os.path.join(out_dir, x["stl"]), spacing, built=built)
-            return x
+            shape = _adopted(store, part_id, os.path.join(out_dir, x["stl"]), spacing, built=built)
         except NotClosed:
             x.update({"closed": False, "why": OPEN})
-    return None
+            continue
+        x.update(L.would_see(built.declared or {}, shape, shapes(built.declared or {})))
+
+
+def _offered(rec: dict) -> Optional[dict]:
+    """The step to offer of a carve, as a record of it (:mod:`caliper.use_step`)."""
+    from . import load_study as L
+    from . import use_step
+
+    ok = [st for st in rec.get("stations") or [] if st.get("saved_g") and verdicts.carve_step(st, None, rec)["counts_as_pass"]]
+    return use_step.choose(ok, float(rec.get("min_safety") or L.MIN_SAFETY), "saved_g",
+                           lambda st: f"{st['removed']:.0%} carved away, {st['saved_g']:,} g less filament")
 
 
 def _join(exact, printed):
@@ -324,7 +338,11 @@ def load_run(store: DesignStore, rid: str) -> Optional[dict]:
     if not os.path.exists(p):
         return None
     with open(p) as f:
-        return json.load(f)
+        rec = json.load(f)
+    rec["offer"] = _offered(rec)              # one answer for the card, the panel, the chat and the 3D view (#167)
+    if rec["offer"]:
+        rec["best"] = rec["offer"]["index"]           # producer: the step to offer, as use_step chooses it
+    return rec
 
 
 def station_path(store: DesignStore, rid: str, index: int) -> str:

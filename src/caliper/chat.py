@@ -728,9 +728,9 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
                        f"the voxels were too coarse to see its walls (not resolved): check it again finer first." if v["kind"] in ("unresolved", "unchecked") else f"{v['word']}.")
                     + " Fix that first.")
     elif best and best["saved_g"]:
-        said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. The lightest that holds is step "
+        said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. The step to use is step "
                     f"{best['index']}: {best['removed']:.0%} {carve.share(rec)} carved away, {best['saved_g']} g less filament, "
-                    f"about {best['safety']:g} times over (printed parts are a rough model). It's on the 3D view: **Carve it like this** to make it the "
+                    f"about {best['safety']:g} times over (printed parts are a rough model). {rec['offer']['said'] if rec.get('offer') else ''} It's on the 3D view: **Carve it like this** to make it the "
                     f"part's shape (under *Will it work? → the numbers*, with every step).")
     else:
         said.append("Nothing could come off it and still hold.")
