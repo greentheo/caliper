@@ -1536,7 +1536,7 @@ function betterLines(c, offers) {
   return `<div class="qbetter"><div class="qbetter-h">Make it better</div>${offers.map((ln) => {
     const i = c.lines.indexOf(ln);
     return `<div class="qoffer"><div class="qoffer-t">${esc(ln.lead)}.<span class="qoffer-c">${esc(ln.cost)}</span></div>
-      <button class="ghost" data-better="${i}" data-better-action="${esc(ln.action)}" data-better-part="${esc(ln.part)}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[carveKey(ln.part)]) || trackedFor(ln.action, ln.part) ? ' disabled' : ''}>${esc(ln.button)}</button></div>`;
+      <button class="ghost" data-better="${i}" data-better-action="${esc(ln.action)}" data-better-part="${esc(ln.part)}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[carveKey(ln.part)]) ? ' disabled' : trackedFor(ln.action, ln.part) ? ' disabled data-job-off="1"' : ''}>${esc(ln.button)}</button></div>`;
   }).join('')}</div>`;
 }
 // each goes through what its panel already does: the chat, the carve, the lightening, or taking a step
@@ -2899,23 +2899,25 @@ async function runLighten(p, again) {
   try { await startLighten(p, again); } finally { delete S.running[key]; }
 }
 async function startLighten(p, again) {
-  const prog = $('lightProgress'), go = $('lightGo');
+  const prog = $('lightProgress'), go = $('lightGo'), slug = S.slug;
   go.disabled = true;
   prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="lightMsg">starting…</div>';
   try {
     const runs = loadRuns(p.id);
     const { job_id } = await api('POST', `/api/designs/${S.slug}/lighten`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2, again: !!again });
     await trackJob(job_id, { kind: 'lighten', part: p.id, text: 'starting…' }).done;
+    if (S.slug !== slug) return;                  // finished with another design open: that design's view stays
     clearStation();
     await refresh();
     const run = lightenRuns(p.id)[0];
     const best = run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
     if (best && best.index) showStation(p.id, run, best.index);
   } catch (e) {
-    await refresh();                              // a 409: the card as it now is, and the reason beside it
+    if (S.slug !== slug) return;
+    await refresh().catch(() => {});              // a 409: the card as it now is, and the reason beside it
     const said = $('lightProgress');
     if (said) said.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(plainly(e.message))}</div>`;
-    if ($('lightGo')) $('lightGo').disabled = false;
+    if ($('lightGo') && !trackedFor('lighten', p.id)) $('lightGo').disabled = false;
   }
 }
 
@@ -2936,46 +2938,85 @@ function trackJob(id, info) {
     if (typeof ev.progress === 'number') t.progress = ev.progress;
     t.waiting = ev.kind === 'waiting';
     paintJobs();
-  }).finally(() => { delete S.tracked[id]; paintJobs(); });
+  }).finally(() => jobOver(id));
   return t;
+}
+// a job's gone, however it went: finished, cancelled, dead, or the server restarted. The page re-reads on its own; if the server
+// isn't back yet it tries again, and paintJobs has already given the buttons back
+function jobOver(id) {
+  const t = S.tracked[id];
+  if (!t) return;
+  delete S.tracked[id];
+  if (S.design && t.slug === S.slug) S.design.running = (S.design.running || []).filter((r) => r.job !== id);
+  paintJobs();
+  rereadWhenBack(t.slug, 20);
+}
+function rereadWhenBack(slug, tries) {
+  if (S.slug !== slug) return;
+  refresh().catch(() => { if (tries > 1) setTimeout(() => rereadWhenBack(slug, tries - 1), 3000); });
+}
+// while something runs, ask the record: another tab's job appears, and one the server no longer has can't hold the page.
+// Gone twice running before it's dropped: a job's last event can still be on its way
+async function pollRunning() {
+  if (!S.slug || !jobsHere().length) return;
+  const slug = S.slug;
+  let got;
+  try { got = await api('GET', `/api/designs/${slug}/running`); } catch (e) { return; }     // following it says when it's gone
+  if (S.slug !== slug || !S.design) return;
+  S.design.running = got.running;
+  syncRunning();
+  for (const t of jobsHere()) {
+    if (got.running.some((r) => r.job === t.job)) t.gone = 0;
+    else if ((t.gone = (t.gone || 0) + 1) > 1) jobOver(t.job);
+  }
 }
 // what's on the record and this page isn't following yet: after a reload, or coming back to the design
 function syncRunning() {
   for (const r of (S.design && S.design.running) || []) {
     if (S.tracked[r.job]) continue;
-    const slug = S.slug, again = () => { if (S.slug === slug) refresh(); };
-    trackJob(r.job, { kind: r.kind, part: r.part, text: r.text, waiting: r.waiting }).done.then(again, again);
+    trackJob(r.job, { kind: r.kind, part: r.part, text: r.text, waiting: r.waiting }).done.catch(() => {});   // jobOver re-reads
   }
+}
+function jobPart(id) { return (((S.design && S.design.parts) || []).find((p) => p.id === id) || {}).name || id; }
+// what a job turned off, and only that, it turns back on: what was off for its own reasons stays off
+function jobOff(b) {
+  if (!b.disabled) b.dataset.jobOff = '1';
+  b.disabled = true;
+  b.title = 'It\'s running now';
 }
 function jobHtml(t, named) {
   const pct = typeof t.progress === 'number' ? Math.round(t.progress * 100) : null;
   return `<div class="job-line">${pct != null ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ''}
-    <div class="small muted">${named ? `${esc(JOB_NAME[t.kind])}${t.part ? ` of ${esc(t.part)}` : ''}: ` : ''}${esc(t.text || 'running…')}
+    <div class="small muted">${named ? `${esc(JOB_NAME[t.kind])}${t.part ? ` of ${esc(jobPart(t.part))}` : ''}: ` : ''}${esc(t.text || 'running…')}
     ${t.waiting ? `<button class="ghost wait-cancel" data-job-cancel="${esc(t.job)}">Cancel</button>` : ''}</div></div>`;
 }
 function paintJobs() {
   const note = $('jobNote');
   if (!note) return;
   const lines = [];
+  document.querySelectorAll('#inspector [data-job-off]').forEach((b) => { b.disabled = false; b.title = ''; delete b.dataset.jobOff; });
   for (const t of jobsHere()) {
-    const here = t.kind === 'release' || S.scope === t.part, box = here ? $(JOB_BOX[t.kind]) : null;
+    const here = t.kind === 'release' || S.scope === t.part, panel = here ? $(JOB_BOX[t.kind]) : null;
+    const box = panel && panel.closest && panel.closest('details:not([open])') ? null : panel;   // folded away isn't on screen
     if (box) { box.innerHTML = jobHtml(t, false); box.dataset.job = t.job; } else lines.push(jobHtml(t, true));
     const go = here && $(JOB_GO[t.kind]);
-    if (go) { go.disabled = true; go.title = 'It\'s running now'; }
-    if (t.kind === 'load' && here && $('lFiner')) $('lFiner').disabled = true;
-    document.querySelectorAll(`#inspector [data-better-action="${t.kind}"][data-better-part="${t.part}"]`).forEach((b) => { b.disabled = true; b.title = 'It\'s running now'; });
+    if (go) jobOff(go);
+    if (t.kind === 'load' && here && $('lFiner')) jobOff($('lFiner'));
+    document.querySelectorAll(`#inspector [data-better-action="${t.kind}"][data-better-part="${t.part}"]`).forEach(jobOff);
   }
   note.innerHTML = lines.join('');
   for (const box of document.querySelectorAll('#inspector [data-job]')) {     // it's over: nothing left over from it
     if (!S.tracked[box.dataset.job]) { box.innerHTML = ''; delete box.dataset.job; }
   }
 }
-$('inspector').addEventListener('click', (e) => {
+function cancelJob(e) {
   const b = e.target.closest('[data-job-cancel]');
   if (!b) return;
   b.disabled = true;
   api('POST', `/api/jobs/${b.dataset.jobCancel}/cancel`).catch((err) => showErr(err.message));
-});
+}
+$('inspector').addEventListener('click', cancelJob);
+setInterval(pollRunning, 5000);
 async function runLoad(p, spacing) {
   const key = `load:${S.slug}/${p.id}`;            // by design and part: part ids repeat across designs (#175)
   if (S.running[key]) return;                      // already asked: the card's button and the panel's are two ways in
@@ -2983,7 +3024,7 @@ async function runLoad(p, spacing) {
   try { await startLoad(p, spacing); } finally { delete S.running[key]; }
 }
 async function startLoad(p, spacing) {
-  const prog = $('lProgress'), go = $('lGo');
+  const prog = $('lProgress'), go = $('lGo'), slug = S.slug;
   go.disabled = true;
   if ($('lFiner')) $('lFiner').disabled = true;
   prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="lMsg">starting…</div>';
@@ -2991,6 +3032,7 @@ async function startLoad(p, spacing) {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`,
       { part: p.id, min_safety: +$('lSafety').value || 2, ...(spacing ? { spacing_mm: spacing } : {}) });
     await trackJob(job_id, { kind: 'load', part: p.id, text: 'starting…' }).done;
+    if (S.slug !== slug) return;          // finished with another design open: its stress picture isn't this design's, whatever the part's called
     S.loadRun[p.id] = 0;
     S.trial = null;                       // the test is set beside the check that just ran, not the one before (#89)
     clearStation();
@@ -3001,8 +3043,11 @@ async function startLoad(p, spacing) {
       if (worst >= 0) showHeat(p.id, run, worst);
     }
   } catch (e) {
-    prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
-    go.disabled = false;
+    if (S.slug !== slug) return;
+    await refresh().catch(() => {});      // a 409 from a stale tab: the card as it now is, and it follows the job that's running
+    const said = $('lProgress');
+    if (said) said.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
+    if ($('lGo') && !trackedFor('load', p.id)) $('lGo').disabled = false;
   }
 }
 

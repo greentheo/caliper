@@ -182,4 +182,4 @@ def test_the_routes_let_a_waiting_check_or_lighten_be_cancelled():
 
 def test_the_scorecard_says_it_is_waiting():
     src = _source("scorecard.py")
-    assert "load_study.study(store, p.id, emit=emit)" in src and 'bool(settings.get("walls", True)), emit=emit)' in src
+    assert "load_study.study(store, p.id, emit=emit, stop=stop)" in src and 'bool(settings.get("walls", True)), emit=emit)' in src

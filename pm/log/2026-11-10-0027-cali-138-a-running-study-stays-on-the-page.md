@@ -8,5 +8,9 @@ job finishing, and its button looked live, either silently dead or starting a du
   Another design may run the same part.
 - With its panel not on screen, a line at the top of the cards says what's running.
 - Found checking it: the Parameters panel threw on a timer while a design was loading.
+- From the review: Cancel on a waiting build package stops it, through `release.make` and `scorecard.compute`, and nothing is written.
+  When a job's gone, however it went, the page re-reads on its own and gives its buttons back, trying again if the server isn't
+  back yet. While something runs it asks the record every 5 s. A finished check no longer touches another design's view. A job
+  whose panel is folded away is said at the top of the cards.
 - Tests: tests/test_running.py. Mutants fail for not being on the record, another design's job counted, a second click allowed, a
   redraw not looking, following twice, and Cancel shown when it isn't waiting.

@@ -1191,6 +1191,12 @@ def router():
             "Content-Disposition": f'attachment; filename="{rid}-{path.replace("/", "-")}"'}
         return Response(data, media_type=media, headers=headers)
 
+    @r.get("/api/designs/{slug}/running")
+    def running_now(slug: str):
+        """What's running, alone: the page asks this while something is, without re-reading the whole design (#178 review)."""
+        load(slug)
+        return {"running": _running(slug)}
+
     # -- the build package (CALI-51): a released, versioned bundle for the shop ---------------------
     @r.post("/api/designs/{slug}/release")
     def release_run(slug: str):
@@ -1200,7 +1206,7 @@ def router():
             raise HTTPException(status_code=503, detail=why)
 
         def work(j):
-            return release.make(DesignStore.load(slug), emit=lambda k, t="", **d: j.emit(k, t, **d))
+            return release.make(DesignStore.load(slug), emit=lambda k, t="", **d: j.emit(k, t, **d), stop=j.check)
 
         try:
             job = RUNNER.submit("release", work, label="build package", lock=_lock(slug), meta={"slug": slug},
