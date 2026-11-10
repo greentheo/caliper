@@ -140,7 +140,7 @@ def _carved_sliver(store: DesignStore, run: dict) -> list[dict]:
     at = _thin_at(run, store.design.display_units == "in")
     return [_line(f"The thinnest spot is {_wall(run['thinnest_mm'])}{',' + at if at else ''}, from the carve",
                   "Roll it back, or use an earlier step of the carve: changing it in the chat drops the carve.",
-                  "Roll it back", "use_t", say="roll it back")]
+                  "Roll it back", "use_t", say="roll it back", local=True)]    # needs no Claude
 
 
 def _thin_line(store: DesignStore, run: dict) -> list[dict]:

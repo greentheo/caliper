@@ -1202,7 +1202,7 @@ async function useBetter(ln) {
   const p = S.design.parts.find((x) => x.id === ln.part);
   if (!p || ln.disabled) return;
   if (ln.action === 'use_t') {
-    if (!S.claude) { tellOffer("Changing it needs Claude, which isn't set up here."); return; }   // not an error to report
+    if (!S.claude && !ln.local) { tellOffer("Changing it needs Claude, which isn't set up here."); return; }   // not an error to report
     return send(ln.say, ln.part);
   }
   if (ln.action === 'carve' || ln.action === 'lighten') {    // a tab left open: look again before hours of machine (#159)
@@ -2190,7 +2190,7 @@ function carveView(p) {
   const head = `<h5 style="margin:14px 0 4px">Carve it <span class="badge">printed, any shape</span></h5>
     <div class="muted small">A printer makes any shape, so the printed part can be carved wherever it isn't working: in steps,
       each one checked. ${p.carved ? 'It\'s carved now; carving again starts from its shape as drawn.' : ''}</div>
-    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo" ${S.carveJob[p.id] || carveBlocked(p) ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
+    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo"${run ? ' data-again="1"' : ''} ${S.carveJob[p.id] || carveBlocked(p) ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
       <span class="muted small">${esc(carveTime(p))}</span></div><div id="carveProgress">${carveProgress(p.id)}</div>`;
   if (!run) return head;
   if (run.status === 'cancelled') {                // stopped from its panel: the steps it finished (CALI-101)
@@ -2235,13 +2235,13 @@ const plainly = (msg) => String(msg ?? '').replace(/^[A-Za-z_.]*(Error|Exception
 // CALI-101: one click, one carve. The job is kept in S.carveJob[part] from the click until it ends, so the button
 // stays disabled, a redraw draws the panel again (steps, bar, time left, Cancel), and a reload finds it by
 // design.carving. The server refuses a second carve of the design (409) whatever the page does.
-async function runCarve(p) {
+async function runCarve(p, again) {
   if (S.carveJob[p.id]) return;                    // already asked: a second click, or a second handler, does nothing
   S.carveJob[p.id] = { text: 'starting…', progress: 0, t0: Date.now() };
   paintCarve(p.id);
   try {
     const runs = loadRuns(p.id);
-    const { job_id } = await api('POST', `/api/designs/${S.slug}/carve`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2 });
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/carve`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2, again: !!again });
     await followCarve(p, job_id);
   } catch (e) {
     delete S.carveJob[p.id];
@@ -2338,7 +2338,7 @@ function carveTime(p) {
   return p.carve_takes || 'check it holds first: how long it takes comes from that';   // the server's words, as the card's
 }
 function wireCarve(p) {
-  if ($('carveGo')) $('carveGo').onclick = () => runCarve(p);
+  if ($('carveGo')) $('carveGo').onclick = (e) => runCarve(p, e.target.dataset.again === '1');   // only "Carve it again" says so
   const on = S.design && S.design.carving;           // a carve running since before this page: follow it (CALI-101)
   if (on && on.part === p.id && !S.carveJob[p.id]) followCarve(p, on.job, on.stopping);
   paintCarve(p.id);
@@ -2374,7 +2374,7 @@ function lightenView(p) {
     <div class="muted small">Down until the safety runs out: holes in the walls where the wood isn't working (a jigsaw cuts
       them, a solid rim where it's glued and screwed), then hole-saw holes in the panel you stand on, one at a time,
       then thinner sheet. Every step is checked again.</div>
-    <div class="actions"><button id="lightGo" ${lightenBlocked(p) ? 'disabled' : ''}>${run ? 'Lighten it again' : 'Lighten it'}</button>
+    <div class="actions"><button id="lightGo"${run ? ' data-again="1"' : ''} ${lightenBlocked(p) ? 'disabled' : ''}>${run ? 'Lighten it again' : 'Lighten it'}</button>
       ${lightenBlocked(p) ? `<span class="muted small">${esc(lightenBlocked(p))}</span>` : ''}</div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
@@ -2502,7 +2502,7 @@ function wireLoad(p) {
   const sel = $('lRun');
   if (sel) sel.onchange = () => { S.loadRun[p.id] = +sel.value; clearStation(); renderInspector(); };
   const lg = $('lightGo');
-  if (lg) lg.onclick = () => runLighten(p);
+  if (lg) lg.onclick = (e) => runLighten(p, e.target.dataset.again === '1');   // only "Lighten it again" says so
   wireCarve(p);
   document.querySelectorAll('#loadBox tr[data-lst]').forEach((tr) => {
     tr.onclick = () => showStation(p.id, lightenRuns(p.id)[0], +tr.dataset.lst);
@@ -2527,18 +2527,18 @@ function wireLoad(p) {
   });
 }
 
-async function runLighten(p) {
+async function runLighten(p, again) {
   if (S.running[`lighten:${p.id}`]) return;        // already asked: a second click does nothing
   S.running[`lighten:${p.id}`] = true;
-  try { await startLighten(p); } finally { delete S.running[`lighten:${p.id}`]; }
+  try { await startLighten(p, again); } finally { delete S.running[`lighten:${p.id}`]; }
 }
-async function startLighten(p) {
+async function startLighten(p, again) {
   const prog = $('lightProgress'), go = $('lightGo');
   go.disabled = true;
   prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="lightMsg">starting…</div>';
   try {
     const runs = loadRuns(p.id);
-    const { job_id } = await api('POST', `/api/designs/${S.slug}/lighten`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2 });
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/lighten`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2, again: !!again });
     await follow(job_id, (ev) => {
       const msg = $('lightMsg'), bar = prog.querySelector('.bar > i');
       if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
@@ -2550,8 +2550,10 @@ async function startLighten(p) {
     const best = run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
     if (best && best.index) showStation(p.id, run, best.index);
   } catch (e) {
-    prog.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(e.message)}</div>`;
-    go.disabled = false;
+    await refresh();                              // a 409: the card as it now is, and the reason beside it
+    const said = $('lightProgress');
+    if (said) said.innerHTML = `<div class="small" style="color:var(--bad);margin-top:6px">⚠ ${esc(plainly(e.message))}</div>`;
+    if ($('lightGo')) $('lightGo').disabled = false;
   }
 }
 

@@ -160,7 +160,7 @@ def api(tmp_path, monkeypatch):
     pytest.importorskip("whittle")
     from fastapi.testclient import TestClient
 
-    from caliper import carve
+    from caliper import carve, load_study
     from caliper.design import DesignStore
     from caliper.server import create_app
 
@@ -182,6 +182,7 @@ def api(tmp_path, monkeypatch):
             time.sleep(0.02)
 
     monkeypatch.setattr(carve, "study", slow)
+    monkeypatch.setattr(load_study, "blocked", lambda *a, **k: None)    # the job's mechanics: whether it may start is #159's
     yield TestClient(create_app()), store.design.slug, gate, began
     gate.set()
 

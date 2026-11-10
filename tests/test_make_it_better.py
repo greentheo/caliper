@@ -536,3 +536,107 @@ const esc = (s) => String(s);
     got = _page(("betterLines",), head, """const line = { better: true, lead: 'Carve', cost: 'c', button: 'Carve it', action: 'carve', part: 'p' };
         return { h: betterLines({ key: 'work', lines: [line] }, [line]) };""")
     assert " disabled>Carve it" in got["h"]
+
+
+# --- #159, the server is the gate ---------------------------------------------------------------------------------------
+def _lightened(store, pid, rid="20261107-000200-light"):
+    _save(lighten.runs_dir(store), {"id": rid, "part": pid, "kind": "lighten", "version": store.design.part(pid).version,
+                                    "created": 2.0, "status": "done", "min_safety": NEED, "stations": []})
+
+
+@pytest.fixture
+def post(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from caliper import design_api as D
+    from caliper.server import create_app
+
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    monkeypatch.setattr(D, "_aero_available", lambda: True)
+    monkeypatch.setattr(carve, "study", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(lighten, "study", lambda *a, **k: {"ok": True})
+    c = TestClient(create_app())
+
+    def go(store, kind, **body):
+        return c.post(f"/api/designs/{os.path.basename(store.root)}/{kind}", json={"part": "tube", "min_safety": 2, **body})
+
+    return go
+
+
+FINISHED = {"carve": _carved, "lighten": _lightened}
+
+
+@pytest.mark.parametrize("kind", ["carve", "lighten"])
+def test_a_stale_button_can_t_start_a_second_run_of_a_finished_version(tmp_path, post, kind):
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 3.0)
+    FINISHED[kind](store, "tube")
+    got = post(store, kind)
+    assert got.status_code == 409 and got.json()["detail"] == f"This version already has a finished {kind}: its result is on the card."
+
+
+@pytest.mark.parametrize("kind", ["carve", "lighten"])
+def test_a_run_asked_for_again_goes_ahead(tmp_path, post, kind):
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 3.0)
+    FINISHED[kind](store, "tube")
+    assert post(store, kind, again=True).status_code == 200
+
+
+@pytest.mark.parametrize("kind", ["carve", "lighten"])
+def test_a_finished_run_of_an_older_version_doesn_t_stop_this_one(tmp_path, post, kind):
+    store = _store(tmp_path, TUBE, "tube")
+    FINISHED[kind](store, "tube")
+    store.write_part("tube", TUBE, intent="again")
+    _check(store, "tube", 3.0)
+    assert post(store, kind).status_code == 200
+
+
+@pytest.mark.parametrize("kind", ["carve", "lighten"])
+def test_what_blocked_says_stops_it_even_asked_again(tmp_path, post, kind):
+    """The same test the buttons read: a stale button on a part that now fails is refused, with why."""
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 0.5)
+    for extra in ({}, {"again": True}):
+        got = post(store, kind, **extra)
+        assert got.status_code == 409 and "already fails" in got.json()["detail"], got.json()
+
+
+def test_a_carve_on_an_unchecked_version_is_refused_with_why(tmp_path, post):
+    """A stale Carve on a new version that hasn't been checked."""
+    store = _store(tmp_path, TUBE, "tube")
+    got = post(store, "carve")
+    assert got.status_code == 409 and "Check it holds first" in got.json()["detail"]
+
+
+@pytest.mark.parametrize("kind", ["carve", "lighten"])
+def test_a_first_run_goes_ahead(tmp_path, post, kind):
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 3.0)
+    assert post(store, kind).status_code == 200
+
+
+def test_a_carved_part_that_fails_points_back_at_the_carve_too(tmp_path):
+    """#159 review: only the holds path was pinned."""
+    store = _store(tmp_path, TUBE, "tube")
+    _check(store, "tube", 0.5, thinnest=0.02, spacing=2.3, too_thin=True, thinnest_where=REAL_WHERE, sees_mm=9.2)
+    state = design_api.design_state(store)
+    state["parts"][0]["carved"] = True
+    state["parts"][0]["blocked"] = load_study.blocked(store, "tube")
+    got = better.offers(store, state, "tube")
+    assert [ln["button"] for ln in got] == ["Roll it back"] and not any("thicken" in ln["text"] for ln in got)
+    assert got[0]["cost"].startswith("Roll it back, or use an earlier step of the carve")
+    assert got[0]["local"]
+
+
+@pytest.mark.parametrize("local,sent", [(True, 1), (False, 0)])
+def test_rolling_back_needs_no_claude(local, sent):
+    got = _page(("useBetter",), _BETTER.replace("CLAUDE", "false"), f"""await useBetter({{ part: 'p', action: 'use_t', say: 'roll it back', local: {str(local).lower()} }});
+        return {{ sent }};""")
+    assert len(got["sent"]) == sent
+
+
+def test_only_the_again_buttons_say_again():
+    src = open(_JS).read()
+    assert "runCarve(p, e.target.dataset.again === '1')" in src and "runLighten(p, e.target.dataset.again === '1')" in src
+    assert "if (ln.action === 'carve') return runCarve(p);" in src and "if (ln.action === 'lighten') return runLighten(p);" in src

@@ -146,6 +146,7 @@ class LoadRequest(BaseModel):
     part: str
     min_safety: float = load_study.MIN_SAFETY     # at each load times its factor
     spacing_mm: Optional[float] = None            # a finer run than the default voxels (CALI-97)
+    again: bool = False                           # a carve or Lighten run again on purpose; a stale button doesn't say so (#159)
 
 
 class Shop(BaseModel):
@@ -965,6 +966,18 @@ def router():
             return design_state(store)
 
     # -- carve (CALI-82): a printed part carved where it isn't working, every step checked ------------------
+    def refuse_a_stale_run(store, req, kind: str, module) -> None:
+        """The gate for a carve or a Lighten, whichever button or tab asked (#159: a tab left open started a second one, about
+        3.4 hours of machine on the stool). 409 with the reason: what ``load_study.blocked`` says stops it, the one test
+        the buttons read, or a finished run of this version unless it's asked for again on purpose."""
+        why = (load_study.blocked(store, req.part) or {}).get(kind)
+        if why:
+            raise HTTPException(status_code=409, detail=f"{why[:1].upper()}{why[1:]}.")
+        version = store.design.part(req.part).version
+        if not req.again and any(r.get("version") == version and r.get("status") == "done"
+                                 for r in module.list_runs(store, req.part)):
+            raise HTTPException(status_code=409, detail=f"This version already has a finished {kind}: its result is on the card.")
+
     @r.post("/api/designs/{slug}/carve")
     def carve_run(slug: str, req: LoadRequest):
         store = load(slug)
@@ -972,6 +985,7 @@ def router():
             raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
         if not _aero_available():
             raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
+        refuse_a_stale_run(store, req, "carve", carve)
 
         def work(j):
             return carve.study(DesignStore.load(slug), req.part, min_safety=req.min_safety,
@@ -1019,6 +1033,7 @@ def router():
             raise HTTPException(status_code=422, detail=str(e))
         if not _aero_available():
             raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
+        refuse_a_stale_run(store, req, "lighten", lighten)
 
         def work(j):
             s = DesignStore.load(slug)
