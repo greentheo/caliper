@@ -329,14 +329,12 @@ def plan_differs(declared: Optional[dict], geometry) -> list[dict]:
         poly, side = np.asarray(pc["polys"][0], float), pc["sides"][0]
         o, u, v, n, _ = _frame(poly)
         u, v, n = (np.asarray(a, float) for a in (u, v, n))
-        flat = np.column_stack([(poly - o) @ u, (poly - o) @ v])
-        turning = 1.0 if np.sum(flat[:, 0] * np.roll(flat[:, 1], -1) - np.roll(flat[:, 0], -1) * flat[:, 1]) > 0 else -1.0
         edges = np.roll(poly, -1, axis=0) - poly
         lengths = np.linalg.norm(edges, axis=1)
         each = np.maximum(5, np.round(96 * lengths / lengths.sum()).astype(int))
         at = np.concatenate([poly[i] + edges[i] * ((np.arange(k) + 0.5) / k)[:, None] for i, k in enumerate(each)])
         along = np.concatenate([np.repeat(edges[i][None] / lengths[i], k, axis=0) for i, k in enumerate(each)])
-        away = turning * np.cross(along, np.cross(u, v))
+        away = np.cross(along, np.cross(u, v))      # the frame's axes follow the outline's own winding, so this is outward
         owner = np.repeat(np.arange(len(poly)), each)
         points = at + n * side * pc["thickness"] / 2 + away * 0.01
         past = _past_outline(mesh, points, away, pieces, pc)

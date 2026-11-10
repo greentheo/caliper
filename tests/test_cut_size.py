@@ -215,3 +215,10 @@ def test_an_outline_drawn_the_other_way_round_is_still_named_when_short(store):
     (got,) = _differs(store, _table("[(10, 220, 220), (290, 220, 220), (290, 0, 220), (10, 0, 220)]"))
     assert sorted(round(v) for v in got["solid"]) == [220, 300]
 
+
+def test_an_edge_under_an_inch_that_s_short_isn_t_the_panel_s_size(store):
+    """A nub on the outline 20 mm wide, whose end stops short of the model's tab: its overall size differs, by a tab."""
+    tab = "cq.Workplane().box(300, 220, 12.7, centered=False).translate((0, 0, 207.3)).union(cq.Workplane().box(10, 20, 12.7, centered=False).translate((300, 100, 207.3)))"
+    pts = [(0, 0), (300, 0), (300, 100), (301, 100), (301, 120), (300, 120), (300, 220), (0, 220)]
+    assert _differs(store, _table(str([(x, y, 220) for x, y in pts]), top=tab)) == []
+
