@@ -252,7 +252,7 @@ def set_values(store: DesignStore, pid: str, changes: list[dict]) -> dict:
             if probe:
                 notes.append(probe)
     if load_study.list_runs(store, pid):           # its strength check is of the older shape now (#147 review)
-        notes.append(f"strength: check the {pid.replace('_', ' ')} again")
+        notes.append(f"strength: check the {getattr(store.design.part(pid), 'label', None) or pid.replace('_', ' ')} again")
     return {"version": version, "said": said, "value": round(got[-1][1], 3), "notes": notes, "moved": moved,
             "read": all(entries[n]["read"] for n in values), "report": report, "failed": errors or {},
             "warning": _ignored(entries, values, got, moved)}

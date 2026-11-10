@@ -25,6 +25,17 @@ SOLID = ("sheet", "stick", "printed")
 MOST = 60
 
 
+def relabelled(store, pid: str, text: str) -> str:
+    """``text`` with the part's pieces called what the person renamed them to (#185: "seat disk" stayed "seat top" on the cards and
+    in the cut list, which keep the name the script gave them)."""
+    import re
+
+    for old, new in ((store.design.piece_labels or {}).get(pid) or {}).items():
+        if new and new != old:
+            text = re.sub(r"(?<![\w])" + re.escape(old).replace("_", "[_ ]").replace(r"\ ", "[_ ]") + r"(?![\w])", new, text)
+    return text
+
+
 def clean_label(text: str) -> str:
     """A name as it's kept: one line, trimmed. Raises with why for one too long."""
     label = " ".join((text or "").split())

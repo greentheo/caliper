@@ -146,6 +146,7 @@ const posts = [];
 let record = { running: [] }, apiFails = false;
 const api = async (m, u) => { posts.push(`${m} ${u}`); if (apiFails) throw new Error('Failed to fetch'); return record; };
 const showErr = () => {};
+const plainly = (s) => s;
 const tick = () => new Promise((r) => setImmediate(r));
 """
 
@@ -304,8 +305,14 @@ def test_it_stops_trying_when_the_design_is_left():
     assert got == {"refreshed": 1}
 
 
-def test_nothing_running_asks_the_server_nothing():
-    assert _run(ALL, "await pollRunning(); return { posts };") == {"posts": []}
+def test_a_tab_following_nothing_still_looks_so_another_tab_s_job_shows():
+    got = _run(ALL, """record = { running: [{ job: 'j2', kind: 'load', part: 'p', text: 'y' }] }; await pollRunning();
+        return { posts, tracked: Object.keys(S.tracked) };""")
+    assert got == {"posts": ["GET /api/designs/a/running"], "tracked": ["j2"]}
+
+
+def test_a_hidden_tab_doesn_t_ask():
+    assert _run(ALL, "document.hidden = true; await pollRunning(); return { posts };") == {"posts": []}
 
 
 def test_the_poll_picks_up_a_job_from_another_tab():
@@ -383,9 +390,9 @@ def test_a_check_finishing_here_shows_its_stress():
 
 
 def test_a_refused_check_re_reads_and_says_why():
-    got = _run(("startLoad",), LOAD.replace("record = { job_id: 'j1' };", "apiFails = true;") + """await go;
+    got = _run(("startLoad", "jobEnded"), LOAD.replace("record = { job_id: 'j1' };", "apiFails = true;") + """await go;
         return { refreshed, said: el('lProgress').innerHTML, off: el('lGo').disabled };""")
-    assert got["refreshed"] == 1 and "Failed to fetch" in got["said"] and got["off"] is False
+    assert got["refreshed"] == 1 and "isn't answering" in got["said"] and got["off"] is False
 
 
 def test_a_lighten_finishing_on_another_design_leaves_this_one_alone():
