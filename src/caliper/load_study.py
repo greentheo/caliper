@@ -1159,6 +1159,10 @@ def default_check(store: DesignStore, part_id: str) -> Optional[dict]:
     return max(runs, key=lambda r: r.get("spacing_mm") or 0) if runs else None     # max keeps the first: the newest
 
 
+#: a load that goes straight into what holds it: the check reads no stress at all, so there's nothing to carve by (#202)
+NO_STRESS = "its load goes straight into what holds it, so the check reads no stress in the part and a carve has nothing to go by"
+
+
 def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
     """What stops a carve or a lightening before it starts, from its default check (#144 review: the card offered Carve
     on the bar stool while the Carve button refused it). The one test the Carve button, the Lighten button and the
@@ -1184,6 +1188,9 @@ def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
     if any((c.get("fea") or {}).get("supported") is False for c in rec.get("cases") or []):
         return {"why": "unsupported", "carve": "its voxels don't connect the load to a support yet, so a carve can't run",
                 "lighten": ""}               # a lightening's holes are checked by the hand checks too
+    if any((c.get("fea") or {}).get("supported") and c.get("safety") is None and not (c.get("fea") or {}).get("peak_mpa")
+           for c in rec.get("cases") or []):  # #202: a bracket's foot, pushed straight down onto the floor
+        return {"why": "no_stress", "carve": NO_STRESS, "lighten": ""}
     return None
 
 

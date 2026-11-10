@@ -95,6 +95,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     fails = L.already_fails(store, part_id)        # carving only takes material away (#137 item 3)
     if fails:
         raise ValueError(f"Can't carve it: {fails}, then carve.")
+    stops = L.blocked(store, part_id)
+    if stops and stops["why"] == "no_stress":
+        raise ValueError(f"Can't carve it: {stops['carve']}.")
     ctx = L.prepare(store, part_id, emit)
     mat = ctx["mat"]
     seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)
@@ -139,7 +142,10 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             stop()                                                     # a cancel lands here too (CALI-101)
             emit("carving", "", progress=round(0.7 * f, 3))
 
-        sweep = ls.sweep(remove_up_to=remove_up_to, stations=stations, progress=swept)
+        try:
+            sweep = ls.sweep(remove_up_to=remove_up_to, stations=stations, progress=swept)
+        except ZeroDivisionError:              # whittle divides by the peak stress, and a step can read none (#202)
+            raise ValueError(f"Can't carve it: {L.NO_STRESS}.") from None
         density = M.printed(mat["key"])["density"] / 1000.0           # g/cm³, solid
         voxel_cm3 = ls.grid.voxel_volume / 1000.0
         printed0 = voxels0 = None
