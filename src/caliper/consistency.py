@@ -280,6 +280,64 @@ def _on_its_face(mesh, pieces: list[dict], tol: float) -> AssertionResult:
                                      "over the panel is counted as the printed part" if bad else ""))
 
 
+#: how far past its outline a panel's solid may run and still be the same size: a saw's kerf, a loose fit (#183)
+PLAN_TOL_MM = 3.0
+_REACH = np.array([1.0, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0, 16.0, 24.0, 32.0, 48.0, 64.0])
+
+
+def _past_outline(mesh, points: np.ndarray, out: np.ndarray, pieces: list[dict], skip: dict) -> np.ndarray:
+    """How far the solid runs on from each point, along its ``out``, before it stops or another piece takes over."""
+    grid = points[:, None] + out[:, None] * _REACH[None, :, None]
+    solid = _signed(mesh, grid.reshape(-1, 3)).reshape(grid.shape[:2]) >= 0
+    theirs = _in_a_piece(grid.reshape(-1, 3), pieces, skip, 0.5).reshape(grid.shape[:2])
+    run = solid & ~theirs
+    ends = np.where(run.all(axis=1), run.shape[1], (~run).argmax(axis=1))
+    lo = np.where(ends > 0, _REACH[np.maximum(ends - 1, 0)], 0.0)
+    hi = np.where(ends < len(_REACH), _REACH[np.minimum(ends, len(_REACH) - 1)], _REACH[-1])
+    for _ in range(4):                                  # to about half a millimetre where it matters
+        mid = (lo + hi) / 2
+        q = points + out * mid[:, None]
+        inside = (_signed(mesh, q) >= 0) & ~_in_a_piece(q, pieces, skip, 0.5)
+        lo, hi = np.where(inside, mid, lo), np.where(inside, hi, mid)
+    return lo
+
+
+def plan_differs(declared: Optional[dict], geometry) -> list[dict]:
+    """The sheets whose outline is smaller than the solid they're part of, in plan: ``[{name, outline, solid}]``, the two sizes
+    in mm along the outline's own axes. Only where a printed rest takes whatever the pieces aren't: anywhere else that solid is
+    uncovered, and :func:`_covers` says so. The stool's seat was cut 16-sided and 11.2 in across from a 12 in round disk, and
+    the 0.8 in went to the printed rest with nothing to say so (#183). It's said, not failed: a panel set in a printed rim
+    looks the same, and only the person knows which they meant."""
+    if not declared or declared.get("error") or getattr(geometry, "mesh", None) is None:
+        return []
+    if not any(isinstance(it, dict) and it.get("kind") == "printed" and it.get("rest") for it in declared.get("construction") or []):
+        return []
+    mesh, pieces = geometry.mesh, shapes(declared)
+    _sides(mesh, pieces)
+    out = []
+    for pc in pieces:
+        if pc["kind"] != "sheet" or len(pc["polys"]) != 1:
+            continue
+        poly, side = np.asarray(pc["polys"][0], float), pc["sides"][0]
+        o, u, v, n, _ = _frame(poly)
+        mid = centre = poly.mean(axis=0)
+        edges = np.roll(poly, -1, axis=0) - poly
+        lengths = np.linalg.norm(edges, axis=1)
+        each = np.maximum(1, np.round(48 * lengths / lengths.sum()).astype(int))
+        at = np.concatenate([poly[i] + edges[i] * ((np.arange(k) + 0.5) / k)[:, None] for i, k in enumerate(each)])
+        along = np.concatenate([np.repeat(edges[i][None] / lengths[i], k, axis=0) for i, k in enumerate(each)])
+        away = np.cross(along, np.asarray(n, float))
+        away *= np.where(np.einsum("ij,ij->i", away, at - mid) < 0, -1.0, 1.0)[:, None]
+        points = at + np.asarray(n, float) * side * pc["thickness"] / 2 + away * 0.01
+        past = _past_outline(mesh, points, away, pieces, pc)
+        if np.mean(past > PLAN_TOL_MM) < 0.5:
+            continue
+        reached = at + away * past[:, None]
+        size = lambda q: [float(np.ptp((q - centre) @ np.asarray(a, float))) for a in (u, v)]   # noqa: E731
+        out.append({"name": pc["name"], "outline": size(poly), "solid": size(reached)})
+    return out
+
+
 def remedy(detail: str) -> str:
     """What to say for a sheet off its face: the shape is right and the declared piece is wrong, so it's the outline that
     moves (#170 review: "fix its shape to match its pieces" would change a correct seat to match a wrong outline)."""
