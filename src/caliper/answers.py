@@ -53,6 +53,11 @@ def _sentence(text: str, most: int = 120) -> str:
     return first[:most - 1].rsplit(" ", 1)[0].rstrip(",;") + "…"
 
 
+def part_name(p: dict) -> str:
+    """The name a person reads for a part in a sentence: its label, or its id in words (#94)."""
+    return p.get("label") or p["id"].replace("_", " ")
+
+
 def _worst(lines: list[dict]) -> str:
     return min((ln["status"] for ln in lines), key=ORDER.index, default="info")
 
@@ -77,7 +82,7 @@ def _carve_offer(store: DesignStore, state: dict, p: dict, mk: dict) -> Optional
                      if isinstance(it, dict) and it.get("kind") == "printed"), None)
     except Exception:  # noqa: BLE001 — the offer is said with the part's own name
         name = None
-    what = name or p["id"].replace("_", " ")
+    what = {pc["key"]: pc["name"] for pc in p.get("pieces") or []}.get(name, name) or part_name(p)    # as renamed (#94)
     if stop:                                     # no check of this version: the button says the same (#144)
         return _line(f"Check it holds first, then carve the {what} where it isn't working, to print less of it.",
                      "info", action="load")
@@ -363,7 +368,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         edge = consistency.bare_edge(store, pid)             # where people stand wasn't loaded (CALI-94)
         for c in run["cases"]:
             if c.get("safety") is not None:
-                work.append(_case_line(pid, run, c, filled, stale, inches, edge=bool(edge)))
+                work.append(_case_line(part_name(p), run, c, filled, stale, inches, edge=bool(edge)))
         work += _grain_lines(store, pid, run, stale, filled, bool(edge))
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
@@ -560,6 +565,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     loaded = [p for p in state["parts"] if p.get("loads") and p.get("role") != "fixed"]
     runs = {pid: next((r for r in state.get("load_runs") or [] if r["part"] == pid), None) for pid in current}
     unchecked = [p["id"] for p in loaded if runs.get(p["id"]) is None or ran_safety(runs[p["id"]]) is None]
+    said = {p["id"]: part_name(p) for p in state["parts"]}          # the names a person reads (#94)
     older = [p["id"] for p in loaded if p["id"] not in unchecked and runs[p["id"]].get("version") != p["version"]]
     # the newest strength run of a part changed since, with its verdict and age: what the design card says over an
     # older scorecard's number (#138 item 1: "2.58x" from v1 over v4's 1.7x ✗)
@@ -569,10 +575,10 @@ def measured(store: DesignStore, state: dict) -> dict:
     if last:
         out["strength.last"] = min(last, key=lambda x: x["safety"])
     if unchecked:
-        out["strength.unchecked"] = ("not checked yet on the " + " and the ".join(x.replace("_", " ") for x in unchecked)
+        out["strength.unchecked"] = ("not checked yet on the " + " and the ".join(said[x] for x in unchecked)
                                      + ": Check it holds")
     if older:
-        out["strength.stale"] = ("the " + " and the ".join(x.replace("_", " ") for x in older)
+        out["strength.stale"] = ("the " + " and the ".join(said[x] for x in older)
                                  + " changed since its strength check: check it again")
     filled = [pid for pid in current if any(r["part"] == pid and r.get("version") == current[pid]
                                             for r in state.get("load_runs") or []) and consistency.filled(store, pid)]
@@ -600,7 +606,7 @@ def measured(store: DesignStore, state: dict) -> dict:
         try:
             rep = C.report(store, p["id"])
         except Exception as e:  # noqa: BLE001 — a part that can't be weighed is unknown, never left out (#132)
-            weighed, unweighed = True, unweighed or f"not checked: the {p['id'].replace('_', ' ')} couldn't be weighed ({e})"
+            weighed, unweighed = True, unweighed or f"not checked: the {part_name(p)} couldn't be weighed ({e})"
             continue
         weighed = True
         if rep.get("mass_lb") is None:             # one part unknown: the total is too, never the rest's (#125)
@@ -777,7 +783,7 @@ def _broken(p: dict, named: bool = False) -> list[dict]:
     shell wall, broken, and no card said so)."""
     from . import part_rules
 
-    who = f"The {p['id'].replace('_', ' ')} breaks" if named else "Breaks"
+    who = f"The {part_name(p)} breaks" if named else "Breaks"
     return [_line(f"✗ {who} its rule {r['said']}.", r["verdict"]["status"], study="rule")
             for r in part_rules.failing(p.get("rules") or [])]
 
@@ -791,7 +797,7 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         # the part's own description, as What do I buy? already reads it (#89 item 3: the raw "I want to make…")
         what = list(solo["what"]["lines"][:1]) + solo["what"]["lines"][1:]
     elif parts:
-        what.append(_line(f"{len(parts)} part{'s' if len(parts) != 1 else ''}: " + ", ".join(p["id"] for p in parts)))
+        what.append(_line(f"{len(parts)} part{'s' if len(parts) != 1 else ''}: " + ", ".join(p.get("label") or p["id"] for p in parts)))
     elif state.get("building"):
         what.append(_line("Building it now: these fill in as it goes.", "info"))
     elif state.get("plan"):                   # planned, not built: the person reviews it first (CALI-35, #3a)

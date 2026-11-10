@@ -839,6 +839,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
     """The build book, as one printable page."""
 
     m = card.get("metrics") or {}
+    name = lambda pid: (rec.get("names") or {}).get(pid) or pid     # noqa: E731 — the name a person reads (#94)
     status = _status(card)
     big = [("weight.total_lb", "all up, with the payload"), ("hitch.tongue_lb", "on the tongue"),
            ("frame.yield_x", "frame yields at × its load"), ("drag.lbf", "drag at speed")]
@@ -848,8 +849,8 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
     if "make.sheets" in m:
         nums += f"<div><b>{m['make.sheets']['value']}</b><span>sheets to cut</span></div>"
     weights = [(k.split(".", 1)[1], v) for k, v in m.items() if k.startswith("weight.") and k != "weight.total_lb"]
-    nums += "".join(f"<div><b>{_num(v['value'], v['unit'])}</b><span>{_e(pid)} as built</span></div>" for pid, v in weights)
-    vers = ", ".join(f"{_e(k)} v{v}" for k, v in rec["versions"].items())
+    nums += "".join(f"<div><b>{_num(v['value'], v['unit'])}</b><span>{_e(name(pid))} as built</span></div>" for pid, v in weights)
+    vers = ", ".join(f"{_e(name(k))} v{v}" for k, v in rec["versions"].items())
     out = [f"<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width'>"
            f"<title>{_e(title(rec['design']))} — build package {rec['id']}</title><style>{CSS}</style></head><body>",
            f"<div class='muted small'>CALIPER BUILD PACKAGE · RELEASE {rec['id']} · "
@@ -885,13 +886,13 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
         out.append("<table><tr><th>part</th><th>with</th><th>pieces</th></tr>")
         for pid, m in rec["making"].items():
             for how, names in m["by_how"].items():
-                out.append(f"<tr><td>{_e(pid)}</td><td>{_e(how)}</td><td>{_e(', '.join(names))}</td></tr>")
+                out.append(f"<tr><td>{_e(name(pid))}</td><td>{_e(how)}</td><td>{_e(', '.join(names))}</td></tr>")
             for x in m["missing"]:
-                out.append(f"<tr><td>{_e(pid)}</td><td class='fail'>not in your shop</td><td>{_e(x['name'])}: {_e(x['why'])}</td></tr>")
+                out.append(f"<tr><td>{_e(name(pid))}</td><td class='fail'>not in your shop</td><td>{_e(x['name'])}: {_e(x['why'])}</td></tr>")
         out.append("</table>")
         for pid, m in rec["making"].items():
             for pr in m["printed"]:
-                out.append(f"<p>{_e(pid)}: printed in {_e(pr['material'].upper())}, {pr['pieces']} piece(s)"
+                out.append(f"<p>{_e(name(pid))}: printed in {_e(pr['material'].upper())}, {pr['pieces']} piece(s)"
                            + (" pinned together: glue 3 mm filament or 1/8 in dowel pins in the holes across each cut"
                               if pr["pinned"] else "")
                            + f"; about {pr['hours']:g} h, {pr['filament_g']:,} g, ${pr['usd']:.2f} "
@@ -901,12 +902,12 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
         laid = {g["line"]: g for g in (plans.get(pid) or {}).get("grain") or []}
         for n in rec["grain"][pid]:
             g = laid.get(n)
-            out.append(f"<p class='note'><b>{_e(pid)}:</b> {_e(n)}"
+            out.append(f"<p class='note'><b>{_e(name(pid))}:</b> {_e(n)}"
                        + ("" if g is None or g["follows"] else
                           f" <b>The layout doesn't follow it</b> ({_e(g['why'])}): lay it out by hand.") + "</p>")
     for pid, plan in plans.items():
         for g in plan.get("tubes") or []:
-            out.append(f"<h3>{_e(g['label'])} <span class='muted small'>· {_e(pid)}</span></h3><table>"
+            out.append(f"<h3>{_e(g['label'])} <span class='muted small'>· {_e(name(pid))}</span></h3><table>"
                        "<tr><th>piece</th><th class='n'>length</th><th class='n'>mm</th><th>ends</th></tr>")
             for t in g["cuts"]:
                 ends = "<br>".join(f"{_e(e['end'])}: {_e(_end_short(e))}" for e in t["ends"])
@@ -914,7 +915,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                            f"<td class='n'>{t['length_mm']:.0f}</td><td class='small'>{ends}</td></tr>")
             out.append("</table>")
         for g in plan.get("sticks") or []:
-            out.append(f"<h3>{_e(g['label'])} <span class='muted small'>· {_e(pid)} · {g['count']} × "
+            out.append(f"<h3>{_e(g['label'])} <span class='muted small'>· {_e(name(pid))} · {g['count']} × "
                        f"{g['stock_len_mm'] / 304.8:g} ft</span></h3><table>"
                        "<tr><th>piece</th><th class='n'>length</th><th class='n'>mm</th></tr>")
             for c in g["cuts"]:
@@ -922,7 +923,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                            f"<td class='n'>{c['length_mm']:.0f}</td></tr>")
             out.append("</table>")
         if plan.get("plates"):
-            out.append(f"<h3>Plates, plasma <span class='muted small'>· {_e(pid)}</span></h3><div class='sheets'>")
+            out.append(f"<h3>Plates, plasma <span class='muted small'>· {_e(name(pid))}</span></h3><div class='sheets'>")
             for pl in plan["plates"]:
                 w, h = pl["size_mm"]
                 out.append(f"<figure><img src='plasma/{_e(pid)}-{_e(pl['name'])}.svg' alt='{_e(pl['name'])}' "
@@ -932,7 +933,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
             out.append("</div>")
         for g in plan.get("sheets") or []:
             base = _router(pid, g)
-            out.append(f"<h3>{_e(g['label'])} <span class='muted small'>· {_e(pid)} · {g['sheets']} sheet(s) of "
+            out.append(f"<h3>{_e(g['label'])} <span class='muted small'>· {_e(name(pid))} · {g['sheets']} sheet(s) of "
                        f"{_e(g['stock'])}, {g['utilisation'] * 100:.0f}% used</span></h3>"
                        f"<div class='small muted'>{base}/sheets/*.dxf to cut · {base}/pattern.pdf is 1:1 with a "
                        f"scale bar · {len(g['panels'])} pieces"
@@ -963,7 +964,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
         for pid, cases in rec["strength"].items():
             for c in cases:
                 safety, breaks = _safety_cell(c)
-                out.append(f"<tr><td>{_e(pid)}</td><td>{_e(c['name'])}, {c['lb']:g} lb × {c['factor']:g}</td>"
+                out.append(f"<tr><td>{_e(name(pid))}</td><td>{_e(c['name'])}, {c['lb']:g} lb × {c['factor']:g}</td>"
                            f"<td class='n'>{safety}</td><td class='n'>{breaks}</td>"
                            f"<td class='n'>______ lb</td></tr>")
         out.append("</table><p class='note'>The prediction is for the load placed the same way. To test it, load it "
@@ -1195,6 +1196,7 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
 
     said = {p.id: grain.notes(store, p.id) for p in store.design.parts}
     rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength, "making": made,
+           "names": {p.id: p.label for p in store.design.parts if p.label},
            "grain": {pid: n for pid, n in said.items() if n},       # which way to cut each panel (CALI-126)
            "slug": os.path.basename(store.root), "versions": versions,
            "card": {"created": card["created"], "summary": card["summary"]},
