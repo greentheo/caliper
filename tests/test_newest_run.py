@@ -26,7 +26,7 @@ def _state(card_safety=2.58):
 
 def test_the_design_line_takes_the_newest_run_over_an_older_card():
     (line,) = answers.held_to(_state(), {"strength.last": {"part": "i_want", "version": 4, "now": 7, "safety": 1.67}})
-    assert line["text"] == ("✗ Holds a 250 lb person sitting, 2× safety (assumed): last checked on v4: 1.7 times over, needs 2 · "
+    assert line["text"] == ("✗ Holds a 250 lb person sitting, 2× safety (assumed): last checked on v4: 1.6 times over, needs 2 · "
                             "v7 not checked yet.")
     assert line["status"] == "bad"
 

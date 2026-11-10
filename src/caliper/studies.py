@@ -126,6 +126,8 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
             return f"doesn't hold — weakest {what} (needs {r.get('min_safety', 2):g}x)", False
         if v["kind"] == "holds":
             return f"holds — weakest {what}", True
+        if v["kind"] == "close":                # a pass near its limit: amber, and says so (CALI-88, #64 item 2)
+            return f"holds, close to the line — weakest {what} (needs {r.get('min_safety', 2):g}x)", True
         if v["kind"] == "edge":                 # the middle only: the front edge, where people stand, isn't checked
             return f"middle only — weakest {what}; the front edge isn't checked", None
         return f"{v['word']} — weakest {what}", None

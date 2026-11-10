@@ -2905,7 +2905,8 @@ const coarseWord = (c) => (c.unresolved === 'unchecked' ? 'not checked' : 'not r
 const verdictTone = (v) => (v && v.status === 'ok' ? 'ok' : v && v.status === 'bad' ? 'bad' : 'warn');
 const verdictBadge = (v) => `<span class="badge ${verdictTone(v)}">${esc(v ? v.word : 'not checked yet')}</span>`;
 // a verdict with a number a person may build on: it holds, or it fails
-const settled = (v) => !!v && (v.kind === 'holds' || v.kind === 'fails');
+// close: a pass near its limit (CALI-88), still a number to build on
+const settled = (v) => !!v && (v.kind === 'holds' || v.kind === 'close' || v.kind === 'fails');
 const caseBadge = (c) => verdictBadge(c.verdict);
 // a carve or lightening step, or a thickness the plate check tried: the server's verdict says if it holds (#132 review)
 const holdsHere = (x) => !!(x && x.verdict && x.verdict.counts_as_pass);

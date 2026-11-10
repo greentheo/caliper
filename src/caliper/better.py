@@ -64,7 +64,7 @@ def _settled_check(store: DesignStore, p: dict, run: Optional[dict]) -> bool:
     if run is None or run.get("version") != p["version"]:
         return False
     v = verdicts.run(run, filled=p.get("untrusted"), edge=bool(consistency.bare_edge(store, p["id"])))
-    return v["kind"] == "holds"
+    return v["kind"] in ("holds", "close")             # close to the line is still a settled pass (CALI-88)
 
 
 def _sheet_offers(run: dict, fails: bool) -> list[dict]:

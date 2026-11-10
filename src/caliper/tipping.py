@@ -107,7 +107,7 @@ def check(store: DesignStore, part_id: str) -> list[dict]:
         m = moments(poly, [own, (max(-float(f[2]), 0.0), at)], float(np.linalg.norm(side)), side, float(at[2]), floor)
         # pushed only straight down inside its base, nothing overturns it: safety None, said as no number to hold
         out.append({"name": ld["name"], "factor": ld["factor"], "checked": True, **m,
-                    "verdict": verdicts.meets(m["safety"], ld["factor"]),
+                    "verdict": verdicts.meets(m["safety"], ld["factor"], close=False),
                     "tips_at_lb": round(m["tips_at_n"] / LB) if m["tips_at_n"] is not None else None,
                     "own_lb": round(own[0] / LB, 1)})
     return out
@@ -119,7 +119,7 @@ def line(case: dict) -> tuple[str, str]:
     name, v = case["name"][:1].lower() + case["name"][1:], case["verdict"]
     if v["kind"] == "waiting":
         return f"Tipping {name}: {case.get('why') or 'not checked'}.", v["status"]
-    if v["kind"] == "holds":
+    if v["kind"] in ("holds", "close"):
         return f"Won't tip {name}, {case['safety']:g} times over ({CAVEAT}).", v["status"]
     return (f"Tips {name}: only {case['safety']:g} times over, and it needs {case['factor']:g} ({CAVEAT})"
             + (f"; it goes over at about {case['tips_at_lb']} lb sideways." if case.get("tips_at_lb")
