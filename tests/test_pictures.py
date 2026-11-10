@@ -92,6 +92,11 @@ def test_a_t_rex_on_the_side_is_cut_and_it_still_holds(stool):
 
     rows = {r["name"]: r for r in C.takeoff(C.declared(stool, "stool")["construction"])}
     assert rows[got["panel"]]["holes"] == 1
+    # its edge is judged at KT_HOLE times the wall's stress there, and no case reads stronger than that (#64 item 5)
+    for c in load_study.list_runs(stool, "stool")[0]["cases"]:
+        pe = c.get("picture_edge")
+        assert pe and pe["piece"] == got["panel"] and pe["kt"] == lighten.KT_HOLE, c
+        assert pe["safety"] is None or c["safety"] <= pe["safety"] + 0.01, c
 
 
 def test_lightening_leaves_a_picture_alone(stool):
@@ -283,3 +288,26 @@ def test_cuttable_does_what_its_words_say():
     # and it did change the shape it was given (the slot and the spikes' tips were too fine)
     assert shape.symmetric_difference(got).area > 0.01 * shape.area
     assert "no part or gap narrower than 1/4 in" in pictures.cuttable.__doc__ and "1/8 in" in pictures.cuttable.__doc__
+
+
+def test_a_pictures_edge_is_judged_at_kt_times_the_walls_stress_there():
+    """CALI-88 (#64 item 5): a picture in a wall got the voxel FEA alone, which reads low at a sharp re-entrant edge.
+    Its edge is now KT_HOLE times the stress the wall had there solid; and a picture whose edge reaches into where
+    the wall works harder (a notch up into it) reads lower than one that doesn't."""
+    from shapely.geometry import Polygon
+
+    s = 2.0
+    shape = (40, 40)
+    cells = np.argwhere(np.ones(shape, dtype=bool))
+    p = {"shape": shape, "lo": np.array([0.0, 0.0]), "inside": np.ones(shape, dtype=bool),
+         "voxels": np.column_stack([cells, np.zeros(len(cells), dtype=int)]), "cells": cells}
+    stress = np.zeros((40, 40, 1))
+    stress[:, :, 0] = 1.0 + np.arange(40)[None, :] / 4.0     # works harder going up the wall (v)
+    solid = np.ones((40, 40, 1), dtype=bool)
+    square = Polygon([(20, 10), (60, 10), (60, 30), (20, 30)])
+    notched = square.union(Polygon([(38, 30), (42, 30), (42, 60), (38, 60)]))
+    plain = lighten.picture_edge(p, [square], stress, solid, s, allow=40.0)
+    worst_cell = 1.0 + 14 / 4.0                               # the square's highest cell, v up to 30 mm
+    assert plain == pytest.approx(40.0 / (lighten.KT_HOLE * worst_cell), rel=1e-6)
+    assert lighten.picture_edge(p, [notched], stress, solid, s, allow=40.0) < plain
+    assert lighten.picture_edge(p, [Polygon([(200, 200), (210, 200), (210, 210)])], stress, solid, s, 40.0) == np.inf
