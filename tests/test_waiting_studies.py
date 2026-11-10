@@ -54,7 +54,15 @@ def test_with_a_queue_of_studies_a_chat_starts_straight_away(held, n):
     _settle(r, held)
 
 
-@pytest.mark.parametrize("kind", sorted(jobs.STUDIES))
+#: written out: a kind dropped from the list must fail here, not stop being tested
+LONG = ["aero", "carve", "firstrun", "frame", "gussets", "lighten", "load", "picture", "release", "scorecard", "whittle"]
+
+
+def test_the_list_of_long_kinds_is_this():
+    assert sorted(jobs.STUDIES) == LONG
+
+
+@pytest.mark.parametrize("kind", LONG)
 def test_each_long_kind_goes_to_the_studies_workers(kind):
     r = jobs.JobRunner()
     name = []
@@ -65,7 +73,7 @@ def test_each_long_kind_goes_to_the_studies_workers(kind):
     assert name[0].startswith("caliper-study")
 
 
-@pytest.mark.parametrize("kind", ["chat", "clarify", "goals", "firstrun", "cutplan"])
+@pytest.mark.parametrize("kind", ["chat", "clarify", "goals", "cutplan"])
 def test_a_conversation_stays_on_its_own_workers(kind):
     r = jobs.JobRunner()
     name = []
@@ -115,3 +123,73 @@ def test_getting_the_turn_after_waiting_starts_the_clock(held):
     assert one_study.take_turn() is True
     assert one_study._since > first
     one_study._TURN.release()
+
+
+def test_with_first_builds_waiting_a_chat_on_another_design_starts_straight_away(held):
+    """Every new design starts with a first build, and a first build runs a strength check."""
+    r = jobs.JobRunner()
+    waiting = [r.submit("firstrun", _waits, lock=f"design:{i}") for i in range(8)]
+    end = time.time() + 5
+    while time.time() < end and not all(any(e.get("kind") == "waiting" for e in j.since(0)) for j in waiting):
+        time.sleep(0.02)
+    began = threading.Event()
+    r.submit("chat", lambda j: began.set(), lock="design:other")
+    assert began.wait(2)
+    _settle(r, held)
+
+
+@pytest.mark.parametrize("kind,word", [("release", "the build package"), ("picture", "the picture"), ("cutplan", "the cut plan"),
+                                       ("firstrun", "the first build"), ("chat", "the message before it"), ("frame", "another job")])
+def test_a_chat_on_a_busy_design_says_what_it_s_waiting_for(kind, word):
+    r = jobs.JobRunner()
+    began, go = threading.Event(), threading.Event()
+
+    def holds(j):
+        began.set()
+        go.wait(10)
+
+    r.submit(kind, holds, lock="design:a")
+    assert began.wait(5)
+    chat = r.submit("chat", lambda j: None, lock="design:a")
+    end = time.time() + 5
+    while time.time() < end and not any(e.get("kind") == "waiting" for e in chat.since(0)):
+        time.sleep(0.01)
+    assert [e["text"] for e in chat.since(0) if e.get("kind") == "waiting"] == [f"Waiting for {word} on this design to finish."]
+    assert chat.status == "queued"
+    go.set()
+    end = time.time() + 5
+    while time.time() < end and not chat.over:
+        time.sleep(0.01)
+    assert chat.status == "done"
+
+
+def test_a_chat_with_nothing_ahead_of_it_says_nothing_about_waiting():
+    r = jobs.JobRunner()
+    chat = r.submit("chat", lambda j: None, lock="design:a")
+    end = time.time() + 5
+    while time.time() < end and not chat.over:
+        time.sleep(0.01)
+    assert not [e for e in chat.since(0) if e.get("kind") == "waiting"]
+
+
+def test_how_often_it_says_so():
+    assert one_study.TELL_EVERY_S == 30.0
+
+
+def test_the_count_leaves_out_the_one_asking(held, monkeypatch):
+    monkeypatch.setattr(one_study, "TELL_EVERY_S", 0.02)
+    said = []
+
+    def stop():
+        if len(said) >= 2:
+            raise jobs.Cancelled()
+
+    with pytest.raises(jobs.Cancelled):
+        one_study.take_turn(lambda k, t="", **d: said.append(t), stop)
+    assert "waiting too" not in said[1]                               # alone in the queue
+
+
+def test_a_study_just_begun_doesn_t_read_0_min(monkeypatch):
+    monkeypatch.setattr(one_study, "_since", time.monotonic() - 2)
+    assert "under a minute" in one_study._how_long(0)
+

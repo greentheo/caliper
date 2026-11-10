@@ -27,7 +27,7 @@ _queued = 0                       # how many are waiting for it
 
 def _how_long(others: int) -> str:
     gone = max(0.0, time.monotonic() - _since) / 60.0
-    return (f"{WAITING} It's been running {gone:.0f} min"
+    return (f"{WAITING} It's been running {f'{gone:.0f} min' if gone >= 1 else 'under a minute'}"
             + (f", and {others} other{'s are' if others != 1 else ' is'} waiting too." if others else "."))
 
 

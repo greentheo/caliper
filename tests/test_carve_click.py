@@ -108,7 +108,7 @@ def test_a_job_asked_to_stop_says_so_until_it_does():
 
 
 def test_a_queued_job_cancelled_never_runs():
-    runner, gate, ran = jobs.JobRunner(workers=1), threading.Event(), []
+    runner, gate, ran = jobs.JobRunner(workers=1, study_workers=1), threading.Event(), []
     first = runner.submit("carve", lambda j: gate.wait(10), lock="a")
     second = runner.submit("carve", lambda j: ran.append(1), lock="b")       # waiting for the one worker
     assert runner.cancel(second.id) is second and second.status == "cancelled"

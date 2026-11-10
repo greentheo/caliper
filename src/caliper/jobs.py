@@ -90,7 +90,9 @@ class Job:
 
 
 #: the kinds of job that are long, or wait their turn for the one strength study at a time
-STUDIES = frozenset({"load", "lighten", "carve", "picture", "scorecard", "release", "whittle", "frame", "gussets", "aero"})
+STUDIES = frozenset({"load", "lighten", "carve", "picture", "scorecard", "release", "whittle", "frame", "gussets", "aero", "firstrun"})
+#: what a job on a design is waiting for, when it's another job on that design that has it (#174)
+AHEAD = {"release": "the build package", "picture": "the picture", "cutplan": "the cut plan", "firstrun": "the first build", "chat": "the message before it"}
 
 #: Every runner made, held weakly: the app's RUNNER and any a test makes.
 RUNNERS = weakref.WeakSet()
@@ -179,7 +181,14 @@ class JobRunner:
         with self._mu:
             return self._locks.setdefault(key, threading.Lock())
 
+    def _ahead(self, job: Job) -> Optional[Job]:
+        with self._mu:
+            return next((j for j in self._jobs.values() if j.lock == job.lock and j is not job and j.status == "running"), None)
+
     def _run(self, job: Job, fn: Callable[[Job], Any], key_lock: threading.Lock) -> None:
+        if key_lock.locked():                 # not silence for as long as that takes: it can be hours (#174)
+            ahead = self._ahead(job)
+            job.emit("waiting", f"Waiting for {AHEAD.get(ahead.kind, 'another job') if ahead else 'another job'} on this design to finish.")
         with key_lock:
             with self._mu:
                 if job.status == "cancelled":                 # cancelled while it waited (CALI-101)
