@@ -683,6 +683,10 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     carve.refuse_if_carved(script, "holes", "lighten it")
     # a picture cut into a panel (CALI-78) stays; the lightening holes are this step's
     keep = [h for h in H.read(script) if h.get("picture")]
+    from . import consistency
+    from . import construction as C
+
+    consistency.refuse_holes_outside(C.declared(store, pid).get("construction") or [], holes)   # (#66 item 4)
     script = H.write(script, keep + holes)
     version = store.write_part(pid, script, action="lighten",
                                feedback=f"lightened: {st['removed']:.0%} out of the walls, {st['holes']} holes, "

@@ -41,8 +41,10 @@ def test_holes_need_brep_on_mesh_only(box_geom):
         measure.holes(box_geom())
 
 
-def test_largest_through_bore_zero_without_solid(box_geom):
-    assert measure.largest_through_bore(box_geom()) == 0.0
+def test_largest_through_bore_is_not_measured_without_solid(box_geom):
+    # a mesh has no B-rep to find holes in: "not measured", never a silent 0 that passes "<= 5" (CALI-90, #66 item 5)
+    with pytest.raises(measure.NotMeasured):
+        measure.largest_through_bore(box_geom())
 
 
 def test_deferred_probes_raise(box_geom):

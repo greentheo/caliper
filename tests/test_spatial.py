@@ -72,6 +72,9 @@ SHAPELY = {
     "if region.contains(cand) and all(cand.distance(p) > 4 * PIN_D_MM for p in pts):",  # printing
     "lo, hi = (mid, hi) if room.contains(placed(mid)) else (lo, mid)",                # pictures
     "if got is None or not room.contains(got):",                                      # pictures
+    # a hole inside its panel's outline, both shapely polygons in the panel's plane (#66 item 4), not a mesh
+    "if hole.is_empty or room.is_empty or not room.contains(hole):",                  # consistency
+    "past = not Polygon(flat).buffer(HOLE_RIM_TOL_MM).contains(hole)",                # consistency
 }
 
 

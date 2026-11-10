@@ -303,6 +303,11 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
     emit("step", f"Cutting the {subject} out of the {panel['name']}", step="cut")
     entry = {"piece": panel["name"], "normal": [round(float(c), 6) for c in panel["inward"]],
              "depth": round(float(panel["t"]), 3), "polygons": [to_3d(panel, poly)], "picture": subject}
+    from . import consistency
+    from . import construction as C
+
+    # never a cut across the panel's edge or into its glued rim, whatever fit() came to (#66 item 4, #70 item 4)
+    consistency.refuse_holes_outside(C.declared(store, part_id).get("construction") or [], [entry])
     script = holes.write(script, [*holes.read(script), entry])
     xy = np.asarray(poly.exterior.coords)
     size = [round(float(np.ptp(xy @ panel["right"])) / IN, 1), round(float(np.ptp(xy @ panel["up"])) / IN, 1)]
