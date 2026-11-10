@@ -656,6 +656,12 @@ def two_sided(pieces: list[dict], load: dict, tol: float, under=None) -> Optiona
     return None
 
 
+def fea_safety(worked: float) -> Optional[float]:
+    """The FEA's number, from its worst voxel's stress over strength: cut toward safe, never rounded up, since the
+    case's "holds" is compared from it (CALI-152, #213)."""
+    return V.cut(1.0 / worked) if worked > 0 else None
+
+
 def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=None) -> Optional[dict]:
     """The sheet a load pushes on face-on, checked as a plate — or None if it lands on no sheet, or on
     one that isn't held all round (the FEA is the number for that one)."""
@@ -1033,7 +1039,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     at = np.asarray(ls.grid.origin) + ls.grid.spacing * np.asarray(hot)
     peak = float(vm[hot])
     fea = {"supported": True, "peak_mpa": round(peak, 2), "robust_mpa": round(float(r.peak_stress), 2),
-           "safety": V.cut(1.0 / float(worked[hot])) if worked[hot] > 0 else None,      # cut, never up (#213)
+           "safety": fea_safety(float(worked[hot])),
            "deflection_mm": round(float(r.max_displacement), 3),
            "at": [round(float(x), 1) for x in at], **_peak_in(ctx, at, ls.grid.spacing)}
     pl = plate_check(ctx["pieces"], load, ctx.get("plate_mat") or mat, ctx["tol"], under=ctx.get("under"))
@@ -1132,6 +1138,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
         "material": mat, "spacing_mm": round(ctx["spacing"], 2), "voxels": int(ctx["ls"].solid.sum()),
         "min_safety": min_safety, "held": held, "cases": cases, "notes": notes,
+        "cut": True,                  # its numbers are kept cut toward safe (CALI-152): one on its limit is settled
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
     }
     thin = ctx.get("thinnest")

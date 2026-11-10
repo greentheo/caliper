@@ -280,10 +280,22 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
     if worst is None or not np.isfinite(worst):
         return case
     fea = (case.get("fea") or {}).get("safety")
-    safety = V.cut(min(worst, fea) if fea else worst)              # cut, never up (#213)
     plate = dict(pl or {}, done=False, why="it has holes, so the plate formula doesn't apply; the FEA does, "
                                            "calibrated against it on the panel solid")
-    case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety, "plate": plate,  # producer
+    return judged(case, min(worst, fea) if fea else worst, min_safety, plate=plate)
+
+
+def estimate_numbers(raw: float, min_safety: float) -> dict:
+    """A thinner sheet's estimate: kept cut toward safe and judged as kept (CALI-152, #214 review)."""
+    safety = V.cut(raw)
+    return {"safety": safety, "holds": safety >= min_safety}  # producer
+
+
+def judged(case: dict, raw: float, min_safety: float, **extra) -> dict:
+    """A holed panel's case, judged from its calibrated number: kept cut toward safe and compared as kept (CALI-152,
+    #213; #214 review: one place for judge_holed and the lightening's re-judge)."""
+    safety = V.cut(raw)
+    case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety, **extra,  # producer
                  "breaks_lb": round(case["lb"] * case["factor"] * safety, -1)})
     return case
 
@@ -439,9 +451,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
                         edge = max(float(np.max(np.where(x["cells"], before, 0.0))) for x in chosen[p["name"]])
                         mine = min(allow / (peak * kk), allow / (KT_HOLE * edge * kk) if edge > 0 else np.inf)
                         fea = (case.get("fea") or {}).get("safety")
-                        safety = V.cut(min(mine, fea) if fea else mine)
-                        case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety,  # producer
-                                     "breaks_lb": round(case["lb"] * case["factor"] * safety, -1)})
+                        judged(case, min(mine, fea) if fea else mine, min_safety)
             cases.append(case)
             results.append(r)
         safety = min((c["safety"] for c in cases if c.get("safety") is not None), default=None)
@@ -474,7 +484,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     stations += [dict(t, index=len(stations) + i) for i, t in enumerate(thinner)]
 
     record = {
-        "id": rid, "part": part_id, "kind": "lighten", "created": time.time(), **seen,
+        "id": rid, "part": part_id, "kind": "lighten", "created": time.time(), **seen, "cut": True,   # (CALI-152)
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
         "min_safety": min_safety, "material": mat["name"], "spacing_mm": round(s, 2),
         "panels": [{"name": p["name"], "thickness_mm": p["t"], "normal": [round(float(c), 6) for c in p["n"]],
@@ -551,7 +561,7 @@ def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
         saved = base["saved_lb"] + (wood_g / 453.59237 - base["saved_lb"]) * (1 - ratio)
         out.append({"phase": "thinner", "estimate": True, "thickness_mm": t, "label": M.nominal(t),
                     "removed": base["removed"], "holes": base["holes"], "top_holes": base.get("top_holes", 0),
-                    "safety": V.cut(worst), "holds": worst >= min_safety, "saved_lb": round(saved, 2),  # producer
+                    **estimate_numbers(worst, min_safety), "saved_lb": round(saved, 2),
                     "from_step": base["index"], "cases": [], "panels": base["panels"]})
         if worst < min_safety:  # search
             break

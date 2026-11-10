@@ -324,6 +324,11 @@ def wall_section(wall: dict, length: float) -> tuple[dict, dict, dict]:
 # ---------------------------------------------------------------------------
 # Running it
 # ---------------------------------------------------------------------------
+def member_safety(m: dict) -> float:
+    """A whittled frame station's number, as its pick compares it: cut toward safe (CALI-152, #213)."""
+    return V.cut(float(m["safety_factor"]))
+
+
 def _summary(result, built: dict) -> dict:
     """What a person reads off one design: weight, worst member, sag, and what the hitch holds."""
     mouth = built["mouth"]
@@ -494,7 +499,7 @@ def study(store: DesignStore, part_id: str, *, load_lb: float = 100.0, factor: f
                     "walls": built["walls"], "on_walls_lb": round(ap["on_walls_kg"] * KG_LB, 1),
                     "fastened": [[round(v, 1) for v in n] for n in built["fastened"]]}
     record = {
-        "id": rid, "part": part_id, "kind": "frame", "created": time.time(), "params": params or {},
+        "id": rid, "part": part_id, "kind": "frame", "created": time.time(), "params": params or {}, "cut": True,
         # the version it ran on: an older run isn't the frame as it is (#132 review)
         "version": store.design.part(part_id).version if store.design.part(part_id) else None,
         "build": build or {}, "walls": bool(carried and carried["shell"]),
@@ -650,7 +655,7 @@ def gussets(store: DesignStore, part_id: str, *, thickness: float = 4.7625, plat
                     f.write(text)
             weld = m.get("weld_moment_nmm")
             rows.append({"index": i, "removed": round(float(st.removed), 3), "mass_kg": round(float(m["mass_kg"]), 3),
-                         "safety": V.cut(float(m["safety_factor"])), "stress_mpa": round(float(m["peak_stress_mpa"]), 1),
+                         "safety": member_safety(m), "stress_mpa": round(float(m["peak_stress_mpa"]), 1),
                          "deflection_mm": round(float(m["deflection_mm"]), 3), "holes": int(m.get("holes", 0)),
                          "relief": round(float(m["plate_share"]), 3),
                          "weld_lbin": None if weld is None else [round(float(w) / LBIN) for w in

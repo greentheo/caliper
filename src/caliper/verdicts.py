@@ -23,6 +23,26 @@ def cut(x: float, places: int = 2) -> float:
     return math.floor(x * k + 1e-9) / k
 
 
+#: What a run from before CALI-152 says when its number sits exactly on its limit: it may be a 1.995 rounded up.
+UNCUT = ("checked before its numbers were kept cut toward safe, and it sits exactly on its limit (a 1.995 was "
+         "rounded up to 2 then): check it again")
+
+
+def old_on_limit(run: Optional[dict], safety, need) -> bool:
+    """A run written before CALI-152 (no ``cut`` marker) whose number is exactly its limit: not settled (#214 review:
+    step-stool-2's stored 2.0 is a true 1.99)."""
+    return (bool(run) and not run.get("cut") and safety is not None and need is not None
+            and abs(float(safety) - float(need)) < 1e-9)
+
+
+def needs_recheck(run: Optional[dict]) -> bool:
+    """A stored run a reader mustn't reuse as it is (a build package's scorecard, #198): one of its cases, or
+    steps, sits on its limit from before CALI-152."""
+    run = run or {}
+    need = run.get("min_safety")
+    return any(old_on_limit(run, x.get("safety"), need) for x in [*(run.get("cases") or []), *(run.get("stations") or [])])
+
+
 #: Every kind, best last: (status, the word a badge says, counts as a pass). A new state goes here and in RANK.
 KINDS = {
     "fails": ("bad", "doesn't hold", False),
@@ -77,6 +97,8 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
         return _make("edge", safety)
     if stale:
         return _make("stale", safety)
+    if old_on_limit(run, safety, run.get("min_safety")):            # a pass that may be a rounded fail (#214)
+        return _make("stale", safety, why=UNCUT)
     return _make("holds", safety)
 
 
@@ -233,8 +255,8 @@ def carve_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = Non
     """A carve step as a person reads it (#132 review): it holds only if the printed part holds there AND the whole
     part does (``whole_holds``), on a shape that isn't a filled-in block, at voxels that can see its walls (#101),
     and whose part closes up (#124). A fail stays a fail."""
-    v = station(st)
-    if v["kind"] == "unchecked":                # its part doesn't close up (#124): said, not a fail
+    v = station(st, run=run)
+    if v["kind"] in ("unchecked", "stale"):     # its part doesn't close up (#124), or an old number on its limit (#214)
         return v
     if not v["counts_as_pass"]:
         return _make("fails", st.get("safety"))
@@ -250,8 +272,8 @@ def carve_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = Non
 def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = None) -> dict:
     """A lightening step as a person reads it (#132 review): a thinner sheet's number is an estimate, never "holds";
     on a filled-in block, not trusted; on voxels that can't see the walls, not resolved (#101)."""
-    v = station(st)
-    if v["kind"] == "fails":
+    v = station(st, run=run)
+    if v["kind"] in ("fails", "stale"):         # a ✗ stays a ✗; an old number on its limit says check again (#214)
         return v
     if st.get("estimate"):
         return _make("estimate", st.get("safety"))
@@ -271,6 +293,8 @@ def station(st: dict, *, whole: bool = False, run: Optional[dict] = None) -> dic
         return _make("unchecked", safety, why=st.get("why") or "its shape doesn't close up")
     if held is None:
         return _make("waiting")
+    if held and old_on_limit(run, safety, (run or {}).get("min_safety")):   # (#214 review)
+        return _make("stale", safety, why=UNCUT)
     if held and coarse(run):
         return _make(coarse(run), safety)
     return _make("holds" if held else "fails", safety)

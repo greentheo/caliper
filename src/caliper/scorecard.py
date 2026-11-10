@@ -30,10 +30,19 @@ from . import materials as M
 from . import one_study
 from .design import DesignStore
 from .jobs import Cancelled
+from . import verdicts
 
 GOALS = "scorecard.yaml"
 LB = 0.224809                      # lbf per N
 
+
+
+def yield_x(a: dict) -> float:
+    """How many times its standing load a frame yields at, a goal's number: cut toward safe after the product (#214
+    review: 1.33 x 1.5 = 1.995 was stored 2.0 and met a goal of 2)."""
+    from . import verdicts
+
+    return verdicts.cut(a["safety"] * a["factor"])
 
 def goals_path(store: DesignStore) -> str:
     return os.path.join(store.root, GOALS)
@@ -262,7 +271,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         a = frame_study.analyse(store, p.id, payload_lb=payload, walls=bool(settings.get("walls", True)), emit=emit)
         _metric(metrics, "frame.safety", a["safety"], "×", f"{p.id}'s weakest member on a ×{a['factor']:g} bump "
                 f"({a['governing']['member']})", "model", "frame study")
-        _metric(metrics, "frame.yield_x", round(a["safety"] * a["factor"], 2), "×",
+        _metric(metrics, "frame.yield_x", yield_x(a), "×",
                 f"{p.id} yields at this many times its standing load", "model", "frame study")
         _metric(metrics, "frame.sag_in", a["deflection_in"], "in", f"{p.id} sags on a bump", "model", "frame study")
         _metric(metrics, "frame.steel_lb", a["mass_lb"], "lb", f"{p.id}'s tubes", "model", "frame study")
@@ -405,14 +414,16 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
             continue
         loaded = True
-        run = next((r for r in load_study.list_runs(store, p.id) if r.get("version") == p.version), None)
+        # a stored run of this version, unless it's one from before CALI-152 sitting on its limit (#214 review)
+        usable = lambda r: r.get("version") == p.version and not verdicts.needs_recheck(r)  # noqa: E731
+        run = next((r for r in load_study.list_runs(store, p.id) if usable(r)), None)
         if run is None:
             emit("strength", f"checking what {p.id} must hold")
             try:
                 with one_study.my_turn(store, emit, stop):   # what it waited behind may be this very check (#184)
                     if {x.id: x.version for x in store.design.parts} != versions:     # it waited, and read the design again
                         raise Moved()
-                    run = next((r for r in load_study.list_runs(store, p.id) if r.get("version") == p.version), None)
+                    run = next((r for r in load_study.list_runs(store, p.id) if usable(r)), None)
                     if run is None:
                         run = load_study.study(store, p.id, emit=emit, stop=stop)
             except (Cancelled, Moved):        # asked to stop, or starting again: not a check that couldn't run (#178 review)

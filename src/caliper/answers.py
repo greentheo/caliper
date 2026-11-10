@@ -422,7 +422,8 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         if d.get("safety") is not None:
             # an older frame run (or one from before it recorded its version) isn't the frame as it is (#132 review)
             v = verdicts.meets(d["safety"], frames[0].get("min_safety"),
-                               stale=frames[0].get("version") != p["version"])
+                               stale=frames[0].get("version") != p["version"]       # or on its limit from before (#214)
+                               or verdicts.old_on_limit(frames[0], d["safety"], frames[0].get("min_safety")))
             work.append(_line(f"The frame holds, {_times(d['safety'])}." if v["kind"] == "holds" else
                               f"The frame read {_times(d['safety'])} on an older version: check it again." if v["kind"] == "stale" else
                               f"The frame is too weak as drawn: {_times(d['safety'])}, it needs "

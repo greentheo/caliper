@@ -25,6 +25,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from . import verdicts
+from . import verdicts as V
 from .design import DesignStore
 from .one_study import one_at_a_time
 from .runs import newest_first
@@ -122,7 +123,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     os.makedirs(out_dir, exist_ok=True)
     # on disk from the start and after every step, so a run that dies (a crash, a restart) says how far it got
     # (CALI-103); it's marked done at the end
-    partial = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(), "status": "running",
+    partial = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(), "status": "running", "cut": True,
                "version": store.design.part(part_id).version, "min_safety": min_safety, "material": mat["name"],
                "spacing_mm": round(s, 2), "steps": stations, "stations": [], "best": None, "weak": "",
                "share": "printed", "notes": [], **seen}
@@ -166,7 +167,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
                 if r.supported:                                    # the printed part's own: what the carve changes
                     judged = r.solid & ~wood & ~ndimage.binary_dilation(ctx["attach"], iterations=1)
                     worked = float((r.von_mises[judged] / printed_strength).max()) if judged.any() else 0.0
-                    mine = round(1.0 / worked, 2) if worked > 0 else None
+                    mine = step_safety(worked)
                     sides = mine if sides is None or (mine is not None and mine < sides) else sides
                 else:
                     sides = 0.0
@@ -418,6 +419,12 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
 #: What a revision that dropped the carve says (CALI-87: one rule for every writer of a part's script).
 DROPPED = "The carve came off with this change (it was cut to the old shape): carve it again."
 _LINE = re.compile(r"^" + NAME + r"\s*=", re.M)
+
+
+def step_safety(worked: float) -> Optional[float]:
+    """A carve step's printed part's number, from its worst stress over strength: cut toward safe, never rounded up,
+    since its "holds" is compared from it (#214 review: round(1/0.50125, 2) stored 2.0 and held at 2)."""
+    return V.cut(1.0 / worked) if worked > 0 else None
 
 
 def carved(script: str) -> bool:
