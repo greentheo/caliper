@@ -41,11 +41,13 @@ class Busy(Exception):
 class Job:
     """One unit of background work and everything it has said so far."""
 
-    def __init__(self, kind: str, label: str = "", lock: str = ""):
+    def __init__(self, kind: str, label: str = "", lock: str = "", meta: Optional[dict] = None, only: str = ""):
         self.id = uuid.uuid4().hex[:12]
         self.kind = kind
         self.label = label
         self.lock = lock or self.id
+        self.meta = meta or {}            # whose it is: the design and part a page finds it again by (#178)
+        self.only = only                  # no second job with this key while one's queued or running (#178)
         self.status = "queued"            # queued | running | done | error | cancelled
         self.events: list[dict] = []
         self.result: Any = None
@@ -105,14 +107,18 @@ class JobRunner:
         self._mu = threading.Lock()
 
     def submit(self, kind: str, fn: Callable[[Job], Any], *, label: str = "",
-               lock: str = "", exclusive: bool = False) -> Job:
+               lock: str = "", exclusive: bool = False, meta: Optional[dict] = None, only: str = "") -> Job:
         """Queue ``fn(job)``; its return value becomes ``job.result``. Returns immediately.
 
         ``exclusive``: refuse (raise :class:`Busy`) while a job with this lock is queued or running, checked and
         queued in one step, so two requests 11 ms apart can't both get through (CALI-101)."""
-        job = Job(kind, label=label, lock=lock)
+        job = Job(kind, label=label, lock=lock, meta=meta, only=only)
         with self._mu:
             self._prune()
+            if only:
+                ahead = next((j for j in self._jobs.values() if j.only == only and not j.over), None)
+                if ahead is not None:
+                    raise Busy(ahead)
             if exclusive:
                 ahead = next((j for j in self._jobs.values() if j.lock == job.lock and not j.over), None)
                 if ahead is not None:
