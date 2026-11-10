@@ -111,9 +111,9 @@ class Proposal:
         scope = "the design" if self.level == "design" else f"'{self.part}'"
         actual = "" if self.actual is None else f" (measured {_fmt(self.actual)})"
         lines = [f"💡 I can lock that in as a test on {scope}:", f"    {self.id}: {self.expr}"]
-        allowed = re.search(r" [-+] (\d+(?:\.\d+)?)\b", self.expr)
-        if allowed and any(k.split(".")[-1] in self.expr for k in MEASURING):
-            lines.append(f"    (the {allowed.group(1)} mm is what measuring it can be off by, on a part that's right)")
+        allowed = added_allowance(self.expr)          # only Caliper's own, never a person's " - 1" (#64 item 10)
+        if allowed is not None:
+            lines.append(f"    (the {allowed:g} mm is what measuring it can be off by, on a part that's right)")
         from . import verdicts
 
         now = verdicts.rule(self.holds_now)["kind"]
@@ -378,6 +378,34 @@ def _measured_as(node) -> Optional[str]:
                 isinstance(base, ast.Call) and isinstance(base.func, ast.Name) and base.func.id == "bbox"):
             return f"bbox.{node.attr}"
     return None
+
+
+def added_allowance(expr: str) -> Optional[float]:
+    """The allowance :func:`allow_for_measuring` wrote into ``expr``, or None: the last term on the bound's side is
+    exactly :data:`MEASURING`'s for the size measured, subtracted from a lower bound or added to an upper one. A
+    person's own ``- 1`` is their number, not a measuring error (CALI-88, #64 item 10)."""
+    try:
+        tree = ast.parse(expr, mode="eval").body
+    except SyntaxError:
+        return None
+    if not isinstance(tree, ast.Compare):
+        return None
+
+    def tail(node, op):
+        return (node.right.value if isinstance(node, ast.BinOp) and isinstance(node.op, op)
+                and isinstance(node.right, ast.Constant) and isinstance(node.right.value, (int, float)) else None)
+
+    if len(tree.ops) == 1:
+        what, op = _measured_as(tree.left), type(tree.ops[0])
+        got = tail(tree.comparators[0], ast.Sub if op in (ast.GtE, ast.Gt) else ast.Add if op in (ast.LtE, ast.Lt) else type(None))
+    elif len(tree.ops) == 2:                        # the band an == becomes: v - tol <= size <= v + tol
+        what = _measured_as(tree.comparators[0])
+        got = tail(tree.left, ast.Sub)
+        if got is None or tail(tree.comparators[1], ast.Add) != got:
+            return None
+    else:
+        return None
+    return got if what is not None and got is not None and abs(got - MEASURING[what]) < 1e-9 else None
 
 
 def allow_for_measuring(expr: str) -> str:
