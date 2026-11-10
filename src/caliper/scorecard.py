@@ -371,6 +371,8 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
 
     worst = None
     unsure = None                     # a ✓ on an FEA too coarse to see the wall: no pass from it (CALI-110)
+    unsettled = None                  # a ✗ on one: a ✗ stays a ✗, and says the fail may be the model's (#191)
+    no_breaks = None                  # a breaking load from a run that can't see the wall isn't one to read
     loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
     left = []                         # parts whose strength isn't known: never left out of the verdict (#132 review)
     for p in store.design.parts:
@@ -396,7 +398,19 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
             left.append(f"the {p.id.replace('_', ' ')}'s strength check gave no number"
                         + next((f": {c['why']}" for c in run["cases"]
                                 if (c.get("fea") or {}).get("supported") is False and c.get("why")), ""))
-        breaks = [c["breaks_lb"] for c in run["cases"] if c.get("breaks_lb")]
+        said = [(c, verdicts.case(run, c)) for c in run["cases"]]
+        sure = [(c, v) for c, v in said if v["kind"] in ("holds", "fails") and not v.get("coarse")]
+        breaks = [c["breaks_lb"] for c, _ in sure if c.get("breaks_lb")]
+        hedged = next(((c, v) for c, v in said if v["kind"] == "fails" and v.get("coarse")), None)
+        inches = store.design.display_units == "in"
+        if hedged and unsettled is None:
+            from .answers import coarse, fail_hedge
+
+            unsettled = fail_hedge(run, *hedged, inches).strip() or coarse(run, inches, holds=False)
+        if no_breaks is None and len(sure) < sum(1 for c in run["cases"] if c.get("breaks_lb")):
+            from .answers import coarse
+
+            no_breaks = coarse(run, inches, holds=not hedged)
         need.append(float(run.get("min_safety") or load_study.MIN_SAFETY))
         if unsure is None and any(verdicts.case(run, c)["kind"] in ("unresolved", "unchecked")
                                   and (c.get("fea") or {}).get("supported") is not False for c in run["cases"]):
@@ -404,16 +418,24 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
 
             unsure = coarse(run, store.design.display_units == "in")
         if ran is not None:
+            from .answers import coarse as _coarse
+
+            open_said = (unsettled if hedged else _coarse(run, inches)
+                         if any(v["kind"] in ("unresolved", "unchecked") for _, v in said) else None)      # this part's own (#191 review)
             _metric(metrics, f"strength.{p.id}.safety", ran, "×", f"{p.id}, its weakest load",
-                    "model", "strength check")
+                    "not resolved" if open_said else "model", "strength check", **({"note": open_said} if open_said else {}))
             worst = ran if worst is None else min(worst, ran)
         if breaks:
             prev = metrics.get("strength.breaks_lb", {}).get("value")
             _metric(metrics, "strength.breaks_lb", min(breaks + ([prev] if prev else [])), "lb",
                     "the smallest predicted breaking load", "model", "strength check")
+    if no_breaks:                     # never the rest's smallest (rule 6)
+        _metric(metrics, "strength.breaks_lb", None, "lb", "the smallest predicted breaking load", "model", "strength check",
+                note=no_breaks)
     if worst is not None:
-        _metric(metrics, "strength.safety", worst, "×", "the weakest load any part must carry", "model",
-                "strength check")
+        _metric(metrics, "strength.safety", worst, "×", "the weakest load any part must carry",
+                "not resolved" if unsettled or unsure else "model", "strength check",
+                **({"note": unsettled or unsure} if unsettled or unsure else {}))
 
     # a strength number from a filled-in solid (or a shape that couldn't be checked) is no verdict (CALI-96)
     from .consistency import filled
@@ -452,7 +474,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
         else:
             met = None
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-110)
-        verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=unsure if strength else None,
+        verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=(unsure or unsettled) if strength else None,
                                 edge=bool(edgeless) if strength else False,             # the middle only (CALI-94)
                                 incomplete="; ".join(left) if strength and left else None,
                                 estimate=m["source"] if m and m.get("trust") == "rough" and c["metric"].startswith("print.")
@@ -467,7 +489,10 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
                                     else "not trusted: a filled-in shape"), "note": untrue})   # which it is (#89)
         elif status == "unresolved":
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
-                           "trust": "not resolved: too coarse to see its walls", "note": unsure})
+                           "trust": "not resolved: too coarse to see its walls", "note": unsure or unsettled})
+        elif status == "fail" and strength and (unsettled or unsure):     # a ✗ stays a ✗, not as a settled number (#191)
+            checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
+                           "trust": "not resolved: too coarse to see its walls", "note": unsettled or unsure})
         elif status == "edge":                # loaded in the middle only (CALI-94): never a pass; a ✗ stays a fail
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "checked in the middle only", "note": MIDDLE_ONLY})
@@ -492,11 +517,13 @@ def compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional[
                                                   and isinstance(was, (int, float)) else None),
                            **({"note": "scored differently since"} if previous and previous[0].get("outdated")
                               else {})})
+    unsettled_n = sum(c["status"] == "fail" and str(c.get("trust") or "").startswith("not resolved") for c in checks)   # (#191)
     card = {"created": time.time(), "scorer": SCORER, "versions": versions, "settings": settings, "checks": checks,
             "notes": g.get("notes") or [],
             "objectives": objectives, "metrics": metrics, "cost": cw,
             "summary": {"pass": sum(c["status"] == "pass" for c in checks),
                         "fail": sum(c["status"] == "fail" for c in checks),
+                        **({"unsettled": unsettled_n} if unsettled_n else {}),
                         "unknown": sum(c["status"] not in ("pass", "fail", "proposed", "estimate") for c in checks),
                         "proposed": sum(c["status"] == "proposed" for c in checks),
                         "untrusted": sum(c["status"] == "untrusted" for c in checks),
