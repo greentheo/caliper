@@ -366,7 +366,7 @@ def make(store: DesignStore, part_id: str, out_dir: Optional[str] = None) -> dic
     rec = {"id": rid, "part": part_id, "version": store.design.part(part_id).version, "created": time.time(),
            "pieces": listed, "pages": len(full), "files": files}
     with open(os.path.join(root, "index.html"), "w") as f:
-        f.write(index_html(store.design.name, part_id, listed, len(full)))
+        f.write(index_html(store.design.name, store.design.part(part_id).label or part_id, listed, len(full)))
     with open(os.path.join(root, "run.json"), "w") as f:
         json.dump(rec, f, indent=2)
     if out_dir is None:
