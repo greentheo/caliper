@@ -1410,7 +1410,7 @@ function scoreMark(c, stale, when) {
   if (c.status === 'fail') return '<span style="color:var(--bad)">✗</span>';
   if (stale && c.status === 'pass') return `<span style="color:var(--amber)" title="${esc(when)}">·</span>`;
   return c.status === 'pass' ? '✓' : c.status === 'proposed' ? '◇'
-    : c.status === 'unresolved' || c.status === 'untrusted' ? '<span style="color:var(--amber)">!</span>' : '?';
+    : c.status === 'unresolved' || c.status === 'untrusted' || c.status === 'estimate' ? '<span style="color:var(--amber)">!</span>' : '?';
 }
 // a goal's own limit beside its number (#137 item 5): "13.1 lb (cap 10 lb)"
 // a scorecard number as the panel says it, at module level: goalLimit uses it too (#139 review: it called scoreView's
@@ -1777,7 +1777,7 @@ function makingView(p) {
       ${[...new Set(notes(how))].map((n) => `<div class="muted">${n}</div>`).join('')}</li>`).join('')}
       ${d.printed.map((x) => `<li><b>printer</b>: ${esc(x.name)} in ${esc(x.material.toUpperCase())}, ${x.pieces} piece${x.pieces === 1 ? '' : 's'}${x.pinned
         ? ' pinned together' : ''} · about <b>${x.hours} h</b>, ${x.filament_g.toLocaleString()} g, $${x.usd.toFixed(2)}
-        <div class="muted">${esc(x.from)}</div></li>`).join('')}
+        <div class="muted">${esc(x.rough_said || x.from)}</div></li>`).join('')}
       ${d.missing.map((x) => `<li style="color:var(--bad)">✗ <b>${esc(x.name)}</b>: ${esc(x.why)}</li>`).join('')}</ul>`;
 }
 async function loadMaking(p, key) {

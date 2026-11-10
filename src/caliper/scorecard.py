@@ -330,7 +330,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
     # can your shop make it (CALI-48): every piece routed to a tool or machine you have; printing costed
     from . import making
 
-    missing, hours, grams, planned, unplanned = [], 0.0, 0.0, 0, []
+    missing, hours, grams, planned, unplanned, guessed = [], 0.0, 0.0, 0, [], ""
     for pid in reports:
         try:
             mk = making.plan(store, pid)
@@ -341,6 +341,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         missing += [f"{pid}: {m['name']} ({m['why']})" for m in mk["missing"]]
         hours += sum(x["hours"] for x in mk["printed"])
         grams += sum(x["filament_g"] for x in mk["printed"])
+        guessed = guessed or next((x["rough_said"] for x in mk["printed"] if x.get("rough_said")), "")
     if reports:
         # a ✓ only over what was worked out (#89, #137 P2 item 10: "✓ … 0 measured" where no part's plan could be
         # made): a part whose plan couldn't be made leaves the check waiting, said why; a missing piece is a fail
@@ -353,8 +354,10 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
                        "note": "; ".join((missing + [f"couldn't work out how to make {u}" for u in unplanned])[:6])})
         _metric(metrics, "make.not_in_shop", len(missing), "pieces", "pieces your shop can't make", "measured", "shop")
     if grams:
-        _metric(metrics, "print.hours", round(hours, 1), "h", "printing time, every printed piece", "model", "slicer")
-        _metric(metrics, "print.filament_g", round(grams), "g", "filament, every printed piece", "model", "slicer")
+        # any piece a guess: the total says so, and the build book can't call it "model, safe side" (#166)
+        how, where = ("rough", guessed) if guessed else ("model", "slicer")
+        _metric(metrics, "print.hours", round(hours, 1), "h", "printing time, every printed piece", how, where)
+        _metric(metrics, "print.filament_g", round(grams), "g", "filament, every printed piece", how, where)
 
     # will it hold (CALI-54): each part's own loads(), from its strength check on this version (run if missing)
     from . import load_study, verdicts
@@ -442,9 +445,14 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-110)
         verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=unsure if strength else None,
                                 edge=bool(edgeless) if strength else False,             # the middle only (CALI-94)
-                                incomplete="; ".join(left) if strength and left else None)
+                                incomplete="; ".join(left) if strength and left else None,
+                                estimate=m["source"] if m and m.get("trust") == "rough" and c["metric"].startswith("print.")
+                                else None)
         status = verdicts.STATUS[verdict["kind"]]
-        if status == "untrusted":
+        if verdict["kind"] == "estimate":     # a rough print time runs low: never a pass (#166)
+            checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None, "trust": "rough",
+                           "note": verdict["why"]})
+        elif status == "untrusted":
             checks.append({**c, "status": status, "value": m["value"] if m else None, "margin": None,
                            "unit": m["unit"] if m else "", "trust": ("not trusted: its shape couldn't be checked" if str(untrue).startswith("couldn't")
                                     else "not trusted: a filled-in shape"), "note": untrue})   # which it is (#89)
@@ -480,10 +488,11 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
             "objectives": objectives, "metrics": metrics, "cost": cw,
             "summary": {"pass": sum(c["status"] == "pass" for c in checks),
                         "fail": sum(c["status"] == "fail" for c in checks),
-                        "unknown": sum(c["status"] not in ("pass", "fail", "proposed") for c in checks),
+                        "unknown": sum(c["status"] not in ("pass", "fail", "proposed", "estimate") for c in checks),
                         "proposed": sum(c["status"] == "proposed" for c in checks),
                         "untrusted": sum(c["status"] == "untrusted" for c in checks),
                         "unresolved": sum(c["status"] == "unresolved" for c in checks),
+                        "estimate": sum(c["status"] == "estimate" for c in checks),
                         "edge": sum(c["status"] == "edge" for c in checks)}}
     os.makedirs(cards_dir(store), exist_ok=True)
     with open(os.path.join(cards_dir(store), time.strftime("%Y%m%d-%H%M%S") + ".json"), "w") as f:

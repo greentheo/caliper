@@ -801,7 +801,8 @@ def _status(card: dict) -> str:
     "unknown")."""
     s = card["summary"]
     if verdicts.summary(s)["counts_as_pass"]:            # one verdict (CALI-112)
-        return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass</span>'
+        guess = ", print time is a guess" if s.get("estimate") else ""       # never a ✓, never in the way (#166)
+        return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass{guess}</span>'
     untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0
     edge = s.get("edge") or 0
     rest = s["unknown"] - untrusted - unresolved - edge
@@ -896,7 +897,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                            + (" pinned together: glue 3 mm filament or 1/8 in dowel pins in the holes across each cut"
                               if pr["pinned"] else "")
                            + f"; about {pr['hours']:g} h, {pr['filament_g']:,} g, ${pr['usd']:.2f} "
-                           f"({_e(pr['from'])}). STLs in <code>printer/{_e(pid)}/</code>.</p>")
+                           f"({_e(pr.get('rough_said') or pr['from'])}). STLs in <code>printer/{_e(pid)}/</code>.</p>")
     out.append("<h2 class='page'>Cut lists</h2>")
     for pid in rec.get("grain") or {}:                 # which way to cut each panel, as the person said (CALI-126)
         laid = {g["line"]: g for g in (plans.get(pid) or {}).get("grain") or []}
