@@ -503,6 +503,11 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     from . import better
 
     work += better.offers(store, state, pid)        # Make it better, where the person looks (#92)
+    from . import tree
+
+    for ln in what + work + buy + how:                 # what the person renamed a piece to (#185)
+        if isinstance(ln, dict) and ln.get("text"):
+            ln["text"] = tree.relabelled(store, pid, ln["text"])
     return [_card("what", "What is it?", what),
             _card("work", "Will it work?", work, "Say what it must do and I'll check it."),
             _card("buy", "What do I buy?", buy),

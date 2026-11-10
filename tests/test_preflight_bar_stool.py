@@ -43,7 +43,7 @@ def test_a_broken_rule_of_its_own_leads_will_it_work(tmp_path):
     store = _with_rule(tmp_path)
     (r,) = part_rules.measured(store, "spool")
     assert r["status"] == "fail" and r["verdict"]["kind"] == "fails" and r["actual"] == pytest.approx(0.6, abs=0.05)
-    assert r["said"].startswith("shell_wall_thickness: its thinnest walls are 0.") and "around z 2" in r["said"]
+    assert r["said"].startswith("shell wall thickness: its thinnest walls are 0.") and "around z 2" in r["said"]
     assert r["said"].endswith("; it says at least 2.85 mm")
     state = design_api.design_state(store)
     assert state["parts"][0]["rules"][0]["verdict"]["kind"] == "fails"            # the page's rules list has it

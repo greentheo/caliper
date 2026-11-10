@@ -197,7 +197,7 @@ def test_studies_lists_carve_for_a_printed_part_and_lighten_for_a_sheet_one(tmp_
     _check(tube, "tube", 3.0)
     menu = {m["kind"]: m for m in studies.menu(design_api.design_state(tube)["parts"][0])}
     assert menu["carve"]["ready"] and not menu["lighten"]["ready"]
-    assert menu["lighten"]["why"] == "it has no sheet pieces: a printed part is carved"
+    assert menu["lighten"]["why"] == "it has no sheet pieces: printed parts get carved instead"
     stool = _store(tmp_path / "s", BOX_STOOL, "stool")
     _check(stool, "stool", 3.1, plate=_plate())
     menu = {m["kind"]: m for m in studies.menu(design_api.design_state(stool)["parts"][0])}
@@ -254,7 +254,7 @@ def test_theo_s_stool_a_fail_too_coarse_to_judge_reaches_the_screen(tmp_path):
     _check(store, "tube", 0.53, thinnest=0.25, spacing=4.6, too_thin=True, thinnest_where=REAL_WHERE, sees_mm=9.2)
     spot, carve_it = _offers(store, "tube")
     assert spot["lead"].startswith("The thinnest spot is 0.25 mm") and carve_it["disabled"]
-    assert carve_it["cost"].endswith("It waits for a check it can trust.")
+    assert carve_it["cost"].endswith("make it hold first, then carve.") and "It waits" not in carve_it["cost"]        # the button's own words (#185)
 
 
 def test_a_fail_on_a_settled_run_stays_as_it_was(tmp_path):
@@ -338,7 +338,7 @@ def test_a_printed_part_is_never_offered_lighten(tmp_path):
     _check(store, "stool", 3.0)
     assert not [ln for ln in _offers(store, "stool") if "lighten" in ln["action"]]
     menu = {m["kind"]: m for m in studies.menu(design_api.design_state(store)["parts"][0])}
-    assert not menu["lighten"]["ready"] and menu["lighten"]["why"] == "its printed part is carved, not lightened with holes"
+    assert not menu["lighten"]["ready"] and menu["lighten"]["why"] == "printed parts get carved instead, not lightened with holes"
 
 
 def _with_cases(store, pid, cases, safety):

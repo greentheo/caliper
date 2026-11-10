@@ -37,6 +37,10 @@ def _wall_needs(expr: str) -> Optional[float]:
         return None
 
 
+def _plain(rule_id: str) -> str:
+    return rule_id.replace("_", " ")
+
+
 def _said(r: dict, where: Optional[list], inches: bool) -> str:
     """One rule's result in words: "shell_wall_thickness: its walls are 0.25 mm around z 16.1 in; it says at least
     2.85 mm"."""
@@ -45,12 +49,12 @@ def _said(r: dict, where: Optional[list], inches: bool) -> str:
     if _is_wall(r["expr"]) and isinstance(r.get("actual"), (int, float)):
         need = _wall_needs(r["expr"])
         at = f" around z {_len(where[2], inches)}" if where else ""
-        return (f"{r['id']}: its thinnest walls are {_wall(float(r['actual']))}{at}"
+        return (f"{_plain(r['id'])}: its thinnest walls are {_wall(float(r['actual']))}{at}"
                 + (f"; it says at least {round(need, 2):g} mm" if need is not None else f" ({r['expr']})"))
     if r.get("status") in ("error", "deferred") and r.get("detail"):
-        return f"{r['id']}: {r['expr']}, not measured: {r['detail']}"
+        return f"{_plain(r['id'])}: {r['expr']}, not measured: {r['detail']}"
     act = r.get("actual")
-    return f"{r['id']}: {r['expr']}" + (f", measured {act:g}" if isinstance(act, float) else
+    return f"{_plain(r['id'])}: {r['expr']}" + (f", measured {act:g}" if isinstance(act, float) else
                                         f", measured {act}" if act is not None and not isinstance(act, bool) else "")
 
 

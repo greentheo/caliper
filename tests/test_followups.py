@@ -23,7 +23,7 @@ def test_a_rule_whose_probe_errors_on_a_part_that_builds_reads_as_a_fail_with_it
     kept, err = part_rules.measured(store, "spool")
     assert kept["verdict"]["kind"] == "holds"
     assert err["status"] == "error" and err["verdict"]["kind"] == "fails" and not err["verdict"]["counts_as_pass"]
-    assert err["said"] == "lip_ratio: min_wall / 0 >= 1, not measured: ZeroDivisionError: float division by zero"
+    assert err["said"] == "lip ratio: min_wall / 0 >= 1, not measured: ZeroDivisionError: float division by zero"
     assert part_rules.failing([kept, err]) == [err]
     work = next(c for c in answers.part(store, design_api.design_state(store), "spool") if c["key"] == "work")
     assert work["lines"][0]["text"] == f"✗ Breaks its rule {err['said']}." and work["lines"][0]["status"] == "bad"

@@ -41,6 +41,7 @@ from typing import Callable, Optional
 
 from . import consistency
 from . import construction as C
+from . import tree
 from . import materials as M
 from . import verdicts
 from .design import DesignStore
@@ -1228,7 +1229,7 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
         cl = os.path.join(src, "cutlist.txt")
         if os.path.exists(cl):
             with open(cl) as f:
-                cut_texts.append(f.read())
+                cut_texts.append(tree.relabelled(store, pid, f.read()))     # what the person calls it (#185)
     with open(os.path.join(root, "cutlist.txt"), "w") as f:
         f.write("\n".join(cut_texts))
     os.makedirs(os.path.join(root, "source"))

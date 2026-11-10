@@ -222,7 +222,7 @@ def test_a_part_with_a_strength_check_says_check_it_again(store):
     os.makedirs(folder)
     with open(os.path.join(folder, "run.json"), "w") as f:
         json.dump(run, f)
-    assert "strength: check the box again" in params.set_value(store, "box", "h", 250)["notes"]
+    assert "strength: check this part again" in params.set_value(store, "box", "h", 250)["notes"]
 
 
 # --- the panel's Rebuild: everything changed, one version (#108, the mockup) ------------------------------------------
@@ -502,7 +502,7 @@ def test_the_panel_sits_after_will_it_work():
 
 @pytest.mark.parametrize("name,note,said", [
     ("foot_t", "Extra radial width of foot ring (~2.5 in + 1 in)", "Extra radial width of foot ring"),
-    ("d", "", "D"),
+    ("d", "", "Depth"),
 ])
 def test_more_of_the_stool_s_names(name, note, said):
     assert _page(f"return {{ s: paramName({{ name: {json.dumps(name)}, note: {json.dumps(note)} }}) }};")["s"] == said

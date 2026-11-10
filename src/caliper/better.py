@@ -209,7 +209,7 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
         known = run and not p.get("untrusted") and not consistency.bare_edge(store, pid)
         got = _sheet_offers(run, fails=True) if known else []
         if run and run.get("too_thin") and p.get("printed"):    # a fail it was too coarse to judge: Theo's stool (#159)
-            got += _carved_sliver(store, run) if p.get("carved") else _thin_line(store, run) + [_waiting_carve(name, takes)]
+            got += _carved_sliver(store, run) if p.get("carved") else _thin_line(store, run) + [_waiting_carve(name, takes, f"{blocked['carve'][:1].upper()}{blocked['carve'][1:]}." if blocked.get("carve") else None)]
         return [{**ln, "part": pid} for ln in got]
     if blocked and blocked.get("why") == "unchecked":           # everything else comes from the check
         return [_line("Check it holds first", "What would make it better comes from that.", "Check it holds", "load",
