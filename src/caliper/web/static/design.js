@@ -1085,8 +1085,10 @@ function renderThread() {
   wireClarify();
   if ($('buildFirst')) {
     $('buildFirst').onclick = async () => {
+      const go = $('buildFirst');
+      go.disabled = true;                              // a double click starts one build (#66 item 1)
       try { followBuild((await api('POST', `/api/designs/${S.slug}/build`)).job_id); }
-      catch (e) { showErr(e.message); }
+      catch (e) { showErr(e.message); go.disabled = false; }
     };
   }
   if (typeof d.claude === 'boolean') S.claude = d.claude;
@@ -2679,8 +2681,10 @@ function carveView(p) {
     <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo"${run ? ' data-again="1"' : ''} ${S.carveJob[carveKey(p.id)] || carveBlocked(p) ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
       <span class="muted small">${esc(carveTime(p))}</span></div><div id="carveProgress">${carveProgress(p.id)}</div>`;
   if (!run) return head;
-  if (run.status === 'cancelled') {                // stopped from its panel: the steps it finished (CALI-101)
-    return `${head}<div class="small"><b>Cancelled</b> after ${run.stations.length} of ${run.steps} steps${run.stations.length
+  if (run.status === 'cancelled' || run.status === 'timed_out') {   // stopped: the steps it finished (CALI-101)
+    // past its limit isn't a cancel nobody made (#211 review)
+    const stopped = run.status === 'timed_out' ? `Stopped at its ${run.limit_s ? run.limit_s / 3600 : 6}-hour limit` : 'Cancelled';
+    return `${head}<div class="small"><b>${stopped}</b> after ${run.stations.length} of ${run.steps} steps${run.stations.length
       ? ': what it finished is below.' : ', before its first step.'}</div>${run.stations.length ? carveChart(p, run) : ''}`;
   }
   if (run.status === 'failed') {                   // it stopped on an error, and says which (CALI-103)
@@ -2755,6 +2759,7 @@ async function followCarve(p, jobId, stopping, keyed) {
   try {
     await follow(jobId, (ev) => {
       if (ev.kind === 'stopping') cj.stopping = true;
+      if (ev.kind === 'started' && ev.limit_s) cj.limit = ev.limit_s;
       if (ev.text && ev.kind !== 'started') cj.text = ev.text;
       const m = /^step (\d+):/.exec(ev.text || ''), n = / in (\d+) steps/.exec(ev.text || '');
       if (m) cj.step = +m[1];
@@ -2783,7 +2788,8 @@ async function followCarve(p, jobId, stopping, keyed) {
 }
 // the panel while a carve runs: the step it's on, the bar, about how long is left (from its pace so far), and Cancel
 // how long a carve has run, from its start, always shown: 9.5 min of a sweep said nothing (#137 item 4)
-const ran = (cj) => (cj && cj.t0 && !cj.stopping ? ` · running for ${minutesText((Date.now() - cj.t0) / 60000)}` : '');
+// and where it will stop: a study has a limit, said beside it (#66 item 2)
+const ran = (cj) => (cj && cj.t0 && !cj.stopping ? ` · running for ${minutesText((Date.now() - cj.t0) / 60000)}${cj.limit ? ` (it stops at a step after ${cj.limit >= 3600 ? `${cj.limit / 3600} hours` : `${Math.round(cj.limit / 60)} min`})` : ''}` : '');
 // the panel's time moves while nothing else does: the sweep before step 1 reports little
 setInterval(() => {
   const mine = `${S.slug}/`;
