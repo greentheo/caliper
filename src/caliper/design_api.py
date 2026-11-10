@@ -36,6 +36,7 @@ class ChatMessage(BaseModel):
     message: str
     scope: Optional[str] = None
     pick: Optional[dict] = None           # the face or edge picked: {kind, id} (#109)
+    shown: Optional[str] = None           # what their own bubble says, where ``message`` has coordinates for the designer (#181)
 
 
 class ParamSet(BaseModel):
@@ -628,7 +629,8 @@ def router():
 
         # the message is kept the moment it arrives, before its job waits or runs: a crash mustn't eat it (CALI-103)
         message = req.message.strip()
-        load(slug).append_log({"kind": "message", "text": message, "scope": req.scope or None, "queued": True})
+        load(slug).append_log({"kind": "message", "text": message, "scope": req.scope or None, "queued": True,
+                               **({"shown": req.shown} if req.shown else {})})
 
         def work(j):
             store = DesignStore.load(slug)
