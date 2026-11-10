@@ -530,7 +530,8 @@ def test_a_double_click_on_use_it_takes_the_step_once():
 
 
 def test_carve_it_is_off_while_its_carve_runs():
-    head = """const S = { carveJob: { p: { text: 'x' } } };
+    head = """const S = { slug: 'd', carveJob: { 'd/p': { text: 'x' } } };
+const carveKey = (pid) => `${S.slug}/${pid}`;
 const esc = (s) => String(s);
 """
     got = _page(("betterLines",), head, """const line = { better: true, lead: 'Carve', cost: 'c', button: 'Carve it', action: 'carve', part: 'p' };

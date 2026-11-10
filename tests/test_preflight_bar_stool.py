@@ -156,7 +156,7 @@ def test_the_page_doesn_t_offer_carve_on_a_part_that_fails():
 
 def test_the_carve_panel_says_how_long_it_has_run():
     out = _run(_page(["carveProgress"], consts=["esc", "minutesText", "ran"], extra=(
-        "const S = {carveJob: {stool: {text: 'carving the printed PETG in 7 steps (as drawn, then 6 carved)', "
+        "const carveKey = (pid) => pid; const S = {carveJob: {stool: {text: 'carving the printed PETG in 7 steps (as drawn, then 6 carved)', "
         "progress: 0.1, t0: Date.now() - 6 * 60000, job: 'j'}}};\nout = carveProgress('stool');")))
     assert "carving the printed PETG in 7 steps (as drawn, then 6 carved) · running for 6 min" in out
 
