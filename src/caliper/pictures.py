@@ -245,11 +245,18 @@ def _try(ctx: dict, panel: dict, poly, min_safety: float) -> Optional[float]:
                              (np.arange(p["shape"][1]) + 0.5) * s + p["lo"][1], indexing="ij"), -1)
     covered = contains_xy(poly, g[..., 0], g[..., 1]) & p["inside"]
     solid = lighten._cut_solid(ctx["ls"].solid, p, covered)
+    mat = ctx.get("plate_mat") or ctx["mat"]
+    uncut = ctx.setdefault("_uncut", {})                 # the wall solid, once per load: what its edge is judged from
     worst = None
     for i in range(len(ctx["loads"])):
         case, _ = L.check_load(ctx, i, min_safety, solid=solid)
         if case.get("safety") is not None and (case.get("fea") or {}).get("supported") is not False:   # no 0x (#140)
-            worst = case["safety"] if worst is None else min(worst, case["safety"])
+            if i not in uncut:
+                uncut[i] = L.check_load(ctx, i, min_safety)[1]
+            # its edge at KT_HOLE times the wall's stress there, as the finished part is judged (#64 item 5)
+            edge = lighten.picture_edge(p, [poly], uncut[i].von_mises, ctx["ls"].solid, s, mat["strength"] * mat["across"])
+            safety = min(case["safety"], round(edge, 2)) if np.isfinite(edge) else case["safety"]
+            worst = safety if worst is None else min(worst, safety)
     return worst
 
 
