@@ -213,9 +213,15 @@ def _opened(body):
 
 
 def test_opening_another_design_drops_the_pick_with_no_rebuilt_line():
-    assert _opened("await openDesign('another'); return { pick: S.pick, hint };") == {"pick": None, "hint": ""}
+    assert _opened("hint = 'Rebuilt: click it again'; await openDesign('another'); return { pick: S.pick, hint: hint === undefined ? 'reset' : hint };") == {
+        "pick": None, "hint": "reset"}
 
 
 def test_reopening_the_same_design_keeps_it():
     assert _opened("await openDesign('x'); return { id: S.pick.id, hint };") == {"id": "f7", "hint": ""}
+
+
+def test_a_new_design_drops_the_pick_and_the_rebuilt_line():
+    src = _fn(open(JS).read(), "startNew")
+    assert "clearPick(); pickHint();" in src and src.index("clearPick();") < src.index("$('inspector').innerHTML")
 

@@ -812,7 +812,7 @@ $('newBtn').onclick = startNew;
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
-  if (first) { S.buildBubble = null; clearPick(); }    // a pick is on this design's part: never posted to another (#196 review)
+  if (first) { S.buildBubble = null; clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
   location.hash = encodeURIComponent(slug);
   if (first) showLoading(slug);
   let got;
@@ -1159,6 +1159,7 @@ function startNew() {
   // remember where we were: the button sits beside the design picker and is easy to hit by mistake
   const was = S.slug ? { slug: S.slug, name: S.design ? S.design.name : S.slug } : null;
   S.slug = null; S.design = null; S.scope = null; S.buildBubble = null;
+  clearPick(); pickHint();                        // nor to a design that doesn't exist yet (#196 review)
   for (const m of meshes.values()) scene.remove(m);
   meshes.clear(); clearStation();
   [...pieces3d.keys()].forEach(dropPieces);
