@@ -289,8 +289,8 @@ def test_the_card_draws_a_make_it_better_section_with_buttons():
     html = _page_of(CARD + "out = qlines(c);")
     assert html.count('class="qbetter-h">Make it better<') == 1 and html.count('class="qoffer"') == 2
     assert 'Make the top thinner.<span class="qoffer-c">Still about 2.3 times over.</span>' in html
-    assert 'data-better="1" data-card="work">Try it</button>' in html
-    assert 'data-better="2" data-card="work" disabled>Carve it</button>' in html
+    assert 'data-better="1" data-better-action="use_t" data-better-part="p" data-card="work">Try it</button>' in html
+    assert 'data-better="2" data-better-action="carve" data-better-part="p" data-card="work" disabled>Carve it</button>' in html
     assert html.count('class="qline') == 1                                  # the offers aren't drawn as verdict lines too
     assert _page_of("const GOTO = {}; out = qlines({key: 'w', lines: [{text: 'a', status: 'ok'}]});").count("qbetter") == 0
 
