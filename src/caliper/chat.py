@@ -527,18 +527,19 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
 
         check = features.landed(picked_from, _features_of(store, part_id), pick, message, store.design.display_units == "in")
         on_pick = check["landed"]
-        if on_pick is False:                        # the same words next time are a retry, not "v2 already did that" (#177)
+        short = on_pick is False or on_pick == features.PARTIAL      # what was asked for didn't happen
+        if short:                                   # the same words next time are a retry, not "v2 already did that" (#177)
             store.append_history(part_id, {"kind": "pick_missed", "version": version})
         # a miss comes first and the turn isn't a success: never a tick above "it isn't on what you picked" (rule 6)
-        reply = (f"\u2717 {check['said']}\n\n{reply.replace(chr(0x2713) + ' ', '', 1)}" if on_pick is False
-                 else f"{reply}\n\n{check['said']}")
+        reply = (f"{'!' if on_pick == features.PARTIAL else chr(0x2717)} {check['said']}\n\n{reply.replace(chr(0x2713) + ' ', '', 1)}"
+                 if short else f"{reply}\n\n{check['said']}")
     proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
                                        drafter=drafter, enabled=promote_feedback,
                                        events=events, on_event=on_event)
     if offer:
         reply += "\n\n" + offer
 
-    return TurnResult(action="refine", ok=bool(res.ok) and not broke and on_pick is not False, part=part_id, version=version,
+    return TurnResult(action="refine", ok=bool(res.ok) and not broke and on_pick not in (False, "partial"), part=part_id, version=version,
                       part_report=res.report, report=after, broke=broke, fixed=fixed,
                       part_errors=part_errors, proposal=proposal, events=events, reply=reply)
 

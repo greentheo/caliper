@@ -27,7 +27,7 @@ LINEAR = 0.4
 ANGULAR = 0.35
 EDGE_POINTS = 24
 #: bumped when what's kept changes: an older file is worked out again
-SCHEMA = 2
+SCHEMA = 3
 #: how far along a face to step to see which way it leaves an edge, mm
 STEP = 0.05
 
@@ -158,6 +158,12 @@ def of_solid(solid, pose=None) -> dict:
             row["major"] = round(surf["major"], 3)
         if "semi" in surf:
             row["semi"] = round(surf["semi"], 6)
+        if f.geomType() == "CYLINDER" and len(verts):          # a hole's wall faces its axis; a post's faces away from it
+            on = np.array(verts[0].toTuple())
+            axis_d = np.asarray(surf["axis"], float)
+            out_from_axis = (on - np.asarray(surf["at"], float))
+            out_from_axis -= axis_d * float(np.dot(out_from_axis, axis_d))
+            row["hollow"] = bool(float(np.dot(np.array(f.normalAt(verts[0]).toTuple()), out_from_axis)) < 0)
         if "at" in surf:
             row["at"] = _vec(_apply(pose, surf["at"]))
         out_faces.append(row)
@@ -278,6 +284,8 @@ def said(features: dict, kind: str, fid: str, inches: bool) -> Optional[str]:
 # Three outcomes, and the default is "couldn't tell". Landed and missed each need positive evidence about the picked edge
 # itself: not any new or moved face near it, and not some other ring that looks similar.
 NOT_MEASURED = "I couldn't tell whether that landed on what you picked."
+#: right place, wrong size: not a tick, and not a miss on location
+PARTIAL = "partial"
 UNDO = ' Say "roll it back" to undo it.'
 _ASKED = re.compile(r"(\d+\s+\d+/\d+|\d+/\d+|\d*\.\d+|\d+)\s*(mm|cm|inch(?:es)?\b|in\b|\")", re.I)
 #: how close two curves or surfaces must be to be the same one, mm: to the rounding they're kept at
@@ -306,6 +314,12 @@ def _size(mm: float, inches: bool) -> str:
     from .answers import _small_len
 
     return _small_len(mm, inches)
+
+
+def _both(got: float, asked: float, inches: bool) -> tuple[str, str]:
+    """Two sizes that differ, said so they read differently: "1/8 in, not 1/8 in" is no use, so those go in mm."""
+    a, b = _size(got, inches), _size(asked, inches)
+    return (a, b) if a != b else (f"{got:g} mm", f"{asked:g} mm")
 
 
 def _parallel(a, b) -> bool:
@@ -358,9 +372,11 @@ def _on(face: dict, points: np.ndarray, reach: float) -> bool:
     """Every point within ``reach`` of the face's own triangles: the surface is where the edge was, all along it."""
     import trimesh
 
+    from . import spatial
+
     mesh = trimesh.Trimesh(np.asarray(face["verts"], float).reshape(-1, 3), np.asarray(face["tris"], int).reshape(-1, 3),
                            process=False)
-    _, gaps, _ = trimesh.proximity.closest_point(mesh, points)
+    _, gaps, _ = spatial.closest_point(mesh, points)
     return float(gaps.max()) <= reach
 
 
@@ -384,8 +400,16 @@ def _fillet(before: dict, after: dict, edge: dict, asked: Optional[float], inche
         for i in e["faces"]:
             meets.setdefault(i, set()).update(x for x in e["faces"] if x != i)
     points = np.asarray(edge["points"], float)
+    straight = edge["type"] == "line"
+    along = points[-1] - points[0]
     for f in after["faces"]:
         if f["type"] not in ("cylinder", "torus", "surface") or not _is_new(f, before):
+            continue
+        # a straight edge's round is a cylinder along it, and a curved edge's is never a cylinder: a neighbour's round has its
+        # end cap on these faces too, and on a short edge it's in reach from end to end (#177 review)
+        if straight and (f["type"] != "cylinder" or not _parallel(f["axis"], along / np.linalg.norm(along))):
+            continue
+        if not straight and f["type"] == "cylinder":
             continue
         if not meets.get(f["id"], set()) & set(a) or not meets.get(f["id"], set()) & set(b):
             continue                                    # a round sits between the picked edge's own two faces
@@ -395,7 +419,8 @@ def _fillet(before: dict, after: dict, edge: dict, asked: Optional[float], inche
         if r is None:
             return "Checked: there's a fillet on the edge you picked.", True
         if asked and abs(r - asked) > max(0.02 * asked, 0.05):
-            return f"The fillet is on the edge you picked, but it's {_size(r, inches)}, not {_size(asked, inches)}.", True
+            got, want = _both(r, asked, inches)
+            return f"It went on that edge, but it's {got} where you asked for {want}." + UNDO, PARTIAL
         return f"Checked: the fillet is on the edge you picked, {_size(r, inches)}.", True
     return NOT_MEASURED, None
 
@@ -407,29 +432,34 @@ def _hole(before: dict, after: dict, face: dict, asked: Optional[float], inches:
     was_there = {f["id"] for f in after["faces"] if not _is_new(f, before)}
     now = _faces_by_id(after)
     for f in after["faces"]:
-        if f["type"] != "cylinder" or not _is_new(f, before):
-            continue
+        if f["type"] != "cylinder" or not f.get("hollow") or not _is_new(f, before):
+            continue                                    # a post's wall faces away from its axis
         rims = [e for e in after["edges"] if f["id"] in e["faces"] and e["type"] == "circle"
                 and abs(e["length"] - 2 * np.pi * f["radius"]) <= 0.02 * e["length"]]
         others = [next((x for x in e["faces"] if x != f["id"]), None) for e in rims]
         if len(rims) < 2 or not any(x in on_it for x in others):
             continue
+        at = next(np.asarray(e["centre"], float) for e, x in zip(rims, others) if x in on_it)
+        if not _on(face, at[None], 0.5):                # the picked face itself, not another pad on its plane
+            continue
         if not all(x in was_there for x in others):     # a floor or a cap it made itself: blind, or a boss
             continue
         size = 2 * f["radius"]
         if asked and abs(size - asked) > max(0.02 * asked, 0.05):
-            return f"There's a hole through the face you picked, but it's {_size(size, inches)}, not {_size(asked, inches)}.", True
+            got, want = _both(size, asked, inches)
+            return f"It went through that face, but it's {got} where you asked for {want}." + UNDO, PARTIAL
         return f"Checked: there's a {_size(size, inches)} hole through the face you picked.", True
     same = [now[i] for i in on_it]
-    if any(abs(f["area"] - face["area"]) <= 0.01 * face["area"] and np.linalg.norm(np.subtract(f["centre"], face["centre"])) <= SAME
+    if any(abs(f["area"] - face["area"]) <= 0.001 * face["area"] and np.linalg.norm(np.subtract(f["centre"], face["centre"])) <= SAME
            for f in same):
         return "The face you picked has no new hole through it." + UNDO, False
     return NOT_MEASURED, None
 
 
 def landed(before: Optional[dict], after: Optional[dict], pick: dict, message: str, inches: bool) -> dict:
-    """Did a change asked of a picked edge or face land on it? ``{"said": one line, "landed": True, False or None}``. None,
-    "couldn't tell", is the default: landed and missed each need positive evidence about the pick itself."""
+    """Did a change asked of a picked edge or face land on it? ``{"said": one line, "landed": True, False, PARTIAL or
+    None}``. None, "couldn't tell", is the default: landed and missed each need positive evidence about the pick itself.
+    PARTIAL: on the right edge or face, at the wrong size."""
     said, hit = _landed(before, after, pick, message, inches)
     return {"said": said, "landed": hit}
 
