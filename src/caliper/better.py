@@ -12,7 +12,10 @@ work?* as suggestions with a cost, not tools. Each line here is one improvement 
 - **Then an invitation,** with what it takes: a carve (a printed part) or a lightening (sheet walls), offered only
   where :func:`load_study.blocked` allows it, the one test the Carve button and the card both read (#144).
 
-The page draws these as card lines (``better: True``), each going to its panel; its design waits for Theo's mockup.
+Each is ``{text, lead, cost, button, action, part, better: True}``: the page draws the lead, the cost beneath it and a
+button (the mockup Theo approved); ``text`` is the same as one sentence. Where :func:`load_study.blocked` stops a carve
+for anything but a part that already fails, the line stays, ``disabled``, its cost saying why it waits; and walls too
+thin for the check get what would let the check see them.
 """
 
 from __future__ import annotations
@@ -36,8 +39,10 @@ def carve_takes(run: Optional[dict]) -> Optional[str]:
     return f"at least about {_minutes(secs * CARVE_PER_CHECK / 60)} at this size" if secs else None
 
 
-def _line(text: str, action: str, **kw) -> dict:
-    return {"text": text, "status": "info", "action": action, "better": True, **kw}   # not a strength verdict: no study
+def _line(lead: str, cost: str, button: str, action: str, **kw) -> dict:
+    """One offer: what to do, what it costs, and the button for it. Not a strength verdict: no study."""
+    return {"text": f"{lead}: {cost[:1].lower()}{cost[1:]}", "lead": lead, "cost": cost, "button": button,
+            "status": "info", "action": action, "better": True, **kw}
 
 
 def _printed_name(store: DesignStore, pid: str) -> str:
@@ -101,10 +106,66 @@ def _sheet_offers(run: dict, fails: bool) -> list[dict]:
             continue
         t = min(ok)
         said = f"Make the {piece} from {label[t]} instead of {label_now}"
-        out.append(_line(f"{said}: that panel holds then, {_times(worst[t], about=True)} by the plate check."
-                         if fails else f"{said}: still {_times(worst[t], about=True)} by the plate check.",
-                         "use_t", say=said))
+        out.append(_line(said, f"{'That panel holds then' if fails else 'Still'}{',' if fails else ''} "
+                               f"{_times(worst[t], about=True)} by the plate check.", "Try it", "use_t", say=said))
     return out
+
+
+def _seen_from(run: dict) -> Optional[float]:
+    """The wall the check can see at this size, in mm: on the run, or (a run from before it was kept) in its words."""
+    import re
+
+    if run.get("sees_mm"):
+        return run["sees_mm"]
+    m = re.search(r"(?:walls must be at least|sees walls from) ([\d.]+) mm", run.get("thin_said") or "")
+    return float(m.group(1)) if m else None
+
+
+#: beside a one-click Use it: what's quoted is the study's own number, and the rebuilt part's check is the one that counts
+_RECHECK = "Using it re-checks it, and that's the number to go by."
+
+
+def _waiting_carve(name: str, takes: str, why: Optional[str] = None) -> dict:
+    """The carve, offered and off: what it would take, and what it's waiting for."""
+    return _line(f"Carve the {name} where it isn't working", (f"{takes[:1].upper()}{takes[1:]}. " if takes else "")
+                 + (why or "It waits for a check it can trust."), "Carve it", "carve", disabled=True)
+
+
+def _carved_sliver(store: DesignStore, run: dict) -> list[dict]:
+    """A carved part's thin spot is the carve's own: a chat change drops the carve, so the way back is the carve's."""
+    from .answers import _thin_at, _wall
+
+    if not run.get("thinnest_mm"):
+        return []
+    at = _thin_at(run, store.design.display_units == "in")
+    return [_line(f"The thinnest spot is {_wall(run['thinnest_mm'])}{',' + at if at else ''}, from the carve",
+                  "Roll it back, or use an earlier step of the carve: changing it in the chat drops the carve.",
+                  "Roll it back", "use_t", say="roll it back", local=True)]    # needs no Claude
+
+
+def _thin_line(store: DesignStore, run: dict) -> list[dict]:
+    """Walls too thin for the check to see (#159 review: "make the walls 9.2 mm" promised what a real run contradicts).
+    Where the thin spot is a named piece a number sets, how thick to make it, rounded up; otherwise (a printed part's
+    sliver, ``{"at": …}``) where the thin spot is and what to do about it. Never that the next click will settle it."""
+    from . import load_study as L
+    from .answers import _thin_at, _wall
+
+    thin, seen, inches = run.get("thinnest_mm"), _seen_from(run), store.design.display_units == "in"
+    if not thin or not seen:
+        return []
+    enough = L.sees_from(seen)
+    secs = run.get("seconds")
+    then = f"at least about {_minutes(secs * L.FINER_BUDGET / 60)}" if secs else "it can take a while"
+    piece = (run.get("thinnest_where") or {}).get("piece")
+    if piece:
+        return [_line(f"Make the {piece} {_wall(enough)} thick so a finer check can see it",
+                      f"It takes more filament, and then a finer check: {then}.", "Try it", "use_t",
+                      say=f"Make the {piece} at least {enough:g} mm thick so the strength check can see it")]
+    at = f",{_thin_at(run, inches)}" if _thin_at(run, inches) else ""
+    return [_line(f"The thinnest spot is {_wall(thin)}{at}: thicken it or make the openings smaller",
+                  f"It takes more filament. A finer check can see walls from {_wall(enough)}: {then}.", "Try it",
+                  "use_t", say=f"The thinnest spot is {_wall(thin)}{at}: thicken it or make the openings near it smaller, "
+                               f"so that it's at least {enough:g} mm")]
 
 
 def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
@@ -121,17 +182,26 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
         return []
     blocked = p.get("blocked") if "blocked" in p else L.blocked(store, pid)
     run = L.default_check(store, pid)
+    name, takes = _printed_name(store, pid), carve_takes(run) or ""
     if blocked and blocked.get("why") == "already_fails":       # what would make it hold, never lighter
         # on a filled-in shape, or with the front edge not checked, "it holds then" isn't known
         known = run and not p.get("untrusted") and not consistency.bare_edge(store, pid)
-        return _sheet_offers(run, fails=True) if known else []
+        got = _sheet_offers(run, fails=True) if known else []
+        if run and run.get("too_thin") and p.get("printed"):    # a fail it was too coarse to judge: Theo's stool (#159)
+            got += _carved_sliver(store, run) if p.get("carved") else _thin_line(store, run) + [_waiting_carve(name, takes)]
+        return [{**ln, "part": pid} for ln in got]
     if blocked and blocked.get("why") == "unchecked":           # everything else comes from the check
-        return [_line("Check it holds first: what would make it better comes from that.", "load")]
+        return [_line("Check it holds first", "What would make it better comes from that.", "Check it holds", "load",
+                      part=pid)]
     settled = _settled_check(store, p, run)
     results, invites = [], []
     if settled:
         results += _sheet_offers(run, fails=False)
-    name = _printed_name(store, pid)
+    if (blocked or {}).get("why") == "too_thin" and p.get("printed"):
+        results += _carved_sliver(store, run) if p.get("carved") else _thin_line(store, run)
+    if p.get("printed") and not p.get("carved") and (blocked or {}).get("carve"):
+        invites.append(_waiting_carve(name, takes, None if blocked["why"] == "too_thin"
+                                      else f"{blocked['carve'][:1].upper()}{blocked['carve'][1:]}."))
     if p.get("printed") and not p.get("carved") and not (blocked or {}).get("carve"):
         mine = [r for r in state.get("carve_runs") or [] if r["part"] == pid and r.get("version") == p["version"]]
         done = next((r for r in mine if r.get("status") == "done"), None)
@@ -140,12 +210,14 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
             v = verdicts.carve_step(best, p.get("untrusted"), done) if best else None
             if settled and best and best.get("saved_g") and v and v["counts_as_pass"]:
                 results.append(_line(
-                    f"Carve the {name} where it isn't working: {best['removed']:.0%} {K.share(done)} carved away, "
-                    f"{best['saved_g']:,} g less filament, still {_times(best['safety'], about=True)}.", "carve_use",
-                    run=done["id"], station=best["index"]))
+                    f"Carve the {name} where it isn't working",
+                    f"{best['removed']:.0%} {K.share(done)} carved away, {best['saved_g']:,} g less filament, still "
+                    f"{_times(best['safety'], about=True)} by the carve's own check. {_RECHECK}", "Use it", "carve_use",
+                    run=done["id"],
+                    station=best["index"]))
         elif not any(r.get("status") in (None, "running") for r in mine):
-            invites.append(_line(f"Carve the {name} where it isn't working, to use less filament: it takes "
-                                 f"{carve_takes(run) or 'a while'}.", "carve"))
+            invites.append(_line(f"Carve the {name} where it isn't working, to use less filament",
+                                 f"It takes {takes or 'a while'}.", "Carve it", "carve"))
     # a printed part is carved: it has no Lighten panel, and the study refuses walls the carve can't see either
     if p.get("sheets") and not p.get("printed") and not (blocked or {}).get("lighten") and not p.get("framed"):
         mine = [r for r in state.get("lighten_runs") or [] if r["part"] == pid and r.get("version") == p["version"]]
@@ -156,9 +228,10 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
             best = max(ok, key=lambda st: st["saved_lb"], default=None)
             if settled and best:
                 results.append(_line(
-                    f"Lighten it with holes where the wood isn't working: {best['saved_lb']:g} lb lighter, still "
-                    f"{_times(best['safety'], about=True)}.", "lighten_use", run=done["id"], station=best["index"]))
+                    "Lighten it with holes where the wood isn't working",
+                    f"{best['saved_lb']:g} lb lighter, still {_times(best['safety'], about=True)} by the lightening's own "
+                    f"check. {_RECHECK}", "Use it", "lighten_use", run=done["id"], station=best["index"]))
         else:
-            invites.append(_line("Lighten it with holes where the wood isn't working: it takes a few minutes.",
-                                 "lighten"))
-    return results + invites
+            invites.append(_line("Lighten it with holes where the wood isn't working", "It takes a few minutes.",
+                                 "Lighten it", "lighten"))
+    return [{**ln, "part": pid} for ln in results + invites]

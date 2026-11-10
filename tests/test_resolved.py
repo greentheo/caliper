@@ -187,6 +187,7 @@ def test_a_spool_hung_on_a_thin_neck_never_reads_holds(tmp_path, monkeypatch):
     assert lines and all(ln["status"] != "ok" for ln in lines), lines
     assert not [ln for ln in lines if ln["text"].startswith(("Holds", "✓"))], lines
     assert rec["thinnest_mm"] == pytest.approx(0.6, abs=0.05) and rec["too_thin"]
+    assert rec["sees_mm"] > rec["thinnest_mm"]                                  # the wall the check could see (#92)
 
 
 @pytest.mark.parametrize("mm,inches,said", [
