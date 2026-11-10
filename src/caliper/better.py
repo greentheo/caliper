@@ -166,8 +166,8 @@ def _thin_line(store: DesignStore, run: dict) -> list[dict]:
     return [_line(f"The thinnest spot is {_wall(thin)}{at}: thicken it or change the openings",
                   f"It takes more filament. If the numbers don't move it, it's how the openings are cut: that's a change to ask "
                   f"for in the chat. A finer check can see walls from {_wall(enough)}: {then}.", "Try it",
-                  "use_t", say=f"The thinnest spot is {_wall(thin)}{at}: change how the openings near it are cut so they leave no "
-                               f"thin sliver, so that it's at least {enough:g} mm")]
+                  "use_t", say=f"The thinnest spot is {_wall(thin)}{at}: thicken it, or if it's beside an opening, change how the "
+                               f"opening is cut so it leaves no sliver, so that it's at least {enough:g} mm")]
 
 
 def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:

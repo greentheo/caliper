@@ -242,6 +242,7 @@ def test_a_thin_spot_that_isn_t_a_piece_says_where_and_promises_nothing(tmp_path
     assert spot["cost"] == ("It takes more filament. If the numbers don't move it, it's how the openings are cut: that's a change to "
                             "ask for in the chat. A finer check can see walls from 9.3 mm: at least about 8 min.")
     assert "around z 409 mm" in spot["say"] and "9.3 mm" in spot["say"] and spot["action"] == "use_t"
+    assert "thicken it, or if it's beside an opening, change how the opening is cut" in spot["say"]    # a plain wall has no openings
     assert carve_it["disabled"]
 
 
