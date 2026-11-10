@@ -812,7 +812,7 @@ $('newBtn').onclick = startNew;
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
-  if (first) S.buildBubble = null;
+  if (first) { S.buildBubble = null; clearPick(); }    // a pick is on this design's part: never posted to another (#196 review)
   location.hash = encodeURIComponent(slug);
   if (first) showLoading(slug);
   let got;

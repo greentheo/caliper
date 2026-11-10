@@ -23,6 +23,7 @@ const log = [];
 const render = () => log.push(['render', S.design && S.design.slug]);
 const syncParts = async (d) => log.push(['sync', d.slug]);
 const clearStation = () => {};
+const clearPick = () => {};
 const showLoading = (slug) => { S.opening = slug; S.design = null; log.push(['loading', slug]); };
 const doneLoading = () => { S.opening = null; };
 const failed = []; const loadFailed = (slug, e) => failed.push([slug, e.message]);

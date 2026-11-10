@@ -136,16 +136,23 @@ def test_the_page_draws_the_bubble_from_what_was_shown():
 
 # --- a pick across a rebuild (#196) -----------------------------------------------------------------------------------------
 _PICKED = _CHOOSE.replace("const facePicked = () => null;", "const facePicked = () => ({ id: 'f7', said: 'face: the cone', local: [0, 0, 1], verts: [], tris: [] });") + """
-class Geom { setAttribute() {} setIndex() {} }
-const THREE = { BufferGeometry: Geom, Float32BufferAttribute: class {} };
+class Geom { setAttribute() {} setIndex() {} translate() { return this; } }
+class Vec { constructor() {} }
+const THREE = { BufferGeometry: Geom, Float32BufferAttribute: class {}, SphereGeometry: Geom, TubeGeometry: Geom, Vector3: Vec, CatmullRomCurve3: class {} };
 let hint = ''; const drawPick = () => {};
+stub.position = { distanceTo: () => 10 };
+const edgePicked = () => ({ id: 'e3', said: 'edge: the circle', local: [0, 0, 2], centre: [0, 0, 0], points: [[0, 0, 0], [1, 1, 1]] });
+const len = (v) => `${v} mm`;
 """
 
 
-def _picked(body):
-    head = """S.design.parts[0].version = 9; PICK.mode = 'face'; globalThis.features = async () => ({ solidMesh: false, version: 9 });
-              await choose({}, HIT);\n"""
-    return _page(head + body, extra=("clearPick", "choose", "pickPosted", "dropOldPick"), more=_PICKED.replace("const pickHint = () => {};", "const pickHint = (t) => { hint = t; };"))
+def _picked(body, mode="face", solid=False):
+    head = f"""S.design.parts[0].version = 9; PICK.mode = '{mode}'; globalThis.features = async () => ({{ solidMesh: {str(solid).lower()}, version: 9 }});
+              await choose({{}}, HIT);\n"""
+    src = open(JS).read()
+    point = "".join(src[src.index(f"const {n} = "):src.index("\n", src.index(f"const {n} = ")) + 1] for n in ("pointSaid", "pointTold"))
+    return _page(head + body, extra=("clearPick", "choose", "pickPosted", "dropOldPick"),
+                 more=_PICKED.replace("const pickHint = () => {};", "const pickHint = (t) => { hint = t; };") + point)
 
 
 def test_a_pick_carries_the_version_it_was_made_on():
@@ -173,4 +180,42 @@ def test_a_part_that_s_gone_takes_its_pick_with_it():
 
 def test_every_redraw_looks():
     assert "dropOldPick();" in _fn(open(JS).read(), "render")
+
+
+def test_an_edge_carries_its_version_too():
+    assert _picked("S.design.parts[0].version = 10; return { p: pickPosted('round it') };", mode="edge")["p"] == {
+        "kind": "edge", "id": "e3", "version": 9, "text": "round it"}
+
+
+def test_a_point_carries_its_version_too():
+    got = _picked("return { v: S.pick.version, kind: S.pick.kind, p: pickPosted('x') };", mode="face", solid=True)
+    assert got == {"v": 9, "kind": "point", "p": None}             # a point has no id: nothing for the landing check to read
+
+
+def test_a_rebuild_drops_an_edge_and_a_point_too():
+    for mode, solid in (("edge", False), ("face", True)):
+        assert _picked("S.design.parts[0].version = 10; dropOldPick(); return { pick: S.pick };", mode=mode, solid=solid) == {"pick": None}
+
+
+_OPEN = """
+const showLoading = () => {}; const doneLoading = () => {}; const render = () => {}; const syncParts = async () => {}; const loadFailed = () => {};
+const location = {}; const api = async () => ({ parts: [{ id: 'stool', version: 9 }] });
+"""
+
+
+def _opened(body):
+    src = open(JS).read()
+    point = "".join(src[src.index(f"const {n} = "):src.index("\n", src.index(f"const {n} = ")) + 1] for n in ("pointSaid", "pointTold"))
+    head = """S.design.parts[0].version = 9; PICK.mode = 'face'; globalThis.features = async () => ({ solidMesh: false, version: 9 });
+              await choose({}, HIT);\n"""
+    return _page(head + body, extra=("clearPick", "choose", "pickPosted", "dropOldPick", "openDesign"),
+                 more=_PICKED.replace("const pickHint = () => {};", "const pickHint = (t) => { hint = t; };") + point + _OPEN)
+
+
+def test_opening_another_design_drops_the_pick_with_no_rebuilt_line():
+    assert _opened("await openDesign('another'); return { pick: S.pick, hint };") == {"pick": None, "hint": ""}
+
+
+def test_reopening_the_same_design_keeps_it():
+    assert _opened("await openDesign('x'); return { id: S.pick.id, hint };") == {"id": "f7", "hint": ""}
 
