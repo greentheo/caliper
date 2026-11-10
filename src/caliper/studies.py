@@ -21,6 +21,7 @@ import re
 from typing import Optional
 
 from . import verdicts
+from .answers import safety_num
 
 #: What says a design moves through air, or air moves past it: a vehicle, a road speed, wind.
 AIR_WORDS = re.compile(r"\b(cars?|trucks?|vans?|vehicles?|trailers?|hitch\w*|tow(?:s|ed|ing)?|roof ?racks?|"
@@ -101,8 +102,8 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
         v = verdicts.run(r, edge=edge)          # one verdict (CALI-112): a ✗ stays a ✗, then not trusted, …
         if v["kind"] == "untrusted":            # a block's number, not the part's: no "holds" (CALI-96)
             return (f"not trusted: it ran on a filled-in shape"
-                    + (f" (the block read {round(r['safety'], 1):g}x)" if r.get("safety") is not None else "")), None
-        what = (f"{worst['name']}: {round(worst['safety'], 1):g}x" if worst.get("safety") is not None
+                    + (f" (the block read {safety_num(r['safety'], r.get('min_safety'))}x)" if r.get("safety") is not None else "")), None
+        what = (f"{worst['name']}: {safety_num(worst['safety'], r.get('min_safety'))}x" if worst.get("safety") is not None
                 else worst["name"])
         unjoined = [x for c, x in zip(cases, v["cases"])
                     if x["kind"] == "unchecked" and (c.get("fea") or {}).get("supported") is False]
@@ -117,7 +118,7 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
         if coarse:                              # a ✓ on an FEA too coarse to see its walls is no ✓ (CALI-97)
             word = "not checked: its walls are too thin for the voxels" if coarse[0][1]["kind"] == "unchecked" else \
                 "not resolved yet: too coarse to see its walls"
-            return f"{word} (the FEA read {round(coarse[0][0]['safety'], 1):g}x)", None
+            return f"{word} (the FEA read {safety_num(coarse[0][0]['safety'], r.get('min_safety'))}x)", None
         if v["kind"] == "fails":
             if r.get("filled"):                 # a ✗ on the block stays a ✗: the part as built is likely weaker
                 what += ", on a filled-in shape: the part as built is likely weaker"
@@ -126,6 +127,8 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
             return f"doesn't hold — weakest {what} (needs {r.get('min_safety', 2):g}x)", False
         if v["kind"] == "holds":
             return f"holds — weakest {what}", True
+        if v["kind"] == "close":                # a pass near its limit: amber, and says so (CALI-88, #64 item 2)
+            return f"holds, close to the line — weakest {what} (needs {r.get('min_safety', 2):g}x)", True
         if v["kind"] == "edge":                 # the middle only: the front edge, where people stand, isn't checked
             return f"middle only — weakest {what}; the front edge isn't checked", None
         return f"{v['word']} — weakest {what}", None
@@ -143,7 +146,7 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
         if best is None or not best["saved_lb"]:
             return "nothing lighter holds", False
         out = next((x for x in st if verdicts.station(x)["kind"] == "fails"), None)
-        return (f"up to {best['saved_lb']:g} lb lighter, still {round(best['safety'], 1):g}x"
+        return (f"up to {best['saved_lb']:g} lb lighter, still {safety_num(best['safety'], r.get('min_safety'))}x"
                 + (f"; runs out at step {out['index']}" if out else "")), True
     if kind == "carve" and r.get("status") == "failed":    # it stopped on an error, and says which (CALI-103)
         return f"failed after {len(r.get('stations') or [])} of {r.get('steps', '?')} steps: {r.get('error', '')}", False
@@ -162,7 +165,7 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
         from . import carve
 
         carved = (f"{best['removed']:.0%} {carve.share(r)} carved away, {best['saved_g']} g less filament, still "
-                  f"{round(best['safety'], 1):g}x" if best and best["saved_g"] else "")
+                  f"{safety_num(best['safety'], r.get('min_safety'))}x" if best and best["saved_g"] else "")
         first = st[0] if st else {}
         if first and verdicts.station(first, whole=True)["kind"] == "fails":
             # the part fails where carving can't reach: that's the verdict, never a green line (CALI-86)

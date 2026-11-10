@@ -256,21 +256,21 @@ def _strength_page(strength: dict, parts: Optional[list] = None) -> dict:
     """The kid's book's last page, from each case's one verdict (CALI-112): a promise only from a case that holds,
     nothing over it; any other case, no standing on it. Every part the book covers must hold: one with no check at
     the released version (none run, an error, no loads()) is "not checked", so never "your turn" (#132 review)."""
-    from . import answers
+    from . import answers, verdicts
 
     cases = [c for cs in strength.values() for c in cs]
     kinds = [(c.get("verdict") or {}).get("kind", "waiting") for c in cases]
     kinds += ["waiting" for pid in (parts or []) if not strength.get(pid)]      # a part left out: not checked
     if not kinds:
         kinds = ["waiting"]                              # nothing checked at all: not checked
-    held = [f"It should hold {c['name'].lower()}, {answers._times(c['safety'])}." for c, k in zip(cases, kinds)
-            if k == "holds"]
+    held = [f"It should hold {c['name'].lower()}, {answers.over(c, c.get('min_safety'))}." for c, k in zip(cases, kinds)
+            if k in verdicts.PASSES]
     if "fails" in kinds:
         # it failed its check: not a kid's to try at all (rule 6), and not "it should hold" (CALI-112's audit)
         return {"title": "Don't stand on it yet", "img": "kids/finished.png",
                 "say": "Don't stand on it yet. It isn't strong enough yet, so a grown-up makes it stronger first and "
                        "checks it again, before anyone stands on it.", "grownup": True}
-    if any(k != "holds" for k in kinds):
+    if any(k not in verdicts.PASSES for k in kinds):
         # its strength hasn't been checked on the stool as built: no standing on it at all (#96 rework, item 4;
         # CALI-110: nor where the check was too coarse to see its walls)
         return {"title": "Don't stand on it yet", "img": "kids/finished.png",

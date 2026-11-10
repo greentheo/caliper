@@ -107,7 +107,8 @@ def test_the_beam_check_s_number_takes_its_colour_and_word_from_its_verdict(tmp_
     assert pl["verdict"]["kind"] == "fails" and pl["verdict"] == verdicts.meets(1.7, 2)
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     fn = re.search(r"^function loadCase\(.*?^}\n", src, re.S | re.M).group(0)
-    assert "const plNum = (n) => `<b style=\"color:var(--${verdictTone(pl.verdict)})\">${sx(n)}" in fn
+    # its number against the run's own limit, by the one formatter (#208 review)
+    assert "const plNum = (n) => `<b style=\"color:var(--${verdictTone(pl.verdict)})\">${sx(n, run.min_safety)}" in fn
     assert fn.count("${plNum(pl.safety_across)}") == 3           # the beam, the ring and the rectangle (#139 merged)
 
 
@@ -207,7 +208,7 @@ def test_an_unsettled_plate_number_says_its_word():
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     line = re.search(r"^\s*const plNum = .*;$", src, re.M).group(0).strip()
     out = _run(_page([], consts=["esc", "verdictTone", "settled"], extra=(
-        "function sx(v) { return v + 'x'; }\nlet pl;\n" + line + "\n"
+        "function sx(v, need) { return v + 'x'; }\nconst run = {min_safety: 2};\nlet pl;\n" + line + "\n"
         "pl = {verdict: {kind: 'unresolved', status: 'warn', word: 'not resolved'}}; const a = plNum(3.0);\n"
         "pl = {verdict: {kind: 'holds', status: 'ok', word: 'holds'}}; const b = plNum(3.0);\n"
         "pl = {verdict: {kind: 'fails', status: 'bad', word: \"doesn't hold\"}}; const c = plNum(1.2);\n"

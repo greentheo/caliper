@@ -138,7 +138,7 @@ def test_a_carve_whose_whole_part_fails_never_says_the_lightest_that_holds(tmp_p
     store = _store(tmp_path, goals="written_by: caliper\nchecks: []\n")
     monkeypatch.setattr(carve, "study", lambda *a, **k: {"stations": [CARVED], "best": 2, "weak": "", "share": "printed"})
     got = chat.carve_part(store, "tube")
-    assert not got.ok and "The lightest that holds" not in got.reply and "the whole part is then 0.6x" in got.reply
+    assert not got.ok and "The lightest that holds" not in got.reply and "the whole part is then 0.6 times over" in got.reply   # as the cards say it (#64 item 16)
 
 
 def test_a_lightening_estimate_is_never_the_lightest_that_holds():
