@@ -252,8 +252,12 @@ def _on_its_face(mesh, pieces: list[dict], tol: float) -> AssertionResult:
             n = np.asarray(C.polygon(poly.tolist())[2], float)
             out = -side * n / np.linalg.norm(n)
             proud = _proud(mesh, pts, out, pc["thickness"] + tol)
+            if len(pc["polys"]) > 1:                    # a facet is a chord of the curve: judged at its edges, where it's on it
+                proud = np.full_like(proud, np.percentile(proud, 10))
             limit = max(tol, 0.1 * pc["thickness"])
-            over = proud > limit
+            # the mistake's signature: the solid ends inside the panel's own thickness. Solid running on past it is a block
+            # the panel is set against or between, and an outline on either face of that is right (#170 review)
+            over = (proud > limit) & (proud < 0.95 * pc["thickness"])
             if over.any():
                 over[over] = ~_in_a_piece(pts[over] + out[None] * proud[over, None] / 2, pieces, pc, 0.5)
             if over.mean() >= 0.5:
@@ -274,6 +278,18 @@ def _on_its_face(mesh, pieces: list[dict], tol: float) -> AssertionResult:
         status="pass" if not bad else "fail", passed=not bad, actual=round(share, 3), margin=round(share - 1.0, 3),
         detail="; ".join(bad[:6]) + (": an outline is a face of the panel, not its mid-plane. Until it's moved, what's left "
                                      "over the panel is counted as the printed part" if bad else ""))
+
+
+def remedy(detail: str) -> str:
+    """What to say for a sheet off its face: the shape is right and the declared piece is wrong, so it's the outline that
+    moves (#170 review: "fix its shape to match its pieces" would change a correct seat to match a wrong outline)."""
+    import re
+
+    m = re.match(r"(.+?): declared [\d.]+ mm (below|above|off) where", detail)
+    if not m:
+        return "move each sheet's outline onto its face"
+    where = {"below": "up to its top face", "above": "down to its underside", "off": "onto its face"}[m.group(2)]
+    return f"move the {m.group(1)}'s outline {where}"
 
 
 def _covers(mesh, pieces: list[dict], tol: float) -> AssertionResult:

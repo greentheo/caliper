@@ -134,3 +134,75 @@ def test_a_columns_outward_run_stops_at_the_surface():
     mesh = trimesh.creation.box((100, 100, 10))
     got = consistency._proud(mesh, np.array([[0.0, 0.0, 0.0]]), np.array([0.0, 0.0, 1.0]), 12.0)
     assert got[0] == pytest.approx(5.0, abs=0.6)
+
+
+# --- #170 review ------------------------------------------------------------------------------------------------------
+def _blocks(thick_below=40.0, thick_above=40.0):
+    """A panel between two printed blocks, or set against one: solid runs on past the panel's faces."""
+    solid = trimesh.creation.box((300, 300, thick_below + T + thick_above))
+    solid.apply_translation((0, 0, (thick_below + T + thick_above) / 2 - thick_below))
+    return solid
+
+
+@pytest.mark.parametrize("z", [0.0, T])
+def test_a_panel_between_printed_blocks_isn_t_flagged_on_either_face(z):
+    r = _result(_declared(z), _blocks())
+    assert r.passed, r.detail
+
+
+def test_an_outline_on_its_joint_face_with_a_block_on_it_isn_t_flagged():
+    assert _result(_declared(T), _blocks(thick_below=0.0, thick_above=T)).passed
+
+
+def _ring(r_out, wall=6.0, h=100.0, sections=128):
+    return trimesh.creation.annulus(r_out - wall, r_out, h, sections=sections)
+
+
+def _facets(r, n, h=100.0):
+    at = [(r * np.cos(2 * np.pi * i / n), r * np.sin(2 * np.pi * i / n)) for i in range(n + 1)]
+    return [[(at[i][0], at[i][1], -h / 2 + 2), (at[i + 1][0], at[i + 1][1], -h / 2 + 2),
+             (at[i + 1][0], at[i + 1][1], h / 2 - 2), (at[i][0], at[i][1], h / 2 - 2)] for i in range(n)]
+
+
+def _bent(r, n=12):
+    return {"construction": [{"name": "skin", "kind": "sheet", "material": "plywood", "thickness": 6.0, "facets": _facets(r, n)}]}
+
+
+@pytest.mark.parametrize("n", [12, 16])
+def test_coarse_facets_on_a_bent_panel_s_outer_face_aren_t_flagged(n):
+    """A facet is a chord: 5 mm inside the curve at its middle, on it at its edges."""
+    r = _result(_bent(150.0, n), _ring(150.0))
+    assert r.passed, r.detail
+
+
+def test_a_bent_panel_declared_at_mid_thickness_is_still_caught():
+    r = _result(_bent(146.0, 48), _ring(150.0, wall=8.0))
+    assert not r.passed and "skin: declared" in r.detail
+
+
+def test_a_minority_overhang_isn_t_flagged():
+    """A raised step on a third of the panel: under half of it has solid left over."""
+    seat = trimesh.creation.box((300, 300, T))
+    seat.apply_translation((0, 0, 100 - T / 2))
+    step = trimesh.creation.box((100, 300, 8))
+    step.apply_translation((-100, 0, 104))
+    assert _result(_declared(100), trimesh.util.concatenate([seat, step])).passed
+
+
+@pytest.mark.parametrize("detail,said", [
+    ("seat top: declared 9.5 mm below where the part has it: an outline…", "move the seat top's outline up to its top face"),
+    ("seat top: declared 9.5 mm above where the part has it: …", "move the seat top's outline down to its underside"),
+    ("side: declared 3.0 mm off where the part has it: …", "move the side's outline onto its face"),
+    ("something else", "move each sheet's outline onto its face"),
+])
+def test_what_to_say_moves_the_outline_not_the_shape(detail, said):
+    assert consistency.remedy(detail) == said
+
+
+def test_the_card_points_at_the_declared_piece(tmp_path):
+    import os
+
+    from caliper import answers
+
+    src = open(os.path.join(os.path.dirname(answers.__file__), "answers.py")).read()
+    assert 'consistency.remedy(off[0].detail) if off[0].id == "construction_on_its_face"' in src
