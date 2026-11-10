@@ -45,15 +45,23 @@ def _times(x: float, about: bool = False, need: Optional[float] = None) -> str:
     fail further under is cut to one place. Nothing under 10 rounds up to "more than 10" (CALI-88, #64 item 1)."""
     if x >= 10:
         return "more than 10 times over"
+    return ("about " if about else "") + f"{safety_num(x, need)} times over"
+
+
+def safety_num(x: float, need: Optional[float] = None) -> str:
+    """A safety factor's number, as every reader says it (#208 review: one formatter, server and page; the page's
+    ``safetyNum`` is the same rule): within 10% of ``need`` either way, two places, cut; a fail further under, one
+    place, cut (1.67 is 1.6, not 1.7); else one place, rounded, but never up to 10. So no reader rounds a fail up
+    to its limit: 1.995 against 2 is 1.99, 0.999 against 1 is 0.99."""
     if need is not None and need / NEAR_LIMIT < x < need * NEAR_LIMIT:
         n = math.floor(x * 100 + 1e-9) / 100           # near the line: the places that tell it from the line
     elif need is not None and x < need:
-        n = math.floor(x * 10 + 1e-9) / 10             # a fail well under: one place, cut (1.67 is 1.6, not 1.7)
+        n = math.floor(x * 10 + 1e-9) / 10             # a fail well under: one place, cut
     else:
-        n = round(x, 1)
-        if n >= 10:
+        n = math.floor(x * 10 + 0.5) / 10                 # half up, as the page's Math.floor: the same float ops
+        if n >= 10 and x < 10:
             n = math.floor(x * 10) / 10
-    return ("about " if about else "") + f"{n:g} times over"
+    return f"{n:g}"
 
 
 def over(c: dict, need: Optional[float] = None, about: bool = False) -> str:
@@ -61,11 +69,16 @@ def over(c: dict, need: Optional[float] = None, about: bool = False) -> str:
     factor, and, where the factor isn't 1, what that is: "3.1 times over 400 lb (200 lb, twice over)". So a reader
     who multiplies 3.1 by Dad's 200 lb isn't misled: the card, the kid's book, the trial panel and the build book
     quote the same number against the same thing. (Against the load itself, 6.2 here, is the owner's to switch to.)"""
-    said = _times(c["safety"], about, need)
+    return _times(c["safety"], about, need) + against(c)
+
+
+def against(c: dict, also: str = "") -> str:
+    """What "N times over" is against, where a case's factor isn't 1: " 400 lb (200 lb, twice over)", with ``also``
+    inside the brackets ("; it needs 2, assumed"). The design card says it as the part card does (#208 review)."""
     lb, factor = c.get("lb"), c.get("factor") or 1.0
-    if lb and factor != 1:
-        said += f" {lb * factor:,.0f} lb ({lb:g} lb, {'twice' if factor == 2 else f'{factor:g} times'} over)"
-    return said
+    if not lb or factor == 1:
+        return f" ({also.lstrip('; ')})" if also else ""
+    return f" {lb * factor:,.0f} lb ({lb:g} lb, {'twice' if factor == 2 else f'{factor:g} times'} over{also})"
 
 
 def _sentence(text: str, most: int = 120) -> str:
@@ -243,7 +256,7 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
             text += f" By hand, the {pl['piece']} on its own{how}: {_times(pl['safety_across'], need=need)}."
     else:                                            # any other kind: its word, never a ✓ (CALI-112)
         text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {_times(c['safety'], rough, need)}."
-    return _line(text + older, v["status"], study="load",
+    return _line(text + older, v["status"], study="load", **({"close": True} if v["kind"] == "close" else {}),
                  **({"rough": L.ROUGH} if rough else {}))
 
 
@@ -329,7 +342,9 @@ def rests_on_model(metric: str) -> bool:
 def _card(key: str, q: str, lines: list[dict], hint: str = "") -> dict:
     card = {"key": key, "q": q, "status": _worst(lines) if lines else "info", "lines": lines, "hint": hint}
     # any verdict resting on a model (a strength or frame study, or the scorecard's checks) says what it promises
-    if any((ln.get("study") in ("load", "frame") or ln.get("model")) and ln["status"] in ("ok", "bad") for ln in lines):
+    # (a close pass is amber, and a verdict all the same: #208 review)
+    if any((ln.get("study") in ("load", "frame") or ln.get("model")) and (ln["status"] in ("ok", "bad") or ln.get("close"))
+           for ln in lines):
         card["promise"] = PROMISE + "".join(f" {r}" for r in dict.fromkeys(ln["rough"] for ln in lines if ln.get("rough")))
     return card
 
@@ -642,6 +657,11 @@ def measured(store: DesignStore, state: dict) -> dict:
         out["strength.edge"] = consistency.MIDDLE_ONLY[0].upper() + consistency.MIDDLE_ONLY[1:] + "."
     if safeties:
         out["strength.safety"] = min(safeties)
+        # the case that number is, for what it's against (#208 review: the design card as the part card says it)
+        worst = min(((r, c) for r, c in cases if c.get("safety") is not None
+                     and (c.get("fea") or {}).get("supported") is not False), key=lambda rc: rc[1]["safety"], default=None)
+        if worst is not None and abs(worst[1]["safety"] - out["strength.safety"]) < 1e-9:
+            out["strength.case"] = {"lb": worst[1].get("lb"), "factor": worst[1].get("factor")}
     if breaks:
         if "strength.no_breaks" not in out:
             out["strength.breaks_lb"] = min(breaks)
@@ -849,11 +869,12 @@ def held_to(state: dict, now: dict) -> list[dict]:
         mark = '✗' if failed else '✓' if verdict['kind'] == 'holds' else '!'
         if c["metric"] == "strength.safety" and isinstance(c.get("limit"), (int, float)):
             # what it does, then what it needs: "2 times over (assumed): 3.11x" read as holding 2 times over (#64 item 15)
-            said = f"{mark} {_without_need(label)}, {num} (it needs {c['limit']:g}{', assumed' if assumed else ''})"
+            need = f"; it needs {c['limit']:g}{', assumed' if assumed else ''}"
+            said = f"{mark} {_without_need(label)}, {num}" + against(now.get("strength.case") or {}, need)
         else:
             said = f"{mark} {label}{assumed}: {num}" + _against(c, failed, units.get(c['metric'], ''))
         out.append(_line(said + later,
-                         "warn" if late else verdict["status"],
+                         "warn" if late else verdict["status"], **({"close": True} if verdict["kind"] == "close" else {}),
                          study="load" if c["metric"].startswith("strength") else None,
                          model=rests_on_model(c["metric"])))
     return out

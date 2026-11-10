@@ -74,7 +74,8 @@ def test_the_design_cards_strength_line_reads_as_the_parts_does(tmp_path):
 
     store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
     lines = [ln["text"] for c in answers.answers(store, design_api.design_state(store)) for ln in c["lines"]]
-    assert "✓ Holds Dad (200 lb), 3.1 times over (it needs 2, assumed)." in lines, lines
+    # and what N is against, as the part card says it (#208 review)
+    assert "✓ Holds Dad (200 lb), 3.1 times over 400 lb (200 lb, twice over; it needs 2, assumed)." in lines, lines
     assert not [t for t in lines if "2 times over (assumed)" in t], lines
 
 
@@ -137,3 +138,88 @@ def test_the_card_the_kids_book_the_trial_panel_and_the_build_book_say_the_same(
     assert trials.predict(store, "step_stool")["over"] == said
     (c,) = strength["step_stool"]
     assert release._safety_cell(c)[0] == "3.1x" and (c["lb"], c["factor"]) == (200, 2)   # its row says "200 lb × 2"
+
+
+
+# --- #208 review: one formatter for a safety factor, every reader, server and page ---------------------------------
+
+FORMATTED = [(1.995, 2, "1.99"), (0.999, 1, "0.99"), (1.96, 2, "1.96")]
+
+
+def _js(script):
+    import json
+    import os
+    import re
+    import subprocess
+
+    from .test_carve_click import _node
+
+    src = open(os.path.join(os.path.dirname(answers.__file__), "web", "static", "design.js")).read()
+    fns = (re.search(r"^function safetyNum\(.*?^}\n", src, re.S | re.M).group(0)
+           + re.search(r"^const sx = .*$", src, re.M).group(0) + "\n"
+           + re.search(r"^function scoreNum\(.*?^}\n", src, re.S | re.M).group(0))
+    out = subprocess.run([_node(), "-e", "const esc = (s) => String(s);\n" + fns + script], capture_output=True,
+                         text=True, timeout=30, check=True).stdout
+    return json.loads(out)
+
+
+@pytest.mark.parametrize("x, need, said", FORMATTED)
+def test_every_reader_says_a_safety_the_same_and_never_up_to_its_limit(x, need, said):
+    from caliper import release, studies
+
+    assert answers.safety_num(x, need) == said
+    run = _run(x, need)
+    assert f": {said}x" in studies._headline("load", run)[0], studies._headline("load", run)
+    case = {"safety": x, "min_safety": need, "breaks_lb": None, "verdict": {"kind": "fails"}}
+    assert release._safety_cell(case)[0] == f"{said}x"
+    coarse = {**case, "verdict": {"kind": "fails", "coarse": True}}
+    assert release._safety_cell(coarse)[0].startswith(f"about {said}x, not settled")
+    page = _js(f"console.log(JSON.stringify([sx({x}, {need}), scoreNum({x}, '×', {need})]));")
+    assert page == [f"{said}x", f"{said} ×"], page
+
+
+def test_the_page_and_the_server_say_every_safety_alike():
+    xs = [round(0.05 * k + 0.001 * (k % 7), 3) for k in range(1, 240)] + [1.995, 0.999, 2.25, 9.96, 10.0, 3.15]
+    needs = [1, 1.5, 2, None]
+    server = [[answers.safety_num(x, n) for x in xs] for n in needs]
+    page = _js(f"const xs = {xs}; console.log(JSON.stringify([1, 1.5, 2, null].map((n) => xs.map((x) => safetyNum(x, n)))));")
+    assert page == server
+
+
+# --- #208 review: close, pinned in each reader ----------------------------------------------------------------------
+
+def test_close_is_settled_and_a_pass_in_the_verdict_tables():
+    assert "close" in verdicts.SETTLED and "close" in verdicts.PASSES and verdicts.STATUS["close"] == "pass"
+    assert verdicts.near(2.0, 2.0) and verdicts.meets(2.0, 2.0)["kind"] == "close"     # exactly the limit is amber
+
+
+def test_a_close_pass_keeps_its_number_in_the_build_book():
+    from caliper import release
+
+    case = {"safety": 2.4, "min_safety": 2.0, "breaks_lb": 960, "verdict": verdicts.meets(2.4, 2.0)}
+    assert release._safety_cell(case) == ("2.4x", "about 960 lb")
+
+
+def test_a_close_pass_lets_a_kid_stand_on_it():
+    from caliper import kidbook
+
+    page = kidbook._strength_page({"p": [{"name": "Dad stepping up", "safety": 2.4, "lb": 200, "factor": 2,
+                                          "min_safety": 2.0, "verdict": verdicts.meets(2.4, 2.0)}]}, ["p"])
+    assert page["title"] == "Test it" and "It should hold dad stepping up, 2.4 times over" in page["say"], page
+
+
+def test_a_close_pass_is_a_settled_check_for_make_it_better(monkeypatch):
+    from caliper import better, consistency
+
+    monkeypatch.setattr(consistency, "bare_edge", lambda store, pid: None)
+    run = {**_run(2.4), "version": 1}
+    assert verdicts.run(run)["kind"] == "close"
+    assert better._settled_check(None, {"id": "p", "version": 1, "untrusted": None}, run)
+
+
+def test_a_close_pass_still_carries_the_promise():
+    """#208 review: a close pass is amber (warn), and the card only said its promise beside an ok or bad line."""
+    run = _run(2.4)
+    line = answers._case_line("stool", run, run["cases"][0], None, False, True)
+    card = answers._card("work", "Will it work?", [line])
+    assert line["status"] == "warn" and card.get("promise") == answers.PROMISE

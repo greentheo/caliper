@@ -1947,8 +1947,9 @@ function scoreMark(c, stale, when) {
 // a goal's own limit beside its number (#137 item 5): "13.1 lb (cap 10 lb)"
 // a scorecard number as the panel says it, at module level: goalLimit uses it too (#139 review: it called scoreView's
 // own num, so a goal with a number threw "num is not defined" and blanked the inspector)
-function scoreNum(v, u) {
+function scoreNum(v, u, need) {
   if (v == null) return '—';
+  if (typeof v === 'number' && (u === '×' || u === 'x')) return `${safetyNum(v, need)}${u ? ' ' + esc(u) : ''}`;   // (#208 review)
   const n = typeof v === 'number' ? (Math.abs(v) >= 100 ? Math.round(v).toLocaleString() : `${+v.toFixed(2)}`) : esc(String(v));
   return u === '$' ? `$${n}` : `${n}${u ? ' ' + esc(u) : ''}`;
 }
@@ -1987,7 +1988,7 @@ function scoreView(d) {
       ${stale ? '<span class="badge bad">a part has changed since</span>' : ''}</div>
     <ul class="list small" style="margin-top:6px">${card.checks.map((c) => { const now = held.find((x) => x.id === c.id) || c;
       return `<li>${scoreMark(c, stale, when)}
-      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit)}${goalLimit(c)}${old}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
+      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit, typeof c.limit === 'number' && (c.op || '>=').startsWith('>') ? c.limit : null)}${goalLimit(c)}${old}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
       ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}</li>`; }).join('')}
       ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${esc(c.label || c.id)} ${from(c)}
         <span class="muted">— new since this card</span></li>`).join('')}</ul>
@@ -2877,22 +2878,36 @@ function lightenView(p) {
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
-        : `The step to use: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
+        : `The step to use: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
       : unsure ? (unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
         : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.')
-      : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety)}).` : ''}
+      : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
       ${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
       ${run.stations.map((x) => `<tr class="${x.estimate ? '' : 'pick'} ${x.index === on ? 'on' : ''}" ${x.estimate ? '' : `data-lst="${x.index}"`}>
         <td>${x.index}</td><td style="text-align:left">${what(x)}</td><td>${lbs(x.saved_lb)}</td>
-        <td style="color:var(--${verdictTone(x.verdict)})">${sx(x.safety)}</td>
+        <td style="color:var(--${verdictTone(x.verdict)})">${sx(x.safety, run.min_safety)}</td>
         <td>${x.verdict && x.verdict.kind === 'estimate' ? `<button class="ghost" data-use-t="Make it from ${esc(x.label)} ${esc((run.material || 'plywood').toLowerCase())}">Use</button>` : ''}</td></tr>`).join('')}</table></div>
     <div class="muted small" style="margin-top:4px">Click a step to see it; <b>Cut these holes</b> makes it the part. An estimate's
       <b>Use</b> asks for that sheet, and the strength check runs on the real thing.</div>
     ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}` : ''}`;
 }
 
-const sx = (v) => (v == null ? '—' : `${+Number(v).toFixed(1)}x`);
+// a safety factor's number, as every reader says it, server and page (#208 review: answers.safety_num is the same
+// rule, op for op): within 10% of what it needs either way, two places, cut; a fail further under, one place, cut;
+// else one place, half up, never up to 10. So 1.995 against 2 is 1.99, never "2x" under a "doesn't hold" badge.
+function safetyNum(x, need) {
+  x = Number(x);
+  let n;
+  if (need != null && x > need / 1.1 && x < need * 1.1) n = Math.floor(x * 100 + 1e-9) / 100;
+  else if (need != null && x < need) n = Math.floor(x * 10 + 1e-9) / 10;
+  else {
+    n = Math.floor(x * 10 + 0.5) / 10;
+    if (n >= 10 && x < 10) n = Math.floor(x * 10) / 10;
+  }
+  return String(n);
+}
+const sx = (v, need) => (v == null ? '—' : `${safetyNum(v, need)}x`);
 // a part whose strength check ran on a filled-in solid has no "holds" anywhere (CALI-96)
 // why: a filled-in shape, or a shape that couldn't be checked against its pieces at all (it fails closed)
 const notTrusted = (why) => (String(why || '').startsWith("couldn't") ? "not trusted: its shape couldn't be checked"
@@ -2921,11 +2936,11 @@ function beamGrain(pl) {
   return pl.grain ? 'with the grain as you said' : 'the grain unknown: the weaker way';
 }
 // keep the advice: the grain the person keeps is the only one that moves the verdict, and it goes on the cut list
-function grainKeep(p, pl) {
+function grainKeep(p, pl, need) {
   const said = (p.grain || {})[pl.piece];
   if (said) return pl.grain === said.grain ? '' : ` · <span class="muted">you said: ${esc(said.line || '')} Check it holds again to use it.</span>`;
   if (!(pl.safety > pl.safety_across)) return '';
-  return ` <button class="ghost" data-grain="${esc(pl.piece)}">Keep: cut it with its ${esc(pl.advice_phrase || 'face grain running from one support to the other')} (${sx(pl.safety)})</button>`;
+  return ` <button class="ghost" data-grain="${esc(pl.piece)}">Keep: cut it with its ${esc(pl.advice_phrase || 'face grain running from one support to the other')} (${sx(pl.safety, need)})</button>`;
 }
 function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
@@ -2933,22 +2948,22 @@ function loadCase(p, run, c, i) {
   const holds = p.untrusted ? untrustedBadge(p) : caseBadge(c);     // a filled-in shape wins (CALI-96, then 97)
   // the plate or beam check's number its verdict rests on (the worse grain's), in the verdict's colour and, where it
   // isn't settled, its word: never green on a not-trusted, unresolved or older case (#122, #132)
-  const plNum = (n) => `<b style="color:var(--${verdictTone(pl.verdict)})">${sx(n)}${pl.verdict && !settled(pl.verdict) ? ` (${esc(pl.verdict.word)})` : ''}</b>`;
+  const plNum = (n) => `<b style="color:var(--${verdictTone(pl.verdict)})">${sx(n, run.min_safety)}${pl.verdict && !settled(pl.verdict) ? ` (${esc(pl.verdict.word)})` : ''}</b>`;
   const plate = !pl ? '' : !pl.done
     ? `<div class="muted small" style="margin-top:4px">No plate check for ${esc(pl.piece)}: ${esc(pl.why)}.</div>`
     : pl.as === 'beam'      // a top on two sides: a beam, not a plate held all round (CALI-116)
       ? `<div class="small" style="margin-top:4px"><b>Beam check</b> — ${esc(pl.piece)}: ${esc(pl.why)} ·
-        ${plNum(pl.safety_across)} ${beamGrain(pl)} · sags ${len(pl.deflection_mm, 3)}${grainKeep(p, pl)}</div>`
+        ${plNum(pl.safety_across)} ${beamGrain(pl)} · sags ${len(pl.deflection_mm, 3)}${grainKeep(p, pl, run.min_safety)}</div>`
     : pl.support === 'ring'  // a disc on a ring (#137 item 7)
       ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, a round plate held at its ring's outer edge (${len(pl.ring_mm)} across),
-        edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → ${plNum(pl.safety_across)} across the grain, ${sx(pl.safety)} along it
+        edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → ${plNum(pl.safety_across)} across the grain, ${sx(pl.safety, run.min_safety)} along it
         · sags ${len(pl.deflection_mm, 3)} <span class="muted">(Roark; needs an engineer's check)</span></div>`
       : `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
-        edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
+        edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety, run.min_safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
         ${plNum(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`;
   const fea = f.supported === false ? `<div class="small" style="color:var(--bad)">${esc(c.why)}</div>`
     : `<div class="small" style="margin-top:4px"><b>whittle FEA</b> — works hardest ${esc(peakWhere(f))}
-        (${fixed(f.peak_mpa, 1)} MPa → ${sx(f.safety)}) · gives ${len(f.deflection_mm, 3)}</div>`;
+        (${fixed(f.peak_mpa, 1)} MPa → ${sx(f.safety, run.min_safety)}) · gives ${len(f.deflection_mm, 3)}</div>`;
   const by = pl && pl.done && pl.by_thickness ? (() => {
     const ok = pl.by_thickness.filter(holdsHere);
     const thin = ok.length ? ok[0] : null;
@@ -2959,18 +2974,18 @@ function loadCase(p, run, c, i) {
         const nowLabel = (pl.by_thickness.find((x) => Math.abs(x.thickness_mm - pl.thickness_mm) < 0.01) || {}).label;
         return `<tr${now ? ' class="on"' : ''}>
         <td style="text-align:left">${esc(b.label)}</td>
-        <td style="color:var(--${verdictTone(b.verdict)})">${sx(b.safety_across)}</td>
-        <td>${sx(b.safety)}</td><td>${len(b.deflection_mm, 3)}</td>
+        <td style="color:var(--${verdictTone(b.verdict)})">${sx(b.safety_across, run.min_safety)}</td>
+        <td>${sx(b.safety, run.min_safety)}</td><td>${len(b.deflection_mm, 3)}</td>
         <td>${now ? '<span class="muted">now</span>' : holdsHere(b)
           ? `<button class="ghost" data-use-t="Make it from ${esc(b.label)} ${esc(run.material.name)} instead of ${esc(nowLabel || 'what it is now')}">Use</button>` : ''}</td></tr>`; }).join('')}</table></details>`;
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
       ${c.blind ? `<div class="small" style="margin-top:2px">The check couldn't see any stress here: the piece under the load may be too thin for its voxels, the load's patch may be smaller than the voxels, or the load may go straight into what holds it.</div>`
-      : c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety)}
+      : c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety, run.min_safety)}
         <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
         ${c.verdict && c.verdict.kind === 'fails' ? 'the fail may be the model\'s' : 'no verdict'} (it needs ${run.min_safety}x)</span></div>`
-      : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety)}</b>
+      : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety, run.min_safety)}</b>
         <span class="muted">(by ${c.governs === 'plate' ? (pl && pl.grain ? `the plate check, ${beamGrain(pl)}` : 'the plate check, with the grain the wrong way') : 'the FEA'}; it needs ${run.min_safety}x)</span>
         ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>`}
       ${plate}${fea}${by}
@@ -3249,12 +3264,12 @@ async function showHeat(pid, run, index) {
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →
         ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>`
           : c.verdict && (c.verdict.kind === 'unresolved' || c.verdict.kind === 'unchecked')   // no "holds" (CALI-110)
-            ? `<b style="color:var(--amber)">${c.blind ? 'not resolved: the check couldn\'t see any stress here' : `${coarseWord(c)}: the FEA read ${sx(c.safety)}, too coarse to see its walls`}</b>`
+            ? `<b style="color:var(--amber)">${c.blind ? 'not resolved: the check couldn\'t see any stress here' : `${coarseWord(c)}: the FEA read ${sx(c.safety, run.min_safety)}, too coarse to see its walls`}</b>`
             : c.verdict && c.verdict.kind === 'edge'     // the middle only (CALI-94): no "holds" where people stand
-              ? `<b style="color:var(--amber)">middle only: the middle read ${sx(c.safety)}; the front edge, where people stand, isn't checked</b>`
+              ? `<b style="color:var(--amber)">middle only: the middle read ${sx(c.safety, run.min_safety)}; the front edge, where people stand, isn't checked</b>`
             : settled(c.verdict)           // the verdict's word and colour (CALI-112): never green unless it holds
-              ? `<b style="color:var(--${verdictTone(c.verdict)})">${esc(c.verdict.word)}, ${sx(c.safety)}</b>`
-              : `<b style="color:var(--amber)">${esc(c.verdict ? c.verdict.word : 'not checked yet')}: the check read ${sx(c.safety)}</b>`}
+              ? `<b style="color:var(--${verdictTone(c.verdict)})">${esc(c.verdict.word)}, ${sx(c.safety, run.min_safety)}</b>`
+              : `<b style="color:var(--amber)">${esc(c.verdict ? c.verdict.word : 'not checked yet')}: the check read ${sx(c.safety, run.min_safety)}</b>`}
         ${c.breaks_lb && settled(c.verdict) ? `· breaks at about ${Number(c.breaks_lb).toLocaleString()} lb` : ''}
         ${run.version !== partOf(pid).version ? `· <b style="color:var(--amber)">from v${run.version}: the part has changed since</b>` : ''}</div>
       <div class="small muted" style="margin-top:2px">Colours: whittle's FEA <span class="heatbar" style="background:linear-gradient(90deg, ${grad})"></span>
@@ -3676,10 +3691,10 @@ async function showStation(pid, run, index) {
     const removed = parametric ? st.removed : st.removed_part;
     const what = carved
       ? `<span><b>Preview, not carved yet:</b> step <b>${index}</b> · ${pct(st.removed)} ${carveShare(run)} carved away ·
-        ${st.saved_g} g less filament · ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(--${verdictTone(st.verdict)})">${esc(st.verdict ? st.verdict.word : 'not checked yet')}, ${sx(st.safety)}</b>`}</span>`
+        ${st.saved_g} g less filament · ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(--${verdictTone(st.verdict)})">${esc(st.verdict ? st.verdict.word : 'not checked yet')}, ${sx(st.safety, run.min_safety)}</b>`}</span>`
       : lightened
       ? `<span><b>Preview, not cut yet:</b> step <b>${index}</b> · ${pct(st.removed)} out of the walls${st.top_holes ? ` and ${st.top_holes} hole${st.top_holes === 1 ? '' : 's'} in the top` : ''} · ${lbs(st.saved_lb)} lighter ·
-        ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(--${verdictTone(st.verdict)})">${esc(st.verdict ? st.verdict.word : 'not checked yet')}, ${sx(st.safety)}</b>`}</span>`
+        ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>` : `<b style="color:var(--${verdictTone(st.verdict)})">${esc(st.verdict ? st.verdict.word : 'not checked yet')}, ${sx(st.safety, run.min_safety)}</b>`}</span>`
       : framed
       ? `<span>design <b>${index}</b> · ${st.mass_lb} lb of steel · weakest ${st.safety}x · sags ${len(st.deflection_mm, 2)}</span>`
       : `<span>${parametric ? 'design' : 'whittle station'} <b>${index}</b> · gives up ${pct(removed)} of the volume

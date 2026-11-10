@@ -869,7 +869,9 @@ def _safety_cell(c: dict) -> tuple[str, str]:
     if kind not in verdicts.SETTLED:                 # any other kind: its word, never a number to build on
         return _e((c.get("verdict") or {}).get("word") or "not checked"), "—"
     if (c.get("verdict") or {}).get("coarse"):       # a ✗ stays a ✗, not as a settled number (#191)
-        return f"about {_num(c.get('safety'))}x, not settled: too coarse to see its walls", "—"
+        from .answers import safety_num            # the one formatter (#208 review): 1.995 never reads 2
+
+        return f"about {safety_num(c['safety'], c.get('min_safety'))}x, not settled: too coarse to see its walls", "—"
     # the number as the cards say it (#64 item 9): the "carrying" column says what it's against (lb × factor)
     from .answers import _times
 
