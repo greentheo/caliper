@@ -61,8 +61,24 @@ _OBLIGATION = re.compile(r"\b(must|always|never|needs? to|has to|should (?:never
 #: CALI-55: a number with a unit is usually a requirement ("under 10 lb", "16 in wide", "$50").
 _MEASURE = re.compile(r"\d\s*(?:lb|lbs|kg|in|inch|inches|mm|cm|ft|feet|mph|%)\b|\$\s*\d", re.I)
 #: CALI-59: asking for it again in plain words is a question, never a change, even with a part selected.
-_EXPLAIN = re.compile(r"\b(explain|plain (?:words|english)|simpler words|more simply|what does .{0,40}\bmean"
-                      r"|say (?:that|it) again|i don'?t (?:get|understand))\b", re.I)
+_EXPLAIN = re.compile(r"\b(explain|plain (?:words|english)|simpler|plainer|more simply|what does .{0,40}\bmean"
+                      r"|say (?:that|it) again|i don'?t (?:get|understand)|like i'?m (?:five|5|six|6|a kid)|eli5)\b",
+                      re.I)
+#: CALI-89 (#65 item 1): an explain phrase makes a message a question only when it asks for nothing else. One that
+#: also asks for a change ("I don't get it, make it 2 inches taller") is the change.
+_CHANGE = re.compile(r"\b(make|change|add|remove|move|use|set|put|cut|build|turn|swap|replace|widen|lengthen|shorten"
+                     r"|thicken|raise|lower)\b", re.I)
+#: (#65 item 3) "make it look like X": a question, answered with the picture offered; nothing changes.
+_LOOKS_LIKE = re.compile(r"\bmake\s+(?:it|this|that|them|the\s+\w+)\s+look\s+like\s+(?:a\s+|an\s+|the\s+)?"
+                         r"(?P<subject>[\w\-' ]{2,40}?)\s*[.!]?$", re.I)
+#: (#65 item 3) what's a part, not a picture: "add a dino skid on the bottom" is a skid.
+_STRUCTURE = {"skid", "skids", "foot", "feet", "leg", "legs", "shelf", "shelves", "bracket", "brackets", "rail",
+              "rails", "handle", "handles", "wheel", "wheels", "base", "step", "steps", "brace", "braces", "support",
+              "supports", "block", "blocks", "drawer", "drawers", "lid", "hinge", "hinges", "hook", "hooks", "tray",
+              "panel", "panels", "post", "posts", "bar", "bars", "strut", "struts", "pad", "pads"}
+#: (#65) a new thing: "add a shelf", "make me a bench"; "make it wider" changes what's there.
+_NEW_THING = re.compile(r"\b(?:add|create|build|make|generate|model|design|insert|need)\s+(?:me\s+)?"
+                        r"(?:a|an|another|some|new|second|one more)\b", re.I)
 #: CALI-78: a picture cut out of a panel, for looks ("put a T-rex on the side", "cut a dinosaur into the front").
 _PICTURE = re.compile(r"\b(?:put|draw|cut|carve|add|stick)\s+(?:a|an|the|some|my)?\s*(?P<subject>[\w\-' ]{2,40}?)"
                       r"\s+(?:on|onto|into|in|out of)\s+(?:the\s+|its\s+)?(?P<where>[\w ]{0,30})", re.I)
@@ -124,7 +140,7 @@ def _words(message: str) -> list[str]:
 
 def _is_question(message: str) -> bool:
     msg = (message or "").strip()
-    if msg.endswith("?") or _EXPLAIN.search(msg):
+    if msg.endswith("?") or (_EXPLAIN.search(msg) and not _CHANGE.search(msg)):
         return True
     w = _words(msg)
     return bool(w) and w[0] in _QUESTION_LEAD
@@ -190,6 +206,11 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
     ids = [p.id for p in store.design.parts]
     question = _is_question(message)
 
+    # "make it look like a dinosaur": the picture offered, nothing changed (#65 item 3)
+    looks = _LOOKS_LIKE.search((message or "").strip())
+    if looks and ids:
+        return Intent(action="answer", part=scope, note=f"offer a picture: {looks.group('subject').strip()}")
+
     # carve a printed part (CALI-82)
     if _CARVE.search(message or "") and not question and ids:
         target = scope or named_part(message, ids) or (ids[0] if len(ids) == 1 else None)
@@ -203,7 +224,8 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
 
         subject = pic.group("subject").strip()
         target = scope or named_part(message, ids) or (ids[0] if len(ids) == 1 else None)
-        if target and (any(k in subject.lower() for k in BUILT_IN)
+        thing = (subject.lower().split() or [""])[-1]
+        if target and thing not in _STRUCTURE and (any(k in subject.lower() for k in BUILT_IN)
                        or re.search(r"\b(picture|drawing|silhouette|cut-?out|shape)\b", subject, re.I)):
             return Intent(action="picture", part=target, intent=subject, where=pic.group("where").strip(),
                           note="a picture to cut out of a panel")
@@ -224,7 +246,10 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
     if question:
         return Intent(action="answer", part=hit, note="reads as a question")
 
-    wants_new = bool(_ADD_VERBS.search((message or "").lower()))
+    wants_new = bool(_NEW_THING.search(message or ""))
+    if not wants_new and len(ids) == 1 and _CHANGE.search(message or ""):
+        # "make it 2 in wider" on a one-part design is that part, not a new one named "part" (#65)
+        return Intent(action="refine", part=ids[0], note="a change, and the design has one part")
     if wants_new or not ids:
         new_id = part_id_from(message, set(ids))
         return Intent(action="author", part=new_id, intent=(message or "").strip(),
@@ -253,6 +278,13 @@ _CLASSIFY_SYSTEM = """You route a message in a CAD design conversation. Reply wi
   the legs down"). `part` is that part.
 - "answer": the user asked a question, asked for something to be explained or said more simply, or said
   something that changes nothing about any part.
+- A message that asks for an explanation AND a change ("I don't get it, make it 2 inches taller", "explain why,
+  and make the legs thicker") is the change: "refine". Asking for simpler or plainer words with no change in it
+  ("say it simpler", "simpler please", "in plain English", "explain like I'm five") is "answer".
+- "make it look like a dinosaur" is "answer" (offer to cut the picture; change nothing). A picture is "put/draw/
+  cut <subject> on/into <a panel>". "a … skid / foot / leg / shelf on the bottom" is a working part, not a
+  picture: "author" (or "refine" when that part is selected).
+- "make it …" (wider, taller, thicker) on a design with one part changes that part: "refine", never a new part.
 If the message is ambiguous about WHICH part, use "answer" — do not guess."""
 
 
@@ -893,6 +925,11 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
     """Report the measured state. No geometry moves — so the answer is facts, not an opinion. With Claude
     (CALI-59), the question itself is answered from those facts, in plain words."""
     events = events if events is not None else []
+    if note.startswith("offer a picture: "):           # "make it look like a dinosaur": offered, not done (#65)
+        subject = note.split(": ", 1)[1]
+        return TurnResult(action="answer", ok=True, part=scope, events=events,
+                          reply=(f"I can cut a {subject} out of a panel nobody stands on, and check it still holds. "
+                                 f"Say \"put a {subject} on the side\" (or the front) to do it. Nothing's changed."))
     if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
         try:
             return TurnResult(action="answer", ok=True, part=scope, events=events,
