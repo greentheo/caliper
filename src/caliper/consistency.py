@@ -218,6 +218,80 @@ def _inside(mesh, pieces: list[dict], tol: float) -> AssertionResult:
                                      if bad else ""))
 
 
+def _proud(mesh, pts: np.ndarray, out: np.ndarray, reach: float, n: int = 25) -> np.ndarray:
+    """How far the solid carries on from each point along ``out``, up to ``reach``: where the column first leaves it."""
+    steps = np.linspace(0.0, reach, n)
+    inside = np.stack([_signed(mesh, pts + out * s) >= 0 for s in steps], axis=1)
+    leaves = np.where(inside.all(axis=1), n - 1, (~inside).argmax(axis=1))
+    return steps[leaves]
+
+
+def _in_a_piece(points: np.ndarray, pieces: list[dict], skip: dict, tol: float) -> np.ndarray:
+    near = np.full(len(points), np.inf)
+    for pc in pieces:
+        if pc is skip:
+            continue
+        if pc["kind"] == "sheet":
+            for p, side in zip(pc["polys"], pc["sides"]):
+                near = np.minimum(near, slab_distance(points, p, pc["thickness"], side))
+        else:
+            near = np.minimum(near, segment_distance(points, pc["a"], pc["b"]) - pc["reach"])
+    return near <= tol
+
+
+def _on_its_face(mesh, pieces: list[dict], tol: float) -> AssertionResult:
+    """Each sheet's outline is a face of the panel, on the solid's surface (#162). Declared off it, the panel is built
+    in the wrong place and the solid left over it, the part of the panel that's missing, reads as the printed rest:
+    the bar stool's seat, outlined at its mid-thickness, counted 9.5 mm of its top as PETG with nothing to say so. So: is
+    there solid beyond the outline, on the side away from the panel, that no other piece accounts for?"""
+    bad = []
+    sheets = [pc for pc in pieces if pc["kind"] == "sheet"]
+    for pc in sheets:
+        for poly, side in zip(pc["polys"], pc["sides"]):
+            pts = polygon_samples(poly, holes=pc.get("holes") if len(pc["polys"]) == 1 else ())
+            n = np.asarray(C.polygon(poly.tolist())[2], float)
+            out = -side * n / np.linalg.norm(n)
+            proud = _proud(mesh, pts, out, pc["thickness"] + tol)
+            if len(pc["polys"]) > 1:                    # a facet is a chord of the curve: judged at its edges, where it's on it
+                proud = np.full_like(proud, np.percentile(proud, 10))
+            limit = max(tol, 0.1 * pc["thickness"])
+            # the mistake's signature: the solid ends inside the panel's own thickness. Solid running on past it is a block
+            # the panel is set against or between, and an outline on either face of that is right (#170 review)
+            over = (proud > limit) & (proud < 0.95 * pc["thickness"])
+            if over.any():
+                over[over] = ~_in_a_piece(pts[over] + out[None] * proud[over, None] / 2, pieces, pc, 0.5)
+            if over.mean() >= 0.5:
+                # to the tenth it's said to, on the column at the median: the steps are coarser than that
+                at = int(np.argsort(proud[over])[len(proud[over]) // 2])
+                lo, hi = float(proud[over][at]) - pc["thickness"] / 12, float(proud[over][at]) + pc["thickness"] / 12
+                column = pts[over][at]
+                for _ in range(10):
+                    mid = (lo + hi) / 2
+                    lo, hi = (mid, hi) if _signed(mesh, (column + out * mid)[None])[0] >= 0 else (lo, mid)
+                off = lo
+                way = "below" if out[2] > 0.7 else "above" if out[2] < -0.7 else "off"
+                bad.append(f"{pc['name']}: declared {off:.1f} mm {way} where the part has it")
+                break
+    share = 1 - len(bad) / max(len(sheets), 1)
+    return AssertionResult(
+        id="construction_on_its_face", expr="each sheet's outline is a face of the panel, on the solid's surface",
+        status="pass" if not bad else "fail", passed=not bad, actual=round(share, 3), margin=round(share - 1.0, 3),
+        detail="; ".join(bad[:6]) + (": an outline is a face of the panel, not its mid-plane. Until it's moved, what's left "
+                                     "over the panel is counted as the printed part" if bad else ""))
+
+
+def remedy(detail: str) -> str:
+    """What to say for a sheet off its face: the shape is right and the declared piece is wrong, so it's the outline that
+    moves (#170 review: "fix its shape to match its pieces" would change a correct seat to match a wrong outline)."""
+    import re
+
+    m = re.match(r"(.+?): declared [\d.]+ mm (below|above|off) where", detail)
+    if not m:
+        return "move each sheet's outline onto its face"
+    where = {"below": "up to its top face", "above": "down to its underside", "off": "onto its face"}[m.group(2)]
+    return f"move the {m.group(1)}'s outline {where}"
+
+
 def _covers(mesh, pieces: list[dict], tol: float) -> AssertionResult:
     import trimesh
 
@@ -436,6 +510,7 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
     if pieces:
         _sides(mesh, pieces)
         out.append(_inside(mesh, pieces, tol))
+        out.append(_on_its_face(mesh, pieces, tol))
         if not rest:
             out.append(_covers(mesh, pieces, tol))
             vol = _volume(mesh, pieces, strength=bool(declared.get("loads")), tol=tol)

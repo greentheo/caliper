@@ -65,8 +65,10 @@ def construction(params, build=None):
     ]
 ```
 
-- **sheet**: a panel cut from a sheet. `outline` is one face of the panel as it sits in the part: a
-  flat polygon, its corners in order around the edge, with the panel's `thickness` behind it. A panel
+- **sheet**: a panel cut from a sheet. `outline` is one face of the panel as it sits in the part, on
+  the solid's surface, never its mid-plane: a flat polygon, its corners in order around the edge, with
+  the panel's `thickness` behind it, going into the solid. A seat whose top is at z = H has its
+  outline at z = H. A panel
   bent to a curve gives `facets` (a list of flat polygons) instead of `outline`. `covers` says what
   goes on its faces, one entry per face covered (`["paint"]` for the outside only).
 - **stick**: a straight length from `a` to `b` along its centreline. Lumber by nominal `size`, or
@@ -87,8 +89,9 @@ The pieces are the part. After every revision Caliper builds the part and checks
 `construction()` says matches what `build()` made, and a mismatch fails the round like any failing
 measurement:
 
-1. **Every piece lies in the solid.** A sheet's outline sits inside the solid or on its surface; a
-   stick's centreline runs inside it.
+1. **Every piece lies in the solid.** A sheet's outline is on the solid's surface, a stick's centreline
+   runs inside it. A sheet declared off its face is named and fails, because the solid left over it
+   would otherwise be counted as printed.
 2. **The pieces cover the solid.** Every part of the solid's surface is on some piece, so nothing in
    the shape is left out of the bill of materials.
 3. **No more material than the shape holds.** The pieces' volume can't exceed the solid's by much (a
