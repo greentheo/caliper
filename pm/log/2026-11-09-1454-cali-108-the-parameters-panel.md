@@ -12,5 +12,6 @@ in #147; this is the panel, to the mockup he approved.
 - It then says "v8 written: …", what the build ignored, and "check it again" where a strength check is now old.
 - Not from the mockup: its "under X the check can't see this wall" and "too big for this flange" notes are particular to
   its example. The server's refusal or the card says these for now.
-- Tests: tests/test_params.py (81, the page's through node). Mutants (no range check, range ignoring units, an unchanged
+- Tests: tests/test_params.py (99, the page's through node). Mutants (no range check, range ignoring units, an unchanged
   number counted as a change, Rebuild on with a bad number, a panel on a reference) each fail.
+- **#171 review:** after Rebuild the model on screen is the new one. The same number written differently (100.0 for 100, 0.375 for 3/8) isn't a change, on the page or the server. A measurement is said only when it's that one number's own: a fillet or hole radius this change made, one number at a time. A carved part has no numbers to set and says to roll it back. The panel sits right after *Will it work?*, a range shows on a change or a warning, and the written line uses the plain names as the mockup does.
