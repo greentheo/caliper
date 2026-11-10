@@ -61,13 +61,23 @@ _OBLIGATION = re.compile(r"\b(must|always|never|needs? to|has to|should (?:never
 #: CALI-55: a number with a unit is usually a requirement ("under 10 lb", "16 in wide", "$50").
 _MEASURE = re.compile(r"\d\s*(?:lb|lbs|kg|in|inch|inches|mm|cm|ft|feet|mph|%)\b|\$\s*\d", re.I)
 #: CALI-59: asking for it again in plain words is a question, never a change, even with a part selected.
-_EXPLAIN = re.compile(r"\b(explain|plain (?:words|english)|simpler|plainer|more simply|what does .{0,40}\bmean"
-                      r"|say (?:that|it) again|i don'?t (?:get|understand)|like i'?m (?:five|5|six|6|a kid)|eli5)\b",
-                      re.I)
-#: CALI-89 (#65 item 1): an explain phrase makes a message a question only when it asks for nothing else. One that
-#: also asks for a change ("I don't get it, make it 2 inches taller") is the change.
-_CHANGE = re.compile(r"\b(make|change|add|remove|move|use|set|put|cut|build|turn|swap|replace|widen|lengthen|shorten"
-                     r"|thicken|raise|lower)\b", re.I)
+_EXPLAIN = re.compile(r"\b(explain|plain (?:words|english)|more simply|what does .{0,40}\bmean"
+                      r"|say (?:that|it)(?: again)?(?: in)? (?:simpler|plainer)|(?:simpler|plainer) (?:words|terms|english)"
+                      r"|(?:simpler|plainer),? please|say (?:that|it) again|i don'?t (?:get|understand)"
+                      r"|like i'?m (?:five|5|six|6|a kid)|eli5)\b|^\s*(?:simpler|plainer)[.!]?\s*$", re.I)
+#: (#212 review) "simpler legs" is a change: simpler or plainer is about the words only when it says so ("say it
+#: simpler", "simpler please", "simpler words", or the word on its own).
+_CHANGE_VERBS = (r"(?:make|change|add|remove|move|use|set|put|cut|build|turn|swap|replace|widen|lengthen|shorten"
+                 r"|thicken|raise|lower|give)")
+#: CALI-89 (#65 item 1, #212 review): a change asked for, as a request: its verb starts a clause ("…, make it 2
+#: inches taller", "and make the legs thicker"). Inside a question it's a word ("explain the build order", "how to cut
+#: the carriage"), and a question stays a question.
+_CHANGE = re.compile(r"(?:^|[,;.!]\s*(?:and\s+|then\s+|but\s+)?|\b(?:and|then|also|just|now)\s+)(?:please\s+)?"
+                     + _CHANGE_VERBS + r"\b", re.I)
+#: (#212) a change to what's there: "make it wider", "use 1/2 in plywood"; not "make a bench", nor "add …".
+_MODIFY = re.compile(r"(?:^|[,;.!]\s*(?:and\s+|then\s+)?|\b(?:and|then|also|just|now)\s+)(?:please\s+)?"
+                     r"(?:make(?!\s+(?:me\s+)?(?:a|an|another|some|new|second|one more)\b)|change|remove|move|use|set"
+                     r"|turn|swap|replace|widen|lengthen|shorten|thicken|raise|lower)\b", re.I)
 #: (#65 item 3) "make it look like X": a question, answered with the picture offered; nothing changes.
 _LOOKS_LIKE = re.compile(r"\bmake\s+(?:it|this|that|them|the\s+\w+)\s+look\s+like\s+(?:a\s+|an\s+|the\s+)?"
                          r"(?P<subject>[\w\-' ]{2,40}?)\s*[.!]?$", re.I)
@@ -77,8 +87,9 @@ _STRUCTURE = {"skid", "skids", "foot", "feet", "leg", "legs", "shelf", "shelves"
               "supports", "block", "blocks", "drawer", "drawers", "lid", "hinge", "hinges", "hook", "hooks", "tray",
               "panel", "panels", "post", "posts", "bar", "bars", "strut", "struts", "pad", "pads"}
 #: (#65) a new thing: "add a shelf", "make me a bench"; "make it wider" changes what's there.
-_NEW_THING = re.compile(r"\b(?:add|create|build|make|generate|model|design|insert|need)\s+(?:me\s+)?"
-                        r"(?:a|an|another|some|new|second|one more)\b", re.I)
+_NEW_THING = re.compile(r"\b(?:add|create|build|generate|model|design|insert|need)\b"
+                        r"|\bmake\s+(?:me\s+)?(?:a|an|another|some|new|second|one more)\b", re.I)   # with or without
+#                                                         an article: "add shelves", "add the lid" (#212 review)
 #: CALI-78: a picture cut out of a panel, for looks ("put a T-rex on the side", "cut a dinosaur into the front").
 _PICTURE = re.compile(r"\b(?:put|draw|cut|carve|add|stick)\s+(?:a|an|the|some|my)?\s*(?P<subject>[\w\-' ]{2,40}?)"
                       r"\s+(?:on|onto|into|in|out of)\s+(?:the\s+|its\s+)?(?P<where>[\w ]{0,30})", re.I)
@@ -140,9 +151,11 @@ def _words(message: str) -> list[str]:
 
 def _is_question(message: str) -> bool:
     msg = (message or "").strip()
-    if msg.endswith("?") or (_EXPLAIN.search(msg) and not _CHANGE.search(msg)):
+    if msg.endswith("?"):
         return True
     w = _words(msg)
+    if _EXPLAIN.search(msg) and not _CHANGE.search(msg):
+        return True                                  # a question stays a question, whatever words are in it (#212)
     return bool(w) and w[0] in _QUESTION_LEAD
 
 
@@ -195,6 +208,28 @@ def _printed(store: DesignStore, part_id: str) -> bool:
                                                          store.read_script(part_id)))
 
 
+def _drawable(store: DesignStore, subject: str, part: Optional[str]) -> bool:
+    """Whether "make it look like <subject>" is a picture to offer (#212 review): one thing, not a compound ("a
+    dinosaur and 2 in taller" is a change), one Caliper can draw offline (not "oak" or "wood", a finish), on a part
+    with a panel a picture can go on."""
+    from .pictures import BUILT_IN, panels
+
+    s = subject.lower()
+    if not part or re.search(r"\d|,|\band\b|\bwith\b", s) or not any(k in s for k in BUILT_IN):
+        return False
+    try:
+        return bool(panels(store, part))
+    except Exception:  # noqa: BLE001 — a part that can't say: no offer, and the message routes as it would
+        return False
+
+
+def _offer(subject: str) -> str:
+    """The picture offered for "make it look like <subject>", nothing changed (#65, #212: "an" before a vowel)."""
+    a = "an" if subject[:1].lower() in "aeiou" else "a"
+    return (f"I can cut {a} {subject} out of a panel nobody stands on, and check it still holds. Say \"put {a} "
+            f"{subject} on the side\" (or the front) to do it. Nothing's changed.")
+
+
 def offline_classify(store: DesignStore, message: str, scope: Optional[str] = None) -> Intent:
     """Deterministic routing — no network. Ask-don't-assume when genuinely ambiguous.
 
@@ -208,7 +243,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
 
     # "make it look like a dinosaur": the picture offered, nothing changed (#65 item 3)
     looks = _LOOKS_LIKE.search((message or "").strip())
-    if looks and ids:
+    if looks and ids and _drawable(store, looks.group("subject").strip(), scope or (ids[0] if len(ids) == 1 else None)):
         return Intent(action="answer", part=scope, note=f"offer a picture: {looks.group('subject').strip()}")
 
     # carve a printed part (CALI-82)
@@ -247,7 +282,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
         return Intent(action="answer", part=hit, note="reads as a question")
 
     wants_new = bool(_NEW_THING.search(message or ""))
-    if not wants_new and len(ids) == 1 and _CHANGE.search(message or ""):
+    if not wants_new and len(ids) == 1 and _MODIFY.search(message or ""):
         # "make it 2 in wider" on a one-part design is that part, not a new one named "part" (#65)
         return Intent(action="refine", part=ids[0], note="a change, and the design has one part")
     if wants_new or not ids:
@@ -285,6 +320,12 @@ _CLASSIFY_SYSTEM = """You route a message in a CAD design conversation. Reply wi
   cut <subject> on/into <a panel>". "a … skid / foot / leg / shelf on the bottom" is a working part, not a
   picture: "author" (or "refine" when that part is selected).
 - "make it …" (wider, taller, thicker) on a design with one part changes that part: "refine", never a new part.
+- A question stays a question, whatever words are in it: "explain the build order", "how do I cut the carriage",
+  "I don't understand which way to turn the panel" are "answer", never a change or a new part. Only a request
+  that starts a clause ("…, make it taller", "and make the legs thicker") is a change.
+- "simpler" or "plainer" is about the words only when it says so ("say it simpler", "simpler please"); "simpler
+  legs", "a plainer finish" change the part. "make it look like a dinosaur and 2 in taller" is a change.
+- "add …" is a new part with or without an article ("add shelves", "add the lid").
 If the message is ambiguous about WHICH part, use "answer" — do not guess."""
 
 
@@ -926,10 +967,7 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
     (CALI-59), the question itself is answered from those facts, in plain words."""
     events = events if events is not None else []
     if note.startswith("offer a picture: "):           # "make it look like a dinosaur": offered, not done (#65)
-        subject = note.split(": ", 1)[1]
-        return TurnResult(action="answer", ok=True, part=scope, events=events,
-                          reply=(f"I can cut a {subject} out of a panel nobody stands on, and check it still holds. "
-                                 f"Say \"put a {subject} on the side\" (or the front) to do it. Nothing's changed."))
+        return TurnResult(action="answer", ok=True, part=scope, events=events, reply=_offer(note.split(": ", 1)[1]))
     if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
         try:
             return TurnResult(action="answer", ok=True, part=scope, events=events,

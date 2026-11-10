@@ -60,3 +60,78 @@ def test_a_new_thing_on_a_one_part_design_is_still_a_new_part(stool):
 def test_claudes_router_has_the_same_rules():
     s = chat._CLASSIFY_SYSTEM
     assert "make it 2 inches taller" in s and "say it simpler" in s and "look like" in s and "skid" in s
+
+
+# --- #212 review: what main routed right still routes right, both ways ---------------------------------------------
+
+@pytest.fixture(scope="module")
+def camper(tmp_path_factory):
+    return samples.open_sample("camper", base=str(tmp_path_factory.mktemp("camper")))
+
+
+#: a question stays a question, whatever words are in it (an authoring run for a question was #65's harm)
+QUESTIONS = ["explain the build order", "explain the cut list", "I don't get how to put it together",
+             "I don't understand which way to turn the panel", "explain what to use for the legs",
+             "I don't understand the cut list", "explain how you would move it", "explain like I'm five how to build it",
+             "ELI5", "eli5 the strength check"]
+
+
+@pytest.mark.parametrize("message", QUESTIONS)
+@pytest.mark.parametrize("scoped", [True, False])
+def test_a_question_stays_a_question(stool, message, scoped):
+    got = chat.offline_classify(stool, message, P if scoped else None)
+    assert got.action == "answer", (message, scoped, got)
+
+
+@pytest.mark.parametrize("message", QUESTIONS[:3])
+def test_a_question_on_an_empty_design_never_authors_a_part(tmp_path, message):
+    from caliper.design import DesignStore
+
+    empty = DesignStore.create("a step stool", base=str(tmp_path))
+    assert chat.offline_classify(empty, message, None).action == "answer"
+
+
+#: changes main made, made still (scoped to the stool's one part)
+@pytest.mark.parametrize("message", ["simpler legs", "a simpler joint", "simpler, with fewer pieces", "plainer finish",
+                                     "make it look like a dinosaur and 2 in taller"])
+def test_a_change_main_made_still_happens(stool, message):
+    got = chat.offline_classify(stool, message, P)
+    assert (got.action, got.part) == ("refine", P), (message, got)
+
+
+@pytest.mark.parametrize("message", ["add two shelves under the step", "add shelves", "add legs", "add the lid",
+                                     "add holes for the bolts", "add a shelf"])
+def test_add_is_a_new_part_with_or_without_an_article_on_a_design_of_several(camper, message):
+    got = chat.offline_classify(camper, message, None)
+    assert got.action == "author", (message, got)
+
+
+def test_on_a_design_of_several_an_unnamed_change_asks_which(camper):
+    assert chat.offline_classify(camper, "make it 2 in wider", None).action == "answer"
+
+
+@pytest.mark.parametrize("message", ["make it look like oak", "make it look like wood"])
+def test_a_look_like_that_isnt_a_picture_offers_none(stool, message):
+    got = chat.offline_classify(stool, message, P)
+    assert not got.note.startswith("offer a picture"), got
+
+
+def test_the_offer_says_an_before_a_vowel():
+    assert "an owl" in chat._offer("owl") and "a dinosaur" in chat._offer("dinosaur")
+
+
+def test_no_picture_offer_where_no_panel_can_take_one(tmp_path):
+    from caliper.design import DesignStore
+
+    from .test_printed_strength import PRINTED
+
+    store = DesignStore.create("a printed box", base=str(tmp_path))
+    store.write_part("box", PRINTED, intent="a printed box")
+    got = chat.offline_classify(store, "make it look like a dinosaur", "box")
+    assert not got.note.startswith("offer a picture"), got
+
+
+def test_the_prompt_has_the_one_part_and_question_rules():
+    s = chat._CLASSIFY_SYSTEM
+    assert "on a design with one part changes that part" in s
+    assert "A question stays a question" in s and "explain the build order" in s
