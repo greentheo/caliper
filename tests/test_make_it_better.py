@@ -278,7 +278,8 @@ def _page_of(extra):
     return _run(_page(["qlines", "betterLines", "useBetter"], consts=["esc"], extra=extra))
 
 
-CARD = ("const GOTO = {load: 'loadBox'};\n"
+CARD = ("const trackedFor = () => null;\n"
+        "const GOTO = {load: 'loadBox'};\n"
         "const c = {key: 'work', lines: [{text: 'Holds a foot.', status: 'ok', study: 'load'},\n"
         "  {better: true, status: 'info', lead: 'Make the top thinner', cost: 'Still about 2.3 times over.', button: 'Try it',\n"
         "   action: 'use_t', say: 'Make it thinner', part: 'p'},\n"
@@ -290,8 +291,8 @@ def test_the_card_draws_a_make_it_better_section_with_buttons():
     html = _page_of(CARD + "out = qlines(c);")
     assert html.count('class="qbetter-h">Make it better<') == 1 and html.count('class="qoffer"') == 2
     assert 'Make the top thinner.<span class="qoffer-c">Still about 2.3 times over.</span>' in html
-    assert 'data-better="1" data-card="work">Try it</button>' in html
-    assert 'data-better="2" data-card="work" disabled>Carve it</button>' in html
+    assert 'data-better="1" data-better-action="use_t" data-better-part="p" data-card="work">Try it</button>' in html
+    assert 'data-better="2" data-better-action="carve" data-better-part="p" data-card="work" disabled>Carve it</button>' in html
     assert html.count('class="qline') == 1                                  # the offers aren't drawn as verdict lines too
     assert _page_of("const GOTO = {}; out = qlines({key: 'w', lines: [{text: 'a', status: 'ok'}]});").count("qbetter") == 0
 
@@ -444,6 +445,8 @@ const el = () => ({ disabled: false, innerHTML: '', value: '2', querySelector: (
 const $ = () => el();
 const api = async () => { posts += 1; return { job_id: 'j' }; };
 const follow = async () => { await gate; };
+const trackJob = () => ({ done: gate });
+const plainly = (m) => m;
 const clearStation = () => {}, refresh = async () => {}, loadRuns = () => [], lightenRuns = () => [], showHeat = () => {}, holdsHere = () => false, showStation = () => {};
 """
 

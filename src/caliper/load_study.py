@@ -1027,6 +1027,18 @@ NOTES = [
 ]
 
 
+#: what a check says where it gave no result that can be read
+NO_RESULT = {"unchecked": "not checked: its walls are too thin for the voxels",
+             "unresolved": "not resolved yet: check it again finer",
+             "untrusted": "not trusted: it ran on a filled-in shape"}
+
+
+def done_words(n: int, v: dict, worst: Optional[float]) -> str:
+    """The last line of a check. A number only beside a result: where the card withholds it, so does this (#178 review)."""
+    said = {"holds": "it holds", "fails": "it doesn't hold", **NO_RESULT}.get(v["kind"], v["word"])
+    return f"{n} load(s) checked: " + said + (f", {worst:g}x" if worst and v["kind"] not in NO_RESULT else "")
+
+
 @one_at_a_time
 def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
           emit: Optional[Callable] = None, spacing: Optional[float] = None,
@@ -1124,12 +1136,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
                                    **({"unresolved": True} if v["kind"] in ("unresolved", "unchecked") else {}),
                                    **({"middle_only": True} if v["kind"] == "edge" else {})})
     store.append_log({"kind": "load", "action": "studied", "part": part_id, "run": rid})
-    said = {"holds": "it holds", "fails": "it doesn't hold",
-            "unchecked": "not checked: its walls are too thin for the voxels",
-            "unresolved": "not resolved yet: check it again finer",
-            "untrusted": "not trusted: it ran on a filled-in shape"}.get(v["kind"], v["word"])
-    emit("done", f"{len(cases)} load(s) checked: " + said + (f", {worst:g}x" if worst else ""),
-         run=rid, progress=1.0)
+    emit("done", done_words(len(cases), v, worst), run=rid, progress=1.0)
     return record
 
 

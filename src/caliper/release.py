@@ -1039,12 +1039,13 @@ def _next_id(store: DesignStore) -> str:
 
 
 def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = True,
-         timeout: float = 180.0) -> dict:
+         timeout: float = 180.0, stop: Optional[Callable[[], None]] = None) -> dict:
     """Release the design as it stands: cut plans and scorecard brought up to date, everything for the shop
     filed in one versioned folder, and its record returned."""
     from . import cutplan, scorecard
 
     emit = emit or (lambda *a, **k: None)
+    stop = stop or (lambda: None)           # raises to cancel, up to the point the release starts being written (#178 review)
     why = cutplan.available()
     if why:
         raise ValueError(f"can't make a build package: {why}")
@@ -1057,6 +1058,7 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     # the cut plans, current for each part's version
     plans, fresh = {}, False
     for p in built:
+        stop()
         runs = cutplan.list_runs(store, p.id)
         if runs and runs[0].get("version") == p.version:
             plans[p.id] = runs[0]
@@ -1073,7 +1075,7 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
     if (fresh or card is None or card.get("versions") != versions or card.get("outdated")
             or (os.path.exists(goals) and os.path.getmtime(goals) > card["created"])):
         emit("scoring", "the design as it stands")
-        card = scorecard.compute(store, emit=emit)
+        card = scorecard.compute(store, emit=emit, stop=stop)
 
     m = card.get("metrics") or {}
     jack_lb = (m.get("parked.jack_lb") or {}).get("value")
@@ -1085,6 +1087,7 @@ def make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tru
         bom[p.id] = r["bom"]
         lumps[p.id] = [row for row in C.takeoff(C._items(C.declared(store, p.id))) if row["kind"] == "lump"]
 
+    stop()                                  # the last step that can stop: nothing's been written yet
     rid = _next_id(store)
     root = os.path.join(releases_dir(store), rid)
     os.makedirs(root)

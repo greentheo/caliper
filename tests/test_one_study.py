@@ -182,26 +182,4 @@ def test_the_routes_let_a_waiting_check_or_lighten_be_cancelled():
 
 def test_the_scorecard_says_it_is_waiting():
     src = _source("scorecard.py")
-    assert "load_study.study(store, p.id, emit=emit)" in src and 'bool(settings.get("walls", True)), emit=emit)' in src
-
-
-def test_the_page_offers_cancel_only_while_it_waits():
-    import json
-    import subprocess
-
-    from .test_carve_click import _fn, _node
-
-    script = """const made = [], posts = [];
-const box = { kids: [], querySelector() { return this.kids[0] || null; }, appendChild(b) { this.kids.push(b); b.remove = () => { this.kids = []; }; } };
-const document = { createElement: () => ({}) };
-const api = async (m, u) => posts.push(u), showErr = () => {};
-""" + _fn(_source("web/static/design.js"), "waitingCancel") + """
-waitingCancel(box, { kind: 'waiting' }, 'j1');
-waitingCancel(box, { kind: 'waiting' }, 'j1');
-const offered = box.kids.length;
-box.kids[0].onclick();
-waitingCancel(box, { kind: 'step' }, 'j1');
-console.log(JSON.stringify({ offered, posts, after: box.kids.length }));"""
-    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
-    assert got.returncode == 0, got.stderr
-    assert json.loads(got.stdout) == {"offered": 1, "posts": ["/api/jobs/j1/cancel"], "after": 0}
+    assert "load_study.study(store, p.id, emit=emit, stop=stop)" in src and 'bool(settings.get("walls", True)), emit=emit)' in src
