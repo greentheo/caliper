@@ -540,8 +540,11 @@ const esc = (s) => String(s);
 
 # --- #159, the server is the gate ---------------------------------------------------------------------------------------
 def _lightened(store, pid, rid="20261107-000200-light"):
-    _save(lighten.runs_dir(store), {"id": rid, "part": pid, "kind": "lighten", "version": store.design.part(pid).version,
-                                    "created": 2.0, "status": "done", "min_safety": NEED, "stations": []})
+    """As a real Lighten writes it: once, when it's finished, with no ``status``."""
+    _save(lighten.runs_dir(store), {"id": rid, "part": pid, "kind": "lighten", "created": 2.0,
+                                    "version": store.design.part(pid).version, "seconds": 60.0, "min_safety": NEED,
+                                    "material": "plywood", "spacing_mm": 2.0, "panels": [], "rules": {}, "stations": [],
+                                    "notes": []})
 
 
 @pytest.fixture
@@ -640,3 +643,18 @@ def test_only_the_again_buttons_say_again():
     src = open(_JS).read()
     assert "runCarve(p, e.target.dataset.again === '1')" in src and "runLighten(p, e.target.dataset.again === '1')" in src
     assert "if (ln.action === 'carve') return runCarve(p);" in src and "if (ln.action === 'lighten') return runLighten(p);" in src
+
+
+def test_a_lighten_on_a_new_unchecked_version_is_no_repeat(tmp_path, post):
+    store = _store(tmp_path, TUBE, "tube")
+    _lightened(store, "tube")
+    store.write_part("tube", TUBE, intent="again")
+    assert post(store, "lighten").status_code == 200
+
+
+@pytest.mark.parametrize("run,done", [("{ part: 'p', version: 3 }", True), ("{ part: 'p', version: 3, status: 'done' }", True),
+                                      ("{ part: 'p', version: 3, status: 'running' }", False),
+                                      ("{ part: 'p', version: 2 }", False)])
+def test_the_page_reads_finished_as_the_server_does(run, done):
+    head = f"const S = {{ design: {{ parts: [{{ id: 'p', version: 3 }}], lighten_runs: [{run}] }} }};\n"
+    assert _page(("studyDone",), head, "return { d: studyDone('lighten', 'p') };") == {"d": done}

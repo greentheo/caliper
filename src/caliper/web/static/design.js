@@ -1189,7 +1189,7 @@ function betterLines(c, offers) {
 function studyDone(action, pid) {
   const p = S.design.parts.find((x) => x.id === pid);
   const runs = S.design[action === 'carve' ? 'carve_runs' : 'lighten_runs'] || [];
-  return !!p && runs.some((r) => r.part === pid && r.version === p.version && r.status === 'done');
+  return !!p && runs.some((r) => r.part === pid && r.version === p.version && (r.status === undefined || r.status === 'done'));   // a Lighten's only record is its finished one
 }
 function tellOffer(text) {                  // a plain word beside the offers: nothing's gone wrong, so no Report it
   const box = document.querySelector('#inspector .qbetter');

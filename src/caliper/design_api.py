@@ -974,7 +974,7 @@ def router():
         if why:
             raise HTTPException(status_code=409, detail=f"{why[:1].upper()}{why[1:]}.")
         version = store.design.part(req.part).version
-        if not req.again and any(r.get("version") == version and r.get("status") == "done"
+        if not req.again and any(r.get("version") == version and r.get("status", "done") == "done"   # a Lighten's only record is its finished one
                                  for r in module.list_runs(store, req.part)):
             raise HTTPException(status_code=409, detail=f"This version already has a finished {kind}: its result is on the card.")
 
