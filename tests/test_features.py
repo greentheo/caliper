@@ -754,7 +754,7 @@ def test_sizes_that_round_the_same_are_said_in_mm():
 
 
 def test_a_build_has_edge_at_too(tmp_path):
-    """The real build, not only the sandbox: the design's own geometry goes through _build_worker."""
+    """The design's own geometry: part_geometry runs the script through the sandbox runner."""
     s = DesignStore.create("a box", base=str(tmp_path / "designs"))
     s.write_part("box", "def build(params):\n    return edge_at(cq.Workplane('XY').box(40, 20, 10), (0, -10, 5)).fillet(3)\n", intent="a box")
     assert s.part_geometry("box").require_mesh().is_volume
@@ -797,3 +797,61 @@ def test_a_cylinder_never_counts_for_a_curved_pick():
     arc = lambda f: next(e for e in f["edges"] if e["type"] == "circle" and e["local"][2] == pytest.approx(10))  # noqa: E731
     assert "cylinder" in {f["type"] for f in features.of_solid(filleted)["faces"]}
     assert _outcome(solid, filleted, arc, "fillet this 1.5 mm")["landed"] is not True
+
+
+def test_a_build_worker_has_edge_at_too():
+    """The warm worker a drag sweep builds on is a different runner, with its own namespace."""
+    from caliper.sandbox import BuildWorker
+
+    script = "def build(params):\n    return edge_at(cq.Workplane('XY').box(40, 20, 10), (0, -10, 5)).fillet(3)\n"
+    with BuildWorker(script, timeout=60) as worker:
+        assert worker.build({}) is not None
+
+
+# a hole begun on the picked face: a 300 mm plate, so a small hole barely changes the face's area
+def _plate():
+    return cq.Workplane("XY").box(300, 300, 20)
+
+
+def _plate_top(f):
+    return next(x for x in f["faces"] if x["type"] == "plane" and x["centre"][2] == pytest.approx(10))
+
+
+def _drill(depth=None):
+    tool = cq.Workplane("XY").circle(3).extrude(depth if depth else 40).translate((0, 0, 10 - (depth if depth else 40)))
+    return _plate().cut(tool)
+
+
+def test_a_blind_hole_begun_on_the_picked_face_can_t_be_told():
+    got = _outcome(_plate(), _drill(5), _plate_top, "put a hole here", kind="face")
+    assert got["landed"] is None and got["said"] == features.NOT_MEASURED
+
+
+def test_a_through_hole_with_a_sloped_far_side_can_t_be_told_not_a_miss():
+    wedge = cq.Workplane("XZ").polyline([(-150, -10), (150, -10), (150, 30), (-150, 10)]).close().extrude(150, both=True)
+    bottom = lambda f: next(x for x in f["faces"] if x["type"] == "plane" and x["centre"][2] == pytest.approx(-10))  # noqa: E731
+    done = wedge.cut(cq.Workplane("XY").circle(3).extrude(60).translate((0, 0, -20)))
+    assert _outcome(wedge, done, bottom, "put a hole here", kind="face")["landed"] is None
+
+
+def test_a_plain_through_hole_still_lands():
+    assert _outcome(_plate(), _drill(), _plate_top, "put a hole here", kind="face")["landed"] is True
+
+
+def test_nothing_done_on_a_big_plate_is_still_a_miss():
+    assert _outcome(_plate(), _plate(), _plate_top, "put a hole here", kind="face")["landed"] is False
+
+
+def test_a_boss_on_a_big_plate_isn_t_a_begun_hole():
+    done = _plate().faces(">Z").workplane().circle(3).extrude(8)
+    assert _outcome(_plate(), done, _plate_top, "put a hole here", kind="face")["landed"] is not True
+
+
+def test_a_hole_in_the_other_pad_is_still_a_miss():
+    base = cq.Workplane("XY").box(300, 60, 4).translate((0, 0, -2))
+    def pad(x):
+        return cq.Workplane("XY").box(120, 60, 10).translate((x, 0, 5))
+    both = base.union(pad(-80)).union(pad(80))
+    done = both.cut(cq.Workplane("XY").circle(3).extrude(20, both=True).translate((80, 0, 0)))
+    got = _outcome(both, done, lambda f: _plane_at(f, -80, 10), "put a hole here", kind="face")
+    assert got["landed"] is False

@@ -449,6 +449,12 @@ def _hole(before: dict, after: dict, face: dict, asked: Optional[float], inches:
             got, want = _both(size, asked, inches)
             return f"It went through that face, but it's {got} where you asked for {want}." + UNDO, PARTIAL
         return f"Checked: there's a {_size(size, inches)} hole through the face you picked.", True
+    for f in after["faces"]:                            # a hole begun on this face that isn't a plain through-hole: can't say
+        if f["type"] == "cylinder" and f.get("hollow") and _is_new(f, before):
+            for e in after["edges"]:
+                if e["type"] == "circle" and f["id"] in e["faces"] and any(x in on_it for x in e["faces"]) \
+                        and _on(face, np.asarray(e["centre"], float)[None], 0.5):
+                    return NOT_MEASURED, None
     same = [now[i] for i in on_it]
     if any(abs(f["area"] - face["area"]) <= 0.001 * face["area"] and np.linalg.norm(np.subtract(f["centre"], face["centre"])) <= SAME
            for f in same):
