@@ -33,10 +33,24 @@ def _minutes(m: float) -> str:
     return "1 min" if m < 1.5 else f"{round(m)} min" if m < 75 else "an hour" if m < 100 else f"{m / 60:.1f} hours"
 
 
+def past_limit(secs: float) -> str:
+    """What a study that would take ``secs`` says about the limit a study may run (jobs.STUDY_LIMIT_S), before the
+    click: nothing if it's within it (#211 review: an estimate and the limit can't disagree)."""
+    from .jobs import STUDY_LIMIT_S
+
+    if secs <= STUDY_LIMIT_S:
+        return ""
+    return (f"; that's past the {STUDY_LIMIT_S / 3600:g}-hour limit a study may run, so it stops at a step before "
+            f"it's done and keeps the steps it finished")
+
+
 def carve_takes(run: Optional[dict]) -> Optional[str]:
-    """What a carve takes at least, from its default check: the one wording, for the card and the Carve button (#157)."""
+    """What a carve takes at least, from its default check: the one wording, for the card and the Carve button (#157),
+    and the limit where it would run past it."""
     secs = (run or {}).get("seconds")
-    return f"at least about {_minutes(secs * CARVE_PER_CHECK / 60)} at this size" if secs else None
+    if not secs:
+        return None
+    return f"at least about {_minutes(secs * CARVE_PER_CHECK / 60)} at this size" + past_limit(secs * CARVE_PER_CHECK)
 
 
 def _line(lead: str, cost: str, button: str, action: str, **kw) -> dict:
@@ -153,7 +167,8 @@ def _thin_line(store: DesignStore, run: dict) -> list[dict]:
         return []
     enough = L.sees_from(seen)
     secs = run.get("seconds")
-    then = f"at least about {_minutes(secs * L.FINER_BUDGET / 60)}" if secs else "it can take a while"
+    then = (f"at least about {_minutes(secs * L.FINER_BUDGET / 60)}" + past_limit(secs * L.FINER_BUDGET)
+            if secs else "it can take a while")
     piece = (run.get("thinnest_where") or {}).get("piece")
     if piece:
         return [_line(f"Make the {piece} {_wall(enough)} thick so a finer check can see it",

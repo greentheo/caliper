@@ -108,9 +108,9 @@ class Job:
 #: the kinds of job that are long, or wait their turn for the one strength study at a time
 STUDIES = frozenset({"load", "lighten", "carve", "picture", "scorecard", "release", "whittle", "frame", "gussets", "aero", "firstrun"})
 #: How long a study may run, in seconds (CALI-90, #66 item 2: nothing ever stopped one). It stops at the first step
-#: boundary past it (where the work calls ``check()``), keeping the steps it finished. Generous: the bar stool's
-#: carve at its finest takes about half an hour. Other jobs (a chat, a cut plan) have none.
-STUDY_LIMIT_S = 3 * 3600
+#: boundary past it (where the work calls ``check()``), keeping the steps it finished. Generous: the sample stool's
+#: own carve is quoted at "at least about 3.4 hours" (#211 review). Other jobs (a chat, a cut plan) have none.
+STUDY_LIMIT_S = 6 * 3600
 LIMIT_S = {k: STUDY_LIMIT_S for k in STUDIES}
 #: what a job on a design is waiting for, when it's another job on that design that has it (#174)
 AHEAD = {"release": "the build package", "picture": "the picture", "cutplan": "the cut plan", "firstrun": "the first build", "chat": "the message before it"}

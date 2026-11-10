@@ -57,3 +57,19 @@ console.log(JSON.stringify([ran({ t0: now - 14 * 60000, limit: 3 * 3600 }), ran(
                                     check=True).stdout)
     assert got[0] == " · running for 14 min (it stops at a step after 3 hours)", got[0]
     assert got[1] == " · running for 14 min"
+
+
+def test_the_limit_is_six_hours():
+    # the sample stool's own carve was quoted at "at least about 3.4 hours": 3 would cut what it's for (#211 review)
+    assert jobs.STUDY_LIMIT_S == 6 * 3600 and jobs.LIMIT_S["carve"] == 6 * 3600
+
+
+def test_a_carve_estimate_past_the_limit_says_so_before_the_click():
+    from caliper import better
+
+    within = better.carve_takes({"seconds": 60})                 # 45 min
+    assert within == "at least about 45 min at this size"
+    past = better.carve_takes({"seconds": 600})                  # 7.5 hours
+    assert past.startswith("at least about 7.5 hours at this size")
+    assert "past the 6-hour limit" in past and "keeps the steps it finished" in past, past
+    assert "past the" not in better.carve_takes({"seconds": 470})   # 5.9 hours: within it
