@@ -2750,6 +2750,7 @@ async function followCarve(p, jobId, stopping, keyed) {
   try {
     await follow(jobId, (ev) => {
       if (ev.kind === 'stopping') cj.stopping = true;
+      if (ev.kind === 'started' && ev.limit_s) cj.limit = ev.limit_s;
       if (ev.text && ev.kind !== 'started') cj.text = ev.text;
       const m = /^step (\d+):/.exec(ev.text || ''), n = / in (\d+) steps/.exec(ev.text || '');
       if (m) cj.step = +m[1];
@@ -2778,7 +2779,8 @@ async function followCarve(p, jobId, stopping, keyed) {
 }
 // the panel while a carve runs: the step it's on, the bar, about how long is left (from its pace so far), and Cancel
 // how long a carve has run, from its start, always shown: 9.5 min of a sweep said nothing (#137 item 4)
-const ran = (cj) => (cj && cj.t0 && !cj.stopping ? ` · running for ${minutesText((Date.now() - cj.t0) / 60000)}` : '');
+// and where it will stop: a study has a limit, said beside it (#66 item 2)
+const ran = (cj) => (cj && cj.t0 && !cj.stopping ? ` · running for ${minutesText((Date.now() - cj.t0) / 60000)}${cj.limit ? ` (it stops at a step after ${cj.limit >= 3600 ? `${cj.limit / 3600} hours` : `${Math.round(cj.limit / 60)} min`})` : ''}` : '');
 // the panel's time moves while nothing else does: the sweep before step 1 reports little
 setInterval(() => {
   const mine = `${S.slug}/`;
