@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 import os
 import re
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel, field_validator
 
@@ -41,6 +41,10 @@ class ParamSet(BaseModel):
     name: str
     value: float
     unit: Optional[str] = None            # a length's unit (mm when none); no unit for a count, a ratio or an angle
+
+
+class ParamsSet(BaseModel):
+    values: list[ParamSet]
 
 
 class LabelSet(BaseModel):
@@ -668,10 +672,11 @@ def router():
             raise HTTPException(422, str(e))
 
     @r.post("/api/designs/{slug}/parts/{pid}/params")
-    def set_part_param(slug: str, pid: str, req: ParamSet):
+    def set_part_param(slug: str, pid: str, req: Union[ParamsSet, ParamSet]):
         """Set one of a part's numbers by hand (CALI-108): no Claude call. A new version with that PARAMS line
         rewritten, rebuilt and the design measured again; refused (422, saying why) outside its range or if it won't
-        build. A value its build ignores or clamps comes back as ``warning``."""
+        build. A value its build ignores or clamps comes back as ``warning``. ``{"values": [...]}`` sets several as one
+        version (the panel's Rebuild)."""
         from . import params
 
         with RUNNER.locked(_lock(slug)):
@@ -679,7 +684,8 @@ def router():
             if store.design.part(pid) is None:
                 raise HTTPException(404, f"no part {pid!r}")
             try:
-                got = params.set_value(store, pid, req.name, req.value, req.unit)
+                got = params.set_values(store, pid, [c.model_dump() for c in req.values]) if isinstance(req, ParamsSet) \
+                    else params.set_value(store, pid, req.name, req.value, req.unit)
             except (ValueError, KeyError) as e:
                 raise HTTPException(422, str(e).strip("'\""))
             return {"version": got["version"], "said": got["said"], "warning": got["warning"], "notes": got["notes"],
@@ -695,6 +701,19 @@ def router():
             except ValueError as e:
                 raise HTTPException(422, str(e))
             return design_state(store)
+
+    @r.get("/api/designs/{slug}/parts/{pid}/features.json")
+    def part_features(slug: str, pid: str):
+        """The part's faces and edges with ids, for picking one (#109). Worked out once per version."""
+        from . import features
+
+        store = load(slug)
+        try:
+            return features.with_words(features.for_part(store, pid), store.design.display_units == "in")
+        except KeyError:
+            raise HTTPException(404, f"no part {pid!r}")
+        except Exception as e:  # noqa: BLE001 — a part that doesn't build has no faces to pick: said, as for its pieces (#172)
+            raise HTTPException(422, str(e))
 
     @r.get("/api/designs/{slug}/parts/{pid}/piece.stl")
     def part_piece_stl(slug: str, pid: str, key: str):
@@ -801,7 +820,7 @@ def router():
         def work(j):
             s = DesignStore.load(slug)
             return load_study.study(s, req.part, min_safety=req.min_safety, spacing=req.spacing_mm,
-                                    emit=lambda k, t="", **d: j.emit(k, t, **d))
+                                    emit=lambda k, t="", **d: j.emit(k, t, **d), stop=j.check)
 
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
         return {"job_id": job.id}
@@ -1023,7 +1042,7 @@ def router():
         def work(j):
             s = DesignStore.load(slug)
             return lighten.study(s, req.part, min_safety=req.min_safety,
-                                 emit=lambda k, t="", **d: j.emit(k, t, **d))
+                                 emit=lambda k, t="", **d: j.emit(k, t, **d), stop=j.check)
 
         job = RUNNER.submit("lighten", work, label=f"lighten · {req.part}", lock=f"load:{slug}")
         return {"job_id": job.id}

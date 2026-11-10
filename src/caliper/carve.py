@@ -26,6 +26,7 @@ import numpy as np
 
 from . import verdicts
 from .design import DesignStore
+from .one_study import one_at_a_time
 from .runs import newest_first
 
 STATIONS = 7
@@ -68,6 +69,7 @@ def runs_dir(store: DesignStore) -> str:
     return os.path.join(store.root, "carves")
 
 
+@one_at_a_time
 def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = None, stations: int = STATIONS,
           remove_up_to: float = REMOVE_UP_TO, emit: Optional[Callable] = None,
           stop: Optional[Callable[[], None]] = None) -> dict:

@@ -32,6 +32,7 @@ import numpy as np
 from . import load_study as L
 from .consistency import _frame
 from .design import DesignStore
+from .one_study import one_at_a_time
 from .runs import newest_first
 
 IN = 25.4
@@ -328,8 +329,10 @@ def runs_dir(store: DesignStore) -> str:
     return os.path.join(store.root, "lighten")
 
 
+@one_at_a_time
 def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY, steps=STEPS,
-          emit: Optional[Callable] = None) -> dict:
+          emit: Optional[Callable] = None,
+          stop: Optional[Callable[[], None]] = None) -> dict:      # ``stop``: cancels while it waits its turn (#169)
     """From the part as it is to where the safety runs out, every step checked in 3D: the walls first (holes
     where the wood isn't working), then hole-saw holes in the panel stood on, then thinner sheet (estimated)."""
     from . import carve

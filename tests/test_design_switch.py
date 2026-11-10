@@ -23,6 +23,7 @@ const syncParts = async (d) => log.push(['sync', d.slug]);
 const clearStation = () => {};
 const showLoading = (slug) => { S.opening = slug; S.design = null; log.push(['loading', slug]); };
 const doneLoading = () => { S.opening = null; };
+const failed = []; const loadFailed = (slug, e) => failed.push([slug, e.message]);
 const meshes = new Map(), scene = { add() {}, remove() {} };
 const location = {};
 const design = (slug) => ({ slug, parts: [] });
@@ -150,12 +151,14 @@ const $ = (id) => parts[id];
 const esc = (s) => String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const meshes = new Map([['p', {}]]), removed = [], scene = { remove: (m) => removed.push(m) };
 const clearStation = () => {};
+const pieces3d = new Map([['p', {}]]); const dropPieces = (p) => pieces3d.delete(p);
+const plainly = (m) => m;
 """
 
 
 def test_the_new_design_s_name_goes_up_at_once_and_nothing_of_the_old_stays():
-    got = _run(("showLoading", "doneLoading"), """S.slug = 'new'; showLoading('new');
-        return { h: parts.inspector.innerHTML, design: S.design, thread: parts.thread.innerHTML, meshes: meshes.size,
+    got = _run(("showLoading", "doneLoading", "pickedName"), """S.slug = 'new'; showLoading('new');
+        return { h: parts.inspector.innerHTML, design: S.design, thread: parts.thread.innerHTML, meshes: meshes.size + pieces3d.size,
                  msg: parts.msg.disabled, send: parts.send.disabled, tree: parts.tree.hidden };""", _LOADING)
     assert "New &lt;stool&gt;" in got["h"] and "loading" in got["h"]
     assert got["design"] is None and got["thread"] == "" and got["meshes"] == 0 and got["tree"] is True
@@ -163,13 +166,13 @@ def test_the_new_design_s_name_goes_up_at_once_and_nothing_of_the_old_stays():
 
 
 def test_the_chat_comes_back_when_it_lands():
-    got = _run(("showLoading", "doneLoading"), """S.slug = 'new'; showLoading('new'); doneLoading();
+    got = _run(("showLoading", "doneLoading", "pickedName"), """S.slug = 'new'; showLoading('new'); doneLoading();
         return { msg: parts.msg.disabled, send: parts.send.disabled, opening: S.opening };""", _LOADING)
     assert got == {"msg": False, "send": False, "opening": None}
 
 
 def test_the_send_stays_off_while_a_message_is_going():
-    got = _run(("showLoading", "doneLoading"), """S.busy = true; showLoading('new'); doneLoading();
+    got = _run(("showLoading", "doneLoading", "pickedName"), """S.busy = true; showLoading('new'); doneLoading();
         return { send: parts.send.disabled };""", _LOADING)
     assert got == {"send": True}
 
@@ -253,3 +256,33 @@ def test_a_carve_finishing_on_the_design_on_screen_redraws():
 
 def test_the_key_has_the_design_in_it():
     assert re.search(r"const carveKey = \(pid\) => `\$\{S\.slug\}/\$\{pid\}`;", open(JS).read())
+
+
+def test_a_load_that_fails_says_why():
+    got = _run(("loadFailed", "doneLoading", "showLoading", "pickedName"), """loadFailed('new', new Error('no such design'));
+        return { h: parts.inspector.innerHTML, hint: parts.viewHint.textContent };""", _LOADING)
+    assert "Couldn't open it: no such design" in got["h"] and got["hint"] == ""
+
+
+def test_opening_a_design_that_fails_doesn_t_throw_and_is_said():
+    got = _run(("openDesign",), """const go = openDesign('bad');
+        later.bad; const k = later['bad'];
+        return { waiting: typeof k };""")
+    assert got == {"waiting": "function"}
+    head = HEAD.replace("const api = (m, url) => new Promise((r) => { later[url.split('/').pop()] = r; });",
+                        "const api = async () => { throw new Error('gone'); };")
+    got = _run(("openDesign",), "await openDesign('bad'); return { failed, opening: S.opening };", head)
+    assert got == {"failed": [["bad", "gone"]], "opening": "bad"}
+
+
+def test_a_failure_for_a_design_left_says_nothing():
+    head = HEAD.replace("const api = (m, url) => new Promise((r) => { later[url.split('/').pop()] = r; });",
+                        "const api = async () => { S.slug = 'other'; throw new Error('gone'); };")
+    assert _run(("openDesign",), "await openDesign('bad'); return { failed };", head) == {"failed": []}
+
+
+def test_new_design_during_a_load_ends_the_load():
+    from .test_carve_click import _fn as fn
+
+    src = fn(open(JS).read(), "startNew")
+    assert src.index("S.slug = null;") < src.index("doneLoading();") and "dropPieces" in src

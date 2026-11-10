@@ -25,6 +25,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from .design import DesignStore
+from .one_study import one_at_a_time
 
 IN = 25.4
 #: Nothing narrower than this, and no gap narrower: a scroll blade in a jigsaw (or a 1/4 in router bit).
@@ -252,6 +253,7 @@ def _try(ctx: dict, panel: dict, poly, min_safety: float) -> Optional[float]:
     return worst
 
 
+@one_at_a_time
 def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", where: str = "",
         min_safety: Optional[float] = None, emit: Optional[Callable] = None, strength: bool = True) -> dict:
     """Put ``shape`` on the part: fitted, checked (shrunk until it holds), cut into ``HOLES``, and the rebuilt

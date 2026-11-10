@@ -4,6 +4,11 @@ Theo: "the advantage to manual cad is the ability to specify things precisely". 
 words, and setting one: converted to mm, refused outside its range, only its line rewritten (its comment kept), built,
 written as a new version that says so, the design measured again, and a value the build ignores or clamps said."""
 
+import json
+import os
+import re
+import subprocess
+
 import pytest
 
 from caliper import aero, params
@@ -218,3 +223,309 @@ def test_a_part_with_a_strength_check_says_check_it_again(store):
     with open(os.path.join(folder, "run.json"), "w") as f:
         json.dump(run, f)
     assert "strength: check the box again" in params.set_value(store, "box", "h", 250)["notes"]
+
+
+# --- the panel's Rebuild: everything changed, one version (#108, the mockup) ------------------------------------------
+def test_several_numbers_are_one_version_with_each_said(store):
+    got = params.set_values(store, "box", [{"name": "h", "value": 150}, {"name": "w", "value": 300}])
+    assert got["version"] == 2 and store.design.part("box").version == 2
+    assert got["said"] == "set h to 150 mm and w to 300 mm by hand"
+    entry = store.history("box")[-1]
+    assert entry["feedback"] == got["said"] and set(entry["params"]) == {"h", "w"}
+    now = {e["name"]: e["value"] for e in params.listing(store, "box")}
+    assert now["h"] == 150 and now["w"] == 300
+
+
+def test_one_bad_number_in_a_batch_writes_none_of_them(store):
+    was = store.read_script("box")
+    with pytest.raises(ValueError, match="between 100 and 300"):
+        params.set_values(store, "box", [{"name": "w", "value": 300}, {"name": "h", "value": 9000}])
+    assert store.read_script("box") == was and store.design.part("box").version == 1
+
+
+def test_a_batch_is_built_as_one_change(store, monkeypatch):
+    """Numbers that only work together: built one at a time, the first could be refused or leave a half-way version."""
+    from caliper import sandbox
+
+    calls, real = [], sandbox.run_script
+    monkeypatch.setattr(sandbox, "run_script", lambda script, p, **k: calls.append(script) or real(script, p, **k))
+    params.set_values(store, "box", [{"name": "h", "value": 150}, {"name": "w", "value": 300}])
+    new = [c for c in calls if '"h": 150' in c]                     # the old script may be built to compare with
+    assert len(new) == 1 and '"w": 300' in new[0]
+
+
+def test_nothing_to_set_and_a_number_twice_are_refused(store):
+    with pytest.raises(ValueError):
+        params.set_values(store, "box", [])
+    with pytest.raises(ValueError, match="twice"):
+        params.set_values(store, "box", [{"name": "h", "value": 150}, {"name": "h", "value": 160}])
+
+
+def test_in_a_batch_a_number_the_build_ignores_is_named(store):
+    got = params.set_values(store, "box", [{"name": "h", "value": 150}, {"name": "spare", "value": 9}])
+    assert "spare" in got["warning"] and "h " not in got["warning"]
+
+
+def test_the_api_takes_a_batch_in_the_person_s_units(store, monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    monkeypatch.setenv("CALIPER_DESIGNS", os.path.dirname(store.root))
+    c, slug = TestClient(create_app()), os.path.basename(store.root)
+    got = c.post(f"/api/designs/{slug}/parts/box/params",
+                 json={"values": [{"name": "h", "value": 6, "unit": "in"}, {"name": "w", "value": 300, "unit": "mm"}]})
+    assert got.status_code == 200 and got.json()["version"] == 2
+    now = {e["name"]: e["value"] for e in c.get(f"/api/designs/{slug}/parts/box/params").json()["params"]}
+    assert now["h"] == pytest.approx(152.4) and now["w"] == 300
+    assert c.post(f"/api/designs/{slug}/parts/box/params", json={"values": []}).status_code == 422
+
+
+# --- the page ---------------------------------------------------------------------------------------------------------
+JS = os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")
+_LIST = """[
+  { name: 'wall_t', note: 'cone wall thickness mm', value: 12.7, unit: 'mm', range: [6.35, 25.4], read: true },
+  { name: 'mesh_rows', note: 'rows of holes', value: 4, unit: 'count', range: [1, 8], read: true },
+  { name: 'spare', note: '', value: 3, unit: 'mm', range: null, read: false },
+  { name: 'tilt', note: 'lean angle', value: 5, unit: 'deg', range: null, read: true } ]"""
+_FNS = ("inchText", "paramName", "readNumber", "paramRange", "paramProblem", "paramRows", "paramsHtml", "paramView")
+
+
+def _page(body: str, units: str = "in") -> dict:
+    from .test_carve_click import _fn, _node
+
+    src = open(JS).read()
+    head = """
+const IN = 25.4;
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+const S = { slug: 'x', design: { display_units: 'UNITS' }, params: null, paramsDone: null };
+const inches = () => S.design.display_units === 'in';
+const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const paramKey = (p) => `${S.slug}/${p.id}/${p.version}/${S.design.display_units}`;
+const isLength = (e) => e.unit === 'mm';
+const paramText = (e, v) => (isLength(e) && inches() ? inchText(v) : `${+Number(v).toFixed(3)}`);
+const paramUnit = (e) => (isLength(e) ? (inches() ? 'in' : 'mm') : e.unit === 'deg' ? 'deg' : '');
+let loaded = 0;
+const loadParams = () => { loaded += 1; };
+globalThis.setTimeout = (f) => f();
+const LIST = LIST_HERE;
+const P = { id: 'box', version: 5, scripted: true, role: 'part' };
+const state = (drafts) => ({ key: 'x/box/5/UNITS', list: LIST, drafts: drafts || {}, saving: false, err: null });
+const byName = (n) => LIST.find((e) => e.name === n);
+""".replace("UNITS", units).replace("LIST_HERE", _LIST)
+    words = re.search(r"^const PARAM_WORD = .*?;$", src, re.M).group(0)
+    script = head + words + "\n".join(_fn(src, n) for n in _FNS) + f"\nconst out = (() => {{ {body} }})();\nconsole.log(JSON.stringify(out));"
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    return json.loads(got.stdout)
+
+
+@pytest.mark.parametrize("mm,said", [(12.7, "1/2"), (31.75, "1 1/4"), (25.4, "1"), (6, "0.236"), (736.6, "29")])
+def test_lengths_show_in_the_person_s_inches(mm, said):
+    assert _page(f"return {{ s: inchText({mm}) }};")["s"] == said
+
+
+@pytest.mark.parametrize("typed,value,unit", [("0.5", 0.5, "in"), ("1/2", 0.5, "in"), ("1 1/4", 1.25, "in"), ('2"', 2, "in"),
+                                              ("12.7 mm", 12.7, "mm"), (".25", 0.25, "in")])
+def test_what_s_typed_is_read_with_its_unit(typed, value, unit):
+    got = _page(f"return readNumber({json.dumps(typed)}, byName('wall_t'));")
+    assert got == {"value": value, "unit": unit}
+
+
+@pytest.mark.parametrize("typed", ["", "abc", "1/0", "1/2/3", "--2"])
+def test_what_isn_t_a_number_isn_t_read(typed):
+    assert _page(f"return {{ r: readNumber({json.dumps(typed)}, byName('wall_t')) }};")["r"] is None
+
+
+def test_a_count_takes_no_unit_and_a_unit_on_it_is_not_a_number():
+    got = _page("return { a: readNumber('5', byName('mesh_rows')), b: readNumber('5 mm', byName('mesh_rows')) };")
+    assert got["a"] == {"value": 5} and got["b"] is None
+
+
+def test_the_panel_lists_each_number_in_plain_words_in_the_person_s_units():
+    h = _page("return { h: paramsHtml(P, state(), null) };")["h"]
+    assert "Cone wall thickness<" in h and 'value="1/2"' in h and " to 1 in" not in h    # a range only on a change
+    assert "Rows of holes" in h and 'value="4"' in h and "1 to 8" not in h
+    assert "set by hand, no Claude call" in h and "doesn't use this" in h
+    assert "Rebuild" not in h                                    # nothing changed
+
+
+def test_the_panel_in_mm():
+    h = _page("return { h: paramsHtml(P, state(), null) };", units="mm")["h"]
+    assert 'value="12.7"' in h and "6.35 to 25.4 mm" not in h
+
+
+def test_a_change_says_what_it_was_and_offers_the_next_version():
+    h = _page("return { h: paramsHtml(P, state({ wall_t: '3/4' }), null) };")["h"]
+    assert 'value="3/4"' in h and "was 1/2 in · 1/4 to 1 in" in h and "Rebuilds as v6" in h and "data-param-rebuild" in h
+    assert "prow changed" in h and "disabled>Rebuild" not in h
+
+
+def test_retyping_the_number_shown_is_not_a_change():
+    got = _page("return { n: paramRows(state({ wall_t: ' 1/2 ' })).filter((r) => r.changed).length };")
+    assert got == {"n": 0}
+
+
+@pytest.mark.parametrize("typed,why", [("2", "Must be 1/4 to 1 in."), ("nope", "That isn&#39;t a number.")])
+def test_a_bad_number_is_refused_with_the_range_and_rebuild_is_off(typed, why):
+    h = _page(f"return {{ h: paramsHtml(P, state({{ wall_t: {json.dumps(typed)} }}), null) }};")["h"]
+    assert why.replace("&#39;", "'") in h and "prow changed bad" in h and "disabled>Rebuild" in h
+
+
+def test_a_range_is_checked_in_the_scripts_mm_whatever_unit_was_typed():
+    got = _page("return { a: paramProblem(byName('wall_t'), { value: 20, unit: 'mm' }), "
+                "b: paramProblem(byName('wall_t'), { value: 30, unit: 'mm' }) };")
+    assert got["a"] == "" and got["b"].startswith("Must be")
+
+
+def test_half_a_row_is_refused():
+    assert _page("return { w: paramProblem(byName('mesh_rows'), { value: 4.5 }) };")["w"] == "A whole number."
+
+
+def test_after_a_rebuild_it_says_what_was_written_and_what_was_ignored():
+    h = _page("""return { h: paramsHtml(P, state(), { part: 'box', version: 5, said: 'Cone wall thickness 3/4 in',
+                 warning: "spare isn't used", notes: ['strength: check the box again'] }) };""")["h"]
+    assert "v5 written: Cone wall thickness 3/4 in set exactly as typed; the whole design re-measured." in h
+    assert "spare isn't used." in h
+    assert "strength: check the box again." in h
+
+
+def test_a_written_line_from_another_part_stays_away():
+    h = _page("""return { h: paramsHtml(P, state(), { part: 'other', version: 5, said: 'x', notes: [] }) };""")["h"]
+    assert "written" not in h
+
+
+@pytest.mark.parametrize("p", ["{ ...P, role: 'fixed' }", "{ ...P, scripted: false }"])
+def test_a_reference_or_a_mesh_has_no_panel(p):
+    assert _page(f"return {{ h: paramView({p}), n: loaded }};") == {"h": "", "n": 0}
+
+
+def test_the_numbers_are_fetched_once_for_a_version():
+    got = _page("""const a = paramView(P), n = loaded;
+                   S.params = { ...state(), key: 'x/box/5/in' };
+                   const b = paramView(P);
+                   return { a, n, again: loaded, drew: b.includes('Parameters') };""")
+    assert got == {"a": "", "n": 1, "again": 1, "drew": True}
+
+
+@pytest.mark.parametrize("name,note,said", [
+    ("seat_dia", "12 in", "Seat diameter"),                                 # Theo's stool: a quantity isn't a name
+    ("seat_t", "3/4 in plywood", "Seat thickness"),
+    ("stool_h", "29", "Stool height"),
+    ("cone_top_dia", "~10.5", "Cone top diameter"),
+    ("cone_bot_dia", "18 in base", "Cone bottom diameter"),
+    ("foot_fillet_r", "1 in fillet radius at cone-to-foot inner junction", "Fillet radius at cone-to-foot inner junction"),
+    ("foot_t", "Extra radial width of foot ring (~2.5 in + 1", "Extra radial width of foot ring"),
+    ("rib_v", "vertical rib between rows mm", "Vertical rib between rows"),
+    ("wall_t", "", "Wall thickness"),
+])
+def test_a_number_s_name_is_words_not_a_quantity(name, note, said):
+    got = _page(f"return {{ s: paramName({{ name: {json.dumps(name)}, note: {json.dumps(note)} }}) }};")
+    assert got["s"] == said
+
+
+@pytest.mark.parametrize("value,said", [(0.375, "3/8 in"), (0.5, "1/2 in"), (1.25, "1 1/4 in"), (6, "6 in"), (0.2362, "0.2362 in"),
+                                        (0, "0 in")])
+def test_an_exact_edit_is_said_exactly(value, said):
+    assert params._said(value, "in") == said
+
+
+# --- #171 review --------------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("typed,changed", [("0.5", False), ("12.7 mm", False), ("1/2", False), ("0.51", True)])
+def test_the_same_number_written_differently_isn_t_a_change(typed, changed):
+    got = _page(f"return {{ n: paramRows(state({{ wall_t: {json.dumps(typed)} }})).filter((r) => r.changed).length }};")
+    assert got == {"n": 1 if changed else 0}
+
+
+def test_an_unchanged_number_writes_no_version_on_the_server(store):
+    got = params.set_values(store, "box", [{"name": "h", "value": 200.0}])
+    assert got["said"] == "nothing to change" and got["version"] == 1 and store.design.part("box").version == 1
+
+
+def test_a_batch_only_writes_what_changed(store):
+    got = params.set_values(store, "box", [{"name": "h", "value": 200.0}, {"name": "w", "value": 300}])
+    assert got["said"] == "set w to 300 mm by hand"
+
+
+def test_a_measurement_of_something_else_says_nothing(store):
+    """#171 review: "built 3 mm" was the mesh openings' corners. A fillet radius this change didn't make isn't its own."""
+    params.set_value(store, "box", "fillet_r", 1.5)
+    both = params.set_values(store, "box", [{"name": "fillet_r", "value": 1.8}, {"name": "w", "value": 300}])
+    assert not [n for n in both["notes"] if "built" in n or "thinnest wall" in n]
+
+
+def test_a_wall_number_says_nothing_about_some_other_thin_spot(store):
+    got = params.set_value(store, "box", "h", 250)
+    assert not [n for n in got["notes"] if "thinnest" in n]
+
+
+def test_a_carved_part_refuses_its_numbers_and_says_roll_it_back(store, monkeypatch):
+    from caliper import carve
+
+    monkeypatch.setattr(carve, "carved", lambda script: True)
+    with pytest.raises(ValueError, match="roll it back"):
+        params.set_values(store, "box", [{"name": "h", "value": 150}])
+    assert store.design.part("box").version == 1
+
+
+def test_a_carved_part_has_no_numbers_to_set_on_the_page():
+    h = _page("return { h: paramView({ ...P, carved: true }), n: loaded };")
+    assert "roll it back" in h["h"] and "data-param" not in h["h"] and h["n"] == 0
+
+
+def test_a_build_that_fails_writes_nothing_and_says_why_plainly(store, monkeypatch):
+    from types import SimpleNamespace
+
+    from caliper import sandbox
+
+    was = store.read_script("box")
+    monkeypatch.setattr(sandbox, "run_script", lambda *a, **k: SimpleNamespace(ok=False, feedback="ValueError: fussy_t is too thick"))
+    with pytest.raises(ValueError) as e:
+        params.set_values(store, "box", [{"name": "h", "value": 150}, {"name": "w", "value": 300}])
+    assert str(e.value).endswith(": fussy_t is too thick") and "ValueError" not in str(e.value)
+    assert store.read_script("box") == was and store.design.part("box").version == 1
+
+
+def test_rebuild_asks_for_the_new_model():
+    from .test_carve_click import _fn
+
+    fn = _fn(open(JS).read(), "rebuildParams")
+    assert fn.index("S.design = got.design;") < fn.index("await syncParts(S.design, false);")
+
+
+def test_the_panel_sits_after_will_it_work():
+    from .test_carve_click import _fn
+
+    fn = _fn(open(JS).read(), "cardsView")
+    assert "${k === 'work' ? groups.params || '' : ''}" in fn
+
+
+@pytest.mark.parametrize("name,note,said", [
+    ("foot_t", "Extra radial width of foot ring (~2.5 in + 1 in)", "Extra radial width of foot ring"),
+    ("d", "", "D"),
+])
+def test_more_of_the_stool_s_names(name, note, said):
+    assert _page(f"return {{ s: paramName({{ name: {json.dumps(name)}, note: {json.dumps(note)} }}) }};")["s"] == said
+
+
+def test_the_written_line_uses_plain_names_and_the_numbers_as_typed():
+    from .test_carve_click import _fn
+
+    src = open(JS).read()
+    fn = _fn(src, "paramsSaid")
+    assert "paramName(r.e)" in fn and "r.text.trim()" in fn
+
+
+def test_a_radius_this_change_didn_t_make_isn_t_its_own(monkeypatch):
+    """The stool: the mesh openings' 3 mm corners were there before and after: nothing to say about the fillet."""
+    monkeypatch.setattr(params, "_radii", lambda g: g)
+    assert params._probe("foot_fillet_r", 12.7, {3.0}, {3.0}) == ""
+    assert params._probe("foot_fillet_r", 12.7, {3.0, 11.2}, {3.0}) == "asked 12.7 mm, built 11.2 mm (the closest fillet)"
+
+
+def test_two_numbers_changed_at_once_say_nothing_about_what_was_built(store, monkeypatch):
+    monkeypatch.setattr(params, "_probe", lambda *a: "asked this, built that")
+    both = params.set_values(store, "box", [{"name": "fillet_r", "value": 1.0}, {"name": "w", "value": 300}])
+    assert not [n for n in both["notes"] if "built" in n]
+    one = params.set_value(store, "box", "fillet_r", 1.5)
+    assert "asked this, built that" in one["notes"]
