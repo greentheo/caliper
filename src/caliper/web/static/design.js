@@ -15,6 +15,7 @@ const S = {
   slug: null,          // the open design
   design: null,        // its last state from the server
   running: {},         // a load check or Lighten this page started and is following, by kind and part (#159)
+  opening: null,       // the design on its way, while it loads (#173)
   scope: null,         // the selected part (the chat is about it), or null = the whole design
   pick: null,          // a face, edge or point picked on it (#109): { part, kind, id, said, local }
   busy: false,         // a turn is in flight
@@ -31,6 +32,13 @@ const S = {
   balance: null,       // {key, data}: the whole design's weight and what the hitch carries
   payload: 0,          // lb of gear or people on the floor, for the balance
 };
+// S.design only ever holds the open design: an answer for one that's no longer open is dropped, whichever call brought it (#168)
+function guardDesign(state) {
+  let open = state.design;
+  Object.defineProperty(state, 'design', { enumerable: true, get: () => open,
+    set: (d) => { if (!d || !d.slug || d.slug === state.slug) open = d; } });
+}
+guardDesign(S);
 
 // ------------------------------------------------------------------------------------------ api
 async function api(method, url, body) {
@@ -360,6 +368,7 @@ function material(p) {
 }
 
 async function syncParts(design, refit) {
+  const slug = S.slug;                          // what lands after the design is left isn't drawn (#168)
   const want = new Map(design.parts.map((p) => [p.id, p]));
   for (const [pid, m] of meshes) {
     if (!want.has(pid)) { scene.remove(m); m.geometry.dispose(); meshes.delete(pid); }
@@ -377,6 +386,7 @@ async function syncParts(design, refit) {
         throw new Error(`${p.id}: ${msg}`);
       }
       const geom = loader.parse(await r.arrayBuffer());
+      if (S.slug !== slug) return;
       geom.computeVertexNormals();
       const mesh = new THREE.Mesh(geom, material(p));
       mesh.userData = { partId: p.id, version: p.version, origin: p.origin, role: p.role };
@@ -387,6 +397,7 @@ async function syncParts(design, refit) {
     })());
   }
   const results = await Promise.allSettled(loads);
+  if (S.slug !== slug) return;
   const failed = results.filter((x) => x.status === 'rejected');
   if (failed.length) showErr(failed.map((f) => f.reason.message).join(' · '));
   await syncPieces(design);
@@ -424,17 +435,23 @@ async function loadPieces(p) {
 }
 let piecesOf = null;              // the design they're of: two designs can both have a part called i_want at v8
 async function syncPieces(design) {
-  if (piecesOf !== S.slug) { [...pieces3d.keys()].forEach(dropPieces); noPieces.clear(); piecesOf = S.slug; }
+  const slug = S.slug;
+  if (piecesOf !== slug) { [...pieces3d.keys()].forEach(dropPieces); noPieces.clear(); piecesOf = slug; }
   const want = new Map(design.parts.filter((p) => (p.pieces || []).length && p.role !== 'fixed').map((p) => [p.id, p]));
   for (const [pid, s] of pieces3d) if (!want.has(pid) || want.get(pid).version !== s.version) dropPieces(pid);
   await Promise.all([...want.values()].filter((p) => !pieces3d.has(p.id) && (noPieces.get(p.id) || {}).version !== p.version).map(async (p) => {
     try {
       const byKey = await loadPieces(p);
+      if (S.slug !== slug) return;                // two designs can share a part's id and version
       if (!S.design || !S.design.parts.some((x) => x.id === p.id && x.version === p.version)) return;   // it moved on
       dropPieces(p.id);
       for (const m of byKey.values()) scene.add(m);
       pieces3d.set(p.id, { version: p.version, byKey });
-    } catch (e) { noPieces.set(p.id, { version: p.version, why: plainly(e.message) }); renderTree(); }
+    } catch (e) {
+      if (S.slug !== slug) return;
+      noPieces.set(p.id, { version: p.version, why: plainly(e.message) });
+      renderTree();
+    }
   }));
 }
 $('oneBody').onclick = () => { TREE.oneBody = !TREE.oneBody; keepTree(); paint(); renderTree(); };
@@ -781,15 +798,51 @@ async function openDesign(slug) {
   S.slug = slug; S.scope = null; S.station = null;
   if (first) S.buildBubble = null;
   location.hash = encodeURIComponent(slug);
-  S.design = await api('GET', `/api/designs/${slug}`);
-  if (first) { for (const m of meshes.values()) scene.remove(m); meshes.clear(); clearStation(); }
+  if (first) showLoading(slug);
+  let got;
+  try { got = await api('GET', `/api/designs/${slug}`); } catch (e) { if (S.slug === slug) loadFailed(slug, e); return; }
+  if (S.slug !== slug) return;                  // another design was chosen while this one loaded (#168)
+  S.design = got;
+  doneLoading();
   render();
   await syncParts(S.design, first);
+}
+// while a design loads the page isn't the old one: the new name, nothing of the old, and the chat off, so a message can't
+// go to a design other than the one on screen (#173)
+function pickedName(slug) {                     // its name as the dropdown has it, before its own state lands
+  const pick = $('designPick').selectedOptions[0];
+  return pick && pick.value === slug ? pick.textContent : slug;
+}
+function showLoading(slug) {
+  S.opening = slug;
+  S.design = null;
+  for (const m of meshes.values()) scene.remove(m);
+  meshes.clear();
+  [...pieces3d.keys()].forEach(dropPieces);
+  clearStation();
+  $('inspector').innerHTML = `<h2>${esc(pickedName(slug))}</h2><div class="muted small"><span class="spin"></span>loading…</div>`;
+  $('thread').innerHTML = '';
+  $('tree').hidden = true;
+  $('scopeRow').hidden = true;
+  $('viewHint').textContent = 'loading…';
+  $('msg').disabled = true; $('send').disabled = true;
+}
+// it couldn't be opened: says why, and the chat stays off, as there's no design on screen to talk about
+function loadFailed(slug, e) {
+  $('inspector').innerHTML = `<h2>${esc(pickedName(slug))}</h2><div class="note-warn small">Couldn't open it: ${esc(plainly(e.message))}</div>`;
+  $('viewHint').textContent = '';
+}
+function doneLoading() {
+  S.opening = null;
+  $('msg').disabled = false;
+  if (!S.busy) $('send').disabled = false;
 }
 
 async function refresh() {
   if (!S.slug) return;
-  S.design = await api('GET', `/api/designs/${S.slug}`);
+  const slug = S.slug, got = await api('GET', `/api/designs/${slug}`);
+  if (S.slug !== slug) return;                  // the design was left while this was on its way (#168)
+  S.design = got;
   if (S.scope && !S.design.parts.find((p) => p.id === S.scope)) S.scope = null;
   render();
   await syncParts(S.design, false);
@@ -1047,7 +1100,7 @@ function aboutPiece(text) {
   return piece ? `About the ${piece.name}: ${text}` : text;
 }
 async function send(text, scope) {
-  if (S.busy || !text.trim()) return;
+  if (S.busy || S.opening || !text.trim()) return;      // never to a design that isn't on screen yet (#173)
   if (!S.slug) return createDesign(text);
   S.busy = true; $('send').disabled = true;
   const live = liveTurn(text, scope);
@@ -1064,6 +1117,7 @@ async function send(text, scope) {
 }
 $('composer').onsubmit = (e) => {
   e.preventDefault();
+  if (S.opening) return;                        // what's typed stays
   const text = $('msg').value;
   $('msg').value = '';
   const said = aboutPick(S.pick, aboutPiece(text));
@@ -1081,6 +1135,9 @@ function startNew() {
   S.slug = null; S.design = null; S.scope = null; S.buildBubble = null;
   for (const m of meshes.values()) scene.remove(m);
   meshes.clear(); clearStation();
+  [...pieces3d.keys()].forEach(dropPieces);
+  doneLoading();                                  // whatever was loading is dropped when it lands (#173)
+  $('viewHint').textContent = '';
   history.replaceState(null, '', location.pathname);
   $('inspector').innerHTML = `<div class="empty">The answers show up here: what it is, whether it works, what to
     buy and how to make it.</div>`;
