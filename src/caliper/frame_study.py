@@ -602,6 +602,7 @@ def gussets_dir(store: DesignStore) -> str:
     return os.path.join(store.root, "gussets")
 
 
+@one_at_a_time
 def gussets(store: DesignStore, part_id: str, *, thickness: float = 4.7625, plates: int = 2,
             min_safety: float = 3.5, payload_lb: float = 100.0, walls: bool = True,
             build: Optional[dict] = None, emit: Optional[Callable] = None, resolution: int = 80) -> dict:
@@ -737,8 +738,9 @@ def adopt_gussets(store: DesignStore, rid: str, picks: Optional[dict] = None) ->
                                            for n, p in plates.items()}, "note": note}
 
 
+@one_at_a_time
 def analyse(store: DesignStore, part_id: str, *, payload_lb: float = 0.0, factor: float = 2.5,
-            walls: bool = True) -> dict:
+            walls: bool = True, emit: Optional[Callable] = None) -> dict:
     """The frame as it stands, carrying the design as built (no sweep) — for the scorecard."""
     from whittle import FrameStudy
 

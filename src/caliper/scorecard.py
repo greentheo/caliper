@@ -231,7 +231,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         if "def members(" not in script or "def supports(" not in script:
             continue
         emit("frame", f"analysing {p.id}")
-        a = frame_study.analyse(store, p.id, payload_lb=payload, walls=bool(settings.get("walls", True)))
+        a = frame_study.analyse(store, p.id, payload_lb=payload, walls=bool(settings.get("walls", True)), emit=emit)
         _metric(metrics, "frame.safety", a["safety"], "×", f"{p.id}'s weakest member on a ×{a['factor']:g} bump "
                 f"({a['governing']['member']})", "model", "frame study")
         _metric(metrics, "frame.yield_x", round(a["safety"] * a["factor"], 2), "×",
@@ -371,7 +371,7 @@ def compute(store: DesignStore, emit: Optional[Callable] = None) -> dict:
         if run is None:
             emit("strength", f"checking what {p.id} must hold")
             try:
-                run = load_study.study(store, p.id)
+                run = load_study.study(store, p.id, emit=emit)
             except Exception as e:  # noqa: BLE001 — a check that can't run is unknown, not a crash
                 _metric(metrics, f"strength.{p.id}.error", str(e), "", f"{p.id}'s strength couldn't be checked",
                         "model", "strength")

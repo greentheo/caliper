@@ -2481,6 +2481,7 @@ async function runLighten(p) {
     const runs = loadRuns(p.id);
     const { job_id } = await api('POST', `/api/designs/${S.slug}/lighten`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2 });
     await follow(job_id, (ev) => {
+      waitingCancel(prog, ev, job_id);
       const msg = $('lightMsg'), bar = prog.querySelector('.bar > i');
       if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
       if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;
@@ -2496,6 +2497,16 @@ async function runLighten(p) {
   }
 }
 
+// a study waiting its turn behind another can be stopped, as a waiting carve can; gone as soon as it starts (#169)
+function waitingCancel(box, ev, jobId) {
+  const had = box.querySelector('.wait-cancel');
+  if (ev.kind !== 'waiting') { if (had) had.remove(); return; }
+  if (had) return;
+  const b = document.createElement('button');
+  b.className = 'ghost wait-cancel'; b.textContent = 'Cancel';
+  b.onclick = () => { b.disabled = true; api('POST', `/api/jobs/${jobId}/cancel`).catch((e) => showErr(e.message)); };
+  box.appendChild(b);
+}
 async function runLoad(p, spacing) {
   const prog = $('lProgress'), go = $('lGo');
   go.disabled = true;
@@ -2505,6 +2516,7 @@ async function runLoad(p, spacing) {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`,
       { part: p.id, min_safety: +$('lSafety').value || 2, ...(spacing ? { spacing_mm: spacing } : {}) });
     await follow(job_id, (ev) => {
+      waitingCancel(prog, ev, job_id);
       const msg = $('lMsg'), bar = prog.querySelector('.bar > i');
       if (ev.text && msg && ev.kind !== 'started') msg.textContent = ev.text;
       if (bar && typeof ev.progress === 'number') bar.style.width = `${Math.round(ev.progress * 100)}%`;

@@ -801,7 +801,7 @@ def router():
         def work(j):
             s = DesignStore.load(slug)
             return load_study.study(s, req.part, min_safety=req.min_safety, spacing=req.spacing_mm,
-                                    emit=lambda k, t="", **d: j.emit(k, t, **d))
+                                    emit=lambda k, t="", **d: j.emit(k, t, **d), stop=j.check)
 
         job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}")
         return {"job_id": job.id}
@@ -1023,7 +1023,7 @@ def router():
         def work(j):
             s = DesignStore.load(slug)
             return lighten.study(s, req.part, min_safety=req.min_safety,
-                                 emit=lambda k, t="", **d: j.emit(k, t, **d))
+                                 emit=lambda k, t="", **d: j.emit(k, t, **d), stop=j.check)
 
         job = RUNNER.submit("lighten", work, label=f"lighten · {req.part}", lock=f"load:{slug}")
         return {"job_id": job.id}

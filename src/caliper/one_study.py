@@ -18,24 +18,30 @@ _TURN = threading.RLock()
 WAITING = "Waiting for another strength study on this server to finish."
 
 
-def take_turn(emit: Optional[Callable] = None, stop: Optional[Callable[[], None]] = None) -> None:
-    """Wait for this thread's turn, saying so once if it has to wait. ``stop`` may raise, to cancel while waiting."""
+def take_turn(emit: Optional[Callable] = None, stop: Optional[Callable[[], None]] = None) -> bool:
+    """Wait for this thread's turn, saying so once if it has to wait. ``stop`` may raise, to cancel while waiting.
+    True if it waited."""
     if _TURN.acquire(blocking=False):
-        return
+        return False
     if emit:
         emit("waiting", WAITING)
     while not _TURN.acquire(timeout=0.25):
         if stop:
             stop()
+    return True
 
 
 def one_at_a_time(study: Callable) -> Callable:
-    """A study (``emit=``, ``stop=`` by keyword, where it has them) that takes its turn."""
+    """A study (``emit=``, ``stop=`` by keyword, where it has them) that takes its turn. One that waited works from the
+    design as it is now, not as it was when it was asked for (#169 review: a part revised during the wait, and v1's record
+    carried v2's number): its store is read again, in place, so whoever holds it sees the same."""
 
     @functools.wraps(study)
     def run(*args, **kw):
-        take_turn(kw.get("emit"), kw.get("stop"))
+        waited = take_turn(kw.get("emit"), kw.get("stop"))
         try:
+            if waited and args and hasattr(args[0], "root"):
+                args[0].__dict__.update(type(args[0]).load(args[0].root).__dict__)
             return study(*args, **kw)
         finally:
             _TURN.release()

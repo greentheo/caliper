@@ -7,4 +7,5 @@ nothing. The cause wasn't found; three different low numbers looks like a race, 
 - A long carve now makes a strength check wait for it. Workers went from 4 to 8, so a chat isn't stuck behind waiting
   studies.
 - Not gated: the drag study (`aero`), which is a separate solver. Whether it shares whatever went wrong isn't known.
-- Tests: tests/test_one_study.py (11, stubbed).
+- Tests: tests/test_one_study.py (22, stubbed).
+- **#169 review:** a study that waited now reads the design again before it starts, in place, so a part revised during the wait is studied as it now is and its record's version and number agree. Pictures, gussets, `analyse` and the parked cases take turns too. A waiting strength check or Lighten can be cancelled (a Cancel while it waits), and the scorecard and pictures say they're waiting.

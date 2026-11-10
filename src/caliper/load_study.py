@@ -1021,7 +1021,8 @@ NOTES = [
 
 @one_at_a_time
 def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
-          emit: Optional[Callable] = None, spacing: Optional[float] = None) -> dict:
+          emit: Optional[Callable] = None, spacing: Optional[float] = None,
+          stop: Optional[Callable[[], None]] = None) -> dict:      # ``stop``: cancels while it waits its turn (#169)
     """Every load the part declares, through whittle's FEA and the plate check. Returns the run record."""
     emit = emit or (lambda *a, **k: None)
     t0 = time.time()

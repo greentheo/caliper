@@ -112,3 +112,96 @@ def test_every_structural_study_takes_its_turn(module):
 
 def test_waiting_studies_leave_workers_for_the_chat():
     assert jobs.JobRunner()._pool._max_workers >= 8
+
+
+# --- #169 review ------------------------------------------------------------------------------------------------------
+from caliper import frame_study as _F  # noqa: E402
+from caliper import parked, pictures  # noqa: E402
+from caliper.design import DesignStore  # noqa: E402
+
+BOX = "def build(params):\n    import cadquery as cq\n    return cq.Workplane('XY').box({x}, 20, 10)\n"
+
+
+@pytest.fixture
+def store(tmp_path):
+    pytest.importorskip("cadquery")
+    s = DesignStore.create("a box", base=str(tmp_path / "designs"))
+    s.write_part("box", BOX.format(x=40), intent="a box")
+    return s
+
+
+@one_study.one_at_a_time
+def _record(store, emit=None, stop=None):
+    """What a study does: read the part and file what it read, against the version it read."""
+    return {"version": store.design.part("box").version, "script": store.read_script("box")}
+
+
+def test_a_study_that_waited_works_from_the_part_as_it_is_now(store):
+    """The reviewer's case: asked for at v1, revised to v2 during the wait: the record's version and number must agree."""
+    log, gate, said = [], threading.Event(), []
+    first, _ = _start(_study(log, "first", gate))
+    _until(lambda: "first in" in log)
+    got = {}
+    second = threading.Thread(target=lambda: got.update(_record(store, emit=lambda k, t="", **d: said.append(k))))
+    second.start()
+    _until(lambda: said)
+    other = DesignStore.load(store.root)
+    other.write_part("box", BOX.format(x=99), intent="a bigger box")
+    gate.set()
+    first.join(5), second.join(5)
+    assert got["version"] == 2 and "box(99" in got["script"]
+    assert store.design.part("box").version == 2                            # the caller's store too
+
+
+def test_a_study_that_didn_t_wait_keeps_the_store_it_was_given(store):
+    store.design.part("box").intent = "not saved yet"
+    _record(store)
+    assert store.design.part("box").intent == "not saved yet"
+
+
+@pytest.mark.parametrize("fn", [pictures.put, _F.gussets, _F.analyse, parked.run])
+def test_every_other_fea_takes_its_turn(fn):
+    assert fn.__wrapped__ is not None
+
+
+@pytest.mark.parametrize("module", [load_study, lighten])
+def test_a_waiting_check_or_lighten_can_be_stopped(module):
+    assert "stop" in __import__("inspect").signature(module.study).parameters
+
+
+def _source(name):
+    import caliper
+
+    return open(__import__("os").path.join(__import__("os").path.dirname(caliper.__file__), name)).read()
+
+
+def test_the_routes_let_a_waiting_check_or_lighten_be_cancelled():
+    src = _source("design_api.py")
+    assert src.count("emit=lambda k, t=\"\", **d: j.emit(k, t, **d), stop=j.check") >= 3
+
+
+def test_the_scorecard_says_it_is_waiting():
+    src = _source("scorecard.py")
+    assert "load_study.study(store, p.id, emit=emit)" in src and 'bool(settings.get("walls", True)), emit=emit)' in src
+
+
+def test_the_page_offers_cancel_only_while_it_waits():
+    import json
+    import subprocess
+
+    from .test_carve_click import _fn, _node
+
+    script = """const made = [], posts = [];
+const box = { kids: [], querySelector() { return this.kids[0] || null; }, appendChild(b) { this.kids.push(b); b.remove = () => { this.kids = []; }; } };
+const document = { createElement: () => ({}) };
+const api = async (m, u) => posts.push(u), showErr = () => {};
+""" + _fn(_source("web/static/design.js"), "waitingCancel") + """
+waitingCancel(box, { kind: 'waiting' }, 'j1');
+waitingCancel(box, { kind: 'waiting' }, 'j1');
+const offered = box.kids.length;
+box.kids[0].onclick();
+waitingCancel(box, { kind: 'step' }, 'j1');
+console.log(JSON.stringify({ offered, posts, after: box.kids.length }));"""
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    assert json.loads(got.stdout) == {"offered": 1, "posts": ["/api/jobs/j1/cancel"], "after": 0}
