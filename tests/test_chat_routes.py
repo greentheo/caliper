@@ -157,3 +157,34 @@ def test_a_size_added_to_the_one_part_is_a_revision_not_a_new_part(stool, messag
 def test_a_words_request_with_a_size_in_it_is_still_the_change(stool):
     got = chat.offline_classify(stool, "make it 2 in taller and put it in plain English", None)
     assert (got.action, got.part) == ("refine", P), got
+
+
+# --- #212, round 3: a why/what/how clause is a question, whatever's in it; each exception pinned on its own -------
+
+@pytest.mark.parametrize("message", ["use plain words: why is it so much heavier", "put it in plain English, why is it heavier",
+                                     "in plain English, how is it wider than the drawing"])
+@pytest.mark.parametrize("scoped", [True, False])
+def test_a_direction_inside_a_question_clause_isnt_a_change(stool, message, scoped):
+    got = chat.offline_classify(stool, message, P if scoped else None)
+    assert got.action == "answer", (message, scoped, got)
+
+
+def test_a_words_request_with_a_question_on_an_empty_design_authors_nothing(tmp_path):
+    from caliper.design import DesignStore
+
+    empty = DesignStore.create("a step stool", base=str(tmp_path))
+    assert chat.offline_classify(empty, "use plain words: why is it so much heavier", None).action == "answer"
+
+
+@pytest.mark.parametrize("message", ["put it in plain English and make it wider",            # a direction only
+                                     "put it in plain English and add 2 inches to the height"])  # a size only
+def test_a_words_request_with_a_change_clause_is_the_change(stool, message):
+    got = chat.offline_classify(stool, message, None)
+    assert (got.action, got.part) == ("refine", P), (message, got)
+
+
+@pytest.mark.parametrize("scoped", [True, False])
+def test_a_statement_with_no_change_isnt_a_revision(stool, scoped):
+    for message in ("I need it by Friday", "I need it"):
+        got = chat.offline_classify(stool, message, P if scoped else None)
+        assert got.action == "answer", (message, scoped, got)

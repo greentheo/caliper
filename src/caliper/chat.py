@@ -79,7 +79,12 @@ _CHANGE = re.compile(r"(?:^|[,;.!]\s*(?:and\s+|then\s+|but\s+)?|\b(?:and|then|al
 _WORDS = re.compile(r"\b(?:plain (?:english|words|language)|(?:simpler|plainer) (?:words|terms|language)|eli5)\b", re.I)
 #: (#212, round 2) a size added to what's there is a revision: "add 2 inches to the height", "I need it 2 in wider".
 _ADD_SIZE = re.compile(r"\badd\s+(?:another\s+)?\d[\d./ ]*\s*(?:in|inch|inches|mm|cm|ft|feet|foot|\")(?=\W|$)"
-                       r"|\bneed\s+(?:it|this|that|them)\b", re.I)
+                       r"|\bneed\s+(?:it|this|that|them)\s+(?:to\s+be\s+)?(?=\d|\S+er\b)", re.I)   # a size after it
+#: (#212, round 3) a clause asking why, what or how: a question, whatever words are in it.
+_Q_CLAUSE = re.compile(r"^\s*(?:why|what|how|which|where|when|who|is|are|does|do|did|can|could|would|should|will)\b",
+                       re.I)
+#: (#212, round 3) a statement with no change in it: "I need it by Friday" isn't a revision.
+_STATEMENT = re.compile(r"^\s*i\s+need\s+(?:it|this|that|them)\b", re.I)
 #: (#212) a change to what's there: "make it wider", "use 1/2 in plywood"; not "make a bench", nor "add …".
 _MODIFY = re.compile(r"(?:^|[,;.!]\s*(?:and\s+|then\s+)?|\b(?:and|then|also|just|now)\s+)(?:please\s+)?"
                      r"(?:make(?!\s+(?:me\s+)?(?:a|an|another|some|new|second|one more)\b)|change|remove|move|use|set"
@@ -93,7 +98,8 @@ _STRUCTURE = {"skid", "skids", "foot", "feet", "leg", "legs", "shelf", "shelves"
               "supports", "block", "blocks", "drawer", "drawers", "lid", "hinge", "hinges", "hook", "hooks", "tray",
               "panel", "panels", "post", "posts", "bar", "bars", "strut", "struts", "pad", "pads"}
 #: (#65) a new thing: "add a shelf", "make me a bench"; "make it wider" changes what's there.
-_NEW_THING = re.compile(r"\b(?:add|create|build|generate|model|design|insert|need)\b"
+_NEW_THING = re.compile(r"\b(?:add|create|build|generate|model|design|insert)\b"
+                        r"|\bneed\s+(?:me\s+)?(?:a|an|another|some|new|second|one more)\b"
                         r"|\bmake\s+(?:me\s+)?(?:a|an|another|some|new|second|one more)\b", re.I)   # with or without
 #                                                         an article: "add shelves", "add the lid" (#212 review)
 #: CALI-78: a picture cut out of a panel, for looks ("put a T-rex on the side", "cut a dinosaur into the front").
@@ -155,6 +161,13 @@ def _words(message: str) -> list[str]:
     return re.findall(r"[a-z0-9_]+", (message or "").lower())
 
 
+def _changes_outside_questions(msg: str) -> bool:
+    """A size or a direction asked for in a clause that isn't itself a question (#212, round 3: "use plain words: why
+    is it so much heavier" asks why; "…and make it wider" asks for a change)."""
+    clauses = re.split(r"[,:;.!?]|\band\b|\bthen\b", msg)
+    return any((_MEASURE.search(c) or _DIRECTION.search(c)) for c in clauses if not _Q_CLAUSE.match(c))
+
+
 def _is_question(message: str) -> bool:
     msg = (message or "").strip()
     if msg.endswith("?"):
@@ -162,8 +175,10 @@ def _is_question(message: str) -> bool:
     w = _words(msg)
     if _EXPLAIN.search(msg) and not _CHANGE.search(msg):
         return True                                  # a question stays a question, whatever words are in it (#212)
-    if _WORDS.search(msg) and not _MEASURE.search(msg) and not _DIRECTION.search(msg):
+    if _WORDS.search(msg) and not _changes_outside_questions(msg):
         return True                                  # other words, whatever verb asks for them (#212, round 2)
+    if _STATEMENT.search(msg) and not _changes_outside_questions(msg) and not _ADD_SIZE.search(msg):
+        return True                                  # "I need it by Friday": nothing to change (#212, round 3)
     return bool(w) and w[0] in _QUESTION_LEAD
 
 
