@@ -162,10 +162,12 @@ def _thin_line(store: DesignStore, run: dict) -> list[dict]:
                       f"It takes more filament, and then a finer check: {then}.", "Try it", "use_t",
                       say=f"Make the {piece} at least {enough:g} mm thick so the strength check can see it")]
     at = f",{_thin_at(run, inches)}" if _thin_at(run, inches) else ""
-    return [_line(f"The thinnest spot is {_wall(thin)}{at}: thicken it or make the openings smaller",
-                  f"It takes more filament. A finer check can see walls from {_wall(enough)}: {then}.", "Try it",
-                  "use_t", say=f"The thinnest spot is {_wall(thin)}{at}: thicken it or make the openings near it smaller, "
-                               f"so that it's at least {enough:g} mm")]
+    # #180: on the stool no number moved it. Its openings were cut so they left a sliver: said, so nobody hunts through the panel
+    return [_line(f"The thinnest spot is {_wall(thin)}{at}: thicken it or change the openings",
+                  f"It takes more filament. If the numbers don't move it, it's how the openings are cut: that's a change to ask "
+                  f"for in the chat. A finer check can see walls from {_wall(enough)}: {then}.", "Try it",
+                  "use_t", say=f"The thinnest spot is {_wall(thin)}{at}: thicken it, or if it's beside an opening, change how the "
+                               f"opening is cut so it leaves no sliver, so that it's at least {enough:g} mm")]
 
 
 def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
