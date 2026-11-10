@@ -160,7 +160,7 @@ def api(tmp_path, monkeypatch):
     pytest.importorskip("whittle")
     from fastapi.testclient import TestClient
 
-    from caliper import carve
+    from caliper import carve, load_study
     from caliper.design import DesignStore
     from caliper.server import create_app
 
@@ -182,6 +182,7 @@ def api(tmp_path, monkeypatch):
             time.sleep(0.02)
 
     monkeypatch.setattr(carve, "study", slow)
+    monkeypatch.setattr(load_study, "blocked", lambda *a, **k: None)    # the job's mechanics: whether it may start is #159's
     yield TestClient(create_app()), store.design.slug, gate, began
     gate.set()
 
@@ -314,6 +315,7 @@ def test_a_redraw_while_a_carve_runs_keeps_its_panel_and_the_button_stays_off():
     out = _run(_page(["carveView", "carveChart", "carveProgress", "carveTime", "carveBlocked"],
                      ["minutesText", "ran", "verdictTone", "holdsHere"], """
 const esc = (s) => String(s);
+const carveKey = (pid) => pid;
 const S = { carveJob: {}, station: null };
 const carveRuns = () => [];
 const loadRuns = () => [{ version: 3, spacing_mm: 4.6, seconds: 90, cases: [{ fea: { supported: true } }] }];
@@ -386,6 +388,7 @@ out.thin = carveTime(p);
 PANEL = ["runCarve", "followCarve", "carveProgress", "paintCarve", "wireCarve"]
 STUBS = """
 const ran = () => '';
+const carveKey = (pid) => pid;
 const S = { carveJob: {}, scope: 'stool', design: {} };
 const esc = (s) => String(s), $ = () => null, showErr = () => {}, clearStation = () => {}, showStation = () => {};
 const document = { querySelectorAll: () => [] };
