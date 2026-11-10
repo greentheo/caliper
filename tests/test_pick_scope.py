@@ -132,3 +132,45 @@ def test_the_page_draws_the_bubble_from_what_was_shown():
     assert "md(e.shown || e.text)" in _fn(src, "renderThread") and "liveTurn(shown || text, scope)" in _fn(src, "send")
     assert "...(shown ? { shown } : {})" in _fn(src, "send")
     assert "const shown = S.pick ? `About this ${S.pick.said}: ${text}` : null;" in src
+
+
+# --- a pick across a rebuild (#196) -----------------------------------------------------------------------------------------
+_PICKED = _CHOOSE.replace("const facePicked = () => null;", "const facePicked = () => ({ id: 'f7', said: 'face: the cone', local: [0, 0, 1], verts: [], tris: [] });") + """
+class Geom { setAttribute() {} setIndex() {} }
+const THREE = { BufferGeometry: Geom, Float32BufferAttribute: class {} };
+let hint = ''; const drawPick = () => {};
+"""
+
+
+def _picked(body):
+    head = """S.design.parts[0].version = 9; PICK.mode = 'face'; globalThis.features = async () => ({ solidMesh: false, version: 9 });
+              await choose({}, HIT);\n"""
+    return _page(head + body, extra=("clearPick", "choose", "pickPosted", "dropOldPick"), more=_PICKED.replace("const pickHint = () => {};", "const pickHint = (t) => { hint = t; };"))
+
+
+def test_a_pick_carries_the_version_it_was_made_on():
+    assert _picked("return { v: S.pick.version, id: S.pick.id };") == {"v": 9, "id": "f7"}
+
+
+def test_it_is_posted_with_that_version_even_if_the_design_has_moved_on():
+    got = _picked("S.design.parts[0].version = 10; return { p: pickPosted('round it') };")["p"]
+    assert got == {"kind": "face", "id": "f7", "version": 9, "text": "round it"}
+
+
+def test_a_rebuild_drops_the_pick_and_says_so():
+    got = _picked("S.design.parts[0].version = 10; dropOldPick(); renderScope(); return { pick: S.pick, hidden: $('pickChip').hidden, hint };")
+    assert got == {"pick": None, "hidden": True, "hint": "Rebuilt: click it again"}
+
+
+def test_a_redraw_at_the_same_version_keeps_it():
+    got = _picked("dropOldPick(); return { id: S.pick.id, hint };")
+    assert got == {"id": "f7", "hint": ""}
+
+
+def test_a_part_that_s_gone_takes_its_pick_with_it():
+    assert _picked("S.design.parts = []; dropOldPick(); return { pick: S.pick };") == {"pick": None}
+
+
+def test_every_redraw_looks():
+    assert "dropOldPick();" in _fn(open(JS).read(), "render")
+
