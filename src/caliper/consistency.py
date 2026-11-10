@@ -611,12 +611,63 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
             out.append(_covers(mesh, pieces, tol))
             vol = _volume(mesh, pieces, strength=bool(declared.get("loads")), tol=tol)
             out += [vol] if vol else []
+    inside = _holes_inside(declared.get("construction") or [])     # (#66 item 4)
+    out += [inside] if inside else []
     if declared.get("loads") is not None:
         out.append(_loads(mesh, declared, pieces, tol))
         if pieces:
             edge = _edge_foot(mesh, declared, pieces, tol, rest)  # a warning, said in its detail (CALI-94)
             out += [edge] if edge else []
     return out
+
+
+#: How far a hole may reach into the glued rim before it's said to cross it: the outline's rounding.
+HOLE_RIM_TOL_MM = 1.0
+
+
+def holes_outside(items: list) -> list[str]:
+    """Each sheet's holes (``holes``, as holes.merge gives them) that cross its outline or reach into the glued rim
+    round it (lighten.RIM_MM: lightening and pictures both keep clear of it), said for a person (CALI-90, #66 item
+    4: one across the edge became a stray 65 mm cut)."""
+    from shapely.geometry import Polygon
+
+    from .lighten import RIM_MM
+
+    out = []
+    for it in items or []:
+        if not isinstance(it, dict) or it.get("kind") != "sheet" or not it.get("outline") or not it.get("holes"):
+            continue
+        poly = np.asarray(it["outline"], float)
+        o, u, v, n, flat = _frame(poly)
+        room = Polygon(flat).buffer(-RIM_MM + HOLE_RIM_TOL_MM, join_style=2)
+        for h in it["holes"]:
+            rel = np.asarray(h, float) - o
+            hole = Polygon(np.stack([rel @ u, rel @ v], axis=1)).buffer(0)
+            if hole.is_empty or room.is_empty or not room.contains(hole):
+                past = not Polygon(flat).buffer(HOLE_RIM_TOL_MM).contains(hole)
+                out.append(f"a hole in the {it.get('name')} " + ("crosses its edge" if past else
+                           f"reaches into the glued rim round its edge (holes stay {RIM_MM / 25.4:g} in inside it)"))
+    return out
+
+
+def refuse_holes_outside(construction: list, entries: list) -> None:
+    """Refuse HOLES ``entries`` (as written into a script) that cross a panel's edge or its rim (#66 item 4)."""
+    from . import holes as H
+
+    bare = [{k: v for k, v in it.items() if k not in ("holes", "pictures")} if isinstance(it, dict) else it
+            for it in construction or []]
+    bad = holes_outside(H.merge(bare, entries))
+    if bad:
+        raise ValueError("; ".join(bad) + ": it can't be cut there")
+
+
+def _holes_inside(items: list) -> Optional[AssertionResult]:
+    if not any(isinstance(it, dict) and it.get("holes") for it in items or []):
+        return None
+    bad = holes_outside(items)
+    return AssertionResult(id="holes_inside", expr="every hole is inside its panel, clear of the glued rim",
+                           status="fail" if bad else "pass", passed=not bad, actual=len(bad),
+                           detail="; ".join(bad) if bad else "")
 
 
 def middle_only(store, part_id: str, run: dict, history: Optional[list] = None) -> bool:

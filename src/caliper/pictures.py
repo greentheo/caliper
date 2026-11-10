@@ -24,6 +24,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from . import verdicts as V
 from .design import DesignStore
 from .one_study import one_at_a_time
 
@@ -257,7 +258,7 @@ def _try(ctx: dict, panel: dict, poly, min_safety: float) -> Optional[float]:
                 uncut[i] = L.check_load(ctx, i, min_safety)[1]
             # its edge at KT_HOLE times the wall's stress there, as the finished part is judged (#64 item 5)
             edge = lighten.picture_edge(p, [poly], uncut[i].von_mises, ctx["ls"].solid, s, mat["strength"] * mat["across"])
-            safety = min(case["safety"], round(edge, 2)) if np.isfinite(edge) else case["safety"]
+            safety = min(case["safety"], V.cut(edge)) if np.isfinite(edge) else case["safety"]   # cut (#213)
             worst = safety if worst is None else min(worst, safety)
     return worst
 
@@ -305,6 +306,11 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
     emit("step", f"Cutting the {subject} out of the {panel['name']}", step="cut")
     entry = {"piece": panel["name"], "normal": [round(float(c), 6) for c in panel["inward"]],
              "depth": round(float(panel["t"]), 3), "polygons": [to_3d(panel, poly)], "picture": subject}
+    from . import consistency
+    from . import construction as C
+
+    # never a cut across the panel's edge or into its glued rim, whatever fit() came to (#66 item 4, #70 item 4)
+    consistency.refuse_holes_outside(C.declared(store, part_id).get("construction") or [], [entry])
     script = holes.write(script, [*holes.read(script), entry])
     xy = np.asarray(poly.exterior.coords)
     size = [round(float(np.ptp(xy @ panel["right"])) / IN, 1), round(float(np.ptp(xy @ panel["up"])) / IN, 1)]

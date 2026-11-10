@@ -294,6 +294,8 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
             how = (f", as a round plate held at its ring's outer edge ({_len(pl['ring_mm'], inches)} across)"
                    if pl.get("support") == "ring" else "")
             text += f" By hand, the {pl['piece']} on its own{how}: {_times(pl['safety_across'], need=need)}."
+    elif v["kind"] == "recheck":                     # its reason, not "older version" (#214 review)
+        text = f"{c['name'][:1].upper() + c['name'][1:]}: check it again, {over(c, need, rough)}: {v['why']}."
     else:                                            # any other kind: its word, never a ✓ (CALI-112)
         text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {_times(c['safety'], rough, need)}."
     return _line(text + older, v["status"], study="load", **({"close": True} if v["kind"] == "close" else {}),
@@ -532,11 +534,13 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         if d.get("safety") is not None:
             # an older frame run (or one from before it recorded its version) isn't the frame as it is (#132 review)
             v = verdicts.meets(d["safety"], frames[0].get("min_safety"),
-                               stale=frames[0].get("version") != p["version"])
+                               stale=frames[0].get("version") != p["version"],
+                               recheck=verdicts.old_on_limit(frames[0], d["safety"], frames[0].get("min_safety")))   # (#214)
             work.append(_line(f"The frame holds, {_times(d['safety'], need=frames[0].get('min_safety'))}"
                               + (f": close to the {frames[0].get('min_safety'):g} it needs." if v["kind"] == "close" else ".")
                               if v["kind"] in ("holds", "close") else
                               f"The frame read {_times(d['safety'], need=frames[0].get('min_safety'))} on an older version: check it again." if v["kind"] == "stale" else
+                              f"The frame read {_times(d['safety'], need=frames[0].get('min_safety'))}: check it again, {v['why']}." if v["kind"] == "recheck" else
                               f"The frame is too weak as drawn: {_times(d['safety'], need=frames[0].get('min_safety'))}, it needs "
                               f"{frames[0].get('min_safety')}.", v["status"], study="frame"))
     mine = {r["id"] for r in p.get("rules") or []}
@@ -677,6 +681,10 @@ def measured(store: DesignStore, state: dict) -> dict:
              for c in r.get("cases") or [] if c.get("safety") is not None or L.blind(r, c)]
     inches = (state.get("display_units") or "in") == "in"
     said = [(r, verdicts.case(r, c)) for r, c in cases]
+    if any(not r.get("cut") for r, _ in cases):
+        out["strength.uncut"] = True                   # made before the rounding fix (#214 review)
+    if any(v["kind"] == "recheck" for _, v in said):
+        out["strength.recheck"] = verdicts.UNCUT
     held = [r for r, v in said if v["kind"] in ("unresolved", "unchecked")]
     if held:                                           # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
         out["strength.unresolved"] = coarse(held[0], inches)
@@ -720,6 +728,7 @@ def measured(store: DesignStore, state: dict) -> dict:
                                            for r in state.get("load_runs") or []) and consistency.bare_edge(store, pid)]
     if edged:                                          # loaded in the middle only (CALI-94, #106 review)
         out["strength.edge"] = consistency.MIDDLE_ONLY[0].upper() + consistency.MIDDLE_ONLY[1:] + "."
+    # a run made before the rounding fix: its number on a goal's limit isn't settled either (#214 review)
     if safeties:
         out["strength.safety"] = min(safeties)
         # the case that number is, for what it's against (#208 review: the design card as the part card says it)
@@ -902,7 +911,11 @@ def held_to(state: dict, now: dict) -> list[dict]:
                                 stale=late or bool(older),
                                 incomplete=now.get("strength.unchecked") if strength else None, estimate=guess,
                                 close=c["metric"] == "strength.safety" and c.get("op", ">=") == ">="    # amber (CALI-88)
-                                and verdicts.near(v, c["limit"]))
+                                and verdicts.near(v, c["limit"]),
+                                # an old number on its limit, the run's or this goal's own (#214 review)
+                                recheck=(now.get("strength.recheck") or (verdicts.UNCUT if verdicts.goal_on_limit(
+                                    bool(now.get("strength.uncut")), c["metric"], v, c.get("limit"), c.get("op", ">="))
+                                    else None)) if strength else None)
         if verdict["kind"] == "estimate":
             out.append(_line(f"! {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}, {guess}.", "warn"))
             continue
@@ -930,7 +943,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
             continue
         # never a ✓ for an older check or score (#132 review): it says when, and what to do
         later = (" (scored before the last change: score it again)." if late
-                 else f" ({older})." if verdict["kind"] == "stale" and older else "." + why)
+                 else f" ({older})." if verdict["kind"] == "stale" and older
+                 else f": check it again, {verdict['why']}." if verdict["kind"] == "recheck" else "." + why)
         mark = '✗' if failed else '✓' if verdict['kind'] == 'holds' else '!'
         if c["metric"] == "strength.safety" and isinstance(c.get("limit"), (int, float)):
             # what it does, then what it needs: "2 times over (assumed): 3.11x" read as holding 2 times over (#64 item 15)

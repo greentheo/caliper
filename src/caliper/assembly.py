@@ -230,24 +230,33 @@ def _build_py_local(path: str) -> Geometry:
     return res.geometry
 
 
-_CARVED = re.compile(r"""^CARVED\s*=\s*["']([^"']+)["']""", re.M)
+#: A script's CARVED line (CALI-82): a line that starts with it, indented or not, annotated or not
+#: (``CARVED: str = "…"``), and nothing else: not ``UNCARVED = …``, not a comment that mentions it. The one reader
+#: (CALI-90 #66 item 3, CALI-92 #70 items 8 and 9): carve.strip and carve.carved, _carved, and the design's flag.
+_CARVED = re.compile(r"""^[ \t]*CARVED[ \t]*(?::[^=\n]*)?=[ \t]*(["'])([^"'\n]+)\1[ \t]*(?:#[^\n]*)?$""", re.M)
+
+
+def carved_file(script: str) -> Optional[str]:
+    """The mesh a carved script is (its CARVED line's file name), or None."""
+    m = _CARVED.search(script or "")
+    return m.group(2) if m else None
 
 
 def _carved(path: str, script: str) -> Optional[Geometry]:
     """The part as carved (CALI-82): a script that says ``CARVED = "carved-….stl"`` is that mesh, kept in the
     part's ``carved/`` folder (the script may be a version's copy, a level or two down)."""
-    m = _CARVED.search(script)
-    if not m:
+    name = carved_file(script)
+    if name is None:
         return None
     import trimesh
 
     here = os.path.dirname(os.path.abspath(path))
     for _ in range(4):
-        f = os.path.join(here, "carved", os.path.basename(m.group(1)))
+        f = os.path.join(here, "carved", os.path.basename(name))
         if os.path.exists(f):
             return Geometry.from_mesh(trimesh.load(f, force="mesh"))
         here = os.path.dirname(here)
-    raise ValueError(f"its carved shape {m.group(1)!r} is missing: roll it back, or carve it again")
+    raise ValueError(f"its carved shape {name!r} is missing: roll it back, or carve it again")
 
 
 def _build_py_part(path: str, position, rotation) -> Geometry:

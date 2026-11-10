@@ -30,6 +30,18 @@ class Cancelled(Exception):
     """Raised at a step boundary of a job asked to stop (CALI-101): it ends "cancelled", not "error"."""
 
 
+class TimedOut(Cancelled):
+    """A job's work ran past its limit (:data:`LIMIT_S`): raised at its next step boundary."""
+
+    def __init__(self, limit_s: float):
+        super().__init__(limit_s)
+        self.limit_s = limit_s
+
+
+def _span(s: float) -> str:
+    return f"{s / 3600:g} hours" if s >= 3600 else f"{s / 60:g} min" if s >= 60 else f"{s:g} s"
+
+
 class Busy(Exception):
     """An exclusive job's lock is taken: ``job`` is the one queued or running under it (CALI-101)."""
 
@@ -55,6 +67,10 @@ class Job:
         self.error_id = ""                # what it's kept as, for a report (CALI-59)
         self.created = time.time()
         self.finished: Optional[float] = None
+        self.started: Optional[float] = None
+        self.limit_s = LIMIT_S.get(kind)  # (#66 item 2)
+        self.waited_s = 0.0               # time spent waiting for the one study turn: not counted (#211 review)
+        self.waiting_since: Optional[float] = None
         self._mu = threading.Lock()
         self._stop = threading.Event()    # asked to stop (CALI-101)
 
@@ -82,6 +98,15 @@ class Job:
         steps, so a cancel takes effect there, with every finished step kept."""
         if self._stop.is_set():
             raise Cancelled()
+        if self.limit_s and self.started and self.running_s() > self.limit_s:
+            raise TimedOut(self.limit_s)
+
+    def running_s(self) -> float:
+        """How long it has worked: since it started, less the time it waited for its study turn (#211 review: two
+        carves queued behind a third ran out their clock waiting)."""
+        now = time.time()
+        waited = self.waited_s + (now - self.waiting_since if self.waiting_since else 0.0)
+        return now - (self.started or now) - waited
 
     def to_dict(self, after: int = 0) -> dict:
         return {"id": self.id, "kind": self.kind, "label": self.label, "status": self.status,
@@ -91,6 +116,11 @@ class Job:
 
 #: the kinds of job that are long, or wait their turn for the one strength study at a time
 STUDIES = frozenset({"load", "lighten", "carve", "picture", "scorecard", "release", "whittle", "frame", "gussets", "aero", "firstrun"})
+#: How long a study may run, in seconds (CALI-90, #66 item 2: nothing ever stopped one). It stops at the first step
+#: boundary past it (where the work calls ``check()``), keeping the steps it finished. Generous: the sample stool's
+#: own carve is quoted at "at least about 3.4 hours" (#211 review). Other jobs (a chat, a cut plan) have none.
+STUDY_LIMIT_S = 6 * 3600
+LIMIT_S = {k: STUDY_LIMIT_S for k in STUDIES}
 #: what a job on a design is waiting for, when it's another job on that design that has it (#174)
 AHEAD = {"release": "the build package", "picture": "the picture", "cutplan": "the cut plan", "firstrun": "the first build", "chat": "the message before it"}
 
@@ -194,11 +224,17 @@ class JobRunner:
                 if job.status == "cancelled":                 # cancelled while it waited (CALI-101)
                     return
                 job.status = "running"
-            job.emit("started", job.label)
+                job.started = time.time()
+            job.emit("started", job.label, limit_s=job.limit_s)
             try:
                 job.result = fn(job)
                 job.status = "done"
                 job.emit("finished", "done")
+            except TimedOut as e:                             # a limit, not a crash: nothing to report (#66 item 2)
+                job.error = (f"it ran past its limit of {_span(e.limit_s)} and stopped at a step; it kept the steps "
+                             f"it finished")
+                job.status = "error"
+                job.emit("error", job.error, timed_out=True)
             except Cancelled:
                 job.status = "cancelled"
                 job.emit("cancelled", "cancelled: it stopped at a step, and kept the steps it finished")

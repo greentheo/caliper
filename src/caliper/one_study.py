@@ -43,6 +43,11 @@ def take_turn(emit: Optional[Callable] = None, stop: Optional[Callable[[], None]
     if emit:
         emit("waiting", WAITING)
     told = time.monotonic()
+    job = getattr(stop, "__self__", None)            # the job waiting, if it's one: its clock doesn't run (#211 review)
+    if job is not None and hasattr(job, "waiting_since"):
+        job.waiting_since = time.time()
+    else:
+        job = None
     with _mu:
         _queued += 1
     try:
@@ -57,6 +62,9 @@ def take_turn(emit: Optional[Callable] = None, stop: Optional[Callable[[], None]
     finally:
         with _mu:
             _queued -= 1
+        if job is not None and job.waiting_since:
+            job.waited_s += time.time() - job.waiting_since
+            job.waiting_since = None
     _since = time.monotonic()
     return True
 

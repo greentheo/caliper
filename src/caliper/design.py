@@ -68,6 +68,10 @@ def slugify(text: str, fallback: str = "design") -> str:
 
 
 #: Where a sentence stops saying what the thing is and starts saying what it's for (CALI-59).
+#: A size in front of the thing: "3/4 in", "1 1/2 in thick" keeps "thick", "12 mm", "2 ft x 3 ft". A number with a
+#: unit only, so a lumber size ("2x4 workbench") stays its name (CALI-90, #66 item 7: "A 3/4 in plywood box" -> "3/4").
+_NAME_SIZE = re.compile(r"^(?:\d+(?:\.\d+)?(?:\s+\d+/\d+|/\d+)?\s*(?:in(?:ch(?:es)?)?|mm|cm|m|ft|feet|foot|\"|')"
+                        r"(?=\s|$)(?!\s+\d)\s*(?:(?:x|×|by)\s+)?)+", re.I)   # "2 in 1" isn't a size (#211 review)
 _NAME_STOP = re.compile(r"\s(?:so|for|that|which|who|to|with|on|behind|from|made|using|in|at|under|over|and)\s"
                         r"|[,.;:!?(]", re.I)
 #: The request around the thing: "I want to make a…", "Can you design me a…", "I'd like a…" (#89 item 1: the bar stool
@@ -83,7 +87,9 @@ def short_name(prompt: str, most: int = 40) -> str:
     can reach the sink…" -> "Step stool")."""
     first = (prompt or "").strip().splitlines()[0].strip() if (prompt or "").strip() else ""
     rest = _NAME_LEAD.sub("", first).strip() or first           # the request's lead off first, then where it stops
-    head = _NAME_STOP.split(f" {rest} ", 1)[0].strip() or rest
+    rest = _NAME_SIZE.sub("", rest).strip() or rest             # and a size in front of it ("3/4 in plywood box")
+    rest = re.sub(r"(\d)\s+in\s+(\d)", "\\1\x00in\x00\\2", rest)   # "2 in 1" isn't "in" a place (#211 review)
+    head = _NAME_STOP.split(f" {rest} ", 1)[0].strip().replace("\x00", " ") or rest.replace("\x00", " ")
     if len(head) > most:
         head = head[:most].rsplit(" ", 1)[0]
     return (head[:1].upper() + head[1:]) if head else "Untitled design"

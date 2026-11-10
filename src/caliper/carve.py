@@ -25,6 +25,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from . import verdicts
+from . import verdicts as V
 from .design import DesignStore
 from .one_study import one_at_a_time
 from .runs import newest_first
@@ -122,7 +123,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
     os.makedirs(out_dir, exist_ok=True)
     # on disk from the start and after every step, so a run that dies (a crash, a restart) says how far it got
     # (CALI-103); it's marked done at the end
-    partial = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(), "status": "running",
+    partial = {"id": rid, "part": part_id, "kind": "carve", "created": time.time(), "status": "running", "cut": True,
                "version": store.design.part(part_id).version, "min_safety": min_safety, "material": mat["name"],
                "spacing_mm": round(s, 2), "steps": stations, "stations": [], "best": None, "weak": "",
                "share": "printed", "notes": [], **seen}
@@ -166,7 +167,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
                 if r.supported:                                    # the printed part's own: what the carve changes
                     judged = r.solid & ~wood & ~ndimage.binary_dilation(ctx["attach"], iterations=1)
                     worked = float((r.von_mises[judged] / printed_strength).max()) if judged.any() else 0.0
-                    mine = round(1.0 / worked, 2) if worked > 0 else None
+                    mine = step_safety(worked)
                     sides = mine if sides is None or (mine is not None and mine < sides) else sides
                 else:
                     sides = 0.0
@@ -227,13 +228,16 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
              else f"{len(out)} steps: the printed part comes off, but {why}"   # #132 review
              if best is not None and best["saved_g"] else f"{len(out)} steps", run=rid, progress=1.0)
         return record
-    except Cancelled:
-        # asked to stop (CALI-101): the steps it finished, and the lightest of them that holds, as a partial run
-        # the lightest step whose printed part holds and closes up, as its verdict says (#132, #124)
+    except Cancelled as e:
+        # asked to stop (CALI-101), or past its time limit (#211 review: not "cancelled" when nobody did): the steps
+        # it finished, and the lightest of them that holds and closes up, as its verdict says (#132, #124)
+        limit = getattr(e, "limit_s", None)
         best = max((x for x in out if verdicts.station(x)["counts_as_pass"]), key=lambda x: x["saved_g"], default=None)
-        keep({**partial, "stations": out, "status": "cancelled", "best": best["index"] if best else None,
+        keep({**partial, "stations": out, "status": "timed_out" if limit else "cancelled",
+              **({"limit_s": limit} if limit else {}), "best": best["index"] if best else None,
               "seconds": round(time.time() - t0, 1)})
-        store.append_history(part_id, {"kind": "carve", "action": "cancelled", "run": rid, "stations": len(out)})
+        store.append_history(part_id, {"kind": "carve", "action": "timed out" if limit else "cancelled", "run": rid,
+                                       "stations": len(out)})
         raise
     except BaseException as e:
         # a carve that fails says so, with what it finished: it doesn't read "not finished" forever (CALI-103)
@@ -419,11 +423,16 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
 
 #: What a revision that dropped the carve says (CALI-87: one rule for every writer of a part's script).
 DROPPED = "The carve came off with this change (it was cut to the old shape): carve it again."
-_LINE = re.compile(r"^" + NAME + r"\s*=", re.M)
+def step_safety(worked: float) -> Optional[float]:
+    """A carve step's printed part's number, from its worst stress over strength: cut toward safe, never rounded up,
+    since its "holds" is compared from it (#214 review: round(1/0.50125, 2) stored 2.0 and held at 2)."""
+    return V.cut(1.0 / worked) if worked > 0 else None
 
 
 def carved(script: str) -> bool:
-    return bool(_LINE.search(script or ""))
+    from .assembly import carved_file           # the one reader of the CARVED line (#66 item 3, #70 items 8-9)
+
+    return carved_file(script) is not None
 
 
 def uncarve(script: str) -> tuple[str, bool]:
@@ -442,6 +451,11 @@ def refuse_if_carved(script: str, what: str, then: str) -> None:
 
 
 def strip(script: str) -> str:
-    """The script without its carve (a revision changes what was carved)."""
-    return re.sub(r'\n*(?:# The printed rest as carved[^\n]*\n)?' + NAME + r'\s*=\s*["\'][^"\']*["\']\n?', "\n",
-                  script).rstrip("\n") + "\n"
+    """The script without its carve (a revision changes what was carved): its CARVED line, as the one reader reads
+    it, and the note Caliper wrote above it. ``UNCARVED = "x"`` and a comment that mentions it stay (#66 item 3)."""
+    if not carved(script):
+        return script
+    from .assembly import _CARVED
+
+    return re.sub(r"\n*(?:# The printed rest as carved[^\n]*\n)?" + _CARVED.pattern + r"\n?", "\n", script,
+                  flags=re.M).rstrip("\n") + "\n"
