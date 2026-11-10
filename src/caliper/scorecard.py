@@ -445,7 +445,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         said = [(c, verdicts.case(run, c)) for c in run["cases"]]
         uncut = uncut or not run.get("cut")
         recheck = recheck or (verdicts.UNCUT if any(v["kind"] == "recheck" for _, v in said) else None)
-        sure = [(c, v) for c, v in said if v["kind"] in ("holds", "fails") and not v.get("coarse")]
+        sure = [(c, v) for c, v in said if v["kind"] in verdicts.SETTLED and not v.get("coarse")]
         breaks = [c["breaks_lb"] for c, _ in sure if c.get("breaks_lb")]
         hedged = next(((c, v) for c, v in said if v["kind"] == "fails" and v.get("coarse")), None)
         inches = store.design.display_units == "in"

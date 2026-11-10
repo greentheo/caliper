@@ -71,15 +71,24 @@ KINDS = {
     "recheck": ("warn", "check it again", False),     # made before a rounding fix, on its limit (CALI-152, #214)
     "estimate": ("warn", "an estimate", False),
     "waiting": ("unknown", "not checked yet", False),
+    "close": ("warn", "holds, close to the line", True),
     "holds": ("ok", "holds", True),
 }
+#: A pass at or under this many times its limit is amber, ``close``: it holds, but near the line (the four-questions
+#: spec's proposal, "within 25% of the limit"; the owner may change the band). CALI-88, #64 item 2.
+CLOSE = 1.25
+#: The kinds with a number a person may build on (it holds, close to the line or not, or it fails), and the passes.
+SETTLED = ("holds", "close", "fails")
+PASSES = ("holds", "close")
 #: Worst first: a run, or a design, is its worst case.
 RANK = list(KINDS)
 
 
 def _make(kind: str, safety=None, **extra) -> dict:
     status, word, counts = KINDS[kind]
-    short = f"{word} {safety:.1f}x" if safety is not None and kind in ("holds", "fails") else word
+    if safety is not None and kind == "fails":           # a ✗'s number is cut, never rounded up toward its limit:
+        safety = math.floor(safety * 10 + 1e-9) / 10     # 1.96 against 2 read "doesn't hold 2.0x" (CALI-88, #64)
+    short = f"{word} {safety:.1f}x" if safety is not None and kind in ("holds", "fails", "close") else word
     return {"status": status, "kind": kind, "word": word, "short": short, "counts_as_pass": counts, **extra}
 
 
@@ -117,7 +126,12 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
         return _make("stale", safety)
     if old_on_limit(run, safety, run.get("min_safety")):            # a pass that may be a rounded fail (#214)
         return _make("recheck", safety, why=UNCUT)
-    return _make("holds", safety)
+    return _make("close" if near(safety, run.get("min_safety")) else "holds", safety)
+
+
+def near(safety: Optional[float], need: Optional[float]) -> bool:
+    """A pass at or under :data:`CLOSE` times what it needs: close to the line (amber)."""
+    return safety is not None and bool(need) and need <= safety <= need * CLOSE
 
 
 def worst(verdicts: list[dict]) -> Optional[dict]:
@@ -177,12 +191,12 @@ def summary(s: Optional[dict]) -> dict:
 #: A verdict kind as a scorecard check's status.
 STATUS = {"holds": "pass", "fails": "fail", "untrusted": "untrusted", "unresolved": "unresolved",
           "unchecked": "unresolved", "edge": "edge", "stale": "unknown", "waiting": "unknown", "estimate": "estimate",
-          "recheck": "unknown"}
+          "close": "pass", "recheck": "unknown"}   # close passes, in amber; an old number on its limit isn't settled
 
 
 def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Optional[str] = None,
          edge: bool = False, stale: bool = False, incomplete: Optional[str] = None,
-         estimate: Optional[str] = None, recheck: Optional[str] = None) -> dict:
+         estimate: Optional[str] = None, close: bool = False, recheck: Optional[str] = None) -> dict:
     """A goal on a metric: ``met`` (None when there's no number). A ✗ stays a ✗ (a fail on a filled-in block is
     certain: the part as built is weaker still); then not trusted, not resolved, middle only, scored before the last
     change, a part left out, a number that's partly a guess (``estimate``, #166: a rough print time runs low, so a ✓
@@ -207,7 +221,7 @@ def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Op
         return _make("waiting", why=incomplete)
     if estimate:
         return _make("estimate", why=estimate)
-    return _make("holds")
+    return _make("close" if close else "holds")
 
 
 def compare(value: float, op: str, limit: float) -> bool:
@@ -220,14 +234,18 @@ def rule(holds_now: Optional[bool]) -> dict:
     return _make("waiting" if holds_now is None else "holds" if holds_now else "fails")
 
 
-def meets(safety: Optional[float], need: Optional[float], *, stale: bool = False) -> dict:
+def meets(safety: Optional[float], need: Optional[float], *, stale: bool = False, close: bool = True,
+          recheck: bool = False) -> dict:
     """A number against what it needs (a frame's weakest member, a station): holds or fails, or waiting; an older
-    run's holds is ``stale`` (a fail stays a fail)."""
+    run's holds is ``stale`` (a fail stays a fail). ``close``: whether a pass near its limit is amber (a strength
+    margin is; a tipping case's factor is its own judgement, not a strength margin)."""
     if safety is None or need is None:          # nothing to hold it to: not a pass (#132 review)
         return _make("waiting")
     if safety < need:
         return _make("fails", safety)
-    return _make("stale" if stale else "holds", safety)
+    if recheck and not stale:                   # an old number on its limit, from before the rounding fix (#214)
+        return _make("recheck", safety, why=UNCUT)
+    return _make("stale" if stale else "close" if close and near(safety, need) else "holds", safety)
 
 
 def release(rel: dict, current: dict) -> dict:
@@ -276,8 +294,8 @@ def carve_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = Non
     """A carve step as a person reads it (#132 review): it holds only if the printed part holds there AND the whole
     part does (``whole_holds``), on a shape that isn't a filled-in block, at voxels that can see its walls (#101),
     and whose part closes up (#124). A fail stays a fail."""
-    v = station(st, run=run)
-    if v["kind"] in ("unchecked", "recheck"):   # its part doesn't close up (#124), or an old number on its limit (#214)
+    v = station(st)
+    if v["kind"] == "unchecked":                # its part doesn't close up (#124): said, not a fail
         return v
     if not v["counts_as_pass"]:
         return _make("fails", st.get("safety"))
@@ -287,14 +305,17 @@ def carve_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = Non
         return _make("untrusted", st.get("safety"), why=filled)
     if coarse(run):
         return _make(coarse(run), st.get("safety"))
+    need = (run or {}).get("min_safety")        # an old number on its limit, the printed part's or the whole's (#214)
+    if old_on_limit(run, st.get("safety"), need) or old_on_limit(run, st.get("whole"), need):
+        return _make("recheck", st.get("safety"), why=UNCUT)
     return _make("holds", st.get("safety"))
 
 
 def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = None) -> dict:
     """A lightening step as a person reads it (#132 review): a thinner sheet's number is an estimate, never "holds";
     on a filled-in block, not trusted; on voxels that can't see the walls, not resolved (#101)."""
-    v = station(st, run=run)
-    if v["kind"] in ("fails", "recheck"):       # a ✗ stays a ✗; an old number on its limit says check again (#214)
+    v = station(st)
+    if v["kind"] == "fails":
         return v
     if st.get("estimate"):
         return _make("estimate", st.get("safety"))
@@ -302,6 +323,8 @@ def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = N
         return _make("untrusted", st.get("safety"), why=filled)
     if coarse(run):
         return _make(coarse(run), st.get("safety"))
+    if old_on_limit(run, st.get("safety"), (run or {}).get("min_safety")):   # an old number on its limit (#214)
+        return _make("recheck", st.get("safety"), why=UNCUT)
     return v
 
 

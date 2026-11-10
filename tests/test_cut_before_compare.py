@@ -174,7 +174,10 @@ def test_an_old_run_on_its_limit_says_check_again_and_a_new_one_holds():
     assert v["kind"] == "recheck" and v["word"] == "check it again" and not v["counts_as_pass"], v
     assert v["why"] == "made before a rounding fix, and it sits exactly on its limit"
     assert verdicts.case(new, new["cases"][0])["kind"] in ("holds", "close")
-    assert verdicts.case(_old(2.4), _old(2.4)["cases"][0])["kind"] == "holds"       # off its limit: as it was
+    assert verdicts.case(_old(2.6), _old(2.6)["cases"][0])["kind"] == "holds"       # off its limit: as it was
+    assert verdicts.case(_old(2.4), _old(2.4)["cases"][0])["kind"] == "close"       # near it, but not on it: amber, a pass
+    on_new = _old(cut=True)
+    assert verdicts.case(on_new, on_new["cases"][0])["kind"] == "close"             # a new run exactly on its limit
     assert verdicts.needs_recheck(old) and not verdicts.needs_recheck(new)
 
 
@@ -183,6 +186,11 @@ def test_an_old_carve_step_on_its_limit_says_check_again():
     st = {"index": 1, "safety": 2.0, "holds": True, "whole": 2.5, "whole_holds": True, "saved_g": 10}  # producer
     assert verdicts.carve_step(st, None, run)["kind"] == "recheck"
     assert verdicts.carve_step(st, None, {**run, "cut": True})["counts_as_pass"]
+    # a coarse run's step reads not resolved, as ever: the marker doesn't turn it into a fail (test_coarse_steps, CI)
+    coarse_run = {**run, "resolved": False}
+    assert verdicts.carve_step(st, None, coarse_run)["kind"] == "unresolved"
+    whole_on_it = {**st, "safety": 2.6, "whole": 2.0}
+    assert verdicts.carve_step(whole_on_it, None, run)["kind"] == "recheck"           # the whole part's number too
 
 
 def test_a_build_package_doesnt_reuse_an_old_run_on_its_limit(tmp_path, monkeypatch):
@@ -242,8 +250,8 @@ def test_an_old_run_on_its_limit_never_ticks_the_design_card_and_says_why(tmp_pa
     assert lines and not lines[0]["text"].startswith("✓") and lines[0]["status"] == "warn", lines
     assert "check it again, made before a rounding fix, and it sits exactly on its limit" in lines[0]["text"], lines
     part = [ln["text"] for ln in answers.answers(store, state, "step_stool")[1]["lines"] if ln.get("study") == "load"]
-    assert part[0].endswith(": check it again, 2 times over: made before a rounding fix, and it sits exactly on its "
-                            "limit."), part
+    assert part[0].endswith(": check it again, 2 times over 400 lb (200 lb, twice over): made before a rounding fix, "
+                            "and it sits exactly on its limit."), part
     run = L.list_runs(store, "step_stool")[0]
     head = studies._headline("load", run)[0]
     assert head.startswith("check it again — weakest") and head.endswith(": " + verdicts.UNCUT), head

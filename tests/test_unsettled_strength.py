@@ -100,7 +100,9 @@ def test_one_part_unsettled_means_no_smallest_breaking_load_from_the_rest(store)
 # --- the build book -------------------------------------------------------------------------------------------------------
 def test_the_book_s_row_says_it_isn_t_settled_and_has_no_breaking_load():
     c = {"safety": 0.53, "breaks_lb": 200, "verdict": {"kind": "fails", "coarse": True}}
-    assert release._safety_cell(c) == ("about 0.53x, not settled: too coarse to see its walls", "—")
+    # the hedge stays; the number is the one formatter's (#208): a fail well under its limit, cut to one place
+    assert release._safety_cell(c) == ("about 0.5x, not settled: too coarse to see its walls", "—")
+    assert release._safety_cell({**c, "min_safety": 2.0}) == ("about 0.5x, not settled: too coarse to see its walls", "—")
 
 
 def test_the_book_s_row_for_a_settled_fail_is_as_it_was():

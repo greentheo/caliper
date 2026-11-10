@@ -64,7 +64,7 @@ def _settled_check(store: DesignStore, p: dict, run: Optional[dict]) -> bool:
     if run is None or run.get("version") != p["version"]:
         return False
     v = verdicts.run(run, filled=p.get("untrusted"), edge=bool(consistency.bare_edge(store, p["id"])))
-    return v["kind"] == "holds"
+    return v["kind"] in ("holds", "close")             # close to the line is still a settled pass (CALI-88)
 
 
 def _sheet_offers(run: dict, fails: bool) -> list[dict]:
@@ -89,7 +89,7 @@ def _sheet_offers(run: dict, fails: bool) -> list[dict]:
             panels.setdefault(pl["piece"], []).append(c)
     out = []
     for piece, on in panels.items():
-        if any(c.get("governs") != "plate" or judged[id(c)] not in ("holds", "fails") for c in on):
+        if any(c.get("governs") != "plate" or judged[id(c)] not in verdicts.SETTLED for c in on):
             continue                                    # the FEA's, or not settled: its number elsewhere isn't known
         if fails and not any(judged[id(c)] == "fails" for c in on):
             continue                                    # it already holds: more material for nothing

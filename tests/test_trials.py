@@ -147,7 +147,10 @@ def test_the_test_record_s_verdicts_are_the_right_colour(checked):
         return trials.summary(checked, "stool")
 
     got = line((150, {"broke": True}))
-    assert got["status"] == "bad" and got["text"] == "It broke at 150 lb in your test. We predicted it would hold 400."
+    # what it had to hold, and what we predicted: both numbers, the second the one #42's calibration needs (#64 item 13)
+    assert got["status"] == "bad" and got["text"] == (
+        f"It broke at 150 lb in your test. It had to hold 400 (200 lb, twice over for {pr['case'].lower()}), and we "
+        f"predicted about {pr['breaks_lb']:,.0f}."), got["text"]
     got = line((must + 50, {"broke": True}))
     assert got["status"] == "warn" and "sooner than we predicted" in got["text"]
     got = line((pr["breaks_lb"] + 50, {"broke": True}))
@@ -234,7 +237,8 @@ def test_every_edge_of_the_verdict_is_pinned(checked):
     assert _only(checked, (must, {"broke": True}))["status"] == "warn"
     got = _only(checked, (must - 1, {"broke": True}))
     assert got["status"] == "bad"
-    assert got["text"] == f"It broke at {must - 1:,.0f} lb in your test. We predicted it would hold {must:,.0f}."
+    assert got["text"].startswith(f"It broke at {must - 1:,.0f} lb in your test. It had to hold {must:,.0f} (")
+    assert got["text"].endswith(f"and we predicted about {breaks:,.0f}.")
     # the prediction: within 10% of it counts as matching it, just under that is too hopeful
     assert _only(checked, (breaks, {"broke": True}))["status"] == "ok"
     assert _only(checked, (0.9 * breaks, {"broke": True}))["status"] == "ok"
@@ -261,3 +265,13 @@ def test_every_step_is_judged_and_the_worst_governs(checked):
     assert got["status"] == "warn" and "at 200 lb it sagged" in got["text"] and "more than we predicted" in got["text"]
     got = _only(checked, (200, {"sag_mm": (lo + hi) / 2 * 200}), (400, {"sag_mm": hi * 400 * 15}))
     assert got["status"] == "warn" and "at 400 lb" in got["text"]
+
+
+def test_a_failed_test_where_the_break_wasnt_settled_says_so(checked, monkeypatch):
+    """CALI-88 (#64 item 13): with no settled prediction (a coarse check), the line says what it had to hold and
+    that where it would break wasn't settled, never a number we didn't predict."""
+    real = trials.predict
+    monkeypatch.setattr(trials, "predict", lambda store, pid: {**real(store, pid), "breaks_lb": None})
+    got = _only(checked, (150, {"broke": True}))
+    assert got["status"] == "bad" and got["text"].startswith("It broke at 150 lb in your test. It had to hold 400 (")
+    assert got["text"].endswith("; where it would break wasn't settled."), got["text"]
