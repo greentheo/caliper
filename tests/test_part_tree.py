@@ -426,3 +426,23 @@ S.design = design;
     assert got.returncode == 0, got.stderr
     out = json.loads(got.stdout)
     assert out["same"] == 0 and out["after"] == 1 and out["drops"][0] == "i_want" and out["stale"] == 0
+
+
+def test_a_part_that_can_t_be_drawn_as_pieces_falls_back_and_says_why():
+    """#161 review: a rethrow in place of the fallback passed: nothing ran the catch itself."""
+    from .test_carve_click import _fn, _node
+
+    src = open(JS).read()
+    script = """let S = { slug: 'a', design: null }, told = 0;
+const pieces3d = new Map(), noPieces = new Map();
+const dropPieces = (p) => pieces3d.delete(p), scene = { add() {} }, plainly = (m) => m, renderTree = () => { told += 1; };
+let piecesOf = 'a';
+async function loadPieces() { throw new Error("its shape isn't closed"); }
+""" + _fn(src, "syncPieces") + """
+const design = { parts: [{ id: 'p', version: 2, role: 'part', pieces: [{ key: 'a' }] }] };
+S.design = design;
+syncPieces(design).then(() => console.log(JSON.stringify({ why: noPieces.get('p'), told, drawn: pieces3d.size })),
+                       (e) => console.log(JSON.stringify({ threw: e.message })));"""
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    assert json.loads(got.stdout) == {"why": {"version": 2, "why": "its shape isn't closed"}, "told": 1, "drawn": 0}
