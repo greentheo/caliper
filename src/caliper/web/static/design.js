@@ -236,7 +236,7 @@ function renderTree() {
   if (!parts.length || document.activeElement === $('treeName')) return;       // never over a name being typed
   const t = seen();
   const cant = (pid, version) => { const n = noPieces.get(pid); return n && n.version === version ? n.why : null; };
-  box.innerHTML = treeHtml(S.design, { parts: t.parts, pieces: t.pieces, open: t.open, rename: t.rename, scope: S.scope, piece: S.piece,
+  box.innerHTML = treeHtml(S.design, { parts: t.parts, pieces: t.pieces, open: t.open, rename: t.rename, scope: S.scope, piece: S.pick ? null : S.piece,
     oneBody: t.oneBody, cant });
   if (t.rename && $('treeName')) { $('treeName').focus(); $('treeName').select(); }
 }
@@ -635,7 +635,7 @@ function pick(e) {
 
 // ------------------------------------------------------------- pick a face or an edge (#109, the mockup's bar)
 // Part, Face or Edge: a click in Face or Edge says which, and the chat says what it picked. The ids are this version's.
-const PICK = { mode: 'part', parts: new Map(), overlay: null, turn: 0 };
+const PICK = { lit: null, mode: 'part', parts: new Map(), overlay: null, turn: 0 };
 const pickKey = (pid, version) => `${S.slug}/${pid}/${version}`;
 // which face a triangle of the merged mesh belongs to: ``starts`` holds each face's first triangle
 function faceOfTriangle(starts, tri) {
@@ -662,10 +662,12 @@ function nearestEdge(edges, project, cursor, px, farthest) {
 }
 // a point on a part with no B-rep: where it is, in the design's units
 const pointSaid = (p) => `point on the surface: x ${len(p[0], 1)}, y ${len(p[1], 1)}, z ${len(p[2], 1)}`;
+// the same point for the designer: scripts are in millimetres, whatever the page is showing (#181 review)
+const pointTold = (p) => `point on the surface: x ${+p[0].toFixed(1)} mm, y ${+p[1].toFixed(1)} mm, z ${+p[2].toFixed(1)} mm`;
 // what goes to the designer: what was picked, and where in the script's own millimetres
 function aboutPick(pick, text) {
   if (!pick) return text;
-  return `About this ${pick.said}${pick.local ? ` (at x ${pick.local[0]}, y ${pick.local[1]}, z ${pick.local[2]} mm in the script's coordinates)` : ''}: ${text}`;
+  return `About this ${pick.told || pick.said}${pick.local ? ` (at x ${pick.local[0]}, y ${pick.local[1]}, z ${pick.local[2]} mm in the script's coordinates)` : ''}: ${text}`;
 }
 function clearPick() {
   S.pick = null;
@@ -727,6 +729,7 @@ async function choose(e, hit) {
   const seen = { ray: ray.ray.clone(), camera: camera.clone(), rect: renderer.domElement.getBoundingClientRect() };
   if (S.scope !== pid) setScope(pid);
   clearPick();
+  renderScope();                                  // a click that misses has no pick: the chip and the box say so, as the message will (#181)
   const turn = PICK.turn;                         // only the last click counts
   let data;
   try { data = await features(pid); } catch (err) {
@@ -737,7 +740,7 @@ async function choose(e, hit) {
   ray.ray.copy(seen.ray);
   if (!hit && (data.solidMesh || PICK.mode === 'face')) return;   // only an edge can be picked from just off the part
   if (data.solidMesh) {                                   // carved, whittled, imported: no faces to name
-    S.pick = { part: pid, kind: 'point', said: pointSaid(point), local: null, point };
+    S.pick = { part: pid, kind: 'point', said: pointSaid(point), told: pointTold(point), local: null, point };
     drawPick(new THREE.SphereGeometry(Math.max(2, 0.006 * hit.distance), 12, 12).translate(...point));
   } else if (PICK.mode === 'face') {
     const f = facePicked(data, hit);
@@ -884,6 +887,8 @@ function pieceInScope() {
   return (part && (part.pieces || []).find((x) => x.key === S.piece)) || null;
 }
 function renderScope() {
+  const lit = S.pick ? null : S.piece || null;            // a pick is the subject, so the tree stops lighting the piece (#181 review)
+  if (PICK.lit !== lit) { PICK.lit = lit; renderTree(); }
   $('scopeRow').hidden = !S.scope;
   const part = S.scope && S.design ? S.design.parts.find((p) => p.id === S.scope) : null;
   const named = part ? part.name || part.id : S.scope;
@@ -917,7 +922,7 @@ function renderThread() {
         `${e.assumed || 0} assumed.</div>`);
     } else if (e.kind === 'message') {
       html.push(`<div class="msg you">${e.scope ? `<div class="scope">on ${esc(e.scope)}</div>` : ''}` +
-        `${md(e.text)}</div>`);
+        `${md(e.shown || e.text)}</div>`);
     } else if (e.kind === 'reply' && e.reply) {
       const tone = e.ok === false ? 'bad' : (e.action === 'answer' ? '' : 'good');
       html.push(`<div class="msg cal ${tone}"><div class="who">Caliper</div>${md(e.reply)}</div>`);
@@ -1104,13 +1109,13 @@ function aboutPiece(text) {
   const piece = pieceInScope();
   return piece ? `About the ${piece.name}: ${text}` : text;
 }
-async function send(text, scope, pick) {
+async function send(text, scope, pick, shown) {
   if (S.busy || S.opening || !text.trim()) return;      // never to a design that isn't on screen yet (#173)
   if (!S.slug) return createDesign(text);
   S.busy = true; $('send').disabled = true;
-  const live = liveTurn(text, scope);
+  const live = liveTurn(shown || text, scope);
   try {
-    const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}) });
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}), ...(shown ? { shown } : {}) });
     await follow(job_id, (ev) => live.step(ev));
     S.busy = false;
     await refresh();
@@ -1125,9 +1130,10 @@ $('composer').onsubmit = (e) => {
   if (S.opening) return;                        // what's typed stays
   const text = $('msg').value;
   $('msg').value = '';
+  const shown = S.pick ? `About this ${S.pick.said}: ${text}` : null;     // their own bubble: no coordinates (#181)
   const said = aboutPick(S.pick, aboutPiece(text)), pick = S.pick && S.pick.id ? { kind: S.pick.kind, id: S.pick.id, version: (S.design.parts.find((x) => x.id === S.pick.part) || {}).version, text } : null;
   if (S.pick) { clearPick(); renderScope(); }
-  send(said, S.scope, pick);
+  send(said, S.scope, pick, shown);
 };
 $('msg').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
