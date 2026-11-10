@@ -24,6 +24,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from . import verdicts as V
 from .design import DesignStore
 from .one_study import one_at_a_time
 
@@ -255,7 +256,7 @@ def _try(ctx: dict, panel: dict, poly, min_safety: float) -> Optional[float]:
                 uncut[i] = L.check_load(ctx, i, min_safety)[1]
             # its edge at KT_HOLE times the wall's stress there, as the finished part is judged (#64 item 5)
             edge = lighten.picture_edge(p, [poly], uncut[i].von_mises, ctx["ls"].solid, s, mat["strength"] * mat["across"])
-            safety = min(case["safety"], round(edge, 2)) if np.isfinite(edge) else case["safety"]
+            safety = min(case["safety"], V.cut(edge)) if np.isfinite(edge) else case["safety"]   # cut (#213)
             worst = safety if worst is None else min(worst, safety)
     return worst
 

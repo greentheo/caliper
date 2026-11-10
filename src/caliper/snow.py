@@ -25,6 +25,7 @@ import time
 from typing import Callable, Optional
 
 from . import construction as C
+from . import verdicts as V
 from . import materials as M
 from .design import DesignStore
 
@@ -82,7 +83,7 @@ def panel(roof: dict, span: float, q: float) -> dict:
     safety, name, sense, stress = min(worst)
     if shear_safety < safety:
         safety, name, sense, stress = shear_safety, roof["core"], "shear", tau
-    return {"element": "roof panel", "span_mm": round(span, 1), "safety": round(safety, 2),
+    return {"element": "roof panel", "span_mm": round(span, 1), "safety": V.cut(safety),
             "governs": f"{name} in {sense}", "stress_mpa": round(stress, 3), "sag_mm": round(sag, 1)}
 
 
@@ -97,7 +98,7 @@ def stick(name: str, size: str, span: float, w: float) -> dict:
     stress = m / s
     sag = 5 * w * span ** 4 / (384 * lum["mech"]["E"] * i)
     return {"element": name, "size": size, "span_mm": round(span, 1),
-            "safety": round(lum["mech"]["strength"] / stress, 2) if stress else 99.0,
+            "safety": V.cut(lum["mech"]["strength"] / stress) if stress else 99.0,
             "governs": f"{size} in bending", "stress_mpa": round(stress, 2), "sag_mm": round(sag, 1)}
 
 
