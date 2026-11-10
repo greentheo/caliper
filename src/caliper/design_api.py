@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 import os
 import re
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel, field_validator
 
@@ -41,6 +41,10 @@ class ParamSet(BaseModel):
     name: str
     value: float
     unit: Optional[str] = None            # a length's unit (mm when none); no unit for a count, a ratio or an angle
+
+
+class ParamsSet(BaseModel):
+    values: list[ParamSet]
 
 
 class LabelSet(BaseModel):
@@ -668,10 +672,11 @@ def router():
             raise HTTPException(422, str(e))
 
     @r.post("/api/designs/{slug}/parts/{pid}/params")
-    def set_part_param(slug: str, pid: str, req: ParamSet):
+    def set_part_param(slug: str, pid: str, req: Union[ParamsSet, ParamSet]):
         """Set one of a part's numbers by hand (CALI-108): no Claude call. A new version with that PARAMS line
         rewritten, rebuilt and the design measured again; refused (422, saying why) outside its range or if it won't
-        build. A value its build ignores or clamps comes back as ``warning``."""
+        build. A value its build ignores or clamps comes back as ``warning``. ``{"values": [...]}`` sets several as one
+        version (the panel's Rebuild)."""
         from . import params
 
         with RUNNER.locked(_lock(slug)):
@@ -679,7 +684,8 @@ def router():
             if store.design.part(pid) is None:
                 raise HTTPException(404, f"no part {pid!r}")
             try:
-                got = params.set_value(store, pid, req.name, req.value, req.unit)
+                got = params.set_values(store, pid, [c.model_dump() for c in req.values]) if isinstance(req, ParamsSet) \
+                    else params.set_value(store, pid, req.name, req.value, req.unit)
             except (ValueError, KeyError) as e:
                 raise HTTPException(422, str(e).strip("'\""))
             return {"version": got["version"], "said": got["said"], "warning": got["warning"], "notes": got["notes"],
