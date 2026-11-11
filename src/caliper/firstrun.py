@@ -18,7 +18,7 @@ from __future__ import annotations
 import os
 from typing import Callable, Optional
 
-from . import chat, goals, load_study, patterns
+from . import chat, goals, load_study
 from .design import DesignStore
 from .errors import scrubbed
 
@@ -27,7 +27,6 @@ from .errors import scrubbed
 #: "not trusted" or "not resolved" under two "Holds…".
 VERDICT_FIRST = ("bad", "warn", "ok", "info")
 #: What the goals are written from, when it's the design's sentence and its answers that say it.
-SAID = "(the design's goal and the answers to its questions)"
 
 
 #: A first build's designer tries: the first, and one repair (CALI-157). Only what stops it being shown right is repaired: a script that
@@ -87,6 +86,10 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
         store.save()
 
     reply = summary(cards(store, pid)) if cards else res.reply
+    short = [r for r in (res.part_report.results if res.part_report is not None else []) if r.id in REPAIRS and not r.passed]
+    if short:                                   # what the one repair couldn't fix comes first, never "I built it" over it
+        reply = ("I built it, but its 3D shape and its pieces still don't match after one repair: the What is it? card says where. "
+                 "Say what to change and I'll revise it.\n\n" + reply)
     if steps.get("plan", "").startswith("planning"):
         reply += f"\n\n({steps['plan'][0].upper()}{steps['plan'][1:]}.)"
     store.append_log({"kind": "reply", "action": "author", "part": pid, "version": res.version,
