@@ -1795,7 +1795,7 @@ function trialView(p) {
   const chart = trialChart(pr, rows);
   return `<p class="small">Put the load where <b>${esc(pr.case)}</b> goes, in steps, and measure how far the middle of
       the ${esc(pr.where || 'top')} sags. Measure it with ${esc(pr.measure_with)}.
-      ${pr.breaks_lb ? `It should break at about <b>${pr.breaks_lb.toLocaleString()} lb</b>.` : 'Where it would break isn\'t settled: the check was too coarse to see its walls.'}
+      ${pr.breaks_lb ? `It should break at about <b>${pr.breaks_lb.toLocaleString()} lb</b>.` : pr.why_no_break ? `Where it would break isn't settled: ${esc(pr.why_no_break)}.` : 'Where it would break isn\'t settled: the check was too coarse to see its walls.'}
       ${pr.over ? `That's ${esc(pr.over)}, as its card says.` : ''}</p>
     ${chart}
     <table class="st"><tr><th>load</th><th>should sag</th><th>sagged</th><th></th></tr>
@@ -2773,6 +2773,7 @@ function carveChart(p, run) {
     <div class="small">${best && best.saved_g ? `The step to use: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% ${carveShare(run)}
       carved away, <b>${best.saved_g} g</b> less filament, the printed part ${best.safety}x;
       ${holdsHere(best) ? `the whole part ${best.whole}x`
+        : best.verdict && best.verdict.kind === 'span' ? `<b style="color:var(--amber)">not settled: ${esc(best.verdict.why)}</b>`    // CALI-153
         : best.verdict && (best.verdict.kind === 'unresolved' || best.verdict.kind === 'unchecked')    // #101
           ? `<b style="color:var(--amber)">${esc(best.verdict.word)}: the voxels were too coarse to see its walls, so no step can be said to hold yet</b>`
         : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a filled-in shape' : `the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
@@ -2936,7 +2937,7 @@ function lightenView(p) {
     : run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
   const out = run && run.stations.find((x) => x.verdict && x.verdict.kind === 'fails');
   // steps the check was too coarse to call: their verdict's word, never "nothing lighter holds" (#136 review)
-  const unsure = run && !best && run.stations.find((x) => x.index && x.verdict && ['unresolved', 'unchecked'].includes(x.verdict.kind));
+  const unsure = run && !best && run.stations.find((x) => x.index && x.verdict && ['unresolved', 'unchecked', 'span'].includes(x.verdict.kind));
   const what = (x) => x.phase === 'thinner' ? `in ${esc(x.label)} sheet <span class="badge">estimate</span>`
     : x.phase === 'top' ? `${pct(x.removed)} of the walls + ${x.top_holes} hole${x.top_holes === 1 ? '' : 's'} in the top`
     : x.index ? `${pct(x.removed)} of the walls` : 'as it is';
@@ -2950,7 +2951,7 @@ function lightenView(p) {
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
         : `The step to use: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
-      : unsure ? (unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
+      : unsure ? (unsure.verdict.kind === 'span' ? `Not settled: ${unsure.verdict.why}, so no step can be said to hold.` : unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
         : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.')
       : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
       ${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
@@ -3034,7 +3035,7 @@ function loadCase(p, run, c, i) {
         ${plNum(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`;
   const fea = f.supported === false ? `<div class="small" style="color:var(--bad)">${esc(c.why)}</div>`
     : `<div class="small" style="margin-top:4px"><b>whittle FEA</b> — works hardest ${esc(peakWhere(f))}
-        (${fixed(f.peak_mpa, 1)} MPa → ${sx(f.safety, run.min_safety)}) · gives ${len(f.deflection_mm, 3)}</div>`;
+        (${fixed(f.peak_mpa, 1)} MPa${c.verdict && c.verdict.kind === 'span' ? '' : ` → ${sx(f.safety, run.min_safety)}`}) · gives ${len(f.deflection_mm, 3)}</div>`;
   const by = pl && pl.done && pl.by_thickness ? (() => {
     const ok = pl.by_thickness.filter(holdsHere);
     const thin = ok.length ? ok[0] : null;
@@ -3056,6 +3057,8 @@ function loadCase(p, run, c, i) {
       : c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety, run.min_safety)}
         <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
         ${c.verdict && c.verdict.kind === 'fails' ? 'the fail may be the model\'s' : 'no verdict'} (it needs ${run.min_safety}x)</span></div>`
+      : c.verdict && c.verdict.kind === 'span' ? `<div class="small" style="margin-top:2px"><b>Not settled:</b> ${esc(c.verdict.why)}.
+        <span class="muted">It needs ${run.min_safety}x.</span></div>`
       : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety, run.min_safety)}</b>
         <span class="muted">(by ${c.governs === 'plate' ? (pl && pl.grain ? `the plate check, ${beamGrain(pl)}` : 'the plate check, with the grain the wrong way') : 'the FEA'}; it needs ${run.min_safety}x)</span>
         ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>`}

@@ -407,6 +407,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     saw_nothing = False               # a check that saw no stress at all (#202): not the same as one too coarse to see a wall
     unsure = None                     # a ✓ on an FEA too coarse to see the wall: no pass from it (CALI-110)
     unsettled = None                  # a ✗ on one: a ✗ stays a ✗, and says the fail may be the model's (#191)
+    span = None                       # the FEA alone, on a part bending between its holds (CALI-153)
     uncut, recheck = False, None      # a run made before the rounding fix, and one of its cases on its limit (#214)
     no_breaks = None                  # a breaking load from a run that can't see the wall isn't one to read
     loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
@@ -445,6 +446,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         said = [(c, verdicts.case(run, c)) for c in run["cases"]]
         uncut = uncut or not run.get("cut")
         recheck = recheck or (verdicts.UNCUT if any(v["kind"] == "recheck" for _, v in said) else None)
+        span = span or (verdicts.SPAN_WHY if any(v["kind"] == "span" for _, v in said) else None)
         sure = [(c, v) for c, v in said if v["kind"] in verdicts.SETTLED and not v.get("coarse")]
         breaks = [c["breaks_lb"] for c, _ in sure if c.get("breaks_lb")]
         hedged = next(((c, v) for c, v in said if v["kind"] == "fails" and v.get("coarse")), None)
@@ -456,7 +458,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         if no_breaks is None and len(sure) < sum(1 for c in run["cases"] if c.get("breaks_lb")):
             from .answers import coarse
 
-            no_breaks = coarse(run, inches, holds=not hedged)
+            spanned = any(v["kind"] == "span" and c.get("breaks_lb") for c, v in said)
+            no_breaks = f"not settled: {verdicts.SPAN_WHY}" if spanned else coarse(run, inches, holds=not hedged)
         need.append(float(run.get("min_safety") or load_study.MIN_SAFETY))
         if unsure is None and any(verdicts.case(run, c)["kind"] in ("unresolved", "unchecked")
                                   and (c.get("fea") or {}).get("supported") is not False for c in run["cases"]):
@@ -527,7 +530,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                                 else None,
                                 # an old number on its limit, the run's or this goal's own (#214 review)
                                 recheck=(recheck or (verdicts.UNCUT if number and verdicts.goal_on_limit(
-                                    uncut, c["metric"], v, lim, op) else None)) if strength else None)
+                                    uncut, c["metric"], v, lim, op) else None)) if strength else None,
+                                span=span if strength else None)
         status = verdicts.STATUS[verdict["kind"]]
         if verdict["kind"] == "estimate":     # a rough print time runs low: never a pass (#166)
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None, "trust": "rough",
@@ -542,6 +546,9 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         elif status == "fail" and strength and (unsettled or unsure):     # a ✗ stays a ✗, not as a settled number (#191)
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": NOT_SEEN if saw_nothing else "not resolved: too coarse to see its walls", "note": unsettled or unsure})
+        elif status == "span":                # the FEA alone, between its holds: no number beside it (CALI-153)
+            checks.append({**c, "status": status, "value": None, "unit": m["unit"], "margin": None,
+                           "trust": "not settled", "note": verdicts.SPAN_WHY})
         elif status == "edge":                # loaded in the middle only (CALI-94): never a pass; a ✗ stays a fail
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "checked in the middle only", "note": MIDDLE_ONLY})
@@ -579,7 +586,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                         "untrusted": sum(c["status"] == "untrusted" for c in checks),
                         "unresolved": sum(c["status"] == "unresolved" for c in checks),
                         "estimate": sum(c["status"] == "estimate" for c in checks),
-                        "edge": sum(c["status"] == "edge" for c in checks)}}
+                        "edge": sum(c["status"] == "edge" for c in checks),
+                        "span": sum(c["status"] == "span" for c in checks)}}
     os.makedirs(cards_dir(store), exist_ok=True)
     with open(os.path.join(cards_dir(store), time.strftime("%Y%m%d-%H%M%S") + ".json"), "w") as f:
         json.dump(card, f, indent=2, default=str)
