@@ -727,8 +727,16 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     spec = _working_spec(store, part_id, intent)
 
     _emit(events, on_event, "authoring", f"authoring {part_id}…", part=part_id)
+
+
+    def said_round(n: int, most: int) -> None:          # the first is the line above; a later one says which (CALI-154)
+        if n > 1:
+            word = {2: "second", 3: "third", 4: "fourth"}.get(n)
+            _emit(events, on_event, "authoring", f"authoring {part_id}: {word + ' try' if word else f'try {n}'}",
+                  part=part_id, round=n, rounds=most)
+
     res = authoring.improve(spec, author=author, max_rounds=max_rounds, client=client,
-                            ref_base=store.root, interfaces=interfaces)
+                            ref_base=store.root, interfaces=interfaces, on_round=said_round)
 
     if res.geometry is None:
         _emit(events, on_event, "error", f"{part_id} would not build", part=part_id)

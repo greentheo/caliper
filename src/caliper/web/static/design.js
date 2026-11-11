@@ -921,7 +921,7 @@ $('newBtn').onclick = startNew;
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
-  if (first) { S.buildBubble = null; clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
+  if (first) { dropBuildFollow(); clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
   location.hash = encodeURIComponent(slug);
   if (first) showLoading(slug);
   let got;
@@ -1047,6 +1047,8 @@ function renderThread() {
     } else if (e.kind === 'message') {
       html.push(`<div class="msg you">${e.scope ? `<div class="scope">on ${esc(e.scope)}</div>` : ''}` +
         `${md(e.shown || e.text)}</div>`);
+    } else if (e.kind === 'reply' && e.action === 'build' && e.ok === false && S.buildBubble) {
+      // the bubble still on screen says this, with its report link: read once. A reload has no bubble, and shows this
     } else if (e.kind === 'reply' && e.reply) {
       const tone = e.ok === false ? 'bad' : (e.action === 'answer' ? '' : 'good');
       html.push(`<div class="msg cal ${tone}"><div class="who">Caliper</div>${md(e.reply)}</div>`);
@@ -1100,14 +1102,16 @@ function renderThread() {
     $('buildFirst').onclick = async () => {
       const go = $('buildFirst');
       go.disabled = true;                              // a double click starts one build (#66 item 1)
-      try { followBuild((await api('POST', `/api/designs/${S.slug}/build`)).job_id); }
-      catch (e) { showErr(e.message); go.disabled = false; }
+      try {
+        followBuild((await api('POST', `/api/designs/${S.slug}/build`)).job_id, 0);
+        refresh().catch(() => {});                     // the cards go by d.building: they stop saying "press Build it"
+      } catch (e) { showErr(e.message); go.disabled = false; }
     };
   }
   if (typeof d.claude === 'boolean') S.claude = d.claude;
   paintSendNote();
   if (S.buildBubble) t.append(S.buildBubble);          // a redraw mid-build keeps its progress
-  if (d.building && S.following !== d.building) followBuild(d.building);
+  if (d.building && S.following !== d.building) followBuild(d.building, ((d.running || []).find((r) => r.job === d.building) || {}).elapsed_s);
   t.scrollTop = t.scrollHeight;
 }
 
@@ -1143,11 +1147,35 @@ function wireClarify() {
 }
 
 // the first build, said as it goes: what it's held to, the part, its strength, its patterns (CALI-59)
-const BUILD_STEPS = { goals: 'Writing down what it has to do', build: 'Building it',
+const BUILD_STEPS = { goals: 'Writing down what it has to do', plan: 'Planning its parts', build: 'Building it',
   strength: 'Checking it holds what it must', patterns: 'Drawing the patterns to cut it out',
   score: 'Scoring it against what it has to do' };
-async function followBuild(jobId) {
+function elapsedText(s) {
+  const t = Math.max(0, Math.round(s));
+  return t < 60 ? `${t} s` : `${Math.floor(t / 60)} min ${t % 60} s`;
+}
+function authoringWords(round) {
+  if (!round || round < 2) return 'writing the design';
+  const word = { 2: 'second', 3: 'third', 4: 'fourth' }[round];
+  return `writing the design: ${word ? `${word} try` : `try ${round}`}`;
+}
+// leaving a design doesn't stop its build: coming back follows it again, and the design you went to can be talked to
+function dropBuildFollow() {
+  S.buildBubble = null;
+  if (!S.following) return;                     // nothing of a build's to let go: a chat turn in flight keeps Send off
+  S.following = null; S.buildFollow = (S.buildFollow || 0) + 1; S.busy = false;
+  $('send').disabled = false;
+}
+// how long it has run comes from the server (its elapsed seconds), so a browser whose clock is off still reads right
+function buildRanFor(seconds) {
+  const began = Date.now() / 1000 - (seconds || 0);
+  if (!S.buildBegan || began < S.buildBegan) S.buildBegan = began;      // a clock that only goes forward
+}
+async function followBuild(jobId, ranFor) {
+  const mine = S.buildFollow = (S.buildFollow || 0) + 1;
   S.following = jobId; S.busy = true; $('send').disabled = true;
+  S.buildBegan = null;
+  buildRanFor(ranFor);
   const t = $('thread');
   t.querySelectorAll('.actions').forEach((n) => n.remove());
   const cal = document.createElement('div');
@@ -1159,38 +1187,38 @@ async function followBuild(jobId) {
   S.buildBubble = cal;
   const head = cal.querySelector('.head');
   let at = null;
-  const mark = (k) => {
+  const mark = (k, text) => {
     if (!BUILD_STEPS[k]) return;
     cal.querySelectorAll('li').forEach((li) => {
       const before = Object.keys(BUILD_STEPS).indexOf(li.dataset.step) < Object.keys(BUILD_STEPS).indexOf(k);
       li.classList.toggle('done', before || li.classList.contains('done'));
       li.classList.toggle('now', li.dataset.step === k);
     });
-    at = k; since = Date.now(); head.innerHTML = `<span class="spin"></span>${esc(BUILD_STEPS[k])}…`;
+    at = k; said = text || BUILD_STEPS[k]; paint();
   };
-  // a long step (writing the design takes a minute or two) shows it's still going
-  let since = Date.now();
-  const tick = setInterval(() => {
-    if (!at || !cal.isConnected) return;
-    const s = Math.round((Date.now() - since) / 1000);
-    if (s >= 5) head.innerHTML = `<span class="spin"></span>${esc(BUILD_STEPS[at])}… <span class="muted small">${s} s</span>`;
-  }, 1000);
+  // the whole build's time: a reload or a switch of design doesn't restart it
+  let said = 'Starting';
+  const paint = () => { head.innerHTML = `<span class="spin"></span>${esc(said)}… <span class="muted small">${elapsedText(Date.now() / 1000 - S.buildBegan)}</span>`; };
+  paint();
+  const tick = setInterval(() => { if (cal.isConnected) paint(); }, 1000);
   try {
     await follow(jobId, (ev) => {
-      if (ev.kind === 'step') return ev.step === 'done' ? null : mark(ev.step);
+      if (ev.kind === 'step') return ev.step === 'done' ? null : mark(ev.step, ev.text);
       const li = at && cal.querySelector(`li[data-step="${at}"] .detail`);
-      const said = ev.kind === 'authoring' ? 'writing the design'
+      const line = ev.kind === 'authoring' ? authoringWords(ev.round)
         : ev.kind === 'built' ? 'it builds' : ev.kind === 'strength' ? ev.text
           : ev.kind === 'error' ? `⚠ ${ev.text}` : '';
-      if (li && said) li.textContent = ` · ${said}`;
+      if (li && line) li.textContent = ` · ${line}`;
     });
   } catch (e) {
-    cal.classList.add('bad'); head.innerHTML = `⚠ ${esc(e.message)} `;
+    cal.classList.add('bad'); head.innerHTML = `⚠ The build stopped: ${esc(e.message)} `;
     head.append(reportLink(e.errorId, e.message));
+    cal.querySelectorAll('li.now').forEach((li) => li.classList.remove('now'));
   } finally {
     clearInterval(tick);
-    S.busy = false; $('send').disabled = false;
+    if (mine === S.buildFollow) { S.busy = false; $('send').disabled = false; S.following = null; }
   }
+  if (mine !== S.buildFollow) return;                            // left for another design, or followed again since
   if (!cal.classList.contains('bad')) S.buildBubble = null;      // the reply in the log says it now
   await refresh();
 }
@@ -1275,7 +1303,7 @@ $('msg').addEventListener('keydown', (e) => {
 function startNew() {
   // remember where we were: the button sits beside the design picker and is easy to hit by mistake
   const was = S.slug ? { slug: S.slug, name: S.design ? S.design.name : S.slug } : null;
-  S.slug = null; S.design = null; S.scope = null; S.buildBubble = null;
+  S.slug = null; S.design = null; S.scope = null; dropBuildFollow();
   clearPick(); pickHint();                        // nor to a design that doesn't exist yet (#196 review)
   for (const m of meshes.values()) scene.remove(m);
   meshes.clear(); clearStation();
@@ -1656,7 +1684,7 @@ function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${
 function answersKey() {               // what the answers depend on: a change to any of it asks again
   const d = S.design;
   const runs = (list) => (list || []).map((r) => [r.id, r.status]);   // a finished carve or Lighten changes the offers (#159)
-  return JSON.stringify([S.slug, S.scope, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
+  return JSON.stringify([S.slug, S.scope, d.building || null, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
     runs(d.carve_runs), runs(d.lighten_runs),
     (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
     (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey, d.display_units]);
@@ -3157,6 +3185,9 @@ async function pollRunning() {
   if (S.slug !== slug || !S.design) return;
   S.design.running = got.running;
   syncRunning();
+  const build = got.running.find((r) => r.kind === 'firstrun');   // started from another tab
+  if (build && S.following !== build.job) { followBuild(build.job, build.elapsed_s); refresh().catch(() => {}); }   // its cards too
+  else if (build) buildRanFor(build.elapsed_s);               // keep to the server's time
   for (const t of jobsHere()) {
     if (got.running.some((r) => r.job === t.job)) t.gone = 0;
     else if ((t.gone = (t.gone || 0) + 1) > 1) jobOver(t.job);
@@ -3165,7 +3196,7 @@ async function pollRunning() {
 // what's on the record and this page isn't following yet: after a reload, or coming back to the design
 function syncRunning() {
   for (const r of (S.design && S.design.running) || []) {
-    if (S.tracked[r.job]) continue;
+    if (r.kind === 'firstrun' || S.tracked[r.job]) continue;     // the first build has its own bubble in the thread
     trackJob(r.job, { kind: r.kind, part: r.part, text: r.text, waiting: r.waiting }).done.catch(() => {});   // jobOver re-reads
   }
 }

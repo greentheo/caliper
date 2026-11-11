@@ -77,7 +77,7 @@ def test_the_tree_is_given_the_piece_only_without_a_pick():
 _CHOOSE = """
 const stub = { clone() { return {}; }, copy() {} };
 const ray = { ray: stub }, camera = stub, renderer = { domElement: { getBoundingClientRect: () => ({}) } }, scene = { remove() {} };
-const setScope = () => {}; const pickHint = () => {}; const plainly = (s) => s; const facePicked = () => null;
+const setScope = () => {}; const pickHint = () => {}; const dropBuildFollow = () => {}; const plainly = (s) => s; const facePicked = () => null;
 const HIT = { object: { userData: { partId: 'stool' } }, point: { x: 1, y: 2, z: 3 }, distance: 10 };
 """
 
