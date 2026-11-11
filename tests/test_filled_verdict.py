@@ -229,3 +229,12 @@ def test_the_fixes_a_card_offers_reach_the_part_with_nothing_selected(tmp_path):
     for phrase in phrases:
         got = chat.offline_classify(store, phrase, None)
         assert (got.action, got.part) == ("refine", "step_stool"), (phrase, got)
+
+
+def test_an_older_run_on_a_filled_shape_reads_as_that_and_doesnt_crash_the_card():
+    """Theo's step-stool-3: the part has since been fixed, so filled() is None, and the newest run on record ran on a filled shape."""
+    run = {"filled": True, "min_safety": 2.0, "cut": True, "version": 1}
+    case = {"name": "a foot", "lb": 200, "factor": 2.0, "safety": 3.0, "holds": True, "governs": "fea", "fea": {"supported": True, "safety": 3.0}}
+    line = answers._case_line("stool", run, case, None, True, True)
+    assert line["status"] == "warn" and line["text"] == ("Not trusted yet: the last strength check ran on a filled-in shape, on an older version. "
+                                                         "Check it again.")
