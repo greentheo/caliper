@@ -193,7 +193,7 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
     from .answers import _times
 
     p = next((x for x in state.get("parts") or [] if x["id"] == pid), None)
-    if p is None or p.get("role") == "fixed" or not p.get("loads") or not p.get("built"):
+    if p is None or p.get("role") == "fixed" or not p.get("loads") or not p.get("built") or p.get("not_accounted"):
         return []
     blocked = p.get("blocked") if "blocked" in p else L.blocked(store, pid)
     run = L.default_check(store, pid)

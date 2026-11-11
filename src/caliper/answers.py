@@ -376,12 +376,22 @@ def untrusted(pid: str, why: str = "") -> str:
     be checked against its pieces at all (which fails closed: never holding)."""
     if why.startswith("couldn't"):
         return f"Not trusted yet: I {why}, so I can't say the strength check ran on the part as built. Check it again."
+    from .consistency import PANEL_SAID
+
+    if PANEL_SAID in why:                            # the shape's right, the pieces aren't (CALI-155): not "fix its shape"
+        return f"Not trusted yet: {why}. Say \"{fix_piece(pid)}\"."
     return (f"Not trusted yet: the strength check ran on a solid with more in it than the {pid.replace('_', ' ')}'s "
             f"pieces: its shape is filled in, or a piece is missing from its construction. Say \"{fix_shape(pid)}\" or "
             f"\"{fix_piece(pid)}\".")
 
 
 #: The two fixes for a solid with more in it than its pieces (#209 review): the shape, or the construction.
+def consistency_no_make() -> str:
+    from .consistency import NO_MAKE
+
+    return NO_MAKE
+
+
 def fix_shape(pid: str) -> str:
     """The words to say to fix a part's shape, naming the part, so they reach it with nothing selected (#209 review:
     "add the missing piece" typed from the design card authored a part named missing_piece)."""
@@ -399,6 +409,8 @@ def fix_for(check_id: str, detail: str, pid: str = "part") -> str:
 
     if check_id == "construction_on_its_face":
         return f'Say "{consistency.remedy(detail)}"'
+    if consistency.PANEL_SAID in detail:             # the solid has a panel its pieces left out: fixing "the shape" would delete it (CALI-155)
+        return f'Say "{fix_piece(pid)}"'
     if check_id == "construction_volume":
         return f'Say "{fix_shape(pid)}" (it\'s filled in) or "{fix_piece(pid)}" (one isn\'t in its construction)'
     return f'Say "{fix_shape(pid)}"'
@@ -422,7 +434,8 @@ def _card(key: str, q: str, lines: list[dict], hint: str = "", promised: str = P
 
 
 def _line(text: str, status: str = "info", **kw) -> dict:
-    return {"text": text, "status": status, **kw}
+    # a verdict with nothing to go on (its status "unknown") reads as a warning on a card: a tipping case with no weight crashed the card (CALI-155)
+    return {"text": text, "status": "warn" if status == "unknown" else status, **kw}
 
 
 # ---------------------------------------------------------------------------
@@ -458,7 +471,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             from . import consistency
 
             geom = store.part_geometry(pid)                  # cached by the assembly (path, mtime)
-            said = consistency.check(C.declared(store, pid), geom)
+            said = consistency.checked(store, pid)
             smaller = consistency.plan_differs(C.declared(store, pid), geom)
             off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
             edge = next((r.detail for r in said if r.id == "loads_edge" and r.detail), "")   # (CALI-94)
@@ -469,7 +482,8 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         if strays:                                   # what the mesh left out, said once (CALI-118)
             what.append(_line(f"I {strays}: it enclosed nothing and weighs nothing.", "info"))
         if off:
-            what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. {fix_for(off[0].id, off[0].detail, pid)} "
+            detail = report.get("not_accounted") or off[0].detail
+            what.append(_line(f"Its 3D shape and its pieces don't match: {detail}. {fix_for(off[0].id, off[0].detail, pid)} "
                               f"and I'll revise it.", "bad"))
         for s in smaller:                      # cut smaller than it's drawn: the cut list follows the outline (#183)
             what.append(_line(consistency.plan_said(s, inches), "warn"))
@@ -556,7 +570,12 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
 
     # What do I buy?
     buy = []
-    if report:
+    from .consistency import NO_MAKE
+
+    wrong = (report or {}).get("not_accounted")          # pieces that aren't the part: nothing from them (CALI-155)
+    if wrong:
+        buy.append(_line(f"{NO_MAKE[:1].upper()}{NO_MAKE[1:]}.", "warn"))
+    elif report:
         b = report["bom"]
         items = [f"{g['count']} sheet{'s' if g['count'] != 1 else ''} of {g['label']}" for g in b["sheets"]]
         items += [f"{g['count']} × {g['label']}" for g in b["sticks"]]
@@ -577,7 +596,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
 
     # How do I make it?
     how = []
-    if report and p.get("role") != "fixed":
+    if wrong:
+        how.append(_line(f"No patterns or cut list yet: {NO_MAKE}. {fix_for('construction_covers', wrong, pid)} and I'll revise it.", "warn"))
+    elif report and p.get("role") != "fixed":
         try:
             mk = making.plan(store, pid, wait=False)       # the slicer never holds a card (#97)
         except Exception:  # noqa: BLE001
@@ -753,7 +774,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     weight = usd = missing = hours = 0.0
     slicing, unsliced, guessed, all_pieces, rough_pieces = False, "", "", 0, 0
     unprintable, cant = "", []                     # a printed piece the shop can't make: no total (#179 review, rule 6)
-    weighed, unweighed = False, None
+    weighed, unweighed, unpriced = False, None, None
     for p in state["parts"]:
         if not p.get("built") or p.get("role") == "fixed":
             continue
@@ -767,6 +788,9 @@ def measured(store: DesignStore, state: dict) -> dict:
             unweighed = unweighed or rep.get("unweighed") or C.UNWEIGHED
         else:
             weight += rep["mass_lb"]
+        unpriced = unpriced or rep.get("not_accounted")          # no total from a part whose pieces aren't it (CALI-155)
+        if rep.get("not_accounted"):
+            continue
         usd += _cost(store, p["id"], rep) or 0.0
         try:
             mk = making.plan(store, p["id"], wait=False)   # the slicer never holds a card (#97)
@@ -785,10 +809,12 @@ def measured(store: DesignStore, state: dict) -> dict:
         except Exception:  # noqa: BLE001
             pass
     if weighed:
-        out.update({"weight.total_lb": None if unweighed else round(weight, 1), "cost.usd": round(usd, 2),
-                    "make.not_in_shop": missing})
+        out.update({"weight.total_lb": None if unweighed else round(weight, 1), "cost.usd": None if unpriced else round(usd, 2),
+                    "make.not_in_shop": None if unpriced else missing})
         if cant:
             out["make.cant"] = cant
+        if unpriced:
+            out["pieces.short"] = unpriced
         if unweighed:
             out["weight.unweighed"] = unweighed
         if unprintable:                            # first: it stays this way however long the slicer takes
@@ -866,7 +892,10 @@ def held_to(state: dict, now: dict) -> list[dict]:
                              study="load", model="scorecard"))
             continue
         assumed = " (assumed)" if c.get("source") == "assumed" else ""
-        unknown = now.get("weight.unweighed") if c["metric"].startswith("weight") else None
+        short = now.get("pieces.short")                # its pieces leave a panel out: no number comes from them (CALI-155)
+        unknown = (now.get("weight.unweighed") if c["metric"].startswith("weight")
+                   else f"it can't be priced yet: {short}" if short and c["metric"].startswith(("cost", "waste"))
+                   else f"its cuts can't be checked yet: {short}" if short and c["metric"].startswith("make") else None)
         if unknown:            # unknown now: never the last card's lower total (#125, #132): one verdict, said
             verdict = verdicts.goal(None, incomplete=unknown)
             out.append(_line(f"{label}{assumed}: {verdict.get('why') or unknown}.", "warn"))
@@ -1064,10 +1093,11 @@ def design(store: DesignStore, state: dict) -> list[dict]:
                           links=[{"label": "Open the build book", "url": url + "index.html"}]
                           + ([{"label": "The kids' build book", "url": url + rel["kids"]}] if rel.get("kids") else [])))
     elif not solo:
-        make.append(_line("No build package yet: make one when it's ready.", "info", action="release"))
+        make.append(_line(f"No build package yet: {consistency_no_make()}.", "warn") if now.get("pieces.short")
+                    else _line("No build package yet: make one when it's ready.", "info", action="release"))
     else:
-        make.append(_line("Or make the whole build package: the build book, cut lists and drawings.", "info",
-                          action="release"))
+        make.append(_line(f"No build package yet: {consistency_no_make()}.", "warn") if now.get("pieces.short")
+                    else _line("Or make the whole build package: the build book, cut lists and drawings.", "info", action="release"))
     return [_card("what", "What is it?", what),
             _card("work", "Will it work?", work,
                   promised=promise(store, [p.id for p in store.design.parts]) if store is not None else PROMISE),

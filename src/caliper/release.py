@@ -1160,6 +1160,11 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
              if p.id not in fixed and store.is_scripted(p.id) and C.declares(store.read_script(p.id))]
     if not built:
         raise ValueError("no part says what it's built from — there's nothing to cut")
+    from . import consistency
+
+    for p in built:                         # (CALI-155)
+        if consistency.not_accounted(store, p.id):
+            raise ValueError(f"can't make a build package: for the {p.id.replace('_', ' ')}, {consistency.NO_MAKE}")
 
     # the cut plans, current for each part's version
     plans, fresh = {}, False

@@ -275,6 +275,10 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
     from . import carve
 
     carve.refuse_if_carved(store.read_script(part_id), f"a {subject}", f"put the {subject} on")
+    from . import consistency
+
+    if consistency.not_accounted(store, part_id):      # the panel list comes from those pieces (CALI-155)
+        raise ValueError(f"I can't put a {subject} on it yet: {consistency.NO_MAKE}")
     panel = choose(panels(store, part_id), where)
     emit("step", f"Fitting the {subject} on the {panel['name']}", step="fit")
     poly = fit(shape, panel)

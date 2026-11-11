@@ -249,6 +249,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             if cutplans[p.id] is None:
                 _metric(metrics, f"make.{p.id}.stale", True, "", f"{p.id}'s cut plan is for an older version",
                         "measured", "cut plan")
+    pieces_short = next((r["not_accounted"] for r in reports.values() if r.get("not_accounted")), None)    # nothing from them (CALI-155)
     b = C.balance(store, payload_lb=payload)
     unknown = {"note": "; ".join(b["unweighed"])} if b.get("unweighed") else {}    # never a lower total (#125)
     _metric(metrics, "weight.total_lb", b["mass_lb"], "lb", f"everything, with {payload:g} lb aboard", "model", "balance",
@@ -355,14 +356,15 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     missing = sum(len(gr.get("missing") or []) for cp in cutplans.values() if cp for gr in cp["sheets"])
     if any(cutplans.values()):
         _metric(metrics, "make.sheets", sheets, "sheets", "sheets to cut (current cut plans)", "measured", "cut plan")
-        _metric(metrics, "make.missing", missing, "pieces", "pieces that fit no sheet", "measured", "cut plan")
+        _metric(metrics, "make.missing", None if pieces_short else missing, "pieces", "pieces that fit no sheet", "measured", "cut plan")
 
     # cost & waste
     emit("cost", "pricing the stock")
     cw = cost_and_waste(store, reports, cutplans)
-    _metric(metrics, "cost.usd", cw["usd"], "$", "stock to buy", "guess", "materials.PRICES", note=cw["basis"])
-    _metric(metrics, "waste.usd", cw["waste_usd"], "$", "of it left as offcut", "guess", "cut plan + prices")
-    _metric(metrics, "waste.pct", round(cw["waste_pct"] * 100, 1), "%", "offcut, by cost", "measured", "cut plan")
+    _metric(metrics, "cost.usd", None if pieces_short else cw["usd"], "$", "stock to buy", "guess", "materials.PRICES",
+            note=pieces_short or cw["basis"])
+    _metric(metrics, "waste.usd", None if pieces_short else cw["waste_usd"], "$", "of it left as offcut", "guess", "cut plan + prices")
+    _metric(metrics, "waste.pct", None if pieces_short else round(cw["waste_pct"] * 100, 1), "%", "offcut, by cost", "measured", "cut plan")
 
     # can your shop make it (CALI-48): every piece routed to a tool or machine you have; printing costed
     from . import making
@@ -385,12 +387,12 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         # made): a part whose plan couldn't be made leaves the check waiting, said why; a missing piece is a fail
         settled = planned and not unplanned
         checks.append({"id": "make:shop", "label": "your shop can make every piece", "kind": "make", "auto": True,
-                       "status": "fail" if missing else "pass" if settled else "unknown",
-                       "value": len(missing) if missing or settled else None, "unit": "pieces it can't make",
-                       "margin": -len(missing) if missing or settled else None,
-                       "trust": "measured" if missing or settled else None,
+                       "status": "unknown" if pieces_short else "fail" if missing else "pass" if settled else "unknown",
+                       "value": None if pieces_short else len(missing) if missing or settled else None, "unit": "pieces it can't make",
+                       "margin": None if pieces_short else -len(missing) if missing or settled else None,
+                       "trust": None if pieces_short else "measured" if missing or settled else None,
                        "note": "; ".join((missing + [f"couldn't work out how to make {u}" for u in unplanned])[:6])})
-        _metric(metrics, "make.not_in_shop", len(missing), "pieces", "pieces your shop can't make", "measured", "shop")
+        _metric(metrics, "make.not_in_shop", None if pieces_short else len(missing), "pieces", "pieces your shop can't make", "measured", "shop")
     if unprintable:                       # a printed piece the shop can't make: no total, and a goal on it says why (#179 review)
         _metric(metrics, "print.hours", None, "h", "printing time, every printed piece", "model", "shop", note=unprintable)
         _metric(metrics, "print.filament_g", None, "g", "filament, every printed piece", "model", "shop", note=unprintable)
