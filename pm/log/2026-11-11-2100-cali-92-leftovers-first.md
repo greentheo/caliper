@@ -18,3 +18,13 @@ Four of the items main still had after the triage of 2026-11-10.
 The step-stool and camper samples have no printed part, so nothing of theirs moves. The strength study's own weight (self-weight in a case) and the centre of gravity still use the model's solid: item 23 is about what's said and bought.
 
 **Tests:** 17 in `test_leftovers_70.py`, one (two cases) in `test_kidbook.py`, and #182's two. Every one fails on main. 16 mutants are all caught: 4 on the stale bar and the 409, 4 on the kids' book view, and 8 on item 23, one per place that reads the figure.
+
+**Rework from the review (the foreman's six):**
+1. **One weight.** The scorecard's `weight.total_lb` is the balance's solid weight plus each part's filament difference, so the card, the scorecard and the book agree. The tongue, the moment and the CG stay on the solid.
+2. **A weight or cost goal on a figure that isn't the slicer's is an `estimate`** (no ✓), in `held_to` and the scorecard's check, as `print.*` already is. That covers the rough guess and the solid's share. The rough figure has no supports in it, so an overhanging part reads light. The metrics carry `trust: rough` with the reason.
+3. **The panel:** `{build: {}}` is the part as it is, so it gets the figure too. The figure is labelled there, and `mass_kg` is on the same figure as `mass_lb`.
+4. **The two stray files** in 835303e (`design.js 0`, `index.html 1`) are deleted. They were copies of `design.js` made by my mutant loop under zsh: `$1` wasn't split, so the restore step `cp m.bak $W/$1` wrote a new file named "design.js 0", and a broad `git add src` took both in. Mutant loops now run in bash from a script file, and I add files by name and check `git status` before every commit.
+5. **While the slicer's at it**, a weight or cost goal says "still slicing" (working), not the solid's figure in red.
+6. **A bug's `KeyError` is a crash again.** The six API handlers that turned any `KeyError` into a 409 now catch `errors.Refused` (a `KeyError`, so other callers still catch it) and `ValueError`. Construction's and aero's deliberate refusals ("the script has no BUILD dict", "no entry for …") raise `Refused`.
+
+**Rework checks:** 12 new tests (8 for the six items, 4 for `filament_said`); all 9 rework mutants caught. The 41 files around the change pass with no API key (981, without `slow`; a first run of 74 files was cut short and its duplicate stopped). CI has the whole suite.

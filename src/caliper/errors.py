@@ -23,6 +23,15 @@ import uuid
 from typing import Optional
 from urllib.parse import quote
 
+
+class Refused(KeyError):
+    """A choice the person's script can't take ("the script has no BUILD dict"): the server says it as a refusal (a 409,
+    a plain line on the page), where a KeyError from a bug shows as the crash it is, with Report it (#237 review)."""
+
+    def __str__(self) -> str:                   # its words, not KeyError's quoted repr
+        return str(self.args[0]) if self.args else ""
+
+
 KEEP = 50
 #: One writer at a time: two errors at once could lose one, or raise (CALI-92, #70 item 12).
 _MU = threading.Lock()

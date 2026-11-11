@@ -780,6 +780,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     slicing, unsliced, guessed, all_pieces, rough_pieces = False, "", "", 0, 0
     unprintable, cant = "", []                     # a printed piece the shop can't make: no total (#179 review, rule 6)
     weighed, unweighed, unpriced = False, None, None
+    reps: list = []                                # each part's report, by its one filament figure
     for p in state["parts"]:
         if not p.get("built") or p.get("role") == "fixed":
             continue
@@ -796,6 +797,7 @@ def measured(store: DesignStore, state: dict) -> dict:
             except Exception:  # noqa: BLE001
                 mk = None
         rep = making.filament(rep, mk)             # its weight and cost by the one filament figure (#70 item 23)
+        reps.append(rep)
         if rep.get("mass_lb") is None:             # one part unknown: the total is too, never the rest's (#125)
             unweighed = unweighed or rep.get("unweighed") or C.UNWEIGHED
         else:
@@ -830,6 +832,11 @@ def measured(store: DesignStore, state: dict) -> dict:
             out["pieces.short"] = unpriced
         if unweighed:
             out["weight.unweighed"] = unweighed
+        guess, slicing_now = making.filament_said(reps)   # a goal on a guessed or still-slicing figure (#237 review)
+        if guess:
+            out["filament.rough"] = guess
+        if slicing_now:
+            out["filament.pending"] = slicing_now
         if unprintable:                            # first: it stays this way however long the slicer takes
             out["print.unknown"] = unprintable
         elif slicing:                              # a part still slicing: no total, said (#97, rule 6)
@@ -944,12 +951,17 @@ def held_to(state: dict, now: dict) -> list[dict]:
             out.append(_line(f"{label}{assumed}: not checked yet. {how}.", "warn",
                              study="load" if c["metric"].startswith("strength") else None))
             continue
+        if c["metric"].startswith(("weight.", "cost.")) and c["metric"] in now and now.get("filament.pending"):
+            out.append(_line(f"{label}{assumed}: {now['filament.pending']}", "info", working=True))   # not the solid's red (#237 review)
+            continue
         met = verdicts.compare(v, c.get("op", ">="), c["limit"])
         strength = c["metric"].startswith("strength")
         untrue = now.get("strength.filled") if strength else None
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-97)
         older = now.get("strength.stale") if strength else None
         guess = None
+        if c["metric"].startswith(("weight.", "cost.")):   # a guessed filament figure: no ✓ on it (#237 review)
+            guess = now.get("filament.rough") if c["metric"] in now else rough_scored.get(c["metric"])
         if c["metric"].startswith("print."):           # a rough print time runs low: no ✓ on it (#166)
             guess = now.get("print.rough") if c["metric"] in now else (
                 f"{'partly ' if re.match(r'[0-9]+ of ', rough_scored[c['metric']]) else ''}a guess "

@@ -191,3 +191,109 @@ def test_the_built_from_panel_says_the_same_grams(mixed):
     g = got["bom"]["printed"][0]
     grams = sum(pr["filament_g"] for pr in making.plan(mixed, "table", wait=False)["printed"])
     assert (g["filament_g"], g["filament_from"]) == (grams, "the slicer's estimate")
+
+
+# --- #237 rework ----------------------------------------------------------------------------------------------------------
+def test_the_design_s_weight_goes_by_the_filament_its_tongue_and_cog_by_the_solid(mixed):
+    """Rework 1: one weight. The scorecard's total is the parts' weights by their one filament figure, with the payload;
+    the tongue, the moment and the CG stay on the solid (the study of where it sits isn't by filament)."""
+    from caliper import construction as C
+    from caliper import scorecard
+
+    one = making.filament(C.report(mixed, "table"), making.plan(mixed, "table"))
+    b = C.balance(mixed, payload_lb=0)
+    card = scorecard.compute(mixed)
+    total = card["metrics"]["weight.total_lb"]["value"]
+    assert total == round(b["mass_lb"] + one["filament_more_kg"] * C.M.LB_KG, 1) != b["mass_lb"]
+    assert card["metrics"]["hitch.tongue_lb"]["value"] == b["mass_lb"]
+
+
+def _goal(store, metric, limit):
+    from caliper import goals
+
+    goals.write(store, {"checks": [{"id": "g", "label": "light enough", "metric": metric, "op": "<=", "limit": limit,
+                                    "source": "answered"}]})
+
+
+@pytest.mark.parametrize("metric,limit", [("weight.total_lb", 100), ("cost.usd", 1000)])
+def test_a_weight_or_cost_goal_on_a_rough_figure_is_an_estimate(mixed, monkeypatch, metric, limit):
+    """Rework 2: the rough figure has no supports in it, so an overhanging part reads light: never a ✓ on it."""
+    from caliper import answers, design_api, printing, scorecard
+
+    monkeypatch.setattr(printing, "estimate", lambda *a, **k: {**SLICED, "trust": "rough", "from": "walls + infill at rough speeds (no slicer installed)"})
+    _goal(mixed, metric, limit)
+    state = design_api.design_state(mixed)
+    (line,) = [ln for ln in answers.held_to(state, answers.measured(mixed, state)) if "light enough" in ln["text"].lower()]
+    assert line["status"] == "warn" and "a guess" in line["text"] and "✓" not in line["text"]
+    (check,) = [c for c in scorecard.compute(mixed)["checks"] if c.get("id") == "g"]
+    assert check["status"] != "pass" and check["trust"] == "rough"
+    _goal(mixed, metric, limit)                                       # the slicer's own figure is no guess
+    monkeypatch.setattr(printing, "estimate", lambda *a, **k: dict(SLICED))
+    state = design_api.design_state(mixed)
+    (line,) = [ln for ln in answers.held_to(state, answers.measured(mixed, state)) if "light enough" in ln["text"].lower()]
+    assert "a guess" not in line["text"]
+
+
+def test_a_weight_goal_while_it_s_still_slicing_says_so(mixed, monkeypatch):
+    """Rework 5: no false red from the solid's figure while the slicer's still at it."""
+    from caliper import answers, design_api, printing
+
+    monkeypatch.setattr(printing, "estimate", lambda *a, **k: dict(printing.WORKING))
+    _goal(mixed, "weight.total_lb", 0.1)                              # the solid's weight would fail this
+    state = design_api.design_state(mixed)
+    (line,) = [ln for ln in answers.held_to(state, answers.measured(mixed, state)) if "light enough" in ln["text"].lower()]
+    assert line["status"] == "info" and line.get("working") and "still slicing" in line["text"]
+
+
+@pytest.mark.parametrize("body", [None, {"build": {}}])
+def test_the_panel_has_the_one_figure_tried_or_not_with_its_mass(mixed, body):
+    """Rework 3: ``{build: {}}`` is the part as it is, so it gets the figure too; and its kilograms agree with its pounds."""
+    from fastapi.testclient import TestClient
+
+    from caliper import construction as C
+    from caliper.server import create_app
+
+    c = TestClient(create_app())
+    url = "/api/designs/table/parts/table/construction"
+    got = (c.get(url) if body is None else c.post(url, json=body)).json()
+    assert got["bom"]["printed"][0]["filament_from"] == "the slicer's estimate"
+    assert got["mass_lb"] == round(got["mass_kg"] * C.M.LB_KG, 1)
+    assert got["mass_kg"] != C.report(mixed, "table")["mass_kg"]
+
+
+def test_a_bug_s_key_error_is_a_crash_and_a_refusal_is_a_409(mixed, monkeypatch):
+    """Rework 6: a 409 shows as a plain line with no Report it (item 24), so a KeyError from a bug mustn't become one."""
+    from fastapi.testclient import TestClient
+
+    from caliper import construction as C
+    from caliper import errors
+    from caliper.server import create_app
+
+    c = TestClient(create_app(), raise_server_exceptions=False)
+    url = "/api/designs/table/parts/table/construction"
+    monkeypatch.setattr(C, "report", lambda *a, **k: {}["mass_lb"])
+    assert c.get(url).status_code == 500
+    monkeypatch.setattr(C, "report", lambda *a, **k: (_ for _ in ()).throw(errors.Refused("the script has no BUILD dict")))
+    got = c.get(url)
+    assert got.status_code == 409 and "no BUILD dict" in got.json()["detail"]
+    assert issubclass(errors.Refused, KeyError)                       # a caller that catches KeyError still does
+
+
+def test_construction_s_own_refusals_are_marked():
+    from caliper import construction as C
+    from caliper import errors
+
+    with pytest.raises(errors.Refused):
+        C.write_build("x = 1\n", {"a": 1})
+    with pytest.raises(errors.Refused):
+        C.write_build("BUILD = {'b': 1}\n", {"a": 1})
+
+
+@pytest.mark.parametrize("mk,said", [({"printed": [{"name": "sides", "filament_g": 726, "trust": "model"}]}, ("", "")),
+                                     ({"printed": [{"name": "sides", "filament_g": 726, "trust": "rough"}]},
+                                      ("a guess (the filament is a rough guess)", "")),
+                                     (None, ("a guess (the filament is by the model's solid)", "")),       # a failed slice, say
+                                     ({"printed": [{"name": "sides", "filament_g": None, "pending": True}]},
+                                      ("a guess (the filament is by the model's solid)", "still slicing"))])
+def test_only_the_slicer_s_own_figure_is_no_guess(mk, said):
+    assert making.filament_said([making.filament(_rep(), mk), None]) == said

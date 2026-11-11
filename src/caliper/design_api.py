@@ -27,6 +27,7 @@ from . import llm
 from . import whittle_bridge as wb
 from .assembly import carved_file
 from .design import DesignStore
+from .errors import Refused
 from .jobs import RUNNER, Busy, stream
 
 
@@ -1353,7 +1354,7 @@ def router():
                 got = frame_study.adopt_gussets(store, rid, req.picks or None)
             except FileNotFoundError as e:
                 raise HTTPException(status_code=404, detail=str(e))
-            except (KeyError, ValueError) as e:
+            except (Refused, ValueError) as e:      # a bug's KeyError stays a crash (#237 review)
                 raise HTTPException(status_code=409, detail=str(e))
             store.append_log({"kind": "gussets", "action": "adopted", "run": rid})
             return {**got, "design": design_state(DesignStore.load(slug))}
@@ -1378,7 +1379,7 @@ def router():
                 got = frame_study.adopt(store, rid, req.station)
             except FileNotFoundError as e:
                 raise HTTPException(status_code=404, detail=str(e))
-            except (KeyError, ValueError) as e:
+            except (Refused, ValueError) as e:      # a bug's KeyError stays a crash (#237 review)
                 raise HTTPException(status_code=409, detail=str(e))
             store.append_log({"kind": "frame", "action": "adopted", "run": rid,
                               "station": req.station, "version": got["version"],
@@ -1391,9 +1392,9 @@ def router():
             raise HTTPException(status_code=404, detail=f"no part {pid!r}")
         try:
             got = construction.report(store, pid, build)
-        except (KeyError, ValueError) as e:
+        except (Refused, ValueError) as e:      # a bug's KeyError stays a crash (#237 review)
             raise HTTPException(status_code=409, detail=str(e))
-        if build is None and (got.get("bom") or {}).get("printed"):   # the part as it is: the one filament figure (#70 item 23)
+        if not build and (got.get("bom") or {}).get("printed"):   # the part as it is ({} too): the one filament figure (#70 item 23)
             from . import making
 
             try:
@@ -1419,7 +1420,7 @@ def router():
                 raise HTTPException(status_code=404, detail=f"no part {pid!r}")
             try:
                 got = construction.adopt(store, pid, req.build)
-            except (KeyError, ValueError) as e:
+            except (Refused, ValueError) as e:      # a bug's KeyError stays a crash (#237 review)
                 raise HTTPException(status_code=409, detail=str(e))
             if got["changed"]:
                 store.append_log({"kind": "build", "action": "adopted", "part": pid,
@@ -1430,7 +1431,7 @@ def router():
     def design_balance(slug: str, req: BalanceRequest):
         try:
             return construction.balance(load(slug), req.build, req.payload_lb)
-        except (KeyError, ValueError) as e:
+        except (Refused, ValueError) as e:      # a bug's KeyError stays a crash (#237 review)
             raise HTTPException(status_code=409, detail=str(e))
 
     # -- parametric drag search (CALI-39): whittle searches PARAMS, numbers come back ---------------
@@ -1475,7 +1476,7 @@ def router():
                 got = aero.adopt(store, rid, req.station)
             except FileNotFoundError as e:
                 raise HTTPException(status_code=404, detail=str(e))
-            except (KeyError, ValueError) as e:
+            except (Refused, ValueError) as e:      # a bug's KeyError stays a crash (#237 review)
                 raise HTTPException(status_code=409, detail=str(e))
             store.append_log({"kind": "aero", "action": "adopted", "run": rid,
                               "station": req.station, "version": got["version"],
