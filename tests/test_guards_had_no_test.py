@@ -63,6 +63,7 @@ def test_the_edges_of_the_volume_band(monkeypatch, share, passes):
 
     block = trimesh.creation.box(extents=(100, 100, 100))
     monkeypatch.setattr(consistency, "_in_no_piece", lambda *a, **k: 0.0)
+    monkeypatch.setattr(consistency, "_loose_regions", lambda *a, **k: [])      # the band's edge, not where it's loose (#224)
     got = consistency._volume(block, [{"name": "a", "volume": share * 1e6}], strength=True)
     assert got.passed is passes
 
