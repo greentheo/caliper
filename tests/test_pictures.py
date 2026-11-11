@@ -261,7 +261,10 @@ def test_a_chat_turn_that_fails_still_answers_in_the_log(client, monkeypatch):
     assert j["status"] == "error"
     log = c.get(f"/api/designs/{slug}").json()["log"]
     assert log[-2]["kind"] == "message" and log[-2]["text"] == "make it a bit taller"
-    assert log[-1]["kind"] == "reply" and log[-1]["ok"] is False and "couldn't" in log[-1]["reply"]
+    assert log[-1]["kind"] == "reply" and log[-1]["ok"] is False
+    from caliper import errors                                 # the plain sentence with its id, never its words (#70 item 18)
+
+    assert log[-1]["reply"] == errors.plain({"id": j["error_id"]}) and "sandbox" not in log[-1]["reply"], log[-1]
 
 
 def test_a_pictures_edge_is_judged_at_kt_times_the_walls_stress_there():
