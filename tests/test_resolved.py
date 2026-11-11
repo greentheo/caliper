@@ -173,10 +173,20 @@ def test_where_no_run_a_study_may_make_can_see_the_walls_it_says_not_checked(tmp
 def test_an_asked_for_voxel_size_cant_go_past_the_budget(tmp_path, monkeypatch):
     """#100 item 2: an explicit spacing skipped the budget, so one click could ask for 10^10 voxels."""
     pytest.importorskip("whittle")
+    import whittle
+
     monkeypatch.setattr(load_study, "MAX_VOXELS", 2_000)
+    least = load_study.finest(math.pi * (30 ** 2 - 26 ** 2) * 80, 80, load_study.FINER_BUDGET)
+    real = whittle.LoadStudy
+
+    def clamped(mesh, material=None, spacing=None):
+        # #72 (#100's ordering): a clamp that's gone fails here, on an assert, before 0.1 mm voxels run away and take the run down
+        assert spacing == pytest.approx(least, rel=0.05), f"handed {spacing} mm voxels, finer than the {least:.3f} mm a study may take"
+        return real(mesh, material=material, spacing=spacing)
+
+    monkeypatch.setattr(whittle, "LoadStudy", clamped)
     store = _store(tmp_path)
     rec = load_study.study(store, "tube", spacing=0.1)
-    least = load_study.finest(math.pi * (30 ** 2 - 26 ** 2) * 80, 80, load_study.FINER_BUDGET)
     assert rec["spacing_mm"] == pytest.approx(least, rel=0.05) and rec["voxels"] < 8 * 2_000 * 1.5
     assert any(n.startswith("Asked for 0.1 mm voxels, finer than a study of a part this size may take")
                for n in rec["notes"])

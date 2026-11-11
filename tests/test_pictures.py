@@ -110,6 +110,57 @@ def test_lightening_leaves_a_picture_alone(stool):
     pics = [h for h in after if h.get("picture")]
     assert len(pics) == 1 and pics[0]["piece"] == got["panel"]
     assert any(not h.get("picture") for h in after)
+    # and a web of wood between them (#50, a surviving mutant, #72): without it a hole cut into the T-rex, 0.0 mm apart
+    # (measured 35.2 mm at 9.53 mm voxels: the web, less the grid's rounding, which is under a voxel)
+    gap = _gap_to_picture(after, got["panel"])
+    assert gap >= lighten.MIN_WEB_MM - rec["spacing_mm"], (gap, rec["spacing_mm"])
+
+
+def _gap_to_picture(entries, panel):
+    """The least gap, in the panel's plane, between its picture and any lightening hole on it (both holes' outlines)."""
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+
+    def flat(entry):
+        pts = [np.asarray(p, float) for p in entry["polygons"]]
+        drop = int(np.argmax(np.abs(entry["normal"])))          # the panel's normal: the axis to drop
+        return unary_union([Polygon(np.delete(p, drop, axis=1)) for p in pts])
+
+    pic = next(flat(h) for h in entries if h.get("picture") and h["piece"] == panel)
+    others = [flat(h) for h in entries if not h.get("picture") and h["piece"] == panel]
+    assert others, "no lightening hole on the picture's panel"
+    return min(pic.distance(o) for o in others)
+
+
+#: A 30 mm hole low in the back, near its corner: the back's still the bigger room, by far.
+BACK_HOLE = '''
+
+HOLES = [{"piece": "back", "normal": [0, -1, 0], "depth": 19.05,
+          "polygons": [[[60, 254, 60], [90, 254, 60], [90, 254, 90], [60, 254, 90]]]}]
+'''
+
+
+def _holed(tmp_path):
+    store = DesignStore.create("a box stool", base=str(tmp_path / "holed"))
+    store.write_part("stool", BOX_STOOL + BACK_HOLE, intent="a box step stool")
+    return {p["name"]: p for p in pictures.panels(store, "stool")}
+
+
+def test_a_picture_keeps_a_web_from_a_hole_already_there(tmp_path):
+    """#50, a surviving mutant (#72): the room for a picture keeps a web of wood from a panel's holes. Dropped, every test passed."""
+    from shapely.geometry import Polygon
+
+    back = _holed(tmp_path)["back"]
+    hole = Polygon([((np.asarray(p, float) - back["o"]) @ back["u"], (np.asarray(p, float) - back["o"]) @ back["v"])
+                    for p in [(60, 254, 60), (90, 254, 60), (90, 254, 90), (60, 254, 90)]])
+    assert back["holes"] == 1 and back["room"].distance(hole) >= lighten.MIN_WEB_MM - 0.5
+
+
+def test_a_panel_without_holes_is_chosen_before_a_bigger_one_with(tmp_path):
+    """#50, a surviving mutant (#72): of the panels the words name, one without holes first. Dropped, every test passed."""
+    found = _holed(tmp_path)
+    assert found["back"]["room"].area > found["left"]["room"].area        # the back is bigger, hole and all
+    assert pictures.choose(list(found.values()), "the left or the back")["name"] == "left"
 
 
 def test_too_weak_shrinks_it_and_hopeless_says_so(stool, monkeypatch):

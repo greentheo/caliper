@@ -42,6 +42,20 @@ def _dropped(store, got):
     assert "carve came off" in got["note"] and "carve came off" in wrote["feedback"]
 
 
+def test_a_revision_in_the_chat_drops_the_carve_fast(carved):
+    """#74/#75 (#72): a refine that kept CARVED in was caught only by the slow carve sweep. The designer hands back the
+    script as it read it, CARVED line and all; what's written has none, and the reply says the carve came off."""
+    from caliper import chat
+
+    wider = carved.read_script("stool").replace('"w": 300.0', '"w": 320.0')
+    assert carve.NAME in wider and wider != carved.read_script("stool")
+    got = chat.refine_part(carved, "stool", "make it 20 mm wider", author=lambda *a: wider, use_llm=False,
+                           promote_feedback=False)
+    assert got.ok is not None and carved.design.part("stool").version == 3, got.reply
+    assert carve.NAME not in carved.read_script("stool") and '"w": 320.0' in carved.read_script("stool")
+    assert carve.DROPPED in got.reply
+
+
 def test_a_build_what_if_adopted_drops_the_carve(carved):
     _dropped(carved, construction.adopt(carved, "stool", {"top": 19.05}))
 
