@@ -260,6 +260,17 @@ def test_the_summaries_count_it_as_its_own(key, count, said):
         assert verdicts.summary(s)["kind"] == "span" and state
 
 
+def test_a_scorecard_breaks_goal_gives_the_right_reason(bridge):
+    import yaml
+
+    s, _ = bridge
+    with open(scorecard.goals_path(s), "w") as f:
+        yaml.safe_dump({"checks": [{"id": "breaks", "label": "breaks", "metric": "strength.breaks_lb", "op": ">=", "limit": 50}]}, f)
+    card = scorecard.compute(s)
+    note = card["metrics"]["strength.breaks_lb"]["note"]
+    assert card["metrics"]["strength.breaks_lb"]["value"] is None and note == f"not settled: {verdicts.SPAN_WHY}" and "too thin" not in note
+
+
 def test_a_scorecard_row_has_no_number(bridge):
     import yaml
 

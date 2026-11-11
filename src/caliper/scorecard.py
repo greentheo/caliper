@@ -458,7 +458,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         if no_breaks is None and len(sure) < sum(1 for c in run["cases"] if c.get("breaks_lb")):
             from .answers import coarse
 
-            no_breaks = coarse(run, inches, holds=not hedged)
+            spanned = any(v["kind"] == "span" and c.get("breaks_lb") for c, v in said)
+            no_breaks = f"not settled: {verdicts.SPAN_WHY}" if spanned else coarse(run, inches, holds=not hedged)
         need.append(float(run.get("min_safety") or load_study.MIN_SAFETY))
         if unsure is None and any(verdicts.case(run, c)["kind"] in ("unresolved", "unchecked")
                                   and (c.get("fea") or {}).get("supported") is not False for c in run["cases"]):
