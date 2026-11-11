@@ -9,3 +9,5 @@ Now: the round names each panel-shaped lump of material no piece describes, and 
 A tipping case with no weight crashed the card ("unknown" isn't a card status); that's fixed too.
 
 Before and after on every sample and on copies of Theo's designs: only the old copy of `step-stool-3` changes. Checked in a real browser on that copy. The 90% is the foreman's to set. Tests: `tests/test_pieces_account.py`, all mutants caught but one that is redundant with the cut plan's own refusal, which a test now tells apart. The whole suite is CI's.
+
+Rework after the review. A panel must have both wide faces in the open, so a shallow filled core and a top built thicker than its sheet aren't told to add a piece; a lid in the shape that no piece says is. The reason is in the person's words and units, said once. Nothing downstream comes from those pieces: cost, waste, "all cuts doable", the build package line and panel, the picture offer, lightening, Make it better. The state runs only the cover check, so a cold open isn't slower (camper at load 150: 13.3 s against 12.2 s).

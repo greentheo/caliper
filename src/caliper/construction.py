@@ -862,7 +862,7 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
     mass, cog = totals(rows)
     saved = read_build(store.read_script(part_id)) or {}
     used = d.get("build") or {}
-    notes = [unweighed[:1].upper() + unweighed[1:] + "."] if unweighed else []
+    notes = [unweighed[:1].upper() + unweighed[1:] + "."] if unweighed and not wrong else []    # said once, as the unknown weight
     if d.get("members"):
         notes.append("Tubes weighed along their centrelines, joint to joint, one length where a tube runs "
                      "straight through — within a few percent; exact cuts (mitres, copes) come with the cut plan.")

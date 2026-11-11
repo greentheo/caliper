@@ -396,6 +396,10 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     from . import carve
 
     carve.refuse_if_carved(store.read_script(part_id), "holes", "lighten it")   # before the study, not at adopt
+    from . import consistency
+
+    if consistency.not_accounted(store, part_id):      # it cuts holes in those pieces (CALI-155)
+        raise ValueError(f"Can't lighten it yet: {consistency.NO_MAKE}")
     from scipy import ndimage
 
     from . import construction as C

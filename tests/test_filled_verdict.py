@@ -102,6 +102,7 @@ def test_a_check_that_raises_isnt_kept_and_never_reads_holding(tmp_path, monkeyp
     checked read as trusted from then on. It fails closed now, for that render, and asks again next time."""
     store, rec = _checked(tmp_path, monkeypatch, FILLED)
     consistency._FILLED.clear()
+    consistency._CHECKED.clear()
     real, calls = consistency.check, []
 
     def flaky(*a, **k):

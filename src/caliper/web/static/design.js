@@ -1835,9 +1835,9 @@ function wireTrial(p) {
 function picturePart() {
   const d = S.design;
   if (!d) return null;
-  if (S.scope) { const p = d.parts.find((x) => x.id === S.scope); return p && p.built ? p : null; }
+  if (S.scope) { const p = d.parts.find((x) => x.id === S.scope); return p && p.built && !p.not_accounted ? p : null; }
   const parts = d.parts.filter((p) => p.role !== 'fixed');
-  return parts.length === 1 && parts[0].built ? parts[0] : null;
+  return parts.length === 1 && parts[0].built && !parts[0].not_accounted ? parts[0] : null;
 }
 document.addEventListener('click', (e) => { if (e.target.dataset && e.target.dataset.picture) openPicture(); });
 async function openPicture() {
@@ -2070,6 +2070,7 @@ function wireScore() {
 // A released, versioned bundle for the shop: the build book (printable, with the assembly order), cut files
 // by machine, cut lists, shopping list and the scorecard as released.
 function releaseView(d) {
+  if (d.parts.some((p) => p.not_accounted)) return `<div class="small muted">No build package yet: a part's pieces don't account for its solid.</div>`;
   const rel = (d.releases || [])[0];
   const go = `<div class="actions"><button id="relGo">${rel ? 'Make a new build package' : 'Make the build package'}</button></div><div id="relProgress"></div>`;
   if (!rel) {

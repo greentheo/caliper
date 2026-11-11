@@ -429,8 +429,15 @@ def _loose_regions(mesh, pieces: list[dict], tol: float) -> list[dict]:
         centred = where - where.mean(axis=0)
         extents = np.sort(np.ptp(centred @ np.linalg.svd(centred, full_matrices=False)[2].T, axis=0))[::-1] + step
         panel = bool(thin) and extents[2] <= 2 * max(thin) and extents[1] >= 3 * extents[2]
+        mid = where.mean(axis=0)
+        if panel:           # both its wide faces in the open, as a panel's are. A shallow filled core, or a top built thicker than its sheet, has one against a piece
+            n = np.linalg.svd(where - mid, full_matrices=False)[2][2]
+            flat = where - ((where - mid) @ n)[:, None] * n
+            off = extents[2] / 2 + 0.75 * step
+            open_both = ~spatial.contains(mesh, flat + n * off) & ~spatial.contains(mesh, flat - n * off)
+            panel = float(open_both.mean()) >= 0.5
         out.append({"lo": (where.min(axis=0) - step / 2).tolist(), "hi": (where.max(axis=0) + step / 2).tolist(),
-                    "litres": len(where) * step ** 3 / 1e6, "panel": panel})
+                    "litres": len(where) * step ** 3 / 1e6, "panel": panel, "size": extents[:2].tolist(), "mid": mid.tolist()})
     return sorted(out, key=lambda r: -r["litres"])
 
 
@@ -614,7 +621,7 @@ def bare_edge(store, part_id: str) -> Optional[str]:
         try:
             declared = C.declared(store, part_id)
             if declared.get("loads"):
-                got = next((r for r in check(declared, store.part_geometry(part_id)) if r.id == "loads_edge"), None)
+                got = next((r for r in checked(store, part_id) if r.id == "loads_edge"), None)
                 out = (got.detail or None) if got is not None else None
         except Exception:  # noqa: BLE001 — this only ever takes a ✓ away; a part that won't check is said elsewhere
             out = None
@@ -641,8 +648,10 @@ def filled(store, part_id: str) -> Optional[str]:
         try:
             declared = C.declared(store, part_id)
             if declared.get("loads"):
-                vol = next((r for r in check(declared, store.part_geometry(part_id)) if r.id == "construction_volume"), None)
-                if vol is not None and not vol.passed and ("filled in" in (vol.detail or "") or PANEL_SAID in (vol.detail or "")):
+                vol = next((r for r in checked(store, part_id) if r.id == "construction_volume"), None)
+                if vol is not None and not vol.passed and PANEL_SAID in (vol.detail or ""):
+                    out = not_accounted(store, part_id) or vol.detail       # in words for a person, where it's the pieces that are short
+                elif vol is not None and not vol.passed and "filled in" in (vol.detail or ""):
                     out = vol.detail
         except Exception as e:  # noqa: BLE001 — closed, not open: a shape that couldn't be checked isn't trusted
             return f"couldn't check its shape against its pieces ({type(e).__name__}: {e})"   # and not kept
@@ -653,14 +662,59 @@ def filled(store, part_id: str) -> Optional[str]:
 
 
 _ACCOUNTED: dict = {}
+_CHECKED: dict = {}
+
+
+def checked(store, part_id: str) -> list[AssertionResult]:
+    """:func:`check` of a part as it stands, once per version and script: a card, the state and the verdicts all ask, and a cold open asked each time."""
+    from . import construction as C
+
+    entry = store.design.part(part_id)
+    key = (store.root, part_id, entry.version if entry else None, hash(store.read_script(part_id)))
+    if key not in _CHECKED:
+        _CHECKED[key] = check(C.declared(store, part_id), store.part_geometry(part_id))
+        while len(_CHECKED) > 64:
+            _CHECKED.pop(next(iter(_CHECKED)))
+    return _CHECKED[key]
+
+
+def _covers_alone(store, part_id: str) -> Optional[AssertionResult]:
+    """Only the cover check: a design's state asks this of every part, and a cold open mustn't wait for all of :func:`check` (#224 review)."""
+    from . import construction as C
+
+    declared = C.declared(store, part_id)
+    if not declared or declared.get("error"):
+        return None
+    if any(isinstance(it, dict) and it.get("kind") == "printed" and it.get("rest") for it in declared.get("construction") or []):
+        return None
+    pieces = shapes(declared)
+    mesh = getattr(store.part_geometry(part_id), "mesh", None)
+    if not pieces or mesh is None:
+        return None
+    _sides(mesh, pieces)
+    return _covers(mesh, pieces, tolerance(mesh))
+
+
+def _panel_words(store, part_id: str) -> str:
+    """The panels no piece describes, for a person: their size and where, in the design's units."""
+    from . import construction as C
+
+    declared = C.declared(store, part_id)
+    mesh = store.part_geometry(part_id).require_mesh()
+    pieces = shapes(declared)
+    _sides(mesh, pieces)
+    inches = getattr(store.design, "display_units", "in") == "in"
+    k, unit = (25.4, "in") if inches else (1.0, "mm")
+    panels = [r for r in _loose_regions(mesh, pieces, tolerance(mesh)) if r["panel"]]
+    said = "; ".join(f"about {r['size'][0] / k:.3g} × {r['size'][1] / k:.3g} {unit} around x {r['mid'][0] / k:.3g}, y {r['mid'][1] / k:.3g}, "
+                     f"z {r['mid'][2] / k:.3g} {unit}" for r in panels[:4])
+    return f"its 3D shape has {'a panel' if len(panels) == 1 else f'{len(panels)} panels'} {PANEL_SAID}: {said}"
 
 
 def not_accounted(store, part_id: str) -> Optional[str]:
     """Why a part's pieces don't describe its solid, or None: too much of its surface is on no piece, so a view, a cut list, patterns, a weight or a
     cost from them would be of something else (CALI-155). A filled-in shape isn't this: its pieces are right. A printed rest is everything the
     pieces aren't, and has nothing to be missing. Kept per version and script, as filled() is."""
-    from . import construction as C
-
     entry = store.design.part(part_id)
     try:
         script = store.read_script(part_id)
@@ -670,10 +724,10 @@ def not_accounted(store, part_id: str) -> Optional[str]:
     if key not in _ACCOUNTED:
         out = None
         try:
-            covers = next((r for r in check(C.declared(store, part_id), store.part_geometry(part_id)) if r.id == "construction_covers"), None)
-            # a panel left out. Not a filled-in block or a lid left off a crate: their pieces are still what gets made
+            covers = _covers_alone(store, part_id)
+            # a panel in the shape that's in no piece, a cut nobody would make. Not a filled-in block, or a lid left off the solid
             if covers is not None and covers.actual is not None and covers.actual < ACCOUNTED_MIN and PANEL_SAID in (covers.detail or ""):
-                out = covers.detail
+                out = _panel_words(store, part_id)
         except Exception:  # noqa: BLE001 — a part that won't check is said elsewhere: this only ever takes something away
             out = None
         _ACCOUNTED[key] = out
