@@ -27,3 +27,14 @@ Theo's step-stool-4 message ("make both sides the right side; the stretcher does
 6. **The pick is kept.** It goes with the part it was made on, the selected one.
 
 36 tests in the file, all stubbed. All 18 mutants are caught (routing, siblings, positions, the tick, "changed", the focus, the count, the pick, the mirror wording); 161 targeted routing and turn tests pass.
+
+**Third round (the re-check, the foreman's four).**
+1. **A real change is never thrown away.** Only a revision whose code is the same, by its parsed tree (comments and layout aside), writes no version. Any other is written. It counts as changed when a PARAMS number, the volume, the bounding box or the centre of mass moved. If none did, it's kept and said with no ✓: "side_left: the code changed, but no number, size or position I measure moved". Pinned: both sides moved 20 mm as literals, a hole moved 100 mm as a literal, and a reshape that keeps volume and centre.
+2. **"match" and "the same as" are mirror wording only before a part asked of, "the other" or "each other."** "Make both sides taller to match the top" has no mirror line.
+3. **The verb's object wins offline.** With a plural and a named part both present, the request's first clause (before "so", "because", "since" or ";") decides. "Make the legs longer; the top wobbles" is the legs. Joined by "and" there, both are edited. The part right after the verb is its object ("make the top overhang the sides" is the top). When it can't tell, it asks: "Which do you want changed: the legs, or the top?"
+4. **Smaller:**
+   - rl/rr are positions, "rear" is "back", and "side" is a position, so "the panels" groups side_panel and back_panel.
+   - A plural that finds one part only by elimination finds none.
+   - A pick on a part the request doesn't change is said: "the pick wasn't used".
+
+53 tests in the file; all 13 of this round's mutants are caught (one survived until the box-only test); 178 targeted routing and turn tests pass.

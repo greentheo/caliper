@@ -74,7 +74,7 @@ def test_claude_naming_an_unknown_part_among_several_is_rejected(stool):
 # --- each named part is edited, and the reply says first what wasn't ----------------------------------------------------
 def _by_part(stool, changes):
     """An author that changes each named part as ``changes`` says, and hands any other back as it was."""
-    scripts = {pid: stool.read_script(pid) for pid in ("side_left", "side_right", "stretcher")}
+    scripts = {pid: stool.read_script(pid) for pid in ("side_left", "side_right", "stretcher") if stool.design.part(pid)}
     owner = {v: k for k, v in scripts.items()}
     return lambda spec, feedback, prior: changes.get(owner.get(prior), prior)
 
@@ -189,12 +189,11 @@ def test_theo_s_own_words_for_a_mirror_get_no_tick(stool, message):
 
 
 def test_a_comment_only_edit_isn_t_a_change(stool):
-    """Item 3: only a moved number or a changed volume counts; a comment is no change, and writes no version."""
+    """Item 3: a comment or a layout change is the same code (by its parsed tree): no change, and no version."""
     note = {"side_left": TALLER["side_left"],
             "side_right": "# the right side\n" + stool.read_script("side_right")}
     res = chat.turn(stool, "make both sides taller", use_llm=False, author=_by_part(stool, note))
-    assert res.reply.splitlines()[0] == ("! Changed side_left; side_right not changed: no number moved and its shape "
-                                         "didn't change.")
+    assert res.reply.splitlines()[0] == "! Changed side_left; side_right not changed: its code came back as it was."
     assert stool.design.part("side_right").version == 1
 
 
@@ -239,3 +238,96 @@ def test_a_pick_goes_with_the_part_it_was_made_on(stool, monkeypatch):
     pick = {"kind": "edge", "id": "e0", "text": "round it"}
     chat.turn(stool, "make both sides taller", scope="side_right", pick=pick, use_llm=False, author=_by_part(stool, TALLER))
     assert got == {"side_left": None, "side_right": pick}
+
+
+# --- #242 re-check ------------------------------------------------------------------------------------------------------
+def test_a_move_written_as_literals_is_a_change(stool):
+    """Item 1: "move both sides out 20 mm", each side's translate moved: the same numbers and volume, not the same box."""
+    out = {"side_left": _box(dx=20, dy=300, x=0, y=20), "side_right": _box(dx=20, dy=300, x=300, y=20)}   # every mate kept
+    res = chat.turn(stool, "move both sides back 20 mm", use_llm=False, author=_by_part(stool, out))
+    assert res.reply.splitlines()[0] == "✓ Changed side_left and side_right." and res.ok
+    assert stool.design.part("side_left").version == 2 and stool.design.part("side_right").version == 2
+
+
+HOLED = ("import cadquery as cq\n\n\ndef build(params):\n"
+         "    return cq.Workplane('XY').box(20, 300, 10).translate(({x}, 0, 0)).faces('>Z')"
+         ".workplane(centerOption='CenterOfBoundBox').center(0, {cy}).hole(6)\n")
+
+
+def test_a_hole_moved_as_a_literal_is_a_change(tmp_path):
+    """Item 1: "move the hole in both sides 100 mm toward the back": its centre moved, the volume didn't."""
+    s = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    s.write_part("side_left", HOLED.format(x=0, cy=0), intent="the left side")
+    s.write_part("side_right", HOLED.format(x=300, cy=0), intent="the right side")
+    back = {"side_left": HOLED.format(x=0, cy=100), "side_right": HOLED.format(x=300, cy=100)}
+    res = chat.turn(s, "move the hole in both sides 100 mm toward the back", use_llm=False, author=_by_part(s, back))
+    assert res.reply.splitlines()[0] == "✓ Changed side_left and side_right."
+
+
+def test_code_that_changed_with_nothing_measured_moving_is_kept_and_said(stool):
+    """Item 1: written, so nothing's lost, but no ✓: "the code changed, but no number, size or position I measure moved"."""
+    same_shape = {"side_left": TALLER["side_left"],
+                  "side_right": stool.read_script("side_right").replace("return cq.", "w = cq.").rstrip()
+                  .replace("translate((300, 0, 0))", "translate((300, 0, 0))\n    return w") + "\n"}
+    res = chat.turn(stool, "make both sides taller", use_llm=False, author=_by_part(stool, same_shape))
+    assert res.reply.splitlines()[0] == ("! Changed side_left; side_right: the code changed, but no number, size or "
+                                         "position I measure moved.")
+    assert stool.design.part("side_right").version == 2 and not res.ok
+
+
+@pytest.mark.parametrize("message,mirror", [("make both sides taller to match the top", False),
+                                            ("make both sides taller, the same as the stretcher", False),
+                                            ("make the left side match the right side, and both sides taller", True),
+                                            ("make both sides match each other and taller", True)])
+def test_match_is_a_mirror_only_before_a_part_asked_of_or_the_other(stool, message, mirror):
+    """Item 2: "taller to match the top" isn't a mirror; "match the right side" (both sides asked of) is."""
+    assert chat._mirror_asked(message, ["side_left", "side_right"]) is mirror
+
+
+@pytest.mark.parametrize("message,want", [
+    ("make the legs longer; the top wobbles", LEGS[1:]),
+    ("make the legs 2 in longer and the top thicker", LEGS),
+    ("make the top thicker so the legs don't wobble", ["top"]),
+])
+def test_the_verb_s_object_wins(message, want):
+    """Item 3: a plural target beside a named part: the one the request's first clause acts on."""
+    assert chat.targets(message, LEGS) == (want, "")
+
+
+def test_when_it_can_t_tell_it_asks(stool):
+    got = chat.targets("the top over the legs is too thin", LEGS)
+    assert got == ([], "Which do you want changed: the legs, or the top? Say which (or both), and I'll change it.")
+    s = DesignStore.create("a table", base=str(stool.root) + "-table")
+    for pid in LEGS:
+        s.write_part(pid, _box(), intent=pid)
+    res = chat.turn(s, "the top over the legs is too thin", use_llm=False, author=lambda *a: pytest.fail("asked, not edited"))
+    assert res.action == "answer" and res.reply == got[1]
+
+
+@pytest.mark.parametrize("parts,message,want", [
+    (["wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"], "make the wheels bigger", ["wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"]),
+    (LEGS, "lengthen the rear legs", ["leg_back_left", "leg_back_right"]),
+    (["side_panel", "back_panel"], "the panels are too thin, make them thicker", ["side_panel", "back_panel"]),
+])
+def test_rear_rl_rr_and_panels(parts, message, want):
+    """Item 4: rl/rr are positions, "rear" is "back", and "the panels" are both panels."""
+    assert chat.named_parts(message, parts) == want
+
+
+def test_a_pick_on_a_part_this_doesn_t_change_is_said(stool):
+    pick = {"kind": "edge", "id": "e0", "text": "round it"}
+    res = chat.turn(stool, "make both sides taller", scope="stretcher", pick=pick, use_llm=False, author=_by_part(stool, TALLER))
+    assert "What you picked is on stretcher, which this doesn't change: the pick wasn't used." in res.reply
+
+
+def test_a_plural_that_finds_one_part_by_elimination_finds_none():
+    """Item 4: "the panels" with panel_door and back_panel isn't back_panel alone (door is no position word)."""
+    assert chat.named_parts("the panels are too thin, make them thicker", ["panel_door", "back_panel"]) == []
+
+
+def test_a_change_of_size_that_keeps_the_volume_and_the_middle_is_a_change(stool):
+    """Item 1: twice as thick and half as long, in place: the same numbers, volume and centre of mass, another box."""
+    reshaped = {"side_left": _box(dx=40, dy=150, x=0), "side_right": _box(dx=40, dy=150, x=300)}
+    res = chat.turn(stool, "make both sides thicker and shorter", use_llm=False, author=_by_part(stool, reshaped))
+    assert res.reply.splitlines()[0].startswith("! Changed side_left and side_right")   # a mate broke: "!" not "✓"
+    assert "the code changed, but no number" not in res.reply.splitlines()[0]
