@@ -327,6 +327,9 @@ def named_parts(message: str, parts: list[str]) -> list[str]:
 #: A request's verb and its article: the part right after it is what the request acts on ("make the top …")
 _VERB_OBJECT = re.compile(r"\b(?:make|set|change|move|thicken|lengthen|widen|raise|lower|shorten|round|trim|extend|give|"
                           r"cut|drill|fillet|chamfer|resize|scale|stretch|shrink|narrow|deepen)\s+(?:the\s+|both\s+|all\s+)?")
+#: A change asked for in a few words: "the top thicker", "2 in longer"
+_MORE = re.compile(r"\b(?:thicker|thinner|longer|shorter|taller|wider|narrower|deeper|shallower|bigger|smaller|higher|"
+                   r"lower|stronger|stiffer|lighter|heavier|larger|flatter|rounder|closer|further|farther|more|less)\b", re.I)
 #: Where a request's own clause ends and what it's about begins: "make the legs longer; the top wobbles"
 _CLAUSE = re.compile(r";|\bso\b|\bbecause\b|\bsince\b|\bwhile\b|\bas\b")
 
@@ -368,7 +371,16 @@ def targets(message: str, parts: list[str]) -> tuple[list[str], str]:
         first_direct = [p for p in direct if (m := re.search(rf"\b{_said_as(p)}\b", text)) and m.start() < end]
         if first_weak and first_direct:
             if re.search(r"\band\b", text[:end]):
-                return order(first_weak | set(first_direct)), ""
+                # "and" joins two requests, not a request and a complaint ("the top is too thin and the legs wobble")
+                asked: set = set()
+                at = 0
+                for piece in re.split(r"\band\b", text[:end]):
+                    if _VERB_OBJECT.search(piece) or _MORE.search(piece):
+                        asked |= {pid for a, got in plurals if at <= a < at + len(piece) for pid in got}
+                        asked |= {p for p in first_direct if re.search(rf"\b{_said_as(p)}\b", piece)}
+                    at += len(piece) + 3
+                if asked:
+                    return order(asked), ""
             led = _VERB_OBJECT.search(text[:end])    # "make the top overhang the sides": the verb's object is the top
             if led:
                 after = led.end()
@@ -1423,7 +1435,10 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
 
 
 #: Asking for one part to be another's mirror or copy, in Theo's words too: "make both sides the right side" (#242 review)
-_MIRROR = re.compile(r"\bmirror(?:s|ed|ing)?\b|\bsymmetric|\blike\s+(?:the\s+|each\s+)?other\b|"
+_MIRROR = re.compile(r"\bmirror(?:s|ed|ing)?\b|\bsymmetric|\blike\s+(?:the\s+|each\s+)?other\b|\bidentical\b|"
+                     r"\bcop(?:y|ies|ied)\b|\blike\s+the\s+(?:left|right|front|back|rear|other)\s+(?:one|side)\b|"
+                     r"\bthe\s+same\b(?!\s+(?:as|thickness|width|height|length|depth|size|diameter|radius|spacing|"
+                     r"thick|wide|tall|long|deep)\b)|"
                      r"\buse\s+(?:the\s+)?(?:\w+\s+){1,2}for\s+(?:both|all|each)\b|"
                      r"\b(?:both|all|each)\s+(?:of\s+)?(?:the\s+)?\w+\s+the\s+(?:left|right|front|back|rear|other|first|second)\b",
                      re.I)

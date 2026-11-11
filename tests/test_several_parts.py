@@ -331,3 +331,33 @@ def test_a_change_of_size_that_keeps_the_volume_and_the_middle_is_a_change(stool
     res = chat.turn(stool, "make both sides thicker and shorter", use_llm=False, author=_by_part(stool, reshaped))
     assert res.reply.splitlines()[0].startswith("! Changed side_left and side_right")   # a mate broke: "!" not "✓"
     assert "the code changed, but no number" not in res.reply.splitlines()[0]
+
+
+# --- #242, the last round ------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("message", ["make both sides identical, and taller", "make both sides like the right one, and taller",
+                                     "make both sides the same, and taller"])
+def test_identical_and_like_the_right_one_are_a_mirror(stool, message):
+    """Item 1: no ✓, and the line that mirroring isn't done yet."""
+    res = chat.turn(stool, message, use_llm=False, author=_by_part(stool, TALLER))
+    lines = res.reply.splitlines()
+    assert "✓" not in lines[0] and not res.ok
+    assert lines[1].startswith("Mirroring one part from another isn't something I can do yet")
+
+
+@pytest.mark.parametrize("message,mirror", [("copy the right side onto both sides", True),
+                                            ("make both sides the same thickness as the top", False),
+                                            ("make both sides taller, the same as the stretcher", False)])
+def test_the_same_as_a_size_isn_t_a_mirror(message, mirror):
+    assert chat._mirror_asked(message, ["side_left", "side_right"]) is mirror
+
+
+@pytest.mark.parametrize("message,want", [("make the top thicker and the legs wobble", (["top"], "")),
+                                          ("make the legs 2 in longer and the top thicker", (LEGS, ""))])
+def test_and_joins_two_requests_not_a_request_and_a_complaint(message, want):
+    """Item 2: the part with the request is changed; a complaint beside it isn't."""
+    assert chat.targets(message, LEGS) == want
+
+
+def test_two_complaints_joined_by_and_are_asked_about():
+    assert chat.targets("the top is too thin and the legs wobble", LEGS) == (
+        [], "Which do you want changed: the legs, or the top? Say which (or both), and I'll change it.")

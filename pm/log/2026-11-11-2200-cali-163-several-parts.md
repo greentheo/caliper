@@ -38,3 +38,9 @@ Theo's step-stool-4 message ("make both sides the right side; the stretcher does
    - A pick on a part the request doesn't change is said: "the pick wasn't used".
 
 53 tests in the file; all 13 of this round's mutants are caught (one survived until the box-only test); 178 targeted routing and turn tests pass.
+
+**Last round (the foreman's two).**
+1. **More mirror wording:** "identical", "copy", "the same" (not "the same as", nor "the same thickness as" and the like) and "like the left/right/front/back/other one or side". Pinned: "make both sides identical" and "make both sides like the right one" get no ✓ and the mirror line.
+2. **"and" joins two requests, not a request and a complaint.** Only a piece with a change verb or a comparative ("thicker", "2 in longer") is a request. "Make the top thicker and the legs wobble" is the top. "The top is too thin and the legs wobble" asks which.
+
+62 tests in the file; all 7 of the round's mutants are caught; 187 targeted routing and turn tests pass.
