@@ -18,6 +18,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from . import llm
 from . import generate
 from .intake import draft_spec
 from .loop import make_eval_fn, persist_run, run_loop
@@ -234,6 +235,13 @@ def create_app():
         if p == "/" or p.endswith((".js", ".css", ".html")):
             resp.headers["Cache-Control"] = "no-store"
         return resp
+
+    @app.exception_handler(llm.Stopped)
+    async def _stopped(request, exc):
+        # Claude declined or was cut off: said in its words, not a crash to report (CALI-157)
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=422, content={"detail": llm.said(exc)})
 
     @app.exception_handler(Exception)
     async def _crashed(request, exc):

@@ -329,3 +329,21 @@ def test_loading_a_design_for_a_request_points_the_log_at_it():
 
     assert "llm.log_to(store)" in inspect.getsource(design_api.router)
     assert "llm.log_to(store)" in inspect.getsource(design_api._submit_first)
+
+
+def test_a_refusal_on_the_classic_api_is_a_422_in_words(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from caliper import server
+
+    monkeypatch.setattr(server, "draft_spec", _raises)
+    got = TestClient(server.create_app(), raise_server_exceptions=False).post("/api/gen", json={"intent": "a block"})
+    assert got.status_code == 422 and "safety checks stopped" in got.json()["detail"]
+
+
+def test_a_refusal_on_the_command_line_is_said_and_exits_plainly(monkeypatch, capsys):
+    from caliper import cli
+
+    monkeypatch.setattr(cli, "draft_spec", _raises)
+    assert cli.main(["run", "a block"]) == 3
+    assert "safety checks stopped" in capsys.readouterr().err
