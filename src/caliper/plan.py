@@ -99,7 +99,7 @@ class SkeletonValue(_Base):
     source: Literal["stated", "assumed", "kept", "measured"] = "assumed"   # measured: off a part as built (#240)
     #: what the number is (#243 review): a part's size, where something sits, a count or a load. Unset, it's read from
     #: its unit and its why (:func:`kind_of`): "height" is both a size and a position, so the name can't say
-    kind: Optional[Literal["size", "position", "count", "load"]] = None
+    kind: Optional[Literal["size", "position", "count", "load", "unclear"]] = None
     #: for a measured size: the part it was measured off, so it's measured again when that part changes
     of: Optional[str] = None
 
@@ -424,16 +424,31 @@ _WHERE = re.compile(r"\b(above|below|off|from|sits?|at|up|high|centre|center|ori
 _LOAD_UNITS = {"N", "lb", "kg"}
 
 
+#: A name's last word that makes it a size whatever its why says (#243 re-check: "flange width, at the top of each side"
+#: read as a position).
+_SIZE_WORDS = {"t", "th", "thk", "thick", "thickness", "w", "wid", "width", "wide", "d", "depth", "deep", "l", "len",
+               "length", "long", "dia", "diam", "diameter", "r", "rad", "radius", "spacing", "pitch", "gap", "clearance"}
+#: A name's last word that can be a size or where something sits: the plan's kind decides, then its why.
+_EITHER = {"h", "ht", "height", "z", "x", "y", "rise", "offset", "elev", "elevation", "level"}
+
+
 def kind_of(s: SkeletonValue) -> str:
-    """What a skeleton number is: its ``kind`` where the plan gives one, else a count by its unit, a load by its unit,
-    a position by its why ("sits 3 in above the floor"), and a size otherwise (#243 review)."""
-    if s.kind:
-        return s.kind
+    """What a skeleton number is (#243 review and re-check): a count or a load by its unit; a size by its name's last
+    word (thickness, width, depth, length, diameter, radius, spacing, clearance); for a height or an offset, the plan's
+    ``kind``, then its why ("sits 3 in above the floor" is a position), else ``unclear``, which nothing fails on. Any
+    other name: the plan's kind, then its why, else a size."""
     if s.unit == "count":
         return "count"
     if s.unit in _LOAD_UNITS:
         return "load"
-    return "position" if _WHERE.search(s.why or "") else "size"
+    last = s.name.lower().split("_")[-1]
+    if last in _SIZE_WORDS:
+        return "size"
+    if s.kind:
+        return s.kind
+    if _WHERE.search(s.why or ""):
+        return "position"
+    return "unclear" if last in _EITHER else "size"
 
 
 def mm(s: SkeletonValue) -> Optional[float]:

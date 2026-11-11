@@ -110,10 +110,12 @@ def _unscored(store: DesignStore) -> bool:
 
 
 def _section_unknown(store: DesignStore, pid: str) -> bool:
-    """Whether the skeleton lacks the size of part ``pid`` that a pocket is cut to: no number named for it."""
-    from .skeleton import _subject
+    """Whether the skeleton lacks the section of part ``pid`` that a pocket is cut to: it's known only when the plan
+    names both its thickness and its height as sizes (#243 re-check: step-stool-4's ``stretcher_height`` is where it
+    sits, a position, and counted as its section, so the sides were still built first)."""
+    from .skeleton import known_section
 
-    return not any(_subject(s.get("name", ""))[0] == pid for s in store.design.skeleton or [])
+    return len(known_section(store.design.skeleton, pid)) < 2
 
 
 def defined_first(store: DesignStore, plan, order: list[str]) -> tuple[list[str], set]:

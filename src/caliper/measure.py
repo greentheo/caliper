@@ -818,12 +818,21 @@ def pocket_said(a: str, b: str, got: dict, clearance: float = POCKET_CLEARANCE_M
             tight.append(-total if total < 0 else -min(pair))
         elif max(abs(g - clearance) for g in pair) > POCKET_TOL_MM:
             loose.append(total)
-    for side, g in got["gaps"].items():                # a side against one wall only, into it
-        if g is not None and g < 0 and got["gaps"].get(("-" if side[0] == "+" else "+") + side[1]) is None:
+    proud = []
+    for side, g in got["gaps"].items():                # a side against one wall only: into it, or off it
+        if g is None or got["gaps"].get(("-" if side[0] == "+" else "+") + side[1]) is not None:
+            continue
+        if g < 0:
             tight.append(-g)
+        elif abs(g - clearance) > POCKET_TOL_MM:      # standing off a slot's only wall (#243 re-check)
+            proud.append((side, g))
     opened = [_SIDES[s] for s, g in got["gaps"].items() if g is None]
     walls = sum(1 for g in got["gaps"].values() if g is not None)
     open_said = f", open on the {' and '.join(opened)}: measured on {walls} side{'s' if walls != 1 else ''}" if opened else ""
+    if proud and not loose and not tight:
+        side, g = max(proud, key=lambda sg: sg[1])
+        return (f"the {name} doesn't sit in {b}'s slot: it's {g:.1f} mm off its {_SIDES[side]}{open_said}, on the "
+                "drawn sizes")
     if not loose and not tight:
         sides = [g for g in got["gaps"].values() if g is not None]
         return (f"the {name} sits in {b}'s pocket with {min(sides):.1f}–{max(sides):.1f} mm a side{open_said}, on the "

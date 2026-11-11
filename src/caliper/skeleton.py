@@ -215,19 +215,26 @@ def shadows(pid: str, script: str, skeleton: list, parts: Optional[list] = None)
         if key in plan:                                # its own name: the same number, whatever kind it is
             value, kind = plan[key]
             if not _agrees(float(v), value):
-                unit = " mm" if kind in ("size", "position") else ""
-                wrong.append(f"{pid} sets its own {said_name(key)}: {v:g}{unit} against the plan's {value:g}{unit}")
+                unit = " mm" if kind in ("size", "position", "unclear") else ""
+                (notes if kind == "unclear" else wrong).append(
+                    f"the plan's {said_name(key)} may be where something sits: {pid} sets {v:g}{unit}, the plan {value:g}{unit}"
+                    if kind == "unclear" else f"{pid} sets its own {said_name(key)}: {v:g}{unit} against the plan's {value:g}{unit}")
             continue
         subject, size = _subject(key)
-        if not subject or subject in own:              # a part's own size is its own
+        if not subject:
             continue
-        same = [n for n, (_, kind) in plan.items() if kind == "size" and _subject(n) == (subject, size)]
-        if same:
+        same = [n for n, (_, kind) in plan.items() if kind in ("size", "unclear") and _subject(n) == (subject, size)]
+        if same:                                       # even a part's own size, where the plan shares it (#243 re-check)
             name = same[0]
             if _agrees(float(v), plan[name][0]):
                 notes.append(f"{pid} restates the plan's {said_name(name)} as {key}: read {name} instead")
+            elif plan[name][1] == "unclear":
+                notes.append(f"the plan's {said_name(name)} may be where something sits: {pid} sets {v:g} mm, the plan "
+                             f"{plan[name][0]:g} mm")
             else:
                 wrong.append(f"{pid} sets its own {said_name(name)}: {v:g} mm against the plan's {plan[name][0]:g} mm")
+        elif subject in own:                           # a part's own size the plan doesn't share is its own
+            continue
         elif subject in others:                        # another part's size, which the plan doesn't share
             notes.append(f"the plan doesn't name the {said_name(key)}: {pid} sets it at {v:g} mm")
     if not wrong:
@@ -243,21 +250,52 @@ SECTION = ("thickness", "height")
 BOARD_FILL = 0.9
 
 
+def known_section(skeleton: list, pid: str) -> dict:
+    """``{"thickness": name, "height": name}``: the sizes of part ``pid``'s section the skeleton names as sizes."""
+    from . import plan as P
+
+    out = {}
+    for s in skeleton or []:
+        sv = s if isinstance(s, P.SkeletonValue) else P.SkeletonValue.model_validate(s)
+        subject, size = _subject(sv.name)
+        if subject == pid and size in SECTION and P.kind_of(sv) == "size":
+            out.setdefault(size, sv.name)
+    return out
+
+
+def _section_name(skeleton: list, pid: str, word: str) -> str:
+    """The name a measured size goes under: ``{pid}_{word}``, or ``{pid}_t`` / ``{pid}_h`` where the plan's name is
+    something else already (step-stool-4's ``stretcher_height`` is where it sits)."""
+    full = f"{pid}_{word}"
+    taken = next((s for s in skeleton or [] if s.get("name") == full), None)
+    return full if taken is None or taken.get("source") == "measured" else f"{pid}_{word[0]}"
+
+
 def section(store, pid: str, geometry) -> list[dict]:
-    """Part ``pid``'s section as built, into the skeleton (``{pid}_thickness``, ``{pid}_height``: its two smaller
-    sizes, source ``measured``, ``of`` the part), so the parts it goes into are written to it (CALI-162, #240). Only for
-    a board, square to the axes and filling its box (#243 review: an L of 3 mm angle read as 50 mm thick); otherwise
-    nothing is written, and []. Written again in place when it's measured again."""
+    """Part ``pid``'s section as built, into the skeleton: whichever of its thickness and height (its two smaller
+    sizes) the plan doesn't already name as a size, source ``measured``, ``of`` the part (CALI-162, #240). Only for a
+    board, square to the axes and filling its box (#243 review: an L of 3 mm angle read as 50 mm thick); otherwise
+    any size measured off it before is dropped, said in its history, and []. Written again in place when measured
+    again."""
     from .measure import _square
 
     m = geometry.require_mesh()
     box = float(m.bounding_box.volume)
     if box <= 0 or float(abs(m.volume)) < BOARD_FILL * box or not _square(m):
+        old = [s for s in store.design.skeleton or [] if s.get("source") == "measured" and s.get("of") == pid]
+        if old:                                    # not a board now: its last measure would go stale (#243 re-check)
+            store.design.skeleton = [s for s in store.design.skeleton if s not in old]
+            store.save()
+            if store.design.part(pid):
+                store.append_history(pid, {"kind": "note", "said": "its measured section is dropped: it isn't a plain "
+                                           "board now (" + ", ".join(s["name"] for s in old) + ")"})
         return []
     lo, hi = m.bounds
-    dims = sorted(float(b - a) for a, b in zip(lo, hi))
-    got = [{"name": f"{pid}_{word}", "value": round(v, 2), "unit": "mm", "why": f"the {pid.replace('_', ' ')} as built",
-            "source": "measured", "kind": "size", "of": pid} for word, v in zip(SECTION, dims[:2])]
+    dims = dict(zip(SECTION, sorted(float(b - a) for a, b in zip(lo, hi))[:2]))
+    planned = known_section([s for s in store.design.skeleton or [] if s.get("source") != "measured"], pid)
+    got = [{"name": _section_name(store.design.skeleton, pid, word), "value": round(v, 2), "unit": "mm",
+            "why": f"the {pid.replace('_', ' ')}'s {word} as built", "source": "measured", "kind": "size", "of": pid}
+           for word, v in dims.items() if word not in planned]
     by = {g["name"]: g for g in got}
     kept = [by.pop(s.get("name")) if s.get("name") in by and s.get("source") == "measured" else s
             for s in store.design.skeleton or []]

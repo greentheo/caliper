@@ -16,7 +16,7 @@ from caliper.measure import Geometry
 pytest.importorskip("cadquery")
 
 PLAN_SKELETON = [{"name": "stretcher_thickness", "value": 19, "unit": "mm", "why": "3/4 in plywood"},
-                 {"name": "stretcher_height", "value": 101.6, "unit": "mm", "why": "4 in"}]
+                 {"name": "stretcher_height", "value": 101.6, "unit": "mm", "why": "4 in", "kind": "size"}]
 
 
 def _side(pocket_y, pocket_z):
@@ -239,7 +239,9 @@ def test_step_stool_4_s_parts_as_built_give_no_false_fail(pid):
     ("bolts_per_flange", "count", "", "count"), ("design_load", "lb", "", "load")])
 def test_a_skeleton_number_s_kind(name, unit, why, kind):
     assert P.kind_of(P.SkeletonValue(name=name, value=1, unit=unit, why=why)) == kind
-    assert P.kind_of(P.SkeletonValue(name=name, value=1, unit=unit, why=why, kind="size")) == "size"   # the plan's says
+    if unit not in ("count", "lb"):                    # a count or a load is one by its unit
+        assert P.kind_of(P.SkeletonValue(name=name, value=1, unit=unit, why=why, kind="position")) == (
+            "size" if name.split("_")[-1] in ("length", "thickness") else "position")   # the size word, then the plan's
 
 
 def test_a_position_is_never_compared_with_a_size():
@@ -248,9 +250,11 @@ def test_a_position_is_never_compared_with_a_size():
     assert r.status == "pass"
 
 
-def test_a_part_s_own_size_is_its_own():
-    r = skeleton.shadows("top", SIDE.format(params='{"top_t": 25}'), PLAN_SKELETON + [{"name": "top_thickness", "value": 19, "unit": "mm"}])
-    assert r.status == "pass"
+def test_a_part_s_own_size_is_its_own_unless_the_plan_shares_it():
+    """top_t on the top is its own; against a plan's top_thickness it's compared (#243 re-check, item 2)."""
+    assert skeleton.shadows("top", SIDE.format(params='{"top_t": 25}'), PLAN_SKELETON).status == "pass"
+    shared = PLAN_SKELETON + [{"name": "top_thickness", "value": 19, "unit": "mm"}]
+    assert skeleton.shadows("top", SIDE.format(params='{"top_t": 25}'), shared).status == "fail"
 
 
 def test_a_pocket_narrowing_at_its_inner_face_fails():
@@ -299,3 +303,107 @@ def test_a_measured_section_is_measured_again_when_its_part_changes(tmp_path):
     store.write_part("stretcher", board.format(t=25.4), intent="the stretcher, thicker")
     got = {s["name"]: s["value"] for s in store.design.skeleton}
     assert got["stretcher_thickness"] == pytest.approx(25.4, abs=0.01) and len(store.design.skeleton) == 2
+
+
+# --- #243 re-check ------------------------------------------------------------------------------------------------------
+def test_on_step_stool_4_s_own_skeleton_the_stretcher_is_built_first(tmp_path):
+    """Item 1: its stretcher_height is where it sits, so its section isn't planned: the stretcher comes before both sides,
+    and its height goes in as stretcher_h, the name the plan's position doesn't use."""
+    from caliper.design import DesignStore
+
+    store = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    plan = P.validate({"parts": [{"id": "top", "what": "the top"}, {"id": "side_left", "what": "a side", "mounts_on": ["top"]},
+                                 {"id": "side_right", "what": "a side", "mounts_on": ["top"]},
+                                 {"id": "stretcher", "what": "the stretcher", "mounts_on": ["side_left", "side_right"]}],
+                       "skeleton": SS4, "mates": [{"between": ["stretcher", "side_left"], "kind": "fits_in"},
+                                                  {"between": ["stretcher", "side_right"], "kind": "fits_in"}]})
+    P.save(store, plan)
+    order, measure_ = build_plan.defined_first(store, P.load(store), P.order(plan))
+    assert order.index("stretcher") < order.index("side_left") and order.index("stretcher") < order.index("side_right")
+    assert measure_ == {"stretcher"}
+    got = build_plan.measure_section(store, "stretcher", _stretcher())
+    assert [(g["name"], g["value"]) for g in got] == [("stretcher_thickness", 19.0), ("stretcher_h", 101.6)]
+    assert next(s for s in store.design.skeleton if s["name"] == "stretcher_height")["value"] == 3.0   # the plan's, kept
+
+
+def test_a_planned_section_named_as_sizes_keeps_the_plan_s_order(tmp_path):
+    from caliper.design import DesignStore
+
+    store = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    sizes = SS4 + [{"name": "stretcher_thickness", "value": 0.75, "unit": "in"}, {"name": "stretcher_h", "value": 4, "unit": "in", "kind": "size"}]
+    plan = P.validate({"parts": [{"id": "side_left", "what": "a side"}, {"id": "stretcher", "what": "the stretcher", "mounts_on": ["side_left"]}],
+                       "skeleton": sizes, "mates": [{"between": ["stretcher", "side_left"], "kind": "fits_in"}]})
+    P.save(store, plan)
+    assert build_plan.defined_first(store, P.load(store), P.order(plan)) == (["side_left", "stretcher"], set())
+
+
+@pytest.mark.parametrize("pid,params", [("stretcher", '{"stretcher_t": 25}'), ("side_left", '{"side_t": 25}')])
+def test_a_part_s_own_size_against_the_plan_s_shared_one_fails(pid, params):
+    """Item 2: the stretcher built 25 thick against pockets cut for 19."""
+    sk = PLAN_SKELETON + [{"name": "side_thickness", "value": 19, "unit": "mm"}]
+    r = skeleton.shadows(pid, SIDE.format(params=params), sk)
+    assert r.status == "fail" and "25 mm against the plan's 19 mm" in r.detail
+
+
+@pytest.mark.parametrize("name,why", [("top_depth", "the top's depth from front to back"),
+                                      ("flange_width", "flange width, at the top of each side"),
+                                      ("stretcher_thickness", "the stretcher board, cut from the same sheet as the top"),
+                                      ("leg_thickness", "the leg's thickness at the floor")])
+def test_the_size_word_decides_before_the_why(name, why):
+    """Item 3: the reviewer's four whys read as positions."""
+    assert P.kind_of(P.SkeletonValue(name=name, value=1, unit="in", why=why)) == "size"
+
+
+def test_a_height_with_no_why_and_no_kind_is_unclear_and_a_mismatch_is_a_note():
+    """Item 3: with every why emptied, step-stool-4's sides failed again on the stretcher height."""
+    bare = [{**s, "why": ""} for s in SS4]
+    assert P.kind_of(P.SkeletonValue.model_validate(next(s for s in bare if s["name"] == "stretcher_height"))) == "unclear"
+    for pid in ("side_left", "side_right"):
+        r = skeleton.shadows(pid, SIDE.format(params=repr(SS4_PARAMS[pid])), bare, list(SS4_PARAMS))
+        assert r.status == "pass", r.detail
+
+
+def test_a_board_revised_into_an_angle_drops_its_section_and_says_so(tmp_path):
+    from caliper.design import DesignStore
+
+    store = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    board = 'import cadquery as cq\n\ndef build(params):\n    return cq.Workplane("XY").box(280, 19.05, 101.6)\n'
+    angle = ('import cadquery as cq\n\ndef build(params):\n    a = cq.Workplane("XY").box(280, 50, 3)\n'
+             '    return a.union(cq.Workplane("XY").box(280, 3, 50).translate((0, 23.5, 23.5)))\n')
+    store.write_part("stretcher", board, intent="the stretcher")
+    build_plan.measure_section(store, "stretcher", store.part_geometry("stretcher"))
+    assert len(store.design.skeleton) == 2
+    store.write_part("stretcher", angle, intent="an angle")
+    assert not store.design.skeleton
+    assert any("its measured section is dropped" in (h.get("said") or "") for h in store.history("stretcher"))
+
+
+def test_a_part_standing_proud_in_an_open_slot_doesn_t_sit_in_it():
+    """Item 4: 48 mm off the bottom of an open-top notch read as "sits … with 0.3–48.4 mm a side"."""
+    side = trimesh.creation.box(extents=(19, 300, 400))
+    notch = trimesh.creation.box(extents=(40, 19.6, 300))
+    notch.apply_translation((0, 0, 200))                     # from z 50 up, open on top
+    high = trimesh.creation.box(extents=(280, 19.05, 101.6))
+    high.apply_translation((135, 0, 148.8))                  # its bottom 48 mm off the notch's
+    r = _fit(Geometry.from_mesh(side.difference(notch)), Geometry.from_mesh(high))
+    assert r.status == "fail"
+    assert r.detail.startswith("the stretcher doesn't sit in side_left's slot: it's 48.0 mm off its bottom, open on the top")
+
+
+def test_a_plan_naming_only_the_thickness_builds_first_and_measures_only_the_height(tmp_path):
+    from caliper.design import DesignStore
+
+    store = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    sk = SS4 + [{"name": "stretcher_thickness", "value": 0.75, "unit": "in"}]
+    plan = P.validate({"parts": [{"id": "side_left", "what": "a side"}, {"id": "stretcher", "what": "the stretcher", "mounts_on": ["side_left"]}],
+                       "skeleton": sk, "mates": [{"between": ["stretcher", "side_left"], "kind": "fits_in"}]})
+    P.save(store, plan)
+    assert build_plan.defined_first(store, P.load(store), P.order(plan)) == (["stretcher", "side_left"], {"stretcher"})
+    got = build_plan.measure_section(store, "stretcher", _stretcher())
+    assert [g["name"] for g in got] == ["stretcher_h"]
+
+
+def test_an_unclear_height_by_its_own_name_is_a_note_not_a_fail():
+    bare = [{**s, "why": ""} for s in SS4]
+    r = skeleton.shadows("side_left", SIDE.format(params='{"stretcher_height": 50}'), bare)
+    assert r.status == "pass" and "the plan's stretcher height may be where something sits: side_left sets 50 mm" in r.detail
