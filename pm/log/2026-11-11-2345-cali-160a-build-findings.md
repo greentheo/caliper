@@ -13,3 +13,5 @@ On a stubbed step-stool-4 v1 (2×4 pockets, walls 15 and 12 mm, a plywood stretc
 This branch stacks on #240 and has #239 merged in, since it uses their measures. Slices B to D wait on Theo's three questions in the issue. Slice A runs automatically after a plan's build (recommendation 1), and only on plan builds.
 
 **Tests:** 6 in `test_build_findings.py`, all stubbed, real geometry.
+
+**Checks.** 6 tests in `test_build_findings.py`, one updated after #243's rework (the shadow finding needs the same size word). All 8 mutants are caught; the flipped-mirror skip, which survived at first, is pinned as not measured. The around-files (build plan, first build, show-it-first, first run) pass (87).

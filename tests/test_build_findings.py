@@ -79,16 +79,20 @@ def test_a_mirror_made_by_flipping_isn_t_a_finding(v1):
 
     mirror.make(v1, "side_right", "side_left")
     assert not [f for f in review.findings(v1)["findings"] if f["kind"] == "mirror"]
+    assert review._mirror_findings(v1) == ([], 0)          # not even measured: it's one by construction
 
 
 def test_a_part_restating_a_shared_size_is_a_finding(v1):
-    v1.design.skeleton = v1.design.skeleton + [{"name": "stretcher_thickness", "value": 19.05, "unit": "mm"},
-                                               {"name": "stretcher_height", "value": 101.6, "unit": "mm"}]
+    """Same subject and size word only (#243): the sides' stretcher_w and stretcher_h against the plan's width and its
+    board height, a size."""
+    v1.design.skeleton = v1.design.skeleton + [{"name": "stretcher_width", "value": 19.05, "unit": "mm"},
+                                               {"name": "stretcher_height", "value": 101.6, "unit": "mm", "kind": "size"}]
     v1.save()
     shadows = [f for f in review.findings(v1)["findings"] if f["kind"] == "shadow"]
     assert {f["parts"][0] for f in shadows} == {"side_left", "side_right"}
-    assert "side_left sets its own stretcher thickness: 38.1 mm against the plan's 19.05 mm" in \
-        next(f for f in shadows if f["parts"] == ["side_left"])["said"]
+    said = next(f for f in shadows if f["parts"] == ["side_left"])["said"]
+    assert "side_left sets its own stretcher width: 38.1 mm against the plan's 19.05 mm" in said
+    assert "side_left sets its own stretcher height: 88.9 mm against the plan's 101.6 mm" in said
 
 
 def test_a_stated_number_nothing_reads_is_a_finding(v1):
