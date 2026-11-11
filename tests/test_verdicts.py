@@ -67,7 +67,7 @@ def _case(**k):
 KIND = {
     "holds": (RUN, _case(), None),
     "fails": (RUN, _case(safety=1.2, holds=False), None),
-    "untrusted": (RUN, _case(), "the strength check ran on a filled-in shape"),
+    "untrusted": (RUN, _case(), "the strength check ran on a solid with more in it than"),
     "unresolved": ({**RUN, "across": 1.0}, _case(), None),
     "unchecked": ({**RUN, "across": 1.0, "finer": False}, _case(), None),
     "edge": (RUN, _case(middle_only=True), None),

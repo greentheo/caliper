@@ -32,6 +32,7 @@ import numpy as np
 
 from . import construction as C
 from . import materials as M
+from . import verdicts as V
 from .design import DesignStore
 from .one_study import one_at_a_time
 from .runs import newest_first
@@ -546,11 +547,11 @@ def beam(span: float, width: float, t: float, force: float, mat: dict, footprint
         if tt > 26:
             continue
         g, w = both(tt)
-        by_t.append({"thickness_mm": tt, "label": M.nominal(tt), "safety": round(g, 2),
-                     "safety_across": round(governs(g, w), 2), "deflection_mm": round(sag_of(tt), 3)})
+        by_t.append({"thickness_mm": tt, "label": M.nominal(tt), "safety": V.cut(g),
+                     "safety_across": V.cut(governs(g, w)), "deflection_mm": round(sag_of(tt), 3)})
     return {"done": True, "as": "beam", "span_mm": round(span, 1), "thickness_mm": t, "stress_mpa": round(stress, 2),
             # the grain's way unknown, the verdict takes the worse of the two (#118); said, that grain's (CALI-126)
-            "safety": round(good, 2), "safety_across": round(governs(good, wrong), 2),
+            "safety": V.cut(good), "safety_across": V.cut(governs(good, wrong)),
             "grain": grain if grain in ("along", "across") else None,
             "grain_phrase": said, "advice_phrase": advice,
             "deflection_mm": round(sag, 3), "by_thickness": by_t, "width_mm": round(carries, 1),
@@ -655,6 +656,12 @@ def two_sided(pieces: list[dict], load: dict, tol: float, under=None) -> Optiona
     return None
 
 
+def fea_safety(worked: float) -> Optional[float]:
+    """The FEA's number, from its worst voxel's stress over strength: cut toward safe, never rounded up, since the
+    case's "holds" is compared from it (CALI-152, #213)."""
+    return V.cut(1.0 / worked) if worked > 0 else None
+
+
 def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=None) -> Optional[dict]:
     """The sheet a load pushes on face-on, checked as a plate — or None if it lands on no sheet, or on
     one that isn't held all round (the FEA is the number for that one)."""
@@ -713,14 +720,14 @@ def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=Non
                     got = ring_plate(ring, t, W, foot, mat["E"])
                     safety = mat["strength"] / got["stress_mpa"]
                     by_t = [{"thickness_mm": tt, "label": M.nominal(tt),
-                             "safety": round(mat["strength"] / g["stress_mpa"], 2),
-                             "safety_across": round(mat["strength"] * mat["across"] / g["stress_mpa"], 2),
+                             "safety": V.cut(mat["strength"] / g["stress_mpa"]),
+                             "safety_across": V.cut(mat["strength"] * mat["across"] / g["stress_mpa"]),
                              "deflection_mm": round(g["deflection_mm"], 3)}
                             for tt in C.THICKNESSES if tt <= 26
                             for g in [ring_plate(ring, tt, W, foot, mat["E"])]]
                     return {**base, "done": True, "support": "ring", "ring_mm": round(2 * ring, 1),
                             "thickness_mm": t, "stress_mpa": round(got["stress_mpa"], 2),
-                            "safety": round(safety, 2), "safety_across": round(safety * mat["across"], 2),
+                            "safety": V.cut(safety), "safety_across": V.cut(safety * mat["across"]),
                             "deflection_mm": round(got["deflection_mm"], 3), "by_thickness": by_t}
                 return {**base, "done": False,
                         "why": ("the load is off its middle; the round-plate check covers a load near the middle"
@@ -742,11 +749,11 @@ def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=Non
                     continue
                 g = plate(a, b, tt, float(abs(f @ n)), max(fu * fv, 1.0), mat["E"])
                 by_t.append({"thickness_mm": tt, "label": M.nominal(tt),
-                             "safety": round(mat["strength"] / g["stress_mpa"], 2),
-                             "safety_across": round(mat["strength"] * mat["across"] / g["stress_mpa"], 2),
+                             "safety": V.cut(mat["strength"] / g["stress_mpa"]),
+                             "safety_across": V.cut(mat["strength"] * mat["across"] / g["stress_mpa"]),
                              "deflection_mm": round(g["deflection_mm"], 3)})
             return {**base, "done": True, "thickness_mm": t, "stress_mpa": round(got["stress_mpa"], 2),
-                    "safety": round(safety, 2), "safety_across": round(safety * mat["across"], 2),
+                    "safety": V.cut(safety), "safety_across": V.cut(safety * mat["across"]),
                     "deflection_mm": round(got["deflection_mm"], 3), "by_thickness": by_t}
     return None
 
@@ -1032,7 +1039,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     at = np.asarray(ls.grid.origin) + ls.grid.spacing * np.asarray(hot)
     peak = float(vm[hot])
     fea = {"supported": True, "peak_mpa": round(peak, 2), "robust_mpa": round(float(r.peak_stress), 2),
-           "safety": round(1.0 / float(worked[hot]), 2) if worked[hot] > 0 else None,
+           "safety": fea_safety(float(worked[hot])),
            "deflection_mm": round(float(r.max_displacement), 3),
            "at": [round(float(x), 1) for x in at], **_peak_in(ctx, at, ls.grid.spacing)}
     pl = plate_check(ctx["pieces"], load, ctx.get("plate_mat") or mat, ctx["tol"], under=ctx.get("under"))
@@ -1045,7 +1052,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
                  "holds": bool(safety is not None and safety >= min_safety),  # producer
                  # where it's predicted to break, placed the same way: linear to failure, as wood is
                  # close to; the joints aren't modelled and may go first
-                 "breaks_lb": round(load["lb"] * load["factor"] * safety, -1) if safety else None})
+                 "breaks_lb": V.cut_lb(load["lb"] * load["factor"] * safety) if safety else None})   # cut (#214)
     if any(pc.get("holes") for pc in ctx["pieces"] if pc["kind"] == "sheet"):
         from .lighten import judge_holed       # a panel stood on with holes: not by the plate formula (CALI-73)
 
@@ -1131,6 +1138,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
         "material": mat, "spacing_mm": round(ctx["spacing"], 2), "voxels": int(ctx["ls"].solid.sum()),
         "min_safety": min_safety, "held": held, "cases": cases, "notes": notes,
+        "cut": True,                  # its numbers are kept cut toward safe (CALI-152): one on its limit is settled
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
     }
     thin = ctx.get("thinnest")

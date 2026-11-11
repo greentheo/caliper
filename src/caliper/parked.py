@@ -19,6 +19,7 @@ from typing import Optional
 
 from . import construction as C
 from . import materials as M
+from . import verdicts as V
 from .design import DesignStore
 from .one_study import one_at_a_time
 
@@ -37,7 +38,7 @@ def floor_knee(material: str, t: float, span: float, load_n: float, patch: float
     stress = m / (b * t * t / 6.0)
     sag = load_n * span ** 3 / (48 * mech["E"] * b * t ** 3 / 12.0)
     return {"span_mm": round(span, 1), "patch_mm": round(patch, 1), "stress_mpa": round(stress, 2),
-            "safety": round(mech["strength"] / stress, 2) if stress > 0 else 99.0, "sag_mm": round(sag, 2)}
+            "safety": V.cut(mech["strength"] / stress) if stress > 0 else 99.0, "sag_mm": round(sag, 2)}
 
 
 def _floor(store: DesignStore, skip) -> Optional[dict]:

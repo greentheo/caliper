@@ -29,6 +29,46 @@ PROMISE = ("A prediction, not a certificate: it rests on the loads it was given 
 PROMISE_POINTER = "That's a prediction, not a certificate: its card says what it rests on."
 
 
+#: Wood, for what a promise says varies (a sheet or a stick of these).
+WOODS = ("plywood", "lumber", "softwood", "hardwood", "mdf", "osb")
+
+
+def promise(store: DesignStore, parts) -> str:
+    """:data:`PROMISE`, worded for what the parts are made of (CALI-88, #64 item 14): wood, a print, both, or any
+    other material. An all-printed box's began "Real wood varies"."""
+    made = set()
+    for pid in parts:
+        try:
+            items = C.declared(store, pid).get("construction") or []
+        except Exception:  # noqa: BLE001 — a part whose script won't say: the general words, never a wrong one
+            items = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            made.add("printed" if it.get("kind") == "printed" else "wood" if it.get("material") in WOODS else "other")
+    if made == {"wood"} or not made:
+        return PROMISE
+    wood, printed, other = "wood" in made, "printed" in made, "other" in made
+    # what it rests on; "rough" is said where a verdict is (a line's own ``rough``), not here: a mixed part whose
+    # plywood governs isn't rough (CALI-97)
+    rests = []
+    if wood or other:
+        rests.append("textbook strengths for the " + ("materials" if wood and other else "wood" if wood else "material"))
+    if printed:
+        rests.append("a model of the print")
+    if wood:
+        also = (["prints"] if printed else []) + (["the other materials"] if other else []) + ["joints"]
+        varies = "Real wood varies, and so do " + (", ".join(also[:-1]) + " and " + also[-1] if len(also) > 1 else also[0])
+    elif printed and not other:
+        varies = "Printers, infill and the bond between a print's layers vary"
+    elif printed:
+        varies = "Prints, materials and joints vary"
+    else:
+        varies = "The material and its joints vary"
+    return (f"A prediction, not a certificate: it rests on the loads it was given and on {' and '.join(rests)}. "
+            f"{varies}, so test it gently before you trust it with a person.")
+
+
 def _len(mm: float, inches: bool) -> str:
     return f"{mm / IN:.1f} in".replace(".0 in", " in") if inches else f"{mm:.0f} mm"
 
@@ -254,6 +294,8 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
             how = (f", as a round plate held at its ring's outer edge ({_len(pl['ring_mm'], inches)} across)"
                    if pl.get("support") == "ring" else "")
             text += f" By hand, the {pl['piece']} on its own{how}: {_times(pl['safety_across'], need=need)}."
+    elif v["kind"] == "recheck":                     # its reason, not "older version" (#214 review)
+        text = f"{c['name'][:1].upper() + c['name'][1:]}: check it again, {over(c, need, rough)}: {v['why']}."
     else:                                            # any other kind: its word, never a ✓ (CALI-112)
         text = f"{c['name'][:1].upper() + c['name'][1:]}: {v['word']}, {_times(c['safety'], rough, need)}."
     return _line(text + older, v["status"], study="load", **({"close": True} if v["kind"] == "close" else {}),
@@ -320,7 +362,10 @@ def filled_fail(why: Optional[str]) -> str:
     be checked against its pieces, that is said, not "a filled-in shape", which isn't known."""
     if (why or "").startswith(("couldn't", "Not trusted yet: I couldn't")):     # filled()'s, or untrusted()'s
         return " Its shape couldn't be checked against its pieces, so this number may not be the part's."
-    return " It ran on a filled-in shape, so the part as built is likely weaker."
+    # both causes, as the volume check says them (#64 item 12, #209 review): with a piece missing from construction()
+    # the solid may be the part as built
+    return (" It ran on a solid with more in it than its pieces: filled in, the part as built is likely weaker; or a "
+            "piece is missing from its construction.")
 
 
 def untrusted(pid: str, why: str = "") -> str:
@@ -328,8 +373,32 @@ def untrusted(pid: str, why: str = "") -> str:
     be checked against its pieces at all (which fails closed: never holding)."""
     if why.startswith("couldn't"):
         return f"Not trusted yet: I {why}, so I can't say the strength check ran on the part as built. Check it again."
-    return (f"Not trusted yet: the strength check ran on a filled-in shape, not the {pid.replace('_', ' ')} as built. "
-            f"Fix its shape first (say \"fix its shape to match its pieces\").")
+    return (f"Not trusted yet: the strength check ran on a solid with more in it than the {pid.replace('_', ' ')}'s "
+            f"pieces: its shape is filled in, or a piece is missing from its construction. Say \"{fix_shape(pid)}\" or "
+            f"\"{fix_piece(pid)}\".")
+
+
+#: The two fixes for a solid with more in it than its pieces (#209 review): the shape, or the construction.
+def fix_shape(pid: str) -> str:
+    """The words to say to fix a part's shape, naming the part, so they reach it with nothing selected (#209 review:
+    "add the missing piece" typed from the design card authored a part named missing_piece)."""
+    return f"fix the shape of the {pid.replace('_', ' ')} to match its pieces"
+
+
+def fix_piece(pid: str) -> str:
+    return f"add the missing piece to the {pid.replace('_', ' ')}"
+
+
+def fix_for(check_id: str, detail: str, pid: str = "part") -> str:
+    """What to say to fix a shape that doesn't match its pieces: both fixes where the volume check can't tell which
+    it is (#209 review), the outline's own where a sheet is off its face, else the shape."""
+    from . import consistency
+
+    if check_id == "construction_on_its_face":
+        return f'Say "{consistency.remedy(detail)}"'
+    if check_id == "construction_volume":
+        return f'Say "{fix_shape(pid)}" (it\'s filled in) or "{fix_piece(pid)}" (one isn\'t in its construction)'
+    return f'Say "{fix_shape(pid)}"'
 
 
 def rests_on_model(metric: str) -> bool:
@@ -339,13 +408,13 @@ def rests_on_model(metric: str) -> bool:
     return m.startswith(("strength.", "frame.")) or m.endswith("safety") or "yield" in m
 
 
-def _card(key: str, q: str, lines: list[dict], hint: str = "") -> dict:
+def _card(key: str, q: str, lines: list[dict], hint: str = "", promised: str = PROMISE) -> dict:
     card = {"key": key, "q": q, "status": _worst(lines) if lines else "info", "lines": lines, "hint": hint}
     # any verdict resting on a model (a strength or frame study, or the scorecard's checks) says what it promises
     # (a close pass is amber, and a verdict all the same: #208 review)
     if any((ln.get("study") in ("load", "frame") or ln.get("model")) and (ln["status"] in ("ok", "bad") or ln.get("close"))
            for ln in lines):
-        card["promise"] = PROMISE + "".join(f" {r}" for r in dict.fromkeys(ln["rough"] for ln in lines if ln.get("rough")))
+        card["promise"] = promised + "".join(f" {r}" for r in dict.fromkeys(ln["rough"] for ln in lines if ln.get("rough")))
     return card
 
 
@@ -397,10 +466,8 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         if strays:                                   # what the mesh left out, said once (CALI-118)
             what.append(_line(f"I {strays}: it enclosed nothing and weighs nothing.", "info"))
         if off:
-            fix = (consistency.remedy(off[0].detail) if off[0].id == "construction_on_its_face"
-                   else "fix its shape to match its pieces")
-            what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. Say \"{fix}\" and I'll revise it.",
-                              "bad"))
+            what.append(_line(f"Its 3D shape and its pieces don't match: {off[0].detail}. {fix_for(off[0].id, off[0].detail, pid)} "
+                              f"and I'll revise it.", "bad"))
         for s in smaller:                      # cut smaller than it's drawn: the cut list follows the outline (#183)
             what.append(_line(consistency.plan_said(s, inches), "warn"))
         if edge:                               # a load case it's missing: a warning, the round passed (CALI-94)
@@ -467,11 +534,13 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         if d.get("safety") is not None:
             # an older frame run (or one from before it recorded its version) isn't the frame as it is (#132 review)
             v = verdicts.meets(d["safety"], frames[0].get("min_safety"),
-                               stale=frames[0].get("version") != p["version"])
+                               stale=frames[0].get("version") != p["version"],
+                               recheck=verdicts.old_on_limit(frames[0], d["safety"], frames[0].get("min_safety")))   # (#214)
             work.append(_line(f"The frame holds, {_times(d['safety'], need=frames[0].get('min_safety'))}"
                               + (f": close to the {frames[0].get('min_safety'):g} it needs." if v["kind"] == "close" else ".")
                               if v["kind"] in ("holds", "close") else
                               f"The frame read {_times(d['safety'], need=frames[0].get('min_safety'))} on an older version: check it again." if v["kind"] == "stale" else
+                              f"The frame read {_times(d['safety'], need=frames[0].get('min_safety'))}: check it again, {v['why']}." if v["kind"] == "recheck" else
                               f"The frame is too weak as drawn: {_times(d['safety'], need=frames[0].get('min_safety'))}, it needs "
                               f"{frames[0].get('min_safety')}.", v["status"], study="frame"))
     mine = {r["id"] for r in p.get("rules") or []}
@@ -560,7 +629,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         if isinstance(ln, dict) and ln.get("text"):
             ln["text"] = tree.relabelled(store, pid, ln["text"])
     return [_card("what", "What is it?", what),
-            _card("work", "Will it work?", work, "Say what it must do and I'll check it."),
+            _card("work", "Will it work?", work, "Say what it must do and I'll check it.", promise(store, [pid])),
             _card("buy", "What do I buy?", buy),
             _card("make", "How do I make it?", how, "Say what it's built from and I'll plan the making.")]
 
@@ -612,6 +681,10 @@ def measured(store: DesignStore, state: dict) -> dict:
              for c in r.get("cases") or [] if c.get("safety") is not None or L.blind(r, c)]
     inches = (state.get("display_units") or "in") == "in"
     said = [(r, verdicts.case(r, c)) for r, c in cases]
+    if any(not r.get("cut") for r, _ in cases):
+        out["strength.uncut"] = True                   # made before the rounding fix (#214 review)
+    if any(v["kind"] == "recheck" for _, v in said):
+        out["strength.recheck"] = verdicts.UNCUT
     held = [r for r, v in said if v["kind"] in ("unresolved", "unchecked")]
     if held:                                           # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
         out["strength.unresolved"] = coarse(held[0], inches)
@@ -655,6 +728,7 @@ def measured(store: DesignStore, state: dict) -> dict:
                                            for r in state.get("load_runs") or []) and consistency.bare_edge(store, pid)]
     if edged:                                          # loaded in the middle only (CALI-94, #106 review)
         out["strength.edge"] = consistency.MIDDLE_ONLY[0].upper() + consistency.MIDDLE_ONLY[1:] + "."
+    # a run made before the rounding fix: its number on a goal's limit isn't settled either (#214 review)
     if safeties:
         out["strength.safety"] = min(safeties)
         # the case that number is, for what it's against (#208 review: the design card as the part card says it)
@@ -837,7 +911,11 @@ def held_to(state: dict, now: dict) -> list[dict]:
                                 stale=late or bool(older),
                                 incomplete=now.get("strength.unchecked") if strength else None, estimate=guess,
                                 close=c["metric"] == "strength.safety" and c.get("op", ">=") == ">="    # amber (CALI-88)
-                                and verdicts.near(v, c["limit"]))
+                                and verdicts.near(v, c["limit"]),
+                                # an old number on its limit, the run's or this goal's own (#214 review)
+                                recheck=(now.get("strength.recheck") or (verdicts.UNCUT if verdicts.goal_on_limit(
+                                    bool(now.get("strength.uncut")), c["metric"], v, c.get("limit"), c.get("op", ">="))
+                                    else None)) if strength else None)
         if verdict["kind"] == "estimate":
             out.append(_line(f"! {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}, {guess}.", "warn"))
             continue
@@ -865,7 +943,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
             continue
         # never a ✓ for an older check or score (#132 review): it says when, and what to do
         later = (" (scored before the last change: score it again)." if late
-                 else f" ({older})." if verdict["kind"] == "stale" and older else "." + why)
+                 else f" ({older})." if verdict["kind"] == "stale" and older
+                 else f": check it again, {verdict['why']}." if verdict["kind"] == "recheck" else "." + why)
         mark = '✗' if failed else '✓' if verdict['kind'] == 'holds' else '!'
         if c["metric"] == "strength.safety" and isinstance(c.get("limit"), (int, float)):
             # what it does, then what it needs: "2 times over (assumed): 3.11x" read as holding 2 times over (#64 item 15)
@@ -981,7 +1060,9 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     else:
         make.append(_line("Or make the whole build package: the build book, cut lists and drawings.", "info",
                           action="release"))
-    return [_card("what", "What is it?", what), _card("work", "Will it work?", work),
+    return [_card("what", "What is it?", what),
+            _card("work", "Will it work?", work,
+                  promised=promise(store, [p.id for p in store.design.parts]) if store is not None else PROMISE),
             _card("buy", "What do I buy?", buy), _card("make", "How do I make it?", make)]
 
 

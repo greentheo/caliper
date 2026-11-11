@@ -102,7 +102,9 @@ def test_the_camper_s_verdicts_carry_the_promise(tmp_path):
     store = samples.open_sample("camper", base=str(tmp_path / "designs"))
     work = answers.answers(store, design_api.design_state(store), None)[1]
     assert any(ln["status"] in ("ok", "bad") and ln["text"][:1] in "✓✗" for ln in work["lines"]), work["lines"]
-    assert work.get("promise") == answers.PROMISE
+    # worded for what it's made of (#64 item 14): steel, foam and plywood, not "Real wood" alone
+    assert work.get("promise") == answers.promise(store, [p.id for p in store.design.parts])
+    assert work["promise"] != answers.PROMISE and "materials" in work["promise"], work["promise"]
 
 
 def test_a_save_that_fails_leaves_the_old_sample_whole(tmp_path):

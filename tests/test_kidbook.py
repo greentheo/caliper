@@ -162,3 +162,27 @@ def test_pieces_with_one_name_are_told_apart_on_the_pages(tmp_path):
     assert len(imgs) == 2 and open(os.path.join(root, imgs[0]), "rb").read() != open(os.path.join(root, imgs[1]), "rb").read()
     top = next(p for p in pages if "Add the top" in p)
     assert "touches both sides" in top, top
+
+
+def test_a_screw_page_says_a_pilot_hole_first_and_the_list_names_the_bit(stool, tmp_path):
+    """CALI-88 (#64 item 8): plywood splits near an edge without a pilot hole. The kids' screw pages say a grown-up
+    drills one first, the tools list has the bit, and the shopping list's screw line names its size."""
+    from caliper import fasteners
+
+    root = str(tmp_path / "release")
+    os.makedirs(root)
+    shop = {"groups": [{"rows": [{"qty": "18", "item": "#8 wood screws"}]}]}
+    rec = {"design": "Box stool", "strength": {"stool": [{"name": "An adult stepping up", "safety": 3.11, "verdict": {"kind": "holds"}}]}}
+    kidbook.make(stool, root, rec, ["stool"], shop)
+    book = open(os.path.join(root, "kids.html")).read()
+    pages = re.findall(r"drills a (\S+ in) pilot hole for each screw[^<]*drives in \d+ screws", book)
+    assert pages and set(pages) == {fasteners.PILOT_BIT}, pages
+    assert f"a {fasteners.PILOT_BIT} drill bit for the pilot holes" in book
+    # short sentences a kid can follow read aloud: none on a screw page over 20 words (#209 review)
+    for say in re.findall(r"<p class='say'>([^<]*drives in \d+ screws[^<]*)</p>", book):
+        for sentence in re.split(r"(?<=\.)\s+", say.strip()):
+            assert len(sentence.split()) <= 20, sentence
+    rows = release.shopping(stool, {}, {"stool": {"fasteners": {"screws": 18, "screw": "#8 × 1 1/4 in wood screws",
+                                                                "glue_ml": 40}}}, {}, {})
+    (screw,) = [r for g in rows["groups"] for r in g["rows"] if "wood screws" in r["item"]]
+    assert f"a {fasteners.PILOT_BIT} pilot hole for each" in screw["for"], screw

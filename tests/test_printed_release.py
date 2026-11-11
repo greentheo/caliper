@@ -48,6 +48,13 @@ def test_an_all_printed_part_makes_a_build_package_that_says_nothing_to_cut(tmp_
     made = release.make(store, pdf=False)
     root = os.path.join(release.releases_dir(store), made["id"])
     assert os.path.exists(os.path.join(root, "index.html"))
+    # what it promises is the print's, in release.json and in the book (#64 item 14, #209 review)
+    import json
+
+    kept = json.load(open(os.path.join(root, "release.json")))["promise"]
+    assert "a model of the print" in kept and "wood" not in kept.lower(), kept
+    book = open(os.path.join(root, "index.html")).read()
+    assert "a model of the print" in book and "Real wood varies" not in book
     cut = open(os.path.join(root, "cutlist.txt")).read()
     assert "Nothing to cut: it's all printed." in cut, cut
     (plan,) = cutplan.list_runs(store, "tube")

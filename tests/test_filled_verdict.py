@@ -4,6 +4,7 @@ Found on the owner's step-stool-2: What is it? said the solid was filled in (61%
 work? read "✓ Holds kid + dad (250 lb), 2 times over: 2x" from a check that ran on that block."""
 
 import os
+import re
 
 import pytest
 
@@ -30,8 +31,10 @@ checks:
   limit: 2.0
   source: assumed
 """
-UNTRUSTED = ('Not trusted yet: the strength check ran on a filled-in shape, not the stool as built. Fix its shape '
-             'first (say "fix its shape to match its pieces").')
+# both causes, as the volume check says them (#64 item 12, #209 review)
+UNTRUSTED = ('Not trusted yet: the strength check ran on a solid with more in it than the stool\'s pieces: its shape '
+             'is filled in, or a piece is missing from its construction. Say "fix the shape of the stool to match its '
+             'pieces" or "add the missing piece to the stool".')     # naming the part: they reach it from anywhere
 
 
 def _checked(tmp_path, monkeypatch, src):
@@ -190,7 +193,8 @@ def test_on_the_design_card_a_filled_in_shape_wins_and_a_fail_stays_a_fail():
     assert line["status"] == "warn" and line["text"].startswith("Not trusted yet"), line
     (line,) = answers.held_to(_goal_state(), {**both, "strength.safety": 1.2})
     assert line["status"] == "bad" and line["text"].startswith("✗ Holds Dad"), line
-    assert line["text"].endswith("It ran on a filled-in shape, so the part as built is likely weaker."), line   # #89
+    assert line["text"].endswith(" It ran on a solid with more in it than its pieces: filled in, the part as built is "
+                                 "likely weaker; or a piece is missing from its construction."), line   # #89, #209
 
 
 def test_on_the_studies_page_a_filled_in_fail_is_still_a_fail():
@@ -201,3 +205,26 @@ def test_on_the_studies_page_a_filled_in_fail_is_still_a_fail():
                                                               "governs": "fea"}]}
     text, ok = studies._headline("load", failed)
     assert ok is False and text.startswith("doesn't hold") and "on a filled-in shape" in text
+
+
+def test_the_shapes_fix_line_names_both_fixes():
+    """#209 review: the volume check names both causes, but the card's fix line offered only "fix its shape to match
+    its pieces", which for undeclared solid legs takes the legs out of the shape."""
+    from caliper import answers
+
+    said = answers.fix_for("construction_volume", "…", "stool")
+    assert '"fix the shape of the stool to match its pieces"' in said and '"add the missing piece to the stool"' in said, said
+
+
+def test_the_fixes_a_card_offers_reach_the_part_with_nothing_selected(tmp_path):
+    """#209 review, round 3: the card said 'add the missing piece', and typed with nothing selected that authored a
+    part named missing_piece. The words a card offers name the part, so the router sends them to it from anywhere."""
+    from caliper import answers, chat, samples
+
+    store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
+    said = answers.untrusted("step_stool", "filled") + " " + answers.fix_for("construction_volume", "…", "step_stool")
+    phrases = re.findall(r'"([^"]+)"', said)
+    assert len(phrases) >= 2, said
+    for phrase in phrases:
+        got = chat.offline_classify(store, phrase, None)
+        assert (got.action, got.part) == ("refine", "step_stool"), (phrase, got)

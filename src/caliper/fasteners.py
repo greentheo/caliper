@@ -20,6 +20,9 @@ import numpy as np
 
 IN = 25.4
 SCREW_EVERY_IN = 6.0
+#: The pilot hole for a #8 wood screw in plywood or softwood: the shop rule of thumb (a hardwood wants 9/64 in).
+#: Plywood splits near an edge without one (CALI-88, #64 item 8).
+PILOT_BIT = "1/8 in"
 GLUE_ML_PER_IN = 0.5
 WOOD = ("plywood", "lumber")
 
