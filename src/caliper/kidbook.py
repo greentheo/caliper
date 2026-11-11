@@ -121,33 +121,66 @@ def order(pcs: list[dict], joints: dict) -> list[tuple[dict, list[str]]]:
     return out
 
 
-def facing(every: list[dict], pictured: set) -> float:
-    """Where to look from: at the side with a picture on it (and the front with it), else the shop book's view."""
+def _middle(every: list[dict]) -> list[float]:
+    pts = [q for p in every for poly, _ in p["polys"] for q in poly]
+    return [sum(q[k] for q in pts) / len(pts) for k in range(3)] if pts else [0.0, 0.0, 0.0]
+
+
+def _out(p: dict, mid: list[float]) -> list[float]:
+    """A panel's outward normal, away from the build's middle."""
     from .release import _normal
 
+    poly = p["polys"][0][0]
+    n = _normal(poly)
+    c = [sum(q[k] for q in poly) / len(poly) for k in range(3)]
+    sign = 1.0 if sum(n[k] * (c[k] - mid[k]) for k in range(3)) >= 0 else -1.0
+    return [sign * v for v in n]
+
+
+def upright(p: dict) -> bool:
+    """A panel standing up (a wall), whose face a view can have its back to: not a top, a floor or a stick."""
+    from .release import _normal
+
+    if p.get("kind") != "sheet" or not p.get("polys"):
+        return False
+    n = _normal(p["polys"][0][0])
+    return math.hypot(n[0], n[1]) > 0.5
+
+
+def faces(every: list[dict], p: dict, cam) -> bool:
+    """Whether a camera looking from ``cam`` (a direction) sees the panel's outer face, not its back through the build."""
+    o = _out(p, _middle(every))
+    return o[0] * cam[0] + o[1] * cam[1] > 0
+
+
+def facing(every: list[dict], pictured: set) -> float:
+    """Where to look from: at the side with a picture on it (and the front with it), else the shop book's view."""
     pts = [q for p in every for poly, _ in p["polys"] for q in poly]
     if not pts or not pictured:
         return 35.0
-    mid = [sum(q[k] for q in pts) / len(pts) for k in range(3)]
-
-    def out(p):                                            # a panel's outward normal, across the floor
-        poly = p["polys"][0][0]
-        n = _normal(poly)
-        c = [sum(q[k] for q in poly) / len(poly) for k in range(3)]
-        sign = 1.0 if sum(n[k] * (c[k] - mid[k]) for k in range(3)) >= 0 else -1.0
-        return [sign * n[0], sign * n[1]]
+    mid = _middle(every)
 
     pic = next((p for p in every if p["name"] in pictured), None)
     if pic is None:
         return 35.0
-    nx, ny = out(pic)
+    nx, ny = _out(pic, mid)[:2]
     centre = math.degrees(math.atan2(ny, nx))
     front = next((p for p in every if "front" in (p["name"] or "").lower() and p["name"] not in pictured), None)
     if front is None:
         return centre - 35.0
-    fx, fy = out(front)
+    fx, fy = _out(front, mid)[:2]
     return max((centre + 40.0, centre - 40.0),
                key=lambda a: math.cos(math.radians(a)) * fx + math.sin(math.radians(a)) * fy)
+
+
+def step_view(every: list[dict], new: dict, view):
+    """The view for the step that adds ``new``: the book's own, unless it has its back to that panel; then one that looks
+    at the panel, toward the front if it can (CALI-92, #70 item 14: "Add the front" drew the front at the back)."""
+    from . import release
+
+    if not upright(new) or faces(every, new, view.cam):
+        return view
+    return release.View(every, azimuth=facing(every, {new["name"]}))
 
 
 def screws_for(mm: float) -> int:
@@ -236,7 +269,7 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
                        f"your safety glasses and ear defenders.")      # short sentences, read aloud (#209 review)
             img = f"kids/step-{len(pages) + 1:02d}.png"
             with open(os.path.join(root, img), "wb") as f:
-                f.write(release.draw(view, [(done, "done"), ([new], "now")]))
+                f.write(release.draw(step_view(every, new, view), [(done, "done"), ([new], "now")]))
             pages.append({"title": f"Add the {words[pc['key']]}" if against else f"Start with the {words[pc['key']]}",
                           "say": say, "img": img, "grownup": bool(n_screws), "screws": n_screws})
             done.append(new)

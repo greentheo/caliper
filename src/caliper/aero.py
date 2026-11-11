@@ -40,6 +40,7 @@ import uuid
 from typing import Callable, Optional
 
 from .design import DesignStore
+from .errors import Refused
 from .runs import newest_first
 
 PARAMS_NAME = "PARAMS"
@@ -122,14 +123,14 @@ def write_params(script: str, values: dict[str, float], keep_float: bool = False
     """
     node = _params_node(ast.parse(script))
     if node is None:
-        raise KeyError(f"the script has no module-level {PARAMS_NAME} dict")
+        raise Refused(f"the script has no module-level {PARAMS_NAME} dict")
     spans = {}
     for k, v in zip(node.keys, node.values):
         if isinstance(k, ast.Constant) and isinstance(k.value, str) and _number(v) is not None:
             spans[k.value] = (v.lineno, v.col_offset, v.end_lineno, v.end_col_offset)
     missing = [name for name in values if name not in spans]
     if missing:
-        raise KeyError(f"{PARAMS_NAME} has no numeric entry for {', '.join(map(repr, missing))}")
+        raise Refused(f"{PARAMS_NAME} has no numeric entry for {', '.join(map(repr, missing))}")
     lines = script.splitlines(keepends=True)
     offsets = [0]
     for line in lines:

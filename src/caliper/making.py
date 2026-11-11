@@ -52,6 +52,48 @@ def _too_big_said(pieces: int, over: list, volume, inches: bool) -> str:
             f"{_len(printing.BED_MARGIN_MM, inches)} clearance: section it differently, in the chat, or use a bigger printer")
 
 
+#: Where a printed group's filament figure came from, said beside it wherever it's given (#70 item 23).
+FROM_SLICER, FROM_ROUGH, FROM_SOLID = "the slicer's estimate", "a rough guess", "by the model's solid"
+
+
+def filament(report: Optional[dict], mk: Optional[dict]) -> Optional[dict]:
+    """One filament figure for a printed group, wherever it's said (CALI-92, #70 item 23: the buy card said 1122 g and the
+    shop panel 726 g for one print). It's the making plan's where the plan has one (the slicer's, or its rough guess
+    where the slicer couldn't), else the model's solid share, and the part's weight goes with it. Each group says which
+    in ``filament_from``. ``report`` is construction.report's and isn't changed: a new one is returned."""
+    printed = ((report or {}).get("bom") or {}).get("printed")
+    if not printed:
+        return report
+    made = {pr["name"]: pr for pr in (mk or {}).get("printed") or [] if pr.get("filament_g") is not None}
+    groups, more_g = [], 0.0
+    for g in printed:
+        pr = made.get(g["name"])
+        if pr is None:
+            waiting = any(x.get("pending") for x in (mk or {}).get("printed") or [] if x["name"] == g["name"])
+            groups.append({**g, "filament_from": FROM_SOLID, **({"filament_pending": True} if waiting else {})})
+            continue
+        more_g += pr["filament_g"] - g["filament_g"]
+        groups.append({**g, "filament_g": pr["filament_g"],
+                       "filament_from": FROM_SLICER if pr.get("trust") == "model" else FROM_ROUGH})
+    out = {**report, "bom": {**report["bom"], "printed": groups}, "filament_more_kg": more_g / 1000}
+    if report.get("mass_kg") is not None and more_g:          # kilograms and pounds on the one figure (#237 review)
+        out["mass_kg"] = round(report["mass_kg"] + more_g / 1000, 2)
+        out["mass_lb"] = round(out["mass_kg"] * C.M.LB_KG, 1)
+    elif report.get("mass_lb") is not None and more_g:      # a report given its pounds alone
+        out["mass_lb"] = round(report["mass_lb"] + more_g / 1000 * C.M.LB_KG, 1)
+    return out
+
+
+def filament_said(reports) -> tuple[str, str]:
+    """``(guess, pending)`` over these reports' printed groups (#237 review): "a guess (…)" where a figure isn't the
+    slicer's, so a weight or cost goal on it is an estimate, never a ✓; "still slicing" where the slicer's at it, so a
+    goal waits rather than reading the solid's figure red. ``("", "")`` where every figure is the slicer's."""
+    groups = [g for r in reports if r for g in ((r.get("bom") or {}).get("printed") or [])]
+    pending = "still slicing" if any(g.get("filament_pending") for g in groups) else ""
+    off = [g.get("filament_from", FROM_SOLID) for g in groups if g.get("filament_from") != FROM_SLICER]
+    return (f"a guess (the filament is {off[0]})" if off else ""), pending
+
+
 def no_print_total(mk: dict) -> str:
     """Why a print total can't be given for this part: a printed piece it can't make isn't in ``printed``, so a sum over that
     would read as the whole (#179 review, rule 6). "" where there's no such piece."""
