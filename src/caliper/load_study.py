@@ -1134,6 +1134,16 @@ def _peak_in(ctx: dict, at: np.ndarray, spacing: float) -> dict:
     return {"in": name, **({"wall_mm": round(float(wall), 2)} if wall is not None else {})}
 
 
+def as_drawn_ceiling(drawn: Optional[dict], governs: str, safety: Optional[float], pl: Optional[dict]):
+    """Rule 6 (#228 review): a carve takes material away, so no step reads stronger than the plywood did as drawn. A step that carves under a
+    held edge loses the plate check and falls back to the FEA, which reads a plywood top high: the as-drawn plate's number across the grain,
+    the one it's judged by, is its ceiling. It's an upper bound, not the step's number (a plate held on three edges is weaker than on four), so
+    the plate is marked ``as_drawn`` and the step reads "no higher than" it. Returns ``(governs, safety, plate)``."""
+    if drawn and safety is not None and safety > drawn["safety_across"]:
+        return "plate", drawn["safety_across"], {**drawn, "as_drawn": True}
+    return governs, safety, pl
+
+
 def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     """One load through the FEA (on ``solid``, the part's voxels unless given) and the plate check.
     Returns ``(case, result)``; the case is the record's entry for it."""
@@ -1171,12 +1181,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
         options.append(("plate", pl["safety_across"]))
     governs, safety = min(((k, s) for k, s in options if s is not None), key=lambda x: x[1],
                           default=("fea", None))
-    drawn = (ctx.get("plate_ceiling") or {}).get(i)
-    if drawn and safety is not None and safety > drawn["safety_across"]:
-        # Rule 6 (#228 review): a carve takes material away, so no step reads stronger than the plywood did as
-        # drawn. A step that carves under a held edge loses the plate check and falls back to the FEA, which reads
-        # a plywood top high: the as-drawn plate number is its ceiling
-        governs, safety, pl = "plate", drawn["safety_across"], {**drawn, "as_drawn": True}
+    governs, safety, pl = as_drawn_ceiling((ctx.get("plate_ceiling") or {}).get(i), governs, safety, pl)
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
                  "holds": bool(safety is not None and safety >= min_safety),  # producer
                  # where it's predicted to break, placed the same way: linear to failure, as wood is

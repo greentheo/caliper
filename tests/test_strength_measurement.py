@@ -355,6 +355,33 @@ def test_a_step_with_a_whole_side_cut_away_reads_no_stronger_than_the_part_as_dr
         assert now["safety"] is not None and now["safety"] <= was["safety"]
 
 
+def test_the_ceiling_is_the_plywoods_number_across_the_grain():
+    # the plate is judged across the grain; a ceiling on the along-grain number would let an FEA between the two through
+    drawn = {"done": True, "safety": 1.2, "safety_across": 0.57, "piece": "top"}
+    governs, safety, pl = load_study.as_drawn_ceiling(drawn, "fea", 0.9, None)
+    assert (governs, safety, pl["as_drawn"]) == ("plate", 0.57, True)
+    assert load_study.as_drawn_ceiling(drawn, "fea", 0.5, None) == ("fea", 0.5, None)       # under it: its own number
+    assert load_study.as_drawn_ceiling(None, "fea", 1.66, None) == ("fea", 1.66, None)      # as drawn: nothing to cap it
+
+
+def test_a_capped_step_reads_no_higher_than_as_drawn_and_isnt_a_pass(mixed, monkeypatch):
+    import trimesh
+    from whittle import LoadStudy
+
+    from caliper import verdicts
+
+    monkeypatch.setattr(LoadStudy, "sweep", lambda self, **kw: SimpleNamespace(
+        stations=[SimpleNamespace(design=d, build=lambda: None) for d in (self.solid.copy(), _notch_under_one_held_edge(self))]))
+    monkeypatch.setattr(carve, "_station_mesh", lambda mesh: trimesh.creation.box())
+    monkeypatch.setattr(carve, "_judge", lambda *a, **k: None)
+    rec = carve.study(mixed, "stool", stations=2, min_safety=0.5)       # under the as-drawn 0.57: the step would pass on its number
+    drawn, notched = rec["stations"]
+    assert not drawn["at_most"] and notched["at_most"] and notched["whole"] == drawn["whole"]
+    assert carve.CAPPED in rec["notes"] and "no higher than" in carve.CAPPED
+    v = verdicts.carve_step(notched, None, rec)
+    assert not v["counts_as_pass"] and v["why"] == verdicts.AT_MOST_WHY
+
+
 def test_a_carves_notes_list_buckling_as_not_checked(mixed, monkeypatch):
     import trimesh
     from whittle import LoadStudy

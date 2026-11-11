@@ -39,8 +39,8 @@ OPEN = ("its carved shape doesn't close up into a solid (it isn't watertight), s
         "use another step, or carve it again")
 
 #: Rule 6 (#228 review): a step that carves away what holds the plywood's edge reads no higher than the part as drawn.
-CAPPED = ("A step that carves away what holds up an edge of the plywood keeps the plywood's number as drawn: taking "
-          "support away can't make it stronger.")
+CAPPED = ("A step that carves away what holds up an edge of the plywood reads no higher than the plywood as drawn: taking "
+          "support away can't make it stronger, and it may make it weaker, which the check can't say.")
 
 
 class NotClosed(ValueError):
@@ -184,14 +184,15 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             removed = 1.0 - printed_voxels / voxels0 if voxels0 else 0.0
             emit("checking", f"step {k}: {removed:.0%} of the printed part carved away",
                  progress=0.7 + 0.3 * k / len(sweep.stations))
-            worst, sides, weak, span = None, None, None, False
+            worst, sides, weak, span, at_most = None, None, None, False, False
             if whole_under is not None:
                 ctx["under"] = station_under(whole_under, ls.grid, st.design & ~wood)
             for i in range(len(ctx["loads"])):
                 case, r = L.check_load(ctx, i, min_safety, solid=st.design)
                 if k == 0 and (case.get("plate") or {}).get("done"):
                     ceiling[i] = case["plate"]                         # as drawn: no carved step reads above it
-                capped = capped or bool((case.get("plate") or {}).get("as_drawn"))
+                at_most = at_most or bool((case.get("plate") or {}).get("as_drawn"))
+                capped = capped or at_most
                 span = span or L.fixed_ends({"min_safety": min_safety}, case)                  # no ✓ on an FEA alone between its holds (CALI-153)
                 if case.get("safety") is not None and (worst is None or case["safety"] < worst):
                     worst, weak = case["safety"], (case.get("plate") or {}).get("piece") if case["governs"] == "plate" \
@@ -216,6 +217,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             out.append({"index": k, "removed": round(removed, 3), "safety": sides, "holds": holds,
                         "whole": worst, "whole_holds": worst is not None and worst >= min_safety, "weakest": weak,  # producer
                         "printed_g": round(grams), "saved_g": round(printed0 - grams), "stl": f, "span": span,
+                        "at_most": at_most,                            # the whole part's number is a ceiling (Rule 6, #228)
                         **({} if fixed is not None else {"closed": False, "why": OPEN})})
             keep({**partial, "stations": out})
             if not holds and k > 0:

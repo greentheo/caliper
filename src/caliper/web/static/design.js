@@ -2783,11 +2783,11 @@ function carveChart(p, run) {
       <text x="24" y="${H - 3}">as drawn</text><text x="${W - 10}" y="${H - 3}" text-anchor="end">${carveShare(run)} carved away →</text></svg>
     <div class="small">${best && best.saved_g ? `The step to use: step <b>${best.index}</b>, ${Math.round(best.removed * 100)}% ${carveShare(run)}
       carved away, <b>${best.saved_g} g</b> less filament, the printed part ${best.safety}x;
-      ${holdsHere(best) ? `the whole part ${best.whole}x`
+      ${holdsHere(best) ? `the whole part ${best.at_most ? 'no higher than ' : ''}${best.whole}x`
         : best.verdict && best.verdict.kind === 'span' ? `<b style="color:var(--amber)">not settled: ${esc(best.verdict.why)}</b>`    // CALI-153
         : best.verdict && (best.verdict.kind === 'unresolved' || best.verdict.kind === 'unchecked')    // #101
           ? `<b style="color:var(--amber)">${esc(best.verdict.word)}: the voxels were too coarse to see its walls, so no step can be said to hold yet</b>`
-        : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a filled-in shape' : `the whole part ${best.whole != null ? best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
+        : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a filled-in shape' : `the whole part ${best.whole != null ? (best.at_most ? 'no higher than ' : '') + best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
       : run.offer ? '' : 'Nothing could come off and still hold.'}
       ${run.offer ? `<div class="${run.offer.kind === 'room' ? 'muted' : 'note-warn'} small" style="margin-top:4px">${esc(run.offer.said)}</div>` : ''}
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
