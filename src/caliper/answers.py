@@ -271,6 +271,8 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
                      f"pushed, then check it again." + older, v["status"], study="load")
     if v["kind"] in ("unresolved", "unchecked"):     # an FEA that can't see the wall is no ✓ (CALI-97)
         return _line(coarse(run, inches) + older, "warn", study="load")
+    if v["kind"] == "span":                          # the FEA alone, between its holds: no ✓ and no number (CALI-153)
+        return _line(f"{c['name'][:1].upper() + c['name'][1:]}: not settled: {v['why']}." + older, "warn", study="load")
     if v["kind"] == "edge":                          # the middle only: no ✓ for where people stand (CALI-94)
         from .consistency import MIDDLE_ONLY
 
@@ -685,6 +687,8 @@ def measured(store: DesignStore, state: dict) -> dict:
         out["strength.uncut"] = True                   # made before the rounding fix (#214 review)
     if any(v["kind"] == "recheck" for _, v in said):
         out["strength.recheck"] = verdicts.UNCUT
+    if any(v["kind"] == "span" for _, v in said):
+        out["strength.span"] = verdicts.SPAN_WHY       # (CALI-153)
     held = [r for r, v in said if v["kind"] in ("unresolved", "unchecked")]
     if held:                                           # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
         out["strength.unresolved"] = coarse(held[0], inches)
@@ -915,7 +919,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
                                 # an old number on its limit, the run's or this goal's own (#214 review)
                                 recheck=(now.get("strength.recheck") or (verdicts.UNCUT if verdicts.goal_on_limit(
                                     bool(now.get("strength.uncut")), c["metric"], v, c.get("limit"), c.get("op", ">="))
-                                    else None)) if strength else None)
+                                    else None)) if strength else None,
+                                span=now.get("strength.span") if strength else None)
         if verdict["kind"] == "estimate":
             out.append(_line(f"! {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}, {guess}.", "warn"))
             continue
@@ -927,7 +932,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
             out.append(_line(f"! {label}{assumed}: {now['strength.edge']}", "warn", study="load",
                              model=rests_on_model(c["metric"])))
             continue
-        if verdict["kind"] == "unresolved":            # no ✓ on an FEA that can't see the wall (CALI-97)
+        if verdict["kind"] in ("unresolved", "span"):  # no ✓ on an FEA that can't see the wall (CALI-97) or the span (CALI-153)
             out.append(_line(f"! {label}{assumed}: {verdict['why']}", "warn",
                              study="load", model=rests_on_model(c["metric"])))
             continue

@@ -60,12 +60,18 @@ def needs_recheck(run: Optional[dict]) -> bool:
     return any(old_on_limit(run, x.get("safety"), need) for x in [*(run.get("cases") or []), *(run.get("stations") or [])])
 
 
+#: Why a part bending between its holds, with the FEA as its only check, isn't settled (CALI-153, #217).
+SPAN_WHY = ("the check holds it fixed where it's held, and a real support may let it turn, so it can read two or three "
+            "times too strong")
+
+
 #: Every kind, best last: (status, the word a badge says, counts as a pass). A new state goes here and in RANK.
 KINDS = {
     "fails": ("bad", "doesn't hold", False),
     "untrusted": ("warn", "not trusted", False),
     "unchecked": ("warn", "not checked", False),
     "unresolved": ("warn", "not resolved", False),
+    "span": ("warn", "not settled", False),           # the FEA alone, on a part bending between its holds (CALI-153)
     "edge": ("warn", "middle only", False),
     "stale": ("warn", "older version", False),
     "recheck": ("warn", "check it again", False),     # made before a rounding fix, on its limit (CALI-152, #214)
@@ -120,6 +126,10 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
         return _make("untrusted", safety, why=filled or run.get("filled"))
     if off:
         return _make("unchecked" if not run.get("finer") else "unresolved", safety)
+    from .load_study import fixed_ends
+
+    if fixed_ends(run, c):
+        return _make("span", safety, why=SPAN_WHY)
     if edge or c.get("middle_only"):
         return _make("edge", safety)
     if stale:
@@ -191,12 +201,13 @@ def summary(s: Optional[dict]) -> dict:
 #: A verdict kind as a scorecard check's status.
 STATUS = {"holds": "pass", "fails": "fail", "untrusted": "untrusted", "unresolved": "unresolved",
           "unchecked": "unresolved", "edge": "edge", "stale": "unknown", "waiting": "unknown", "estimate": "estimate",
-          "close": "pass", "recheck": "unknown"}   # close passes, in amber; an old number on its limit isn't settled
+          "span": "unknown", "close": "pass", "recheck": "unknown"}   # close passes, in amber; an old number on its limit isn't settled
 
 
 def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Optional[str] = None,
          edge: bool = False, stale: bool = False, incomplete: Optional[str] = None,
-         estimate: Optional[str] = None, close: bool = False, recheck: Optional[str] = None) -> dict:
+         estimate: Optional[str] = None, close: bool = False, recheck: Optional[str] = None,
+         span: Optional[str] = None) -> dict:
     """A goal on a metric: ``met`` (None when there's no number). A ✗ stays a ✗ (a fail on a filled-in block is
     certain: the part as built is weaker still); then not trusted, not resolved, middle only, scored before the last
     change, a part left out, a number that's partly a guess (``estimate``, #166: a rough print time runs low, so a ✓
@@ -211,6 +222,8 @@ def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Op
         return _make("untrusted", why=untrusted)
     if unresolved:
         return _make("unresolved", why=unresolved)
+    if span:
+        return _make("span", why=span)
     if edge:
         return _make("edge")
     if stale:
@@ -295,7 +308,7 @@ def carve_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = Non
     part does (``whole_holds``), on a shape that isn't a filled-in block, at voxels that can see its walls (#101),
     and whose part closes up (#124). A fail stays a fail."""
     v = station(st)
-    if v["kind"] == "unchecked":                # its part doesn't close up (#124): said, not a fail
+    if v["kind"] in ("unchecked", "span"):      # its part doesn't close up (#124), or bends between its holds (CALI-153): said, not a fail
         return v
     if not v["counts_as_pass"]:
         return _make("fails", st.get("safety"))
@@ -315,7 +328,7 @@ def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = N
     """A lightening step as a person reads it (#132 review): a thinner sheet's number is an estimate, never "holds";
     on a filled-in block, not trusted; on voxels that can't see the walls, not resolved (#101)."""
     v = station(st)
-    if v["kind"] == "fails":
+    if v["kind"] in ("fails", "span"):
         return v
     if st.get("estimate"):
         return _make("estimate", st.get("safety"))
@@ -339,6 +352,8 @@ def station(st: dict, *, whole: bool = False, run: Optional[dict] = None) -> dic
         return _make("waiting")
     if held and old_on_limit(run, safety, (run or {}).get("min_safety")):   # (#214 review)
         return _make("recheck", safety, why=UNCUT)
+    if held and st.get("span"):                # the FEA alone, between its holds (CALI-153)
+        return _make("span", safety, why=SPAN_WHY)
     if held and coarse(run):
         return _make(coarse(run), safety)
     return _make("holds" if held else "fails", safety)

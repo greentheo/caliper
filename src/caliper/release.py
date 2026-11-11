@@ -870,6 +870,8 @@ def _safety_cell(c: dict) -> tuple[str, str]:
         return "not resolved: too coarse to see its walls", "—"
     if kind == "edge":                               # where people stand wasn't loaded (CALI-94)
         return "checked in the middle only, not at the front edge", "—"
+    if kind == "span":                               # the FEA alone, between its holds (CALI-153)
+        return f"not settled: {verdicts.SPAN_WHY}", "—"
     if kind == "recheck":                            # its reason (#214 review)
         return f"check it again: {verdicts.UNCUT}", "—"
     if kind not in verdicts.SETTLED:                 # any other kind: its word, never a number to build on
