@@ -868,7 +868,7 @@ def mirror_off(g: Geometry, other: Any, plane: Optional[str] = None) -> float:
     flip = np.eye(4)
     flip[k, k], flip[k, 3] = -1.0, 2.0 * at
     m = b.copy()
-    m.apply_transform(flip)
+    m.apply_transform(flip)                        # trimesh winds a reflected mesh outward again itself
     vol = float(abs(a.volume))
     if vol <= 0:
         raise ValueError("the part has no volume to compare")
