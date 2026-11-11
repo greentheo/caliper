@@ -1146,7 +1146,7 @@ function wireClarify() {
   };
 }
 
-// the first build, said as it goes: what it's held to, the part, its strength, its patterns (CALI-59)
+// the first build, said as it goes: its plan, and the part (CALI-157: the checks wait to be asked for)
 const BUILD_STEPS = { plan: 'Planning its parts', build: 'Building it' };
 function elapsedText(s) {
   const t = Math.max(0, Math.round(s));

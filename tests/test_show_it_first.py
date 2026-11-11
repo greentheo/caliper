@@ -5,7 +5,7 @@ import pytest
 from caliper import answers, design_api, firstrun, goals, load_study, patterns, scorecard
 from caliper.design import DesignStore
 
-from .test_carve_click import JS, _fn
+from .test_carve_click import JS
 
 pytest.importorskip("cadquery")
 
@@ -138,5 +138,78 @@ def test_the_steps_the_page_lists_are_the_ones_it_does():
 
 
 def test_the_page_shows_the_part_as_soon_as_its_written():
-    follow = _fn(open(JS).read(), "followBuild")
-    assert "ev.kind === 'wrote'" in follow and "refresh()" in follow.split("ev.kind === 'wrote'")[1][:60]
+    from .test_first_build_progress import _bubble
+
+    got = _bubble("""followBuild('j'); const before = refreshed; running[0].on({kind: 'wrote', text: 'p -> v1'});
+      await new Promise((r) => setTimeout(r, 0)); return [before, refreshed, S.following];""")
+    assert got == [0, 1, "j"]                      # redrawn with the part while the build carries on
+
+
+def test_a_mismatch_the_repair_couldnt_fix_is_said_first(tmp_path, quiet):
+    got = firstrun.build(_store(tmp_path), use_llm=False, author=Author(SHORT, BROKEN))
+    assert got["version"] and got["reply"].startswith("I built it, but its 3D shape and its pieces still don't match after one repair")
+
+
+#: A block filled in, every face of it a declared panel: its surface is all on pieces, only its volume says it's wrong.
+FILLED = '''import cadquery as cq
+
+
+def build(params):
+    return cq.Workplane().box(300, 200, 200, centered=False)
+
+
+def construction(params, build=None):
+    t = 19.05
+    def sheet(name, o):
+        return {"name": name, "kind": "sheet", "material": "plywood", "thickness": t, "outline": o}
+    return [sheet("top", [(0, 0, 200), (300, 0, 200), (300, 200, 200), (0, 200, 200)]),
+            sheet("bottom", [(0, 0, 0), (300, 0, 0), (300, 200, 0), (0, 200, 0)]),
+            sheet("left", [(0, 0, 0), (0, 200, 0), (0, 200, 200), (0, 0, 200)]),
+            sheet("right", [(300, 0, 0), (300, 200, 0), (300, 200, 200), (300, 0, 200)]),
+            sheet("front", [(0, 0, 0), (300, 0, 0), (300, 0, 200), (0, 0, 200)]),
+            sheet("back", [(0, 200, 0), (300, 200, 0), (300, 200, 200), (0, 200, 200)])]
+
+
+def loads(params, build=None):
+    return [{"name": "a foot", "lb": 100, "factor": 2.0, "lo": (100, 50, 198), "hi": (200, 150, 200)}]
+'''
+
+
+def test_a_filled_shape_gets_the_one_repair_too(tmp_path, quiet):
+    from .test_load_study import BOX_STOOL
+
+    author = Author(FILLED, BOX_STOOL)
+    got = firstrun.build(_store(tmp_path), use_llm=False, author=author)
+    assert got["version"] and author.calls == 2
+
+
+def test_goals_ask_claude_with_no_lock_on_the_design(tmp_path, monkeypatch):
+    import os
+    import time
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from caliper import jobs
+
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    s = DesignStore.create("a step stool", base=str(tmp_path))
+    s.write_part("p", BOX, intent="x")
+    slug = os.path.basename(s.root)
+    monkeypatch.setattr(design_api, "RUNNER", jobs.JobRunner())
+    held = []
+
+    def draft(store, said, data, client=None):
+        held.append(design_api.RUNNER.locked(design_api._lock(slug)).locked())
+        return {"checks": [], "objectives": []}
+
+    monkeypatch.setattr(goals, "draft", draft)
+    app = FastAPI()
+    app.include_router(design_api.router())
+    TestClient(app).get(f"/api/designs/{slug}/answers")
+    for _ in range(300):
+        if held:
+            break
+        time.sleep(0.01)
+    assert held == [False]
