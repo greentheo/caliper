@@ -11,15 +11,19 @@ The critical stress of a flat plate in compression (Timoshenko & Gere, *Theory o
 edges, each taken on the safe side:
 
 - the loaded edges (top and bottom) are simply supported, never clamped;
-- an unloaded edge is simply supported where another piece meets it along its length, and free where nothing does;
+- an unloaded edge is simply supported where a piece standing off the wall's plane meets it along its length (a sheet
+  across it, or a stick), and free where nothing does. A sheet in the wall's own plane holds nothing: two butted halves
+  fold together (#235 review);
 - both unloaded edges held: ``k = min over m of (m b/a + a/(m b))²``, 4 for a long plate (Timoshenko eq. 9-7);
 - one held, one free: ``k = 0.425 + (b/a)²`` (Timoshenko §9.4; Bulson);
-- neither held: a wide column pinned at its ends, ``σ_cr = π² E t² / (12 a²)`` (Euler; without 1 − ν², the lower).
+- neither held: nothing stops its top moving sideways either, so it sways: fixed at its foot and free at its top, a
+  cantilever of twice its height, a quarter of Euler's ``π² E t² / (12 a²)`` (:data:`SWAY`; without 1 − ν², the lower).
+  A wall braced at its top by something across it would do better; that isn't looked for, so this errs safe.
 
-``E`` is the panel's stiffness the weaker way (plywood's across its face grain), since which way the grain runs isn't
-known. The whole of the case's factored load is taken on each wall in line with it: the safe side, as the share each
+``E`` is the panel's bending stiffness the weaker way, since which way the grain runs isn't known. For plywood that's
+across its face grain, where the outer plies run the wrong way: :data:`PLY_BENDING_ACROSS` of along. The whole of the case's factored load is taken on each wall in line with it: the safe side, as the share each
 wall carries isn't worked out. A panel this can't describe (not a rectangle, holes in it, loaded at a slant to its
-edges) isn't checked, and says so. NEEDS ENGINEER CHECK (#42): the edge conditions, and E across the grain for plywood.
+edges) isn't checked, and says so. NEEDS ENGINEER CHECK (#42): the edge conditions, the sway, and E across the grain for plywood.
 """
 
 from __future__ import annotations
@@ -35,17 +39,26 @@ NU = 0.3
 SQUARE = 0.1
 #: A sheet carries a load in its own plane when the load is within this of the plane (as :func:`load_study.buckling_notes`).
 IN_PLANE = 0.3
+#: A wall held on neither side sways: a cantilever of twice its height buckles at a quarter of Euler's load (#235 review).
+SWAY = 0.25
+#: Plywood's bending stiffness across its face grain, as a share of along it. The foreman's call until Theo's coupons
+#: measure it (#235 review): ply theory gives about 0.09 for a 3-ply sheet and 0.3 for a 5-ply, and buckling goes by
+#: bending, so the strength ratio (0.5) isn't it; 0.1 is safe for the thin sheets that buckle.
+PLY_BENDING_ACROSS = 0.1
+#: Another sheet's plane this far from square to the wall's (|n·n′|) is standing off it, and can hold an edge.
+OFF_PLANE = 0.5
 
 
 def k_factor(a: float, b: float, held: int) -> float:
     """The buckling coefficient for loaded edges simply supported, and ``held`` (0, 1 or 2) unloaded edges simply supported, the
-    rest free. For ``held == 0`` it's the wide column's, written as a plate's: ``(b/a)² (1 − ν²)``, so σ_cr is Euler's."""
+    rest free. For ``held == 0`` it's the swaying wide column's, written as a plate's: ``SWAY (b/a)² (1 − ν²)``, so σ_cr is a
+    quarter of Euler's."""
     r = a / b
     if held >= 2:
         return min((m / r + r / m) ** 2 for m in range(1, max(2, int(r) + 3)))
     if held == 1:
         return 0.425 + (1 / r) ** 2
-    return (1 / r) ** 2 * (1 - NU ** 2)
+    return SWAY * (1 / r) ** 2 * (1 - NU ** 2)
 
 
 def critical_stress(E: float, t: float, a: float, b: float, held: int) -> float:
@@ -54,14 +67,21 @@ def critical_stress(E: float, t: float, a: float, b: float, held: int) -> float:
 
 
 def weak_E(mat: dict) -> float:
-    """The sheet's stiffness the weaker way: its own across the face grain where it's given, else in the ratio of its strengths."""
-    across = (mat["E_across"] / mat["E"]) if mat.get("E_across") else mat.get("across", 1.0)
+    """The sheet's bending stiffness the weaker way: its own across the face grain where it's given; plywood's (a sheet
+    weaker across its grain) :data:`PLY_BENDING_ACROSS` of along; anything else, the same both ways."""
+    if mat.get("E_across"):
+        across = mat["E_across"] / mat["E"]
+    elif mat.get("key") == "plywood" or float(mat.get("across", 1.0)) < 1.0:
+        across = PLY_BENDING_ACROSS
+    else:
+        across = 1.0
     return float(mat["E"]) * min(float(across), 1.0)
 
 
 def _held(pc: dict, k: int, e: int, pieces: list[dict], tol: float) -> bool:
-    """Whether another piece meets edge ``e`` of the sheet's polygon ``k`` along it: probed beside the edge and just under it,
-    at its quarter points (as :func:`fasteners.joints` probes a joint), all of them touching."""
+    """Whether a piece standing off the sheet's plane meets edge ``e`` of its polygon ``k`` along it: probed beside the edge
+    and just under it, at its quarter points (as :func:`fasteners.joints` probes a joint), all of them touching. A sheet in
+    the same plane (the other half of a butted wall) doesn't count."""
     from .consistency import _frame, segment_distance, slab_distance
 
     poly, side, t = pc["polys"][k], pc["sides"][k], pc["thickness"]
@@ -79,7 +99,8 @@ def _held(pc: dict, k: int, e: int, pieces: list[dict], tol: float) -> bool:
                 continue
             if other["kind"] == "sheet":
                 near = min([near] + [float(slab_distance(probes, op, other["thickness"], os_).min())
-                                     for op, os_ in zip(other["polys"], other["sides"])])
+                                     for op, os_ in zip(other["polys"], other["sides"])
+                                     if abs(float(_frame(op)[3] @ n)) < OFF_PLANE])
             elif "a" in other:
                 near = min(near, float((segment_distance(probes, other["a"], other["b"]) - other.get("half", 0)).min()))
         if near > tol:

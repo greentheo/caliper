@@ -3082,7 +3082,7 @@ function foldedBy(c) {
   const done = (c.buckling || []).filter((r) => r.done);
   const w = done.length ? done.reduce((a, b) => (b.safety < a.safety ? b : a)) : null;
   if (!w) return 'the buckling check';
-  const sides = w.edges_held === 2 ? 'held along both sides' : w.edges_held === 1 ? 'held along one side' : 'free along its sides';
+  const sides = w.edges_held === 2 ? 'held along both sides' : w.edges_held === 1 ? 'held along one side' : 'free along its sides, its top free to sway';
   return `the buckling check on the ${esc(w.piece)}: a plate ${sides}, its whole load on it`;
 }
 

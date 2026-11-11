@@ -209,7 +209,13 @@ def _small_len(mm: float, inches: bool) -> str:
 def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     """What a ✗ adds about where it fails and how sure (#137 item 2), the same words on the part card and the design
     card (#139 review: the design card named the 0.25 mm webs, the part card the 5.2 mm wall at the peak). "" when
-    there's nothing to add."""
+    there's nothing to add. Where the hand buckling check decides it, the wall that folds, never the FEA's peak (#235 review)."""
+    if c.get("governs") == "buckling":
+        rows = [r for r in c.get("buckling") or [] if r.get("done")]
+        if rows:
+            wall = min(rows, key=lambda r: r["safety"])["piece"]
+            return (f" The {wall} folds first: it's too slender for the load running down it (a hand buckling check, "
+                    f"its edges and stiffness taken on the safe side, and the whole load on it).")
     where, thin_here = worst_at(run, c, inches)
     wall = _wall(c["fea"]["wall_mm"], inches) if where else ""
     if v.get("coarse") and thin_here:                # among walls the voxels can't see: the fail may be the model's

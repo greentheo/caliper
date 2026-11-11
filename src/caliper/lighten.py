@@ -339,8 +339,14 @@ def estimate_numbers(raw: float, min_safety: float) -> dict:
 def judged(case: dict, raw: float, min_safety: float, **extra) -> dict:
     """A holed panel's case, judged from its calibrated number: kept cut toward safe and compared as kept (CALI-152,
     #213; #214 review: one place for judge_holed, the lightening's re-judge and a picture's edge)."""
-    safety = V.cut(raw)
-    case.update({"safety": safety, "governs": "fea-calibrated", "holds": safety >= min_safety, **extra,  # producer
+    safety, governs = V.cut(raw), "fea-calibrated"
+    # a hole in the top doesn't stop a wall the load runs down from folding: the hand buckling check's number stands where it's
+    # the lower (CALI-159, #235 review: a 1/4 in wall at 0.39 read 7.14 under a top with a hand hole)
+    folds = min((r["safety"] for r in case.get("buckling") or [] if r.get("done")), default=None)
+    case.pop("over", None)
+    if folds is not None and folds < safety:
+        case["over"], governs, safety = governs, "buckling", folds
+    case.update({"safety": safety, "governs": governs, "holds": safety >= min_safety, **extra,  # producer
                  "breaks_lb": V.cut_lb(case["lb"] * case["factor"] * safety)})
     return case
 
