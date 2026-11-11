@@ -1,0 +1,95 @@
+<title>Coupon Bend Test</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400&family=IBM+Plex+Sans+Condensed:wght@400;600;700&display=swap">
+<style>
+/* A test record: one printed page, ruled and dense, the look of a lab form */
+:root { --paper:#fbfcfa; --ink:#1b211d; --soft:#56605a; --rule:#aab3ad; --tint:#e7ece8; --mark:#b5481f;
+        --body:"IBM Plex Sans Condensed","Arial Narrow",Arial,sans-serif;
+        --num:"IBM Plex Mono",Menlo,Consolas,monospace; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --paper:#171c19; --ink:#e7ece8; --soft:#a4aea8;
+        --rule:#4d5751; --tint:#262d29; --mark:#ef8a5e; color-scheme:dark } }
+:root[data-theme="dark"] { --paper:#171c19; --ink:#e7ece8; --soft:#a4aea8; --rule:#4d5751; --tint:#262d29;
+        --mark:#ef8a5e; color-scheme:dark }
+@page { size: letter portrait; margin: 0.35in; }
+@media print { :root, :root:not([data-theme="light"]), :root[data-theme="dark"] { --paper:#fff; --ink:#000; --soft:#333;
+        --rule:#777; --tint:#eee; --mark:#000; color-scheme:light } .sheet { padding:0 !important; max-width:none !important } }
+* { box-sizing:border-box }
+body { background:var(--paper); color:var(--ink); font:10px/1.24 var(--body); margin:0 }
+.sheet { max-width:7.8in; margin:0 auto; padding-block:12px; padding-left:max(16px,env(safe-area-inset-left,0px));
+         padding-right:max(16px,env(safe-area-inset-right,0px)); display:grid; gap:7px }
+h1 { font-size:19px; line-height:1; margin:0; text-wrap:balance }
+header { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px; border-bottom:2px solid var(--ink); padding-bottom:4px }
+header p { margin:0; color:var(--soft); flex:1 1 300px; min-width:0 }
+h2 { font-size:10px; letter-spacing:.07em; text-transform:uppercase; margin:0 0 2px }
+.top { display:grid; grid-template-columns:minmax(0,1.04fr) minmax(0,1fr); gap:10px }
+.ways { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,2.3in),1fr)); gap:4px 12px }
+ol, ul { margin:0; padding-left:14px; display:grid; gap:1px }
+svg { width:100%; height:auto; display:block; max-width:100% }
+svg text { fill:var(--ink); font:10px var(--body) } svg .s { fill:none; stroke:var(--ink); stroke-width:1.4 }
+svg .t { fill:var(--tint); stroke:var(--ink); stroke-width:1.2 } svg .m { fill:none; stroke:var(--mark); stroke-width:1.2 }
+svg .mt { fill:var(--mark); font-weight:600 }
+.safe { border:1.5px solid var(--mark); padding:3px 6px }
+.safe b { color:var(--mark) }
+.wrap { overflow-x:auto }
+table { border-collapse:collapse; width:100%; font:inherit }
+th, td { border:1px solid var(--rule); padding:1px 3px; text-align:left; vertical-align:top }
+th { background:var(--tint); font-weight:600; font-size:9.5px; line-height:1.1 }
+td.id { white-space:nowrap }
+td.n { font-family:var(--num); font-size:9.5px; white-space:nowrap; font-variant-numeric:tabular-nums }
+.rec td { height:19px }
+.note { color:var(--soft); margin:0 }
+</style>
+<div class="sheet">
+<header><h1>Coupon bend test</h1><p>A strip on two supports, loaded in the middle. Caliper will compare what you read here with what it predicted for the same strip (issue #42).</p></header>
+<div class="top">
+<div><svg viewBox="0 0 330 138" role="img" aria-label="A strip resting on two round supports, a bucket hanging from a strap at the middle, a thread stretched between pins over the supports and a rule at mid-span">
+<circle class="t" cx="46" cy="55" r="7"/><circle class="t" cx="284" cy="55" r="7"/>
+<path class="s" d="M36 62h20l4 22H32zM274 62h20l4 22h-28z"/>
+<rect class="t" x="16" y="38" width="298" height="10"/>
+<rect class="s" x="156" y="33" width="18" height="5"/>
+<path class="s" d="M157 33v28M173 33v28M165 61v8"/>
+<path class="s" d="M151 74h28l-3 34h-22zM151 74c4-11 24-11 28 0"/>
+<text x="165" y="96" text-anchor="middle">load</text>
+<path class="m" d="M46 22v16M284 22v16M46 24H284"/>
+<rect class="t" x="183" y="10" width="7" height="38"/>
+<text class="mt" x="195" y="17">rule: read it at the thread</text>
+<text class="mt" x="52" y="17">thread on pins</text>
+<path class="s" d="M46 118H284M46 113v10M284 113v10"/>
+<text x="165" y="131" text-anchor="middle">span: centre of support to centre of support</text>
+<text x="150" y="66" text-anchor="end">saddle and strap</text>
+<path class="s" d="M6 43h6M9 38v10"/><text x="0" y="33">depth</text>
+</svg></div>
+<div><h2>Each coupon</h2><ol>
+<li>Measure its width and depth at mid-span, and the span. Weigh it if you can.</li>
+<li>Tape or screw two round supports, 1 in pipe or dowel, to two sawhorses so they can't roll. Rest the strip loose on them, so its ends can turn and slide.</li>
+<li>Hang the load from a strap over a 1 in wood saddle at the middle, the table's floor gap above a block or pad. If the load touches down before the strip breaks, the numbers are bad: redo it with more gap.</li>
+<li>Hang the empty hanger, about 5 lb, and zero the sag reading there. The sag steps count what you add above it.</li>
+<li>Go to each of the three load steps. Wait 30 seconds and read the sag. The steps are targets: write what you actually hung.</li>
+<li>Back off to the empty hanger. The reading should come back near zero. If it doesn't, something slipped or crushed: redo it.</li>
+<li>Where the table says to break it, stop reading sag and add load in small steps from the side, at arm's length. Write the most it held, <b>which includes the hanger and strap</b>, and how it broke. If you run out of load, write "held N, didn't break".</li>
+</ol></div>
+</div>
+<div class="safe"><b>Safety.</b> Eye protection, gloves and closed shoes. Brace or weigh the horses so they can't tip when one end kicks. Near the break, no hand or foot under the load, and never lean over the strip. A snapped strip pivots on its supports and the ends whip up: stand beside it, never in line with either end, and keep people and pets out. Every strap, hanger and scale must be rated above the most you'll hang; luggage scales often stop near 110 lb. With a ratchet strap, keep your face out of its line: a stretched strap can throw the scale. Bagged concrete is 60 to 80 lb, so lift it with care. Nobody stands on a coupon.</div>
+<div class="ways">
+<div><h2>Loading: use what you have</h2><ul>
+<li><b>Sand or gravel in buckets</b>, weighed before you hang them. Two part-full buckets are safer than one full one.</li>
+<li><b>Bathroom scale:</b> weigh each bucket on it. Holding a bucket and subtracting yourself is too coarse for 4 and 5 lb steps: use a kitchen or luggage scale there. Or put one support on a board on the scale, note the reading with the strip resting, and as you load take twice the rise. It can't be zeroed with the strip on it, and many digital ones won't follow a slowly rising load, so check yours does first.</li>
+<li><b>Weights or bagged concrete</b> on a hanger board.</li>
+<li><b>Hanging scale and ratchet strap</b> to a floor anchor: the scale reads the load directly.</li>
+</ul></div>
+<div><h2>Reading the sag: from a reference on the supports</h2><ul>
+<li><b>Dial indicator</b> clamped to a straight bar. The bar sits on a small block at each end, on the strip over the supports, taller than the saddle and strap so it clears them. Tip on the strip beside the saddle. Not on a stand on the floor: that counts crush and the horses' flex.</li>
+<li><b>Rule and thread:</b> stretch a thread tight between two pins in the strip, over the supports, standing taller than the saddle and strap so it clears them. Tape a steel rule upright at mid-span, and read it where the thread crosses, at eye level, to 1/64 in or 0.5 mm.</li>
+<li><b>No dial for PETG?</b> A rule can't read 1 mm. Skip the sag and just break it: the most it held is still worth having.</li>
+</ul></div>
+</div>
+<div><h2>Coupons</h2><div class="wrap"><table>
+<tr><th>ID</th><th>What to cut or print</th><th>Span</th><th>Load steps, lb</th><th>Sag at top step</th><th>Read with</th><th>Floor gap</th><th>Break it?</th></tr>
+<tr><td class=id><b>2x4-E</b></td><td>2x4 on edge: 8 ft stud cut to 90 in. Pick a straight one and test it this way first</td><td class=n>84 in</td><td class=n>50 / 100 / 150</td><td class=n>6.8 mm</td><td>rule or dial</td><td class=n>2 in</td><td>no, it takes 425+ lb</td></tr><tr><td class=id><b>2x4-F</b></td><td>2x4 flat: the same stud, turned flat</td><td class=n>84 in</td><td class=n>20 / 40 / 60</td><td class=n>14.7 mm</td><td>rule or dial</td><td class=n>4 in</td><td>yes, at 180+ lb</td></tr><tr><td class=id><b>34-L</b></td><td>3/4 in ply, along: 3 x 34 in strip, face grain along its length</td><td class=n>30 in</td><td class=n>20 / 40 / 60</td><td class=n>7.0 mm</td><td>rule or dial</td><td class=n>2 in</td><td>yes, at 165+ lb</td></tr><tr><td class=id><b>34-X</b></td><td>3/4 in ply, across: 3 x 34 in strip, face grain across it</td><td class=n>30 in</td><td class=n>10 / 20 / 30</td><td class=n>7.0 mm</td><td>rule or dial</td><td class=n>2 in</td><td>yes, at 80+ lb</td></tr><tr><td class=id><b>12-L</b></td><td>1/2 in ply, along: 3 x 28 in strip, face grain along its length</td><td class=n>24 in</td><td class=n>10 / 20 / 30</td><td class=n>6.1 mm</td><td>rule or dial</td><td class=n>2 in</td><td>yes, at 90+ lb</td></tr><tr><td class=id><b>12-X</b></td><td>1/2 in ply, across: 3 x 28 in strip, face grain across it</td><td class=n>24 in</td><td class=n>5 / 10 / 15</td><td class=n>6.1 mm</td><td>rule or dial</td><td class=n>2 in</td><td>yes, at 45+ lb</td></tr><tr><td class=id><b>PG-F</b></td><td>PETG, printed flat: 1 x 1/2 x 8 in bar, the 1 in face on the bed</td><td class=n>6 in</td><td class=n>4 / 8 / 12</td><td class=n>1.0 mm</td><td>dial, or skip sag</td><td class=n>2 in</td><td>yes, at 30+ lb</td></tr><tr><td class=id><b>PG-E</b></td><td>PETG, printed on edge: same bar, the 1/2 in face on the bed</td><td class=n>6 in</td><td class=n>4 / 8 / 12</td><td class=n>1.0 mm</td><td>dial, or skip sag</td><td class=n>2 in</td><td>yes, at 30+ lb</td></tr><tr><td class=id><b>PG-S</b></td><td>PETG, printed standing: same bar, printed upright with a brim: bending pulls its layers apart</td><td class=n>6 in</td><td class=n>4 / 8 / 12</td><td class=n>1.0 mm</td><td>dial, or skip sag</td><td class=n>2 in</td><td>yes, at 30+ lb</td></tr>
+</table></div></div>
+<p class="note"><b>2x4 on edge:</b> a loose block each side at each end keeps it upright without gripping it. <b>PETG:</b> test all three bars on their 1 in face, 1/2 in deep, however they printed. For the 6 in span, clamp two 2x4s flat across two sawhorses far enough apart that their legs clear, about 2 ft, with the 2x4s long enough to reach and 5 in clear between them. Tape a dowel along each inside edge, rest the bar across the dowels, and hang the load down through the gap, between the horses. It has to carry about 100 lb. <b>Sag and break</b> are predictions from the textbook values Caliper uses today, at its default print settings (1.2 mm walls, 20% infill). Real wood often beats them by a lot, and finding out by how much is the point. Most 3/4 ply is 23/32 and most 1/2 ply is 15/32, so expect more sag and a lower break than these; the comparison uses the depth you measure. Three of each kind beats one. PETG may fold instead of snapping. Printed: note layer height, walls, infill and pattern, filament, nozzle temperature. Wood: note knots near the middle, and moisture if you have a meter.</p>
+<div><h2>Record: load in lb, sizes and sag in mm or in (say which). Copy this page for more rows</h2><div class="wrap"><table class="rec">
+<tr><th>ID</th><th>#</th><th>Width</th><th>Depth</th><th>Span</th><th>Load 1</th><th>Sag 1</th><th>Load 2</th><th>Sag 2</th><th>Load 3</th><th>Sag 3</th><th>Back to</th><th>Most it held</th><th>How it broke, and where</th></tr>
+<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+</table></div></div>
+</div>

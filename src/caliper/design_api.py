@@ -15,6 +15,7 @@ import math
 import os
 import re
 import threading
+import time
 from typing import Optional, Union
 
 from pydantic import BaseModel, field_validator
@@ -236,10 +237,19 @@ def _submit_first(slug: str):
         llm.log_to(store)
         if store.design.parts:
             raise ValueError("it's already built: say what to change")
-        return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d), strength=_aero_available(),
-                              cards=lambda s, pid: answers.answers(s, design_state(s), pid))
+        try:
+            return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d), strength=_aero_available(),
+                                  cards=lambda s, pid: answers.answers(s, design_state(s), pid))
+        except Exception as e:          # on the design's record, so a reload or coming back says what happened (#220)
+            from .errors import scrubbed
 
-    job = RUNNER.submit("firstrun", work, label="first build", lock=_lock(slug))
+            built = bool(DesignStore.load(store.root).design.parts)       # a crash after the part exists: no Build it to press
+            store.append_log({"kind": "reply", "action": "build", "ok": False, "error": scrubbed(e),
+                              "reply": f"The build stopped before it finished: {scrubbed(e)}. "
+                                       + ("What it made is here: say what to change." if built else "Press Build it to try again.")})
+            raise
+
+    job = RUNNER.submit("firstrun", work, label="first build", lock=_lock(slug), meta={"slug": slug})
     _FIRST[slug] = job.id
     return job
 
@@ -288,12 +298,13 @@ def _running(slug: str) -> list[dict]:
     what a page draws from on load and on every redraw, so a study isn't lost to a switch, a reload or a redraw (#178)."""
     out = []
     for j in RUNNER.active():
-        if j.meta.get("slug") != slug or j.kind not in ("load", "lighten", "release"):
+        if j.meta.get("slug") != slug or j.kind not in ("load", "lighten", "release", "firstrun"):
             continue
         said = j.since(0)
         words = [ev["text"] for ev in said if ev.get("text") and ev.get("kind") != "started"]
         out.append({"job": j.id, "kind": j.kind, "part": j.meta.get("part"), "text": words[-1] if words else "",
-                    "waiting": bool(said and said[-1].get("kind") == "waiting"), "stopping": j.stopping})
+                    "waiting": bool(said and said[-1].get("kind") == "waiting"), "stopping": j.stopping,
+                    "elapsed_s": round(time.time() - j.started) if j.started else 0})
     return out
 
 

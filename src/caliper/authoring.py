@@ -207,6 +207,7 @@ def improve(
     seed_feedback: Optional[str] = None,
     ref_base: str = ".",
     interfaces=None,
+    on_round: Optional[Callable[[int, int], None]] = None,
 ) -> ImproveResult:
     """Author a part and drive it to green: build errors AND failing measurements both feed back.
 
@@ -240,6 +241,8 @@ def improve(
     best: Optional[tuple] = None  # (geometry, script, report)
 
     for rnd in range(1, max_rounds + 1):
+        if on_round is not None:                     # (round, most rounds): so a long authoring run can say which try it's on
+            on_round(rnd, max_rounds)
         try:
             script = author(spec, feedback, prior)
         except llm.Declined as e:                    # said in words, and not worth asking again the same way

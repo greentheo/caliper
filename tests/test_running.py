@@ -64,7 +64,8 @@ def test_the_design_s_record_says_what_s_running(api):
     began.wait(5)
     time.sleep(0.05)
     (r,) = c.get(f"/api/designs/{slug}").json()["running"]
-    assert r == {"job": jid, "kind": "load", "part": "box", "text": "checking the first load", "waiting": False, "stopping": False}
+    assert r == {"job": jid, "kind": "load", "part": "box", "text": "checking the first load", "waiting": False, "stopping": False,
+                 "elapsed_s": r["elapsed_s"]}                 # how long it's run, for a first build's bubble (CALI-154)
     assert c.get(f"/api/designs/{other}").json()["running"] == []          # the same part id on another design isn't it
     gate.set()
     _wait(jobs.RUNNER.get(jid))
