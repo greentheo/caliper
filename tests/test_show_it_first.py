@@ -150,6 +150,14 @@ def test_a_mismatch_the_repair_couldnt_fix_is_said_first(tmp_path, quiet):
     assert got["version"] and got["reply"].startswith("I built it, but its 3D shape and its pieces still don't match after one repair")
 
 
+def test_the_lead_and_the_cards_say_i_built_it_once(tmp_path, quiet):
+    cards = lambda store, pid: [{"key": "what", "q": "What is it?", "lines": [{"text": "a box", "status": "info"}]}]   # noqa: E731
+    got = firstrun.build(_store(tmp_path), use_llm=False, author=Author(SHORT, BROKEN), cards=cards)
+    assert firstrun.BUILT not in got["reply"] and firstrun.FOUND in got["reply"]   # the lead said it was built
+    fine = firstrun.build(_store(tmp_path / "b"), use_llm=False, author=Author(BOX), cards=cards)
+    assert fine["reply"].startswith(firstrun.BUILT)
+
+
 #: A block filled in, every face of it a declared panel: its surface is all on pieces, only its volume says it's wrong.
 FILLED = '''import cadquery as cq
 
@@ -208,6 +216,39 @@ def test_goals_ask_claude_with_no_lock_on_the_design(tmp_path, monkeypatch):
     app = FastAPI()
     app.include_router(design_api.router())
     TestClient(app).get(f"/api/designs/{slug}/answers")
+    for _ in range(300):
+        if held:
+            break
+        time.sleep(0.01)
+    assert held == [False]
+
+
+def test_goals_from_the_clarify_answers_ask_claude_with_no_lock_on_the_design(tmp_path, monkeypatch):
+    # #231 review 2: the route the page uses to answer questions without building
+    import os
+    import time
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from caliper import clarify, jobs
+
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    s = DesignStore.create("a step stool", base=str(tmp_path))
+    slug = os.path.basename(s.root)
+    monkeypatch.setattr(design_api, "RUNNER", jobs.JobRunner())
+    monkeypatch.setattr(clarify, "answer_round", lambda *a, **k: None)
+    held = []
+
+    def draft(store, said, data, client=None):
+        held.append(design_api.RUNNER.locked(design_api._lock(slug)).locked())
+        return {"checks": [], "objectives": []}
+
+    monkeypatch.setattr(goals, "draft", draft)
+    app = FastAPI()
+    app.include_router(design_api.router())
+    TestClient(app).post(f"/api/designs/{slug}/clarify", json={"answers": {"q1": "about 2 ft"}})
     for _ in range(300):
         if held:
             break
