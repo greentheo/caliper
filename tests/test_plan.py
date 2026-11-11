@@ -134,7 +134,7 @@ def test_a_plan_of_four_parts_is_saved_and_stops_for_review(tmp_path):
         got["reply"]
     plan_call = next(k for k in client.asked if k.get("tools"))
     assert TURBINE_SAID in plan_call["messages"][0]["content"]
-    assert plan_call["tool_choice"] == {"type": "tool", "name": "plan"}
+    assert "tool_choice" not in plan_call                               # Opus 5.5 refuses a forced tool
     # what's on file, read back as the next load reads it
     again = DesignStore.load(store.design.slug, base=str(tmp_path / "designs"))
     assert [p.id for p in again.assembly.parts] == ["rotor", "hub", "mast", "base"]

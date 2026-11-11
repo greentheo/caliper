@@ -666,17 +666,18 @@ def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[
          drop: bool = True) -> Plan:
     """One plan from the planner, validated and classified. A refused plan is asked for once more, with the reason
     (#117: one "=" for "==" threw the camper's whole plan away); refused again, the reason is raised."""
-    from .chat import DEFAULT_MODEL
+    from . import llm
 
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
 
         client = Anthropic()
+    # Opus 5.5 refuses a forced tool: it's asked to, and a reply without one is sent back round below
+    content = f"{content}\n\nAnswer by calling the plan tool."
     ask = content
     for attempt in (1, 2):
-        msg = client.messages.create(model=model or DEFAULT_MODEL, max_tokens=4000, system=SYSTEM, tools=[_tool()],
-                                     tool_choice={"type": "tool", "name": "plan"},
-                                     messages=[{"role": "user", "content": ask}])
+        msg = llm.ask(client, "plan", model=model, system=SYSTEM, tools=[_tool()],
+                      messages=[{"role": "user", "content": ask}])
         got = next((b.input for b in msg.content if getattr(b, "type", None) == "tool_use"), None)
         try:
             if got is None:

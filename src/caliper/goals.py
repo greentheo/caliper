@@ -23,6 +23,7 @@ import os
 import re
 from typing import Optional
 
+from . import llm
 from .design import DesignStore
 
 SOURCES = ("stated", "assumed", "proposed", "confirmed")
@@ -146,14 +147,13 @@ def _valid(c: dict, kind: str) -> Optional[dict]:
 
 def draft(store: DesignStore, said: str, data: dict, *, client=None, model: Optional[str] = None) -> dict:
     """Claude's list of checks and objectives as they should now be."""
-    from .chat import DEFAULT_MODEL
 
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
 
         client = Anthropic()
-    msg = client.messages.create(model=model or DEFAULT_MODEL, max_tokens=1500, system=_SYSTEM,
-                                 messages=[{"role": "user", "content": _context(store, data, said)}])
+    msg = llm.ask(client, "goals", model=model, system=_SYSTEM,
+                  messages=[{"role": "user", "content": _context(store, data, said)}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     m = re.search(r"\{.*\}", text, re.S)
     got = json.loads(m.group(0) if m else text)
@@ -185,6 +185,9 @@ def update(store: DesignStore, said: str, *, use_llm: bool = True, client=None) 
     if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
         try:
             got = draft(store, said, data, client=client)
+        except llm.Stopped as e:
+            llm.tell(store, e, "I've kept its checks to what I could read myself.")
+            got = offline(store, said, data)
         except Exception:  # noqa: BLE001 — the turn landed; the checks wait for the next one
             got = offline(store, said, data)
     else:
