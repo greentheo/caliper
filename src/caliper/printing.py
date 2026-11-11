@@ -71,7 +71,7 @@ def split(mesh, volume) -> list:
     cuts = [lo + (hi - lo) * k / n for k in range(1, n)]
     normal = np.zeros(3)
     normal[axis] = 1.0
-    pieces, rest = [], mesh
+    pieces, rest, pinned_any = [], mesh, False
     for c in cuts:
         origin = np.zeros(3)
         origin[axis] = c
@@ -81,13 +81,21 @@ def split(mesh, volume) -> list:
         if pins is not None:
             from .occt import OCCT
 
+            pinned_any = True
             with OCCT:                                   # manifold3d, one boolean at a time
                 below = below.difference(pins, engine="manifold")
                 above = above.difference(pins, engine="manifold")
         pieces.append(below)
         rest = above
     pieces.append(rest)
+    for p in pieces:
+        p.metadata["pinned"] = pinned_any                # bodies simply apart have no cut, and no pins (#70 item 22)
     return pieces
+
+
+def pinned(parts: list) -> bool:
+    """Whether :func:`split` cut a body and put pin holes across the cut: pieces that were simply apart weren't."""
+    return any(p.metadata.get("pinned") for p in parts)
 
 
 def _pins(mesh, axis: int, at: float):

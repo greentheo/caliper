@@ -136,6 +136,8 @@ def save(slug: str, name: str, base: Optional[str] = None, out: Optional[str] = 
     if os.path.exists(dest):
         old = tempfile.mkdtemp(prefix=".old-", dir=root)
         os.rename(dest, os.path.join(old, name))
+    # two renames, so the sample is missing for an instant: no stdlib call swaps two directories in one step
+    # (renameat2 and renamex_np are platform calls). It's a developer's command, one at a time (#70 item 18)
     os.rename(work, dest)
     if old:
         shutil.rmtree(old, ignore_errors=True)

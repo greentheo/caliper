@@ -182,3 +182,146 @@ def test_a_failed_job_s_yaml_error_drops_its_excerpt_too():
     _wait(j)
     e = next(x for x in errors.recent(5) if x["id"] == j.error_id)
     assert "Emma" not in e["error"] + e["trace"] and "line 1, column" in e["error"]
+
+
+def test_errors_recorded_at_once_are_all_kept(tmp_path, monkeypatch):
+    """CALI-92 (#70 item 12): record() had no lock, and every writer shared one ".tmp": two at once could lose one,
+    or raise. A lock, and a temporary name of each writer's own."""
+    import threading
+
+    monkeypatch.setenv("CALIPER_ERRORS", str(tmp_path / "errors.jsonl"))
+    real_open = open
+    gate = threading.Barrier(8)
+
+    def slow_open(path, *a, **k):                  # every writer reaches its write together
+        if str(path).endswith(".tmp") or ".tmp" in os.path.basename(str(path)):
+            try:
+                gate.wait(timeout=0.5)
+            except threading.BrokenBarrierError:
+                pass
+        return real_open(path, *a, **k)
+
+    monkeypatch.setattr("builtins.open", slow_open)
+    said = []
+    threads = [threading.Thread(target=lambda k=k: said.append(errors.record("a job", f"boom {k}")["id"])) for k in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    monkeypatch.setattr("builtins.open", real_open)
+    kept = {e["id"] for e in errors.recent(50)}
+    assert len(said) == 8 and set(said) <= kept, (said, kept)
+
+
+def test_a_running_jobs_error_is_scrubbed_as_a_report_is(tmp_path, monkeypatch):
+    """CALI-92 (#70 item 18): a job's live error, which the page shows, was str(e): a server's paths, once hosted."""
+    from caliper.jobs import JobRunner
+
+    monkeypatch.setenv("CALIPER_ERRORS", str(tmp_path / "errors.jsonl"))
+    home = os.path.expanduser("~")
+
+    def boom(job):
+        raise ValueError(f"no such file: {home}/designs/garden-bench-for-mum/run.json")
+
+    j = JobRunner().submit("carve", boom)
+    _wait(j)
+    assert j.status == "error" and home not in j.error and "garden-bench" not in j.error, j.error
+    assert j.error.startswith("ValueError: no such file: ~/designs/<design>"), j.error
+
+
+def test_a_failed_chat_turns_reply_is_the_plain_sentence_with_its_id(tmp_path, monkeypatch):
+    """CALI-92 (#70 item 18): the log's reply was the raw "I couldn't do that: {type}: {e}"."""
+    from fastapi.testclient import TestClient
+
+    from caliper import chat, design_api
+    from caliper.design import DesignStore
+    from caliper.jobs import JobRunner
+    from caliper.server import create_app
+
+    monkeypatch.setenv("CALIPER_ERRORS", str(tmp_path / "errors.jsonl"))
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    runner = JobRunner()
+    monkeypatch.setattr(design_api, "RUNNER", runner)
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+
+    def broken(*a, **k):
+        raise ValueError("/Users/someone/secret went wrong")
+
+    monkeypatch.setattr(chat, "turn", broken)
+    slug = os.path.basename(store.root)
+    r = TestClient(create_app()).post(f"/api/designs/{slug}/chat", json={"message": "make it taller"})
+    assert r.status_code == 200, r.text
+    j = runner.get(r.json()["job_id"])
+    _wait(j)
+    reply = [x for x in DesignStore.load(slug).log() if x.get("kind") == "reply"][-1]["reply"]
+    assert reply == errors.plain({"id": j.error_id}) and "secret" not in reply, reply
+    assert len([e for e in errors.recent(50) if e["id"] == j.error_id]) == 1 and len(errors.recent(50)) == 1   # kept once
+
+
+@pytest.mark.parametrize("secret", ["sk-ant-api03-AbCdEf0123456789_xyz-ABCDEFG", "sk-proj-abcdef0123456789abcdef",
+                                    "ghp_abcdefghijklmnopqrstuvwxyz0123456789", "github_pat_11ABCDE0_abcdefghij1234567890",
+                                    "gho_abcdefghijklmnopqrstuvwxyz0123456789", "xoxb-1234567890-abcdefghij",
+                                    "AKIAIOSFODNN7EXAMPLE"])
+def test_a_key_or_token_never_reaches_a_report_or_the_page(secret):
+    """#215 review: errors.scrub covered home folders and design names only: a key in an exception's text went
+    into job.error and the stored report."""
+    said = errors.scrub(f"401 from the API with key {secret} (try again)")
+    assert secret not in said and "<secret>" in said and said.endswith("(try again)"), said
+
+
+def test_a_key_set_in_the_environment_is_scrubbed_whatever_it_looks_like(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "plainlookingvalue123")
+    assert "plainlookingvalue123" not in errors.scrub("sent plainlookingvalue123 to the API")
+
+
+def test_ordinary_words_are_left_alone():
+    text = "ValueError: the task-ant skeleton and sk-8 board don't fit"
+    assert errors.scrub(text) == text
+
+
+KEY = "sk-ant-api03-AbCdEf0123456789_xyz"
+
+
+def test_the_live_event_through_the_jobs_route_carries_no_path_and_no_key(tmp_path, monkeypatch):
+    """#215 review: job.error was scrubbed, but the event beside it carried the raw last line of the trace."""
+    from fastapi.testclient import TestClient
+
+    from caliper import jobs, server
+
+    monkeypatch.setenv("CALIPER_ERRORS", str(tmp_path / "errors.jsonl"))
+    home = os.path.expanduser("~")
+
+    def boom(job):
+        raise ValueError(f"{home}/secret/path.py with {KEY}")
+
+    j = jobs.RUNNER.submit("carve", boom, lock="design:scrub")
+    _wait(j)
+    got = TestClient(server.create_app()).get(f"/api/jobs/{j.id}").json()
+    text = str(got)
+    assert home not in text and KEY not in text and "secret/path.py" in text, text
+    assert [e for e in got["events"] if e["kind"] == "error"][0]["trace"].startswith("ValueError: ~/secret/path.py")
+
+
+def test_a_raw_exception_in_a_first_build_or_a_chat_reply_is_scrubbed(tmp_path, monkeypatch):
+    from caliper import carve, chat, firstrun, goals
+    from caliper.design import DesignStore
+
+    store = DesignStore.create("a stool", base=str(tmp_path))
+    home = os.path.expanduser("~")
+
+    def boom(*a, **k):
+        raise ValueError(f"{home}/x with {KEY}")
+
+    heard = []
+    monkeypatch.setattr(goals, "update", boom)
+    monkeypatch.setattr(firstrun, "_author", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop here")), raising=False)
+    try:
+        firstrun.build(store, emit=lambda k, t="", **d: heard.append(t), strength=False, use_llm=False)
+    except Exception:  # noqa: BLE001 — only what it said before stopping is under test
+        pass
+    told = [t for t in heard if t.startswith("couldn't write down")]
+    assert told and KEY not in told[0] and home not in told[0], heard
+    monkeypatch.setattr(carve, "study", boom)
+    store.write_part("p", "def build(params):\n    return None\n", intent="x")
+    got = chat.carve_part(store, "p")
+    assert KEY not in got.reply and home not in got.reply and KEY not in got.error, got.reply

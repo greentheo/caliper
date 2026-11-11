@@ -19,7 +19,7 @@ from typing import Optional, Union
 
 from pydantic import BaseModel, field_validator
 
-from . import (aero, better, consistency, answers, carve, chat, clarify, construction, cutplan, firstrun, frame_study, goals, grain,
+from . import (aero, better, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
                lighten,
                load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, tree, verdicts)
 from . import whittle_bridge as wb
@@ -656,10 +656,11 @@ def router():
                 res = chat.turn(store, message, scope=req.scope or None, logged=True, pick=req.pick,
                                 on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
             except Exception as e:
-                # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87)
+                # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87): the
+                # 500's plain sentence and the error's id, never its own words (#70 item 18)
                 if not any(x.get("kind") == "reply" for x in store.log()[before:]):
-                    store.append_log({"kind": "reply", "action": "error", "ok": False,
-                                      "reply": f"I couldn't do that: {type(e).__name__}: {e}"})
+                    e._kept = errors.record_exception(errors.job_where("chat"), e)    # the job's own record, once
+                    store.append_log({"kind": "reply", "action": "error", "ok": False, "reply": errors.plain(e._kept)})
                 raise
             return turn_result(res)
 

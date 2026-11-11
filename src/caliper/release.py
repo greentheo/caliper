@@ -45,6 +45,7 @@ from . import tree
 from . import materials as M
 from . import verdicts
 from .design import DesignStore
+from .errors import scrubbed
 from .fasteners import PILOT_BIT
 
 #: The order a part goes together in, by the layers ``construction._layer`` sorts its pieces into.
@@ -476,8 +477,7 @@ def _say_stage(pid: str, layer: str, pcs: list[dict], plan: dict, ctx: dict) -> 
             do.append("Glue and screw them together where they meet, a screw every 6 in along each joint (pilot "
                       "holes first); they're cut to the outside surface, so check each corner square as it goes on.")
         else:
-            do.append("Glue them to the floor's edge and the skeleton with foam-safe adhesive; they're cut to the "
-                      "outside surface, so trim the inside corners to suit as they go on.")
+            do.append(fasten_panels(pcs))
     elif layer == "shell":
         title = "The shell: bands and roof"
         n_bent = sum(1 for p in pcs if len(p["polys"]) > 1)
@@ -710,8 +710,10 @@ def shopping(store: DesignStore, plans: dict, bom: dict, lumps: dict, ctx: dict)
         for row in ls:
             if "plate" in (row.get("label") or ""):
                 continue
+            foam = any(isinstance(it, dict) and it.get("material") in FOAMS   # glue only where foam is glued (#215 review)
+                       for it in C.declared(store, pid).get("construction") or [])
             add("hardware", f"{row['label']}", "allowance", P["hardware_allowance"],
-                "foam-safe adhesive, screws, tape, bolts and fender washers")
+                ("foam-safe adhesive, " if foam else "") + "screws, tape, bolts and fender washers")
     if ctx.get("jacks"):
         rate = ctx.get("jack_rating")
         add("hardware", "trailer stabilizer jack" + (f", rated {rate:.0f} lb or more" if rate else ""),
@@ -772,7 +774,7 @@ def print_pdf(html_path: str, pdf_path: str, timeout: float = 120.0) -> Optional
                             "file://" + os.path.abspath(html_path)],
                            capture_output=True, timeout=timeout)
         except (subprocess.TimeoutExpired, OSError) as e:
-            return f"Chrome couldn't print it: {e}"
+            return f"Chrome couldn't print it: {scrubbed(e)}"
     return None if os.path.exists(pdf_path) and os.path.getsize(pdf_path) > 0 else "Chrome printed nothing"
 
 
@@ -900,6 +902,18 @@ def _headlines(metrics: dict) -> list[tuple[str, str]]:
     return ([("weight.total_lb", "all up, with the payload" if hitched else "all up")]
             + ([("hitch.tongue_lb", "on the tongue")] if hitched else [])
             + [("frame.yield_x", "frame yields at × its load"), ("drag.lbf", "drag at speed")])
+
+
+#: What foam panels want: an ordinary glue's solvent can eat them.
+FOAMS = ("xps", "eps")
+
+
+def fasten_panels(pcs: list) -> str:
+    """How panels that aren't all wood go on: the glue line comes from the material (CALI-92, #70 item 15). Foam
+    needs foam-safe adhesive; for anything else, where the right glue isn't known, none is named."""
+    how = ("Glue them to the floor's edge and the skeleton with foam-safe adhesive" if any(p.get("material") in FOAMS for p in pcs)
+           else "Fasten them to the floor's edge and the skeleton")
+    return how + "; they're cut to the outside surface, so trim the inside corners to suit as they go on."
 
 
 def _promise(store: DesignStore, parts: list) -> str:
@@ -1277,7 +1291,7 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
         kids = None
         kept = errors.record_exception("a build package's kids' book", e)
         kids_error = {"error": kept["error"], "error_id": kept["id"]}
-        emit("error", f"couldn't make the kids' book: {e}")
+        emit("error", f"couldn't make the kids' book: {scrubbed(e)}")
     else:
         kids_error = None
 

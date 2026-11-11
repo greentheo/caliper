@@ -377,10 +377,13 @@ def create_app():
                  for p in asm.parts]
         mates = [{"id": m.id, "between": m.between, "kind": m.kind, "fit": m.fit} for m in asm.mates]
         # CALI-27: one broken part must not sink the assembly — measure what loads, NAME what didn't.
+        from .occt import OCCT
+
         geoms, part_errors = load_parts_tolerant(asm, base_dir=base)
         try:
-            report = evaluate_assembly(asm, base_dir=base, parts=geoms).to_dict()
-            collisions = [[a, b] for a, b, v in measure.pairwise_interference(geoms) if v > 1e-6]
+            with OCCT:                    # OCCT's booleans, one thread at a time (CALI-92, #70 item 11: exit 134)
+                report = evaluate_assembly(asm, base_dir=base, parts=geoms).to_dict()
+                collisions = [[a, b] for a, b, v in measure.pairwise_interference(geoms) if v > 1e-6]
         except Exception as e:  # noqa: BLE001 — evaluation itself failing still shouldn't 500
             report, collisions = {"all_pass": False, "results": [], "error": str(e)}, []
         return {"id": aid, "name": asm.name, "intent": asm.intent, "parts": parts,
@@ -460,8 +463,11 @@ def create_app():
             saved_id = None
         from . import measure
         new_geoms = load_parts(new_asm, base_dir=base)
-        report2 = evaluate_assembly(new_asm, base_dir=base, parts=new_geoms).to_dict()
-        collisions = [[a, b] for a, b, v in measure.pairwise_interference(new_geoms) if v > 1e-6]
+        from .occt import OCCT
+
+        with OCCT:                        # (#70 item 11)
+            report2 = evaluate_assembly(new_asm, base_dir=base, parts=new_geoms).to_dict()
+            collisions = [[a, b] for a, b, v in measure.pairwise_interference(new_geoms) if v > 1e-6]
         return {
             "ok": res.ok, "run_id": run_id, "new_id": req.new_id, "rounds": res.rounds,
             "new_part": {"id": req.new_id, "stl_url": f"/api/runs/{run_id}/part.stl",

@@ -16,6 +16,7 @@ import os
 import platform
 import re
 import sys
+import threading
 import time
 import traceback
 import uuid
@@ -23,6 +24,8 @@ from typing import Optional
 from urllib.parse import quote
 
 KEEP = 50
+#: One writer at a time: two errors at once could lose one, or raise (CALI-92, #70 item 12).
+_MU = threading.Lock()
 #: Where a report goes when you choose to send it: a new issue, filled in, in your own browser.
 ISSUES = "https://github.com/greentheo/caliper/issues/new"
 #: GitHub refuses very long URLs; a report's traceback is cut to fit.
@@ -42,6 +45,11 @@ JOBS = {"chat": "a chat turn", "clarify": "a question about the design", "firstr
 #: A design's folder or address names it, and a design's name is the person's words (its slug comes from them).
 _DESIGN = re.compile(r"designs/[^/\s'\"]+")
 _HOMES = re.compile(r"/(?:Users|home)/[^/\s'\"]+")
+#: API keys and tokens by their shape: a key must never reach a report or the page (#215 review).
+_SECRETS = re.compile(r"\b(?:sk-[A-Za-z0-9_\-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
+                      r"|xox[abprs]-[A-Za-z0-9\-]{10,}|AKIA[0-9A-Z]{16})")
+#: ... and by where they're set, whatever they look like.
+_SECRET_ENV = re.compile(r"KEY|TOKEN|SECRET|PASSWORD", re.I)
 
 
 def job_where(kind: str) -> str:
@@ -51,7 +59,10 @@ def job_where(kind: str) -> str:
 def scrub(text: str) -> str:
     """Your home folder as ``~`` and any design's name as ``<design>``, so a report carries neither your user
     name nor anything you called a design."""
-    text = text or ""
+    text = _SECRETS.sub("<secret>", text or "")
+    for name, value in os.environ.items():
+        if _SECRET_ENV.search(name) and len(value) >= 12:
+            text = text.replace(value, "<secret>")
     custom = os.environ.get("CALIPER_DESIGNS")
     if custom:
         text = re.sub(re.escape(custom.rstrip("/")) + r"/[^/\s'\"]+", "designs/<design>", text)
@@ -62,6 +73,11 @@ def scrub(text: str) -> str:
     return _DESIGN.sub("designs/<design>", text)
 
 
+def scrubbed(e) -> str:
+    """An exception (or its text) as a person or a report may read it (#215 review)."""
+    return scrub(str(e))
+
+
 def record(where: str, error: str, trace: str = "") -> dict:
     """Keep one error. Never raises: a failure to record must not hide the failure itself."""
     e = {"id": uuid.uuid4().hex[:8], "at": time.time(), "where": scrub(where)[:200], "error": scrub(error)[:2000],
@@ -69,11 +85,13 @@ def record(where: str, error: str, trace: str = "") -> dict:
     try:
         p = path()
         os.makedirs(os.path.dirname(p), exist_ok=True)
-        kept = recent(KEEP - 1)
-        with open(p + ".tmp", "w") as f:
-            for x in [*reversed(kept), e]:
-                f.write(json.dumps(x) + "\n")
-        os.replace(p + ".tmp", p)
+        tmp = f"{p}.{uuid.uuid4().hex[:8]}.tmp"          # its own: never another writer's half-written file
+        with _MU:
+            kept = recent(KEEP - 1)
+            with open(tmp, "w") as f:
+                for x in [*reversed(kept), e]:
+                    f.write(json.dumps(x) + "\n")
+            os.replace(tmp, p)
     except OSError:
         pass
     return e
