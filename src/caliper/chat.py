@@ -1139,7 +1139,7 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     for pid, err in part_errors.items():
         if pid != part_id:
             lines.append(f"⚠ {pid} won't build: {scrubbed(err)}")
-    if res.error and res.geometry is not None:     # a round that built is kept, and why it stopped there is said
+    if getattr(res, "error", None) and res.geometry is not None:     # a round that built is kept, and why it stopped there is said
         lines.append(f"{res.error}.")
     return "\n".join(lines)
 
