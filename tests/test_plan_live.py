@@ -175,7 +175,7 @@ def test_a_plan_of_several_parts_says_what_it_dropped(tmp_path):
     plan["parts"].append({"id": "yard_ground", "what": "the ground it's staked into", "role": "fixed"})
     plan["mates"].append({"between": ["base", "yard_ground"], "kind": "touch"})
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
-    got = firstrun.build(store, use_llm=True, client=fake(plan), author=_never, strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(plan), author=_never)
     assert got["plan"] == "review" and "yard_ground" not in P.load(store).ids()
     assert "(The yard ground is what it stands on, not a part.)" in got["reply"], got["reply"]
     from caliper import design_api
@@ -188,7 +188,7 @@ def test_the_stool_plans_one_part_and_its_first_run_doesn_t_stop(tmp_path, monke
     monkeypatch.setattr(chat, "author_part", lambda *a, **k: built.append(a[1]) or chat.TurnResult(
         "author", "no", ok=False, error="stub"))
     store = DesignStore.create(STOOL_SAID, base=str(tmp_path / "designs"))
-    got = firstrun.build(store, use_llm=True, strength=False, client=fake(STOOL))
+    got = firstrun.build(store, use_llm=True, client=fake(STOOL))
     assert built and got.get("plan") is None and store.design.plan is None
     assert got["steps"]["plan"] == "one part (the bathroom floor is what it stands on, not a part)"
 
@@ -199,7 +199,7 @@ def test_one_part_to_build_beside_one_you_have_builds_at_once(tmp_path, monkeypa
     monkeypatch.setattr(chat, "author_part", lambda *a, **k: built.append(a[1]) or chat.TurnResult(
         "author", "no", ok=False, error="stub"))
     store = DesignStore.create("A bracket for my generator (1 in shaft).", base=str(tmp_path / "designs"))
-    got = firstrun.build(store, use_llm=True, strength=False, client=fake({"parts": [
+    got = firstrun.build(store, use_llm=True, client=fake({"parts": [
         {"id": "bracket", "what": "a printed bracket", "made": "printed"},
         {"id": "generator", "what": "the generator you have", "role": "fixed"}]}))
     assert built and got.get("plan") is None and got["steps"]["plan"] == "one part"
@@ -239,7 +239,7 @@ def test_refused_twice_the_bad_rule_is_left_out_and_said_and_the_plan_stands(tmp
     store = DesignStore.create("A camper: a 48 in wide plywood cargo box on a welded frame.",
                                base=str(tmp_path / "designs"))
     client = fake(CAMPER)
-    got = firstrun.build(store, use_llm=True, strength=False, client=client, author=_never)
+    got = firstrun.build(store, use_llm=True, client=client, author=_never)
     assert len(client.plan_calls()) == 2 and got["plan"] == "review"
     assert P.load(store).ids() == ["cargo_box", "frame"] and not P.load(store).rules
     assert "I left out the check 'box_fits' (bbox(cargo_box).dy = box_width):" in got["reply"]
@@ -278,7 +278,7 @@ def test_what_the_person_didn_t_say_is_assumed_and_not_enforced(tmp_path):
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
     store.design.display_units = "in"
     store.save()
-    got = firstrun.build(store, use_llm=True, client=fake(_fixed_ok(TURBINE)), author=_never, strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(_fixed_ok(TURBINE)), author=_never)
     assert got["plan"] == "review"
     plan = P.load(store)
     src = {s.name: s.source for s in plan.skeleton}
@@ -298,7 +298,7 @@ def test_what_the_person_didn_t_say_is_assumed_and_not_enforced(tmp_path):
 
 def test_keeping_an_assumed_check_enforces_it_and_a_revision_keeps_it_kept(tmp_path):
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
-    firstrun.build(store, use_llm=True, client=fake(_fixed_ok(TURBINE)), author=_never, strength=False)
+    firstrun.build(store, use_llm=True, client=fake(_fixed_ok(TURBINE)), author=_never)
     P.keep(store, "rotor_size")                         # reads rotor_d, assumed: keeping the check keeps it too
     assert {s.name: s.source for s in P.load(store).skeleton}["rotor_d"] == "kept"
     P.keep(store, "base_stable")
@@ -328,7 +328,7 @@ def test_keep_from_the_page(tmp_path, monkeypatch):
 
     monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
-    firstrun.build(store, use_llm=True, client=fake(_fixed_ok(TURBINE)), author=_never, strength=False)
+    firstrun.build(store, use_llm=True, client=fake(_fixed_ok(TURBINE)), author=_never)
     app = TestClient(create_app())
     got = app.post(f"/api/designs/{store.design.slug}/plan/checks/base_stable/keep")
     assert got.status_code == 200, got.text

@@ -208,6 +208,7 @@ def improve(
     ref_base: str = ".",
     interfaces=None,
     on_round: Optional[Callable[[int, int], None]] = None,
+    repair_only: Optional[frozenset] = None,
 ) -> ImproveResult:
     """Author a part and drive it to green: build errors AND failing measurements both feed back.
 
@@ -276,6 +277,8 @@ def improve(
 
         summary = _failing_summary(report)
         history.append(("measurement_fail", summary))
+        if repair_only is not None and not {r.id for r in report.results if r.status in ("fail", "error")} & repair_only:
+            break                                    # nothing here is worth another try: told to the person, who can correct it
         sig = _report_signature(report)
         if sig in seen:  # same failures again → the LLM is stuck; stop rather than spin
             break

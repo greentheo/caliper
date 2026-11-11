@@ -74,7 +74,7 @@ def test_a_rule_of_literals_alone_is_dropped_and_said():
 def test_after_the_retry_a_bad_rule_is_dropped_and_said_and_the_plan_stands(tmp_path, bad, why):
     store = DesignStore.create(CAMPER_SAID, base=str(tmp_path / "designs"))
     client = fake(_with(bad))                                  # the same rule both times, as the live run had it
-    got = firstrun.build(store, use_llm=True, client=client, author=_never, strength=False)
+    got = firstrun.build(store, use_llm=True, client=client, author=_never)
     assert len(client.plan_calls()) == 2
     assert got["plan"] == "review", got["steps"]               # the plan stands: two parts, to review
     plan = P.load(store)
@@ -99,7 +99,7 @@ def test_a_plan_level_fault_still_falls_back_to_one_part(tmp_path):
     orig = C.author_part
     C.author_part = lambda *a, **k: built.append(a[1]) or chat.TurnResult("author", "no", ok=False, error="stub")
     try:
-        got = firstrun.build(store, use_llm=True, client=fake(looped), strength=False)
+        got = firstrun.build(store, use_llm=True, client=fake(looped))
     finally:
         C.author_part = orig
     assert built and store.design.plan is None
@@ -155,8 +155,7 @@ def test_a_note_through_the_review_the_saved_plan_the_card_and_keep(tmp_path):
     from caliper import design_api
 
     store = DesignStore.create(CAMPER_SAID, base=str(tmp_path / "designs"))
-    got = firstrun.build(store, use_llm=True, client=fake(_with("tube_size <= receiver")), author=_never,
-                         strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(_with("tube_size <= receiver")), author=_never)
     note = "the frame tube fits the receiver (tube_size <= receiver)"
     assert f"By the numbers: {note}." in got["reply"]
     assert P.load(store).notes == [note]
@@ -174,7 +173,7 @@ def test_an_edit_a_note_contradicts_is_refused_with_it_never_a_silent_drop(tmp_p
     store = DesignStore.create(CAMPER_SAID, base=str(tmp_path / "designs"))
     store.design.display_units = "in"
     store.save()
-    firstrun.build(store, use_llm=True, client=fake(_with("tube_size <= receiver")), author=_never, strength=False)
+    firstrun.build(store, use_llm=True, client=fake(_with("tube_size <= receiver")), author=_never)
     wider = _with("tube_size <= receiver")
     wider["skeleton"][0]["value"] = 3
     client = fake(wider)
@@ -188,7 +187,7 @@ def test_an_edit_a_note_contradicts_is_refused_with_it_never_a_silent_drop(tmp_p
 def test_the_retry_gets_the_hint_and_the_person_doesn_t(tmp_path):
     store = DesignStore.create(CAMPER_SAID, base=str(tmp_path / "designs"))
     client = fake(CAMPER)
-    got = firstrun.build(store, use_llm=True, client=client, author=_never, strength=False)
+    got = firstrun.build(store, use_llm=True, client=client, author=_never)
     retry = client.plan_calls()[1]["messages"][0]["content"]
     assert "(lengths in a check read in mm)" in retry
     assert "lengths in a check" not in got["reply"]
@@ -203,7 +202,7 @@ def test_left_out_is_validate_s_own_and_a_revision_keeps_the_prior_s(tmp_path):
     plan = P.validate(claimed)
     assert plan.left_out == ["the check 'frame_tube_fits_receiver' (25.4 == 25.4): it reads only numbers"]
     store = DesignStore.create(CAMPER_SAID, base=str(tmp_path / "designs"))
-    firstrun.build(store, use_llm=True, client=fake(_with("25.4 == 25.4")), author=_never, strength=False)
+    firstrun.build(store, use_llm=True, client=fake(_with("25.4 == 25.4")), author=_never)
     kept = P.load(store).left_out
     assert kept == plan.left_out
     wider = _with("25.4 == 25.4")

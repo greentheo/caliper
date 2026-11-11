@@ -238,7 +238,7 @@ def _submit_first(slug: str):
         if store.design.parts:
             raise ValueError("it's already built: say what to change")
         try:
-            return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d), strength=_aero_available(),
+            return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d),
                                   cards=lambda s, pid: answers.answers(s, design_state(s), pid))
         except Exception as e:          # on the design's record, so a reload or coming back says what happened (#220)
             from .errors import scrubbed
@@ -667,13 +667,14 @@ def router():
             store = load(slug)
             clarify.answer_round(store, req.answers, skip=req.skip)
         if req.build and not store.design.parts and _claude():
-            first_build(slug)                  # it writes the checks first, then builds against them
+            first_build(slug)                  # it builds and shows the part; what it's held to is written when a card asks (CALI-157)
             return design_state(load(slug))
 
         def checks(j):                  # what it's held to, from the answers (CALI-55), off the request
+            said = "(the answers to the clarifying questions)"
+            got = goals.propose(DesignStore.load(slug), said)        # Claude, with no lock held: nothing waits behind it (CALI-157)
             with RUNNER.locked(_lock(slug)):
-                s = DesignStore.load(slug)
-                return goals.update(s, "(the answers to the clarifying questions)")
+                return goals.apply(DesignStore.load(slug), got)
 
         RUNNER.submit("goals", checks, label=f"checks · {slug}", lock=f"goals:{slug}")
         return design_state(load(slug))
@@ -997,9 +998,10 @@ def router():
                 and not RUNNER.busy(f"goals:{slug}"):
             # what it's held to, from what was said, for a design from before the conversation wrote it (step 2)
             def checks(j):
+                got = goals.propose(DesignStore.load(slug), "(the design's goal and requirements)")   # no lock held while it asks (CALI-157)
                 with RUNNER.locked(_lock(slug)):
                     s = DesignStore.load(slug)
-                    return None if goals.read(s) else goals.update(s, "(the design's goal and requirements)")
+                    return None if goals.read(s) else goals.apply(s, got)
 
             RUNNER.submit("goals", checks, label=f"checks · {slug}", lock=f"goals:{slug}")
         return {"part": part, "cards": answers.answers(store, design_state(store), part)}

@@ -343,8 +343,9 @@ def test_the_first_build_doesnt_make_patterns_from_them(tmp_path):
     from caliper import firstrun
 
     s = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
-    got = firstrun.build(s, use_llm=False, author=lambda spec, feedback, prior: STRIPS, strength=False)
-    assert got["steps"]["patterns"] == consistency.NO_MAKE and not patterns.list_runs(s)
+    # the first build shows the part and stops (CALI-157): no patterns, from pieces that account for it or not
+    got = firstrun.build(s, use_llm=False, author=lambda spec, feedback, prior: STRIPS)
+    assert "patterns" not in got["steps"] and not patterns.list_runs(s)
 
 
 @pytest.mark.parametrize("fn, arg, said", [("patternView", "{not_accounted: 'x'}", "No patterns yet"), ("buildView", "{not_accounted: 'x'}", "No cut plan yet"),

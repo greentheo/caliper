@@ -66,8 +66,7 @@ class Stub:
 
 def _reviewed(tmp_path):
     store = DesignStore.create(SAID, base=str(tmp_path / "designs"))
-    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=Stub(fails={"base", "mast", "hub"}),
-                         strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=Stub(fails={"base", "mast", "hub"}))
     assert got["plan"] == "review" and not store.design.parts
     return store
 
@@ -75,7 +74,7 @@ def _reviewed(tmp_path):
 def test_build_it_builds_the_parts_in_order_and_every_interface_holds(tmp_path):
     store = _reviewed(tmp_path)
     stub = Stub()
-    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=stub, strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=stub)
     assert stub.order() == ["base", "mast", "hub"]                       # mounted-on first; the generator is his
     assert got["ok"] and got["plan"] == "built", got
     assert [p.id for p in store.design.parts if p.version] == ["base", "mast", "hub"]
@@ -94,19 +93,19 @@ def test_build_it_builds_the_parts_in_order_and_every_interface_holds(tmp_path):
     assert store.design.plan["status"] == "built"
 
 
-def test_a_mast_100_mm_short_fails_its_round_naming_the_rule_and_the_retry_fixes_it(tmp_path):
+def test_a_mast_100_mm_short_is_told_not_retried(tmp_path):
+    """CALI-157: a part that builds is shown, and what's wrong with it is for the person to correct."""
     store = _reviewed(tmp_path)
     stub = Stub(short={"mast"})
-    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=stub, strength=False)
-    fed = [f for p, _, f in stub.calls if p == "mast" and f]
-    assert fed and "mast_height" in fed[0] and "abs(bbox(mast).max_z - mast_top_z) <= 1" in fed[0], fed
-    assert got["ok"] and store.evaluate(tolerant=True)[0].all_pass
+    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=stub)
+    assert not [f for p, _, f in stub.calls if p == "mast" and f]             # the designer wasn't sent back
+    assert store.design.part("mast").version and not got["ok"] and "mast_height" in got["reply"], got["reply"]
 
 
 def test_each_designer_sees_the_skeleton_and_what_s_already_built(tmp_path):
     store = _reviewed(tmp_path)
     stub = Stub()
-    firstrun.build(store, use_llm=True, client=fake(TURBINE), author=stub, strength=False)
+    firstrun.build(store, use_llm=True, client=fake(TURBINE), author=stub)
     said = {p: intent for p, intent, _ in stub.calls}
     assert "SKELETON (the numbers the parts share, in mm" in said["base"]
     assert "mast_top_z = 2133.6 mm (7 ft: the mast's top)" in said["base"]
@@ -120,14 +119,14 @@ def test_each_designer_sees_the_skeleton_and_what_s_already_built(tmp_path):
 
 def test_a_part_that_won_t_build_leaves_the_ones_before_it_and_says_which_and_why(tmp_path):
     store = _reviewed(tmp_path)
-    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=Stub(fails={"hub"}), strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=Stub(fails={"hub"}))
     assert not got["ok"] and got["plan"] == "stopped" and got["part"] == "hub"
     assert [p.id for p in store.design.parts if p.version] == ["base", "mast"]
     assert "I couldn't build the hub" in got["reply"] and "the hub won't fit the shaft" in got["reply"]
     assert "Build it again to retry it" in got["reply"]
     # retried, it goes on from the hub: the base and mast aren't designed again
     stub = Stub()
-    again = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=stub, strength=False)
+    again = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=stub)
     assert stub.order() == ["hub"] and again["ok"]
 
 
@@ -178,9 +177,8 @@ def _with_generator_rule(tmp_path):
     plan["rules"] += [{"id": "clear_of_generator", "expr": "min_clearance(hub, generator) >= 5"},
                       {"id": "hub_size", "expr": "bbox(hub).dx <= 100"}]
     store = DesignStore.create(SAID, base=str(tmp_path / "designs"))
-    got = firstrun.build(store, use_llm=True, client=fake(plan), author=Stub(fails={"base", "mast", "hub"}),
-                         strength=False)
-    assert "3 parts to make, up to 4 designer tries each (at most 12)" in got["reply"]      # the cost, before Build
+    got = firstrun.build(store, use_llm=True, client=fake(plan), author=Stub(fails={"base", "mast", "hub"}))
+    assert "3 parts to make, up to 2 designer tries each (at most 6)" in got["reply"]      # the cost, before Build
     P.keep(store, "clear_of_generator")
     return store, plan
 
@@ -188,7 +186,7 @@ def _with_generator_rule(tmp_path):
 def test_a_rule_over_the_part_you_have_asks_for_its_size_and_ok_stays_false(tmp_path):
     store, plan = _with_generator_rule(tmp_path)
     stub = Stub()
-    got = firstrun.build(store, use_llm=True, client=fake(plan), author=stub, strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(plan), author=stub)
     report, _ = store.evaluate(tolerant=True)
     (waits,) = [r for r in report.results if r.id == "clear_of_generator"]
     assert waits.status == "deferred" and waits.detail == "needs the generator's size: say it, or keep it off"
@@ -203,9 +201,9 @@ def test_a_rule_over_a_part_not_built_yet_isn_t_measured_in_the_round(tmp_path):
     plan = json.loads(json.dumps(TURBINE))
     plan["rules"].append({"id": "hub_over_mast", "expr": "bbox(hub).min_z >= bbox(mast).max_z - 1"})
     store = DesignStore.create(SAID, base=str(tmp_path / "designs"))
-    firstrun.build(store, use_llm=True, client=fake(plan), author=Stub(fails={"base", "mast", "hub"}), strength=False)
+    firstrun.build(store, use_llm=True, client=fake(plan), author=Stub(fails={"base", "mast", "hub"}))
     P.keep(store, "hub_over_mast")
-    got = firstrun.build(store, use_llm=True, client=fake(plan), author=Stub(), strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(plan), author=Stub())
     mast = next(ln for ln in got["reply"].splitlines() if ln.startswith("- the mast"))
     assert "hub_over_mast" not in mast and mast.startswith("- the mast: built ✓"), mast
     hub = next(ln for ln in got["reply"].splitlines() if ln.startswith("- the hub"))
@@ -214,7 +212,7 @@ def test_a_rule_over_a_part_not_built_yet_isn_t_measured_in_the_round(tmp_path):
 
 def test_the_stop_says_the_reason_never_a_traceback(tmp_path):
     store = _reviewed(tmp_path)
-    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=Stub(fails={"hub"}), strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=Stub(fails={"hub"}))
     assert got["reply"].startswith("I couldn't build the hub: the hub won't fit the shaft.")
     assert "Traceback" not in got["reply"] and "/" not in got["reply"].split(".")[0]
     assert any("Traceback" in (e.get("error") or "") for e in store.log() if e.get("action") == "failed")
@@ -252,7 +250,7 @@ def test_a_design_whose_measurement_throws_is_not_checked_never_ok(tmp_path, mon
 
     store = _reviewed(tmp_path)
     monkeypatch.setattr(chat, "_measure_design", lambda s: (None, {"<design>": "ValueError: the rotor's mesh broke"}))
-    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=Stub(), strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=Stub())
     assert got["plan"] == "built" and got["ok"] is False
     assert "The design checks: not checked: the rotor's mesh broke." in got["reply"]
     # the log line says what the result says (#135 review nit, CALI-125): it said ok=True here

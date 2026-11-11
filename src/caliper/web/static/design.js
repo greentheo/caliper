@@ -1146,10 +1146,8 @@ function wireClarify() {
   };
 }
 
-// the first build, said as it goes: what it's held to, the part, its strength, its patterns (CALI-59)
-const BUILD_STEPS = { goals: 'Writing down what it has to do', plan: 'Planning its parts', build: 'Building it',
-  strength: 'Checking it holds what it must', patterns: 'Drawing the patterns to cut it out',
-  score: 'Scoring it against what it has to do' };
+// the first build, said as it goes: its plan, and the part (CALI-157: the checks wait to be asked for)
+const BUILD_STEPS = { plan: 'Planning its parts', build: 'Building it' };
 function elapsedText(s) {
   const t = Math.max(0, Math.round(s));
   return t < 60 ? `${t} s` : `${Math.floor(t / 60)} min ${t % 60} s`;
@@ -1203,6 +1201,7 @@ async function followBuild(jobId, ranFor) {
   const tick = setInterval(() => { if (cal.isConnected) paint(); }, 1000);
   try {
     await follow(jobId, (ev) => {
+      if (ev.kind === 'wrote') refresh().catch(() => {});         // on screen as soon as it's written: its reply is still being put together
       if (ev.kind === 'step') return ev.step === 'done' ? null : mark(ev.step, ev.text);
       const li = at && cal.querySelector(`li[data-step="${at}"] .detail`);
       const line = ev.kind === 'authoring' ? authoringWords(ev.round)

@@ -178,20 +178,32 @@ def offline(store: DesignStore, said: str, data: dict) -> dict:
 def update(store: DesignStore, said: str, *, use_llm: bool = True, client=None) -> Optional[dict]:
     """Bring the design's checks up to date with what was just said. Returns what changed
     (``{"added": [...], "changed": [...], "proposed": [...]}``), or None when the file is somebody's own."""
+    return apply(store, propose(store, said, use_llm=use_llm, client=client))
+
+
+def propose(store: DesignStore, said: str, *, use_llm: bool = True, client=None) -> Optional[dict]:
+    """What the checks would be, from what was just said: the slow part (Claude), which writes nothing, so it needs no lock on the
+    design (CALI-157: a correction mustn't wait behind it). None when the file is somebody's own."""
     data = read(store)
     if not ours(data):
         return None
-    before = {c["id"]: c for c in data.get("checks") or []}
     if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
         try:
-            got = draft(store, said, data, client=client)
+            return draft(store, said, data, client=client)
         except llm.Stopped as e:
             llm.tell(store, e, "I've kept its checks to what I could read myself.")
-            got = offline(store, said, data)
+            return offline(store, said, data)
         except Exception:  # noqa: BLE001 — the turn landed; the checks wait for the next one
-            got = offline(store, said, data)
-    else:
-        got = offline(store, said, data)
+            return offline(store, said, data)
+    return offline(store, said, data)
+
+
+def apply(store: DesignStore, got: Optional[dict]) -> Optional[dict]:
+    """:func:`propose`'s checks merged into the design's, as they stand now: quick, under the design's lock."""
+    data = read(store)
+    if got is None or not ours(data):
+        return None
+    before = {c["id"]: c for c in data.get("checks") or []}
     declined = set(data.get("declined") or [])
     checks, metrics = [], set()
     strength = any(c["metric"] == "strength.safety" for c in got["checks"])

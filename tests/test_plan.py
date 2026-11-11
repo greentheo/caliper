@@ -126,7 +126,7 @@ def _never(*a, **k):
 def test_a_plan_of_four_parts_is_saved_and_stops_for_review(tmp_path):
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
     client = fake(TURBINE)
-    got = firstrun.build(store, use_llm=True, client=client, author=_never, strength=False)
+    got = firstrun.build(store, use_llm=True, client=client, author=_never)
     assert got["plan"] == "review" and got["part"] is None and not store.design.parts
     assert got["reply"].startswith(
         "A wind turbine in 4 parts: the rotor (two printed buckets between two plates), the hub, the mast (a 2 in "
@@ -166,13 +166,13 @@ def test_build_it_on_a_reviewed_plan_builds_its_parts_in_order(tmp_path):
     """#3a said "comes next (#3b)" here; #3b builds the parts, mounted-on first (the base), and a part that won't
     build is said by name. (test_build_plan.py builds a whole plan.)"""
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
-    firstrun.build(store, use_llm=True, client=fake(TURBINE), author=_never, strength=False)
+    firstrun.build(store, use_llm=True, client=fake(TURBINE), author=_never)
     asked = []
 
     def broken(spec, feedback, prior):
         asked.append(spec.part)
         return "def build(params):\n    raise ValueError('no base yet')\n"
-    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=broken, strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(TURBINE), author=broken)
     assert set(asked) == {"base"} and got["plan"] == "stopped" and got["part"] == "base"
     assert got["reply"].startswith("I couldn't build the base:") and not store.design.parts
 
@@ -181,7 +181,7 @@ def test_make_the_mast_10_ft_changes_that_number_and_nothing_else(tmp_path):
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
     store.design.display_units = "in"
     store.save()
-    firstrun.build(store, use_llm=True, client=fake(TURBINE), author=_never, strength=False)
+    firstrun.build(store, use_llm=True, client=fake(TURBINE), author=_never)
     before_asm = store.assembly.to_yaml()
     taller = copy.deepcopy(TURBINE)
     taller["skeleton"][0]["value"] = 10
@@ -208,7 +208,7 @@ def test_a_plan_the_planner_gets_wrong_is_refused_and_it_builds_as_one(tmp_path,
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
     monkeypatch.setattr(chat, "author_part", lambda *a, **k: built.append(a) or chat.TurnResult("author", "no", ok=False,
                                                                                                     error="stub"))
-    got = firstrun.build(store, use_llm=True, client=fake(looped), strength=False)
+    got = firstrun.build(store, use_llm=True, client=fake(looped))
     assert built and store.design.plan is None
     assert got["steps"]["plan"].startswith("planning it in several parts didn't work (the parts mount on each other")
 
@@ -218,7 +218,7 @@ def test_the_stool_plans_one_part_and_builds_as_today(tmp_path, monkeypatch):
     monkeypatch.setattr(chat, "author_part", lambda *a, **k: built.append(a[1]) or chat.TurnResult(
         "author", "no", ok=False, error="stub"))
     store = DesignStore.create("A box step stool from 3/4 in plywood.", base=str(tmp_path / "designs"))
-    got = firstrun.build(store, use_llm=True, strength=False, client=fake(
+    got = firstrun.build(store, use_llm=True, client=fake(
         {"parts": [{"id": "step_stool", "what": "a box step stool of plywood panels", "made": "sheet"}]}))
     assert built == ["box_step"]                         # as today: the whole sentence, one part
     assert got["steps"]["plan"] == "one part" and store.design.plan is None
@@ -230,7 +230,7 @@ def test_with_no_key_it_builds_one_part_and_says_planning_needs_claude(tmp_path,
         "author", "no", ok=False, error="stub"))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
-    got = firstrun.build(store, use_llm=True, strength=False)
+    got = firstrun.build(store, use_llm=True)
     assert len(built) == 1 and store.design.plan is None
     assert got["steps"]["plan"] == "planning it in several parts needs Claude: I built it as one"
 

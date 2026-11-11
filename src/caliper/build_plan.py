@@ -45,7 +45,9 @@ def interfaces(store: DesignStore, pid: str, built: dict) -> Callable:
 
 
 #: Designer tries a part gets: the plan's review says the total before Build it (#135 review), and no run exceeds it.
-ROUNDS = 4
+ROUNDS = 2
+#: As a first build (CALI-157): the first try and one repair, and only for what stops the part being shown right.
+REPAIRS = frozenset({"construction_covers", "construction_volume"})
 
 
 def cost(plan) -> str:
@@ -127,7 +129,7 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
         check = interfaces(store, pid, built)
         res = chat.author_part(store, pid, p.what + (f" ({p.made})" if p.made else ""), author=author,
                                client=client, use_llm=use_llm, on_event=forward, promote_feedback=False,
-                               max_rounds=max_rounds, interfaces=check)
+                               max_rounds=max_rounds, interfaces=check, repair_only=REPAIRS)
         if not res.version:
             failed = (pid, plainly(res.error or "it never built"))
             # the whole text (its traceback) goes to the log, never the reply (#135 review)

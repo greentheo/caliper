@@ -2,21 +2,15 @@
 
 A new design used to stop after its questions with "Tell me which part to build first". Then it needed a
 build, a strength requirement, a strength check and the patterns, each asked for in turn, before its cards
-had anything to say: the stool took six messages and a couple of clicks. The first build does them in a
-row, saying each as it goes:
+had anything to say: the stool took six messages and a couple of clicks. The first build now does the minimum, and shows it (CALI-157):
 
-1. **What it's held to:** the checks, from the sentence and the answers (CALI-55).
-2. **Build it:** first the plan (CALI-35, #3a): with Claude, a planner splits the sentence into parts, the numbers
-   they share and the checks between them. A plan of several parts stops here for the person's review; the stool
-   plans as one part and goes on. Then the whole thing as one part, from the sentence and the answers. Its
-   description is then rewritten from what was built (CALI-69).
-3. **Will it work?** Its strength check, when it says what it must hold, at the safety its checks ask for.
-4. **How do I make it?** The patterns, when it has flat sheet pieces.
-5. **Scored:** what it's held to, judged (the cut plans' sheets and offcut too), so no check it was given
-   reads "not checked yet".
+1. **Build it:** first the plan (CALI-35, #3a): with Claude, a planner splits the sentence into parts, the numbers they share and the checks
+   between them. A plan of several parts stops here for the person's review; the stool plans as one part and goes on.
+2. **The part, on screen,** as soon as one script builds: one automatic repair at most, for a script that doesn't build or pieces that don't
+   account for the solid. Anything else that fails is told to the person, so corrections can start.
 
-A step that can't run says why, and the rest go on: the cards then say what's still missing. The reply
-is the four answers, one line each, in words a kid can read.
+Whether it holds, the patterns and the score are there to click when it looks right. The reply is the four answers, one line each, in words a
+kid can read, and the card says "not checked yet" until the check runs.
 """
 
 from __future__ import annotations
@@ -24,7 +18,7 @@ from __future__ import annotations
 import os
 from typing import Callable, Optional
 
-from . import chat, goals, load_study, patterns
+from . import chat, goals, load_study
 from .design import DesignStore
 from .errors import scrubbed
 
@@ -32,8 +26,10 @@ from .errors import scrubbed
 #: Worst first (#132 review): a fail, then a warning, then what holds, so the first reply's two lines never drop a
 #: "not trusted" or "not resolved" under two "Holds…".
 VERDICT_FIRST = ("bad", "warn", "ok", "info")
-#: What the goals are written from, when it's the design's sentence and its answers that say it.
-SAID = "(the design's goal and the answers to its questions)"
+#: A first build's designer tries: the first, and one repair (CALI-157). Only what stops it being shown right is repaired: a script that
+#: doesn't build always is, and these checks: pieces that don't account for the solid. Anything else is told to the person.
+FIRST_ROUNDS = 2
+REPAIRS = frozenset({"construction_covers", "construction_volume"})
 
 
 def first_part(store: DesignStore) -> tuple[str, str]:
@@ -54,25 +50,17 @@ def _min_safety(store: DesignStore) -> float:
 
 
 def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool = True, client=None,
-          author=None, strength: bool = True, cards: Optional[Callable] = None) -> dict:
-    """Build a design that has no parts yet, check it and plan its making. Returns what each step did:
-    ``{"part", "ok", "steps": {goals, build, strength, patterns}, "reply"}``.
+          author=None, cards: Optional[Callable] = None) -> dict:
+    """Build a design that has no parts yet, and show it: the minimum, so corrections can start (CALI-157). Whether it holds, its patterns and
+    its score wait to be asked for. Returns ``{"part", "ok", "steps": {build}, "reply"}``.
 
-    ``emit(kind, text, **data)`` hears each step (a job's emit). ``strength=False`` skips the strength check
-    (whittle isn't installed). ``cards(store, pid)`` gives the part's four cards for the reply.
+    ``emit(kind, text, **data)`` hears each step (a job's emit). ``cards(store, pid)`` gives the part's four cards for the reply.
     """
     emit = emit or (lambda *a, **k: None)
     steps: dict = {}
 
     def forward(ev):
         emit(ev.kind, ev.text, **ev.data)
-
-    emit("step", "Writing down what it has to do", step="goals")
-    try:
-        steps["goals"] = goals.reply(goals.update(store, SAID, use_llm=use_llm, client=client)) or "unchanged"
-    except Exception as e:  # noqa: BLE001 — it builds without them; the cards say nothing's checked
-        steps["goals"] = f"failed: {scrubbed(e)}"
-        emit("error", f"couldn't write down what it has to do: {scrubbed(e)}")
 
     held = _plan(store, steps, emit, use_llm=use_llm, client=client, author=author)
     if held is not None:                       # a plan of several parts: the person reviews it first (CALI-35)
@@ -81,7 +69,7 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
     pid, intent = first_part(store)
     emit("step", "Building it", step="build", part=pid)
     res = chat.author_part(store, pid, intent, author=author, client=client, use_llm=use_llm,
-                           on_event=forward, promote_feedback=False)
+                           on_event=forward, promote_feedback=False, max_rounds=FIRST_ROUNDS, repair_only=REPAIRS)
     steps["build"] = "built" if res.version else f"failed: {res.error}"
     store.append_log({"kind": "firstrun", "action": "built" if res.version else "failed", "part": pid,
                       "version": res.version})
@@ -94,71 +82,13 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
         entry.label = store.design.name
         store.save()
 
-    if _llm(use_llm, client):
-        # what it is, as built: the sentence said what it's for, the script says what it is
-        entry = store.design.part(pid)
-        entry.intent = chat.redescribe(intent, "built from the design's goal and the answers to its questions",
-                                       store.read_script(pid), use_llm=use_llm, client=client)
-        store.save()
-
-    script = store.read_script(pid) if store.is_scripted(pid) else ""
-    if "def loads(" not in script:
-        steps["strength"] = "it doesn't say what it must hold"
-    elif not strength:
-        steps["strength"] = "the strength check isn't installed"
-    else:
-        emit("step", "Checking it holds what it must", step="strength", part=pid)
-        try:
-            run = load_study.study(store, pid, min_safety=_min_safety(store),
-                                   emit=lambda k, t="", **d: emit("strength", t, **d) if t else None)
-            from .answers import ran_safety
-
-            ran = ran_safety(run)                    # never 0x for a load that never reached a support (#140)
-            steps["strength"] = f"{ran}x" if ran is not None else next(
-                (f"not checked: {c['why']}" for c in run.get("cases") or []
-                 if (c.get("fea") or {}).get("supported") is False and c.get("why")), "no verdict")
-        except Exception as e:  # noqa: BLE001 — the card says it's not checked yet, with the button
-            steps["strength"] = f"failed: {scrubbed(e)}"
-            emit("error", f"couldn't check it holds: {scrubbed(e)}")
-
-    from . import consistency
-
-    short = consistency.not_accounted(store, pid)
-    try:
-        flat = not short and bool(patterns.pieces(store, pid))
-    except Exception:  # noqa: BLE001 — no construction() it can read
-        flat = False
-    if flat:
-        emit("step", "Drawing the patterns to cut it out", step="patterns", part=pid)
-        try:
-            rec = patterns.make(store, pid)
-            steps["patterns"] = f"{rec['pages']} pages"
-        except Exception as e:  # noqa: BLE001
-            steps["patterns"] = f"failed: {scrubbed(e)}"
-            emit("error", f"couldn't draw the patterns: {scrubbed(e)}")
-    else:
-        steps["patterns"] = consistency.NO_MAKE if short else "no flat pieces"
-
-    if goals.read(store).get("checks"):
-        emit("step", "Scoring it against what it has to do", step="score", part=pid)
-        try:
-            from . import scorecard
-
-            card = scorecard.compute(store, emit=lambda k, t="", **d: emit("score", t, **d) if t else None)
-            s_ = card["summary"]
-            steps["score"] = f"{s_['pass']} pass, {s_['fail']} fail"
-        except Exception as e:  # noqa: BLE001 — the card offers Score it
-            steps["score"] = f"failed: {scrubbed(e)}"
-            emit("error", f"couldn't score it: {scrubbed(e)}")
-    else:
-        steps["score"] = "nothing to hold it to"
-
     reply = summary(cards(store, pid)) if cards else res.reply
+    short = [r for r in (res.part_report.results if res.part_report is not None else []) if r.id in REPAIRS and not r.passed]
+    if short:                                   # what the one repair couldn't fix comes first, never "I built it" over it
+        reply = ("I built it, but its 3D shape and its pieces still don't match after one repair: the What is it? card says where. "
+                 "Say what to change and I'll revise it.\n\n" + reply.replace(BUILT, FOUND, 1))     # "I built it" said once
     if steps.get("plan", "").startswith("planning"):
         reply += f"\n\n({steps['plan'][0].upper()}{steps['plan'][1:]}.)"
-    if steps.get("strength", "").startswith("failed: "):
-        # said, not hidden behind a "Check it holds" that would fail the same way (CALI-81)
-        reply += f"\n\n⚠ I couldn't check it holds: {steps['strength'][len('failed: '):]}."
     store.append_log({"kind": "reply", "action": "author", "part": pid, "version": res.version,
                       "ok": bool(res.ok), "reply": reply, "firstrun": True})
     emit("step", "Done", step="done", part=pid)
@@ -203,10 +133,14 @@ def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, cli
     return {"part": None, "ok": True, "steps": steps, "reply": reply, "plan": "review"}
 
 
+#: How the summary opens, and how it opens after a lead that already said it was built.
+BUILT, FOUND = "I built it. Here's what I found:", "Here's what I found:"
+
+
 def summary(cards: list[dict]) -> str:
     """The four answers as the reply: each question and its top line or two. Where a card has verdicts
     (will it work, how to make it), a failure comes first, then what holds, then the rest."""
-    lines = ["I built it. Here's what I found:", ""]
+    lines = [BUILT, ""]
     for c in cards:
         said = [ln for ln in c["lines"] if ln["text"]]
         if c["key"] in ("work", "make"):
