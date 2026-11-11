@@ -227,8 +227,12 @@ def named_part(message: str, parts: list[str]) -> Optional[str]:
     return hits[0][1]
 
 
-#: "both sides", "neither slot", "each leg", "all the legs": a word several parts share (#241)
-_GROUP = re.compile(r"\b(?:both|neither|either|each|every|all)\s+(?:of\s+)?(?:the\s+)?([a-z]+)", re.I)
+#: "both sides", "neither slot", "each leg", "all the legs": a word that makes several parts the target (#241)
+#: Words that say where a part is, not what it is: the ids of true siblings differ only by these, or by a number.
+POSITION = {"left", "right", "front", "back", "rear", "top", "bottom", "upper", "lower", "inner", "outer", "middle",
+            "centre", "center", "near", "far", "l", "r", "fl", "fr", "bl", "br", "lh", "rh"}
+_GROUP = re.compile(r"\b(?:both|neither|either|each|every|all)\s+(?:of\s+)?(?:the\s+)?((?:(?:"
+                    + "|".join(sorted(POSITION, key=len, reverse=True)) + r")\s+)*[a-z]+)\b", re.I)
 
 
 def _said_as(pid: str) -> str:
@@ -238,29 +242,94 @@ def _said_as(pid: str) -> str:
     return "(?:" + "|".join([re.escape(pid.lower())] + [r"\s+".join(map(re.escape, o)) for o in orders]) + ")"
 
 
-def named_parts(message: str, parts: list[str]) -> list[str]:
-    """Every part a change names (CALI-163, #241: "make both sides…" went to one side), in the order of ``parts``.
+def _singular(word: str) -> list[str]:
+    """A plural's singulars to try: shelves → shelf, bodies → body, boxes → box, legs → leg."""
+    w = word.lower()
+    out = []
+    if w.endswith("ves"):
+        out += [w[:-3] + "f", w[:-3] + "fe"]
+    if w.endswith("ies"):
+        out.append(w[:-3] + "y")
+    if w.endswith("es"):
+        out.append(w[:-2])
+    if w.endswith("s") and not w.endswith("ss"):
+        out.append(w[:-1])
+    return out
 
-    Several only when the message says several: a word they share ("both sides", "the legs", "neither slot"), or names
-    joined by "and" or a comma ("the stretcher and the left side"). With a shared word, every part it names outright
-    comes too ("…; the stretcher doesn't fit"). Otherwise the one part :func:`named_part` finds: a part named only as a
-    reference ("make the carriage clear the rail") isn't changed."""
+
+def _siblings(stem: str, where: set, parts: list[str]) -> list[str]:
+    """The parts a plural of ``stem`` means: those whose id, with the stem taken out, leaves only position words or
+    numbers (side_left, leg_front_left, shelf_2: not corner_bracket_left, not lid_hinge), narrowed to ``where`` ("front
+    legs" → the two front legs). The part named just ``stem`` counts too."""
+    out = []
+    for pid in parts:
+        tokens = [t for t in pid.lower().split("_") if t]
+        if stem not in tokens:
+            continue
+        rest = set(tokens) - {stem}
+        if all(t in POSITION or t.isdigit() for t in rest) and where <= set(tokens):
+            out.append(pid)
+    return out
+
+
+def _group(text: str, parts: list[str], strong: bool) -> list[str]:
+    """Every part a group word names (``strong``: "both sides", "each leg", "all the shelves"), else every part a bare
+    plural names ("the front legs"), siblings only, narrowed by the position words before it."""
+    found: list[str] = []
+    if strong:
+        for m in _GROUP.finditer(text):
+            words = m.group(1).lower().split()
+            noun = words[-1]
+            where = {w for w in words[:-1] if w in POSITION}
+            for stem in [noun] + _singular(noun):
+                got = _siblings(stem, where, parts)
+                if got:
+                    found += got
+                    break
+        return found
+    words = _words(text)
+    for i, w in enumerate(words):
+        stems = _singular(w) if len(w) > 3 else []
+        if not stems:
+            continue
+        where, j = set(), i - 1
+        while j >= 0 and words[j] in POSITION:
+            where.add(words[j])
+            j -= 1
+        for stem in stems:
+            got = _siblings(stem, where, parts)
+            if got:
+                found += got
+                break
+    return found
+
+
+def named_parts(message: str, parts: list[str]) -> list[str]:
+    """Every part a change is asked of (CALI-163, #241: "make both sides…" went to one side), in the order of ``parts``.
+
+    - A group word makes a group the target: "both sides", "neither slot", "each leg", "all the shelves".
+    - Names joined by "and" or a comma are each the target ("the stretcher and the left side").
+    - A bare plural is the target only when no part is named outright ("make the front legs longer"): beside a named
+      part it's where that part is measured from ("make the top thicker so the legs don't wobble": the top).
+    - Any other part named is a reference, not changed ("…; the stretcher doesn't fit snug": not the stretcher).
+    Several only when the message says several; otherwise the one part :func:`named_part` finds."""
     text = (message or "").lower()
-    words = _words(message)
     direct = [pid for pid in parts if re.search(rf"\b{_said_as(pid)}\b", text)]
     direct = [p for p in direct if not any(o != p and set(p.split("_")) < set(o.split("_")) for o in direct)]
-    stems = {w[:-1] for w in words if w.endswith("s") and len(w) > 3} | {m.group(1).rstrip("s") for m in _GROUP.finditer(text)}
-    grouped = {pid for stem in stems for pid in parts
-               if stem in pid.lower().split("_") and sum(stem in q.lower().split("_") for q in parts) >= 2}
-    if grouped:
-        return [pid for pid in parts if pid in grouped or pid in direct]
     joined = set()
     for a in direct:
         for b in direct:
             if a != b and re.search(rf"{_said_as(a)}\s*(?:,|\band\b|&)\s*(?:the\s+)?{_said_as(b)}", text):
                 joined |= {a, b}
+    strong = set(_group(text, parts, strong=True))
+    if strong:
+        return [pid for pid in parts if pid in strong or pid in joined]
     if len(joined) >= 2:
         return [pid for pid in parts if pid in joined]
+    if not direct:
+        weak = set(_group(text, parts, strong=False))
+        if weak:
+            return [pid for pid in parts if pid in weak]
     one = named_part(message, parts)
     return [one] if one else []
 
@@ -622,11 +691,12 @@ def _features_of(store: DesignStore, part_id: str) -> Optional[dict]:
 def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, client=None,
                 max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
                 use_llm: bool = True, drafter=None, promote_feedback: bool = True, measured: str = "",
-                pick: Optional[dict] = None, focus: str = "", keep_same: bool = True) -> TurnResult:
+                pick: Optional[dict] = None, focus: str = "", keep_same: bool = True, of: str = "") -> TurnResult:
     """Revise a part **that lives inside a design** and re-measure the whole thing.
 
     ``focus`` is said to the designer only, after the request (#241: which of the parts it names this revision is
-    for). ``keep_same=False``: a revision that hands the script back as it was writes no version, and says so.
+    for). ``keep_same=False``: a revision that moves no number and doesn't change the shape's volume (a comment-only
+    edit, say) writes no version, and says so. ``of`` follows the part's name as it's said ("2 of 2").
 
     The gap CALI-29 exists to close. Everything here is plumbing around one existing call —
     :func:`~caliper.authoring.refine_authored` — except the two things that make it safe: the revision
@@ -661,7 +731,7 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     prior = script                                 # what the request changes, as it was (CALI-107)
     was = _volume(store, part_id)
 
-    _emit(events, on_event, "authoring", f"revising {part_id}…", part=part_id)
+    _emit(events, on_event, "authoring", f"revising {part_id}{f' ({of})' if of else ''}…", part=part_id)
     # ``measured`` is true of this version: to the designer's first round only, never into the part's record (#158)
     tries: list = []
     res = None
@@ -690,9 +760,9 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
 
     uncarved = carve.carved(store.read_script(part_id))   # a carve fits the shape it was carved from (CALI-82)
     script = carve.uncarve(res.script)[0]
-    if not keep_same and script == carve.uncarve(prior)[0]:   # nothing to write: said, never a version that's the same (#241)
+    if not keep_same and _same(prior, script, was, res.geometry):   # nothing to write: said, never a version (#241)
         return TurnResult(action="refine", ok=False, part=part_id, events=events, error="unchanged",
-                          reply=f"The revision left **{part_id}** as it was.")
+                          reply=f"The revision moved no number in **{part_id}** and didn't change its shape.")
     from .authoring import params_from_spec
 
     version = store.write_part(part_id, script, feedback=message, action="refine",
@@ -730,6 +800,20 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     return TurnResult(action="refine", ok=bool(res.ok) and not broke and on_pick not in (False, "partial"), part=part_id, version=version,
                       part_report=res.report, report=after, broke=broke, fixed=fixed,
                       part_errors=part_errors, proposal=proposal, events=events, reply=reply)
+
+
+def _same(prior: str, new: str, was, geometry) -> bool:
+    """Whether a revision changed nothing that can be seen (#242 review, rule 6): no number in its PARAMS moved and its
+    volume is the same. A comment-only edit is the same; so is one whose shape didn't change at all."""
+    from . import carve, fallbacks
+
+    if fallbacks.changed(carve.uncarve(prior or "")[0], new or ""):
+        return False
+    try:
+        now = float(abs(geometry.require_mesh().volume))
+    except Exception:  # noqa: BLE001 — a volume that can't be read can't show a change
+        return was is None
+    return was is not None and abs(now - was) <= 1e-6 * max(was, 1.0)
 
 
 def _offer_promotion(store: DesignStore, part_id: str, feedback: str, *, use_llm: bool,
@@ -1243,30 +1327,51 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     return "\n".join(lines)
 
 
-_MIRROR = re.compile(r"\bmirror(?:s|ed|ing)?\b|\bmirror[- ]image\b|\bsymmetric", re.I)
+#: Asking for one part to be another's mirror or copy, in Theo's words too: "make both sides the right side" (#242 review)
+_MIRROR = re.compile(r"\bmirror(?:s|ed|ing)?\b|\bsymmetric|\b(?:the\s+)?same\s+as\b|\bmatch(?:es|ing)?\b|"
+                     r"\blike\s+the\s+other\b|\buse\s+(?:the\s+)?(?:\w+\s+){1,2}for\s+(?:both|all|each)\b|"
+                     r"\b(?:both|all|each)\s+(?:of\s+)?(?:the\s+)?\w+\s+the\s+(?:left|right|front|back|other|first|second)\b",
+                     re.I)
 
 
 def _listed(xs: list[str]) -> str:
     return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
 
 
-def refine_several(store: DesignStore, parts: list[str], message: str, **kw) -> TurnResult:
+def refine_several(store: DesignStore, parts: list[str], message: str, *, scope: Optional[str] = None,
+                   pick: Optional[dict] = None, **kw) -> TurnResult:
     """An edit that names several parts changes each (CALI-163, #241), in plan order, each built and checked before the
     next, and the reply says first what changed and what didn't: a tick only when every part named changed (rule 6:
-    "✓ revised side_left" over a request that named both sides read greener than it was)."""
+    "✓ revised side_left" over a request that named both sides read greener than it was).
+
+    Each designer is told which part its revision is for, and what the parts before it became (#242 review: a size
+    they share can follow). The count is said up front, and "2 of 3" as each starts. A pick goes with the part it was
+    made on, the selected one."""
+    from . import fallbacks
+
     events = kw.pop("events", None)
     events = events if events is not None else []
-    done, left, results = [], [], []
-    for pid in parts:
+    on_event = kw.get("on_event")
+    _emit(events, on_event, "authoring", f"revising {len(parts)} parts: {', '.join(parts)}", parts=list(parts))
+    done, left, results, became = [], [], [], []
+    for n, pid in enumerate(parts, 1):
         others = [p for p in parts if p != pid]
         focus = (f"This request names {_listed(parts)}. This revision is to {pid} only: {_listed(others)} "
                  f"{'is' if len(others) == 1 else 'are'} revised on {'its' if len(others) == 1 else 'their'} own.")
-        r = refine_part(store, pid, message, events=events, focus=focus, keep_same=False, **kw)
+        if became:
+            focus += " Already revised for it: " + "; ".join(became) + "."
+        prior = store.read_script(pid) if store.is_scripted(pid) else ""
+        r = refine_part(store, pid, message, events=events, focus=focus, keep_same=False, of=f"{n} of {len(parts)}",
+                        pick=pick if pid == scope else None, **kw)
         results.append(r)
-        if r.version is not None:                  # it wrote a version: changed (one handed back as it was writes none)
+        if r.version is not None:                  # it wrote a version: a number or its shape moved (_same)
             done.append(pid)
+            moved = fallbacks.changed(prior, store.read_script(pid))
+            became.append(f"{pid} " + (", ".join(f"{k} {a:g} → {b:g}" if isinstance(a, (int, float)) and
+                                                 isinstance(b, (int, float)) else f"{k} {a!r} → {b!r}"
+                                                 for k, a, b in moved) if moved else "changed in how it's built"))
         else:
-            why = ("the revision left it as it was" if r.error == "unchanged"
+            why = ("no number moved and its shape didn't change" if r.error == "unchanged"
                    else f"it wouldn't build ({scrubbed(r.error)})" if r.error else "it wasn't revised")
             left.append((pid, why))
     mirror = bool(_MIRROR.search(message or ""))
@@ -1609,9 +1714,9 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         awaiting.park(store, "repeat", part=intent.part, message=message, pick=pick)
         result = TurnResult(action="ask", ok=True, part=intent.part, events=events, reply=again)
     elif several:                                  # each part the request names (#241)
-        result = refine_several(store, intent.parts, message, author=author, client=client, max_rounds=max_rounds,
-                                events=events, on_event=on_event, use_llm=use_llm, drafter=drafter,
-                                promote_feedback=promote_feedback)
+        result = refine_several(store, intent.parts, message, scope=scope, pick=pick, author=author, client=client,
+                                max_rounds=max_rounds, events=events, on_event=on_event, use_llm=use_llm,
+                                drafter=drafter, promote_feedback=promote_feedback)
     elif intent.action == "refine" and intent.part:
         result = refine_part(store, intent.part, message, author=author, client=client, pick=pick,
                              max_rounds=max_rounds, events=events, on_event=on_event,

@@ -12,3 +12,18 @@ Theo's step-stool-4 message ("make both sides the right side; the stretcher does
 - **"Still measures green" says what was measured:** "The design's checks pass (touch, no overlap); whether a part fits snug in its pocket isn't measured." That stays until #240's `fits_in`.
 
 **Tests:** 15 in `test_several_parts.py`, all stubbed. Two existing tests pinned the old green line and are updated. 140 targeted routing and turn tests pass. Mutants wait until Theo's live session on 8011 is done.
+
+**Rework from the review (the foreman's six):**
+1. **A part named as a reference stays out.** Offline now does what the router prompt says.
+   - A group word ("both", "neither", "each", "every", "all") brings in only the parts it groups, and names join only by "and" or a comma.
+   - A bare plural is the target only when no part is named outright.
+   - Theo's message now gives side_left and side_right, not the stretcher. "Make the top thicker so the legs don't wobble" and "the top overhang the sides" give the top alone.
+2. **Plurals group only true siblings.** These are ids that leave only position words or numbers once the stem is out (side_left, leg_front_left and shelf_2 qualify; corner_bracket_left and lid_hinge don't). A position word beside the plural narrows the group ("front legs" gives the two front legs), and -ves and -ies are made singular ("shelves").
+3. **Rule 6:**
+   - Theo's own wording counts as a mirror request: "both sides the right side", "use the left side for both sides", "the same as", "match", "like the other". It gets the not-yet-possible line (#239) and no ✓. This applies on the several-parts path only, since "make the hole match the bolt" on one part isn't a mirror.
+   - A part counts as changed only when a number in its PARAMS moved or its volume changed. A comment-only edit writes no version and reads "not changed: no number moved and its shape didn't change".
+4. **The second designer is told what the first part became:** "Already revised for it: side_left h 10 → 60."
+5. **The count is said up front** ("revising 2 parts: side_left, side_right"), then "(1 of 2)", "(2 of 2)" as each starts.
+6. **The pick is kept.** It goes with the part it was made on, the selected one.
+
+36 tests in the file, all stubbed. All 18 mutants are caught (routing, siblings, positions, the tick, "changed", the focus, the count, the pick, the mirror wording); 161 targeted routing and turn tests pass.

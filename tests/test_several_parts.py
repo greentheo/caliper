@@ -34,7 +34,7 @@ def stool(tmp_path):
 @pytest.mark.parametrize("message,want", [
     ("make both sides 2 in taller", ["side_left", "side_right"]),
     ("neither side is tall enough: make them 2 in taller", ["side_left", "side_right"]),
-    (THEO, ["side_left", "side_right", "stretcher"]),
+    (THEO, ["side_left", "side_right"]),                     # the stretcher is what they're sized off, not a change
     ("make the stretcher and the left side thicker", ["side_left", "stretcher"]),
 ])
 def test_a_message_that_names_several_parts_routes_to_each(stool, message, want):
@@ -55,9 +55,9 @@ def test_one_part_named_still_routes_as_before(stool):
 
 
 def test_claude_s_routing_returns_every_part_it_names(stool):
-    client = _StubClient('{"action": "refine", "part": "side_left", "parts": ["side_left", "side_right", "stretcher"]}')
+    client = _StubClient('{"action": "refine", "part": "side_left", "parts": ["side_left", "side_right"]}')
     got = chat.llm_classify(stool, THEO, client=client)
-    assert got.parts == ["side_left", "side_right", "stretcher"] and got.part == "side_left"
+    assert got.parts == ["side_left", "side_right"] and got.part == "side_left"
     seen = []
     create = client.create
     client.create = lambda **kw: seen.append(kw) or create(**kw)
@@ -136,3 +136,106 @@ def test_no_tick_over_a_change_that_broke_a_check(stool):
     res = chat.turn(stool, "make both sides taller", use_llm=False, author=_by_part(stool, into))
     assert res.reply.splitlines()[0] == "! Changed side_left and side_right." and not res.ok
     assert "stretcher_misses_right" in res.broke
+
+
+@pytest.mark.parametrize("message", ["make the stretcher clear the left side by 2 mm", "move the stretcher up to the right side"])
+def test_a_part_named_only_as_a_reference_isn_t_changed(stool, message):
+    """Two names, no shared word and no "and" between them: one part is changed, the other is where it's measured from."""
+    assert len(chat.offline_classify(stool, message).parts) == 1
+
+
+# --- #242 review --------------------------------------------------------------------------------------------------------
+LEGS = ["top", "leg_front_left", "leg_front_right", "leg_back_left", "leg_back_right"]
+
+
+@pytest.mark.parametrize("parts,message,want", [
+    (LEGS, "make the top thicker so the legs don't wobble", ["top"]),
+    (["side_left", "side_right", "top"], "thicken the top; it flexes between the sides", ["top"]),
+    (["side_left", "side_right", "top"], "make the top overhang the sides by 1 in", ["top"]),
+    (["top", "apron_front", "apron_back"], "both aprons need a groove for the top's buttons", ["apron_front", "apron_back"]),
+])
+def test_a_part_named_as_a_reference_stays_out(parts, message, want):
+    """Item 1: a shared word brings in only the parts it groups; a part named beside it is where it's measured from."""
+    assert chat.named_parts(message, parts) == want
+
+
+@pytest.mark.parametrize("parts,message,want", [
+    (LEGS, "make the front legs longer", ["leg_front_left", "leg_front_right"]),
+    (LEGS, "make both front legs longer", ["leg_front_left", "leg_front_right"]),
+    (LEGS, "it rocks on the left legs", ["leg_front_left", "leg_back_left"]),
+    (LEGS, "all the legs 2 in longer", LEGS[1:]),
+    (["top", "corner_bracket_left", "corner_bracket_right"], "round the corners", []),
+    (["top", "corner_bracket_left", "corner_bracket_right"], "round the corners of the top", ["top"]),
+    (["lid", "lid_hinge"], "make the lids thicker", ["lid"]),
+    (["shelf_1", "shelf_2", "shelf_3"], "make the shelves deeper", ["shelf_1", "shelf_2", "shelf_3"]),
+])
+def test_a_plural_groups_only_true_siblings(parts, message, want):
+    """Item 2: ids that leave only position words or numbers once the stem is out; a position word narrows them."""
+    assert chat.named_parts(message, parts) == want
+
+
+TALLER = {"side_left": _box(dx=20, dy=300, x=0).replace("10)", "60)"),
+          "side_right": _box(dx=20, dy=300, x=300).replace("10)", "60)")}
+
+
+@pytest.mark.parametrize("message", ["make both sides the right side, and taller", "use the left side for both sides, taller",
+                                     "make the left side match the other, and both sides taller"])
+def test_theo_s_own_words_for_a_mirror_get_no_tick(stool, message):
+    """Item 3: "make both sides the right side" is a mirror in other words: said as not done yet (#239), and no ✓."""
+    res = chat.turn(stool, message, use_llm=False, author=_by_part(stool, TALLER))
+    lines = res.reply.splitlines()
+    assert lines[0].startswith("! Changed") and "✓" not in lines[0] and not res.ok
+    assert lines[1].startswith("Mirroring one part from another isn't something I can do yet")
+
+
+def test_a_comment_only_edit_isn_t_a_change(stool):
+    """Item 3: only a moved number or a changed volume counts; a comment is no change, and writes no version."""
+    note = {"side_left": TALLER["side_left"],
+            "side_right": "# the right side\n" + stool.read_script("side_right")}
+    res = chat.turn(stool, "make both sides taller", use_llm=False, author=_by_part(stool, note))
+    assert res.reply.splitlines()[0] == ("! Changed side_left; side_right not changed: no number moved and its shape "
+                                         "didn't change.")
+    assert stool.design.part("side_right").version == 1
+
+
+PARAMS_SIDE = ('import cadquery as cq\n\nPARAMS = {{"h": {h}}}\n\n\ndef build(params):\n    p = {{**PARAMS, **(params or {{}})}}\n'
+               '    return cq.Workplane().box(20, 300, p["h"]).translate(({x}, 0, 0))\n')
+
+
+def test_the_second_designer_is_told_what_the_first_part_became(tmp_path):
+    """Item 4: side_right's designer sees side_left's moved numbers, so a size they share can follow."""
+    s = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    s.write_part("side_left", PARAMS_SIDE.format(h=10, x=0), intent="the left side")
+    s.write_part("side_right", PARAMS_SIDE.format(h=10, x=300), intent="the right side")
+    told = []
+
+    def author(spec, feedback, prior):
+        told.append(feedback)
+        return prior.replace('"h": 10', '"h": 60')
+    chat.turn(s, "make both sides taller", use_llm=False, author=author)
+    assert "Already revised for it" not in told[0]
+    assert "Already revised for it: side_left h 10 → 60." in told[1]
+
+
+def test_the_count_is_said_up_front_and_each_part_s_place(stool):
+    """Item 5: one event before the first part, then "1 of 2", "2 of 2"."""
+    seen = []
+    chat.turn(stool, "make both sides taller", use_llm=False, author=_by_part(stool, TALLER),
+              on_event=lambda ev: seen.append(ev.text))
+    said = [t for t in seen if t.startswith("revising")]
+    assert said[:3] == ["revising 2 parts: side_left, side_right", "revising side_left (1 of 2)…",
+                        "revising side_right (2 of 2)…"]
+
+
+def test_a_pick_goes_with_the_part_it_was_made_on(stool, monkeypatch):
+    """Item 6: the several-parts path kept no pick; it goes to the selected part's revision only."""
+    got = {}
+    real = chat.refine_part
+
+    def spy(store, pid, message, **kw):
+        got[pid] = kw.get("pick")
+        return real(store, pid, message, **kw)
+    monkeypatch.setattr(chat, "refine_part", spy)
+    pick = {"kind": "edge", "id": "e0", "text": "round it"}
+    chat.turn(stool, "make both sides taller", scope="side_right", pick=pick, use_llm=False, author=_by_part(stool, TALLER))
+    assert got == {"side_left": None, "side_right": pick}
