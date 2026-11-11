@@ -78,14 +78,20 @@ SHAPELY = {
 }
 
 
+#: Taking the query modules by name: ``from trimesh import proximity`` (or ``ray``, aliased or in a list), so a bare
+#: ``proximity.…`` below it needs no ``trimesh.`` in front (#230 review).
+FROM = re.compile(r"^\s*from\s+trimesh\s+import\b.*\b(proximity|ray)\b")
+
+
 def offending(name: str, text: str) -> list:
     out = []
-    alias = re.search(r"import trimesh as (\w+)", text)
+    aliases = re.findall(r"import trimesh as (\w+)", text)          # every one, not the first (#230 review)
+    via = re.compile(rf"\b({'|'.join(aliases)})\.(proximity|ray)\b") if aliases else None
     for n, line in enumerate(text.splitlines(), 1):
         code = re.sub(r"spatial\.(contains|on_surface)\(", "(", line.split("#")[0])       # only that call: a raw one beside it still counts
         if line.strip() in SHAPELY:
             continue
-        if RAW.search(code) or (alias and re.search(rf"\b{alias.group(1)}\.(proximity|ray)\b", code)):
+        if RAW.search(code) or FROM.search(code) or (via and via.search(code)):
             out.append(f"{name}:{n}: {line.strip()}")
     return out
 
@@ -107,6 +113,17 @@ def test_no_module_queries_a_mesh_any_other_way():
 def test_the_guard_sees_every_way_in(line):
     """CALI-103 (#99 review, item 2): an alias got past the old guard, and whole files were exempt."""
     assert offending("x.py", line)
+
+
+@pytest.mark.parametrize("text", ["from trimesh import proximity\nd = proximity.signed_distance(m, p)",
+                                  "from trimesh import proximity as px\nd = px.signed_distance(m, p)",
+                                  "from trimesh import util, proximity\nd = proximity.closest_point(m, p)",
+                                  "from trimesh.proximity import signed_distance\nd = signed_distance(m, p)",
+                                  "from trimesh import ray\nhit = ray.ray_triangle.RayMeshIntersector(m)",
+                                  "import trimesh as a\nimport trimesh as b\nd = b.proximity.signed_distance(m, p)"])
+def test_the_guard_sees_a_from_import_and_every_alias(text):
+    """#230 review (reviewer-2, item 2): ``from trimesh import proximity`` got past the guard, and only a file's first alias was looked at."""
+    assert offending("x.py", text)
 
 
 def test_the_guard_lets_shapely_through_and_only_those_lines():

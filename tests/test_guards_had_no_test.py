@@ -68,6 +68,64 @@ def test_the_edges_of_the_volume_band(monkeypatch, share, passes):
     assert got.passed is passes
 
 
+#: A box's six walls, every one a declared panel, around a block filled in: its pieces are 6t/L of it.
+def _filled_cube(side: float) -> str:
+    return f'''import cadquery as cq
+
+L, T = {side}, 19.05
+
+
+def build(params):
+    return cq.Workplane().box(L, L, L, centered=False)
+
+
+def construction(params, build=None):
+    def sheet(name, o):
+        return {{"name": name, "kind": "sheet", "material": "plywood", "thickness": T, "outline": o}}
+    return [sheet("top", [(0, 0, L), (L, 0, L), (L, L, L), (0, L, L)]),
+            sheet("bottom", [(0, 0, 0), (L, 0, 0), (L, L, 0), (0, L, 0)]),
+            sheet("left", [(0, 0, 0), (0, L, 0), (0, L, L), (0, 0, L)]),
+            sheet("right", [(L, 0, 0), (L, L, 0), (L, L, L), (L, 0, L)]),
+            sheet("front", [(0, 0, 0), (L, 0, 0), (L, 0, L), (0, 0, L)]),
+            sheet("back", [(0, L, 0), (L, L, 0), (L, L, L), (0, L, L)])]
+
+
+def loads(params, build=None):
+    return [{{"name": "a foot", "lb": 100, "factor": 2.0, "lo": (L / 2 - 20, L / 2 - 20, L - 2), "hi": (L / 2 + 20, L / 2 + 20, L)}}]
+'''
+
+
+@pytest.mark.parametrize("side, leg", [(176.0, "the solid is its pieces"), (166.0, "of the solid is in no piece")])
+def test_the_volume_band_on_a_real_filled_box(tmp_path, side, leg):
+    """#230 review (reviewer-2, item 1): the band on a real shape. A filled box with its six walls declared fails on either side of
+    0.67, which is why the stubbed test above pins only the comparison: just under, on its pieces' volume; just over, on the share
+    of it in no piece."""
+    from caliper.design import DesignStore
+
+    s = DesignStore.create("a filled box", base=str(tmp_path / "designs"))
+    s.write_part("box", _filled_cube(side), intent="a box")
+    got = next(r for r in consistency.checked(s, "box") if r.id == "construction_volume")
+    assert not got.passed and leg in got.expr, (got.expr, got.actual)
+
+
+# --- #74/#75: an all-wood build lists kids.html -----------------------------------------------------------------------------------
+def test_an_all_wood_build_lists_its_kids_book(tmp_path):
+    """#72: the index lists kids.html only when one was made. The other side, a wooden build listing it, had no test."""
+    from caliper import cutplan, release
+    from caliper.design import DesignStore
+
+    from .test_load_study import BOX_STOOL
+
+    if cutplan.available() is not None:
+        pytest.skip(cutplan.available())
+    s = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
+    s.write_part("stool", BOX_STOOL, intent="a box step stool")
+    made = release.make(s, pdf=False)
+    root = os.path.join(release.releases_dir(s), made["id"])
+    assert made["kids"] == "kids.html" and os.path.exists(os.path.join(root, "kids.html"))
+    assert "<code>kids.html</code>" in open(os.path.join(root, "index.html")).read()
+
+
 # --- the hash seed: a page's wording mustn't change with it (#75's rework) -------------------------------------------------------
 ORDER = textwrap.dedent("""
     import tempfile
