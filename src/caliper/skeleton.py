@@ -145,3 +145,70 @@ def said(result: dict) -> str:
     if rep is not None:
         lines.append(f"The design checks: {rep.said()}.")
     return "\n\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# CALI-162 (#240) — a part reads a shared size, it never restates it
+# ---------------------------------------------------------------------------
+#: A size's last word, as a PARAMS name ends: stretcher_w and stretcher_width are both its width.
+SIZES = {"w": "width", "wid": "width", "width": "width", "wide": "width", "h": "height", "ht": "height",
+         "height": "height", "tall": "height", "t": "thickness", "th": "thickness", "thk": "thickness",
+         "thick": "thickness", "thickness": "thickness", "d": "depth", "depth": "depth", "deep": "depth",
+         "l": "length", "len": "length", "length": "length", "long": "length", "dia": "diameter", "diam": "diameter",
+         "diameter": "diameter", "r": "radius", "rad": "radius", "radius": "radius", "gap": "clearance",
+         "clear": "clearance", "clearance": "clearance", "spacing": "spacing", "pitch": "spacing"}
+#: How close a part's own number may be to the plan's and still be it (mm, or the same number in inches).
+SAME_MM = 0.05
+SHADOW = "skeleton_shadow"
+
+
+def _subject(name: str) -> tuple[str, str]:
+    """``("stretcher", "thickness")`` for stretcher_t; ``("", "")`` where the name doesn't end in a size."""
+    tokens = [t for t in name.lower().split("_") if t]
+    if len(tokens) < 2 or tokens[-1] not in SIZES:
+        return "", ""
+    return "_".join(tokens[:-1]), SIZES[tokens[-1]]
+
+
+def _agrees(v: float, mm: float) -> bool:
+    return abs(v - mm) <= SAME_MM or abs(v * 25.4 - mm) <= SAME_MM
+
+
+def shadows(pid: str, script: str, skeleton: list):
+    """Whether part ``pid``'s script reads the plan's shared sizes rather than setting its own (CALI-162, #240: both
+    sides of step-stool-4 set ``stretcher_w`` 38.1 mm and ``stretcher_h`` 88.9 mm, a 2×4, while the stretcher was 19 ×
+    101.6 mm). A ``PARAMS`` key with a skeleton's name and another value, or a near-name (same subject, a size word:
+    ``stretcher_w`` beside ``stretcher_thickness``), fails: "side_left sets its own stretcher thickness: 38.1 mm
+    against the plan's 19 mm". One :class:`AssertionResult`, ``skeleton_shadow``; a pass where none does."""
+    from . import aero
+    from . import plan as P
+    from .evaluate import AssertionResult
+
+    expr = "the part reads the plan's shared sizes by their names"
+    params = aero.read_params(script or "") or {}
+    plan: dict = {}
+    for s in skeleton or []:
+        sv = s if isinstance(s, P.SkeletonValue) else P.SkeletonValue.model_validate(s)
+        plan[sv.name] = P.mm(sv) if P.mm(sv) is not None else float(sv.value)
+    said = []
+    for key, v in params.items():
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            continue
+        if key in plan:
+            if not _agrees(float(v), plan[key]):
+                said.append(f"{pid} sets its own {key.replace('_', ' ')}: {v:g} mm against the plan's {plan[key]:g} mm")
+            continue
+        subject, size = _subject(key)
+        same = [n for n in plan if subject and _subject(n)[0] == subject]
+        if not same:
+            continue
+        name = next((n for n in same if _subject(n)[1] == size), None) or min(same, key=lambda n: abs(plan[n] - v))
+        words = name.replace("_", " ")
+        said.append(f"{pid} sets its own {words}: {v:g} mm against the plan's {plan[name]:g} mm" if not _agrees(float(v), plan[name])
+                    else f"{pid} restates the plan's {words} as {key}: read {name} instead")
+    if not said:
+        return AssertionResult(SHADOW, expr, "pass", True, actual=0)
+    names = sorted({n for n in plan})
+    return AssertionResult(SHADOW, expr, "fail", False, actual=len(said),
+                           detail="; ".join(said) + f". Use the plan's numbers by their names in PARAMS ({', '.join(names)}), "
+                                  "never your own: a size two parts share is the plan's.")

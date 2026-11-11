@@ -96,12 +96,12 @@ class SkeletonValue(_Base):
     value: float
     unit: str
     why: str = ""
-    source: Literal["stated", "assumed", "kept"] = "assumed"
+    source: Literal["stated", "assumed", "kept", "measured"] = "assumed"   # measured: off a part as built (#240)
 
 
 class PlanMate(_Base):
     between: list[str]
-    kind: Literal["no_interference", "clearance", "fit", "touch"] = "no_interference"
+    kind: Literal["no_interference", "clearance", "fit", "touch", "fits_in"] = "no_interference"
     value: Optional[float] = None
 
 
@@ -601,7 +601,7 @@ def number(s: SkeletonValue, inches: bool) -> str:
 def said_number(s: SkeletonValue, inches: bool) -> str:
     """"mast h: 7 ft (the mast you asked for)", and " · assumed" on one the person didn't give."""
     return (f"{s.name.replace('_', ' ')}: {number(s, inches)}" + (f" ({s.why})" if s.why else "")
-            + (" · assumed" if s.source == "assumed" else ""))
+            + (" · assumed" if s.source == "assumed" else " · measured off the part" if s.source == "measured" else ""))
 
 
 def numbers(plan: Plan, inches: bool) -> list[str]:
@@ -643,7 +643,11 @@ stated size as a reference, never designed. Anything welded, printed, cut or oth
 is never the ground, the floor, a wall or the room: what it stands on is held, the floor by default.
 
 Name the numbers the parts share as the skeleton: each with a value, a unit (mm, in, ft, m, cm, deg, N, lb, kg, \
-count, or a speed in m/s, km/h or mph) and why. Write mates between parts (touch, clearance, fit, no_interference) and rules over part ids and \
+count, or a speed in m/s, km/h or mph) and why. A number two parts must agree on lives in the skeleton, never in \
+either part: where one part sits in, on or through another (a pocket, slot, hole, flange, a top on sides), name the \
+joining sizes in the skeleton (the inserted part's thickness and height, the pocket's clearance a side, a bolt's \
+diameter and spacing), and write a fits_in mate between them, the inserted part first, its value the clearance a \
+side in mm. Write mates between parts (touch, clearance, fit, fits_in, no_interference) and rules over part ids and \
 skeleton names, so every interface is measured. A rule may call: interference(a, b), min_clearance(a, b), \
 hole_misalignment(a, b), holes_aligned(a, b), bbox(part).dx/.dy/.dz (sizes) and .min_x/.min_y/.min_z/.max_x/\
 .max_y/.max_z (corners), abs, min, max. Every rule compares a measure of a part with a number (`==`, never `=`), \

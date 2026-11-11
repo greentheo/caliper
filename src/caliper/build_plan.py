@@ -38,16 +38,20 @@ def interfaces(store: DesignStore, pid: str, built: dict) -> Callable:
     sub = Assembly(name=store.assembly.name, parts=[p for p in store.assembly.parts if p.id in here],
                    mates=mates, assertions=rules)
     values = P.skeleton_values(store.design.skeleton)
+    from . import skeleton
 
-    def check(geometry):
-        return evaluate_assembly(sub, base_dir=store.root, parts={**built, pid: geometry}, values=values).results
+    def check(geometry, script: str = ""):
+        got = evaluate_assembly(sub, base_dir=store.root, parts={**built, pid: geometry}, values=values).results
+        if script and store.design.skeleton:   # it reads the plan's shared sizes, never its own (CALI-162, #240)
+            got.append(skeleton.shadows(pid, script, store.design.skeleton))
+        return got
     return check
 
 
 #: Designer tries a part gets: the plan's review says the total before Build it (#135 review), and no run exceeds it.
 ROUNDS = 2
 #: As a first build (CALI-157): the first try and one repair, and only for what stops the part being shown right.
-REPAIRS = frozenset({"construction_covers", "construction_volume"})
+REPAIRS = frozenset({"construction_covers", "construction_volume", "skeleton_shadow"})   # its own sizes: fixed (#240)
 
 
 def cost(plan) -> str:
@@ -102,13 +106,54 @@ def _unscored(store: DesignStore) -> bool:
     return not cards or cards[0].get("versions") != versions
 
 
+#: The size words a part's section is said by, in the skeleton: its thickness and its height (#240).
+SECTION = ("thickness", "height")
+
+
+def _section_unknown(store: DesignStore, pid: str) -> bool:
+    """Whether the skeleton lacks the size of part ``pid`` that a pocket is cut to: no number named for it."""
+    from .skeleton import _subject
+
+    return not any(_subject(s.get("name", ""))[0] == pid for s in store.design.skeleton or [])
+
+
+def defined_first(store: DesignStore, plan, order: list[str]) -> tuple[list[str], set]:
+    """The build order, with a part that goes into another's pocket built before it when the plan can't give its size
+    up front (CALI-162, #240: both sides were written before the stretcher existed, and each guessed a 2×4). Returns
+    ``(order, measure)``: ``measure`` holds the parts whose section goes into the skeleton once built."""
+    order, measure = list(order), set()
+    for m in plan.mates:
+        if m.kind != "fits_in":
+            continue
+        inner, outer = m.between
+        if inner in order and outer in order and _section_unknown(store, inner):
+            measure.add(inner)
+            if order.index(inner) > order.index(outer):
+                order.remove(inner)
+                order.insert(order.index(outer), inner)
+    return order, measure
+
+
+def measure_section(store: DesignStore, pid: str, geometry) -> list[dict]:
+    """Part ``pid``'s section as built, into the skeleton (``{pid}_thickness``, ``{pid}_height``: its two smaller
+    sizes), so the parts it goes into are written to it (#240). The numbers written, as skeleton entries."""
+    lo, hi = geometry.require_mesh().bounds
+    dims = sorted(float(b - a) for a, b in zip(lo, hi))
+    got = [{"name": f"{pid}_{word}", "value": round(v, 2), "unit": "mm", "why": f"the {pid.replace('_', ' ')} as built",
+            "source": "measured"} for word, v in zip(SECTION, dims[:2])]
+    have = {s.get("name") for s in store.design.skeleton or []}
+    store.design.skeleton = list(store.design.skeleton or []) + [g for g in got if g["name"] not in have]
+    store.save()
+    return got
+
+
 def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, client=None, use_llm: bool = True,
           max_rounds: int = ROUNDS) -> dict:
     """Build the saved plan's parts in order. Returns the first run's result: ``plan`` is ``built`` when every
     part to be made is, ``stopped`` (with ``part``, the one that wouldn't build) when one isn't."""
     plan = P.load(store)
     by = {p.id: p for p in plan.parts}
-    order = P.order(plan)
+    order, measure = defined_first(store, plan, P.order(plan))   # a part a pocket is cut to, first, if its size isn't planned
 
     def forward(ev):
         emit(ev.kind, ev.text, **ev.data)
@@ -137,6 +182,10 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
             break
         built[pid] = store.part_geometry(pid)
         store.append_log({"kind": "firstrun", "action": "built", "part": pid, "version": res.version})
+        if pid in measure:                               # its section, for the parts it goes into (#240)
+            got = measure_section(store, pid, built[pid])
+            emit("step", f"The {name}'s size, measured: " + ", ".join(f"{g['name'].replace('_', ' ')} {g['value']:g} mm" for g in got),
+                 step="measured", part=pid)
         mine = [r for r in check(built[pid])] if res.part_report is not None else []
         marks, head = _marks(mine)
         said.append(f"- the {name}: built" + (f" {head}" if head else "") + (f" ({marks})" if marks else ""))

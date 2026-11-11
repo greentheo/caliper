@@ -719,3 +719,84 @@ def slice_part(g: Geometry, profile: Any):
 
 def fea(g: Geometry, loads: Any, supports: Any, material: Any):
     raise NotImplementedError("fea(): deferred to Phase 3 (simulation).")
+
+
+# ---------------------------------------------------------------------------
+# CALI-162 (#240) — a part in another's pocket: the gap on each side, measured
+# ---------------------------------------------------------------------------
+#: How far a side's gap may sit from the plan's clearance and still fit (#240): the clearance ± this.
+POCKET_TOL_MM = 0.5
+#: A pocket's clearance a side when the plan gives none: 0.3 mm, a snug slip fit in plywood.
+POCKET_CLEARANCE_MM = 0.3
+
+
+def pocket(inserted: Geometry, host: Any) -> dict:
+    """The gaps round a part where it goes into another's pocket, slot or hole (CALI-162, #240: step-stool-4's sides
+    had pockets for a 2×4 and a 3/4 in plywood stretcher in them, and the touch rules couldn't see it).
+
+    The axis it goes in along is the one it sticks out of the host on. From its centre line, half way into the host,
+    a ray each way across the other two axes finds the host's first wall: the gap that side is that distance less half
+    the part's size, negative where the part runs into the wall. A side with no wall (an open slot) has none.
+    ``{"in": bool, "axis": "x", "gaps": {"+y": mm or None, "-y": …, "+z": …, "-z": …}, "why": str}``."""
+    from . import spatial
+
+    a, b = inserted.require_mesh(), _as_mesh(host)
+    alo, ahi = a.bounds
+    blo, bhi = b.bounds
+    out = [max(0.0, blo[k] - alo[k]) + max(0.0, ahi[k] - bhi[k]) for k in range(3)]
+    k = int(np.argmax(out))
+    lo, hi = max(alo[k], blo[k]), min(ahi[k], bhi[k])
+    if out[k] <= 0 or hi - lo <= 0.05:
+        return {"in": False, "axis": "xyz"[k], "gaps": {}, "why": "doesn't go into it"}
+    centre = (alo + ahi) / 2.0
+    centre[k] = (lo + hi) / 2.0
+    if bool(spatial.contains(b, [centre])[0]):
+        return {"in": False, "axis": "xyz"[k], "gaps": {}, "why": "isn't in a pocket of it: its middle is in the solid"}
+    gaps: dict = {}
+    for i in (j for j in range(3) if j != k):
+        half = (ahi[i] - alo[i]) / 2.0
+        for sign in (1.0, -1.0):
+            d = np.zeros(3)
+            d[i] = sign
+            loc, _, _ = spatial.intersects_location(b, np.array([centre]), np.array([d]))
+            ahead = [float((p[i] - centre[i]) * sign) for p in loc if (p[i] - centre[i]) * sign > 1e-9]
+            gaps[("+" if sign > 0 else "-") + "xyz"[i]] = round(min(ahead) - half, 3) if ahead else None
+    return {"in": True, "axis": "xyz"[k], "gaps": gaps, "why": ""}
+
+
+def fit_off(inserted: Geometry, host: Any, clearance: float = POCKET_CLEARANCE_MM) -> float:
+    """How far the worst side of a part in a pocket sits from ``clearance``, in mm: a fit passes within
+    :data:`POCKET_TOL_MM`. A part that doesn't go into the host raises (said, never a pass)."""
+    got = pocket(inserted, host)
+    if not got["in"]:
+        raise ValueError(got["why"])
+    sides = [g for g in got["gaps"].values() if g is not None]
+    if not sides:
+        raise ValueError("it has no wall on any side to fit against")
+    return round(max(abs(g - clearance) for g in sides), 3)
+
+
+def pocket_said(a: str, b: str, got: dict, clearance: float = POCKET_CLEARANCE_MM) -> str:
+    """A fit in words, naming both parts and the play: "the stretcher has 19.1 mm of play in side_left's pocket"."""
+    name = a.replace("_", " ")
+    if not got.get("in"):
+        return f"the {name} {got.get('why') or 'is not in it'} ({b})"
+    loose, tight = [], []
+    for axis in "xyz":
+        pair = [got["gaps"].get(f"+{axis}"), got["gaps"].get(f"-{axis}")]
+        if None in pair:
+            continue
+        total = pair[0] + pair[1]
+        if min(pair) < 0:
+            tight.append(-total if total < 0 else -min(pair))
+        elif max(abs(g - clearance) for g in pair) > POCKET_TOL_MM:
+            loose.append(total)
+    if not loose and not tight:
+        sides = [g for g in got["gaps"].values() if g is not None]
+        return f"the {name} sits in {b}'s pocket with {min(sides):.1f}–{max(sides):.1f} mm a side"
+    said = []
+    if loose:
+        said.append(f"has {max(loose):.1f} mm of play in {b}'s pocket")
+    if tight:
+        said.append(f"is {max(tight):.1f} mm too big for {b}'s pocket" if not loose else f"is {max(tight):.1f} mm too big for it the other way")
+    return f"the {name} " + ", and ".join(said)

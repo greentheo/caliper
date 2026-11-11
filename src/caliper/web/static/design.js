@@ -1147,7 +1147,7 @@ function wireClarify() {
 }
 
 // the first build, said as it goes: its plan, and the part (CALI-157: the checks wait to be asked for)
-const BUILD_STEPS = { plan: 'Planning its parts', build: 'Building it' };
+const BUILD_STEPS = { plan: 'Planning its parts', build: 'Building it', measured: 'Measuring it for the parts it goes into' };
 function elapsedText(s) {
   const t = Math.max(0, Math.round(s));
   return t < 60 ? `${t} s` : `${Math.floor(t / 60)} min ${t % 60} s`;
