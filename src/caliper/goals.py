@@ -146,14 +146,14 @@ def _valid(c: dict, kind: str) -> Optional[dict]:
 
 def draft(store: DesignStore, said: str, data: dict, *, client=None, model: Optional[str] = None) -> dict:
     """Claude's list of checks and objectives as they should now be."""
-    from .chat import DEFAULT_MODEL
+    from . import llm
 
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
 
         client = Anthropic()
-    msg = client.messages.create(model=model or DEFAULT_MODEL, max_tokens=1500, system=_SYSTEM,
-                                 messages=[{"role": "user", "content": _context(store, data, said)}])
+    msg = llm.ask(client, model=model, max_tokens=8000, effort="medium", system=_SYSTEM,
+                  messages=[{"role": "user", "content": _context(store, data, said)}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     m = re.search(r"\{.*\}", text, re.S)
     got = json.loads(m.group(0) if m else text)

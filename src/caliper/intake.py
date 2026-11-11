@@ -21,8 +21,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
-DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
 
+from . import llm
 from .spec import Assertion, Spec
 
 # M-bolt nominal → clearance hole diameter (mm), close fit.
@@ -258,16 +258,17 @@ def normalize_spec_dict(d: dict) -> dict:
 
 
 def llm_draft(intent: str, machine: Optional[str] = None, client=None, model: Optional[str] = None) -> IntakeResult:
-    model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
 
         client = Anthropic()
     # No assistant prefill: some models (e.g. claude-sonnet-4-6) reject a trailing assistant turn.
     # The system prompt asks for a bare JSON object and extract_json tolerates fences/prose anyway.
-    msg = client.messages.create(
+    msg = llm.ask(
+        client,
         model=model,
-        max_tokens=2000,
+        max_tokens=8000,
+        effort="medium",
         system=_SYSTEM,
         messages=[
             {"role": "user", "content": f"machine: {machine or 'generic'}\nintent: {intent}"},

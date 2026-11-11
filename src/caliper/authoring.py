@@ -17,13 +17,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
-from . import consistency, sandbox
+from . import consistency, llm, sandbox
 from .spec import Spec
 
-DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
 #: Long enough for a multi-member part plus helper functions; the old 2000 cut a tube frame off mid-line,
 #: and a part now writes its construction() beside build() (CALI-54).
-AUTHOR_MAX_TOKENS = 12000
+AUTHOR_MAX_TOKENS = 32000             # with thinking inside it (Opus 5.5), and streamed so a long reply doesn't hit the HTTP timeout
 
 # author(spec, feedback, prior_script) -> python source for `build(params)`
 Author = Callable[[Spec, Optional[str], Optional[str]], str]
@@ -84,7 +83,6 @@ def author_script(
     model: Optional[str] = None,
 ) -> str:
     """Ask Claude to write (or revise) the ``build(params)`` script for ``spec``."""
-    model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
 
@@ -109,10 +107,8 @@ def author_script(
             f"--- problem ---\n{feedback}"
         )
 
-    msg = client.messages.create(
-        model=model, max_tokens=AUTHOR_MAX_TOKENS, system=system_prompt(),
-        messages=[{"role": "user", "content": ask}],
-    )
+    msg = llm.ask(client, model=model, max_tokens=AUTHOR_MAX_TOKENS, effort="high", system=system_prompt(), cache=True, stream=True,
+                  messages=[{"role": "user", "content": ask}], cut_off_ok=True)
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     code = extract_code(text)
     if getattr(msg, "stop_reason", None) == "max_tokens":
@@ -248,7 +244,10 @@ def improve(
     best: Optional[tuple] = None  # (geometry, script, report)
 
     for rnd in range(1, max_rounds + 1):
-        script = author(spec, feedback, prior)
+        try:
+            script = author(spec, feedback, prior)
+        except llm.Declined as e:                    # said in words, and not worth asking again the same way
+            return ImproveResult(ok=False, script=prior or "", rounds=rnd, error=str(e), history=history)
         run = sandbox.run_script(script, params, timeout=timeout)
         prior = script
 

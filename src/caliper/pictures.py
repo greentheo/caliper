@@ -24,6 +24,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from . import llm
 from . import verdicts as V
 from .design import DesignStore
 from .one_study import one_at_a_time
@@ -33,7 +34,6 @@ IN = 25.4
 MIN_FEATURE_MM = 0.25 * IN
 #: How much of the room it may fill, and how much smaller each try gets when it doesn't hold.
 FILL, SHRINK, TRIES = 0.9, 0.8, 5
-DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
 
 #: A T-rex, side on, facing right, standing on y = 0 in a 100 box: drawn by hand so it works offline.
 TREX = [(0, 52), (10, 56), (22, 60), (34, 66), (44, 70), (54, 74), (62, 79), (66, 88), (76, 93), (90, 93),
@@ -108,8 +108,8 @@ def draw(subject: str, *, use_llm: bool = True, client=None, model: Optional[str
                 from anthropic import Anthropic  # lazy; may be absent
 
                 client = Anthropic()
-            msg = client.messages.create(model=model or DEFAULT_MODEL, max_tokens=3000, system=_DRAW_SYSTEM,
-                                         messages=[{"role": "user", "content": f"Draw: {subject}"}])
+            msg = llm.ask(client, model=model, max_tokens=8000, effort="medium", system=_DRAW_SYSTEM,
+                          messages=[{"role": "user", "content": f"Draw: {subject}"}])
             text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
             m = re.search(r"\{.*\}", text, re.S)
             return _unit(np.asarray(_shapes(json.loads(m.group(0) if m else text)["shapes"]).exterior.coords))

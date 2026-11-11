@@ -34,11 +34,11 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from . import llm
 from .design import DesignStore
 from .errors import scrubbed
 from .spec import Assertion, Spec
 
-DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
 
 #: What a brand-new part must clear before anything else is asked of it. A spec with no assertions can
 #: never pass (:attr:`Report.all_pass` requires at least one considered check), so the author loop would
@@ -358,7 +358,6 @@ If the message is ambiguous about WHICH part, use "answer" — do not guess."""
 def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
                  client=None, model: Optional[str] = None) -> Intent:
     """Route with Claude, given the design's parts as context. Raises on any failure (caller falls back)."""
-    model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
 
@@ -377,8 +376,8 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
            f"means that part\n\n" if scope else "")
         + f"message: {message}"
     )
-    msg = client.messages.create(model=model, max_tokens=300, system=_CLASSIFY_SYSTEM,
-                                 messages=[{"role": "user", "content": ask}])
+    msg = llm.ask(client, model=model, max_tokens=2000, effort="low", system=_CLASSIFY_SYSTEM,
+                  messages=[{"role": "user", "content": ask}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     m = re.search(r"\{.*\}", text, re.S)
     data = json.loads(m.group(0) if m else text)
@@ -703,8 +702,8 @@ def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = 
                 from anthropic import Anthropic  # lazy; may be absent
 
                 client = Anthropic()
-            msg = client.messages.create(
-                model=model or DEFAULT_MODEL, max_tokens=200, system=_DESCRIBE_SYSTEM,
+            msg = llm.ask(
+                client, model=model, max_tokens=2000, effort="low", system=_DESCRIBE_SYSTEM,
                 messages=[{"role": "user", "content": f"description as it was: {old or '(none)'}\n\n"
                                                       f"the change just made: {change}\n\nthe script now:\n{script}"}])
             text = " ".join("".join(b.text for b in msg.content if getattr(b, "type", None) == "text").split())
@@ -979,8 +978,8 @@ def explain(store: DesignStore, message: str, scope: Optional[str] = None, clien
         from anthropic import Anthropic  # lazy; may be absent
 
         client = Anthropic()
-    msg = client.messages.create(
-        model=model or DEFAULT_MODEL, max_tokens=400, system=_EXPLAIN_SYSTEM,
+    msg = llm.ask(
+        client, model=model, max_tokens=4000, effort="medium", system=_EXPLAIN_SYSTEM,
         messages=[{"role": "user", "content": f"facts:\n{_facts(store, scope)}\n\nquestion: {message}"}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text").strip()
     if not text:

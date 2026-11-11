@@ -23,9 +23,9 @@ import sys
 from dataclasses import asdict, dataclass
 from typing import Callable, Optional
 
+from . import llm
 from .design import DesignStore
 
-DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
 MAX_QUESTIONS = 5
 
 _INCHES = re.compile(r"\d\s*(?:\"|”|''|in\b|inch|inches)", re.I)
@@ -84,13 +84,12 @@ Reply with ONLY a JSON array:
 
 
 def llm_questions(prompt: str, client=None, model: Optional[str] = None) -> list[Question]:
-    model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
 
         client = Anthropic()
-    msg = client.messages.create(model=model, max_tokens=900, system=_SYSTEM,
-                                 messages=[{"role": "user", "content": prompt}])
+    msg = llm.ask(client, model=model, max_tokens=4000, effort="medium", system=_SYSTEM,
+                  messages=[{"role": "user", "content": prompt}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     m = re.search(r"\[.*\]", text, re.S)
     data = json.loads(m.group(0) if m else text)

@@ -23,7 +23,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .intake import _M_CLEARANCE, _WORD_NUM, DEFAULT_MODEL, extract_json
+from . import llm
+from .intake import _M_CLEARANCE, _WORD_NUM, extract_json
 from .spec import Assertion, Spec
 
 
@@ -225,15 +226,16 @@ Output ONLY a raw JSON object (no markdown, no prose):
 
 
 def llm_refine(spec: Spec, instruction: str, client=None, model: Optional[str] = None) -> RefineResult:
-    model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic
 
         client = Anthropic()
     # No assistant prefill: some models (e.g. claude-sonnet-4-6) reject a trailing assistant turn.
-    msg = client.messages.create(
+    msg = llm.ask(
+        client,
         model=model,
-        max_tokens=2000,
+        max_tokens=8000,
+        effort="high",
         system=_SYSTEM,
         messages=[
             {"role": "user", "content": f"current spec:\n{spec.to_json()}\n\nchange: {instruction}"},
