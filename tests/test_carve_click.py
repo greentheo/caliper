@@ -56,7 +56,10 @@ def test_the_check_and_the_queueing_are_one_step():
     runner, gate, got = jobs.JobRunner(), threading.Event(), []
     meet = threading.Barrier(2, timeout=1.0)
 
+    hooked = []
+
     def between():
+        hooked.append(1)
         try:
             meet.wait()
         except threading.BrokenBarrierError:
@@ -78,6 +81,7 @@ def test_the_check_and_the_queueing_are_one_step():
     gate.set()
     started = [g for g in got if isinstance(g, jobs.Job)]
     assert len(started) == 1 and len(got) == 2, got
+    assert hooked                                      # the hook ran: a split that drops it isn't let through by silence (#72)
     _wait(started[0])
 
 
