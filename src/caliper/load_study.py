@@ -580,6 +580,22 @@ def orthotropic(mat: dict) -> float:
     return float(min(1.0, max(ratio, 0.0)) ** 0.25)
 
 
+def with_held(under, held: list[dict], tol: float):
+    """What a panel rests on, with the part's own ``held()`` patches counted too (CALI-153): a shelf on two patches is a
+    beam across them. The floor a part is held by when it doesn't say isn't one: anything would rest on that."""
+    boxes = [(np.asarray(h["lo"], float) - 3 * tol, np.asarray(h["hi"], float) + 3 * tol)
+             for h in held if not h.get("default")]
+    if not boxes:
+        return under
+
+    def either(pts, *rest):
+        pts = np.asarray(pts, float)
+        on = np.any([np.all((pts >= lo) & (pts <= hi), axis=1) for lo, hi in boxes], axis=0)
+        return on | under(pts, *rest) if under is not None else on
+
+    return either
+
+
 def _held_edges(pc: dict, k: int, others: list[dict], tol: float, under=None) -> list[int]:
     """Which of a panel's edges another piece holds: one it butts against, or one under it (up to a
     fifth of the way in: a top that overhangs its sides by an inch still rests on them)."""
@@ -833,6 +849,90 @@ def buckling_notes(pieces: list[dict], loads: list[dict], mat: dict) -> list[str
     return []
 
 
+#: The share of a load's own footprint over a hold at which it's a push straight down, not a span.
+ON_A_HOLD = 0.5
+
+
+def _closed_round(held: set, at: tuple) -> bool:
+    """Whether walking out from ``at`` in all four directions meets something held, past any hold it starts on."""
+    reach = max(max(abs(a - b) for a, b in zip(c, at)) for c in held) + 1
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        k, clear = 0, False
+        met = False
+        while k <= reach:
+            here = (at[0] + dx * k, at[1] + dy * k) in held
+            clear = clear or not here
+            if clear and here:
+                met = True
+                break
+            k += 1
+        if not met:
+            return False
+    return True
+
+
+def spans_between(patches: list, lo, hi, force, spacing: float) -> bool:
+    """Whether a load bends the part between where it's held, seen along the load (CALI-153, #217). Its middle is inside the outline of everything
+    that's held (not past it, like a bracket's arm); under half of its own footprint lands over a hold (not a leg pushed straight down, but a load
+    spread over three feet is); and the holds don't close all round it (a ring or a box's walls carry it down). Feet joined into one patch still
+    span. ``patches``: the held places, as points a voxel apart."""
+    if not len(patches):
+        return False
+    from shapely.geometry import MultiPoint, Point
+
+    keep = [i for i in range(3) if i != int(np.argmax(np.abs(np.asarray(force, float))))]
+    lo2, hi2 = np.asarray(lo, float)[keep], np.asarray(hi, float)[keep]
+    mid = (lo2 + hi2) / 2
+    points = np.unique(np.vstack(patches)[:, keep], axis=0)
+    if not Point(mid).within(MultiPoint(points).convex_hull.buffer(spacing)):
+        return False
+    origin = points.min(axis=0)
+    cell = lambda xy: tuple(np.rint((np.asarray(xy, float) - origin) / spacing).astype(np.int64).tolist())        # noqa: E731
+    held = {cell(p) for p in points}
+    axes = [np.arange(a, b + spacing / 2, spacing) if b > a else np.array([a]) for a, b in zip(lo2, hi2)]
+    foot = [cell((x, y)) for x in axes[0] for y in axes[1]]
+    if sum(c in held for c in foot) / len(foot) >= ON_A_HOLD:
+        return False
+    return not _closed_round(held, cell(mid))
+
+
+def _held_patches(ctx: dict) -> list:
+    """Where the part is held, as separate patches of voxel centres, however many ``held()`` said (or the floor's feet)."""
+    from scipy import ndimage
+
+    ls, held, grow = ctx["ls"], ctx["held"], ctx["grow"]
+    region = np.zeros(ls.grid.shape, dtype=bool)
+    for h in held:
+        region |= ls.region(box=_grow(h["lo"], h["hi"], grow))
+    labels, n = ndimage.label(region, structure=np.ones((3, 3, 3)))
+    origin = np.asarray(ls.grid.origin, float)
+    return [origin + ls.grid.spacing * np.argwhere(labels == i + 1) for i in range(n)]
+
+
+def _spans(run: dict, c: dict) -> bool:
+    """Whether a case's load spans between its holds: as the run recorded, or, from before it did, from its ``held()`` boxes. A
+    stored run held by the default floor can't tell, and says nothing new until it's checked again."""
+    if "spans" in c:
+        return bool(c["spans"])
+    boxes = [h for h in run.get("held") or [] if not h.get("default") and h.get("lo") and h.get("hi")]
+    if len(boxes) < 2 or not (c.get("lo") and c.get("hi") and c.get("force_n")):
+        return False
+    step = float(run.get("spacing_mm") or 1.0)
+    patches = [np.stack(np.meshgrid(*[np.arange(a, b + step / 2, step) if b > a else np.array([a]) for a, b in zip(h["lo"], h["hi"])],
+                                    indexing="ij"), -1).reshape(-1, 3) for h in boxes]
+    return spans_between(patches, c["lo"], c["hi"], c["force_n"], step)
+
+
+def fixed_ends(run: dict, c: dict) -> bool:
+    """Whether this case's verdict rests on an FEA holding the ends of a span fixed, with no plate or beam check behind it, and a number that
+    wouldn't clear what it needs if the FEA reads as high as it can (:data:`verdicts.SPAN_MARGIN`): not a ✓ (CALI-153: a shelf on two patches
+    read 5.06 where beam theory gives about 1). ``run`` needs ``min_safety``."""
+    safety, need = c.get("safety"), run.get("min_safety") or MIN_SAFETY
+    return (c.get("governs", "fea") == "fea" and not (c.get("plate") or {}).get("done")
+            and (c.get("fea") or {}).get("supported") is not False and safety is not None and safety < need * V.SPAN_MARGIN
+            and _spans(run, c))
+
+
 def run_safety(cases: list) -> Optional[float]:
     """A strength run's number, as ``study`` writes it: the worst of the cases that ran. A case whose load never
     reached a support has none, so it's never a 0x (#140 review); none that ran, no number."""
@@ -965,7 +1065,8 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
            "mat": mat, "tol": tol, "spacing": spacing, "coarse": coarse, "held": held, "ls": ls,
            "thinnest": min(thins) if thins else None, "finest": least, "thinnest_where": where,
            "thin_said": thin_words(store, part_id, min(thins), where, least, bool(printed)) if thins else None,
-           "attach": attach, "plate_mat": sheet_mat or mat}
+           "attach": attach, "plate_mat": sheet_mat or mat, "grow": grow}
+    ctx["patches"] = _held_patches(ctx)
     if printed and wood:
         _two_materials(ctx, wood, sheet_mat, rest)
     return ctx
@@ -1063,7 +1164,8 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
            "safety": fea_safety(float(worked[hot])),
            "deflection_mm": round(float(r.max_displacement), 3),
            "at": [round(float(x), 1) for x in at], **_peak_in(ctx, at, ls.grid.spacing)}
-    pl = plate_check(ctx["pieces"], load, ctx.get("plate_mat") or mat, ctx["tol"], under=ctx.get("under"))
+    pl = plate_check(ctx["pieces"], load, ctx.get("plate_mat") or mat, ctx["tol"],
+                     under=with_held(ctx.get("under"), ctx.get("held") or [], ctx["tol"]))
     options = [("fea", fea["safety"])]
     if pl and pl.get("done"):
         options.append(("plate", pl["safety_across"]))
@@ -1079,7 +1181,10 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
                  "holds": bool(safety is not None and safety >= min_safety),  # producer
                  # where it's predicted to break, placed the same way: linear to failure, as wood is
                  # close to; the joints aren't modelled and may go first
-                 "breaks_lb": V.cut_lb(load["lb"] * load["factor"] * safety) if safety else None})   # cut (#214)
+                 "breaks_lb": V.cut_lb(load["lb"] * load["factor"] * safety) if safety else None,   # cut (#214)
+                 # does it bend between where it's held? An FEA alone can't settle that (CALI-153)
+                 **({"spans": spans_between(ctx["patches"], load["lo"], load["hi"], load["force"], ls.grid.spacing)}
+                    if "patches" in ctx else {})})
     if any(pc.get("holes") for pc in ctx["pieces"] if pc["kind"] == "sheet"):
         from .lighten import judge_holed       # a panel stood on with holes: not by the plate formula (CALI-73)
 
@@ -1109,6 +1214,7 @@ NOTES = [
 
 #: what a check says where it gave no result that can be read
 NO_RESULT = {"unchecked": "not checked: its walls are too thin for the voxels",
+             "span": "not settled: the check holds its ends fixed",
              "unresolved": "not resolved yet: check it again finer",
              "untrusted": "not trusted: it ran on a filled-in shape"}
 

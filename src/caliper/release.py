@@ -848,11 +848,13 @@ def _status(card: dict, smaller: int = 0) -> str:
         return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass{guess}{but}</span>'
     untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0
     edge = s.get("edge") or 0
-    rest = s["unknown"] - untrusted - unresolved - edge
+    span = s.get("span") or 0
+    rest = s["unknown"] - untrusted - unresolved - edge - span
     open_ = s.get("unsettled") or 0
     why = [f"{s['fail']} check(s) fail" + (f" ({open_} not settled: too coarse to see its walls)" if open_ else "") if s["fail"] else "", f"{untrusted} not trusted" if untrusted else "",
            f"{unresolved} not resolved" if unresolved else "",          # an FEA too coarse to see its walls (CALI-110)
            f"{edge} checked in the middle only, not at the front edge" if edge else "",       # (CALI-94)
+           f"{span} not settled: the check holds it fixed where it's held" if span else "",   # (CALI-153)
            f"{rest} unknown" if rest else ""]
     return f'<span class="status notready">Not ready — {", ".join(w for w in why if w)}</span>'
 
@@ -870,6 +872,8 @@ def _safety_cell(c: dict) -> tuple[str, str]:
         return "not resolved: too coarse to see its walls", "—"
     if kind == "edge":                               # where people stand wasn't loaded (CALI-94)
         return "checked in the middle only, not at the front edge", "—"
+    if kind == "span":                               # the FEA alone, between its holds (CALI-153)
+        return f"not settled: {verdicts.SPAN_WHY}", "—"
     if kind == "recheck":                            # its reason (#214 review)
         return f"check it again: {verdicts.UNCUT}", "—"
     if kind not in verdicts.SETTLED:                 # any other kind: its word, never a number to build on
@@ -1156,6 +1160,11 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
              if p.id not in fixed and store.is_scripted(p.id) and C.declares(store.read_script(p.id))]
     if not built:
         raise ValueError("no part says what it's built from — there's nothing to cut")
+    from . import consistency
+
+    for p in built:                         # (CALI-155)
+        if consistency.not_accounted(store, p.id):
+            raise ValueError(f"can't make a build package: for the {p.id.replace('_', ' ')}, {consistency.NO_MAKE}")
 
     # the cut plans, current for each part's version
     plans, fresh = {}, False

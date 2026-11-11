@@ -15,6 +15,7 @@ import math
 import os
 import re
 import threading
+import time
 from typing import Optional, Union
 
 from pydantic import BaseModel, field_validator
@@ -234,10 +235,19 @@ def _submit_first(slug: str):
         store = DesignStore.load(slug)
         if store.design.parts:
             raise ValueError("it's already built: say what to change")
-        return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d), strength=_aero_available(),
-                              cards=lambda s, pid: answers.answers(s, design_state(s), pid))
+        try:
+            return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d), strength=_aero_available(),
+                                  cards=lambda s, pid: answers.answers(s, design_state(s), pid))
+        except Exception as e:          # on the design's record, so a reload or coming back says what happened (#220)
+            from .errors import scrubbed
 
-    job = RUNNER.submit("firstrun", work, label="first build", lock=_lock(slug))
+            built = bool(DesignStore.load(store.root).design.parts)       # a crash after the part exists: no Build it to press
+            store.append_log({"kind": "reply", "action": "build", "ok": False, "error": scrubbed(e),
+                              "reply": f"The build stopped before it finished: {scrubbed(e)}. "
+                                       + ("What it made is here: say what to change." if built else "Press Build it to try again.")})
+            raise
+
+    job = RUNNER.submit("firstrun", work, label="first build", lock=_lock(slug), meta={"slug": slug})
     _FIRST[slug] = job.id
     return job
 
@@ -269,6 +279,26 @@ def _plan(store: DesignStore) -> Optional[dict]:
                          for m in pl.mates]}
 
 
+def _refuse_wrong_pieces(store: DesignStore, pid: str) -> None:
+    from fastapi import HTTPException
+
+    why = consistency.not_accounted(store, pid)
+    if why:
+        raise HTTPException(status_code=409, detail=f"it's shown as one body because its pieces don't account for its solid: {why}")
+
+
+def pieces_or_why(store: DesignStore, pid: str) -> dict:
+    """The part as its pieces, or a 409 that says why it's drawn as one body: pieces that don't describe the solid would show
+    something else, two boards in the air for a stool with splayed sides (CALI-155)."""
+    from fastapi import HTTPException
+
+    _refuse_wrong_pieces(store, pid)
+    try:
+        return construction.pieces3d(store, pid)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
 def _building(slug: str) -> Optional[str]:
     j = RUNNER.get(_FIRST.get(slug, ""))
     return j.id if j is not None and not j.over else None
@@ -286,12 +316,13 @@ def _running(slug: str) -> list[dict]:
     what a page draws from on load and on every redraw, so a study isn't lost to a switch, a reload or a redraw (#178)."""
     out = []
     for j in RUNNER.active():
-        if j.meta.get("slug") != slug or j.kind not in ("load", "lighten", "release"):
+        if j.meta.get("slug") != slug or j.kind not in ("load", "lighten", "release", "firstrun"):
             continue
         said = j.since(0)
         words = [ev["text"] for ev in said if ev.get("text") and ev.get("kind") != "started"]
         out.append({"job": j.id, "kind": j.kind, "part": j.meta.get("part"), "text": words[-1] if words else "",
-                    "waiting": bool(said and said[-1].get("kind") == "waiting"), "stopping": j.stopping})
+                    "waiting": bool(said and said[-1].get("kind") == "waiting"), "stopping": j.stopping,
+                    "elapsed_s": round(time.time() - j.started) if j.started else 0})
     return out
 
 
@@ -359,6 +390,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "carved": carved_file(script) is not None,          # one reader, anchored (#70 item 9)
             # its strength rests on a filled-in solid (or a shape that couldn't be checked): no "holds" (CALI-96)
             "untrusted": consistency.filled(store, p.id) if "def loads(" in script else None,
+            "not_accounted": consistency.not_accounted(store, p.id) if construction.declares(script) else None,  # (CALI-155)
             "suggest": {k: aero.suggest(k, v, ranges) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "label": p.label, "name": p.label or p.id,      # the name a person reads; the id never changes (#94)
@@ -770,6 +802,7 @@ def router():
         store = load(slug)
         if store.design.part(pid) is None:
             raise HTTPException(404, f"no part {pid!r}")
+        _refuse_wrong_pieces(store, pid)                  # the page then draws the solid, and the tree says why (CALI-155)
         try:
             got = tree.mesh(store, pid, key)
         except KeyError:
@@ -1184,10 +1217,7 @@ def router():
         store = load(slug)
         if store.design.part(pid) is None:
             raise HTTPException(status_code=404, detail=f"no part {pid!r}")
-        try:
-            return construction.pieces3d(store, pid)
-        except ValueError as e:
-            raise HTTPException(status_code=409, detail=str(e))
+        return pieces_or_why(store, pid)
 
     # -- cut plan (CALI-45): panels unfolded and nested by unfold-to-sheets, sticks cut-listed ----------
     @r.post("/api/designs/{slug}/parts/{pid}/cutplan")

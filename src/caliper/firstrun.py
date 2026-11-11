@@ -121,8 +121,11 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
             steps["strength"] = f"failed: {scrubbed(e)}"
             emit("error", f"couldn't check it holds: {scrubbed(e)}")
 
+    from . import consistency
+
+    short = consistency.not_accounted(store, pid)
     try:
-        flat = bool(patterns.pieces(store, pid))
+        flat = not short and bool(patterns.pieces(store, pid))
     except Exception:  # noqa: BLE001 — no construction() it can read
         flat = False
     if flat:
@@ -134,7 +137,7 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
             steps["patterns"] = f"failed: {scrubbed(e)}"
             emit("error", f"couldn't draw the patterns: {scrubbed(e)}")
     else:
-        steps["patterns"] = "no flat pieces"
+        steps["patterns"] = consistency.NO_MAKE if short else "no flat pieces"
 
     if goals.read(store).get("checks"):
         emit("step", "Scoring it against what it has to do", step="score", part=pid)

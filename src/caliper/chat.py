@@ -727,8 +727,16 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     spec = _working_spec(store, part_id, intent)
 
     _emit(events, on_event, "authoring", f"authoring {part_id}…", part=part_id)
+
+
+    def said_round(n: int, most: int) -> None:          # the first is the line above; a later one says which (CALI-154)
+        if n > 1:
+            word = {2: "second", 3: "third", 4: "fourth"}.get(n)
+            _emit(events, on_event, "authoring", f"authoring {part_id}: {word + ' try' if word else f'try {n}'}",
+                  part=part_id, round=n, rounds=most)
+
     res = authoring.improve(spec, author=author, max_rounds=max_rounds, client=client,
-                            ref_base=store.root, interfaces=interfaces)
+                            ref_base=store.root, interfaces=interfaces, on_round=said_round)
 
     if res.geometry is None:
         _emit(events, on_event, "error", f"{part_id} would not build", part=part_id)
@@ -963,7 +971,8 @@ def _facts(store: DesignStore, scope: Optional[str]) -> str:
                           if v["kind"] in ("unresolved", "unchecked") or v.get("coarse") else "")
                        + ("; CHECKED IN THE MIDDLE ONLY: the front edge, where people stand, isn't, so this is no "
                           "verdict" if v["kind"] == "edge" else "")
-                       + ("; NOT TRUSTED: it ran on a filled-in shape" if v["kind"] == "untrusted" else ""))
+                       + ("; NOT TRUSTED: it ran on a filled-in shape" if v["kind"] == "untrusted" else "")
+                       + (f"; NOT SETTLED: {v.get('why')}, so this number is no verdict" if v["kind"] == "span" else ""))
         out += [f"strength note: {n}" for n in (run.get("notes") or [])[:4]]
     said = [e for e in store.log() if e.get("kind") in ("message", "reply")][-6:]
     out += [f"{'they said' if e['kind'] == 'message' else 'Caliper said'}: {(e.get('text') or e.get('reply') or '')[:600]}"
