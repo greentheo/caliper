@@ -208,23 +208,26 @@ def test_equal_ends_are_said_once():
 # ---------------------------------------------------------------------------
 # Item 5: buckling, said where it isn't checked
 # ---------------------------------------------------------------------------
-def test_a_wall_carrying_the_load_lists_buckling_as_not_checked(stool, monkeypatch):
+def test_a_wall_carrying_the_load_lists_buckling_as_checked_by_hand(stool, monkeypatch):
+    # #229 (CALI-159): its four plain walls are checked by hand now, so the note says so, not "isn't checked"
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
     rec = load_study.study(stool, "stool")
-    assert load_study.BUCKLING in rec["notes"]
+    assert load_study.BUCKLING_CHECKED in rec["notes"] and load_study.BUCKLING not in rec["notes"]
 
 
 def _sheet(normal):
     n = np.asarray(normal, float)
     u = np.array([0.0, 0.0, 1.0]) if abs(n[2]) < 0.5 else np.array([1.0, 0.0, 0.0])
     v = np.cross(n, u)
-    return {"kind": "sheet", "polys": [np.array([[0.0, 0.0, 0.0], 100 * u, 100 * u + 100 * v, 100 * v])]}
+    return {"name": "panel", "kind": "sheet", "thickness": 6.35, "sides": [1],
+            "polys": [np.array([[0.0, 0.0, 0.0], 100 * u, 100 * u + 100 * v, 100 * v])]}
 
 
 def test_a_flat_panel_alone_has_no_wall_to_buckle():
     down = [{"force": [0.0, 0.0, -100.0]}]
     assert load_study.buckling_notes([_sheet((0, 0, 1))], down, {}) == []
-    assert load_study.buckling_notes([_sheet((1, 0, 0))], down, {}) == [load_study.BUCKLING]
+    # standing in line with the load: a wall, checked by hand since #229 (a plain rectangle, nothing beside it)
+    assert load_study.buckling_notes([_sheet((1, 0, 0))], down, {"E": 8000.0}) == [load_study.BUCKLING_CHECKED]
 
 
 def test_a_printed_part_has_walls_to_buckle():

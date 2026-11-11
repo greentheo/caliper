@@ -3070,11 +3070,20 @@ function loadCase(p, run, c, i) {
       : c.verdict && c.verdict.kind === 'span' ? `<div class="small" style="margin-top:2px"><b>Not settled:</b> ${esc(c.verdict.why)}.
         <span class="muted">It needs ${run.min_safety}x.</span></div>`
       : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety, run.min_safety)}</b>
-        <span class="muted">(by ${c.governs === 'plate' ? (pl && pl.grain ? `the plate check, ${beamGrain(pl)}` : 'the plate check, with the grain the wrong way') : 'the FEA'}; it needs ${run.min_safety}x)</span>
+        <span class="muted">(by ${c.governs === 'buckling' ? foldedBy(c) : c.governs === 'plate' ? (pl && pl.grain ? `the plate check, ${beamGrain(pl)}` : 'the plate check, with the grain the wrong way') : 'the FEA'}; it needs ${run.min_safety}x)</span>
         ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>`}
       ${plate}${fea}${by}
       ${c.heat ? `<div class="actions"><button data-heat="${i}" class="${on ? 'primary' : ''}">${on ? 'Showing the stress' : 'Show the stress'}</button></div>` : ''}
     </div>`;
+}
+
+// the hand buckling check that governs a case (CALI-159, #229): which wall, and what it was taken as
+function foldedBy(c) {
+  const done = (c.buckling || []).filter((r) => r.done);
+  const w = done.length ? done.reduce((a, b) => (b.safety < a.safety ? b : a)) : null;
+  if (!w) return 'the buckling check';
+  const sides = w.edges_held === 2 ? 'held along both sides' : w.edges_held === 1 ? 'held along one side' : 'free along its sides, its top free to sway';
+  return `the buckling check on the ${esc(w.piece)}: a plate ${sides}, its whole load on it`;
 }
 
 function loadResults(p, run, runs) {
@@ -3343,7 +3352,9 @@ async function showHeat(pid, run, index) {
     const grad = HEAT.map(([t, hex]) => `#${hex.toString(16).padStart(6, '0')} ${t * 100}%`).join(', ');
     // two numbers are on screen: the picture is the FEA's, the verdict may be the plate check's — say which is which
     const pl = c.plate && c.plate.done ? c.plate : null, f = c.fea || {};
-    const decided = c.governs === 'plate' && pl
+    const decided = c.governs === 'buckling'
+      ? foldedBy(c)                                                       // the picture is the FEA's; the verdict isn't (#229)
+      : c.governs === 'plate' && pl
       ? `the plate check on the ${esc(pl.piece)}: ${fixed(pl.stress_mpa, 1)} MPa, with the grain the wrong way`
       : `the FEA's peak: ${fixed(f.peak_mpa, 1)} MPa ${esc(peakWhere(f))}`;   // never an old run's label (#139 review)
     const bar = $('stationBar');
