@@ -597,6 +597,8 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
                                  f"The part is unchanged."))
 
     _emit(events, on_event, "built", f"{part_id} built in {res.rounds} round(s)", part=part_id)
+    if getattr(res, "tries", None):                # how many tries and how long each, to see what small edits gain
+        store.append_log({"kind": "revise", "part": part_id, "rounds": res.rounds, "tries": res.tries})
     report_dict = res.report.to_dict() if res.report is not None else None
     described = redescribe(entry.intent, message, res.script, use_llm=use_llm, client=client)
     from . import carve

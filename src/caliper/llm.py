@@ -35,6 +35,7 @@ JOBS = {
     "clarify": Job(QUICK_MODEL, "low", 4000),
     "explain": Job(DEFAULT_MODEL, "medium", 4000),
     "author": Job(DEFAULT_MODEL, "high", 64000, stream=True, cache=True),
+    "revise": Job(DEFAULT_MODEL, "high", 16000, cache=True),
     "plan": Job(DEFAULT_MODEL, "high", 32000, stream=True),
     "refine": Job(DEFAULT_MODEL, "high", 8000),
     "intake": Job(DEFAULT_MODEL, "medium", 8000),
