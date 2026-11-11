@@ -97,6 +97,11 @@ class SkeletonValue(_Base):
     unit: str
     why: str = ""
     source: Literal["stated", "assumed", "kept", "measured"] = "assumed"   # measured: off a part as built (#240)
+    #: what the number is (#243 review): a part's size, where something sits, a count or a load. Unset, it's read from
+    #: its unit and its why (:func:`kind_of`): "height" is both a size and a position, so the name can't say
+    kind: Optional[Literal["size", "position", "count", "load"]] = None
+    #: for a measured size: the part it was measured off, so it's measured again when that part changes
+    of: Optional[str] = None
 
 
 class PlanMate(_Base):
@@ -413,6 +418,24 @@ def order(plan: Plan) -> list[str]:
 TO_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0, "in": 25.4, "ft": 304.8}
 
 
+#: Words in a skeleton number's why that make it a position: where something sits, not how big it is.
+_WHERE = re.compile(r"\b(above|below|off|from|sits?|at|up|high|centre|center|origin|level)\b.*\b(floor|ground|centre|center|"
+                    r"origin|top|bottom|base|middle|front|back|edge)\b|\bunderside (?:is |sits )?(?:\d|at)", re.I)
+_LOAD_UNITS = {"N", "lb", "kg"}
+
+
+def kind_of(s: SkeletonValue) -> str:
+    """What a skeleton number is: its ``kind`` where the plan gives one, else a count by its unit, a load by its unit,
+    a position by its why ("sits 3 in above the floor"), and a size otherwise (#243 review)."""
+    if s.kind:
+        return s.kind
+    if s.unit == "count":
+        return "count"
+    if s.unit in _LOAD_UNITS:
+        return "load"
+    return "position" if _WHERE.search(s.why or "") else "size"
+
+
 def mm(s: SkeletonValue) -> Optional[float]:
     """A skeleton number as a length in mm (the models' unit), or None if it isn't a length."""
     return s.value * TO_MM[s.unit] if s.unit in TO_MM else None
@@ -643,7 +666,8 @@ stated size as a reference, never designed. Anything welded, printed, cut or oth
 is never the ground, the floor, a wall or the room: what it stands on is held, the floor by default.
 
 Name the numbers the parts share as the skeleton: each with a value, a unit (mm, in, ft, m, cm, deg, N, lb, kg, \
-count, or a speed in m/s, km/h or mph) and why. A number two parts must agree on lives in the skeleton, never in \
+count, or a speed in m/s, km/h or mph), why, and its kind: size (how big a part is: a thickness, a width), position \
+(where something sits: a height off the floor, an offset), count or load. A number two parts must agree on lives in the skeleton, never in \
 either part: where one part sits in, on or through another (a pocket, slot, hole, flange, a top on sides), name the \
 joining sizes in the skeleton (the inserted part's thickness and height, the pocket's clearance a side, a bolt's \
 diameter and spacing), and write a fits_in mate between them, the inserted part first, its value the clearance a \

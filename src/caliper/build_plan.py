@@ -43,7 +43,8 @@ def interfaces(store: DesignStore, pid: str, built: dict) -> Callable:
     def check(geometry, script: str = ""):
         got = evaluate_assembly(sub, base_dir=store.root, parts={**built, pid: geometry}, values=values).results
         if script and store.design.skeleton:   # it reads the plan's shared sizes, never its own (CALI-162, #240)
-            got.append(skeleton.shadows(pid, script, store.design.skeleton))
+            got.append(skeleton.shadows(pid, script, store.design.skeleton,
+                                        [p["id"] for p in (store.design.plan or {}).get("parts") or []]))
         return got
     return check
 
@@ -106,8 +107,6 @@ def _unscored(store: DesignStore) -> bool:
     return not cards or cards[0].get("versions") != versions
 
 
-#: The size words a part's section is said by, in the skeleton: its thickness and its height (#240).
-SECTION = ("thickness", "height")
 
 
 def _section_unknown(store: DesignStore, pid: str) -> bool:
@@ -135,16 +134,10 @@ def defined_first(store: DesignStore, plan, order: list[str]) -> tuple[list[str]
 
 
 def measure_section(store: DesignStore, pid: str, geometry) -> list[dict]:
-    """Part ``pid``'s section as built, into the skeleton (``{pid}_thickness``, ``{pid}_height``: its two smaller
-    sizes), so the parts it goes into are written to it (#240). The numbers written, as skeleton entries."""
-    lo, hi = geometry.require_mesh().bounds
-    dims = sorted(float(b - a) for a, b in zip(lo, hi))
-    got = [{"name": f"{pid}_{word}", "value": round(v, 2), "unit": "mm", "why": f"the {pid.replace('_', ' ')} as built",
-            "source": "measured"} for word, v in zip(SECTION, dims[:2])]
-    have = {s.get("name") for s in store.design.skeleton or []}
-    store.design.skeleton = list(store.design.skeleton or []) + [g for g in got if g["name"] not in have]
-    store.save()
-    return got
+    """Part ``pid``'s section as built, into the skeleton (:func:`skeleton.section`); [] where it can't be measured."""
+    from . import skeleton
+
+    return skeleton.section(store, pid, geometry)
 
 
 def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, client=None, use_llm: bool = True,
@@ -184,7 +177,9 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
         store.append_log({"kind": "firstrun", "action": "built", "part": pid, "version": res.version})
         if pid in measure:                               # its section, for the parts it goes into (#240)
             got = measure_section(store, pid, built[pid])
-            emit("step", f"The {name}'s size, measured: " + ", ".join(f"{g['name'].replace('_', ' ')} {g['value']:g} mm" for g in got),
+            emit("step", (f"The {name}'s size, measured: " + ", ".join(f"{g['name'].replace('_', ' ')} {g['value']:g} mm"
+                                                                       for g in got)) if got else
+                 f"The {name}'s size couldn't be measured (it isn't a plain board): say its thickness and height",
                  step="measured", part=pid)
         mine = [r for r in check(built[pid])] if res.part_report is not None else []
         marks, head = _marks(mine)
