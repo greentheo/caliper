@@ -108,6 +108,21 @@ def test_the_volume_band_on_a_real_filled_box(tmp_path, side, leg):
     assert not got.passed and leg in got.expr, (got.expr, got.actual)
 
 
+# --- #56: the page's note while a lightening step is previewed -------------------------------------------------------------------
+def test_patterns_made_while_previewing_a_step_say_it_isnt_cut_in():
+    """#56 (#72): the note had no test. It shows on the part whose lightening step is on screen, and only there: not
+    on another part, not with nothing previewed, not for a station that isn't a lightening run's (a drag study's, say)."""
+    from .test_carve_click import _page, _run
+
+    out = _run(_page(["previewNote"], consts=["esc"], extra="""
+const S = {station: {part: 'stool', run: 'l1', index: 3}, design: {lighten_runs: [{id: 'l1'}]}};
+out = [previewNote({id: 'stool', name: 'Step stool'}), previewNote({id: 'lid'})];
+S.station = {part: 'stool', run: 'd1', index: 2}; out.push(previewNote({id: 'stool'}));
+S.station = null; out.push(previewNote({id: 'stool'}));"""))
+    assert "These are of the Step stool as it is, without the step you're previewing." in out[0]
+    assert "<b>Cut these holes</b>" in out[0] and out[1:] == ["", "", ""]
+
+
 # --- #74/#75: an all-wood build lists kids.html; #52: its shop book glues and screws --------------------------------------------------
 def test_an_all_wood_build_lists_its_kids_book(tmp_path):
     """#72: the index lists kids.html only when one was made. The other side, a wooden build listing it, had no test. And #52: the
