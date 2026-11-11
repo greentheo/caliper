@@ -2365,8 +2365,8 @@ function builtResults(p, c) {
       ${bom.lumps.map((g) => `<li><b>${esc(g.name)}</b> <span class="muted">${lbs(g.mass_kg * 2.20462)}</span></li>`).join('')}
       ${bom.fasteners ? `<li><b>${bom.fasteners.screws} × ${esc(bom.fasteners.screw)}</b> and <b>${esc(bom.fasteners.glue)}</b>
         <div class="muted small">${esc(bom.fasteners.basis)}</div></li>` : ''}
-      ${(bom.printed || []).map((g) => `<li><b>${esc(g.label)}</b>: ${esc(g.name)} <span class="muted">${g.filament_g} g of filament
-        (${g.volume_cm3} cm³ at ${Math.round(g.infill * 100)}% infill)</span></li>`).join('')}
+      ${(bom.printed || []).map((g) => `<li><b>${esc(g.label)}</b>: ${esc(g.name)} <span class="muted">${Math.round(g.filament_g)} g of filament${g.filament_from ? `, ${esc(g.filament_from)}` : ''}
+        (the model: ${g.volume_cm3} cm³ at ${Math.round(g.infill * 100)}% infill)</span></li>`).join('')}
     </ul>
     ${(r.notes || []).map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}
     <div class="muted small" style="margin-top:4px">Counts are a shopping estimate (panels packed on whole sheets, cuts on

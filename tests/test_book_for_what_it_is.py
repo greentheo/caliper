@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from caliper import answers, construction, cutplan, design_api, release as R, shop
+from caliper import answers, construction, cutplan, design_api, making, release as R, shop
 from caliper.design import DesignStore
 
 from .test_mixed import MIXED
@@ -44,16 +44,21 @@ def test_a_printed_piece_has_its_own_step(stool):
 
 
 def test_the_list_has_the_filament_and_agrees_with_what_do_i_buy(stool):
-    store, _, book = stool
-    g = construction.report(store, "table")["bom"]["printed"][0]
+    """One figure for the filament (#70 item 23): the making plan's, here its rough guess (no slicer), with where it came from."""
+    store, made, book = stool
+    shop.write({"hand": ["drill", "jigsaw"], "machines": [PRINTER]})     # the shop the book was made in (each test gets its own)
+    g = making.filament(construction.report(store, "table"), making.plan(store, "table", wait=False))["bom"]["printed"][0]
+    assert g["filament_from"] == making.FROM_ROUGH
     grams = f"{g['filament_g']:.0f} g"
-    assert f"<td>{grams}</td><td>PETG filament</td>" in book
+    assert f"<td>{grams} ({g['filament_from']})</td><td>PETG filament</td>" in book
     card = next(c for c in answers.part(store, design_api.design_state(store), "table") if c["key"] == "buy")
-    assert f"{grams} of PETG filament" in card["lines"][0]["text"]
+    assert f"{grams} of PETG filament ({g['filament_from']})" in card["lines"][0]["text"]
+    assert f"{round(g['filament_g']):,} g" in book                    # the printing section's own figure, the same
 
 
-def test_the_book_says_why_the_slicer_s_grams_differ(stool):
-    assert "The shopping list goes by the model's weight" in stool[2]
+def test_the_book_says_its_figures_are_one(stool):
+    assert "The shopping list goes by the model's weight" not in stool[2]
+    assert "give the same filament figure as this" in stool[2]
 
 
 # --- a design on a hitch keeps its words ----------------------------------------------------------------------------------

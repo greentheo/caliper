@@ -52,6 +52,34 @@ def _too_big_said(pieces: int, over: list, volume, inches: bool) -> str:
             f"{_len(printing.BED_MARGIN_MM, inches)} clearance: section it differently, in the chat, or use a bigger printer")
 
 
+#: Where a printed group's filament figure came from, said beside it wherever it's given (#70 item 23).
+FROM_SLICER, FROM_ROUGH, FROM_SOLID = "the slicer's estimate", "a rough guess", "by the model's solid"
+
+
+def filament(report: Optional[dict], mk: Optional[dict]) -> Optional[dict]:
+    """One filament figure for a printed group, wherever it's said (CALI-92, #70 item 23: the buy card said 1122 g and the
+    shop panel 726 g for one print). It's the making plan's where the plan has one (the slicer's, or its rough guess
+    where the slicer couldn't), else the model's solid share, and the part's weight goes with it. Each group says which
+    in ``filament_from``. ``report`` is construction.report's and isn't changed: a new one is returned."""
+    printed = ((report or {}).get("bom") or {}).get("printed")
+    if not printed:
+        return report
+    made = {pr["name"]: pr for pr in (mk or {}).get("printed") or [] if pr.get("filament_g") is not None}
+    groups, more_g = [], 0.0
+    for g in printed:
+        pr = made.get(g["name"])
+        if pr is None:
+            groups.append({**g, "filament_from": FROM_SOLID})
+            continue
+        more_g += pr["filament_g"] - g["filament_g"]
+        groups.append({**g, "filament_g": pr["filament_g"],
+                       "filament_from": FROM_SLICER if pr.get("trust") == "model" else FROM_ROUGH})
+    lb = report.get("mass_lb")
+    if lb is not None and more_g:
+        lb = round(lb + more_g / 1000 * C.M.LB_KG, 1)
+    return {**report, "mass_lb": lb, "bom": {**report["bom"], "printed": groups}}
+
+
 def no_print_total(mk: dict) -> str:
     """Why a print total can't be given for this part: a printed piece it can't make isn't in ``printed``, so a sum over that
     would read as the whole (#179 review, rule 6). "" where there's no such piece."""

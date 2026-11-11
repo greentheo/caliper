@@ -1390,9 +1390,18 @@ def router():
         if store.design.part(pid) is None:
             raise HTTPException(status_code=404, detail=f"no part {pid!r}")
         try:
-            return construction.report(store, pid, build)
+            got = construction.report(store, pid, build)
         except (KeyError, ValueError) as e:
             raise HTTPException(status_code=409, detail=str(e))
+        if build is None and (got.get("bom") or {}).get("printed"):   # the part as it is: the one filament figure (#70 item 23)
+            from . import making
+
+            try:
+                mk = making.plan(store, pid, wait=False)
+            except Exception:  # noqa: BLE001 — the solid's share, said so
+                mk = None
+            got = making.filament(got, mk)
+        return got
 
     @r.get("/api/designs/{slug}/parts/{pid}/construction")
     def part_construction(slug: str, pid: str):

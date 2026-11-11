@@ -97,3 +97,97 @@ def test_a_refusal_shows_as_a_plain_line_with_no_report_link():
     said = "this lightening is of version 3 and the part is at version 4: lighten it again"
     assert _errbar(said, True) == {"text": said + " ", "plain": True, "report": False}
     assert _errbar("boom", False) == {"text": "⚠ boom ", "plain": False, "report": True}
+
+
+# --- item 23: one filament number -----------------------------------------------------------------------------------------
+from caliper import making  # noqa: E402
+
+
+def _rep(g=1122.0, lb=4.0):
+    return {"mass_lb": lb, "bom": {"sheets": [], "printed": [{"name": "sides", "material": "petg", "label": "PETG",
+                                                              "filament_g": g}]}}
+
+
+@pytest.mark.parametrize("trust,said", [("model", "the slicer's estimate"), ("rough", "a rough guess")])
+def test_the_filament_is_the_making_plan_s_and_the_weight_goes_with_it(trust, said):
+    """Item 23: the buy card said 1122 g (the model's solid) and the shop panel 726 g (the slicer's), for one print."""
+    got = making.filament(_rep(), {"printed": [{"name": "sides", "filament_g": 726, "trust": trust}]})
+    g = got["bom"]["printed"][0]
+    assert (g["filament_g"], g["filament_from"]) == (726, said)
+    assert got["mass_lb"] == round(4.0 - 396 / 1000 * 2.20462, 1)
+
+
+@pytest.mark.parametrize("mk", [None, {"printed": []}, {"printed": [{"name": "sides", "filament_g": None, "pending": True}]}])
+def test_with_no_number_from_the_plan_it_s_the_solid_s_share_and_says_so(mk):
+    got = making.filament(_rep(), mk)
+    assert got["bom"]["printed"][0]["filament_g"] == 1122.0 and got["mass_lb"] == 4.0
+    assert got["bom"]["printed"][0]["filament_from"] == "by the model's solid"
+
+
+SLICED = {"hours": 3.0, "filament_g": 300.0, "usd": 7.5, "trust": "model", "from": "PrusaSlicer"}
+
+
+@pytest.fixture
+def mixed(tmp_path, monkeypatch):
+    """The plywood top on printed sides, with a slicer that says 300 g a piece."""
+    from caliper import printing, shop
+    from caliper.design import DesignStore
+
+    from .test_mixed import MIXED
+
+    monkeypatch.setenv("CALIPER_SHOP", str(tmp_path / "shop.yaml"))
+    shop.write({"hand": ["drill", "jigsaw"], "machines": [{"id": "printer", "kind": "printer", "volume_mm": [400, 400, 400],
+                                                           "materials": ["pla", "petg"]}]})
+    monkeypatch.setattr(printing, "estimate", lambda *a, **k: dict(SLICED))
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    store = DesignStore.create("a side table", base=str(tmp_path / "designs"), slug="table")
+    store.write_part("table", MIXED, intent="a plywood top on printed sides")
+    return store
+
+
+def test_the_buy_card_the_shop_panel_and_the_weight_say_one_number(mixed):
+    from caliper import answers, design_api
+    from caliper import construction as C
+
+    mk = making.plan(mixed, "table", wait=False)
+    grams = sum(pr["filament_g"] for pr in mk["printed"])
+    model = C.report(mixed, "table")
+    assert grams != round(model["bom"]["printed"][0]["filament_g"])          # the two the walk saw differ
+    cards = {c["key"]: c for c in answers.part(mixed, design_api.design_state(mixed), "table")}
+    buy = cards["buy"]["lines"]
+    assert f"{grams:.0f} g of PETG filament (the slicer's estimate)" in buy[0]["text"]
+    lb = making.filament(model, mk)["mass_lb"]
+    assert lb != model["mass_lb"] and any(f"It weighs {lb:g} lb" in ln["text"] for ln in buy)
+    assert answers.measured(mixed, design_api.design_state(mixed))["weight.total_lb"] == lb
+
+
+def test_the_cost_goes_by_the_same_grams(mixed):
+    from caliper import answers
+    from caliper import construction as C
+
+    model = C.report(mixed, "table")
+    one = making.filament(model, making.plan(mixed, "table", wait=False))
+    assert answers._cost(mixed, "table", one) < answers._cost(mixed, "table", model)    # 300 g, under the model's
+
+
+def test_the_scorecard_weighs_and_prices_by_the_same_grams(mixed):
+    from caliper import scorecard
+
+    one = making.filament(__import__("caliper.construction", fromlist=["report"]).report(mixed, "table"),
+                          making.plan(mixed, "table"))
+    card = scorecard.compute(mixed)
+    assert card["metrics"]["weight.table"]["value"] == one["mass_lb"]
+    grams = one["bom"]["printed"][0]["filament_g"]
+    assert any(ln["item"].startswith(f"{grams:.0f} g of ") and ln["from"] == "the slicer's estimate"
+               for ln in scorecard.cost_and_waste(mixed, {"table": {**one, "pieces_raw": []}}, {})["lines"])
+
+
+def test_the_built_from_panel_says_the_same_grams(mixed):
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    got = TestClient(create_app()).get("/api/designs/table/parts/table/construction").json()
+    g = got["bom"]["printed"][0]
+    grams = sum(pr["filament_g"] for pr in making.plan(mixed, "table", wait=False)["printed"])
+    assert (g["filament_g"], g["filament_from"]) == (grams, "the slicer's estimate")

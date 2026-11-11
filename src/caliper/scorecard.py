@@ -161,7 +161,7 @@ def cost_and_waste(store: DesignStore, reports: dict, cutplans: dict) -> dict:
         for g in r["bom"].get("printed") or []:               # filament by weight (CALI-48)
             cost = g["filament_g"] / 1000 * M.printed(g["material"])["usd_per_kg"]
             lines.append({"part": pid, "item": f"{g['filament_g']:.0f} g of {g['label']} filament", "usd": round(cost, 2),
-                          "waste_usd": 0.0, "waste_pct": 0.0, "from": "by weight"})
+                          "waste_usd": 0.0, "waste_pct": 0.0, "from": g.get("filament_from") or "by weight"})
             bought_usd += cost
         for row in r["pieces_raw"]:
             if row["kind"] != "lump":
@@ -230,11 +230,18 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
 
     # what each part is built from: weight, keeps, the bill of materials
     emit("weighing", "what each part is built from")
-    reports, cutplans = {}, {}
+    from . import making
+
+    reports, cutplans, made = {}, {}, {}
     for p in store.design.parts:
         if not store.is_scripted(p.id) or not C.declares(store.read_script(p.id)):
             continue
         r = C.report(store, p.id)
+        try:                                   # how it's made, asked here: its weight and cost go by its filament (#70 item 23)
+            made[p.id] = making.plan(store, p.id)
+        except Exception as e:  # noqa: BLE001 — unknown is said by the shop check below, not a crash
+            made[p.id] = e
+        r = making.filament(r, made[p.id] if isinstance(made[p.id], dict) else None)
         r["pieces_raw"] = C.takeoff(C._items(C.declared(store, p.id)))
         reports[p.id] = r
         _metric(metrics, f"weight.{p.id}", r["mass_lb"], "lb", f"{p.id} weighs", "model", "construction",
@@ -367,14 +374,11 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     _metric(metrics, "waste.pct", None if pieces_short else round(cw["waste_pct"] * 100, 1), "%", "offcut, by cost", "measured", "cut plan")
 
     # can your shop make it (CALI-48): every piece routed to a tool or machine you have; printing costed
-    from . import making
-
     missing, hours, grams, planned, unplanned, guessed, unprintable = [], 0.0, 0.0, 0, [], "", ""
     for pid in reports:
-        try:
-            mk = making.plan(store, pid)
-        except Exception as e:  # noqa: BLE001 — unknown is said by the check, not a crash
-            unplanned.append(f"{pid}: {e}")
+        mk = made[pid]                         # planned above, with the weighing
+        if not isinstance(mk, dict):
+            unplanned.append(f"{pid}: {mk}")
             continue
         planned += 1
         missing += [f"{pid}: {m['name']} ({m['why']})" for m in mk["missing"]]

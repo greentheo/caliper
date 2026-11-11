@@ -693,9 +693,10 @@ def shopping(store: DesignStore, plans: dict, bom: dict, lumps: dict, ctx: dict)
         qty = f"{qt} qt" if qt < 4 else f"{math.ceil(paint)} gal"
         add("lumber yard / home center", "exterior paint", f"{qty} (uses {paint:.2f} gal)",
             (qt / 4 if qt < 4 else math.ceil(paint)) * P["paint_per_gal"], "over the glass, under the floor" if cloth else "the finish")
-    for b in bom.values():                     # by the solid's weight, as What do I buy? says it and prices it (#182)
+    for b in bom.values():                     # the one figure What do I buy? says and prices (#182, #70 item 23)
         for g in b.get("printed") or []:
-            add("filament", f"{g['label'].split(' ')[0]} filament", f"{g['filament_g']:.0f} g",
+            add("filament", f"{g['label'].split(' ')[0]} filament",
+                f"{g['filament_g']:.0f} g" + (f" ({g['filament_from']})" if g.get("filament_from") else ""),
                 g["filament_g"] / 1000 * M.printed(g["material"])["usd_per_kg"], g["name"].replace("_", " "))
     screws = sum((b.get("fasteners") or {}).get("screws", 0) for b in bom.values())
     if screws:
@@ -988,8 +989,8 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                            + f"; about {pr['hours']:g} h, {pr['filament_g']:,} g, ${pr['usd']:.2f} "
                            f"({_e(pr.get('rough_said') or pr['from'])}). STLs in <code>printer/{_e(pid)}/</code>.</p>")
         if any(m["printed"] for m in rec["making"].values()):
-            out.append("<p class='muted small'>That's the slicer's figure. The shopping list goes by the model's weight, as "
-                       "What do I buy? does, so the two can differ a little.</p>")
+            out.append("<p class='muted small'>The shopping list and What do I buy? give the same filament figure as this, "
+                       "and say where it came from.</p>")
     out.append("<h2 class='page'>Cut lists</h2>")
     for said in rec.get("cut_smaller") or []:          # beside what it's about (#183 review)
         out.append(f"<p class='note'><b>Before you cut:</b> {_e(said)}</p>")
@@ -1217,6 +1218,9 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
             made[p.id] = {"by_how": mk["by_how"], "missing": [{"name": m["name"], "why": m["why"]} for m in mk["missing"]],
                           "printed": mk["printed"], "shop_default": mk["shop_default"]}
 
+    for pid, mk in made.items():               # the list's filament is the plan's, as the card's is (#70 item 23)
+        if pid in bom:
+            bom[pid] = making.filament({"bom": bom[pid]}, mk)["bom"]
     ctx.update(hitched=_hitched(m), made=made)
     emit("drawing", "the assembly order")
     st, every = steps(store, plans, bom, ctx)
