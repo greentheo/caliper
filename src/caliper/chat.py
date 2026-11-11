@@ -585,8 +585,16 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
 
     _emit(events, on_event, "authoring", f"revising {part_id}…", part=part_id)
     # ``measured`` is true of this version: to the designer's first round only, never into the part's record (#158)
-    res = authoring.refine_authored(spec, script, message, max_rounds=max_rounds, measured=measured,
-                                    ref_base=store.root, author=author, client=client)
+    tries: list = []
+    res = None
+    try:
+        res = authoring.refine_authored(spec, script, message, max_rounds=max_rounds, measured=measured,
+                                        ref_base=store.root, author=author, client=client, tries=tries)
+    finally:
+        # every revision's tries, each with its round, built or not: the ones that fail are the ones to see (#232 review)
+        if tries:
+            store.append_log({"kind": "revise", "part": part_id, "rounds": res.rounds if res else max(t["round"] for t in tries),
+                              "built": bool(res and res.geometry is not None), "tries": tries})
 
     if res.geometry is None:                      # never built — don't write a broken part
         _emit(events, on_event, "error", f"{part_id} would not build", part=part_id)
@@ -597,8 +605,6 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
                                  f"The part is unchanged."))
 
     _emit(events, on_event, "built", f"{part_id} built in {res.rounds} round(s)", part=part_id)
-    if getattr(res, "tries", None):                # how many tries and how long each, to see what small edits gain
-        store.append_log({"kind": "revise", "part": part_id, "rounds": res.rounds, "tries": res.tries})
     report_dict = res.report.to_dict() if res.report is not None else None
     described = redescribe(entry.intent, message, res.script, use_llm=use_llm, client=client)
     from . import carve

@@ -133,3 +133,108 @@ def test_tries_and_seconds_go_on_the_designs_log(tmp_path, monkeypatch):
     chat.refine_part(s, "p", "make it 120 wide", client=Fake(), use_llm=False, promote_feedback=False)
     entry = next(e for e in s.log() if e.get("kind") == "revise")
     assert entry["part"] == "p" and entry["rounds"] == 1 and entry["tries"][0]["how"] == "edit" and entry["tries"][0]["seconds"] >= 0
+
+
+# ---------------------------------------------------------------------------
+# The #232 review
+# ---------------------------------------------------------------------------
+def test_the_shared_rules_say_code_unless_asked_for_edits():
+    # one system prompt for a write and an edit, so its cache holds: it can't say "only code" to the edit
+    rules = authoring.system_prompt()
+    assert "unless\n  you're asked for edits to a script: then output only the JSON" in rules
+
+
+@pytest.mark.parametrize("edits", [
+    [{"old": "# the top", "new": "# the top, 20 thick"}],                  # a comment
+    [{"old": "WIDTH = 100.0", "new": "WIDTH = 100.0"}],                    # the same
+    [{"old": "leg   =  cq", "new": "leg = cq"}],                           # spacing
+])
+def test_an_edit_that_leaves_the_code_as_it_was_isnt_a_revision(edits):
+    with pytest.raises(authoring.NoEdit, match="leave the code as it was"):
+        authoring.apply_edits(SCRIPT, edits)
+
+
+def test_a_comment_only_edit_goes_round_with_that_error():
+    errors = []
+
+    def editor(s, f, p, error):
+        errors.append(error)
+        return [{"old": "# the top", "new": "# the top, 120 wide"}] if len(errors) == 1 else [ONE_LINE]
+
+    got = authoring.refine_authored(_spec(), SCRIPT, "make it 120 wide", editor=editor)
+    assert errors[1] == authoring.UNCHANGED and "WIDTH = 120.0" in got.script
+
+
+def test_edits_dont_chain_and_dont_overlap():
+    # each old is looked up in the script as given: one only an earlier edit wrote isn't there
+    with pytest.raises(authoring.NoEdit, match="isn't in the script"):
+        authoring.apply_edits(SCRIPT, [ONE_LINE, {"old": "WIDTH = 120.0", "new": "WIDTH = 130.0"}])
+    with pytest.raises(authoring.NoEdit, match="overlap"):
+        authoring.apply_edits(SCRIPT, [ONE_LINE, {"old": "100.0\nDEPTH", "new": "90.0\nDEPTH"}])
+    both = authoring.apply_edits(SCRIPT, [{"old": "DEPTH = 50.0", "new": "DEPTH = 60.0"}, ONE_LINE])     # any order
+    assert "WIDTH = 120.0" in both and "DEPTH = 60.0" in both
+    assert "not as your other edits leave it" in authoring.EDIT_ASK and "no two edits may overlap" in authoring.EDIT_ASK
+
+
+def test_a_reply_with_raw_newlines_in_its_strings_is_read():
+    raw = '{"edits": [{"old": "WIDTH = 100.0\nDEPTH = 50.0", "new": "WIDTH = 120.0\nDEPTH = 50.0"}]}'
+    got = authoring.refine_authored(_spec(), SCRIPT, "make it 120 wide", client=Fake(raw))
+    assert "WIDTH = 120.0" in got.script and [t["how"] for t in got.tries] == ["edit"]
+
+
+def test_a_reply_that_isnt_json_says_why_in_the_retry():
+    c = Fake('{"edits": [{"old": "WIDTH = 100.0", "new": }]}', json.dumps({"edits": [ONE_LINE]}))
+    got = authoring.refine_authored(_spec(), SCRIPT, "wider", client=c)
+    assert "Expecting value" in got.tries[0]["why"]
+    assert "Expecting value" in c.calls[1]["messages"][0]["content"]
+
+
+def test_a_cut_off_reply_is_an_edit_that_failed_not_a_half_edit():
+    class CutOff(Fake):
+        def _create(self, **kw):
+            self.calls.append(kw)
+            return NS(content=[NS(type="text", text='{"edits": [{"old": "WIDTH')], stop_reason="max_tokens", usage=None)
+
+    with pytest.raises(authoring.NoEdit, match="cut off"):
+        authoring.edit_script(_spec(), SCRIPT, "wider", client=CutOff())
+
+
+def test_the_edit_request_has_the_spec_the_rewrite_has():
+    spec = Spec(part="p", intent="a thing", parameters={"width": {"type": "fixed", "value": 100.0, "unit": "mm"}},
+                assertions=[{"id": "wide_enough", "expr": "bbox.dx >= 100"}])
+    c = Fake(json.dumps({"edits": [ONE_LINE]}))
+    authoring.edit_script(spec, SCRIPT, "wider", client=c)
+    asked = c.calls[0]["messages"][0]["content"]
+    assert asked.startswith(authoring._the_spec(spec)) and "width" in asked and "wide_enough: bbox.dx >= 100" in asked
+
+
+def test_a_failed_builds_error_reaches_the_next_edit_and_each_try_has_its_round():
+    seen = []
+
+    def editor(s, f, p, error):
+        seen.append(f)
+        return [{"old": "WIDTH = 100.0", "new": "WIDTH = 1 / 0"}] if len(seen) == 1 else [{"old": "WIDTH = 1 / 0", "new": "WIDTH = 120.0"}]
+
+    got = authoring.refine_authored(_spec(), SCRIPT, "wider", editor=editor)
+    assert "ZeroDivisionError" in seen[1] or "division by zero" in seen[1]
+    assert [(t["round"], t["how"]) for t in got.tries] == [(1, "edit"), (2, "edit")]
+
+
+def test_a_revision_that_never_builds_still_logs_its_tries(tmp_path, monkeypatch):
+    s = DesignStore.create("a thing", base=str(tmp_path / "designs"))
+    s.write_part("p", SCRIPT, intent="a thing")
+    breaks = {"old": "def build(params):", "new": "def build(params):\n    raise RuntimeError('not today')"}
+    monkeypatch.setattr(authoring, "edit_script", lambda *a, **k: [breaks])
+    got = chat.refine_part(s, "p", "make it 120 wide", client=Fake(), use_llm=False, promote_feedback=False, max_rounds=2)
+    assert not got.ok
+    entry = next(e for e in s.log() if e.get("kind") == "revise")
+    assert entry["built"] is False and [(t["round"], t["how"]) for t in entry["tries"]] == [(1, "edit"), (2, "edit")]
+
+
+def test_a_failed_builds_error_is_in_the_next_edit_request():
+    c = Fake(json.dumps({"edits": [{"old": "WIDTH = 100.0", "new": "WIDTH = 1 / 0"}]}),
+             json.dumps({"edits": [{"old": "WIDTH = 1 / 0", "new": "WIDTH = 120.0"}]}))
+    got = authoring.refine_authored(_spec(), SCRIPT, "wider", client=c)
+    assert got.geometry is not None and "WIDTH = 120.0" in got.script
+    asked = c.calls[1]["messages"][0]["content"]
+    assert "division by zero" in asked.split("--- what to change ---")[1]
