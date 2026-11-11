@@ -39,14 +39,84 @@ def _run(store: DesignStore, part_id: str) -> Optional[dict]:
     return runs[0] if runs else None
 
 
-def measure_with(sag_mm: float) -> str:
-    """What will see a sag this big."""
+#: A 0.001 in dial indicator's smallest division, and the thinnest feeler gauge in a usual set (about 0.0015 in), mm.
+DIAL_MM, FEELER_MM = 0.025, 0.04
+
+
+def measure_with(sag_mm: float, closed: bool = False, across: str = "the two held edges") -> str:
+    """What will see a sag this big, on this part. ``closed``: its underside is shut in, so it's measured from above, off
+    a straightedge on the edges that don't move (``across``), and beside the foot, because the load sits where it would cross
+    (#70 item 2)."""
+    feeler = sag_mm >= 2 * FEELER_MM                 # the thinnest blade with something to spare
+    if sag_mm < DIAL_MM:
+        return "no hand tool: this sag is under what a dial indicator reads, so the test is the load held"
+    if closed:
+        if sag_mm < 0.5:
+            return (f"a dial indicator on a straightedge across {across}, read beside the foot"
+                    + (" (or feeler gauges under the straightedge)" if feeler else "")
+                    + ": its underside is closed in, so it can't be read from below")
+        return f"a straightedge across {across} and a steel rule, read beside the foot: its underside is closed in"
     if sag_mm < 0.5:
-        return ("a dial indicator under the middle (or a straightedge across the top and feeler gauges): "
-                "a tape measure won't see a sag this small")
+        return ("a dial indicator under the middle" + (" (or a straightedge across the top and feeler gauges)" if feeler else "")
+                + ": a tape measure won't see a sag this small")
     if sag_mm < 3:
         return "a straightedge across the top and a steel rule or feeler gauges at the middle"
     return "a tape measure from the floor to the middle of the top, before and with the load"
+
+
+def closed_under(store, part_id: str, case: dict, plate: dict) -> bool:
+    """Whether the underside of the panel the load lands on is shut in: from just below the load's middle, something of
+    the part stands in the way in all four directions. A panel without a plate check has nothing to say it's closed."""
+    if not (plate or {}).get("done") or not case.get("lo"):
+        return False
+    import numpy as np
+
+    from . import spatial
+
+    try:
+        mesh = store.part_geometry(part_id).require_mesh()
+    except Exception:  # noqa: BLE001 — a part that can't say: read from below, as before
+        return False
+    lo, hi = np.asarray(case["lo"], float), np.asarray(case["hi"], float)
+    at = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2] - plate["thickness_mm"] - 5.0]
+    ways = np.array([(1.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, -1.0, 0.0)])
+    _, rays, _ = spatial.intersects_location(mesh, np.array([at] * 4, float), ways)
+    return len(set(rays.tolist())) == 4
+
+
+#: Odd terms of the plate series each way: past this the sample top's falloff moves under 0.1%.
+SERIES = 39
+
+
+def _navier(a: float, b: float, foot: float, x: float, y: float) -> float:
+    """An ``a`` × ``b`` plate's sag at (x, y), simply supported all round, under a ``foot``-square patch at its middle: Navier's
+    double sine series (Timoshenko & Woinowsky-Krieger §30), up to the plate's stiffness and the load, which a share cancels."""
+    def spread(z: float) -> float:                           # the patch's share of a term: sin z / z, a point load's 1
+        return math.sin(z) / z if z else 1.0
+
+    total = 0.0
+    for m in range(1, 2 * SERIES, 2):
+        for n in range(1, 2 * SERIES, 2):
+            pm, pn = m * math.pi, n * math.pi
+            total += (math.sin(pm / 2) * math.sin(pn / 2) * spread(pm * foot / (2 * a)) * spread(pn * foot / (2 * b))
+                      * math.sin(pm * x / a) * math.sin(pn * y / b) / ((m / a) ** 2 + (n / b) ** 2) ** 2)
+    return total
+
+
+def beside_the_foot(plate: dict, along: str = "long") -> float:
+    """A panel's sag half an inch past the foot's edge, as a share of its sag under the foot (#70 item 2, #228 review). Held all
+    round, from the plate series: ``along`` the long side (a straightedge resting on the two long edges, read toward a short end)
+    or the short. The sample top, 368 × 216 mm under a 100 mm foot: 0.78 along the long side, 0.59 along the short. On two
+    edges the straightedge moves along the held edges with the foot: 1."""
+    if plate.get("as") == "beam":
+        return 1.0
+    a, b = plate["a_mm"], plate["b_mm"]                       # long, short
+    foot = max(plate.get("footprint_mm") or [0.0])           # a square foot its widest way: a round or square foot near enough
+    off = foot / 2 + IN / 2
+    x, y = (a / 2 + off, b / 2) if along == "long" else (a / 2, b / 2 + off)
+    if x >= a or y >= b:
+        return 0.0                                            # past the held edge: it doesn't move there
+    return _navier(a, b, foot, x, y) / _navier(a, b, foot, a / 2, b / 2)
 
 
 #: the most steps a test plan has, whatever it's asked to reach (#202: 66 million, from a check that saw no stress, held up the card)
@@ -98,6 +168,10 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
         weaker = ratio < 1.0
     flex = (sag if sag is not None else plate["deflection_mm"]) / applied if plate.get("done") else None
     lo, hi = sorted([stiff, flex if flex is not None else stiff])
+    closed = closed_under(store, part_id, case, plate)
+    spot = beside_the_foot(plate) if closed else 1.0           # where it can be read: the prediction is for there (#70 item 2)
+    all_round = closed and plate.get("as") != "beam"           # held all round: say which way the straightedge goes
+    lo, hi = lo * spot, hi * spot
     span = L.fixed_ends(run, case)                             # not settled: nothing to load it up to (CALI-153)
     breaks = None if L.unresolved(run, case) or span else case.get("breaks_lb")     # a plan isn't built up to a number nobody can read (#202)
     top = breaks or applied * 2
@@ -113,7 +187,15 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
             "where": plate.get("piece") if plate.get("done") else L.peak_in(case["fea"]),   # not an old label
             "breaks_lb": breaks,                                        # None: not a number to test against (#191 review)
             "steps": steps, "per_lb_mm": [round(lo, 6), round(hi, 6)],
-            "measure_with": measure_with(hi * case["lb"]),
+            "measure_with": measure_with(hi * case["lb"], closed, across="the two long edges" if all_round else "the two held edges"),
+            "closed_under": closed, "spot": round(spot, 3),
+            "measured_at": (("half an inch past the foot toward a short end, from a straightedge resting on the two long edges"
+                             if all_round else "beside the foot, half an inch off its edge, from a straightedge on the held edges")
+                            if closed else "at the middle"),
+            # held all round, a straightedge fits either way and the two readings differ by a third (#228 review): the
+            # sag is given for the long edges, and this says what the other way reads
+            "other_way": (f"Laid on the short edges and read half an inch past the foot toward a long edge, it sags about "
+                          f"{beside_the_foot(plate, 'short') / spot:.0%} of that." if all_round and spot else None),
             # its safety as the card says it, against the same thing (#64 item 9); not a number to test against
             # where the break isn't settled
             "why_no_break": "the check holds it fixed where it's held, so it may read too strong" if span else None,
@@ -126,7 +208,9 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
                          else " to the plate check's (held all round, edges free to turn"
                         + (", the grain taken the weaker way, as its strength is" if weaker else "")
                         + ": the flexible end)")   # (#64 item 7, #209 review)
-                        if flex is not None else "")}
+                        if flex is not None else "")
+                     + (f", given beside where the foot is: about {spot:.0%} of its sag under the foot (rough: a beam's curve along "
+                        f"the panel)" if closed and spot < 1.0 else "")}
 
 
 def record(store: DesignStore, part_id: str, load_lb: float, sag_mm: Optional[float] = None,
@@ -263,7 +347,7 @@ def summary(store: DesignStore, part_id: str, inches: bool = True) -> Optional[d
     if worst is not None:
         a, b = worst["predicted_mm"]
         step = f"at {worst['load_lb']:,.0f} lb it sagged {_sag(worst['sag_mm'], inches)} " \
-               f"(we predicted {_sag(a, inches, unit=False)}–{_sag(b, inches)})"
+               f"(we predicted {sag_range(a, b, inches)})"
         if worst["sag_mm"] > SAG_OUT * b:
             said, status = f"{said}, but {step}: it sagged more than we predicted", "warn"
         elif worst["sag_mm"] < a / SAG_OUT:
@@ -271,6 +355,17 @@ def summary(store: DesignStore, part_id: str, inches: bool = True) -> Optional[d
         else:
             said += f"; {step}"
     return {"text": said + ".", "status": status, "broke": False}
+
+
+def sag_range(a: float, b: float, inches: bool) -> str:
+    """A predicted sag's two ends, to enough places that they differ (the page's ``sagRange``, op for op: #70 item 2)."""
+    x, y, unit = (a / IN, b / IN, " in") if inches else (a, b, " mm")
+    places = 3 if inches else 2
+    if x == y:
+        return f"{x:.{places}f}{unit}"
+    while places < 6 and f"{x:.{places}f}" == f"{y:.{places}f}":
+        places += 1
+    return f"{x:.{places}f}–{y:.{places}f}{unit}"
 
 
 def _sag(mm: float, inches: bool, unit: bool = True) -> str:

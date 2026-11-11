@@ -61,6 +61,9 @@ def needs_recheck(run: Optional[dict]) -> bool:
 
 
 #: Why a part bending between its holds, with the FEA as its only check, isn't settled (CALI-153, #217).
+#: A carve step that carved under a held edge of the plywood (#228): its number is a ceiling, not a reading.
+AT_MOST_WHY = ("it carves away what holds up an edge of the plywood, so the whole part reads no higher than it did as drawn, "
+               "and how much weaker it is the check can't say")
 SPAN_WHY = ("the check holds it fixed where it's held, and a real support may let it turn, so it can read two or three "
             "times too strong")
 
@@ -322,6 +325,8 @@ def carve_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = Non
         return _make("fails", st.get("safety"))
     if st.get("whole_holds") is False:  # producer: the study's own number, judged here
         return _make("fails", st.get("whole"), why="the whole part doesn't hold there")
+    if st.get("at_most"):               # Rule 6 (#228): no higher than the plywood as drawn, and how much lower isn't checked
+        return _make("span", st.get("whole"), why=AT_MOST_WHY)
     if filled:
         return _make("untrusted", st.get("safety"), why=filled)
     if coarse(run):
