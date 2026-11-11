@@ -120,6 +120,45 @@ def test_solid_4_mm_past_a_panel_is_in_no_piece():
     assert not got.passed and "100% of it is in no piece" in got.detail, got.detail
 
 
+# --- #63's session report: chat.carve_part on a real carve's record ---------------------------------------------------------------
+def test_the_carve_reply_on_a_real_two_step_carve(tmp_path, monkeypatch):
+    """#72: ``chat.carve_part``'s reply was tested only on stubbed records (and in test_coarse_steps only when the best step saved
+    something). Here the plywood top on printed sides is checked for real at two steps, as drawn and with its left side's top
+    cut away (measured: the printed part 2.19x then 0.42x; the whole part 0.57x then 0.42x). Needing 0.5x, no step past the
+    first holds, and the headline and the reply both say nothing could come off: never a step to use."""
+    pytest.importorskip("whittle")
+    import numpy as np
+    import trimesh
+    from types import SimpleNamespace
+    from whittle import LoadStudy
+
+    from caliper import carve, chat, studies
+    from caliper.design import DesignStore
+
+    from .test_mixed import MIXED
+
+    def top_of_the_left_side(ls):
+        at = [np.asarray(ls.grid.origin)[a] + ls.grid.spacing * np.arange(ls.solid.shape[a]) for a in (0, 2)]
+        out = ls.solid.copy()
+        out[np.broadcast_to((at[0] < 30.0)[:, None, None] & (at[1] > 160.0)[None, None, :], out.shape)] = False
+        return out
+
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    monkeypatch.setattr(LoadStudy, "sweep", lambda self, **kw: SimpleNamespace(stations=[
+        SimpleNamespace(design=d, build=lambda: None) for d in (self.solid.copy(), top_of_the_left_side(self))]))
+    monkeypatch.setattr(carve, "_station_mesh", lambda mesh: trimesh.creation.box())
+    monkeypatch.setattr(carve, "_judge", lambda *a, **k: None)
+    s = DesignStore.create("a stool with printed sides", base=str(tmp_path / "designs"))
+    s.write_part("stool", MIXED, intent="a plywood top on printed sides")
+    rec = carve.study(s, "stool", stations=2, min_safety=0.5)
+    drawn, cut = rec["stations"]
+    assert drawn["whole"] > cut["whole"] and drawn["whole_holds"] and not cut["holds"] and cut["saved_g"]   # the fixture
+    assert studies._headline("carve", rec) == ("nothing could come off and still hold", False)
+    monkeypatch.setattr(carve, "study", lambda *a, **k: rec)
+    got = chat.carve_part(s, "stool")
+    assert not got.ok and got.reply == "Nothing could come off it and still hold.", got.reply
+
+
 # --- #56: the page's note while a lightening step is previewed -------------------------------------------------------------------
 def test_patterns_made_while_previewing_a_step_say_it_isnt_cut_in():
     """#56 (#72): the note had no test. It shows on the part whose lightening step is on screen, and only there: not
