@@ -67,6 +67,18 @@ def test_the_why_says_less_of_it_carries_the_load_with_the_grain_along():
     assert "less stiff across" not in load_study.beam(mat=SAME, **EDGE)["why"]
 
 
+def test_the_advice_s_number_is_the_narrower_width_s():
+    """#122 review, a surviving mutant (#72): "Cut with its face grain … and it's about N times over" worked out on the
+    isotropic width passed every test, since only its words were checked."""
+    import re
+
+    got, iso = load_study.beam(mat=PLY, **EDGE), load_study.beam(mat=SAME, **EDGE)
+    said = float(re.search(r"and it's about ([\d.]+) times over instead of", got["why"]).group(1))
+    assert said == pytest.approx(got["safety"], abs=0.051)                 # the grain-along number, on 0.84 of the width
+    assert abs(said - iso["safety"]) > 0.2                                 # never the isotropic slab's
+    assert f"(on {got['width_along_mm'] / 25.4:.1f} in:" in got["why"]
+
+
 def test_the_page_shows_a_beam_as_a_beam():
     """The panel's plate line said "held all round, edges free to turn" for a top resting on two sides."""
     import os

@@ -216,3 +216,12 @@ def test_a_length_written_as_a_whole_number_still_says_mm(tmp_path):
     got = chat.refine_part(store, "tube", "make the wall 6 mm", author=lambda *a: TUBE.replace('"wall": 4.0', '"wall": 6'),
                            use_llm=False, promote_feedback=False)
     assert "Changed: wall 4 mm → 6 mm" in got.reply, got.reply
+
+
+def test_a_count_is_said_as_a_plain_number(tmp_path):
+    """#119 re-check, a surviving mutant (#72): with ``_counts`` off a count read "rows 4 mm → 6 mm", and no test said so."""
+    rows = TUBE.replace('"wall": 4.0}', '"wall": 4.0, "rows": 4}')
+    assert rows != TUBE
+    got = chat.refine_part(_store(tmp_path, rows), "tube", "make it 6 rows", author=lambda *a: rows.replace('"rows": 4', '"rows": 6'),
+                           use_llm=False, promote_feedback=False)
+    assert "Changed: rows 4 → 6" in got.reply, got.reply

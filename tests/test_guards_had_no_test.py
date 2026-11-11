@@ -108,9 +108,11 @@ def test_the_volume_band_on_a_real_filled_box(tmp_path, side, leg):
     assert not got.passed and leg in got.expr, (got.expr, got.actual)
 
 
-# --- #74/#75: an all-wood build lists kids.html -----------------------------------------------------------------------------------
+# --- #74/#75: an all-wood build lists kids.html; #52: its shop book glues and screws --------------------------------------------------
 def test_an_all_wood_build_lists_its_kids_book(tmp_path):
-    """#72: the index lists kids.html only when one was made. The other side, a wooden build listing it, had no test."""
+    """#72: the index lists kids.html only when one was made. The other side, a wooden build listing it, had no test. And #52: the
+    shop book tells a wooden build to glue and screw where pieces meet, never the camper's foam-safe adhesive; forcing that off
+    passed every test."""
     from caliper import cutplan, release
     from caliper.design import DesignStore
 
@@ -123,7 +125,9 @@ def test_an_all_wood_build_lists_its_kids_book(tmp_path):
     made = release.make(s, pdf=False)
     root = os.path.join(release.releases_dir(s), made["id"])
     assert made["kids"] == "kids.html" and os.path.exists(os.path.join(root, "kids.html"))
-    assert "<code>kids.html</code>" in open(os.path.join(root, "index.html")).read()
+    book = open(os.path.join(root, "index.html")).read()
+    assert "<code>kids.html</code>" in book
+    assert "Glue and screw them together where they meet" in book and "floor's edge" not in book
 
 
 # --- the hash seed: a page's wording mustn't change with it (#75's rework) -------------------------------------------------------

@@ -186,3 +186,23 @@ def test_a_screw_page_says_a_pilot_hole_first_and_the_list_names_the_bit(stool, 
                                                                 "glue_ml": 40}}}, {}, {})
     (screw,) = [r for g in rows["groups"] for r in g["rows"] if "wood screws" in r["item"]]
     assert f"a {fasteners.PILOT_BIT} pilot hole for each" in screw["for"], screw
+
+
+def test_a_box_with_one_foam_wall_isn_t_all_wood(tmp_path):
+    """#52, a surviving mutant (#72): the material check in ``suits``. Off, the XPS crate still got no book (its other pieces
+    turn it away), so nothing saw it: here every piece is a sheet, and one of them is foam."""
+    foam = BOX_STOOL.replace('"material": "plywood"', '"material": "xps" if k == "left" else "plywood"')
+    assert foam != BOX_STOOL
+    store = DesignStore.create("a box stool", base=str(tmp_path / "foam"))
+    store.write_part("stool", foam, intent="a box step stool")
+    assert not kidbook.suits(store, ["stool"])
+
+
+def test_every_screw_page_is_marked_with_a_grown_up(stool, tmp_path):
+    """#52, a surviving mutant (#72): the "with a grown-up" badge on a page where screws go in. Turned off, every test passed."""
+    root = str(tmp_path / "release")
+    os.makedirs(root)
+    kidbook.make(stool, root, {"design": "Box stool", "strength": {}}, ["stool"], {"groups": []})
+    pages = re.findall(r"<section class='step'>(.*?)</section>", open(os.path.join(root, "kids.html")).read(), re.S)
+    screwed = [p for p in pages if re.search(r"drives in \d+ screws", p)]
+    assert len(screwed) >= 4 and all("<div class='grownup'>" in p for p in screwed), [p[:80] for p in screwed]
