@@ -206,3 +206,18 @@ def test_every_screw_page_is_marked_with_a_grown_up(stool, tmp_path):
     pages = re.findall(r"<section class='step'>(.*?)</section>", open(os.path.join(root, "kids.html")).read(), re.S)
     screwed = [p for p in pages if re.search(r"drives in \d+ screws", p)]
     assert len(screwed) >= 4 and all("<div class='grownup'>" in p for p in screwed), [p[:80] for p in screwed]
+
+
+def test_a_case_with_no_number_beside_one_that_holds_still_makes_the_book(stool, tmp_path):
+    """#234 review (the foreman): the promise list is built before the early returns, so without its filter a case with no number
+    (a load that never reached a support) is said "times over" and raises, and the package drops the kids' book."""
+    root = str(tmp_path / "release")
+    os.makedirs(root)
+    rec = {"design": "Box stool", "strength": {"stool": [
+        {"name": "An adult stepping up", "lb": 200, "factor": 2.0, "safety": 3.11, "verdict": {"kind": "holds"}},
+        {"name": "A shove from the side", "lb": 50, "factor": 2.0, "safety": None, "verdict": {"kind": "unchecked"}}]}}
+    import html
+
+    assert kidbook.make(stool, root, rec, ["stool"], {"groups": []}) == "kids.html"
+    book = html.unescape(open(os.path.join(root, "kids.html")).read())
+    assert "Don't stand on it yet" in book and "It should hold" not in book

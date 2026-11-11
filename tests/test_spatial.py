@@ -81,10 +81,13 @@ SHAPELY = {
 #: Taking the query modules by name: ``from trimesh import proximity`` (or ``ray``, aliased or in a list), so a bare
 #: ``proximity.…`` below it needs no ``trimesh.`` in front (#230 review).
 FROM = re.compile(r"^\s*from\s+trimesh\s+import\b.*\b(proximity|ray)\b")
+#: The same import split across lines, in brackets or after a backslash (#234 review): the whole statement, from its ``from``.
+SPLIT = re.compile(r"^[ \t]*from\s+trimesh\s+import[ \t]*(\([^)]*\)|(?:[^\n]*\\\n)+[^\n]*)", re.M)
 
 
 def offending(name: str, text: str) -> list:
-    out = []
+    out = [f"{name}:{text.count(chr(10), 0, m.start()) + 1}: {m.group(0).splitlines()[0].strip()}"
+           for m in SPLIT.finditer(text) if re.search(r"\b(proximity|ray)\b", m.group(1))]
     aliases = re.findall(r"import trimesh as (\w+)", text)          # every one, not the first (#230 review)
     via = re.compile(rf"\b({'|'.join(aliases)})\.(proximity|ray)\b") if aliases else None
     for n, line in enumerate(text.splitlines(), 1):
@@ -120,7 +123,9 @@ def test_the_guard_sees_every_way_in(line):
                                   "from trimesh import util, proximity\nd = proximity.closest_point(m, p)",
                                   "from trimesh.proximity import signed_distance\nd = signed_distance(m, p)",
                                   "from trimesh import ray\nhit = ray.ray_triangle.RayMeshIntersector(m)",
-                                  "import trimesh as a\nimport trimesh as b\nd = b.proximity.signed_distance(m, p)"])
+                                  "import trimesh as a\nimport trimesh as b\nd = b.proximity.signed_distance(m, p)",
+                                  "from trimesh import (\n    util,\n    proximity,\n)\nd = proximity.closest_point(m, p)",
+                                  "from trimesh import util, \\\n    ray\nhit = ray.ray_triangle.RayMeshIntersector(m)"])
 def test_the_guard_sees_a_from_import_and_every_alias(text):
     """#230 review (reviewer-2, item 2): ``from trimesh import proximity`` got past the guard, and only a file's first alias was looked at."""
     assert offending("x.py", text)
