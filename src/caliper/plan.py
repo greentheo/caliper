@@ -676,7 +676,7 @@ def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[
     content = f"{content}\n\nAnswer by calling the plan tool."
     ask = content
     for attempt in (1, 2):
-        msg = llm.ask(client, model=model, max_tokens=16000, effort="high", system=SYSTEM, tools=[_tool()],
+        msg = llm.ask(client, "plan", model=model, system=SYSTEM, tools=[_tool()],
                       messages=[{"role": "user", "content": ask}])
         got = next((b.input for b in msg.content if getattr(b, "type", None) == "tool_use"), None)
         try:

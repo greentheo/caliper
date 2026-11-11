@@ -20,9 +20,6 @@ from typing import Any, Callable, Optional
 from . import consistency, llm, sandbox
 from .spec import Spec
 
-#: Long enough for a multi-member part plus helper functions; the old 2000 cut a tube frame off mid-line,
-#: and a part now writes its construction() beside build() (CALI-54).
-AUTHOR_MAX_TOKENS = 32000             # with thinking inside it (Opus 5.5), and streamed so a long reply doesn't hit the HTTP timeout
 
 # author(spec, feedback, prior_script) -> python source for `build(params)`
 Author = Callable[[Spec, Optional[str], Optional[str]], str]
@@ -107,8 +104,7 @@ def author_script(
             f"--- problem ---\n{feedback}"
         )
 
-    msg = llm.ask(client, model=model, max_tokens=AUTHOR_MAX_TOKENS, effort="high", system=system_prompt(), cache=True, stream=True,
-                  messages=[{"role": "user", "content": ask}], cut_off_ok=True)
+    msg = llm.ask(client, "author", model=model, system=system_prompt(), messages=[{"role": "user", "content": ask}], cut_off_ok=True)
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     code = extract_code(text)
     if getattr(msg, "stop_reason", None) == "max_tokens":
@@ -247,7 +243,11 @@ def improve(
         try:
             script = author(spec, feedback, prior)
         except llm.Declined as e:                    # said in words, and not worth asking again the same way
-            return ImproveResult(ok=False, script=prior or "", rounds=rnd, error=str(e), history=history)
+            if best is not None:                     # a round that built is kept
+                geom, script, report = best
+                return ImproveResult(ok=report.all_pass, geometry=geom, script=script, report=report, rounds=rnd, error=llm.said(e),
+                                     history=history)
+            return ImproveResult(ok=False, script=prior or "", rounds=rnd, error=llm.said(e), history=history)
         run = sandbox.run_script(script, params, timeout=timeout)
         prior = script
 

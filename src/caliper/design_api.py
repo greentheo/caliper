@@ -22,6 +22,7 @@ from pydantic import BaseModel, field_validator
 from . import (aero, better, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
                lighten,
                load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, tree, verdicts)
+from . import llm
 from . import whittle_bridge as wb
 from .assembly import carved_file
 from .design import DesignStore
@@ -232,6 +233,7 @@ def _submit_first(slug: str):
 
     def work(j):
         store = DesignStore.load(slug)
+        llm.log_to(store)
         if store.design.parts:
             raise ValueError("it's already built: say what to change")
         return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d), strength=_aero_available(),
@@ -516,9 +518,11 @@ def router():
 
     def load(slug: str) -> DesignStore:
         try:
-            return DesignStore.load(slug)
+            store = DesignStore.load(slug)
         except FileNotFoundError:
             raise HTTPException(status_code=404, detail=f"no design {slug!r}")
+        llm.log_to(store)                               # which model answered each job goes on this design's log
+        return store
 
     # -- jobs ----------------------------------------------------------------------------------------
     @r.post("/api/jobs/{job_id}/cancel")
@@ -565,7 +569,11 @@ def router():
             qs, source = clarify.draft_questions(req.prompt.strip(), shop=shop.read(),
                                                  shop_known=os.path.exists(shop.path()))   # the slow part — unlocked
             with RUNNER.locked(_lock(slug)):
-                clarify.open_round(DesignStore.load(slug), qs, source)
+                here = DesignStore.load(slug)
+                clarify.open_round(here, qs, source)
+                if source.startswith(clarify.STOPPED):
+                    here.append_log({"kind": "reply", "action": "claude", "ok": False,
+                                     "reply": f"{source[len(clarify.STOPPED):]}. I've asked the plain questions instead."})
             return {"questions": [q.to_dict() for q in qs], "source": source}
 
         job = RUNNER.submit("clarify", ask, label="clarify", lock=f"clarify:{slug}")

@@ -233,9 +233,8 @@ def llm_refine(spec: Spec, instruction: str, client=None, model: Optional[str] =
     # No assistant prefill: some models (e.g. claude-sonnet-4-6) reject a trailing assistant turn.
     msg = llm.ask(
         client,
+        "refine",
         model=model,
-        max_tokens=8000,
-        effort="high",
         system=_SYSTEM,
         messages=[
             {"role": "user", "content": f"current spec:\n{spec.to_json()}\n\nchange: {instruction}"},
@@ -251,6 +250,8 @@ def apply_refinement(spec: Spec, instruction: str, use_llm: bool = True, client=
     if use_llm:
         try:
             return llm_refine(spec, instruction, client=client)
+        except llm.Stopped:                       # never something else changed quietly in its place
+            raise
         except Exception as e:
             if os.environ.get("CALIPER_DEBUG"):
                 print(f"[refine] LLM path failed → offline: {type(e).__name__}: {e}", file=sys.stderr)

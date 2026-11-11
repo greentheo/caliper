@@ -266,9 +266,8 @@ def llm_draft(intent: str, machine: Optional[str] = None, client=None, model: Op
     # The system prompt asks for a bare JSON object and extract_json tolerates fences/prose anyway.
     msg = llm.ask(
         client,
+        "intake",
         model=model,
-        max_tokens=8000,
-        effort="medium",
         system=_SYSTEM,
         messages=[
             {"role": "user", "content": f"machine: {machine or 'generic'}\nintent: {intent}"},
@@ -290,6 +289,8 @@ def draft_spec(
     if use_llm:
         try:
             return llm_draft(intent, machine=machine, client=client)
+        except llm.Stopped:                       # never something else made quietly in its place
+            raise
         except Exception as e:  # SDK/key/network unavailable or bad response → deterministic fallback
             if os.environ.get("CALIPER_DEBUG"):
                 print(f"[intake] LLM path failed → offline: {type(e).__name__}: {e}", file=sys.stderr)

@@ -376,7 +376,7 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
            f"means that part\n\n" if scope else "")
         + f"message: {message}"
     )
-    msg = llm.ask(client, model=model, max_tokens=2000, effort="low", system=_CLASSIFY_SYSTEM,
+    msg = llm.ask(client, "classify", model=model, system=_CLASSIFY_SYSTEM,
                   messages=[{"role": "user", "content": ask}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     m = re.search(r"\{.*\}", text, re.S)
@@ -703,7 +703,7 @@ def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = 
 
                 client = Anthropic()
             msg = llm.ask(
-                client, model=model, max_tokens=2000, effort="low", system=_DESCRIBE_SYSTEM,
+                client, "describe", model=model, system=_DESCRIBE_SYSTEM,
                 messages=[{"role": "user", "content": f"description as it was: {old or '(none)'}\n\n"
                                                       f"the change just made: {change}\n\nthe script now:\n{script}"}])
             text = " ".join("".join(b.text for b in msg.content if getattr(b, "type", None) == "text").split())
@@ -979,7 +979,7 @@ def explain(store: DesignStore, message: str, scope: Optional[str] = None, clien
 
         client = Anthropic()
     msg = llm.ask(
-        client, model=model, max_tokens=4000, effort="medium", system=_EXPLAIN_SYSTEM,
+        client, "explain", model=model, system=_EXPLAIN_SYSTEM,
         messages=[{"role": "user", "content": f"facts:\n{_facts(store, scope)}\n\nquestion: {message}"}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text").strip()
     if not text:
@@ -993,16 +993,19 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
     """Report the measured state. No geometry moves — so the answer is facts, not an opinion. With Claude
     (CALI-59), the question itself is answered from those facts, in plain words."""
     events = events if events is not None else []
+    stopped = None
     if note.startswith("offer a picture: "):           # "make it look like a dinosaur": offered, not done (#65)
         return TurnResult(action="answer", ok=True, part=scope, events=events, reply=_offer(note.split(": ", 1)[1]))
     if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
         try:
             return TurnResult(action="answer", ok=True, part=scope, events=events,
                               reply=explain(store, message, scope, client=client))
+        except llm.Stopped as e:                 # said, then the facts as they are
+            stopped = llm.said(e)
         except Exception:  # noqa: BLE001 — the facts as they are, then
             pass
     d = store.design
-    lines = [f"**{d.name}** — {d.prompt}" if d.prompt else f"**{d.name}**"]
+    lines = ([f"{stopped}. Here's what's measured:", ""] if stopped else []) + [f"**{d.name}** — {d.prompt}" if d.prompt else f"**{d.name}**"]
     if d.requirements:
         lines.append("")
         lines.append("Clarified so far:")
@@ -1136,6 +1139,8 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     for pid, err in part_errors.items():
         if pid != part_id:
             lines.append(f"⚠ {pid} won't build: {scrubbed(err)}")
+    if res.error and res.geometry is not None:     # a round that built is kept, and why it stopped there is said
+        lines.append(f"{res.error}.")
     return "\n".join(lines)
 
 

@@ -483,7 +483,7 @@ def llm_draft(store: DesignStore, part: str, feedback: str, client=None,
     ask = (f"{store.prompt_context(part)}\n\n"
            f"the user said this about '{part}': {feedback}\n\n"
            f"What single assertion would lock that in permanently?")
-    msg = llm.ask(client, model=model, max_tokens=3000, effort="medium", system=_DRAFT_SYSTEM,
+    msg = llm.ask(client, "promote", model=model, system=_DRAFT_SYSTEM,
                   messages=[{"role": "user", "content": ask}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     m = re.search(r"\{.*\}", text, re.S)
@@ -509,6 +509,8 @@ def draft(store: DesignStore, part: str, feedback: str, *, use_llm: bool = True,
             got = llm_draft(store, part, feedback, client=client)
             if got.proposal is not None or not got.measurable:
                 return got
+        except llm.Stopped as e:
+            llm.tell(store, e, "So I can't offer a rule from what you said just now.")
         except Exception as e:  # noqa: BLE001 — a failed draft must not sink the user's edit
             print(f"[promote] LLM drafting failed → offline: {type(e).__name__}: {e}", file=sys.stderr)
     return offline_draft(store, part, feedback)

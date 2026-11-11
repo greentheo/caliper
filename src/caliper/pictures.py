@@ -108,11 +108,13 @@ def draw(subject: str, *, use_llm: bool = True, client=None, model: Optional[str
                 from anthropic import Anthropic  # lazy; may be absent
 
                 client = Anthropic()
-            msg = llm.ask(client, model=model, max_tokens=8000, effort="medium", system=_DRAW_SYSTEM,
+            msg = llm.ask(client, "draw", model=model, system=_DRAW_SYSTEM,
                           messages=[{"role": "user", "content": f"Draw: {subject}"}])
             text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
             m = re.search(r"\{.*\}", text, re.S)
             return _unit(np.asarray(_shapes(json.loads(m.group(0) if m else text)["shapes"]).exterior.coords))
+        except llm.Stopped as e:
+            raise ValueError(f"{llm.said(e)}. Or draw it on the pad instead") from e
         except Exception:  # noqa: BLE001 — ask for a drawing
             pass
     raise ValueError(f"I can't draw {subject or 'that'} here: draw it on the pad instead")

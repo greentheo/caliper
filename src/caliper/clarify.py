@@ -88,7 +88,7 @@ def llm_questions(prompt: str, client=None, model: Optional[str] = None) -> list
         from anthropic import Anthropic  # lazy; may be absent
 
         client = Anthropic()
-    msg = llm.ask(client, model=model, max_tokens=4000, effort="medium", system=_SYSTEM,
+    msg = llm.ask(client, "clarify", model=model, system=_SYSTEM,
                   messages=[{"role": "user", "content": prompt}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     m = re.search(r"\[.*\]", text, re.S)
@@ -294,6 +294,10 @@ def take_offer(store: DesignStore, index: int, add: bool) -> dict:
 Asker = Callable[[str], list[Question]]
 
 
+#: What ``source`` starts with when Claude gave no usable answer and the plain questions stand in: the rest is why, for the person.
+STOPPED = "stopped: "
+
+
 def draft_questions(prompt: str, *, use_llm: bool = True, client=None,
                     asker: Optional[Asker] = None, shop: Optional[dict] = None,
                     shop_known: bool = True) -> tuple[list[Question], str]:
@@ -306,6 +310,8 @@ def draft_questions(prompt: str, *, use_llm: bool = True, client=None,
             told = shop_words(shop, shop_known) if shop else ""
             said = prompt + (f"\n\nTheir shop (what they make things with; never ask about it): {told}." if told else "")
             return with_shop(llm_questions(said, client=client), shop, shop_known), "llm"
+        except llm.Stopped as e:
+            return with_shop(offline_questions(prompt), shop, shop_known), STOPPED + llm.said(e)
         except Exception as e:  # noqa: BLE001 — a design must still start without the LLM
             print(f"[clarify] LLM questions failed → offline: {type(e).__name__}: {e}",
                   file=sys.stderr)
