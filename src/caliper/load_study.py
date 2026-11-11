@@ -348,11 +348,22 @@ def _nominal(c: dict) -> Optional[float]:
     return float(sum(f * f for f in force) ** 0.5) / (a * b) if a > 0 and b > 0 else None
 
 
+def judged_by(run: dict, case: dict) -> Optional[str]:
+    """The check a case's verdict stands on: what governs it. Under a hand buckling check (CALI-159, #229) that's the
+    buckling check where it fails (a fail is certain), and where it holds, the check it took over from: a pass from it never
+    settles an FEA too coarse to see the wall, blind, or spanning between its holds."""
+    governs = case.get("governs", "fea")
+    if governs != "buckling":
+        return governs
+    need = run.get("min_safety") or MIN_SAFETY
+    return "buckling" if case.get("safety") is not None and case["safety"] < need else case.get("over", "fea")
+
+
 def blind(run: dict, case: dict) -> bool:
     """The FEA ran and saw next to no stress for the load it was given: a bracket's 12 mm foot, loaded half way along, read 54,956,221
     times over (#202). That's a check that saw nothing, not a part that holds. No number from it means the same."""
     fea = case.get("fea") or {}
-    if fea.get("supported") is not True or case.get("governs", "fea") != "fea":
+    if fea.get("supported") is not True or judged_by(run, case) != "fea":
         return False
     if "safety" not in fea:           # a case that doesn't say isn't one that saw nothing
         return False
@@ -371,7 +382,7 @@ def unresolved(run: dict, case: dict) -> bool:
     if blind(run, case):
         return True
     thin, s = run.get("thinnest_mm"), run.get("spacing_mm")
-    if case.get("governs") != "fea" or not (thin and s):
+    if judged_by(run, case) != "fea" or not (thin and s):
         return False
     return not _sees(run.get("across") or thin / s)    # as the run counted it, not from its rounded sizes
 
@@ -828,25 +839,33 @@ def plate_why(pl: Optional[dict]) -> Optional[str]:
     return pl["why"]
 
 
-#: What the check can't see, said wherever a wall carries the load in compression (#70 item 5). NEEDS ENGINEER CHECK:
-#: whether a hand plate-buckling check belongs in V1.
+#: What the check can't see, said wherever a wall carries the load in compression and isn't checked by hand (#70 item 5):
+#: a printed part's walls, or a sheet :mod:`buckling` can't describe (CALI-159).
 BUCKLING = ("Buckling isn't checked: a thin wall carrying the load in compression can fold before it reaches its "
             "strength, more so with a big cut-out.")
+#: Said where every sheet in line with a load was checked for it by hand (CALI-159, #229).
+BUCKLING_CHECKED = ("Buckling is checked by hand for each wall the load runs down: as a flat plate, its whole load on it, "
+                    "its edges free where nothing meets them, and the plywood taken the weaker way (rough).")
 
 
-def buckling_notes(pieces: list[dict], loads: list[dict], mat: dict) -> list[str]:
-    """:data:`BUCKLING`, if the part has a wall to carry a load in its own plane: a printed part, or a sheet standing in
-    line with one of its loads."""
+def buckling_notes(pieces: list[dict], loads: list[dict], mat: dict, tol: float = 2.0,
+                   sheet_mat: Optional[dict] = None) -> list[str]:
+    """What's said of buckling, if the part has a wall to carry a load in its own plane: :data:`BUCKLING` for a printed
+    part, or where a sheet in line with a load couldn't be checked (naming it, and why); else :data:`BUCKLING_CHECKED`."""
     if mat.get("printed"):
         return [BUCKLING]
-    from .consistency import _frame
+    from . import buckling as B
 
-    forces = [np.asarray(ld["force"], float) for ld in loads]
-    for pc in pieces:
-        if pc["kind"] == "sheet" and any(abs(float(_frame(p)[3] @ f)) < 0.3 * float(np.linalg.norm(f))
-                                         for p in pc["polys"] for f in forces):
-            return [BUCKLING]
-    return []
+    rows = [r for ld in loads for r in B.check(pieces, ld, sheet_mat or mat, tol)]
+    if not rows:
+        return []
+    left = {}
+    for r in rows:
+        if not r["done"]:
+            left.setdefault(r["piece"], r["why"])
+    if left:
+        return [BUCKLING + " Not on " + "; ".join(f"the {p}: {why}" for p, why in left.items()) + "."]
+    return [BUCKLING_CHECKED]
 
 
 #: The share of a load's own footprint over a hold at which it's a push straight down, not a span.
@@ -928,7 +947,7 @@ def fixed_ends(run: dict, c: dict) -> bool:
     wouldn't clear what it needs if the FEA reads as high as it can (:data:`verdicts.SPAN_MARGIN`): not a ✓ (CALI-153: a shelf on two patches
     read 5.06 where beam theory gives about 1). ``run`` needs ``min_safety``."""
     safety, need = c.get("safety"), run.get("min_safety") or MIN_SAFETY
-    return (c.get("governs", "fea") == "fea" and not (c.get("plate") or {}).get("done")
+    return (judged_by(run, c) == "fea" and not (c.get("plate") or {}).get("done")
             and (c.get("fea") or {}).get("supported") is not False and safety is not None and safety < need * V.SPAN_MARGIN
             and _spans(run, c))
 
@@ -1182,6 +1201,18 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     governs, safety = min(((k, s) for k, s in options if s is not None), key=lambda x: x[1],
                           default=("fea", None))
     governs, safety, pl = as_drawn_ceiling((ctx.get("plate_ceiling") or {}).get(i), governs, safety, pl)
+    # a wall the load runs down can fold before it crushes (CALI-159, #229): the hand check governs where it's the lowest.
+    # What it took over from is kept, so an FEA too coarse to see the wall still says so (no verdict greener)
+    from . import buckling as B
+
+    folds = [{**r, "safety": V.cut(r["safety"])} if r["done"] else r
+             for r in B.check(ctx["pieces"], load, ctx.get("plate_mat") or mat, ctx["tol"])]
+    weakest = B.governing(folds)
+    if weakest is not None and (safety is None or weakest["safety"] < safety):
+        case["over"] = governs
+        governs, safety = "buckling", weakest["safety"]
+    if folds:
+        case["buckling"] = folds
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
                  "holds": bool(safety is not None and safety >= min_safety),  # producer
                  # where it's predicted to break, placed the same way: linear to failure, as wood is
@@ -1262,7 +1293,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
 
     fea_seconds = time.time() - t1
     notes = [f"{mat['name']}: E {mat['E']:g} MPa, strength {mat['strength']:g} MPa — {mat['basis']}.", *NOTES,
-             *buckling_notes(ctx["pieces"], loads, mat)]
+             *buckling_notes(ctx["pieces"], loads, mat, ctx["tol"], ctx.get("plate_mat"))]
     if mat.get("note"):
         notes.append(mat["note"])
     if ctx.get("note"):
