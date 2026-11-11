@@ -12,8 +12,11 @@ the loop injects ``eval_fn`` — so the author/heal mechanism is fully testable 
 
 from __future__ import annotations
 
+import ast
+import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -56,7 +59,8 @@ Rules:
 - If the part is made from sheet goods, lumber or steel tube, declare what it's built from (BUILD and
   construction(), or members() and supports() for a welded tube frame), using only the materials listed
   below. Caliper checks the declarations against the solid every time it builds the part.
-- Output ONLY the Python code of the script — no markdown fences, no prose, no example calls.
+- Output ONLY the Python code of the script — no markdown fences, no prose, no example calls — unless
+  you're asked for edits to a script: then output only the JSON object asked for.
 
 The reference for part scripts follows. It is the same document contributors read.
 
@@ -72,6 +76,21 @@ def system_prompt() -> str:
     return f"{_SYSTEM}{reference}\n\n## The materials table\n\n{materials.table()}\n"
 
 
+def _the_spec(spec: Spec) -> str:
+    """The part, its intent, its parameters and the measured assertions it must keep passing: what a write and an edit both see."""
+    goals = "\n".join(f"  - {a.id}: {a.expr}" for a in spec.assertions)
+    params = "\n".join(
+        f"  - {n}: {getattr(p, 'type', '?')} = {getattr(p, 'init', getattr(p, 'value', None))}"
+        f"{(' ' + p.unit) if getattr(p, 'unit', None) else ''}"
+        for n, p in spec.parameters.items()
+    )
+    return (
+        f"part: {spec.part}\nintent: {spec.intent}\n\n"
+        f"parameters (your build(params) receives these by name):\n{params or '  (none)'}\n\n"
+        f"it should aim to satisfy these measured assertions:\n{goals or '  (none)'}"
+    )
+
+
 def author_script(
     spec: Spec,
     feedback: Optional[str] = None,
@@ -85,17 +104,7 @@ def author_script(
 
         client = Anthropic()
 
-    goals = "\n".join(f"  - {a.id}: {a.expr}" for a in spec.assertions)
-    params = "\n".join(
-        f"  - {n}: {getattr(p, 'type', '?')} = {getattr(p, 'init', getattr(p, 'value', None))}"
-        f"{(' ' + p.unit) if getattr(p, 'unit', None) else ''}"
-        for n, p in spec.parameters.items()
-    )
-    ask = (
-        f"part: {spec.part}\nintent: {spec.intent}\n\n"
-        f"parameters (your build(params) receives these by name):\n{params or '  (none)'}\n\n"
-        f"it should aim to satisfy these measured assertions:\n{goals or '  (none)'}"
-    )
+    ask = _the_spec(spec)
     if prior and feedback:
         ask += (
             "\n\nYour previous attempt did not satisfy the spec. Revise the script to fix it; keep the "
@@ -194,6 +203,7 @@ class ImproveResult:
     rounds: int = 0
     error: str = ""
     history: list[tuple] = field(default_factory=list)  # (kind, detail) per round
+    tries: list = field(default_factory=list)           # a revision's: each try, how it went and how long it took
 
 
 def improve(
@@ -337,6 +347,8 @@ def refine_authored(
     author: Optional[Author] = None,
     client=None,
     measured: str = "",
+    editor=None,
+    tries: Optional[list] = None,
 ) -> ImproveResult:
     """Apply a natural-language change to an authored part by revising its script (CALI-22).
 
@@ -346,8 +358,122 @@ def refine_authored(
     """
     spec.intent = (spec.intent + "  " if spec.intent else "") + instruction
     feedback = (
-        "Apply this change to the part below, keeping the existing measured checks passing (change as "
+        "Apply this change to the script above, keeping the existing measured checks passing (change as "
         "little else as possible):\n  " + instruction + measured
     )
-    return improve(spec, author=author, max_rounds=max_rounds, client=client,
-                   seed_script=script, seed_feedback=feedback, ref_base=ref_base)
+    tries = [] if tries is None else tries                 # the caller's, so a revision that raises still has its tries to log
+    if editor is None and author is None:            # the real path. A stub author alone still rewrites whole, as tests give it
+        editor = lambda s, f, p, error: edit_script(s, p, f, error, client=client)   # noqa: E731
+    if editor is not None:
+        whole = author or (lambda s, f, p: author_script(s, feedback=f, prior=p, client=client))
+        author = _by_edits(editor, whole, tries)
+    got = improve(spec, author=author, max_rounds=max_rounds, client=client,
+                  seed_script=script, seed_feedback=feedback, ref_base=ref_base)
+    got.tries = tries
+    return got
+
+
+class NoEdit(ValueError):
+    """The edits a designer gave can't be applied exactly, so they aren't guessed at."""
+
+
+#: Why an edit that leaves the code as it was isn't a revision (#232 review): the checks measure the spec, not the change asked for, so
+#: an edit to a comment, or an old the same as its new, would build, pass and be logged as the change.
+UNCHANGED = ("those edits leave the code as it was (only a comment or spacing changed, or each new is its old): change the code itself "
+             "to do what's asked")
+
+
+def _code(script: str) -> Optional[str]:
+    """The script's code, comments and spacing aside; None if it doesn't parse (the build then says why, as for any script)."""
+    try:
+        return ast.dump(ast.parse(script))
+    except SyntaxError:
+        return None
+
+
+def apply_edits(script: str, edits) -> str:
+    """The script with each ``{"old", "new"}`` replaced exactly. Every ``old`` is looked up in the script as given, not as earlier edits left
+    it, and must be there exactly once; two edits may not overlap; and the code must change (:data:`UNCHANGED`)."""
+    if not isinstance(edits, list) or not edits:
+        raise NoEdit("there were no edits in that reply")
+    spans = []
+    for e in edits:
+        old, new = e.get("old") if isinstance(e, dict) else None, e.get("new") if isinstance(e, dict) else None
+        if not isinstance(old, str) or not old or not isinstance(new, str):
+            raise NoEdit(f"an edit needs an old and a new string: {e!r}")
+        n = script.count(old)
+        if n == 0:
+            raise NoEdit(f"this isn't in the script, character for character: {old!r}")
+        if n > 1:
+            raise NoEdit(f"this appears {n} times, so say more of the line around it: {old!r}")
+        at = script.index(old)
+        spans.append((at, at + len(old), new))
+    spans.sort()
+    for (_, end, _), (start, _, _) in zip(spans, spans[1:]):
+        if start < end:
+            raise NoEdit("two of those edits overlap: make them one edit, or pick text that doesn't overlap")
+    out, last = [], 0
+    for start, end, new in spans:
+        out += [script[last:start], new]
+        last = end
+    edited = "".join(out) + script[last:]
+    before = _code(script)
+    if before is not None and _code(edited) == before:
+        raise NoEdit(UNCHANGED)
+    return edited
+
+
+#: What a revision is asked for: the system prompt stays the authoring one, so its cache is shared; its rules say to answer this in JSON.
+EDIT_ASK = ("Change the script below with the smallest edits that do it, and leave everything else exactly as it is. Reply with only a JSON "
+            'object: {"edits": [{"old": "exact text from the script", "new": "its replacement"}]}. Each "old" is looked up in the script as '
+            "it is below, not as your other edits leave it, and must appear there exactly once, so include enough of its line to make it unique; "
+            "no two edits may overlap. Change the code, not just a comment. Do not restate the rest of the script.")
+
+
+def edit_script(spec: Spec, prior: str, feedback: Optional[str], error: Optional[str] = None, client=None, model: Optional[str] = None) -> list:
+    """Ask Claude for targeted replacements to ``prior``. Raises :class:`NoEdit` for a reply that isn't them."""
+    if client is None:
+        from anthropic import Anthropic  # lazy; may be absent
+
+        client = Anthropic()
+    ask = (f"{_the_spec(spec)}\n\n{EDIT_ASK}\n\n--- the script ---\n{prior}\n--- what to change ---\n{feedback or ''}"
+           + (f"\n--- your last edits didn't apply ---\n{error}" if error else ""))
+    try:
+        msg = llm.ask(client, "revise", model=model, system=system_prompt(), messages=[{"role": "user", "content": ask}])
+    except llm.CutOff as e:
+        raise NoEdit(llm.said(e)) from e
+    text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
+    m = re.search(r"\{.*\}", text, re.S)
+    try:
+        # strict=False: a model writes code into JSON with raw newlines in its strings
+        return json.loads(m.group(0) if m else text, strict=False)["edits"]
+    except ValueError as e:
+        raise NoEdit(f"that reply wasn't the edits as JSON: {e}") from e
+    except (KeyError, TypeError) as e:
+        raise NoEdit('that reply was JSON, but not {"edits": [...]}') from e
+
+
+def _by_edits(editor, whole, tries: list):
+    """An author (spec, feedback, prior) that edits ``prior``. An edit that can't be applied is tried once more with the error, then the part is
+    rewritten whole, and ``tries`` says which it was, in which round, and how long each took."""
+    rounds = [0]
+
+    def author(spec, feedback, prior):
+        rounds[0] += 1
+        error = None
+        for _ in range(2):
+            started = time.time()
+            try:
+                new = apply_edits(prior, editor(spec, feedback, prior, error))
+            except NoEdit as e:
+                error = str(e)
+                tries.append({"round": rounds[0], "how": "edit failed", "seconds": round(time.time() - started, 1), "why": error})
+                continue
+            tries.append({"round": rounds[0], "how": "edit", "seconds": round(time.time() - started, 1)})
+            return new
+        started = time.time()
+        new = whole(spec, feedback, prior)
+        tries.append({"round": rounds[0], "how": "rewrite", "seconds": round(time.time() - started, 1)})
+        return new
+
+    return author

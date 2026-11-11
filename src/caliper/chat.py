@@ -585,8 +585,16 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
 
     _emit(events, on_event, "authoring", f"revising {part_id}…", part=part_id)
     # ``measured`` is true of this version: to the designer's first round only, never into the part's record (#158)
-    res = authoring.refine_authored(spec, script, message, max_rounds=max_rounds, measured=measured,
-                                    ref_base=store.root, author=author, client=client)
+    tries: list = []
+    res = None
+    try:
+        res = authoring.refine_authored(spec, script, message, max_rounds=max_rounds, measured=measured,
+                                        ref_base=store.root, author=author, client=client, tries=tries)
+    finally:
+        # every revision's tries, each with its round, built or not: the ones that fail are the ones to see (#232 review)
+        if tries:
+            store.append_log({"kind": "revise", "part": part_id, "rounds": res.rounds if res else max(t["round"] for t in tries),
+                              "built": bool(res and res.geometry is not None), "tries": tries})
 
     if res.geometry is None:                      # never built — don't write a broken part
         _emit(events, on_event, "error", f"{part_id} would not build", part=part_id)
