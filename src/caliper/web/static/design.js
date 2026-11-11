@@ -52,6 +52,8 @@ async function api(method, url, body) {
     try { const j = await r.json(); msg = j.detail || j.error || msg; errorId = j.error_id || ''; } catch (e) { /* not JSON */ }
     const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
     if (errorId) { err.errorId = errorId; (window.__errIds = window.__errIds || {})[err.message] = errorId; }   // a crash the server kept (CALI-59)
+    // a 409 is a refusal the server meant, not a bug: it shows as a plain line with no Report it (#70 item 24)
+    if (r.status === 409) { err.refused = true; (window.__refused = window.__refused || {})[err.message] = true; }
     throw err;
   }
   return r.json();
@@ -3789,13 +3791,25 @@ async function showStation(pid, run, index) {
       ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>`;
     bar.innerHTML = `${what}
       ${carved && st.closed === false ? `<span class="small" style="color:var(--bad)">Can't use this step: ${esc(st.why)}.</span>` : ''}
-      ${(lightened || carved) && !index ? '' : `<button class="primary" id="adoptBtn" ${(lightened || carved) && !holdsHere(st) ? `disabled title="${esc(st.verdict ? `It can't be used: ${st.verdict.word}` : '')}"` : ''}>${lightened ? 'Cut these holes in '
-        : carved ? 'Carve it like this: ' : framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`}
+      ${stationAction(pid, run, index, st)}
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };
     if ($('adoptBtn')) $('adoptBtn').onclick = () => adoptStation(pid, run.id, index, run.kind);
     paint(); renderInspector();
   } catch (e) { showErr(e.message); }
+}
+// the bar's offer for a step: a Lighten or carve of an older version can't be cut in (the server refuses it, CALI-87),
+// so it isn't offered: the bar says to run it again (CALI-92, #70 item 24)
+function stationAction(pid, run, index, st) {
+  const lightened = run.kind === 'lighten', carved = run.kind === 'carve';
+  if ((lightened || carved) && !index) return '';
+  const now = partOf(pid).version;
+  if ((lightened || carved) && run.version != null && now != null && run.version !== now) {
+    return `<span class="small" id="staleRun">${lightened ? 'This lightening' : 'This carve'} is of v${run.version}, and the part
+      has changed since (it's v${now}): ${lightened ? 'lighten' : 'carve'} it again.</span>`;
+  }
+  return `<button class="primary" id="adoptBtn" ${(lightened || carved) && !holdsHere(st) ? `disabled title="${esc(st.verdict ? `It can't be used: ${st.verdict.word}` : '')}"` : ''}>${lightened ? 'Cut these holes in '
+    : carved ? 'Carve it like this: ' : run.kind === 'frame' ? 'Use these sizes for ' : run.kind === 'parametric' ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`;
 }
 function clearStation(keepBar) {
   if (stationMesh) { scene.remove(stationMesh); stationMesh.geometry.dispose(); stationMesh = null; }
