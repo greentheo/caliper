@@ -80,11 +80,12 @@ SHAPELY = {
 
 def offending(name: str, text: str) -> list:
     out = []
+    alias = re.search(r"import trimesh as (\w+)", text)
     for n, line in enumerate(text.splitlines(), 1):
-        code = line.split("#")[0]
-        if line.strip() in SHAPELY or re.search(r"spatial\.(contains|on_surface)\(", code):
+        code = re.sub(r"spatial\.(contains|on_surface)\(", "(", line.split("#")[0])       # only that call: a raw one beside it still counts
+        if line.strip() in SHAPELY:
             continue
-        if RAW.search(code):
+        if RAW.search(code) or (alias and re.search(rf"\b{alias.group(1)}\.(proximity|ray)\b", code)):
             out.append(f"{name}:{n}: {line.strip()}")
     return out
 
@@ -100,7 +101,9 @@ def test_no_module_queries_a_mesh_any_other_way():
 
 @pytest.mark.parametrize("line", ["q = mesh.nearest", "d = mesh.nearest.on_surface(p)", "inside = mesh.contains(p)",
                                   "hit = mesh.ray.intersects_any(o, d)", "t = mesh.triangles_tree",
-                                  "f = getattr(mesh, 'contains')", "trimesh.proximity.signed_distance(m, p)"])
+                                  "f = getattr(mesh, 'contains')", "trimesh.proximity.signed_distance(m, p)",
+                                  "import trimesh as tm; d = tm.proximity.signed_distance(m, p)",
+                                  "a = spatial.contains(m, p); b = mesh.contains(p)"])
 def test_the_guard_sees_every_way_in(line):
     """CALI-103 (#99 review, item 2): an alias got past the old guard, and whole files were exempt."""
     assert offending("x.py", line)

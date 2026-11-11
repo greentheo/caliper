@@ -26,9 +26,6 @@ from .errors import scrubbed
 #: Worst first (#132 review): a fail, then a warning, then what holds, so the first reply's two lines never drop a
 #: "not trusted" or "not resolved" under two "Holds…".
 VERDICT_FIRST = ("bad", "warn", "ok", "info")
-#: What the goals are written from, when it's the design's sentence and its answers that say it.
-
-
 #: A first build's designer tries: the first, and one repair (CALI-157). Only what stops it being shown right is repaired: a script that
 #: doesn't build always is, and these checks: pieces that don't account for the solid. Anything else is told to the person.
 FIRST_ROUNDS = 2
@@ -89,7 +86,7 @@ def build(store: DesignStore, *, emit: Optional[Callable] = None, use_llm: bool 
     short = [r for r in (res.part_report.results if res.part_report is not None else []) if r.id in REPAIRS and not r.passed]
     if short:                                   # what the one repair couldn't fix comes first, never "I built it" over it
         reply = ("I built it, but its 3D shape and its pieces still don't match after one repair: the What is it? card says where. "
-                 "Say what to change and I'll revise it.\n\n" + reply)
+                 "Say what to change and I'll revise it.\n\n" + reply.replace(BUILT, FOUND, 1))     # "I built it" said once
     if steps.get("plan", "").startswith("planning"):
         reply += f"\n\n({steps['plan'][0].upper()}{steps['plan'][1:]}.)"
     store.append_log({"kind": "reply", "action": "author", "part": pid, "version": res.version,
@@ -136,10 +133,14 @@ def _plan(store: DesignStore, steps: dict, emit: Callable, *, use_llm: bool, cli
     return {"part": None, "ok": True, "steps": steps, "reply": reply, "plan": "review"}
 
 
+#: How the summary opens, and how it opens after a lead that already said it was built.
+BUILT, FOUND = "I built it. Here's what I found:", "Here's what I found:"
+
+
 def summary(cards: list[dict]) -> str:
     """The four answers as the reply: each question and its top line or two. Where a card has verdicts
     (will it work, how to make it), a failure comes first, then what holds, then the rest."""
-    lines = ["I built it. Here's what I found:", ""]
+    lines = [BUILT, ""]
     for c in cards:
         said = [ln for ln in c["lines"] if ln["text"]]
         if c["key"] in ("work", "make"):

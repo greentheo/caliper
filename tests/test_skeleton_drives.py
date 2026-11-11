@@ -66,7 +66,7 @@ def _turbine(tmp_path, hub=HUB, plan=PLAN):
     store = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "designs"))
     store.design.display_units = "in"
     store.save()
-    firstrun.build(store, use_llm=True, client=fake(plan), author=_never, strength=False)     # the plan, reviewed
+    firstrun.build(store, use_llm=True, client=fake(plan), author=_never)     # the plan, reviewed
     for pid, script in (("base", BASE), ("mast", MAST), ("hub", hub)):                         # built, as #3b builds
         store.write_part(pid, script, intent=pid)
     return store

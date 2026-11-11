@@ -290,6 +290,10 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
     why = available()
     if why:
         raise ValueError(f"can't make a cut plan: {why}")
+    from . import consistency
+
+    if consistency.not_accounted(store, part_id):      # (CALI-155)
+        raise ValueError(f"can't make a cut plan: {consistency.NO_MAKE}")
     d = C.declared(store, part_id)
     items = C._items(d)
     if not items:

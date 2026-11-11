@@ -180,7 +180,7 @@ def test_a_one_part_design_s_part_is_called_what_the_design_is(tmp_path):
 
     store = DesignStore.create("I want to make a bar stool to hold 250 lb.", base=str(tmp_path / "designs"))
     assert store.design.name == "Bar stool"
-    got = firstrun.build(store, use_llm=False, author=_author(_box()), strength=False)
+    got = firstrun.build(store, use_llm=False, author=_author(_box()))
     assert got["ok"] and store.design.part(got["part"]).label == "Bar stool"
 
 

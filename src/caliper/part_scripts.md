@@ -68,7 +68,8 @@ def construction(params, build=None):
 - **sheet**: a panel cut from a sheet. `outline` is one face of the panel as it sits in the part, on
   the solid's surface, never its mid-plane: a flat polygon, its corners in order around the edge, with
   the panel's `thickness` behind it, going into the solid. A seat whose top is at z = H has its
-  outline at z = H. A panel
+  outline at z = H. A sloped or splayed panel's outline is its real corners in 3D, on the panel's own
+  face (its four corners, top and foot), never a flat stand-in. A panel
   bent to a curve gives `facets` (a list of flat polygons) instead of `outline`. `covers` says what
   goes on its faces, one entry per face covered (`["paint"]` for the outside only).
 - **stick**: a straight length from `a` to `b` along its centreline. Lumber by nominal `size`, or

@@ -41,8 +41,8 @@ def test_the_four_cards_read_top_line_first(store):
     assert [c["q"] for c in cards.values()] == ["What is it?", "Will it work?", "What do I buy?", "How do I make it?"]
     assert cards["what"]["lines"][0]["text"] == "A one-platform step stool from 3/4 in plywood."
     assert cards["what"]["lines"][1]["text"].startswith("16 × 10 in, 9 in tall")
-    # it says what it must hold but nobody's checked: a warning that says what to do
-    assert cards["work"]["status"] == "warn" and "Check it holds" in cards["work"]["lines"][0]["text"]
+    # it says what it must hold but nobody's checked: a warning that says when to check it (CALI-157: shown first, checked when asked)
+    assert cards["work"]["status"] == "warn" and cards["work"]["lines"][0]["text"] == "Not checked yet: check it when it looks right."
     buy = cards["buy"]["lines"][0]["text"]
     assert "1 sheet of 3/4 in softwood plywood" in buy and "screws and wood glue" in buy and "about $" in buy
     assert cards["make"]["lines"][0]["text"] == "With your jigsaw: 5 pieces."

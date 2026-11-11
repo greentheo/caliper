@@ -98,12 +98,14 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
         weaker = ratio < 1.0
     flex = (sag if sag is not None else plate["deflection_mm"]) / applied if plate.get("done") else None
     lo, hi = sorted([stiff, flex if flex is not None else stiff])
-    breaks = None if L.unresolved(run, case) else case.get("breaks_lb")     # a plan isn't built up to a number nobody can read (#202)
+    span = L.fixed_ends(run, case)                             # not settled: nothing to load it up to (CALI-153)
+    breaks = None if L.unresolved(run, case) or span else case.get("breaks_lb")     # a plan isn't built up to a number nobody can read (#202)
     top = breaks or applied * 2
     step = 50 if top <= 1500 else 100                          # a sandbag at a time
     step = max(step, math.ceil(top / MOST_STEPS / step) * step)   # and a plan a person could carry out
     # up to where it should break, no further: a stool predicted to go at 220 lb doesn't need 250 on it
     loads = sorted({x for x in {case["lb"], *range(step, int(breaks), step), math.ceil(breaks)} if x <= math.ceil(breaks)} if breaks
+                   else {case["lb"], *(x for x in range(step, int(applied) + 1, step))} if span       # no further than it must carry (CALI-153)
                    else {case["lb"], *range(step, int(applied * 2) + step, step)})
     steps = [{"lb": lb, "sag_mm": [round(lo * lb, 3), round(hi * lb, 3)]} for lb in loads]
     return {"part": part_id, "version": run["version"], "run": run["id"], "case": case["name"], "lb": case["lb"],
@@ -114,9 +116,11 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
             "measure_with": measure_with(hi * case["lb"]),
             # its safety as the card says it, against the same thing (#64 item 9); not a number to test against
             # where the break isn't settled
-            "over": None if L.unresolved(run, case) else answers.over(case, run.get("min_safety")),
+            "why_no_break": "the check holds it fixed where it's held, so it may read too strong" if span else None,
+            "over": None if L.unresolved(run, case) or span else answers.over(case, run.get("min_safety")),
             "basis": ("from an FEA too coarse to see its walls, so a rough guess until it's checked finer: "
-                      if L.unresolved(run, case) else "")                       # said, not hidden (CALI-110)
+                      if L.unresolved(run, case) else "from an FEA that holds it fixed where it's held, so a real one may give more: "
+                      if span else "")                       # said, not hidden (CALI-110)
                      + "linear to breaking: the FEA's sag (joints solid, the stiff end)"
                      + ((" to the beam check's (resting on two edges, free to turn: the flexible end)" if plate.get("as") == "beam"
                          else " to the plate check's (held all round, edges free to turn"
