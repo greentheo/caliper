@@ -238,7 +238,7 @@ def _submit_first(slug: str):
         if store.design.parts:
             raise ValueError("it's already built: say what to change")
         try:
-            return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d), strength=_aero_available(),
+            return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d),
                                   cards=lambda s, pid: answers.answers(s, design_state(s), pid))
         except Exception as e:          # on the design's record, so a reload or coming back says what happened (#220)
             from .errors import scrubbed

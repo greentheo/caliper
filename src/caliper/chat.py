@@ -717,7 +717,7 @@ def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = 
 def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, client=None,
                 max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
                 use_llm: bool = True, drafter=None, promote_feedback: bool = True,
-                interfaces=None) -> TurnResult:
+                interfaces=None, repair_only=None) -> TurnResult:
     """Author a brand-new part into the design, then measure the design with it in place."""
     from . import authoring
 
@@ -735,7 +735,7 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
                   part=part_id, round=n, rounds=most)
 
     res = authoring.improve(spec, author=author, max_rounds=max_rounds, client=client,
-                            ref_base=store.root, interfaces=interfaces, on_round=said_round)
+                            ref_base=store.root, interfaces=interfaces, on_round=said_round, repair_only=repair_only)
 
     if res.geometry is None:
         _emit(events, on_event, "error", f"{part_id} would not build", part=part_id)

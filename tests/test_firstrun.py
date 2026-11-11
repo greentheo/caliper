@@ -60,23 +60,21 @@ def test_one_sentence_in_four_answers_out(tmp_path, quick):
     assert got["ok"] and got["part"] == "box_step" and store.design.part("box_step").version == 1
     # each step said as it goes, in order
     steps = [d["step"] for k, _, d in heard if k == "step"]
-    assert steps == ["goals", "build", "strength", "patterns", "score", "done"]
-    assert got["steps"]["score"].endswith("fail")
-    # its strength check, at the safety its checks ask for, and its patterns: on the version just built
-    (run,) = load_study.list_runs(store, "box_step")
-    assert run["version"] == 1 and run["safety"] and run["min_safety"] == firstrun._min_safety(store)
+    assert steps == ["build", "done"]                      # the minimum: what comes next is asked for (CALI-157)
+    assert load_study.list_runs(store, "box_step") == []
     from caliper import patterns
 
-    (pat,) = patterns.list_runs(store, "box_step")
-    assert pat["version"] == 1 and pat["pages"] > 0
+    assert patterns.list_runs(store, "box_step") == []
     # the reply is the four answers, one line each
     reply = got["reply"]
     for q in ("What is it?", "Will it work?", "What do I buy?", "How do I make it?"):
         assert f"**{q}**" in reply
-    assert "Holds an adult stepping up" in reply and "plywood" in reply
+    assert "Not checked yet: check it when it looks right" in reply and "plywood" in reply
     log = store.log()
     assert any(e["kind"] == "firstrun" and e["action"] == "built" for e in log)
     assert log[-1]["kind"] == "reply" and log[-1]["firstrun"] and log[-1]["reply"] == reply
+    # Check it holds, by hand
+    load_study.study(store, "box_step")
     # the verdict says what it promises, and what it doesn't
     work = next(c for c in _cards(store, "box_step") if c["key"] == "work")
     assert work["promise"] == answers.PROMISE and "not a certificate" in work["promise"]
@@ -110,12 +108,12 @@ def test_a_build_that_fails_says_so_and_adds_nothing(tmp_path):
     assert got["steps"]["build"].startswith("failed")
 
 
-def test_no_strength_check_without_loads_or_without_whittle(tmp_path, quick):
+def test_a_first_build_runs_no_strength_check_by_itself(tmp_path, quick):
     store = DesignStore.create(PROMPT, base=str(tmp_path / "designs"))
     heard = []
     got = firstrun.build(store, emit=lambda k, t="", **d: heard.append(d.get("step")), use_llm=False,
-                         author=_author, strength=False)
-    assert got["ok"] and "isn't installed" in got["steps"]["strength"] and "strength" not in heard
+                         author=_author)
+    assert got["ok"] and "strength" not in got["steps"] and "strength" not in heard
 
 
 # --- through the API: the clarify answers start it, and the page can follow it -----------------------------
@@ -157,9 +155,9 @@ def test_answering_its_questions_builds_it(client):
     assert done["status"] == "done", done.get("error")
     state = client.get(f"/api/designs/{slug}").json()
     assert state["building"] is None and [p["id"] for p in state["parts"]] == ["box_step"]
-    assert state["load_runs"] and state["pattern_runs"]
+    assert not state["load_runs"] and not state["pattern_runs"]
     cards = {c["key"]: c for c in client.get(f"/api/designs/{slug}/answers?part=box_step").json()["cards"]}
-    assert any(ln["status"] == "ok" and "Holds" in ln["text"] for ln in cards["work"]["lines"])
+    assert any(ln["text"] == "Not checked yet: check it when it looks right." for ln in cards["work"]["lines"])
     # built once: asking again is refused
     assert client.post(f"/api/designs/{slug}/build").status_code == 409
 
@@ -223,5 +221,5 @@ def test_with_no_key_a_reviewed_plan_isn_t_built_or_planned_again(tmp_path, monk
     fresh = DesignStore.create(TURBINE_SAID, base=str(tmp_path / "other"))
     monkeypatch.setattr(firstrun.chat, "author_part", lambda *a, **k: firstrun.chat.TurnResult(
         "author", "no", ok=False, error="stub"))
-    out = firstrun.build(fresh, use_llm=True, strength=False)
+    out = firstrun.build(fresh, use_llm=True)
     assert out["steps"]["plan"] == "planning it in several parts needs Claude: I built it as one"
