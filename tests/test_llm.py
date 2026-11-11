@@ -344,6 +344,6 @@ def test_a_refusal_on_the_classic_api_is_a_422_in_words(monkeypatch):
 def test_a_refusal_on_the_command_line_is_said_and_exits_plainly(monkeypatch, capsys):
     from caliper import cli
 
-    monkeypatch.setattr(cli, "draft_spec", _raises)
+    monkeypatch.setattr(intake, "draft_spec", _raises)            # the command imports it when it runs
     assert cli.main(["run", "a block"]) == 3
     assert "safety checks stopped" in capsys.readouterr().err
