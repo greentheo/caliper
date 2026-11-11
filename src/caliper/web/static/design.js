@@ -1756,6 +1756,14 @@ function cardsView(groups) {
 // ------------------------------------------------------------------- test it (CALI-80)
 // What the strength check predicts at each load step, what to measure the sag with, and what the real one did.
 const sagText = (mm) => (inches() ? `${(mm / IN).toFixed(3)} in` : `${mm.toFixed(2)} mm`);
+// A predicted sag's two ends, to enough places that they differ (trials.sag_range, op for op)
+function sagRange(a, b) {
+  const [x, y, unit] = inches() ? [a / IN, b / IN, ' in'] : [a, b, ' mm'];
+  let places = inches() ? 3 : 2;
+  if (x === y) return `${x.toFixed(places)}${unit}`;
+  while (places < 6 && x.toFixed(places) === y.toFixed(places)) places += 1;
+  return `${x.toFixed(places)}–${y.toFixed(places)}${unit}`;
+}
 function trialView(p) {
   const t = S.trial && S.trial.part === p.id && S.trial.key === p.version ? S.trial.data : null;
   if (!t) { setTimeout(() => loadTrial(p), 0); return '<div class="muted small"><span class="spin"></span>working out what to expect…</div>'; }
@@ -1765,15 +1773,15 @@ function trialView(p) {
   const show = pr.steps.filter((st, i) => i < 3 || st.lb === pr.lb || i === pr.steps.length - 1
     || st.lb % (pr.steps.length > 20 ? 200 : 100) === 0);
   const chart = trialChart(pr, rows);
-  return `<p class="small">Put the load where <b>${esc(pr.case)}</b> goes, in steps, and measure how far the middle of
-      the ${esc(pr.where || 'top')} sags. Measure it with ${esc(pr.measure_with)}.
+  return `<p class="small">Put the load where <b>${esc(pr.case)}</b> goes, in steps, and measure how far ${pr.closed_under ? `the ${esc(pr.where || 'top')} sags ${esc(pr.measured_at)}` : `the middle of
+      the ${esc(pr.where || 'top')} sags`}. Measure it with ${esc(pr.measure_with)}.
       ${pr.breaks_lb ? `It should break at about <b>${pr.breaks_lb.toLocaleString()} lb</b>.` : 'Where it would break isn\'t settled: the check was too coarse to see its walls.'}
       ${pr.over ? `That's ${esc(pr.over)}, as its card says.` : ''}</p>
     ${chart}
     <table class="st"><tr><th>load</th><th>should sag</th><th>sagged</th><th></th></tr>
       ${show.map((st) => {
         const got = rows.filter((r) => r.load_lb === st.lb).slice(-1)[0];
-        return `<tr><td>${st.lb.toLocaleString()} lb</td><td>${sagText(st.sag_mm[0])}–${sagText(st.sag_mm[1])}</td>
+        return `<tr><td>${st.lb.toLocaleString()} lb</td><td>${sagRange(st.sag_mm[0], st.sag_mm[1])}</td>
           <td>${got ? (got.broke ? '<b class="bad">broke</b>' : got.sag_mm != null ? sagText(got.sag_mm) : 'held') : ''}</td>
           <td class="muted">${got && got.ratio ? `${got.ratio}×` : ''}</td></tr>`;
       }).join('')}

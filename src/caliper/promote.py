@@ -69,6 +69,16 @@ DESIGN_VOCABULARY = """  min_clearance(a, b)              smallest gap between t
 #: tessellated to 0.05 mm, so a size can read up to 0.05 short at each side; a wall is ray-cast across that
 #: mesh from just inside its surface (19.05 mm ply reads 18.98). A rule that pins one of them allows for it.
 MEASURING = {"min_wall": 0.15, "bbox.dx": 0.1, "bbox.dy": 0.1, "bbox.dz": 0.1}
+#: A wall built right reads about 0.02 mm short at any thickness from 0.8 to 19.05 mm (#70 item 17, measured on printed
+#: boxes and cylinders; a joined part read up to 0.07), so the error is absolute. But a fixed 0.15 lets a 1.2 mm wall
+#: through 12% under, so on a wall it's capped at this share of what the rule asks for: from 3 mm down, it bites.
+#: NEEDS ENGINEER CHECK: what share is acceptable for a printed wall.
+MEASURING_SHARE = 0.05
+
+
+def allowance(what: str, value: float) -> float:
+    """How far this measurement may read off, on a rule that pins it at ``value``."""
+    return min(MEASURING[what], round(MEASURING_SHARE * abs(value), 3)) if what == "min_wall" else MEASURING[what]
 
 _ID_OK = re.compile(r"^[a-z][a-z0-9_]*$")
 _YES = re.compile(r"\b(yes|yep|yeah|sure|ok|okay|do it|lock it in|lock that in|enforce|keep it|accept|"
@@ -395,17 +405,24 @@ def added_allowance(expr: str) -> Optional[float]:
         return (node.right.value if isinstance(node, ast.BinOp) and isinstance(node.op, op)
                 and isinstance(node.right, ast.Constant) and isinstance(node.right.value, (int, float)) else None)
 
+    def base(node):
+        return node.left.value if isinstance(node, ast.BinOp) and isinstance(node.left, ast.Constant) else None
+
     if len(tree.ops) == 1:
-        what, op = _measured_as(tree.left), type(tree.ops[0])
+        what, op, value = _measured_as(tree.left), type(tree.ops[0]), base(tree.comparators[0])
         got = tail(tree.comparators[0], ast.Sub if op in (ast.GtE, ast.Gt) else ast.Add if op in (ast.LtE, ast.Lt) else type(None))
     elif len(tree.ops) == 2:                        # the band an == becomes: v - tol <= size <= v + tol
-        what = _measured_as(tree.comparators[0])
+        what, value = _measured_as(tree.comparators[0]), base(tree.left)
         got = tail(tree.left, ast.Sub)
         if got is None or tail(tree.comparators[1], ast.Add) != got:
             return None
     else:
         return None
-    return got if what is not None and got is not None and abs(got - MEASURING[what]) < 1e-9 else None
+    if what is None or got is None:
+        return None
+    # the allowance for its size, or the fixed one a rule locked before #70 item 17 was written with
+    known = [MEASURING[what], *([allowance(what, value)] if isinstance(value, (int, float)) else [])]
+    return got if any(abs(got - k) < 1e-9 for k in known) else None
 
 
 def allow_for_measuring(expr: str) -> str:
@@ -422,7 +439,7 @@ def allow_for_measuring(expr: str) -> str:
     if what is None or not isinstance(rhs, ast.Constant) or not isinstance(rhs.value, (int, float)) \
             or isinstance(rhs.value, bool):
         return expr
-    tol, left, v = MEASURING[what], ast.unparse(tree.left), ast.unparse(rhs)      # their number, as written
+    tol, left, v = allowance(what, rhs.value), ast.unparse(tree.left), ast.unparse(rhs)      # their number, as written
     op = type(tree.ops[0])
     if op in (ast.GtE, ast.Gt):
         return f"{left} {'>=' if op is ast.GtE else '>'} {v} - {tol:g}"

@@ -812,6 +812,27 @@ def plate_why(pl: Optional[dict]) -> Optional[str]:
     return pl["why"]
 
 
+#: What the check can't see, said wherever a wall carries the load in compression (#70 item 5). NEEDS ENGINEER CHECK:
+#: whether a hand plate-buckling check belongs in V1.
+BUCKLING = ("Buckling isn't checked: a thin wall carrying the load in compression can fold before it reaches its "
+            "strength, more so with a big cut-out.")
+
+
+def buckling_notes(pieces: list[dict], loads: list[dict], mat: dict) -> list[str]:
+    """:data:`BUCKLING`, if the part has a wall to carry a load in its own plane: a printed part, or a sheet standing in
+    line with one of its loads."""
+    if mat.get("printed"):
+        return [BUCKLING]
+    from .consistency import _frame
+
+    forces = [np.asarray(ld["force"], float) for ld in loads]
+    for pc in pieces:
+        if pc["kind"] == "sheet" and any(abs(float(_frame(p)[3] @ f)) < 0.3 * float(np.linalg.norm(f))
+                                         for p in pc["polys"] for f in forces):
+            return [BUCKLING]
+    return []
+
+
 def run_safety(cases: list) -> Optional[float]:
     """A strength run's number, as ``study`` writes it: the worst of the cases that ran. A case whose load never
     reached a support has none, so it's never a 0x (#140 review); none that ran, no number."""
@@ -1123,7 +1144,8 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         cases.append(case)
 
     fea_seconds = time.time() - t1
-    notes = [f"{mat['name']}: E {mat['E']:g} MPa, strength {mat['strength']:g} MPa — {mat['basis']}.", *NOTES]
+    notes = [f"{mat['name']}: E {mat['E']:g} MPa, strength {mat['strength']:g} MPa — {mat['basis']}.", *NOTES,
+             *buckling_notes(ctx["pieces"], loads, mat)]
     if mat.get("note"):
         notes.append(mat["note"])
     if ctx.get("note"):

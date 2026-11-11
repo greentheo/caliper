@@ -33,6 +33,8 @@ IN = 25.4
 MIN_FEATURE_MM = 0.25 * IN
 #: How much of the room it may fill, and how much smaller each try gets when it doesn't hold.
 FILL, SHRINK, TRIES = 0.9, 0.8, 5
+#: How many times, and by how much, :func:`fit` shrinks a picture that rounding pushed past its room before it refuses.
+FIT_TRIES, FIT_SHRINK = 30, 0.95
 DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
 
 #: A T-rex, side on, facing right, standing on y = 0 in a 100 box: drawn by hand so it works offline.
@@ -204,7 +206,6 @@ def cuttable(poly):
 
 def fit(shape, panel: dict, scale: float = 1.0):
     """The picture on the panel: upright as you look at it, centred in the room, ``scale`` of as big as fits."""
-    from shapely import affinity
     from shapely.geometry import Polygon
     from shapely.ops import polylabel
 
@@ -218,10 +219,14 @@ def fit(shape, panel: dict, scale: float = 1.0):
     for _ in range(30):                                  # the biggest that fits
         mid = (lo + hi) / 2
         lo, hi = (mid, hi) if room.contains(placed(mid)) else (lo, mid)
-    got = cuttable(placed(lo * FILL * scale))
-    if got is None or not room.contains(got):
-        got = cuttable(affinity.scale(placed(lo * FILL * scale), 0.95, 0.95))
-    return got
+    # rounding it for a jigsaw can push it past the room: smaller until it fits, or none. Never one outside (#70 item 4)
+    k = lo * FILL * scale
+    for _ in range(FIT_TRIES):
+        got = cuttable(placed(k))
+        if got is not None and room.contains(got):
+            return got
+        k *= FIT_SHRINK
+    return None
 
 
 def to_3d(panel: dict, poly) -> list[list[float]]:
@@ -233,6 +238,20 @@ def to_3d(panel: dict, poly) -> list[list[float]]:
 # ---------------------------------------------------------------------------
 # Checked, then cut
 # ---------------------------------------------------------------------------
+def _quieter(ctx: dict, shape, panel: dict, found: list[dict], min_safety: float) -> Optional[dict]:
+    """The panel, other than ``panel``, where this picture would hold: biggest room first, by the same check and the same
+    shrinking. ``{"panel", "safety"}`` or None. It only says so: nothing moves until the person asks (#70 item 3)."""
+    for other in sorted((p for p in found if p["name"] != panel["name"]), key=lambda p: -p["room"].area):
+        for k in range(TRIES):
+            poly = fit(shape, other, scale=SHRINK ** k)
+            got = _try(ctx, other, poly, min_safety) if poly is not None else None
+            if got is None:
+                break
+            if got >= min_safety:  # search
+                return {"panel": other["name"], "safety": got}
+    return None
+
+
 def _try(ctx: dict, panel: dict, poly, min_safety: float) -> Optional[float]:
     """The worst safety with ``poly`` cut out of ``panel``, on the voxels; None if the panel isn't in them."""
     from shapely import contains_xy
@@ -299,10 +318,14 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
         if predicted is not None and predicted < min_safety:  # search
             from . import answers
 
+            better = _quieter(ctx, shape, panel, panels(store, part_id), min_safety)
+            instead = (f"It would hold on the {better['panel']}, {answers._times(better['safety'], need=min_safety)}. Want it "
+                       f"there? Say \"put it on the {better['panel']}\"." if better
+                       else "No other panel would hold it either, even smaller.")
             return {"ok": False, "panel": panel["name"], "subject": subject, "predicted": predicted,
-                    "min_safety": min_safety, "reply": (
+                    "min_safety": min_safety, "holds_on": better["panel"] if better else None, "reply": (
                         f"A {subject} on the {panel['name']} would make it too weak: {answers._times(predicted, need=min_safety)} at "
-                        f"best, and it needs {min_safety:g}. Try another panel (\"on the side\"), or a smaller one.")}
+                        f"best, and it needs {min_safety:g}. {instead}")}
     emit("step", f"Cutting the {subject} out of the {panel['name']}", step="cut")
     entry = {"piece": panel["name"], "normal": [round(float(c), 6) for c in panel["inward"]],
              "depth": round(float(panel["t"]), 3), "polygons": [to_3d(panel, poly)], "picture": subject}

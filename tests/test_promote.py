@@ -67,7 +67,7 @@ def test_a_no_collision_rule_is_recognised(gantry):
 def test_a_wall_minimum_is_recognised(gantry):
     pytest.importorskip("cadquery")
     got = promote.offline_draft(gantry, "carriage", "walls of at least 2mm please")
-    assert got.proposal.expr == "min_wall >= 2.0 - 0.15"
+    assert got.proposal.expr == "min_wall >= 2.0 - 0.1"
 
 
 def test_a_rule_about_something_that_is_not_a_part_is_not_invented(gantry):
