@@ -1100,14 +1100,17 @@ function renderThread() {
     $('buildFirst').onclick = async () => {
       const go = $('buildFirst');
       go.disabled = true;                              // a double click starts one build (#66 item 1)
-      try { followBuild((await api('POST', `/api/designs/${S.slug}/build`)).job_id); }
-      catch (e) { showErr(e.message); go.disabled = false; }
+      try {
+        followBuild((await api('POST', `/api/designs/${S.slug}/build`)).job_id, 0);
+        S.answers = null;                              // the cards were drawn before it started: "press Build it" isn't so any more
+        refresh().catch(() => {});
+      } catch (e) { showErr(e.message); go.disabled = false; }
     };
   }
   if (typeof d.claude === 'boolean') S.claude = d.claude;
   paintSendNote();
   if (S.buildBubble) t.append(S.buildBubble);          // a redraw mid-build keeps its progress
-  if (d.building && S.following !== d.building) followBuild(d.building);
+  if (d.building && S.following !== d.building) followBuild(d.building, ((d.running || []).find((r) => r.job === d.building) || {}).elapsed_s);
   t.scrollTop = t.scrollHeight;
 }
 
@@ -1157,12 +1160,19 @@ function authoringWords(round) {
 }
 // leaving a design doesn't stop its build: coming back follows it again, and the design you went to can be talked to
 function dropBuildFollow() {
-  S.following = null; S.buildFollow = (S.buildFollow || 0) + 1; S.busy = false; S.buildBubble = null;
+  S.buildBubble = null;
+  if (!S.following) return;                     // nothing of a build's to let go: a chat turn in flight keeps Send off
+  S.following = null; S.buildFollow = (S.buildFollow || 0) + 1; S.busy = false;
   $('send').disabled = false;
 }
-async function followBuild(jobId) {
+// how long it has run comes from the server (its elapsed seconds), so a browser whose clock is off still reads right
+function buildRanFor(seconds) {
+  S.buildBegan = Date.now() / 1000 - (seconds || 0);
+}
+async function followBuild(jobId, ranFor) {
   const mine = S.buildFollow = (S.buildFollow || 0) + 1;
   S.following = jobId; S.busy = true; $('send').disabled = true;
+  buildRanFor(ranFor);
   const t = $('thread');
   t.querySelectorAll('.actions').forEach((n) => n.remove());
   const cal = document.createElement('div');
@@ -1183,14 +1193,13 @@ async function followBuild(jobId) {
     });
     at = k; said = text || BUILD_STEPS[k]; paint();
   };
-  // how long the whole build has run, by the server's clock from its own first event: a reload or a switch of design doesn't restart it
-  let said = 'Starting', began = Date.now() / 1000;
-  const paint = () => { head.innerHTML = `<span class="spin"></span>${esc(said)}… <span class="muted small">${elapsedText(Date.now() / 1000 - began)}</span>`; };
+  // the whole build's time: a reload or a switch of design doesn't restart it
+  let said = 'Starting';
+  const paint = () => { head.innerHTML = `<span class="spin"></span>${esc(said)}… <span class="muted small">${elapsedText(Date.now() / 1000 - S.buildBegan)}</span>`; };
   paint();
   const tick = setInterval(() => { if (cal.isConnected) paint(); }, 1000);
   try {
     await follow(jobId, (ev) => {
-      if (ev.kind === 'started' && ev.t) { began = ev.t; paint(); }
       if (ev.kind === 'step') return ev.step === 'done' ? null : mark(ev.step, ev.text);
       const li = at && cal.querySelector(`li[data-step="${at}"] .detail`);
       const line = ev.kind === 'authoring' ? authoringWords(ev.round)
@@ -1199,8 +1208,9 @@ async function followBuild(jobId) {
       if (li && line) li.textContent = ` · ${line}`;
     });
   } catch (e) {
-    cal.classList.add('bad'); head.innerHTML = `⚠ ${esc(e.message)} `;
+    cal.classList.add('bad'); head.innerHTML = `⚠ The build stopped: ${esc(e.message)} `;
     head.append(reportLink(e.errorId, e.message));
+    cal.querySelectorAll('li.now').forEach((li) => li.classList.remove('now'));
   } finally {
     clearInterval(tick);
     if (mine === S.buildFollow) { S.busy = false; $('send').disabled = false; S.following = null; }
@@ -3173,7 +3183,8 @@ async function pollRunning() {
   S.design.running = got.running;
   syncRunning();
   const build = got.running.find((r) => r.kind === 'firstrun');   // started from another tab
-  if (build && S.following !== build.job) followBuild(build.job);
+  if (build && S.following !== build.job) followBuild(build.job, build.elapsed_s);
+  else if (build) buildRanFor(build.elapsed_s);               // keep to the server's time
   for (const t of jobsHere()) {
     if (got.running.some((r) => r.job === t.job)) t.gone = 0;
     else if ((t.gone = (t.gone || 0) + 1) > 1) jobOver(t.job);

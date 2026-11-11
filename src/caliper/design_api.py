@@ -235,8 +235,15 @@ def _submit_first(slug: str):
         store = DesignStore.load(slug)
         if store.design.parts:
             raise ValueError("it's already built: say what to change")
-        return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d), strength=_aero_available(),
-                              cards=lambda s, pid: answers.answers(s, design_state(s), pid))
+        try:
+            return firstrun.build(store, emit=lambda k, t="", **d: j.emit(k, t, **d), strength=_aero_available(),
+                                  cards=lambda s, pid: answers.answers(s, design_state(s), pid))
+        except Exception as e:          # on the design's record, so a reload or coming back says what happened (#220)
+            from .errors import scrubbed
+
+            store.append_log({"kind": "reply", "action": "build", "ok": False, "error": scrubbed(e),
+                              "reply": f"The build stopped before it finished: {scrubbed(e)}. Press Build it to try again."})
+            raise
 
     job = RUNNER.submit("firstrun", work, label="first build", lock=_lock(slug), meta={"slug": slug})
     _FIRST[slug] = job.id
