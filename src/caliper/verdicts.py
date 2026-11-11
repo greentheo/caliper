@@ -65,6 +65,12 @@ SPAN_WHY = ("the check holds it fixed where it's held, and a real support may le
             "times too strong")
 
 
+#: A span's FEA number is only in doubt under this many times what it needs: the worst the check read high against beam theory in the coupon
+#: table (pm/bench/theory-vs-whittle.md, 3.17). A part that clears even after dividing by it has earned its ✓. To be revisited when Theo's
+#: measured coupons come in (#42).
+SPAN_MARGIN = 3.2
+
+
 #: Every kind, best last: (status, the word a badge says, counts as a pass). A new state goes here and in RANK.
 KINDS = {
     "fails": ("bad", "doesn't hold", False),
@@ -170,7 +176,7 @@ def fails(rec: dict, c: Optional[dict] = None) -> bool:
 
 # --- a scorecard: its checks' statuses and its summary --------------------------------------------------------------
 #: A scorecard check's status, as a verdict kind.
-CHECK = {"pass": "holds", "fail": "fails", "untrusted": "untrusted", "unresolved": "unresolved", "edge": "edge",
+CHECK = {"pass": "holds", "fail": "fails", "untrusted": "untrusted", "unresolved": "unresolved", "edge": "edge", "span": "span",
          "unknown": "waiting", "deferred": "waiting", "proposed": "waiting"}
 
 
@@ -189,6 +195,8 @@ def summary(s: Optional[dict]) -> dict:
         return _make("untrusted", why="a check isn't trusted yet")
     if s.get("unresolved"):
         return _make("unresolved", why="a strength check isn't resolved")
+    if s.get("span"):
+        return _make("span", why=SPAN_WHY)
     if s.get("edge"):
         return _make("edge", why="a strength check skipped the front edge")
     if s.get("unknown") or not (s.get("pass") or s.get("estimate")):
@@ -201,7 +209,7 @@ def summary(s: Optional[dict]) -> dict:
 #: A verdict kind as a scorecard check's status.
 STATUS = {"holds": "pass", "fails": "fail", "untrusted": "untrusted", "unresolved": "unresolved",
           "unchecked": "unresolved", "edge": "edge", "stale": "unknown", "waiting": "unknown", "estimate": "estimate",
-          "span": "unknown", "close": "pass", "recheck": "unknown"}   # close passes, in amber; an old number on its limit isn't settled
+          "span": "span", "close": "pass", "recheck": "unknown"}   # close passes, in amber; an old number on its limit isn't settled
 
 
 def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Optional[str] = None,

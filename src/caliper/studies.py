@@ -131,8 +131,8 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
             return f"holds, close to the line — weakest {what} (needs {r.get('min_safety', 2):g}x)", True
         if v["kind"] == "edge":                 # the middle only: the front edge, where people stand, isn't checked
             return f"middle only — weakest {what}; the front edge isn't checked", None
-        if v["kind"] == "span":                 # the FEA alone, between its holds (CALI-153)
-            return f"not settled — weakest {what}: {verdicts.SPAN_WHY}", None
+        if v["kind"] == "span":                 # the FEA alone, between its holds: no number to quote (CALI-153)
+            return f"not settled: {verdicts.SPAN_WHY}", None
         if v["kind"] == "recheck":              # its reason, not "older version" (#214 review)
             return f"check it again — weakest {what}: {verdicts.UNCUT}", None
         return f"{v['word']} — weakest {what}", None
@@ -234,7 +234,8 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
         unresolved = s.get("unresolved") or 0                       # nor is not resolved (CALI-110)
         edge = s.get("edge") or 0                                   # nor middle-only (CALI-94)
         return (f"{s.get('pass', 0)} pass · {s.get('fail', 0)} fail" + (f" · {untrusted} not trusted" if untrusted else "")
-                + (f" · {unresolved} not resolved" if unresolved else "") + (f" · {edge} middle only" if edge else ""),
+                + (f" · {unresolved} not resolved" if unresolved else "") + (f" · {edge} middle only" if edge else "")
+                + (f" · {s['span']} not settled" if s.get("span") else ""),
                 verdicts.summary(s)["counts_as_pass"])              # one verdict (CALI-112)
     if kind == "release":
         why = verdicts.summary((r.get("card") or {}).get("summary"))["why"] or "a check isn't settled"

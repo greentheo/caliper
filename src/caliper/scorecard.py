@@ -545,6 +545,9 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         elif status == "fail" and strength and (unsettled or unsure):     # a ✗ stays a ✗, not as a settled number (#191)
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": NOT_SEEN if saw_nothing else "not resolved: too coarse to see its walls", "note": unsettled or unsure})
+        elif status == "span":                # the FEA alone, between its holds: no number beside it (CALI-153)
+            checks.append({**c, "status": status, "value": None, "unit": m["unit"], "margin": None,
+                           "trust": "not settled", "note": verdicts.SPAN_WHY})
         elif status == "edge":                # loaded in the middle only (CALI-94): never a pass; a ✗ stays a fail
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "checked in the middle only", "note": MIDDLE_ONLY})
@@ -582,7 +585,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                         "untrusted": sum(c["status"] == "untrusted" for c in checks),
                         "unresolved": sum(c["status"] == "unresolved" for c in checks),
                         "estimate": sum(c["status"] == "estimate" for c in checks),
-                        "edge": sum(c["status"] == "edge" for c in checks)}}
+                        "edge": sum(c["status"] == "edge" for c in checks),
+                        "span": sum(c["status"] == "span" for c in checks)}}
     os.makedirs(cards_dir(store), exist_ok=True)
     with open(os.path.join(cards_dir(store), time.strftime("%Y%m%d-%H%M%S") + ".json"), "w") as f:
         json.dump(card, f, indent=2, default=str)

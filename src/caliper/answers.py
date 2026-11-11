@@ -698,7 +698,8 @@ def measured(store: DesignStore, state: dict) -> dict:
     # a breaking load from a run that can't see its walls isn't one to read, and never the rest's smallest (#191 review)
     gone = next(((r, v) for (r, c), (_, v) in zip(cases, said) if c.get("breaks_lb") and (v["kind"] not in verdicts.SETTLED or v.get("coarse"))), None)
     if gone:
-        out["strength.no_breaks"] = coarse(gone[0], inches, holds=gone[1]["kind"] != "fails")
+        out["strength.no_breaks"] = (f"not settled: {verdicts.SPAN_WHY}" if gone[1]["kind"] == "span"
+                                     else coarse(gone[0], inches, holds=gone[1]["kind"] != "fails"))
     if any(L.rough(r, c) for r, c in cases):
         out["strength.rough"] = True                   # the printed model's number: "about", as the part card says
     from . import consistency
@@ -1015,12 +1016,13 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         # never a pass: a check that couldn't run (#103 review), nor one measured on a filled-in shape (CALI-96)
         untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0     # never a pass (CALI-110)
         edge = s.get("edge") or 0                                                      # nor middle only (CALI-94)
-        waits = (s.get("unknown") or 0) - untrusted - unresolved - edge
+        span = s.get("span") or 0                                                      # nor not settled (CALI-153)
+        waits = (s.get("unknown") or 0) - untrusted - unresolved - edge - span
         said = (f"{s['pass']} check{'s' if s['pass'] != 1 else ''} pass" if s["pass"] or fails
-                else "No check has run yet" if waits and not untrusted and not unresolved and not edge
+                else "No check has run yet" if waits and not untrusted and not unresolved and not edge and not span
                 else "No check passes yet")
         rest = ([f"{untrusted} not trusted"] * bool(untrusted) + [f"{unresolved} not resolved"] * bool(unresolved)
-                + [f"{edge} middle only"] * bool(edge) + [f"{waits} not checked yet"] * bool(waits)
+                + [f"{edge} middle only"] * bool(edge) + [f"{span} not settled"] * bool(span) + [f"{waits} not checked yet"] * bool(waits)
                 + [f"{s.get('estimate')} a guess"] * bool(s.get("estimate")))
         work.append(_line(said + (
             f", {s['fail']} fail" + (f" ({s['unsettled']} not settled: too coarse to see its walls)" if s.get("unsettled") else "") + ": " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")

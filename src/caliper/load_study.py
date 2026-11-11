@@ -828,21 +828,51 @@ def plate_why(pl: Optional[dict]) -> Optional[str]:
     return pl["why"]
 
 
+#: The share of a load's own footprint over a hold at which it's a push straight down, not a span.
+ON_A_HOLD = 0.5
+
+
+def _closed_round(held: set, at: tuple) -> bool:
+    """Whether walking out from ``at`` in all four directions meets something held, past any hold it starts on."""
+    reach = max(max(abs(a - b) for a, b in zip(c, at)) for c in held) + 1
+    for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+        k, clear = 0, False
+        met = False
+        while k <= reach:
+            here = (at[0] + dx * k, at[1] + dy * k) in held
+            clear = clear or not here
+            if clear and here:
+                met = True
+                break
+            k += 1
+        if not met:
+            return False
+    return True
+
+
 def spans_between(patches: list, lo, hi, force, spacing: float) -> bool:
-    """Whether a load lands between where the part is held, and over none of it: seen along the load, its middle is inside the
-    outline of all the patches (not past them, like a bracket's arm) and not over one of them (a leg pushed straight down). A
-    load like that bends the part between its holds, and the FEA holds those ends fixed (CALI-153, #217)."""
-    if len(patches) < 2:
+    """Whether a load bends the part between where it's held, seen along the load (CALI-153, #217). Its middle is inside the outline of everything
+    that's held (not past it, like a bracket's arm); under half of its own footprint lands over a hold (not a leg pushed straight down, but a load
+    spread over three feet is); and the holds don't close all round it (a ring or a box's walls carry it down). Feet joined into one patch still
+    span. ``patches``: the held places, as points a voxel apart."""
+    if not len(patches):
         return False
     from shapely.geometry import MultiPoint, Point
 
     keep = [i for i in range(3) if i != int(np.argmax(np.abs(np.asarray(force, float))))]
-    mid = Point(((np.asarray(lo, float) + np.asarray(hi, float)) / 2)[keep])
-
-    def around(points):
-        return MultiPoint(np.unique(np.asarray(points, float)[:, keep], axis=0)).convex_hull.buffer(spacing)
-
-    return bool(around(np.vstack(patches)).contains(mid)) and not any(around(p).contains(mid) for p in patches)
+    lo2, hi2 = np.asarray(lo, float)[keep], np.asarray(hi, float)[keep]
+    mid = (lo2 + hi2) / 2
+    points = np.unique(np.vstack(patches)[:, keep], axis=0)
+    if not MultiPoint(points).convex_hull.buffer(spacing).contains(Point(mid)):
+        return False
+    origin = points.min(axis=0)
+    cell = lambda xy: tuple(np.rint((np.asarray(xy, float) - origin) / spacing).astype(np.int64).tolist())        # noqa: E731
+    held = {cell(p) for p in points}
+    axes = [np.arange(a, b + spacing / 2, spacing) if b > a else np.array([a]) for a, b in zip(lo2, hi2)]
+    foot = [cell((x, y)) for x in axes[0] for y in axes[1]]
+    if sum(c in held for c in foot) / len(foot) >= ON_A_HOLD:
+        return False
+    return not _closed_round(held, cell(mid))
 
 
 def _held_patches(ctx: dict) -> list:
@@ -866,16 +896,20 @@ def _spans(run: dict, c: dict) -> bool:
     boxes = [h for h in run.get("held") or [] if not h.get("default") and h.get("lo") and h.get("hi")]
     if len(boxes) < 2 or not (c.get("lo") and c.get("hi") and c.get("force_n")):
         return False
-    patches = [np.array([[x, y, z] for x in (h["lo"][0], h["hi"][0]) for y in (h["lo"][1], h["hi"][1])
-                         for z in (h["lo"][2], h["hi"][2])], float) for h in boxes]
-    return spans_between(patches, c["lo"], c["hi"], c["force_n"], float(run.get("spacing_mm") or 1.0))
+    step = float(run.get("spacing_mm") or 1.0)
+    patches = [np.stack(np.meshgrid(*[np.arange(a, b + step / 2, step) if b > a else np.array([a]) for a, b in zip(h["lo"], h["hi"])],
+                                    indexing="ij"), -1).reshape(-1, 3) for h in boxes]
+    return spans_between(patches, c["lo"], c["hi"], c["force_n"], step)
 
 
 def fixed_ends(run: dict, c: dict) -> bool:
-    """Whether this case's verdict rests on an FEA holding the ends of a span fixed, with no plate or beam check behind it:
-    not a ✓, whatever the number (CALI-153: a shelf on two patches read 5.06 where beam theory gives about 1)."""
+    """Whether this case's verdict rests on an FEA holding the ends of a span fixed, with no plate or beam check behind it, and a number that
+    wouldn't clear what it needs if the FEA reads as high as it can (:data:`verdicts.SPAN_MARGIN`): not a ✓ (CALI-153: a shelf on two patches
+    read 5.06 where beam theory gives about 1). ``run`` needs ``min_safety``."""
+    safety, need = c.get("safety"), run.get("min_safety") or MIN_SAFETY
     return (c.get("governs", "fea") == "fea" and not (c.get("plate") or {}).get("done")
-            and (c.get("fea") or {}).get("supported") is not False and _spans(run, c))
+            and (c.get("fea") or {}).get("supported") is not False and safety is not None and safety < need * V.SPAN_MARGIN
+            and _spans(run, c))
 
 
 def run_safety(cases: list) -> Optional[float]:

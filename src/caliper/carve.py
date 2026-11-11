@@ -161,7 +161,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             worst, sides, weak, span = None, None, None, False
             for i in range(len(ctx["loads"])):
                 case, r = L.check_load(ctx, i, min_safety, solid=st.design)
-                span = span or L.fixed_ends({}, case)                  # no ✓ on an FEA alone between its holds (CALI-153)
+                span = span or L.fixed_ends({"min_safety": min_safety}, case)                  # no ✓ on an FEA alone between its holds (CALI-153)
                 if case.get("safety") is not None and (worst is None or case["safety"] < worst):
                     worst, weak = case["safety"], (case.get("plate") or {}).get("piece") if case["governs"] == "plate" \
                         else case["fea"].get("in")
