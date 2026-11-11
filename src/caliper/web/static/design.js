@@ -1047,6 +1047,8 @@ function renderThread() {
     } else if (e.kind === 'message') {
       html.push(`<div class="msg you">${e.scope ? `<div class="scope">on ${esc(e.scope)}</div>` : ''}` +
         `${md(e.shown || e.text)}</div>`);
+    } else if (e.kind === 'reply' && e.action === 'build' && e.ok === false && S.buildBubble) {
+      // the bubble still on screen says this, with its report link: read once. A reload has no bubble, and shows this
     } else if (e.kind === 'reply' && e.reply) {
       const tone = e.ok === false ? 'bad' : (e.action === 'answer' ? '' : 'good');
       html.push(`<div class="msg cal ${tone}"><div class="who">Caliper</div>${md(e.reply)}</div>`);
@@ -1102,8 +1104,7 @@ function renderThread() {
       go.disabled = true;                              // a double click starts one build (#66 item 1)
       try {
         followBuild((await api('POST', `/api/designs/${S.slug}/build`)).job_id, 0);
-        S.answers = null;                              // the cards were drawn before it started: "press Build it" isn't so any more
-        refresh().catch(() => {});
+        refresh().catch(() => {});                     // the cards go by d.building: they stop saying "press Build it"
       } catch (e) { showErr(e.message); go.disabled = false; }
     };
   }
@@ -1167,11 +1168,13 @@ function dropBuildFollow() {
 }
 // how long it has run comes from the server (its elapsed seconds), so a browser whose clock is off still reads right
 function buildRanFor(seconds) {
-  S.buildBegan = Date.now() / 1000 - (seconds || 0);
+  const began = Date.now() / 1000 - (seconds || 0);
+  if (!S.buildBegan || began < S.buildBegan) S.buildBegan = began;      // a clock that only goes forward
 }
 async function followBuild(jobId, ranFor) {
   const mine = S.buildFollow = (S.buildFollow || 0) + 1;
   S.following = jobId; S.busy = true; $('send').disabled = true;
+  S.buildBegan = null;
   buildRanFor(ranFor);
   const t = $('thread');
   t.querySelectorAll('.actions').forEach((n) => n.remove());
@@ -1681,7 +1684,7 @@ function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${
 function answersKey() {               // what the answers depend on: a change to any of it asks again
   const d = S.design;
   const runs = (list) => (list || []).map((r) => [r.id, r.status]);   // a finished carve or Lighten changes the offers (#159)
-  return JSON.stringify([S.slug, S.scope, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
+  return JSON.stringify([S.slug, S.scope, d.building || null, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
     runs(d.carve_runs), runs(d.lighten_runs),
     (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
     (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey, d.display_units]);
@@ -3183,7 +3186,7 @@ async function pollRunning() {
   S.design.running = got.running;
   syncRunning();
   const build = got.running.find((r) => r.kind === 'firstrun');   // started from another tab
-  if (build && S.following !== build.job) followBuild(build.job, build.elapsed_s);
+  if (build && S.following !== build.job) { followBuild(build.job, build.elapsed_s); refresh().catch(() => {}); }   // its cards too
   else if (build) buildRanFor(build.elapsed_s);               // keep to the server's time
   for (const t of jobsHere()) {
     if (got.running.some((r) => r.job === t.job)) t.gone = 0;

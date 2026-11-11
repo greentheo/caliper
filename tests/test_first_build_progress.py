@@ -173,6 +173,16 @@ def test_the_clock_starts_from_what_the_server_says_and_keeps_ticking():
     assert "2 min 5 s" in got[0] and "2 min 15 s" in got[1]
 
 
+def test_the_clock_never_steps_back():
+    got = _bubble("""followBuild('j', 10); const first = S.buildBegan; buildRanFor(7); const held = S.buildBegan; buildRanFor(12); return [first === held, S.buildBegan < held];""")
+    assert got == [True, True]
+
+
+def test_another_build_starts_its_own_clock():
+    got = _bubble("""followBuild('a', 100); const was = S.buildBegan; followBuild('b', 3); return S.buildBegan > was;""")
+    assert got is True
+
+
 def test_an_earlier_follow_of_a_build_doesnt_end_a_later_one():
     got = _bubble("""followBuild('a'); followBuild('b'); running[0].resolve({}); await new Promise((r) => setTimeout(r, 0));
       const after = {busy: S.busy, following: S.following, refreshed};
@@ -192,18 +202,19 @@ def test_after_a_crash_the_step_stops_and_it_says_the_build_stopped():
 def _poll(running):
     src = open(JS).read()
     return _run("const S = {slug: 's', design: {running: []}, tracked: {}, following: 'mine'};\nconst document = {hidden: false};\n"
-                f"const api = async () => ({{running: {running}}});\nconst called = [], anchored = [];\n"
+                f"const api = async () => ({{running: {running}}});\nconst called = [], anchored = [];\nlet refreshed = 0;\n"
+                "const refresh = async () => { refreshed += 1; };\n"
                 "const followBuild = (...a) => called.push(a); const buildRanFor = (s) => anchored.push(s);\n"
                 "const syncRunning = () => {}; const jobsHere = () => [];\n" + _fn(src, "pollRunning")
-                + "await pollRunning();\nconsole.log(JSON.stringify([called, anchored]));")
+                + "await pollRunning();\nconsole.log(JSON.stringify([called, anchored, refreshed]));")
 
 
 def test_a_build_started_in_another_tab_is_picked_up_at_its_time():
-    assert _poll('[{"job": "other", "kind": "firstrun", "elapsed_s": 40}]') == [[["other", 40]], []]
+    assert _poll('[{"job": "other", "kind": "firstrun", "elapsed_s": 40}]') == [[["other", 40]], [], 1]      # its cards redrawn too
 
 
 def test_a_build_already_followed_keeps_to_the_servers_time():
-    assert _poll('[{"job": "mine", "kind": "firstrun", "elapsed_s": 41}]') == [[], [41]]
+    assert _poll('[{"job": "mine", "kind": "firstrun", "elapsed_s": 41}]') == [[], [41], 0]
 
 
 def test_a_redraw_follows_a_build_at_its_time():
@@ -242,7 +253,43 @@ def test_the_card_doesnt_say_press_build_it_during_a_build(tmp_path):
 def test_pressing_build_it_redraws_the_cards_so_they_stop_saying_press_build_it():
     src = open(JS).read()
     press = src[src.index("$('buildFirst').onclick"):src.index("if (typeof d.claude === 'boolean')")]
-    assert press.index("followBuild(") < press.index("S.answers = null;") < press.index("refresh()")
+    assert press.index("followBuild(") < press.index("refresh()")
+
+
+def _key(design):
+    return _run("const S = {slug: 's', scope: null, design: " + design + "};\n" + _fn(open(JS).read(), "answersKey")
+                + "console.log(JSON.stringify(answersKey()));")
+
+
+def test_the_cards_are_asked_again_when_a_build_starts_and_ends():
+    plain = "{parts: []}"
+    building = "{parts: [], building: 'j'}"
+    assert _key(plain) != _key(building) and _key(plain) == _key("{parts: [], building: null}")
+
+
+def test_a_failed_build_is_read_once_while_its_bubble_is_on_screen():
+    src = open(JS).read()
+    assert "e.kind === 'reply' && e.action === 'build' && e.ok === false && S.buildBubble" in src
+    assert src.index("e.action === 'build' && e.ok === false && S.buildBubble") < src.index("} else if (e.kind === 'reply' && e.reply) {")
+
+
+def test_a_crash_after_the_part_exists_offers_no_missing_button(tmp_path, monkeypatch):
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path))
+    store = DesignStore.create("a step stool", base=str(tmp_path))
+    monkeypatch.setattr(design_api, "RUNNER", jobs.JobRunner())
+
+    def boom(s, emit, **k):
+        s.write_part("stool", "import cadquery as cq\n\n\ndef build(params):\n    return cq.Workplane().box(10, 10, 10)\n", intent="x")
+        raise RuntimeError("the cards fell over")
+
+    monkeypatch.setattr(firstrun, "build", boom)
+    job = design_api.first_build(os.path.basename(store.root))
+    for _ in range(1000):
+        if job.over:
+            break
+        time.sleep(0.01)
+    last = DesignStore.load(store.root).log()[-1]
+    assert "Build it" not in last["reply"] and "say what to change" in last["reply"]
 
 
 def test_a_first_build_isnt_tracked_like_a_study():

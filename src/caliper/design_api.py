@@ -241,8 +241,10 @@ def _submit_first(slug: str):
         except Exception as e:          # on the design's record, so a reload or coming back says what happened (#220)
             from .errors import scrubbed
 
+            built = bool(DesignStore.load(store.root).design.parts)       # a crash after the part exists: no Build it to press
             store.append_log({"kind": "reply", "action": "build", "ok": False, "error": scrubbed(e),
-                              "reply": f"The build stopped before it finished: {scrubbed(e)}. Press Build it to try again."})
+                              "reply": f"The build stopped before it finished: {scrubbed(e)}. "
+                                       + ("What it made is here: say what to change." if built else "Press Build it to try again.")})
             raise
 
     job = RUNNER.submit("firstrun", work, label="first build", lock=_lock(slug), meta={"slug": slug})
