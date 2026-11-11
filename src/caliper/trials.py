@@ -43,18 +43,19 @@ def _run(store: DesignStore, part_id: str) -> Optional[dict]:
 DIAL_MM, FEELER_MM = 0.025, 0.04
 
 
-def measure_with(sag_mm: float, closed: bool = False) -> str:
+def measure_with(sag_mm: float, closed: bool = False, across: str = "the two held edges") -> str:
     """What will see a sag this big, on this part. ``closed``: its underside is shut in, so it's measured from above, off
-    a straightedge on the edges that don't move, and beside the foot, because the load sits where it would cross (#70 item 2)."""
+    a straightedge on the edges that don't move (``across``), and beside the foot, because the load sits where it would cross
+    (#70 item 2)."""
     feeler = sag_mm >= 2 * FEELER_MM                 # the thinnest blade with something to spare
     if sag_mm < DIAL_MM:
         return "no hand tool: this sag is under what a dial indicator reads, so the test is the load held"
     if closed:
         if sag_mm < 0.5:
-            return ("a dial indicator on a straightedge across the two held edges, read beside the foot"
+            return (f"a dial indicator on a straightedge across {across}, read beside the foot"
                     + (" (or feeler gauges under the straightedge)" if feeler else "")
                     + ": its underside is closed in, so it can't be read from below")
-        return "a straightedge across the two held edges and a steel rule, read beside the foot: its underside is closed in"
+        return f"a straightedge across {across} and a steel rule, read beside the foot: its underside is closed in"
     if sag_mm < 0.5:
         return ("a dial indicator under the middle" + (" (or a straightedge across the top and feeler gauges)" if feeler else "")
                 + ": a tape measure won't see a sag this small")
@@ -83,13 +84,39 @@ def closed_under(store, part_id: str, case: dict, plate: dict) -> bool:
     return len(set(rays.tolist())) == 4
 
 
-def beside_the_foot(plate: dict) -> float:
-    """A panel's sag half an inch off the foot's edge, as a share of its sag under the foot: a beam's curve along the panel's long
-    side, for a panel held all round. Rough; NEEDS ENGINEER CHECK. On two edges the straightedge moves along the edges: 1."""
+#: Odd terms of the plate series each way: past this the sample top's falloff moves under 0.1%.
+SERIES = 39
+
+
+def _navier(a: float, b: float, foot: float, x: float, y: float) -> float:
+    """An ``a`` × ``b`` plate's sag at (x, y), simply supported all round, under a ``foot``-square patch at its middle: Navier's
+    double sine series (Timoshenko & Woinowsky-Krieger §30), up to the plate's stiffness and the load, which a share cancels."""
+    def spread(z: float) -> float:                           # the patch's share of a term: sin z / z, a point load's 1
+        return math.sin(z) / z if z else 1.0
+
+    total = 0.0
+    for m in range(1, 2 * SERIES, 2):
+        for n in range(1, 2 * SERIES, 2):
+            pm, pn = m * math.pi, n * math.pi
+            total += (math.sin(pm / 2) * math.sin(pn / 2) * spread(pm * foot / (2 * a)) * spread(pn * foot / (2 * b))
+                      * math.sin(pm * x / a) * math.sin(pn * y / b) / ((m / a) ** 2 + (n / b) ** 2) ** 2)
+    return total
+
+
+def beside_the_foot(plate: dict, along: str = "long") -> float:
+    """A panel's sag half an inch past the foot's edge, as a share of its sag under the foot (#70 item 2, #228 review). Held all
+    round, from the plate series: ``along`` the long side (a straightedge resting on the two long edges, read toward a short end)
+    or the short. The sample top, 368 × 216 mm under a 100 mm foot: 0.78 along the long side, 0.59 along the short. On two
+    edges the straightedge moves along the held edges with the foot: 1."""
     if plate.get("as") == "beam":
         return 1.0
-    x = max(plate["a_mm"] / 2 - max(plate.get("footprint_mm") or [0.0]) / 2 - IN / 2, 0.0) / plate["a_mm"]
-    return 3 * x - 4 * x ** 3
+    a, b = plate["a_mm"], plate["b_mm"]                       # long, short
+    foot = max(plate.get("footprint_mm") or [0.0])           # a square foot its widest way: a round or square foot near enough
+    off = foot / 2 + IN / 2
+    x, y = (a / 2 + off, b / 2) if along == "long" else (a / 2, b / 2 + off)
+    if x >= a or y >= b:
+        return 0.0                                            # past the held edge: it doesn't move there
+    return _navier(a, b, foot, x, y) / _navier(a, b, foot, a / 2, b / 2)
 
 
 #: the most steps a test plan has, whatever it's asked to reach (#202: 66 million, from a check that saw no stress, held up the card)
@@ -143,6 +170,7 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     lo, hi = sorted([stiff, flex if flex is not None else stiff])
     closed = closed_under(store, part_id, case, plate)
     spot = beside_the_foot(plate) if closed else 1.0           # where it can be read: the prediction is for there (#70 item 2)
+    all_round = closed and plate.get("as") != "beam"           # held all round: say which way the straightedge goes
     lo, hi = lo * spot, hi * spot
     span = L.fixed_ends(run, case)                             # not settled: nothing to load it up to (CALI-153)
     breaks = None if L.unresolved(run, case) or span else case.get("breaks_lb")     # a plan isn't built up to a number nobody can read (#202)
@@ -159,8 +187,15 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
             "where": plate.get("piece") if plate.get("done") else L.peak_in(case["fea"]),   # not an old label
             "breaks_lb": breaks,                                        # None: not a number to test against (#191 review)
             "steps": steps, "per_lb_mm": [round(lo, 6), round(hi, 6)],
-            "measure_with": measure_with(hi * case["lb"], closed), "closed_under": closed, "spot": round(spot, 3),
-            "measured_at": "beside the foot, half an inch off its edge, from a straightedge on the held edges" if closed else "at the middle",
+            "measure_with": measure_with(hi * case["lb"], closed, across="the two long edges" if all_round else "the two held edges"),
+            "closed_under": closed, "spot": round(spot, 3),
+            "measured_at": (("half an inch past the foot toward a short end, from a straightedge resting on the two long edges"
+                             if all_round else "beside the foot, half an inch off its edge, from a straightedge on the held edges")
+                            if closed else "at the middle"),
+            # held all round, a straightedge fits either way and the two readings differ by a third (#228 review): the
+            # sag is given for the long edges, and this says what the other way reads
+            "other_way": (f"Laid on the short edges and read half an inch past the foot toward a long edge, it sags about "
+                          f"{beside_the_foot(plate, 'short') / spot:.0%} of that." if all_round and spot else None),
             # its safety as the card says it, against the same thing (#64 item 9); not a number to test against
             # where the break isn't settled
             "why_no_break": "the check holds it fixed where it's held, so it may read too strong" if span else None,

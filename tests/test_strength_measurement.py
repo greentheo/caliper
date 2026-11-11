@@ -140,10 +140,43 @@ def test_the_sample_stools_advice_suits_its_closed_box(sample):
     pr = trials.predict(sample, pid)
     assert pr["closed_under"] is True
     assert "beside the foot" in pr["measure_with"] and "under the middle" not in pr["measure_with"]
-    assert "beside the foot" in pr["measured_at"]
-    # the sag is given for that spot, less than at the middle
-    assert 0.5 < pr["spot"] < 1.0
+    # held all round: which way the straightedge goes, and what the other way reads (#228 review)
+    assert "long edges" in pr["measure_with"] and "long edges" in pr["measured_at"]
+    assert "half an inch past the foot" in pr["measured_at"]
+    # the sag is given for that spot, from the plate series: 0.78 of the middle's along the long side
+    assert pr["spot"] == pytest.approx(0.776, abs=0.002)
+    assert "77%" in pr["other_way"]                                # 0.594 / 0.776
     assert "where the foot is" in pr["basis"]
+
+
+def test_the_plate_series_reads_the_reviews_numbers_beside_the_foot():
+    # #228 review: a Navier series for the sample top, 368 x 216 mm under a 100 mm foot, half an inch past it
+    top = {"a_mm": 368.0, "b_mm": 216.0, "footprint_mm": [100.0, 100.0]}
+    assert trials.beside_the_foot(top) == pytest.approx(0.776, abs=0.002)
+    assert trials.beside_the_foot(top, "short") == pytest.approx(0.594, abs=0.002)
+    assert trials.beside_the_foot({"as": "beam"}) == 1.0           # the straightedge moves with the foot
+
+
+def test_the_sag_on_the_card_is_the_sag_beside_the_foot(sample, monkeypatch):
+    pid = sample.design.parts[0].id
+    there = trials.predict(sample, pid)
+    monkeypatch.setattr(trials, "closed_under", lambda *a: False)
+    middle = trials.predict(sample, pid)
+    assert there["per_lb_mm"] == pytest.approx([x * there["spot"] for x in middle["per_lb_mm"]], rel=1e-3)
+    assert middle["other_way"] is None and middle["measured_at"] == "at the middle"
+
+
+def test_the_trial_card_says_what_the_other_way_reads(sample):
+    import json
+
+    pid = sample.design.parts[0].id
+    pr = trials.predict(sample, pid)
+    t = {"prediction": pr, "rows": []}
+    got = _run("const esc = (s) => String(s); const inches = () => true; const trialChart = () => '';\n"
+               "const sagRange = () => ''; const sagText = () => '';\n"
+               f"const S = {{trial: {{part: 'p', key: 1, data: {json.dumps(t)}}}}};\n"
+               f"{_fn(open(JS).read(), 'trialView')}\nconsole.log(JSON.stringify(trialView({{id: 'p', version: 1}})));")
+    assert pr["other_way"] in got and "long edges" in got
 
 
 def test_a_stool_open_underneath_keeps_the_middle(sample, tmp_path):
@@ -320,6 +353,19 @@ def test_a_step_with_a_whole_side_cut_away_reads_no_stronger_than_the_part_as_dr
     drawn, carved = _carve_steps(mixed, monkeypatch, no_left_side)
     for was, now in zip(drawn, carved):
         assert now["safety"] is not None and now["safety"] <= was["safety"]
+
+
+def test_a_carves_notes_list_buckling_as_not_checked(mixed, monkeypatch):
+    import trimesh
+    from whittle import LoadStudy
+
+    monkeypatch.setattr(LoadStudy, "sweep", lambda self, **kw: SimpleNamespace(
+        stations=[SimpleNamespace(design=self.solid.copy(), build=lambda: None)]))
+    monkeypatch.setattr(carve, "_station_mesh", lambda mesh: trimesh.creation.box())
+    monkeypatch.setattr(carve, "_judge", lambda *a, **k: None)
+    rec = carve.study(mixed, "stool", stations=1)
+    assert load_study.BUCKLING in rec["notes"]                     # printed sides carry the top in compression
+    assert carve.CAPPED not in rec["notes"]                        # nothing carved, nothing capped
 
 
 def test_a_step_that_keeps_its_held_edges_is_read_by_its_own_plate_check(mixed, monkeypatch):

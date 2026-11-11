@@ -69,8 +69,9 @@ DESIGN_VOCABULARY = """  min_clearance(a, b)              smallest gap between t
 #: tessellated to 0.05 mm, so a size can read up to 0.05 short at each side; a wall is ray-cast across that
 #: mesh from just inside its surface (19.05 mm ply reads 18.98). A rule that pins one of them allows for it.
 MEASURING = {"min_wall": 0.15, "bbox.dx": 0.1, "bbox.dy": 0.1, "bbox.dz": 0.1}
-#: A wall built right reads about 0.02 mm short at any thickness from 0.8 to 19.05 mm (#70 item 17, measured on printed
-#: boxes and cylinders; a joined part read up to 0.07), so the error is absolute. But a fixed 0.15 lets a 1.2 mm wall
+#: A wall built right reads about 0.01 mm short at any thickness from 0.8 to 19.05 mm (#70 item 17, measured on printed
+#: boxes and cylinders; joined walls, an L, a T, at 30° and 45°, on a plate, a tube on a plate and a ribbed box, read 0.008
+#: to 0.012 short at 0.8, 1.2 and 2 mm, #228 review), so the error is absolute. But a fixed 0.15 lets a 1.2 mm wall
 #: through 12% under, so on a wall it's capped at this share of what the rule asks for: from 3 mm down, it bites.
 #: NEEDS ENGINEER CHECK: what share is acceptable for a printed wall.
 MEASURING_SHARE = 0.05
