@@ -88,11 +88,15 @@ def test_fit_and_refine_route_authored_through_author_loop(tmp_path, monkeypatch
     assert rc in (0, 3)
     assert (tmp_path / "runs" / "run_0001" / "part.py").exists()
 
-    # refine: the LLM edits the authored script; instruction is folded into the persisted intent
+    # refine: the LLM edits the authored script (CALI-157: an edit first, a rewrite only if it can't); instruction is folded
+    # into the persisted intent
+    monkeypatch.setattr(authoring, "edit_script", lambda spec, prior, feedback, error=None, client=None, model=None:
+                        [{"old": "box(40, 30, 4)", "new": "box(44, 30, 4)"}])
     rc = cli.main(["refine", str(d), "make it a touch wider", "--max-iter", "1"])
     assert rc in (0, 3)
     new_spec = (tmp_path / "runs" / "run_0002" / "spec.yaml").read_text()
     assert "make it a touch wider" in new_spec
+    assert "box(44, 30, 4)" in (tmp_path / "runs" / "run_0002" / "part.py").read_text()      # the edit, not a rewrite
 
 
 def test_fit_missing_reference_file_returns_2(capsys):
