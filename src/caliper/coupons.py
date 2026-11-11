@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -219,10 +220,6 @@ def _mm(v: float) -> str:
     return f"{v:.2f}" if v < 10 else f"{v:.1f}"
 
 
-def _x(v: float, ref: float) -> str:
-    return f"{v / ref:.2f}x"
-
-
 def _cell(r: dict, how: str) -> str:
     return f"{r[how]['sag_mm'] / r['theory_sag_mm']:.2f} / {r[how]['breaks_lb'] / r['theory_breaks_lb']:.2f}"
 
@@ -271,10 +268,11 @@ def table_md(rows: list[dict]) -> str:
             f"deeper than it is (`layers` in the JSON), and it reads stiffer and stronger again: sag {ch:.2f} to {ck:.2f} of "
             f"theory, break load {bh:.2f} to {bk:.2f} times theory, on the {len(rounded)} coupons long enough that the check "
             "picks that coarser size. A real panel short enough to get 4 across exactly doesn't have this.\n"
-            "- **Where that reaches a verdict.** A sheet resting on other pieces also gets the plate or beam check, which is "
-            "this theory, and the lower number governs. Where the FEA is the only check (printed parts, and a part held at two "
-            f"patches with nothing else checking it), it can read {h2:.1f} to {k2:.1f} times too strong if the real support "
-            "lets the end turn. Nothing here changes a verdict.\n"
+            "- **Where that reaches a verdict.** A sheet the check finds resting on other pieces all round, on two opposite "
+            "edges or on a ring also gets the plate or beam check, which is this theory, and the lower number governs. Anything "
+            "else has the FEA alone (a sheet on `held()` patches, or on one or three edges, an outline that isn't a rectangle "
+            f"or disc, sticks, printed parts), and where it bends between its holds it can read {h2:.1f} to {k2:.1f} times too "
+            "strong if the real support lets the end turn. #217 tracks that. Nothing here changes a verdict.\n"
             "- **The printed rows are one model.** The check has one set of values for a print, whichever way it was laid "
             "down, at Caliper's default walls and infill.\n"
             "- **Across-grain plywood is run here at half E and half strength**, so theory and whittle compare like with like. "
@@ -299,7 +297,7 @@ _STYLE = """
 @media print { :root, :root:not([data-theme="light"]), :root[data-theme="dark"] { --paper:#fff; --ink:#000; --soft:#333;
         --rule:#777; --tint:#eee; --mark:#000; color-scheme:light } .sheet { padding:0 !important; max-width:none !important } }
 * { box-sizing:border-box }
-body { background:var(--paper); color:var(--ink); font:10.5px/1.28 var(--body); margin:0 }
+body { background:var(--paper); color:var(--ink); font:10px/1.24 var(--body); margin:0 }
 .sheet { max-width:7.8in; margin:0 auto; padding-block:12px; padding-left:max(16px,env(safe-area-inset-left,0px));
          padding-right:max(16px,env(safe-area-inset-right,0px)); display:grid; gap:7px }
 h1 { font-size:19px; line-height:1; margin:0; text-wrap:balance }
@@ -353,7 +351,14 @@ def _in(mm: float) -> str:
 
 
 def _read_with(c: Coupon, sag: float) -> str:
-    return "ruler or dial" if sag >= RULER_MM else "dial only"
+    return "rule or dial" if sag >= RULER_MM else "dial, or skip sag"
+
+
+def floor_gap_in(c: Coupon) -> int:
+    """How far above its catch the load hangs, in whole inches: twice the sag at the predicted break (real wood goes
+    further), or at the top step where the sheet doesn't ask for a break. Never under two inches."""
+    sag = theory(c, theory(c)["breaks_lb"] if c.breaks else c.steps[-1])["sag_mm"]
+    return max(2, math.ceil(2 * sag / IN))
 
 
 def _break(c: Coupon, t: dict) -> str:
@@ -370,7 +375,7 @@ def sheet_html() -> str:
                     f"<td class=n>{_in(c.span)} in</td>"
                     f"<td class=n>{' / '.join(str(s) for s in c.steps)}</td>"
                     f"<td class=n>{t['sag_mm']:.1f} mm</td><td>{_read_with(c, t['sag_mm'])}</td>"
-                    f"<td>{_break(c, t)}</td></tr>")
+                    f"<td class=n>{floor_gap_in(c)} in</td><td>{_break(c, t)}</td></tr>")
     blank = "<tr>" + "<td></td>" * 14 + "</tr>"
     return f"""<title>Coupon Bend Test</title>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -382,35 +387,36 @@ def sheet_html() -> str:
 <div>{_RIG}</div>
 <div><h2>Each coupon</h2><ol>
 <li>Measure its width and depth at mid-span, and the span. Weigh it if you can.</li>
-<li>Rest it on two round supports, 1 in pipe or dowel, on sawhorses or a bench. Don't fix it down: the ends must be free to turn and slide. Mark the middle.</li>
-<li>Hang the load from a strap over a 1 in wood saddle at the middle. Keep the load two inches off the floor.</li>
-<li>Hang the empty bucket or hanger, about 5 lb. Zero the reading there. That load doesn't count: write loads above it.</li>
+<li>Tape or screw two round supports, 1 in pipe or dowel, to sawhorses or a bench so they can't roll. Rest the strip loose on them, so its ends can turn and slide.</li>
+<li>Hang the load from a strap over a 1 in wood saddle at the middle, the table's floor gap above a block or pad. If the load touches down before the strip breaks, the numbers are bad: redo it with more gap.</li>
+<li>Hang the empty hanger, about 5 lb, and zero the sag reading there. The sag steps count what you add above it.</li>
 <li>Go to each of the three load steps. Wait 30 seconds and read the sag. The steps are targets: write what you actually hung.</li>
 <li>Back off to the empty hanger. The reading should come back near zero. If it doesn't, something slipped or crushed: redo it.</li>
-<li>Where the table says to break it, add load in small steps until it goes. Write the most it held, and how it broke.</li>
+<li>Where the table says to break it, stop reading sag and add load in small steps from the side, at arm's length. Write the most it held, <b>which includes the hanger and strap</b>, and how it broke. If you run out of load, write "held N, didn't break".</li>
 </ol></div>
 </div>
-<div class="safe"><b>Safety.</b> Eye protection. Nobody stands on a coupon or under the load, and feet stay clear of where it lands. Wood can snap hard and send splinters, so stand to the side when you get near the break.</div>
+<div class="safe"><b>Safety.</b> Eye protection, gloves and closed shoes. Brace or weigh the horses so they can't tip when one end kicks. Near the break, no hand or foot under the load, and never lean over the strip. A snapped strip pivots on its supports and the ends whip up: stand beside it, never in line with either end, and keep people and pets out. Every strap, hanger and scale must be rated above the most you'll hang; luggage scales often stop near 110 lb. With a ratchet strap, keep your face out of its line: a stretched strap can throw the scale. Bagged concrete is 60 to 80 lb, so lift it with care. Nobody stands on a coupon.</div>
 <div class="ways">
 <div><h2>Loading: use what you have</h2><ul>
 <li><b>Sand or gravel in buckets</b>, weighed before you hang them. Two part-full buckets are safer than one full one.</li>
-<li><b>Bathroom scale:</b> weigh each bucket on it, or hold the bucket and subtract your own weight. Or set one support on the scale, zero it with the coupon resting, and double what it reads as you load.</li>
+<li><b>Bathroom scale:</b> weigh each bucket on it. Holding a bucket and subtracting yourself is too coarse for 4 and 5 lb steps: use a kitchen or luggage scale there. Or put one support on a board on the scale, note the reading with the strip resting, and as you load take twice the rise. It can't be zeroed with the strip on it, and many digital ones won't follow a slowly rising load, so check yours does first.</li>
 <li><b>Weights or bagged concrete</b> on a hanger board.</li>
-<li><b>Hanging scale and ratchet strap</b> to a floor anchor: the scale reads the load directly, and the load eases off when the coupon breaks.</li>
+<li><b>Hanging scale and ratchet strap</b> to a floor anchor: the scale reads the load directly.</li>
 </ul></div>
-<div><h2>Reading the sag: use what you have</h2><ul>
-<li><b>Dial indicator</b> on a stand on the floor, tip against the underside beside the strap. Best for anything that sags under 3 mm.</li>
-<li><b>Rule and thread:</b> stretch a thread tight between two pins in the coupon, over the supports. Tape a steel rule upright at mid-span, and read it where the thread crosses, at eye level, to 1/64 in or 0.5 mm. The thread moves with the coupon at the supports, so crushed supports don't count.</li>
+<div><h2>Reading the sag: from a reference on the supports</h2><ul>
+<li><b>Dial indicator</b> clamped to a straight bar that rests on the strip over the supports, tip on the strip beside the saddle. Not on a stand on the floor: that counts crush and the horses' flex.</li>
+<li><b>Rule and thread:</b> stretch a thread tight between two pins in the strip, over the supports. Tape a steel rule upright at mid-span, and read it where the thread crosses, at eye level, to 1/64 in or 0.5 mm.</li>
+<li><b>No dial for PETG?</b> A rule can't read 1 mm. Skip the sag and just break it: the most it held is still worth having.</li>
 </ul></div>
 </div>
 <div><h2>Coupons</h2><div class="wrap"><table>
-<tr><th>ID</th><th>What to cut or print</th><th>Span</th><th>Load steps, lb</th><th>Sag at top step</th><th>Read with</th><th>Break it?</th></tr>
+<tr><th>ID</th><th>What to cut or print</th><th>Span</th><th>Load steps, lb</th><th>Sag at top step</th><th>Read with</th><th>Floor gap</th><th>Break it?</th></tr>
 {''.join(rows)}
 </table></div></div>
-<p class="note">Sag and break are predictions from the textbook values Caliper uses today, at its default print settings (1.2 mm walls, 20% infill). Real wood often beats them by a lot, and finding out by how much is the point. Three of each kind beats one. PETG may fold instead of snapping: write the most it held. Printed: note layer height, walls, infill and pattern, filament, nozzle temperature. Wood: note knots near the middle, and moisture if you have a meter.</p>
+<p class="note"><b>2x4 on edge:</b> a loose block each side at each end keeps it upright without gripping it. <b>PETG:</b> test all three bars on their 1 in face, 1/2 in deep, however they printed. For the 6 in span, clamp two 2x4s flat across two sawhorses set 18 in apart, 5 in clear between the 2x4s. Tape a dowel along each inside edge, rest the bar across the dowels, and hang the load down through the gap, between the horses. It has to carry about 100 lb. <b>Sag and break</b> are predictions from the textbook values Caliper uses today, at its default print settings (1.2 mm walls, 20% infill). Real wood often beats them by a lot, and finding out by how much is the point. Most 3/4 ply is 23/32 and most 1/2 ply is 15/32, so expect more sag and a lower break than these; the comparison uses the depth you measure. Three of each kind beats one. PETG may fold instead of snapping. Printed: note layer height, walls, infill and pattern, filament, nozzle temperature. Wood: note knots near the middle, and moisture if you have a meter.</p>
 <div><h2>Record: load in lb, sizes and sag in mm or in (say which). Copy this page for more rows</h2><div class="wrap"><table class="rec">
 <tr><th>ID</th><th>#</th><th>Width</th><th>Depth</th><th>Span</th><th>Load 1</th><th>Sag 1</th><th>Load 2</th><th>Sag 2</th><th>Load 3</th><th>Sag 3</th><th>Back to</th><th>Most it held</th><th>How it broke, and where</th></tr>
-{blank * 9}
+{blank * 5}
 </table></div></div>
 </div>
 """

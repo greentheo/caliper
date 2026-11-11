@@ -71,12 +71,45 @@ def test_the_sheet_says_how_to_load_and_read_it_with_what_he_may_have():
         assert need in page
 
 
+@pytest.mark.parametrize("words", [
+    "Eye protection", "gloves and closed shoes", "so they can't tip", "so they can't roll", "ends can turn and slide",
+    "no hand or foot under the load", "never lean over the strip", "never in line with either end",
+    "keep people and pets out", "at arm's length", "stop reading sag", "floor gap above a block or pad",
+    "rated above the most you'll hang", "luggage scales often stop near 110 lb", "keep your face out of its line",
+    "Nobody stands on a coupon", "60 to 80 lb",
+])
+def test_the_sheets_safety_words_are_there(words):
+    assert words in K.sheet_html()
+
+
+@pytest.mark.parametrize("words", [
+    "which includes the hanger and strap", "test all three bars on their 1 in face, 1/2 in deep",
+    "take twice the rise", "can't be zeroed with the strip on it", "too coarse for 4 and 5 lb steps",
+    "rests on the strip over the supports", "Not on a stand on the floor", "held N, didn't break",
+    "a loose block each side at each end", "5 in clear between the 2x4s", "23/32", "15/32", "Skip the sag",
+])
+def test_the_sheet_heads_off_the_ways_to_write_down_a_wrong_number(words):
+    assert words in K.sheet_html()
+
+
 @pytest.mark.parametrize("c", K.COUPONS, ids=lambda c: c.id)
-def test_the_sheet_says_a_ruler_wont_do_where_the_sag_is_too_small(c):
+def test_the_floor_gap_is_more_than_the_sag_when_it_breaks(c):
+    gap, top = K.floor_gap_in(c) * K.IN, K.theory(c)["breaks_lb"] if c.breaks else c.steps[-1]
+    assert gap > 1.75 * K.theory(c, top)["sag_mm"]                # wood's clear strength is 1.75 times the table's
+    assert f"<td class=n>{K.floor_gap_in(c)} in</td>" in next(r for r in K.sheet_html().split("<tr>") if f"<b>{c.id}</b>" in r)
+
+
+def test_the_check_sizes_voxels_from_the_thinnest_side_and_its_length():
+    assert K.check_spacing(K.by_id("2x4-E")) == pytest.approx(2286 / 160, abs=0.01)      # by its length, not its 3.5 in depth
+    assert K.across(K.by_id("2x4-E"), 4) == pytest.approx(38.1 / 4)
+
+
+@pytest.mark.parametrize("c", K.COUPONS, ids=lambda c: c.id)
+def test_the_sheet_says_a_rule_wont_do_where_the_sag_is_too_small(c):
     t = K.theory(c)
     row = next(r for r in K.sheet_html().split("<tr>") if f"<b>{c.id}</b>" in r)
-    assert ("dial only" in row) == (t["sag_mm"] < K.RULER_MM)
-    assert ("ruler or dial" in row) == (t["sag_mm"] >= K.RULER_MM)
+    assert ("dial, or skip sag" in row) == (t["sag_mm"] < K.RULER_MM)
+    assert ("rule or dial" in row) == (t["sag_mm"] >= K.RULER_MM)
     assert f"{t['sag_mm']:.1f} mm" in row
 
 
