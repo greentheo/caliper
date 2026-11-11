@@ -79,3 +79,29 @@ def test_a_stated_strength_goal_isn_t_doubled(tmp_path, monkeypatch):
     card = scorecard.compute(store)
     assert not [c for c in card["checks"] if c["id"] == "strength_loads"]
     assert [c["id"] for c in card["checks"] if c.get("metric") == "strength.safety"] == ["strength_step"]
+
+
+def test_a_goal_only_proposed_doesn_t_stand_in_for_one(tmp_path, monkeypatch):
+    """#120 review, a surviving mutant (#72): a proposed strength goal binds nothing until it's kept, so the part is
+    still held to its loads. Dropping the "proposed" test let it stand in for the implicit check."""
+    store, _ = _goalless(tmp_path, monkeypatch, HEAVY, "proposed")
+    with open(os.path.join(store.root, "scorecard.yaml"), "w") as f:
+        f.write("written_by: caliper\nchecks:\n- id: strength_step\n  label: holds a step\n"
+                "  metric: strength.safety\n  op: '>='\n  limit: 2.0\n  source: proposed\n")
+    card = scorecard.compute(store)
+    (check,) = [c for c in card["checks"] if c["id"] == "strength_loads"]
+    assert check["status"] == "fail" and check["source"] == "implicit"
+
+
+def test_several_parts_are_held_to_the_strictest_s_safety(tmp_path, monkeypatch):
+    """#120 review, a surviving mutant (#72): the limit is the strictest part's ``min_safety``, never the laxest's."""
+    pytest.importorskip("whittle")
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 4)
+    store = DesignStore.create("two stools", base=str(tmp_path / "two"))
+    store.write_part("low", LIGHT, intent="a step stool")
+    store.write_part("tall", LIGHT, intent="a step stool")
+    load_study.study(store, "low", min_safety=1.5)
+    load_study.study(store, "tall", min_safety=3.0)
+    card = scorecard.compute(store)
+    (check,) = [c for c in card["checks"] if c["id"] == "strength_loads"]
+    assert check["limit"] == 3.0

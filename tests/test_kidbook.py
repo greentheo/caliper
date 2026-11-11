@@ -186,3 +186,38 @@ def test_a_screw_page_says_a_pilot_hole_first_and_the_list_names_the_bit(stool, 
                                                                 "glue_ml": 40}}}, {}, {})
     (screw,) = [r for g in rows["groups"] for r in g["rows"] if "wood screws" in r["item"]]
     assert f"a {fasteners.PILOT_BIT} pilot hole for each" in screw["for"], screw
+
+
+def test_a_box_with_one_foam_wall_isn_t_all_wood(tmp_path):
+    """#52, a surviving mutant (#72): the material check in ``suits``. Off, the XPS crate still got no book (its other pieces
+    turn it away), so nothing saw it: here every piece is a sheet, and one of them is foam."""
+    foam = BOX_STOOL.replace('"material": "plywood"', '"material": "xps" if k == "left" else "plywood"')
+    assert foam != BOX_STOOL
+    store = DesignStore.create("a box stool", base=str(tmp_path / "foam"))
+    store.write_part("stool", foam, intent="a box step stool")
+    assert not kidbook.suits(store, ["stool"])
+
+
+def test_every_screw_page_is_marked_with_a_grown_up(stool, tmp_path):
+    """#52, a surviving mutant (#72): the "with a grown-up" badge on a page where screws go in. Turned off, every test passed."""
+    root = str(tmp_path / "release")
+    os.makedirs(root)
+    kidbook.make(stool, root, {"design": "Box stool", "strength": {}}, ["stool"], {"groups": []})
+    pages = re.findall(r"<section class='step'>(.*?)</section>", open(os.path.join(root, "kids.html")).read(), re.S)
+    screwed = [p for p in pages if re.search(r"drives in \d+ screws", p)]
+    assert len(screwed) >= 4 and all("<div class='grownup'>" in p for p in screwed), [p[:80] for p in screwed]
+
+
+def test_a_case_with_no_number_beside_one_that_holds_still_makes_the_book(stool, tmp_path):
+    """#234 review (the foreman): the promise list is built before the early returns, so without its filter a case with no number
+    (a load that never reached a support) is said "times over" and raises, and the package drops the kids' book."""
+    root = str(tmp_path / "release")
+    os.makedirs(root)
+    rec = {"design": "Box stool", "strength": {"stool": [
+        {"name": "An adult stepping up", "lb": 200, "factor": 2.0, "safety": 3.11, "verdict": {"kind": "holds"}},
+        {"name": "A shove from the side", "lb": 50, "factor": 2.0, "safety": None, "verdict": {"kind": "unchecked"}}]}}
+    import html
+
+    assert kidbook.make(stool, root, rec, ["stool"], {"groups": []}) == "kids.html"
+    book = html.unescape(open(os.path.join(root, "kids.html")).read())
+    assert "Don't stand on it yet" in book and "It should hold" not in book

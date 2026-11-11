@@ -215,3 +215,11 @@ def test_the_cut_sheet_cuts_the_holes_before_the_outlines(tmp_path):
         ys = [float(y) for y in re.findall(r"\n20\n\s*([-\d.]+)", body)]
         polys.append(list(zip(xs, ys)))
     assert len(polys) == 6 and small(polys[0]) and not any(small(p) for p in polys[1:])
+    # and only the cut lines moved (#72, from #75's review): the other layers stay as unfold-to-sheets put them, piece by
+    # piece, so each label, in order, still starts over its own outline, in order
+    sheet = open(os.path.join(root, "sheet-01.svg")).read()
+    labels = sheet.split('<g id="label"')[1].split("</g>")[0]
+    starts = [float(x) for x in re.findall(r'<text x="([-\d.]+)"', labels)]
+    outlines = [p for p in paths if not small(p)]
+    assert len(starts) == len(outlines) == 5
+    assert all(min(x for x, _ in o) - 1 <= s <= max(x for x, _ in o) for s, o in zip(starts, outlines)), (starts, outlines)
