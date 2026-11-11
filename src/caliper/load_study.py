@@ -1069,6 +1069,12 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
         options.append(("plate", pl["safety_across"]))
     governs, safety = min(((k, s) for k, s in options if s is not None), key=lambda x: x[1],
                           default=("fea", None))
+    drawn = (ctx.get("plate_ceiling") or {}).get(i)
+    if drawn and safety is not None and safety > drawn["safety_across"]:
+        # Rule 6 (#228 review): a carve takes material away, so no step reads stronger than the plywood did as
+        # drawn. A step that carves under a held edge loses the plate check and falls back to the FEA, which reads
+        # a plywood top high: the as-drawn plate number is its ceiling
+        governs, safety, pl = "plate", drawn["safety_across"], {**drawn, "as_drawn": True}
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
                  "holds": bool(safety is not None and safety >= min_safety),  # producer
                  # where it's predicted to break, placed the same way: linear to failure, as wood is

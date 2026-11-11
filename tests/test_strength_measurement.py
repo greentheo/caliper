@@ -260,6 +260,74 @@ def test_carving_away_what_holds_an_edge_changes_the_plywoods_check(mixed, monke
     assert carved["plate"]["edges_held"] == 1 and not carved["plate"].get("done")
 
 
+def _carve_steps(mixed, monkeypatch, cut):
+    """The real carve's checks of two steps, as drawn and ``cut``: every load's case at each, then stopped."""
+    import trimesh
+    from whittle import LoadStudy
+
+    seen, real = [], load_study.check_load
+
+    def sweep(self, **kw):
+        return SimpleNamespace(stations=[SimpleNamespace(design=d, build=lambda: None)
+                                         for d in (self.solid.copy(), cut(self))])
+
+    def check(ctx, i, need, solid=None):
+        seen.append(real(ctx, i, need, solid=solid)[0])
+        if len(seen) == 2 * len(ctx["loads"]):
+            raise _Stop
+        return seen[-1], SimpleNamespace(supported=False)
+
+    monkeypatch.setattr(LoadStudy, "sweep", sweep)
+    monkeypatch.setattr(load_study, "check_load", check)
+    monkeypatch.setattr(carve, "_station_mesh", lambda mesh: trimesh.creation.box())
+    with pytest.raises(_Stop):
+        carve.study(mixed, "stool", stations=2)
+    n = len(seen) // 2
+    return seen[:n], seen[n:]
+
+
+def _centres(ls, axis):
+    return np.asarray(ls.grid.origin)[axis] + ls.grid.spacing * np.arange(ls.solid.shape[axis])
+
+
+def _notch_under_one_held_edge(ls):
+    """The review's notch: the printed side cut away under the middle of the left edge, just below the plywood."""
+    x, y, z = (_centres(ls, a) for a in range(3))
+    out = ls.solid.copy()
+    cut = (x < 30.0)[:, None, None] & (abs(y - 110.0) < 20.0)[None, :, None] & ((z > 160.0) & (z < 207.0))[None, None, :]
+    out[cut] = False
+    return out
+
+
+def test_a_step_carved_under_a_held_edge_reads_no_stronger_than_the_part_as_drawn(mixed, monkeypatch):
+    # Rule 6 (#228 review): the notch unholds the edge, the plate check stops and the FEA reads a plywood top far
+    # higher (0.57 -> 1.66 on the review's run). Taking support away can't make it stronger
+    drawn, notched = _carve_steps(mixed, monkeypatch, _notch_under_one_held_edge)
+    assert all(c["governs"] == "plate" and c["plate"]["done"] for c in drawn)
+    for was, now in zip(drawn, notched):
+        assert now["plate"]["as_drawn"] and now["plate"]["edges_held"] == 2
+        assert now["fea"]["safety"] > was["safety"]                  # what it would have read
+        assert now["safety"] == was["safety"] and now["governs"] == "plate"
+        assert now["breaks_lb"] == was["breaks_lb"]
+
+
+def test_a_step_with_a_whole_side_cut_away_reads_no_stronger_than_the_part_as_drawn(mixed, monkeypatch):
+    def no_left_side(ls):
+        out = ls.solid.copy()
+        out[_centres(ls, 0) < 30.0] = False
+        return out
+
+    drawn, carved = _carve_steps(mixed, monkeypatch, no_left_side)
+    for was, now in zip(drawn, carved):
+        assert now["safety"] is not None and now["safety"] <= was["safety"]
+
+
+def test_a_step_that_keeps_its_held_edges_is_read_by_its_own_plate_check(mixed, monkeypatch):
+    drawn, same = _carve_steps(mixed, monkeypatch, lambda ls: ls.solid.copy())
+    assert not any(c["plate"].get("as_drawn") for c in same)
+    assert [c["safety"] for c in same] == [c["safety"] for c in drawn]
+
+
 # ---------------------------------------------------------------------------
 # Item 7: the adopted plywood and carved sides are one body
 # ---------------------------------------------------------------------------

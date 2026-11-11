@@ -38,6 +38,10 @@ NAME = "CARVED"
 OPEN = ("its carved shape doesn't close up into a solid (it isn't watertight), so it can't be built or checked: "
         "use another step, or carve it again")
 
+#: Rule 6 (#228 review): a step that carves away what holds the plywood's edge reads no higher than the part as drawn.
+CAPPED = ("A step that carves away what holds up an edge of the plywood keeps the plywood's number as drawn: taking "
+          "support away can't make it stronger.")
+
 
 class NotClosed(ValueError):
     """A carved step whose shape isn't watertight, even repaired."""
@@ -170,6 +174,8 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         whole_under = ctx.get("under")                                  # the uncarved print: each step takes its own
         voxel_cm3 = ls.grid.voxel_volume / 1000.0
         printed0 = voxels0 = None
+        ceiling, capped = {}, False
+        ctx["plate_ceiling"] = ceiling                                 # Rule 6 (#228 review): filled at step 0
         for k, st in enumerate(sweep.stations):
             stop()                                                     # between steps: what's done is kept
             # the share of the printed part: whittle's own `removed` counts the wood it keeps too (CALI-86)
@@ -183,6 +189,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
                 ctx["under"] = station_under(whole_under, ls.grid, st.design & ~wood)
             for i in range(len(ctx["loads"])):
                 case, r = L.check_load(ctx, i, min_safety, solid=st.design)
+                if k == 0 and (case.get("plate") or {}).get("done"):
+                    ceiling[i] = case["plate"]                         # as drawn: no carved step reads above it
+                capped = capped or bool((case.get("plate") or {}).get("as_drawn"))
                 if case.get("safety") is not None and (worst is None or case["safety"] < worst):
                     worst, weak = case["safety"], (case.get("plate") or {}).get("piece") if case["governs"] == "plate" \
                         else case["fea"].get("in")
@@ -236,7 +245,8 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
                             f"Carved by whittle's sweep, {mat['name']} only: the "
                             + ("wood, " if wood.any() else "") + "where it's pushed and where it's held are kept.",
                             "Each step is checked by the strength check; using one rebuilds the part with that shape "
-                            "and checks it again: that's the number to go by.", *([mat["note"]] if mat.get("note") else []),
+                            "and checks it again: that's the number to go by.", *([CAPPED] if capped else []),
+                            *([mat["note"]] if mat.get("note") else []),
                             *L.buckling_notes(ctx["pieces"], ctx["loads"], mat)]}
         keep(record)
         store.append_history(part_id, {"kind": "carve", "action": "studied", "run": rid, "stations": len(out)})
