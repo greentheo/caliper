@@ -85,11 +85,17 @@ def test_the_sheets_safety_words_are_there(words):
 @pytest.mark.parametrize("words", [
     "which includes the hanger and strap", "test all three bars on their 1 in face, 1/2 in deep",
     "take twice the rise", "can't be zeroed with the strip on it", "too coarse for 4 and 5 lb steps",
-    "rests on the strip over the supports", "Not on a stand on the floor", "held N, didn't break",
-    "a loose block each side at each end", "5 in clear between the 2x4s", "23/32", "15/32", "Skip the sag",
+    "a small block at each end, on the strip over the supports", "taller than the saddle and strap", "Not on a stand on the floor", "held N, didn't break",
+    "a loose block each side at each end", "5 in clear between them", "their legs clear, about 2 ft", "23/32", "15/32", "Skip the sag",
 ])
 def test_the_sheet_heads_off_the_ways_to_write_down_a_wrong_number(words):
     assert words in K.sheet_html()
+
+
+def test_the_record_has_a_row_for_each_coupon_and_no_bench():
+    page = K.sheet_html()
+    assert page.split('class="rec"')[1].count("<tr><td>") >= len(K.COUPONS)
+    assert "or a bench" not in page
 
 
 @pytest.mark.parametrize("c", K.COUPONS, ids=lambda c: c.id)

@@ -387,7 +387,7 @@ def sheet_html() -> str:
 <div>{_RIG}</div>
 <div><h2>Each coupon</h2><ol>
 <li>Measure its width and depth at mid-span, and the span. Weigh it if you can.</li>
-<li>Tape or screw two round supports, 1 in pipe or dowel, to sawhorses or a bench so they can't roll. Rest the strip loose on them, so its ends can turn and slide.</li>
+<li>Tape or screw two round supports, 1 in pipe or dowel, to two sawhorses so they can't roll. Rest the strip loose on them, so its ends can turn and slide.</li>
 <li>Hang the load from a strap over a 1 in wood saddle at the middle, the table's floor gap above a block or pad. If the load touches down before the strip breaks, the numbers are bad: redo it with more gap.</li>
 <li>Hang the empty hanger, about 5 lb, and zero the sag reading there. The sag steps count what you add above it.</li>
 <li>Go to each of the three load steps. Wait 30 seconds and read the sag. The steps are targets: write what you actually hung.</li>
@@ -404,8 +404,8 @@ def sheet_html() -> str:
 <li><b>Hanging scale and ratchet strap</b> to a floor anchor: the scale reads the load directly.</li>
 </ul></div>
 <div><h2>Reading the sag: from a reference on the supports</h2><ul>
-<li><b>Dial indicator</b> clamped to a straight bar that rests on the strip over the supports, tip on the strip beside the saddle. Not on a stand on the floor: that counts crush and the horses' flex.</li>
-<li><b>Rule and thread:</b> stretch a thread tight between two pins in the strip, over the supports. Tape a steel rule upright at mid-span, and read it where the thread crosses, at eye level, to 1/64 in or 0.5 mm.</li>
+<li><b>Dial indicator</b> clamped to a straight bar. The bar sits on a small block at each end, on the strip over the supports, taller than the saddle and strap so it clears them. Tip on the strip beside the saddle. Not on a stand on the floor: that counts crush and the horses' flex.</li>
+<li><b>Rule and thread:</b> stretch a thread tight between two pins in the strip, over the supports, standing taller than the saddle and strap so it clears them. Tape a steel rule upright at mid-span, and read it where the thread crosses, at eye level, to 1/64 in or 0.5 mm.</li>
 <li><b>No dial for PETG?</b> A rule can't read 1 mm. Skip the sag and just break it: the most it held is still worth having.</li>
 </ul></div>
 </div>
@@ -413,10 +413,10 @@ def sheet_html() -> str:
 <tr><th>ID</th><th>What to cut or print</th><th>Span</th><th>Load steps, lb</th><th>Sag at top step</th><th>Read with</th><th>Floor gap</th><th>Break it?</th></tr>
 {''.join(rows)}
 </table></div></div>
-<p class="note"><b>2x4 on edge:</b> a loose block each side at each end keeps it upright without gripping it. <b>PETG:</b> test all three bars on their 1 in face, 1/2 in deep, however they printed. For the 6 in span, clamp two 2x4s flat across two sawhorses set 18 in apart, 5 in clear between the 2x4s. Tape a dowel along each inside edge, rest the bar across the dowels, and hang the load down through the gap, between the horses. It has to carry about 100 lb. <b>Sag and break</b> are predictions from the textbook values Caliper uses today, at its default print settings (1.2 mm walls, 20% infill). Real wood often beats them by a lot, and finding out by how much is the point. Most 3/4 ply is 23/32 and most 1/2 ply is 15/32, so expect more sag and a lower break than these; the comparison uses the depth you measure. Three of each kind beats one. PETG may fold instead of snapping. Printed: note layer height, walls, infill and pattern, filament, nozzle temperature. Wood: note knots near the middle, and moisture if you have a meter.</p>
+<p class="note"><b>2x4 on edge:</b> a loose block each side at each end keeps it upright without gripping it. <b>PETG:</b> test all three bars on their 1 in face, 1/2 in deep, however they printed. For the 6 in span, clamp two 2x4s flat across two sawhorses far enough apart that their legs clear, about 2 ft, with the 2x4s long enough to reach and 5 in clear between them. Tape a dowel along each inside edge, rest the bar across the dowels, and hang the load down through the gap, between the horses. It has to carry about 100 lb. <b>Sag and break</b> are predictions from the textbook values Caliper uses today, at its default print settings (1.2 mm walls, 20% infill). Real wood often beats them by a lot, and finding out by how much is the point. Most 3/4 ply is 23/32 and most 1/2 ply is 15/32, so expect more sag and a lower break than these; the comparison uses the depth you measure. Three of each kind beats one. PETG may fold instead of snapping. Printed: note layer height, walls, infill and pattern, filament, nozzle temperature. Wood: note knots near the middle, and moisture if you have a meter.</p>
 <div><h2>Record: load in lb, sizes and sag in mm or in (say which). Copy this page for more rows</h2><div class="wrap"><table class="rec">
 <tr><th>ID</th><th>#</th><th>Width</th><th>Depth</th><th>Span</th><th>Load 1</th><th>Sag 1</th><th>Load 2</th><th>Sag 2</th><th>Load 3</th><th>Sag 3</th><th>Back to</th><th>Most it held</th><th>How it broke, and where</th></tr>
-{blank * 5}
+{blank * 9}
 </table></div></div>
 </div>
 """
