@@ -1,0 +1,560 @@
+[
+ {
+  "id": "2x4-E",
+  "name": "2x4 on edge",
+  "lb": 150,
+  "theory_sag_mm": 6.76,
+  "theory_breaks_lb": 423.0,
+  "check": {
+   "how": "check",
+   "spacing_mm": 14.29,
+   "across": 2.67,
+   "voxels": 3360,
+   "layers": 7,
+   "converged": true,
+   "sag_mm": 1.061,
+   "peak_mpa": 3.08,
+   "breaks_lb": 974.0
+  },
+  "four": {
+   "how": "check",
+   "spacing_mm": 9.52,
+   "across": 4.0,
+   "voxels": 9600,
+   "layers": 10,
+   "converged": true,
+   "sag_mm": 1.432,
+   "peak_mpa": 4.36,
+   "breaks_lb": 688.1
+  },
+  "six": {
+   "how": "check",
+   "spacing_mm": 6.35,
+   "across": 6.0,
+   "voxels": 30556,
+   "layers": 15,
+   "converged": true,
+   "sag_mm": 1.757,
+   "peak_mpa": 5.69,
+   "breaks_lb": 527.2
+  },
+  "alone_four": {
+   "how": "alone",
+   "spacing_mm": 9.52,
+   "across": 4.0,
+   "voxels": 4480,
+   "layers": 10,
+   "converged": true,
+   "sag_mm": 5.279,
+   "peak_mpa": 5.89,
+   "breaks_lb": 509.3
+  },
+  "alone_six": {
+   "how": "alone",
+   "spacing_mm": 6.35,
+   "across": 6.0,
+   "voxels": 14249,
+   "layers": 15,
+   "converged": true,
+   "sag_mm": 6.5,
+   "peak_mpa": 8.34,
+   "breaks_lb": 359.7
+  }
+ },
+ {
+  "id": "2x4-F",
+  "name": "2x4 flat",
+  "lb": 60,
+  "theory_sag_mm": 14.66,
+  "theory_breaks_lb": 181.3,
+  "check": {
+   "how": "check",
+   "spacing_mm": 14.29,
+   "across": 2.67,
+   "voxels": 3360,
+   "layers": 3,
+   "converged": true,
+   "sag_mm": 1.955,
+   "peak_mpa": 2.12,
+   "breaks_lb": 566.0
+  },
+  "four": {
+   "how": "check",
+   "spacing_mm": 9.52,
+   "across": 4.0,
+   "voxels": 9600,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 3.067,
+   "peak_mpa": 3.08,
+   "breaks_lb": 389.6
+  },
+  "six": {
+   "how": "check",
+   "spacing_mm": 6.35,
+   "across": 6.0,
+   "voxels": 30240,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 3.429,
+   "peak_mpa": 3.66,
+   "breaks_lb": 327.9
+  },
+  "alone_four": {
+   "how": "alone",
+   "spacing_mm": 9.52,
+   "across": 4.0,
+   "voxels": 4480,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 12.709,
+   "peak_mpa": 5.63,
+   "breaks_lb": 213.1
+  },
+  "alone_six": {
+   "how": "alone",
+   "spacing_mm": 6.35,
+   "across": 6.0,
+   "voxels": 14112,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 14.039,
+   "peak_mpa": 6.17,
+   "breaks_lb": 194.5
+  }
+ },
+ {
+  "id": "34-L",
+  "name": "3/4 in ply, along",
+  "lb": 60,
+  "theory_sag_mm": 7.02,
+  "theory_breaks_lb": 163.2,
+  "check": {
+   "how": "check",
+   "spacing_mm": 5.4,
+   "across": 3.53,
+   "voxels": 9600,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 0.967,
+   "peak_mpa": 3.74,
+   "breaks_lb": 481.3
+  },
+  "four": {
+   "how": "check",
+   "spacing_mm": 4.76,
+   "across": 4.0,
+   "voxels": 11648,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 1.492,
+   "peak_mpa": 5.09,
+   "breaks_lb": 353.6
+  },
+  "six": {
+   "how": "check",
+   "spacing_mm": 3.17,
+   "across": 6.0,
+   "voxels": 39168,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 1.54,
+   "peak_mpa": 5.62,
+   "breaks_lb": 320.3
+  },
+  "alone_four": {
+   "how": "alone",
+   "spacing_mm": 4.76,
+   "across": 4.0,
+   "voxels": 5120,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 6.373,
+   "peak_mpa": 9.71,
+   "breaks_lb": 185.4
+  },
+  "alone_six": {
+   "how": "alone",
+   "spacing_mm": 3.17,
+   "across": 6.0,
+   "voxels": 17280,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 6.6,
+   "peak_mpa": 9.95,
+   "breaks_lb": 180.9
+  }
+ },
+ {
+  "id": "34-X",
+  "name": "3/4 in ply, across",
+  "lb": 30,
+  "theory_sag_mm": 7.02,
+  "theory_breaks_lb": 81.6,
+  "check": {
+   "how": "check",
+   "spacing_mm": 5.4,
+   "across": 3.53,
+   "voxels": 9600,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 0.967,
+   "peak_mpa": 1.87,
+   "breaks_lb": 240.6
+  },
+  "four": {
+   "how": "check",
+   "spacing_mm": 4.76,
+   "across": 4.0,
+   "voxels": 11648,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 1.492,
+   "peak_mpa": 2.55,
+   "breaks_lb": 176.5
+  },
+  "six": {
+   "how": "check",
+   "spacing_mm": 3.17,
+   "across": 6.0,
+   "voxels": 39168,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 1.54,
+   "peak_mpa": 2.81,
+   "breaks_lb": 160.1
+  },
+  "alone_four": {
+   "how": "alone",
+   "spacing_mm": 4.76,
+   "across": 4.0,
+   "voxels": 5120,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 6.373,
+   "peak_mpa": 4.85,
+   "breaks_lb": 92.8
+  },
+  "alone_six": {
+   "how": "alone",
+   "spacing_mm": 3.17,
+   "across": 6.0,
+   "voxels": 17280,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 6.6,
+   "peak_mpa": 4.97,
+   "breaks_lb": 90.5
+  }
+ },
+ {
+  "id": "12-L",
+  "name": "1/2 in ply, along",
+  "lb": 30,
+  "theory_sag_mm": 6.06,
+  "theory_breaks_lb": 90.6,
+  "check": {
+   "how": "check",
+   "spacing_mm": 4.44,
+   "across": 2.86,
+   "voxels": 8640,
+   "layers": 3,
+   "converged": true,
+   "sag_mm": 0.957,
+   "peak_mpa": 3.6,
+   "breaks_lb": 250.0
+  },
+  "four": {
+   "how": "check",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 21504,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 1.224,
+   "peak_mpa": 4.62,
+   "breaks_lb": 194.8
+  },
+  "six": {
+   "how": "check",
+   "spacing_mm": 2.12,
+   "across": 6.0,
+   "voxels": 72576,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 1.29,
+   "peak_mpa": 5.14,
+   "breaks_lb": 175.1
+  },
+  "alone_four": {
+   "how": "alone",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 9216,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 5.518,
+   "peak_mpa": 8.91,
+   "breaks_lb": 101.0
+  },
+  "alone_six": {
+   "how": "alone",
+   "spacing_mm": 2.12,
+   "across": 6.0,
+   "voxels": 31104,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 5.699,
+   "peak_mpa": 9.21,
+   "breaks_lb": 97.7
+  }
+ },
+ {
+  "id": "12-X",
+  "name": "1/2 in ply, across",
+  "lb": 15,
+  "theory_sag_mm": 6.06,
+  "theory_breaks_lb": 45.3,
+  "check": {
+   "how": "check",
+   "spacing_mm": 4.44,
+   "across": 2.86,
+   "voxels": 8640,
+   "layers": 3,
+   "converged": true,
+   "sag_mm": 0.957,
+   "peak_mpa": 1.8,
+   "breaks_lb": 125.0
+  },
+  "four": {
+   "how": "check",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 21504,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 1.224,
+   "peak_mpa": 2.31,
+   "breaks_lb": 97.4
+  },
+  "six": {
+   "how": "check",
+   "spacing_mm": 2.12,
+   "across": 6.0,
+   "voxels": 72576,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 1.29,
+   "peak_mpa": 2.57,
+   "breaks_lb": 87.5
+  },
+  "alone_four": {
+   "how": "alone",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 9216,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 5.518,
+   "peak_mpa": 4.46,
+   "breaks_lb": 50.4
+  },
+  "alone_six": {
+   "how": "alone",
+   "spacing_mm": 2.12,
+   "across": 6.0,
+   "voxels": 31104,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 5.699,
+   "peak_mpa": 4.61,
+   "breaks_lb": 48.8
+  }
+ },
+ {
+  "id": "PG-F",
+  "name": "PETG, printed flat",
+  "lb": 12,
+  "theory_sag_mm": 1.01,
+  "theory_breaks_lb": 30.8,
+  "check": {
+   "how": "check",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 2048,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 0.121,
+   "peak_mpa": 0.94,
+   "breaks_lb": 97.5
+  },
+  "four": {
+   "how": "check",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 2048,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 0.121,
+   "peak_mpa": 0.94,
+   "breaks_lb": 97.5
+  },
+  "six": {
+   "how": "check",
+   "spacing_mm": 2.12,
+   "across": 6.0,
+   "voxels": 6912,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 0.139,
+   "peak_mpa": 1.2,
+   "breaks_lb": 76.3
+  },
+  "alone_four": {
+   "how": "alone",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 768,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 0.819,
+   "peak_mpa": 2.46,
+   "breaks_lb": 37.2
+  },
+  "alone_six": {
+   "how": "alone",
+   "spacing_mm": 2.12,
+   "across": 6.0,
+   "voxels": 2592,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 0.883,
+   "peak_mpa": 2.57,
+   "breaks_lb": 35.6
+  }
+ },
+ {
+  "id": "PG-E",
+  "name": "PETG, printed on edge",
+  "lb": 12,
+  "theory_sag_mm": 1.01,
+  "theory_breaks_lb": 30.8,
+  "check": {
+   "how": "check",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 2048,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 0.121,
+   "peak_mpa": 0.94,
+   "breaks_lb": 97.5
+  },
+  "four": {
+   "how": "check",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 2048,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 0.121,
+   "peak_mpa": 0.94,
+   "breaks_lb": 97.5
+  },
+  "six": {
+   "how": "check",
+   "spacing_mm": 2.12,
+   "across": 6.0,
+   "voxels": 6912,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 0.139,
+   "peak_mpa": 1.2,
+   "breaks_lb": 76.3
+  },
+  "alone_four": {
+   "how": "alone",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 768,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 0.819,
+   "peak_mpa": 2.46,
+   "breaks_lb": 37.2
+  },
+  "alone_six": {
+   "how": "alone",
+   "spacing_mm": 2.12,
+   "across": 6.0,
+   "voxels": 2592,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 0.883,
+   "peak_mpa": 2.57,
+   "breaks_lb": 35.6
+  }
+ },
+ {
+  "id": "PG-S",
+  "name": "PETG, printed standing",
+  "lb": 12,
+  "theory_sag_mm": 1.01,
+  "theory_breaks_lb": 30.8,
+  "check": {
+   "how": "check",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 2048,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 0.121,
+   "peak_mpa": 0.94,
+   "breaks_lb": 97.5
+  },
+  "four": {
+   "how": "check",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 2048,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 0.121,
+   "peak_mpa": 0.94,
+   "breaks_lb": 97.5
+  },
+  "six": {
+   "how": "check",
+   "spacing_mm": 2.12,
+   "across": 6.0,
+   "voxels": 6912,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 0.139,
+   "peak_mpa": 1.2,
+   "breaks_lb": 76.3
+  },
+  "alone_four": {
+   "how": "alone",
+   "spacing_mm": 3.17,
+   "across": 4.0,
+   "voxels": 768,
+   "layers": 4,
+   "converged": true,
+   "sag_mm": 0.819,
+   "peak_mpa": 2.46,
+   "breaks_lb": 37.2
+  },
+  "alone_six": {
+   "how": "alone",
+   "spacing_mm": 2.12,
+   "across": 6.0,
+   "voxels": 2592,
+   "layers": 6,
+   "converged": true,
+   "sag_mm": 0.883,
+   "peak_mpa": 2.57,
+   "breaks_lb": 35.6
+  }
+ }
+]
