@@ -556,3 +556,21 @@ def test_a_rule_pinned_to_a_size_is_still_checked_for_conflicts(gantry):
     assert [c[1] for c in promote.conflicts(gantry, band, "design", "carriage")] == ["carriage_low"]
     assert promote.conflicts(gantry, promote.allow_for_measuring("bbox(carriage).dz == 20"), "design", "carriage") == []
     assert promote._bounds("30 >= bbox(carriage).dz >= 10") == ("bbox(carriage).dz", 10, 30)
+
+
+@pytest.mark.parametrize("expr, said", [
+    ("min_wall >= 9.95 - 0.15", "the 0.15 mm is what measuring it can be off by"),     # the allowance Caliper adds
+    ("min_wall >= 9.95 - 1", None),                       # a person's own " - 1" isn't a measuring error (#64 item 10)
+    ("min_wall >= 9.95 - 1 - 0.15", "the 0.15 mm is what measuring it can be off by"),   # theirs, then ours
+    ("bbox.dz <= 230 + 0.1", "the 0.1 mm is what measuring it can be off by"),
+    ("bbox.dz <= 230 + 2", None),
+    ("230 - 0.1 <= bbox.dz <= 230 + 0.1", "the 0.1 mm is what measuring it can be off by"),   # a pinned size's band
+    ("230 - 2 <= bbox.dz <= 230 + 2", None),
+])
+def test_only_the_allowance_caliper_added_is_called_a_measuring_error(expr, said):
+    p = promote.Proposal(id="r", expr=expr, level="part", part="carriage", holds_now=True)
+    text = p.describe()
+    if said:
+        assert said in text, text
+    else:
+        assert "what measuring it can be off by" not in text, text

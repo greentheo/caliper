@@ -210,9 +210,11 @@ def named_part(message: str, parts: list[str]) -> Optional[str]:
     words = set(_words(message))
     hits = []
     for pid in parts:
-        tokens = set(_words(pid))
-        if tokens and tokens <= words:
-            hits.append((len(tokens), pid))
+        # its id as written ("step_stool"), or as a person says it ("the step stool": #209 review, a card's words)
+        for tokens in (set(_words(pid)), set(pid.lower().split("_")) - {""}):
+            if tokens and tokens <= words:
+                hits.append((len(tokens), pid))
+                break
     if not hits:
         return None
     hits.sort(reverse=True)
@@ -941,7 +943,8 @@ def _facts(store: DesignStore, scope: Optional[str]) -> str:
                 out.append(f"{pid or 'the design'} · {c['q']} {ln['text']}")
             promised = promised or bool(c.get("promise"))
     if promised:                                       # so a plain answer about strength can say it (CALI-86)
-        out.append(f"what a strength verdict promises: {answers.PROMISE}")
+        out.append("what a strength verdict promises: "
+                   + answers.promise(store, [scope] if scope else [p.id for p in store.design.parts]))   # (#64 item 14)
     from . import consistency, verdicts
 
     for run in load_study.list_runs(store)[:2]:

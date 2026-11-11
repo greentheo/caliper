@@ -45,6 +45,7 @@ from . import tree
 from . import materials as M
 from . import verdicts
 from .design import DesignStore
+from .fasteners import PILOT_BIT
 
 #: The order a part goes together in, by the layers ``construction._layer`` sorts its pieces into.
 BUILD_ORDER = ["tubes", "gussets", "jacks", "floor", "skeleton", "panels", "shell", "patches"]
@@ -700,7 +701,8 @@ def shopping(store: DesignStore, plans: dict, bom: dict, lumps: dict, ctx: dict)
     if screws:
         kinds = sorted({b["fasteners"]["screw"] for b in bom.values() if b.get("fasteners")})
         add("hardware", " / ".join(kinds), f"{screws} (a box of {100 if screws > 50 else 50})",
-            max(screws, 50) * P["screw_each"], "the joints, a screw every 6 in")
+            max(screws, 50) * P["screw_each"],
+            f"the joints, a screw every 6 in; drill a {PILOT_BIT} pilot hole for each")    # (#64 item 8)
         ml = sum((b.get("fasteners") or {}).get("glue_ml", 0) for b in bom.values())
         add("hardware", "wood glue", "an 8 oz bottle" if ml <= 236 else f"{math.ceil(ml / 236)} × 8 oz bottles",
             P["wood_glue_8oz"] * max(1, math.ceil(ml / 236)), "every joint, before the screws")
@@ -900,6 +902,12 @@ def _headlines(metrics: dict) -> list[tuple[str, str]]:
             + [("frame.yield_x", "frame yields at × its load"), ("drag.lbf", "drag at speed")])
 
 
+def _promise(store: DesignStore, parts: list) -> str:
+    from .answers import promise
+
+    return promise(store, parts)
+
+
 def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], notes: list[str]) -> str:
     """The build book, as one printable page."""
 
@@ -925,7 +933,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
            f"<div class='nums'>{nums}</div>"]
     from .answers import PROMISE
 
-    out.append(f"<p class='note'><b>What the numbers promise.</b> {_e(PROMISE)}</p>")       # CALI-59
+    out.append(f"<p class='note'><b>What the numbers promise.</b> {_e(rec.get('promise') or PROMISE)}</p>")   # CALI-59
     if notes:
         out.append("<h3>Before you cut</h3><ul>" + "".join(f"<li>{_e(n)}</li>" for n in notes) + "</ul>")
     # what to buy
@@ -1289,6 +1297,7 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
            "names": {p.id: p.label for p in store.design.parts if p.label},
            "grain": {pid: n for pid, n in said.items() if n},       # which way to cut each panel (CALI-126)
            "slug": os.path.basename(store.root), "versions": versions,
+           "promise": _promise(store, [p.id for p in built]),        # worded for what it's made of (#64 item 14)
            "card": {"created": card["created"], "summary": card["summary"]},
            "ready": verdicts.summary(card["summary"])["counts_as_pass"],      # one verdict (CALI-112)
            "cutplans": {pid: plan["id"] for pid, plan in plans.items()},

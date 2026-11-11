@@ -267,6 +267,67 @@ def test_every_step_is_judged_and_the_worst_governs(checked):
     assert got["status"] == "warn" and "at 400 lb" in got["text"]
 
 
+def _plate_run(kind):
+    # the fields each check really writes (#209 review): a beam its sag both ways; a plate held all round only its
+    # deflection_mm, at the material's E (along the face grain)
+    plate = ({"done": True, "piece": "top", "as": "beam", "deflection_mm": 0.8, "deflection_across_mm": 0.8,
+              "deflection_along_mm": 0.4} if kind == "beam" else {"done": True, "piece": "top", "deflection_mm": 0.4})
+    return {"id": "r1", "version": 1, "min_safety": 2.0, "spacing_mm": 3.0, "resolved": True, "safety": 3.0,
+            "material": {"key": "plywood", "E": 8000.0, "across": 0.5},
+            "cases": [{"name": "An adult stepping up", "lb": 200.0, "factor": 2.0, "safety": 3.0, "holds": True,  # producer
+                       "governs": "plate", "breaks_lb": 1200.0, "plate": plate,
+                       "fea": {"supported": True, "deflection_mm": 0.2, "safety": 3.5}}]}
+
+
+@pytest.mark.parametrize("kind, check", [("beam", "the beam check's (resting on two edges, free to turn"),
+                                         ("plate", "the plate check's (held all round, edges free to turn")])
+def test_the_predictions_basis_names_the_check_it_came_from(kind, check, monkeypatch, tmp_path):
+    """CALI-88 (#64 item 7): a beam-checked top's basis said "the plate check's (edges free…)". It names the check.
+    And the flexible end is the same grain's sag the verdict takes (the worse grain's here, none declared)."""
+    store = DesignStore.create("a stool", base=str(tmp_path))
+    store.write_part("top", "def build(params):\n    return None\n", intent="x")
+    monkeypatch.setattr(trials, "_run", lambda s, pid: _plate_run(kind))
+    pr = trials.predict(store, "top")
+    assert check in pr["basis"], pr["basis"]
+    assert pr["per_lb_mm"][1] == pytest.approx(0.8 / 400, abs=1e-6)     # across the grain: the worse, as breaks_lb takes
+
+
+
+def test_a_plate_checked_tops_sag_is_across_the_grain_as_its_strength_is(tmp_path):
+    """#209 review: the sample stool's top is plate-checked: its break takes the across-grain strength (3.11, the
+    plate's 6.22 halved), but its flexible end took the along-grain stiffness: 0.261 mm at 400 lb, so 0.003-0.005 in
+    at 200 lb where across the grain it's about 0.010 in. The real stored run, no fields added."""
+    from caliper import samples
+
+    store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
+    run = load_study.list_runs(store, "step_stool")[0]
+    (case,) = run["cases"]
+    plate = case["plate"]
+    assert "deflection_across_mm" not in plate and plate.get("as") != "beam"          # what a plate writes
+    pr = trials.predict(store, "step_stool")
+    across = plate["deflection_mm"] / run["material"]["across"] / (case["lb"] * case["factor"])
+    assert pr["per_lb_mm"][1] == pytest.approx(across, rel=1e-3), pr["per_lb_mm"]
+    hi_200 = pr["per_lb_mm"][1] * 200 / 25.4
+    assert 0.009 < hi_200 < 0.011, hi_200                                              # about 0.010 in at 200 lb
+    assert "the grain taken the weaker way" in pr["basis"], pr["basis"]
+
+
+def test_a_mixed_parts_plate_takes_its_own_pieces_grain(tmp_path, monkeypatch):
+    """#209 review, round 3: the ratio came from the run's main material (a print: across 1.0), not the plate-checked
+    piece's (the mixed stool's plywood top: 0.5), so its sag stayed along the grain."""
+    from .test_mixed import MIXED
+
+    store = DesignStore.create("a stool", base=str(tmp_path))
+    store.write_part("stool", MIXED, intent="a stool")
+    run = _plate_run("plate")
+    run["material"] = {"key": "petg", "E": 2000.0, "across": 1.0}          # the part's main material: the print
+    run["cases"][0]["plate"]["piece"] = "top"                              # the plate: its plywood top
+    monkeypatch.setattr(trials, "_run", lambda s, pid: run)
+    pr = trials.predict(store, "stool")
+    assert pr["per_lb_mm"][1] == pytest.approx(0.4 / 0.5 / 400, rel=1e-3), pr["per_lb_mm"]
+    assert "the grain taken the weaker way" in pr["basis"]
+
+
 def test_a_failed_test_where_the_break_wasnt_settled_says_so(checked, monkeypatch):
     """CALI-88 (#64 item 13): with no settled prediction (a coarse check), the line says what it had to hold and
     that where it would break wasn't settled, never a number we didn't predict."""

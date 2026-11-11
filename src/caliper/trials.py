@@ -53,6 +53,22 @@ def measure_with(sag_mm: float) -> str:
 MOST_STEPS = 40
 
 
+def _plate_material(store: DesignStore, part_id: str, piece: Optional[str]) -> Optional[dict]:
+    """The plate-checked piece's own material, as the strength check reads one (its grain ratio): a part of two
+    materials records its main one, and the bar stool's plywood seat sits on PETG (#209 review, round 3)."""
+    if not piece:
+        return None
+    from . import construction as C
+    from . import load_study as L
+
+    try:
+        item = next((it for it in C.declared(store, part_id).get("construction") or []
+                     if isinstance(it, dict) and it.get("name") == piece and it.get("material")), None)
+        return L.material([{"material": item["material"], "volume": 1.0}]) if item else None
+    except Exception:  # noqa: BLE001 — a part that can't say: the run's own material, as before
+        return None
+
+
 def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     """For the worst load the part was checked for: the sag at each step to where it should break, as a range,
     and what to measure it with. None without a strength check on this version."""
@@ -72,6 +88,14 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     # "across" the span), else the worse grain's, so the prediction spans both (#122 review)
     grain = plate.get("grain") if plate.get("grain") in ("along", "across") else None
     sag = plate.get(f"deflection_{grain}_mm") if grain else None
+    weaker = False
+    if sag is None and plate.get("done") and plate.get("as") != "beam":
+        # a plate held all round writes its sag at the material's E, along the face grain, while its strength is
+        # taken across it: its sag across the grain, the weaker way, as its strength is (#209 review)
+        mat = _plate_material(store, part_id, plate.get("piece")) or run.get("material") or {}
+        ratio = (mat["E_across"] / mat["E"]) if mat.get("E_across") and mat.get("E") else mat.get("across", 1.0)
+        sag = plate.get("deflection_across_mm") or plate["deflection_mm"] / min(max(float(ratio), 1e-6), 1.0)
+        weaker = ratio < 1.0
     flex = (sag if sag is not None else plate["deflection_mm"]) / applied if plate.get("done") else None
     lo, hi = sorted([stiff, flex if flex is not None else stiff])
     breaks = None if L.unresolved(run, case) else case.get("breaks_lb")     # a plan isn't built up to a number nobody can read (#202)
@@ -94,7 +118,11 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
             "basis": ("from an FEA too coarse to see its walls, so a rough guess until it's checked finer: "
                       if L.unresolved(run, case) else "")                       # said, not hidden (CALI-110)
                      + "linear to breaking: the FEA's sag (joints solid, the stiff end)"
-                     + (" to the plate check's (edges free, the flexible end)" if flex is not None else "")}
+                     + ((" to the beam check's (resting on two edges, free to turn: the flexible end)" if plate.get("as") == "beam"
+                         else " to the plate check's (held all round, edges free to turn"
+                        + (", the grain taken the weaker way, as its strength is" if weaker else "")
+                        + ": the flexible end)")   # (#64 item 7, #209 review)
+                        if flex is not None else "")}
 
 
 def record(store: DesignStore, part_id: str, load_lb: float, sag_mm: Optional[float] = None,

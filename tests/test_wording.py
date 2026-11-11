@@ -95,7 +95,8 @@ def test_a_fail_on_a_filled_in_shape_is_likely_weaker_and_a_shape_unchecked_says
     (c,) = run["cases"]
     filled = answers._case_line("stool", run, c, "its pieces fill its shape", False, True)
     assert filled["status"] == "bad" and filled["text"].startswith("Doesn't hold an adult stepping up: only 1.2 times")
-    assert filled["text"].endswith(" It ran on a filled-in shape, so the part as built is likely weaker.")
+    assert filled["text"].endswith(" It ran on a solid with more in it than its pieces: filled in, the part as built "
+                                   "is likely weaker; or a piece is missing from its construction.")
     unknown = answers._case_line("stool", run, c, "couldn't check its shape (no mesh)", False, True)
     assert unknown["text"].endswith(" Its shape couldn't be checked against its pieces, so this number may not be "
                                     "the part's.")

@@ -264,6 +264,32 @@ def test_a_chat_turn_that_fails_still_answers_in_the_log(client, monkeypatch):
     assert log[-1]["kind"] == "reply" and log[-1]["ok"] is False and "couldn't" in log[-1]["reply"]
 
 
+def test_cuttable_does_what_its_words_say():
+    """CALI-88 (#64 item 11): "nothing narrower than a blade turns round" overstated it. What the smoothing does: no
+    part and no gap narrower than 1/4 in, and every corner rounded to at least 1/8 in, so a scroll blade can follow
+    it. Shown as what that means: opening and closing it by 1/8 in leave it as it is."""
+    import math
+
+    from shapely.geometry import Polygon
+
+    r = pictures.MIN_FEATURE_MM / 2
+    assert abs(r - 0.125 * 25.4) < 1e-9
+    # a star with thin spikes and a narrow slot cut into it: both are what a blade can't follow
+    pts = [((60 if k % 2 else 18) * math.cos(math.pi * k / 7), (60 if k % 2 else 18) * math.sin(math.pi * k / 7))
+           for k in range(14)]
+    slot = Polygon([(-2, -40), (2, -40), (2, 0), (-2, 0)])
+    shape = Polygon(pts).buffer(4).difference(slot)
+    got = pictures.cuttable(shape)
+    assert got is not None and got.is_valid
+    opened = got.buffer(-r).buffer(r)                     # nothing narrower than 2r: opening changes nothing
+    closed = got.buffer(r).buffer(-r)                     # no gap narrower than 2r, inside corners >= r
+    assert got.symmetric_difference(opened).area < 0.01 * got.area
+    assert got.symmetric_difference(closed).area < 0.01 * got.area
+    # and it did change the shape it was given (the slot and the spikes' tips were too fine)
+    assert shape.symmetric_difference(got).area > 0.01 * shape.area
+    assert "no part or gap narrower than 1/4 in" in pictures.cuttable.__doc__ and "1/8 in" in pictures.cuttable.__doc__
+
+
 def test_a_pictures_edge_is_judged_at_kt_times_the_walls_stress_there():
     """CALI-88 (#64 item 5): a picture in a wall got the voxel FEA alone, which reads low at a sharp re-entrant edge.
     Its edge is now KT_HOLE times the stress the wall had there solid; and a picture whose edge reaches into where

@@ -89,6 +89,12 @@ def test_a_printed_part_s_verdict_says_about(store, tmp_path, monkeypatch):
                         line["text"]), line["text"]
     work = answers.answers(store, design_api.design_state(store), "box")[1]
     assert "Printed parts are a rough model" in work["promise"]
+    # worded for the print where a person meets it: the part card and the chat's facts (#64 item 14, #209 review)
+    assert "a model of the print" in work["promise"] and "Real wood varies" not in work["promise"], work["promise"]
+    from caliper import chat
+
+    facts = chat._facts(store, "box")
+    assert "what a strength verdict promises" in facts and "Real wood varies" not in facts.split("what a strength verdict promises")[1]
     ply = DesignStore.create("a box stool", base=str(tmp_path / "ply"))
     ply.write_part("stool", BOX_STOOL, intent="a box stool")
     load_study.study(ply, "stool")
