@@ -249,6 +249,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             if cutplans[p.id] is None:
                 _metric(metrics, f"make.{p.id}.stale", True, "", f"{p.id}'s cut plan is for an older version",
                         "measured", "cut plan")
+    pieces_short = next((r["not_accounted"] for r in reports.values() if r.get("not_accounted")), None)    # nothing from them (CALI-155)
     b = C.balance(store, payload_lb=payload)
     unknown = {"note": "; ".join(b["unweighed"])} if b.get("unweighed") else {}    # never a lower total (#125)
     _metric(metrics, "weight.total_lb", b["mass_lb"], "lb", f"everything, with {payload:g} lb aboard", "model", "balance",
@@ -355,14 +356,15 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     missing = sum(len(gr.get("missing") or []) for cp in cutplans.values() if cp for gr in cp["sheets"])
     if any(cutplans.values()):
         _metric(metrics, "make.sheets", sheets, "sheets", "sheets to cut (current cut plans)", "measured", "cut plan")
-        _metric(metrics, "make.missing", missing, "pieces", "pieces that fit no sheet", "measured", "cut plan")
+        _metric(metrics, "make.missing", None if pieces_short else missing, "pieces", "pieces that fit no sheet", "measured", "cut plan")
 
     # cost & waste
     emit("cost", "pricing the stock")
     cw = cost_and_waste(store, reports, cutplans)
-    _metric(metrics, "cost.usd", cw["usd"], "$", "stock to buy", "guess", "materials.PRICES", note=cw["basis"])
-    _metric(metrics, "waste.usd", cw["waste_usd"], "$", "of it left as offcut", "guess", "cut plan + prices")
-    _metric(metrics, "waste.pct", round(cw["waste_pct"] * 100, 1), "%", "offcut, by cost", "measured", "cut plan")
+    _metric(metrics, "cost.usd", None if pieces_short else cw["usd"], "$", "stock to buy", "guess", "materials.PRICES",
+            note=pieces_short or cw["basis"])
+    _metric(metrics, "waste.usd", None if pieces_short else cw["waste_usd"], "$", "of it left as offcut", "guess", "cut plan + prices")
+    _metric(metrics, "waste.pct", None if pieces_short else round(cw["waste_pct"] * 100, 1), "%", "offcut, by cost", "measured", "cut plan")
 
     # can your shop make it (CALI-48): every piece routed to a tool or machine you have; printing costed
     from . import making
@@ -385,12 +387,12 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         # made): a part whose plan couldn't be made leaves the check waiting, said why; a missing piece is a fail
         settled = planned and not unplanned
         checks.append({"id": "make:shop", "label": "your shop can make every piece", "kind": "make", "auto": True,
-                       "status": "fail" if missing else "pass" if settled else "unknown",
-                       "value": len(missing) if missing or settled else None, "unit": "pieces it can't make",
-                       "margin": -len(missing) if missing or settled else None,
-                       "trust": "measured" if missing or settled else None,
+                       "status": "unknown" if pieces_short else "fail" if missing else "pass" if settled else "unknown",
+                       "value": None if pieces_short else len(missing) if missing or settled else None, "unit": "pieces it can't make",
+                       "margin": None if pieces_short else -len(missing) if missing or settled else None,
+                       "trust": None if pieces_short else "measured" if missing or settled else None,
                        "note": "; ".join((missing + [f"couldn't work out how to make {u}" for u in unplanned])[:6])})
-        _metric(metrics, "make.not_in_shop", len(missing), "pieces", "pieces your shop can't make", "measured", "shop")
+        _metric(metrics, "make.not_in_shop", None if pieces_short else len(missing), "pieces", "pieces your shop can't make", "measured", "shop")
     if unprintable:                       # a printed piece the shop can't make: no total, and a goal on it says why (#179 review)
         _metric(metrics, "print.hours", None, "h", "printing time, every printed piece", "model", "shop", note=unprintable)
         _metric(metrics, "print.filament_g", None, "g", "filament, every printed piece", "model", "shop", note=unprintable)
@@ -407,6 +409,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     saw_nothing = False               # a check that saw no stress at all (#202): not the same as one too coarse to see a wall
     unsure = None                     # a ✓ on an FEA too coarse to see the wall: no pass from it (CALI-110)
     unsettled = None                  # a ✗ on one: a ✗ stays a ✗, and says the fail may be the model's (#191)
+    span = None                       # the FEA alone, on a part bending between its holds (CALI-153)
     uncut, recheck = False, None      # a run made before the rounding fix, and one of its cases on its limit (#214)
     no_breaks = None                  # a breaking load from a run that can't see the wall isn't one to read
     loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
@@ -445,6 +448,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         said = [(c, verdicts.case(run, c)) for c in run["cases"]]
         uncut = uncut or not run.get("cut")
         recheck = recheck or (verdicts.UNCUT if any(v["kind"] == "recheck" for _, v in said) else None)
+        span = span or (verdicts.SPAN_WHY if any(v["kind"] == "span" for _, v in said) else None)
         sure = [(c, v) for c, v in said if v["kind"] in verdicts.SETTLED and not v.get("coarse")]
         breaks = [c["breaks_lb"] for c, _ in sure if c.get("breaks_lb")]
         hedged = next(((c, v) for c, v in said if v["kind"] == "fails" and v.get("coarse")), None)
@@ -456,7 +460,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         if no_breaks is None and len(sure) < sum(1 for c in run["cases"] if c.get("breaks_lb")):
             from .answers import coarse
 
-            no_breaks = coarse(run, inches, holds=not hedged)
+            spanned = any(v["kind"] == "span" and c.get("breaks_lb") for c, v in said)
+            no_breaks = f"not settled: {verdicts.SPAN_WHY}" if spanned else coarse(run, inches, holds=not hedged)
         need.append(float(run.get("min_safety") or load_study.MIN_SAFETY))
         if unsure is None and any(verdicts.case(run, c)["kind"] in ("unresolved", "unchecked")
                                   and (c.get("fea") or {}).get("supported") is not False for c in run["cases"]):
@@ -527,7 +532,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                                 else None,
                                 # an old number on its limit, the run's or this goal's own (#214 review)
                                 recheck=(recheck or (verdicts.UNCUT if number and verdicts.goal_on_limit(
-                                    uncut, c["metric"], v, lim, op) else None)) if strength else None)
+                                    uncut, c["metric"], v, lim, op) else None)) if strength else None,
+                                span=span if strength else None)
         status = verdicts.STATUS[verdict["kind"]]
         if verdict["kind"] == "estimate":     # a rough print time runs low: never a pass (#166)
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None, "trust": "rough",
@@ -542,6 +548,9 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         elif status == "fail" and strength and (unsettled or unsure):     # a ✗ stays a ✗, not as a settled number (#191)
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": NOT_SEEN if saw_nothing else "not resolved: too coarse to see its walls", "note": unsettled or unsure})
+        elif status == "span":                # the FEA alone, between its holds: no number beside it (CALI-153)
+            checks.append({**c, "status": status, "value": None, "unit": m["unit"], "margin": None,
+                           "trust": "not settled", "note": verdicts.SPAN_WHY})
         elif status == "edge":                # loaded in the middle only (CALI-94): never a pass; a ✗ stays a fail
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None,
                            "trust": "checked in the middle only", "note": MIDDLE_ONLY})
@@ -579,7 +588,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                         "untrusted": sum(c["status"] == "untrusted" for c in checks),
                         "unresolved": sum(c["status"] == "unresolved" for c in checks),
                         "estimate": sum(c["status"] == "estimate" for c in checks),
-                        "edge": sum(c["status"] == "edge" for c in checks)}}
+                        "edge": sum(c["status"] == "edge" for c in checks),
+                        "span": sum(c["status"] == "span" for c in checks)}}
     os.makedirs(cards_dir(store), exist_ok=True)
     with open(os.path.join(cards_dir(store), time.strftime("%Y%m%d-%H%M%S") + ".json"), "w") as f:
         json.dump(card, f, indent=2, default=str)

@@ -281,6 +281,26 @@ def _plan(store: DesignStore) -> Optional[dict]:
                          for m in pl.mates]}
 
 
+def _refuse_wrong_pieces(store: DesignStore, pid: str) -> None:
+    from fastapi import HTTPException
+
+    why = consistency.not_accounted(store, pid)
+    if why:
+        raise HTTPException(status_code=409, detail=f"it's shown as one body because its pieces don't account for its solid: {why}")
+
+
+def pieces_or_why(store: DesignStore, pid: str) -> dict:
+    """The part as its pieces, or a 409 that says why it's drawn as one body: pieces that don't describe the solid would show
+    something else, two boards in the air for a stool with splayed sides (CALI-155)."""
+    from fastapi import HTTPException
+
+    _refuse_wrong_pieces(store, pid)
+    try:
+        return construction.pieces3d(store, pid)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
 def _building(slug: str) -> Optional[str]:
     j = RUNNER.get(_FIRST.get(slug, ""))
     return j.id if j is not None and not j.over else None
@@ -372,6 +392,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "carved": carved_file(script) is not None,          # one reader, anchored (#70 item 9)
             # its strength rests on a filled-in solid (or a shape that couldn't be checked): no "holds" (CALI-96)
             "untrusted": consistency.filled(store, p.id) if "def loads(" in script else None,
+            "not_accounted": consistency.not_accounted(store, p.id) if construction.declares(script) else None,  # (CALI-155)
             "suggest": {k: aero.suggest(k, v, ranges) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
             "label": p.label, "name": p.label or p.id,      # the name a person reads; the id never changes (#94)
@@ -790,6 +811,7 @@ def router():
         store = load(slug)
         if store.design.part(pid) is None:
             raise HTTPException(404, f"no part {pid!r}")
+        _refuse_wrong_pieces(store, pid)                  # the page then draws the solid, and the tree says why (CALI-155)
         try:
             got = tree.mesh(store, pid, key)
         except KeyError:
@@ -1205,10 +1227,7 @@ def router():
         store = load(slug)
         if store.design.part(pid) is None:
             raise HTTPException(status_code=404, detail=f"no part {pid!r}")
-        try:
-            return construction.pieces3d(store, pid)
-        except ValueError as e:
-            raise HTTPException(status_code=409, detail=str(e))
+        return pieces_or_why(store, pid)
 
     # -- cut plan (CALI-45): panels unfolded and nested by unfold-to-sheets, sticks cut-listed ----------
     @r.post("/api/designs/{slug}/parts/{pid}/cutplan")

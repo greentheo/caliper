@@ -396,6 +396,10 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     from . import carve
 
     carve.refuse_if_carved(store.read_script(part_id), "holes", "lighten it")   # before the study, not at adopt
+    from . import consistency
+
+    if consistency.not_accounted(store, part_id):      # it cuts holes in those pieces (CALI-155)
+        raise ValueError(f"Can't lighten it yet: {consistency.NO_MAKE}")
     from scipy import ndimage
 
     from . import construction as C
@@ -506,6 +510,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
               "saved_lb": round(saved_g / 453.59237, 2), "holes": sum(len(v) for v in holes.values()),
               "top_holes": sum(len(chosen[p["name"]]) for p in tops),
               "safety": safety, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
+              "span": any(L.fixed_ends({"min_safety": min_safety}, c) for c in cases),     # no ✓ on an FEA alone between its holds (CALI-153)
               "cases": [{"name": c["name"], "safety": c.get("safety"), "governs": c.get("governs"),
                          "fea_safety": (c.get("fea") or {}).get("safety"), "breaks_lb": c.get("breaks_lb"),
                          "in": (c.get("fea") or {}).get("in")} for c in cases],

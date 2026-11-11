@@ -339,6 +339,10 @@ def runs_dir(store: DesignStore) -> str:
 
 def make(store: DesignStore, part_id: str, out_dir: Optional[str] = None) -> dict:
     """Every flat sheet piece of a part, three ways. Returns the record (its files relative to its folder)."""
+    from . import consistency
+
+    if consistency.not_accounted(store, part_id):      # (CALI-155)
+        raise ValueError(f"can't make patterns: {consistency.NO_MAKE}")
     pcs = pieces(store, part_id)
     if not pcs:
         raise ValueError(f"'{part_id}' has no flat sheet pieces to make patterns of")

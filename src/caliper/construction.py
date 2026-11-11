@@ -854,11 +854,15 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
         raise ValueError(f"'{part_id}' doesn't say what it's built from — give its script a "
                          f"construction(params, build) (or members() for a tube frame)")
     items, unweighed = _weighed(with_printed(store, part_id, items, d))
+    from .consistency import not_accounted
+
+    wrong = not_accounted(store, part_id)              # pieces that aren't the part: no weight from them (CALI-155)
+    unweighed = wrong or unweighed
     rows = takeoff(items)
     mass, cog = totals(rows)
     saved = read_build(store.read_script(part_id)) or {}
     used = d.get("build") or {}
-    notes = [unweighed[:1].upper() + unweighed[1:] + "."] if unweighed else []
+    notes = [unweighed[:1].upper() + unweighed[1:] + "."] if unweighed and not wrong else []    # said once, as the unknown weight
     if d.get("members"):
         notes.append("Tubes weighed along their centrelines, joint to joint, one length where a tube runs "
                      "straight through — within a few percent; exact cuts (mitres, copes) come with the cut plan.")
@@ -894,6 +898,7 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
             "changed": {k: v for k, v in used.items() if k in saved and saved[k] != v},
             "choices": choices(used, d.get("build_options")),
             # unknown, not the rest's: a part whose printed piece can't be weighed has no weight (#125 review)
+            **({"not_accounted": wrong} if wrong else {}),
             "mass_kg": None if unweighed else round(mass, 2), "mass_lb": None if unweighed else round(mass * M.LB_KG, 1),
             "cog": None if unweighed else _round3(cog), **({"unweighed": unweighed} if unweighed else {}),
             "materials": by_material(rows), "bom": bom_, "notes": notes,
@@ -916,6 +921,9 @@ def balance(store: DesignStore, build: Optional[dict] = None, payload_lb: float 
             # printed pieces weighed from their solid, as report() does: without it the bar stool's total read
             # 1.6 lb (its plywood seat) while its part weighed 10.9 (CALI-111)
             known, why = _weighed(with_printed(store, p.id, items, d))
+            from .consistency import not_accounted
+
+            why = not_accounted(store, p.id) or why        # pieces that aren't the part (CALI-155)
             rows = takeoff(known)
             mass, cog = totals(rows)
             if why:                                # unknown, and so is the total (#125 review)

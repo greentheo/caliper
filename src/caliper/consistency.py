@@ -386,6 +386,66 @@ def remedy(detail: str) -> str:
     return f"move the {m.group(1)}'s outline {where}"
 
 
+#: Said wherever pieces and solid part ways because the solid has panels no piece describes: the shape is right and the pieces are wrong.
+PANEL_SAID = "no piece describes"
+#: Below this share of the solid's surface on a piece, its pieces don't describe the part: nothing's made from them (CALI-155). A part a
+#: little under COVER_MIN has a detail left out, and keeps its patterns. NEEDS ENGINEER CHECK: the foreman's to set from real parts.
+ACCOUNTED_MIN = 0.9
+#: What the make side says instead of a cut list, patterns, weight or cost from pieces that don't account for the solid.
+NO_MAKE = "its pieces don't account for its solid, so there's nothing to cut, weigh or price from them yet"
+#: How a sloped panel is declared (and the guide says the same): what a designer who drew a flat stand-in has to do instead.
+SLOPED = "a sloped or splayed panel's outline is its real corners in 3D, on the panel's own face"
+
+
+def _loose_regions(mesh, pieces: list[dict], tol: float) -> list[dict]:
+    """Where the solid has material in no piece, as separate pieces of it: ``{"lo", "hi", "litres", "panel"}``, biggest first. ``panel``: thin one way
+    and wide the other two, as a sheet is, tilted or not: a panel the pieces left out, not a fill."""
+    from scipy import ndimage
+
+    from . import spatial
+
+    lo, hi = mesh.bounds
+    thin = [pc["thickness"] for pc in pieces if pc["kind"] == "sheet"] + [2 * pc["half"] for pc in pieces if pc["kind"] == "stick"]
+    longest = float(np.max(hi - lo))
+    step = max(0.75 * min(thin) if thin else longest / 40, longest / 64)
+    axes = [np.arange(a + step / 2, b, step) for a, b in zip(lo, hi)]
+    grid = np.stack(np.meshgrid(*axes, indexing="ij"), -1)
+    pts = grid.reshape(-1, 3)
+    inside = spatial.contains(mesh, pts)
+    near = np.full(len(pts), np.inf)
+    for pc in pieces:
+        if pc["kind"] == "sheet":
+            for p, side in zip(pc["polys"], pc["sides"]):
+                near[inside] = np.minimum(near[inside], slab_distance(pts[inside], p, pc["thickness"], side))
+        else:
+            near[inside] = np.minimum(near[inside], segment_distance(pts[inside], pc["a"], pc["b"]) - pc["reach"])
+    loose = (inside & (near > tol)).reshape(grid.shape[:3])
+    labels, n = ndimage.label(loose, structure=np.ones((3, 3, 3)))
+    out, total = [], int(loose.sum())
+    for i in range(n):
+        where = grid[labels == i + 1]
+        if len(where) < max(3, 0.05 * total):            # a sliver between two pieces isn't a place to send anyone
+            continue
+        centred = where - where.mean(axis=0)
+        extents = np.sort(np.ptp(centred @ np.linalg.svd(centred, full_matrices=False)[2].T, axis=0))[::-1] + step
+        panel = bool(thin) and extents[2] <= 2 * max(thin) and extents[1] >= 3 * extents[2]
+        mid = where.mean(axis=0)
+        if panel:           # both its wide faces in the open, as a panel's are. A shallow filled core, or a top built thicker than its sheet, has one against a piece
+            n = np.linalg.svd(where - mid, full_matrices=False)[2][2]
+            flat = where - ((where - mid) @ n)[:, None] * n
+            off = extents[2] / 2 + 0.75 * step
+            open_both = ~spatial.contains(mesh, flat + n * off) & ~spatial.contains(mesh, flat - n * off)
+            panel = float(open_both.mean()) >= 0.5
+        out.append({"lo": (where.min(axis=0) - step / 2).tolist(), "hi": (where.max(axis=0) + step / 2).tolist(),
+                    "litres": len(where) * step ** 3 / 1e6, "panel": panel, "size": extents[:2].tolist(), "mid": mid.tolist()})
+    return sorted(out, key=lambda r: -r["litres"])
+
+
+def _places(regions: list[dict]) -> str:
+    return "; ".join(f"x {r['lo'][0]:.0f}..{r['hi'][0]:.0f}, y {r['lo'][1]:.0f}..{r['hi'][1]:.0f}, z {r['lo'][2]:.0f}..{r['hi'][2]:.0f} "
+                     f"({r['litres']:.1f} L)" for r in regions[:4])
+
+
 def _covers(mesh, pieces: list[dict], tol: float) -> AssertionResult:
     import trimesh
 
@@ -403,6 +463,15 @@ def _covers(mesh, pieces: list[dict], tol: float) -> AssertionResult:
     if share < COVER_MIN:
         off = pts[~covered]
         lo, hi = off.min(axis=0), off.max(axis=0)
+        panels = [r for r in _loose_regions(mesh, pieces, tol) if r["panel"]] if share < ACCOUNTED_MIN else []
+        if panels:                                  # where each is, never the middle of the part between them (CALI-155)
+            one = (f": around {_xyz(off.mean(axis=0))}, within x {lo[0]:.0f}..{hi[0]:.0f}, y {lo[1]:.0f}..{hi[1]:.0f}, "
+                   f"z {lo[2]:.0f}..{hi[2]:.0f}" if len(panels) == 1 else "")
+            detail = (f"{100 * (1 - share):.0f}% of the solid's surface isn't on any piece{one}, and build() has material {PANEL_SAID}, "
+                      f"shaped like a panel: {_places(panels)}. Add a piece for each to construction(): {SLOPED}, never a flat stand-in")
+            return AssertionResult(
+                id="construction_covers", expr=f"the pieces cover the solid's surface (≥ {COVER_MIN:.0%})",
+                status="fail", passed=False, actual=round(share, 3), margin=round(share - COVER_MIN, 3), detail=detail)
         detail = (f"{100 * (1 - share):.0f}% of the solid's surface isn't on any piece: around "
                   f"{_xyz(off.mean(axis=0))}, within x {lo[0]:.0f}..{hi[0]:.0f}, y {lo[1]:.0f}..{hi[1]:.0f}, "
                   f"z {lo[2]:.0f}..{hi[2]:.0f} — add the piece that's there, or take it out of build() (a panel in the shape thicker than its sheet shows up here too)")
@@ -445,6 +514,16 @@ def _volume(mesh, pieces: list[dict], strength: bool = False, tol: float = 2.0) 
         # a solid block round its panels (CALI-83: Theo's stool was built as a filled box): every panel lies in
         # it and covers its surface, so only the volume shows it
         core = ratio >= VOLUME_MIN                    # the volumes pass, and the share in no piece fails (CALI-87)
+        panels = [r for r in _loose_regions(mesh, pieces, tol) if r["panel"]]
+        if panels:                                    # the shape's right and the pieces left a panel out: which way it's wrong (CALI-155)
+            return AssertionResult(
+                id="construction_volume",
+                expr=(f"no more than {SOLID_IN_NO_PIECE:.0%} of the solid is in no piece" if core
+                      else f"the solid is its pieces ({VOLUME_MIN:g}–{VOLUME_MAX:g}× its volume)"),
+                status="fail", passed=False, actual=round(loose if core else ratio, 3),
+                margin=round(SOLID_IN_NO_PIECE - loose if core else ratio - VOLUME_MIN, 3),
+                detail=(f"the solid ({solid / 1e6:.2f} L) has material {PANEL_SAID}, shaped like a panel: {_places(panels)}. Add a piece for each "
+                        f"to construction(): {SLOPED}, never a flat stand-in"))
         return AssertionResult(
             id="construction_volume",
             expr=(f"no more than {SOLID_IN_NO_PIECE:.0%} of the solid is in no piece" if core
@@ -542,7 +621,7 @@ def bare_edge(store, part_id: str) -> Optional[str]:
         try:
             declared = C.declared(store, part_id)
             if declared.get("loads"):
-                got = next((r for r in check(declared, store.part_geometry(part_id)) if r.id == "loads_edge"), None)
+                got = next((r for r in checked(store, part_id) if r.id == "loads_edge"), None)
                 out = (got.detail or None) if got is not None else None
         except Exception:  # noqa: BLE001 — this only ever takes a ✓ away; a part that won't check is said elsewhere
             out = None
@@ -569,8 +648,10 @@ def filled(store, part_id: str) -> Optional[str]:
         try:
             declared = C.declared(store, part_id)
             if declared.get("loads"):
-                vol = next((r for r in check(declared, store.part_geometry(part_id)) if r.id == "construction_volume"), None)
-                if vol is not None and not vol.passed and "filled in" in (vol.detail or ""):
+                vol = next((r for r in checked(store, part_id) if r.id == "construction_volume"), None)
+                if vol is not None and not vol.passed and PANEL_SAID in (vol.detail or ""):
+                    out = not_accounted(store, part_id) or vol.detail       # in words for a person, where it's the pieces that are short
+                elif vol is not None and not vol.passed and "filled in" in (vol.detail or ""):
                     out = vol.detail
         except Exception as e:  # noqa: BLE001 — closed, not open: a shape that couldn't be checked isn't trusted
             return f"couldn't check its shape against its pieces ({type(e).__name__}: {e})"   # and not kept
@@ -578,6 +659,81 @@ def filled(store, part_id: str) -> Optional[str]:
         while len(_FILLED) > 64:
             _FILLED.pop(next(iter(_FILLED)))
     return _FILLED[key]
+
+
+_ACCOUNTED: dict = {}
+_CHECKED: dict = {}
+
+
+def checked(store, part_id: str) -> list[AssertionResult]:
+    """:func:`check` of a part as it stands, once per version and script: a card, the state and the verdicts all ask, and a cold open asked each time."""
+    from . import construction as C
+
+    entry = store.design.part(part_id)
+    key = (store.root, part_id, entry.version if entry else None, hash(store.read_script(part_id)))
+    if key not in _CHECKED:
+        _CHECKED[key] = check(C.declared(store, part_id), store.part_geometry(part_id))
+        while len(_CHECKED) > 64:
+            _CHECKED.pop(next(iter(_CHECKED)))
+    return _CHECKED[key]
+
+
+def _covers_alone(store, part_id: str) -> Optional[AssertionResult]:
+    """Only the cover check: a design's state asks this of every part, and a cold open mustn't wait for all of :func:`check` (#224 review)."""
+    from . import construction as C
+
+    declared = C.declared(store, part_id)
+    if not declared or declared.get("error"):
+        return None
+    if any(isinstance(it, dict) and it.get("kind") == "printed" and it.get("rest") for it in declared.get("construction") or []):
+        return None
+    pieces = shapes(declared)
+    mesh = getattr(store.part_geometry(part_id), "mesh", None)
+    if not pieces or mesh is None:
+        return None
+    _sides(mesh, pieces)
+    return _covers(mesh, pieces, tolerance(mesh))
+
+
+def _panel_words(store, part_id: str) -> str:
+    """The panels no piece describes, for a person: their size and where, in the design's units."""
+    from . import construction as C
+
+    declared = C.declared(store, part_id)
+    mesh = store.part_geometry(part_id).require_mesh()
+    pieces = shapes(declared)
+    _sides(mesh, pieces)
+    inches = getattr(store.design, "display_units", "in") == "in"
+    k, unit = (25.4, "in") if inches else (1.0, "mm")
+    panels = [r for r in _loose_regions(mesh, pieces, tolerance(mesh)) if r["panel"]]
+    said = "; ".join(f"about {r['size'][0] / k:.3g} × {r['size'][1] / k:.3g} {unit} around x {r['mid'][0] / k:.3g}, y {r['mid'][1] / k:.3g}, "
+                     f"z {r['mid'][2] / k:.3g} {unit}" for r in panels[:4])
+    return f"its 3D shape has {'a panel' if len(panels) == 1 else f'{len(panels)} panels'} {PANEL_SAID}: {said}"
+
+
+def not_accounted(store, part_id: str) -> Optional[str]:
+    """Why a part's pieces don't describe its solid, or None: too much of its surface is on no piece, so a view, a cut list, patterns, a weight or a
+    cost from them would be of something else (CALI-155). A filled-in shape isn't this: its pieces are right. A printed rest is everything the
+    pieces aren't, and has nothing to be missing. Kept per version and script, as filled() is."""
+    entry = store.design.part(part_id)
+    try:
+        script = store.read_script(part_id)
+    except (OSError, KeyError, ValueError):
+        return None
+    key = (store.root, part_id, entry.version if entry else None, hash(script))
+    if key not in _ACCOUNTED:
+        out = None
+        try:
+            covers = _covers_alone(store, part_id)
+            # a panel in the shape that's in no piece, a cut nobody would make. Not a filled-in block, or a lid left off the solid
+            if covers is not None and covers.actual is not None and covers.actual < ACCOUNTED_MIN and PANEL_SAID in (covers.detail or ""):
+                out = _panel_words(store, part_id)
+        except Exception:  # noqa: BLE001 — a part that won't check is said elsewhere: this only ever takes something away
+            out = None
+        _ACCOUNTED[key] = out
+        while len(_ACCOUNTED) > 64:
+            _ACCOUNTED.pop(next(iter(_ACCOUNTED)))
+    return _ACCOUNTED[key]
 
 
 def check(declared: Optional[dict], geometry) -> list[AssertionResult]:

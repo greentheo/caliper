@@ -970,7 +970,8 @@ def _facts(store: DesignStore, scope: Optional[str]) -> str:
                           if v["kind"] in ("unresolved", "unchecked") or v.get("coarse") else "")
                        + ("; CHECKED IN THE MIDDLE ONLY: the front edge, where people stand, isn't, so this is no "
                           "verdict" if v["kind"] == "edge" else "")
-                       + ("; NOT TRUSTED: it ran on a filled-in shape" if v["kind"] == "untrusted" else ""))
+                       + ("; NOT TRUSTED: it ran on a filled-in shape" if v["kind"] == "untrusted" else "")
+                       + (f"; NOT SETTLED: {v.get('why')}, so this number is no verdict" if v["kind"] == "span" else ""))
         out += [f"strength note: {n}" for n in (run.get("notes") or [])[:4]]
     said = [e for e in store.log() if e.get("kind") in ("message", "reply")][-6:]
     out += [f"{'they said' if e['kind'] == 'message' else 'Caliper said'}: {(e.get('text') or e.get('reply') or '')[:600]}"
