@@ -116,6 +116,12 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
                         "from": (rough or each)[0]["from"], "rough": len(rough),
                         "rough_said": rough_said(len(rough), len(parts), rough[0]["from"] if rough else ""),
                         "slicer_failed": any(e.get("slicer_failed") for e in each)})
+    from . import mirror
+
+    flip = mirror.source_of(store, part_id)        # a printed mirror: the source's file, flipped (CALI-161, #239)
+    for pr in printed if flip else []:
+        pr["mirror_of"] = flip
+        pr["mirror_said"] = f"a mirror of {flip}: these STLs are {flip}'s, mirrored (or flip {flip}'s files in the slicer)"
     by_how: dict = {}
     for p in pieces:
         if p["ok"]:

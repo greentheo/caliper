@@ -89,6 +89,11 @@ class PlanPart(_Base):
     mounts_on: list[str] = Field(default_factory=list)
     #: for a fixed part: "stated" when the person's words say they have it, else "assumed" ("you have it? say if not")
     source: Literal["stated", "assumed"] = "stated"
+    #: CALI-161 (#239): this part is another's mirror, flipped in a plane (YZ, XZ or XY); built by flipping, not designed
+    mirror_of: Optional[str] = None
+    mirror_plane: Optional[Literal["YZ", "XZ", "XY"]] = None
+    #: the point the plane passes through, in mm: the assembly origin unless given
+    mirror_at: Optional[list[float]] = None
 
 
 class SkeletonValue(_Base):
@@ -188,6 +193,12 @@ def validate(data, drop_bad_rules: bool = False) -> Plan:
                 raise PlanError(f"{p.id!r} mounts on {m!r}, which isn't a part of the plan")
             if m == p.id:
                 raise PlanError(f"{p.id!r} mounts on itself")
+        if p.mirror_of is not None:                 # a mirror of a part of the plan, never of itself or of a mirror (#239)
+            src = next((q for q in plan.parts if q.id == p.mirror_of), None)
+            if src is None or src.id == p.id:
+                raise PlanError(f"{p.id!r} is a mirror of {p.mirror_of!r}, which isn't another part of the plan")
+            if src.mirror_of is not None:
+                raise PlanError(f"{p.id!r} mirrors {src.id!r}, which is itself a mirror: mirror {src.mirror_of!r} instead")
     for m in plan.mates:
         if len(m.between) != 2 or m.between[0] == m.between[1]:
             raise PlanError(f"a mate is between two different parts, not {m.between!r}")
@@ -399,7 +410,7 @@ def order(plan: Plan) -> list[str]:
             loop = doing[doing.index(pid):] + [pid]
             raise PlanError("the parts mount on each other in a circle: " + " → ".join(loop))
         doing.append(pid)
-        for m in by[pid].mounts_on:
+        for m in by[pid].mounts_on + ([by[pid].mirror_of] if by[pid].mirror_of in by else []):   # a mirror after its source
             visit(m)
         doing.pop()
         done.append(pid)
@@ -653,6 +664,11 @@ planned (true, it's a note; false, the plan contradicts itself and is refused). 
 Give a number or a rule source "stated" only when the person gave it; anything you chose (a size, a margin, a rule \
 of thumb) is "assumed": shown to them, and not enforced until they keep it. Don't add rules nobody asked for beyond \
 what makes the parts fit.
+
+A part that is another's mirror (a pair, matching sides, "the other side", "mirror") is mirror_of that part, with \
+mirror_plane the plane it flips in (YZ for a left and right, XZ for a front and back, XY for a top and bottom) and \
+mirror_at a point on that plane in mm (half way between the two; the origin if left out): it's \
+built by flipping its source, never designed on its own.
 
 Ids and names are lowercase with underscores. Answer by calling the plan tool, once."""
 

@@ -623,7 +623,8 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                            _line(f"Print it in {pr['material'].upper()}: {n}; print time: the slicer couldn't work it "
                                  f"out: {_why(pr)}.", "warn") if pr.get("hours") is None else
                            _line(f"Print it in {pr['material'].upper()}: {n}, about {pr['hours']:g} h"
-                                 + (f" ({pr['rough_said']})" if pr.get("rough_said") else "") + ".",
+                                 + (f" ({pr['rough_said']})" if pr.get("rough_said") else "") + "."
+                                 + (f" It's {pr['mirror_said']}." if pr.get("mirror_said") else ""),
                                  "warn" if pr.get("rough_said") else "ok"))        # a guess is never green (rule 6)
             why: dict = {}
             for x in mk["missing"]:
