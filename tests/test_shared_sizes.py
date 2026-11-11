@@ -168,3 +168,24 @@ def test_a_planned_size_keeps_the_plan_s_order(tmp_path):
                        "skeleton": PLAN_SKELETON, "mates": [{"between": ["stretcher", "side_left"], "kind": "fits_in"}]})
     P.save(store, plan)
     assert build_plan.defined_first(store, P.load(store), P.order(plan)) == (["side_left", "stretcher"], set())
+
+
+def test_a_part_whose_middle_is_in_the_host_s_solid_isn_t_in_a_pocket():
+    """Run into a side with no pocket: no gaps to measure from inside the solid. Said, never a pass (mutant 0)."""
+    solid = Geometry.from_mesh(trimesh.creation.box(extents=(19, 300, 400)))
+    r = _fit(solid, _stretcher())
+    assert r.status == "error" and "isn't in a pocket of it" in r.detail
+
+
+def test_a_part_that_doesn_t_stick_out_has_no_way_in_to_measure():
+    """A block wholly inside the side's bounds, in its pocket: no axis it goes in along. Said, never a pass (mutant 3)."""
+    block = trimesh.creation.box(extents=(5, 19, 101.6))
+    block.apply_translation((0, 0, 100))
+    r = _fit(_side(19.6, 102.2), Geometry.from_mesh(block))
+    assert r.status == "error" and "doesn't go into it" in r.detail
+
+
+def test_a_near_name_is_matched_by_what_it_names_not_by_the_nearest_number():
+    """stretcher_h is a height: against the plan's height, though 20 is nearer the thickness (mutant 7)."""
+    r = skeleton.shadows("side_left", SIDE.format(params='{"stretcher_h": 20}'), PLAN_SKELETON)
+    assert "side_left sets its own stretcher height: 20 mm against the plan's 101.6 mm" in r.detail
