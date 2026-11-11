@@ -278,7 +278,7 @@ def improve(
 
         report.results.append(fallbacks.result(script))
         if interfaces is not None:     # CALI-35 (#3b): the rules between it and the parts already built
-            report.results.extend(interfaces(run.geometry))
+            report.results.extend(interfaces(run.geometry, script))   # and the script, for its shared sizes (#240)
         best = (run.geometry, script, report)
         if report.all_pass:
             history.append(("passed", ""))

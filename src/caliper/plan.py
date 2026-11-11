@@ -96,12 +96,17 @@ class SkeletonValue(_Base):
     value: float
     unit: str
     why: str = ""
-    source: Literal["stated", "assumed", "kept"] = "assumed"
+    source: Literal["stated", "assumed", "kept", "measured"] = "assumed"   # measured: off a part as built (#240)
+    #: what the number is (#243 review): a part's size, where something sits, a count or a load. Unset, it's read from
+    #: its unit and its why (:func:`kind_of`): "height" is both a size and a position, so the name can't say
+    kind: Optional[Literal["size", "position", "count", "load", "unclear"]] = None
+    #: for a measured size: the part it was measured off, so it's measured again when that part changes
+    of: Optional[str] = None
 
 
 class PlanMate(_Base):
     between: list[str]
-    kind: Literal["no_interference", "clearance", "fit", "touch"] = "no_interference"
+    kind: Literal["no_interference", "clearance", "fit", "touch", "fits_in"] = "no_interference"
     value: Optional[float] = None
 
 
@@ -413,6 +418,39 @@ def order(plan: Plan) -> list[str]:
 TO_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0, "in": 25.4, "ft": 304.8}
 
 
+#: Words in a skeleton number's why that make it a position: where something sits, not how big it is.
+_WHERE = re.compile(r"\b(above|below|off|from|sits?|at|up|high|centre|center|origin|level)\b.*\b(floor|ground|centre|center|"
+                    r"origin|top|bottom|base|middle|front|back|edge)\b|\bunderside (?:is |sits )?(?:\d|at)", re.I)
+_LOAD_UNITS = {"N", "lb", "kg"}
+
+
+#: A name's last word that makes it a size whatever its why says (#243 re-check: "flange width, at the top of each side"
+#: read as a position).
+_SIZE_WORDS = {"t", "th", "thk", "thick", "thickness", "w", "wid", "width", "wide", "d", "depth", "deep", "l", "len",
+               "length", "long", "dia", "diam", "diameter", "r", "rad", "radius", "spacing", "pitch", "gap", "clearance"}
+#: A name's last word that can be a size or where something sits: the plan's kind decides, then its why.
+_EITHER = {"h", "ht", "height", "z", "x", "y", "rise", "offset", "elev", "elevation", "level"}
+
+
+def kind_of(s: SkeletonValue) -> str:
+    """What a skeleton number is (#243 review and re-check): a count or a load by its unit; a size by its name's last
+    word (thickness, width, depth, length, diameter, radius, spacing, clearance); for a height or an offset, the plan's
+    ``kind``, then its why ("sits 3 in above the floor" is a position), else ``unclear``, which nothing fails on. Any
+    other name: the plan's kind, then its why, else a size."""
+    if s.unit == "count":
+        return "count"
+    if s.unit in _LOAD_UNITS:
+        return "load"
+    last = s.name.lower().split("_")[-1]
+    if last in _SIZE_WORDS:
+        return "size"
+    if s.kind:
+        return s.kind
+    if _WHERE.search(s.why or ""):
+        return "position"
+    return "unclear" if last in _EITHER else "size"
+
+
 def mm(s: SkeletonValue) -> Optional[float]:
     """A skeleton number as a length in mm (the models' unit), or None if it isn't a length."""
     return s.value * TO_MM[s.unit] if s.unit in TO_MM else None
@@ -601,7 +639,7 @@ def number(s: SkeletonValue, inches: bool) -> str:
 def said_number(s: SkeletonValue, inches: bool) -> str:
     """"mast h: 7 ft (the mast you asked for)", and " · assumed" on one the person didn't give."""
     return (f"{s.name.replace('_', ' ')}: {number(s, inches)}" + (f" ({s.why})" if s.why else "")
-            + (" · assumed" if s.source == "assumed" else ""))
+            + (" · assumed" if s.source == "assumed" else " · measured off the part" if s.source == "measured" else ""))
 
 
 def numbers(plan: Plan, inches: bool) -> list[str]:
@@ -643,7 +681,12 @@ stated size as a reference, never designed. Anything welded, printed, cut or oth
 is never the ground, the floor, a wall or the room: what it stands on is held, the floor by default.
 
 Name the numbers the parts share as the skeleton: each with a value, a unit (mm, in, ft, m, cm, deg, N, lb, kg, \
-count, or a speed in m/s, km/h or mph) and why. Write mates between parts (touch, clearance, fit, no_interference) and rules over part ids and \
+count, or a speed in m/s, km/h or mph), why, and its kind: size (how big a part is: a thickness, a width), position \
+(where something sits: a height off the floor, an offset), count or load. A number two parts must agree on lives in the skeleton, never in \
+either part: where one part sits in, on or through another (a pocket, slot, hole, flange, a top on sides), name the \
+joining sizes in the skeleton (the inserted part's thickness and height, the pocket's clearance a side, a bolt's \
+diameter and spacing), and write a fits_in mate between them, the inserted part first, its value the clearance a \
+side in mm. Write mates between parts (touch, clearance, fit, fits_in, no_interference) and rules over part ids and \
 skeleton names, so every interface is measured. A rule may call: interference(a, b), min_clearance(a, b), \
 hole_misalignment(a, b), holes_aligned(a, b), bbox(part).dx/.dy/.dz (sizes) and .min_x/.min_y/.min_z/.max_x/\
 .max_y/.max_z (corners), abs, min, max. Every rule compares a measure of a part with a number (`==`, never `=`), \

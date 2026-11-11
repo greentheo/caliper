@@ -62,11 +62,13 @@ class Mate(_Base):
     - ``fit`` (``fit`` class, e.g. ``slip``) → a tunable clearance **band** (CALI-19) between them.
     - ``touch`` (``value`` = tolerance, default 0.1) → ``-tol <= min_clearance(a, b) <= tol``
       (surfaces meet, flush within tolerance — a seated/mating face).
+    - ``fits_in`` (``value`` = the clearance a side, default 0.3) → the first part in the second's pocket, each side's
+      gap within 0.5 mm of the clearance: ``fit_off(a, b, c) <= 0.5`` (CALI-162, #240), its play said.
     """
 
     id: str
     between: list[str]
-    kind: Literal["no_interference", "clearance", "fit", "touch"] = "no_interference"
+    kind: Literal["no_interference", "clearance", "fit", "touch", "fits_in"] = "no_interference"
     value: Optional[float] = None
     fit: Optional[str] = None
     nominal: Optional[float] = None
@@ -149,6 +151,9 @@ def mate_assertion(mate: Mate) -> Assertion:
     if mate.kind == "touch":
         t = 0.1 if mate.value is None else abs(mate.value)
         return Assertion(id=mate.id, expr=f"{-t} <= min_clearance({a}, {b}) <= {t}")
+    if mate.kind == "fits_in":             # a part in another's pocket, its gaps measured (CALI-162, #240)
+        c = measure.POCKET_CLEARANCE_MM if mate.value is None else abs(mate.value)
+        return Assertion(id=mate.id, expr=f"fit_off({a}, {b}, {c}) <= {measure.POCKET_TOL_MM}")
     raise ValueError(f"unknown mate kind {mate.kind!r}")
 
 
@@ -336,6 +341,8 @@ def build_context(asm: Assembly, parts: dict[str, Geometry]) -> dict:
         # hole alignment across parts (CALI-25) — does a screw pass through both?
         "hole_misalignment": lambda a, b: measure.min_hole_misalignment(a, b),
         "holes_aligned": lambda a, b, tol=0.5: measure.min_hole_misalignment(a, b) <= tol,
+        # a part in another's pocket: how far its worst side is from the clearance (CALI-162, #240)
+        "fit_off": lambda a, b, c=measure.POCKET_CLEARANCE_MM: measure.fit_off(a, b, c),
         # per-part dimensional query
         "bbox": lambda part: measure.bounding_box(part),
         # tolerant comparisons (CALI-19)
@@ -368,6 +375,7 @@ def evaluate_assembly(
     ctx.update(values or {})               # the skeleton's numbers, by name (CALI-35)
     out = []
     fixed = {p.id for p in asm.parts if p.role == "fixed"}
+    pockets = {m.id: m for m in asm.mates if m.kind == "fits_in"}
     for a in derived_assertions(asm):
         waits = sorted(_names(a.expr) & set(unbuilt))
         if waits:                          # a rule over a part that's planned but not built yet (CALI-35)
@@ -376,7 +384,16 @@ def evaluate_assembly(
                 f"needs the {' and the '.join(w.replace('_', ' ') for w in yours)}'s size: say it, or keep it off"
                 if yours else f"waits for {' and '.join(waits)} to be built")))
         else:
-            out.append(evaluate_assertion(a, ctx))
+            got = evaluate_assertion(a, ctx)
+            fits = pockets.get(a.id)
+            if fits is not None and got.status in ("pass", "fail"):     # the play, in words, naming both (#240)
+                inner, outer = fits.between
+                c = measure.POCKET_CLEARANCE_MM if fits.value is None else abs(fits.value)
+                try:
+                    got.detail = measure.pocket_said(inner, outer, measure.pocket(parts[inner], parts[outer]), c)
+                except Exception:  # noqa: BLE001 — the number stands; the words are extra
+                    pass
+            out.append(got)
     return Report(out)
 
 

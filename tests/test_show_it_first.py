@@ -134,7 +134,7 @@ def test_the_steps_the_page_lists_are_the_ones_it_does():
     import re
 
     known = set(re.findall(r"(\w+): '", re.search(r"const BUILD_STEPS = \{(.*?)\};", src, re.S).group(1)))
-    assert known == {"plan", "build"}
+    assert known == {"plan", "build", "measured"}      # measured: a section measured off a part, said (#240)
 
 
 def test_the_page_shows_the_part_as_soon_as_its_written():
