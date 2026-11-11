@@ -863,7 +863,7 @@ def spans_between(patches: list, lo, hi, force, spacing: float) -> bool:
     lo2, hi2 = np.asarray(lo, float)[keep], np.asarray(hi, float)[keep]
     mid = (lo2 + hi2) / 2
     points = np.unique(np.vstack(patches)[:, keep], axis=0)
-    if not MultiPoint(points).convex_hull.buffer(spacing).contains(Point(mid)):
+    if not Point(mid).within(MultiPoint(points).convex_hull.buffer(spacing)):
         return False
     origin = points.min(axis=0)
     cell = lambda xy: tuple(np.rint((np.asarray(xy, float) - origin) / spacing).astype(np.int64).tolist())        # noqa: E731
