@@ -303,7 +303,8 @@ def test_the_live_event_through_the_jobs_route_carries_no_path_and_no_key(tmp_pa
 
 
 def test_a_raw_exception_in_a_first_build_or_a_chat_reply_is_scrubbed(tmp_path, monkeypatch):
-    from caliper import carve, chat, firstrun, goals
+    from caliper import carve, chat, firstrun
+    from caliper import plan as P
     from caliper.design import DesignStore
 
     store = DesignStore.create("a stool", base=str(tmp_path))
@@ -312,15 +313,17 @@ def test_a_raw_exception_in_a_first_build_or_a_chat_reply_is_scrubbed(tmp_path, 
     def boom(*a, **k):
         raise ValueError(f"{home}/x with {KEY}")
 
+    # the first build's own raw error (CALI-157: it plans and builds, and its goals are written elsewhere, by a job the runner scrubs)
     heard = []
-    monkeypatch.setattr(goals, "update", boom)
-    monkeypatch.setattr(firstrun, "_author", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop here")), raising=False)
+    monkeypatch.setattr(P, "propose", boom)
     try:
-        firstrun.build(store, emit=lambda k, t="", **d: heard.append(t), strength=False, use_llm=False)
+        got = firstrun.build(store, emit=lambda k, t="", **d: heard.append(t), use_llm=True, client=object(),
+                             author=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop here")))
     except Exception:  # noqa: BLE001 — only what it said before stopping is under test
-        pass
-    told = [t for t in heard if t.startswith("couldn't write down")]
+        got = None
+    told = [t for t in heard if t.startswith("couldn't plan its parts")]
     assert told and KEY not in told[0] and home not in told[0], heard
+    assert got is None or (KEY not in str(got) and home not in str(got))
     monkeypatch.setattr(carve, "study", boom)
     store.write_part("p", "def build(params):\n    return None\n", intent="x")
     got = chat.carve_part(store, "p")
