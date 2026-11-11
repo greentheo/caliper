@@ -373,6 +373,10 @@ def untrusted(pid: str, why: str = "") -> str:
     be checked against its pieces at all (which fails closed: never holding)."""
     if why.startswith("couldn't"):
         return f"Not trusted yet: I {why}, so I can't say the strength check ran on the part as built. Check it again."
+    from .consistency import PANEL_SAID
+
+    if PANEL_SAID in why:                            # the shape's right, the pieces aren't (CALI-155): not "fix its shape"
+        return f"Not trusted yet: {why}. Say \"{fix_piece(pid)}\"."
     return (f"Not trusted yet: the strength check ran on a solid with more in it than the {pid.replace('_', ' ')}'s "
             f"pieces: its shape is filled in, or a piece is missing from its construction. Say \"{fix_shape(pid)}\" or "
             f"\"{fix_piece(pid)}\".")
@@ -396,6 +400,8 @@ def fix_for(check_id: str, detail: str, pid: str = "part") -> str:
 
     if check_id == "construction_on_its_face":
         return f'Say "{consistency.remedy(detail)}"'
+    if consistency.PANEL_SAID in detail:             # the solid has a panel its pieces left out: fixing "the shape" would delete it (CALI-155)
+        return f'Say "{fix_piece(pid)}"'
     if check_id == "construction_volume":
         return f'Say "{fix_shape(pid)}" (it\'s filled in) or "{fix_piece(pid)}" (one isn\'t in its construction)'
     return f'Say "{fix_shape(pid)}"'
@@ -419,7 +425,8 @@ def _card(key: str, q: str, lines: list[dict], hint: str = "", promised: str = P
 
 
 def _line(text: str, status: str = "info", **kw) -> dict:
-    return {"text": text, "status": status, **kw}
+    # a verdict with nothing to go on (its status "unknown") reads as a warning on a card: a tipping case with no weight crashed the card (CALI-155)
+    return {"text": text, "status": "warn" if status == "unknown" else status, **kw}
 
 
 # ---------------------------------------------------------------------------
@@ -553,7 +560,12 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
 
     # What do I buy?
     buy = []
-    if report:
+    from .consistency import NO_MAKE
+
+    wrong = (report or {}).get("not_accounted")          # pieces that aren't the part: nothing from them (CALI-155)
+    if wrong:
+        buy.append(_line(f"{NO_MAKE[:1].upper()}{NO_MAKE[1:]}.", "warn"))
+    elif report:
         b = report["bom"]
         items = [f"{g['count']} sheet{'s' if g['count'] != 1 else ''} of {g['label']}" for g in b["sheets"]]
         items += [f"{g['count']} × {g['label']}" for g in b["sticks"]]
@@ -574,7 +586,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
 
     # How do I make it?
     how = []
-    if report and p.get("role") != "fixed":
+    if wrong:
+        how.append(_line(f"No patterns or cut list yet: {NO_MAKE}. {fix_for('construction_covers', wrong, pid)} and I'll revise it.", "warn"))
+    elif report and p.get("role") != "fixed":
         try:
             mk = making.plan(store, pid, wait=False)       # the slicer never holds a card (#97)
         except Exception:  # noqa: BLE001
@@ -747,7 +761,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     weight = usd = missing = hours = 0.0
     slicing, unsliced, guessed, all_pieces, rough_pieces = False, "", "", 0, 0
     unprintable, cant = "", []                     # a printed piece the shop can't make: no total (#179 review, rule 6)
-    weighed, unweighed = False, None
+    weighed, unweighed, unpriced = False, None, None
     for p in state["parts"]:
         if not p.get("built") or p.get("role") == "fixed":
             continue
@@ -761,6 +775,9 @@ def measured(store: DesignStore, state: dict) -> dict:
             unweighed = unweighed or rep.get("unweighed") or C.UNWEIGHED
         else:
             weight += rep["mass_lb"]
+        unpriced = unpriced or rep.get("not_accounted")          # no total from a part whose pieces aren't it (CALI-155)
+        if rep.get("not_accounted"):
+            continue
         usd += _cost(store, p["id"], rep) or 0.0
         try:
             mk = making.plan(store, p["id"], wait=False)   # the slicer never holds a card (#97)
@@ -779,10 +796,12 @@ def measured(store: DesignStore, state: dict) -> dict:
         except Exception:  # noqa: BLE001
             pass
     if weighed:
-        out.update({"weight.total_lb": None if unweighed else round(weight, 1), "cost.usd": round(usd, 2),
+        out.update({"weight.total_lb": None if unweighed else round(weight, 1), "cost.usd": None if unpriced else round(usd, 2),
                     "make.not_in_shop": missing})
         if cant:
             out["make.cant"] = cant
+        if unpriced:
+            out["cost.unpriced"] = unpriced
         if unweighed:
             out["weight.unweighed"] = unweighed
         if unprintable:                            # first: it stays this way however long the slicer takes
@@ -860,7 +879,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
                              study="load", model="scorecard"))
             continue
         assumed = " (assumed)" if c.get("source") == "assumed" else ""
-        unknown = now.get("weight.unweighed") if c["metric"].startswith("weight") else None
+        unknown = (now.get("weight.unweighed") if c["metric"].startswith("weight")
+                   else now.get("cost.unpriced") if c["metric"].startswith("cost") else None)
         if unknown:            # unknown now: never the last card's lower total (#125, #132): one verdict, said
             verdict = verdicts.goal(None, incomplete=unknown)
             out.append(_line(f"{label}{assumed}: {verdict.get('why') or unknown}.", "warn"))

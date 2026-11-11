@@ -360,7 +360,9 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     # cost & waste
     emit("cost", "pricing the stock")
     cw = cost_and_waste(store, reports, cutplans)
-    _metric(metrics, "cost.usd", cw["usd"], "$", "stock to buy", "guess", "materials.PRICES", note=cw["basis"])
+    wrong = next((r["not_accounted"] for r in reports.values() if r.get("not_accounted")), None)    # (CALI-155)
+    _metric(metrics, "cost.usd", None if wrong else cw["usd"], "$", "stock to buy", "guess", "materials.PRICES",
+            note=wrong or cw["basis"])
     _metric(metrics, "waste.usd", cw["waste_usd"], "$", "of it left as offcut", "guess", "cut plan + prices")
     _metric(metrics, "waste.pct", round(cw["waste_pct"] * 100, 1), "%", "offcut, by cost", "measured", "cut plan")
 

@@ -2245,6 +2245,7 @@ function triedFor() {      // every part's what-ifs, so the balance shows them t
 }
 
 function buildView(p) {
+  if (p.not_accounted) return `<div class="small muted">No cut plan yet: its pieces don't account for its solid.</div>`;
   const c = S.built[p.id];
   if (!c || c.version !== p.version) { loadBuilt(p, c && c.version === p.version ? c.tried : {}); return '<div class="small muted">weighing…</div>'; }
   if (c.loading) return '<div class="small muted">weighing…</div>';
@@ -2427,6 +2428,7 @@ function previewNote(p) {
         <b>Cut these holes</b> (in the bar under the 3D view) to make it part of it, then make them again.</div>` : '';
 }
 function patternView(p) {
+  if (p.not_accounted) return `<div class="small muted">No patterns yet: its pieces don't account for its solid.</div>`;
   const run = (S.design.pattern_runs || []).find((r) => r.part === p.id);
   const url = (name) => `/api/designs/${S.slug}/patterns/${run.id}/${name}`;
   const stale = run && run.version !== p.version;
