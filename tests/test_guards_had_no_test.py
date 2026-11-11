@@ -69,10 +69,10 @@ def test_the_edges_of_the_volume_band(monkeypatch, share, passes):
 
 
 #: A box's six walls, every one a declared panel, around a block filled in: its pieces are 6t/L of it.
-def _filled_cube(side: float) -> str:
+def _filled_cube(side: float, t: float = 19.05) -> str:
     return f'''import cadquery as cq
 
-L, T = {side}, 19.05
+L, T = {side}, {t}
 
 
 def build(params):
@@ -106,6 +106,18 @@ def test_the_volume_band_on_a_real_filled_box(tmp_path, side, leg):
     s.write_part("box", _filled_cube(side), intent="a box")
     got = next(r for r in consistency.checked(s, "box") if r.id == "construction_volume")
     assert not got.passed and leg in got.expr, (got.expr, got.actual)
+
+
+def test_solid_4_mm_past_a_panel_is_in_no_piece():
+    """#75's finding 11 (#72): the share in no piece is judged at the surface's own tolerance (2 mm here). Three times it passed
+    every test, since the 4 in cube's grid has no point between 2 and 6 mm past a panel. Here, with 1/4 in panels on a 155.25 mm
+    block, the grid's first row is 4 mm past each one: all of it is in no piece (measured: 100%; at 6 mm, 63%)."""
+    from caliper import sandbox
+
+    built = sandbox.run_script(_filled_cube(155.25, 6.35), timeout=120)
+    got = {r.id: r for r in consistency.check(built.declared, built.geometry)}["construction_volume"]
+    assert consistency.tolerance(built.geometry.mesh) == 2.0
+    assert not got.passed and "100% of it is in no piece" in got.detail, got.detail
 
 
 # --- #56: the page's note while a lightening step is previewed -------------------------------------------------------------------
