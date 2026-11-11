@@ -38,16 +38,22 @@ jobs:
             find "$CONDA_PREFIX/lib" \( -name 'OCP*.so' -o -name 'vtkRenderingOpenGL2*.so' \) -print0 \
               | xargs -0 -r ldd 2>/dev/null | grep "not found" | sort -u
           }
+          # No `exit` in this step: in a login shell (bash -l) it runs ~/.bash_logout, whose last line returns 1 on
+          # the runners, so even `exit 0` failed the step. It ends on its last test instead.
           gone=$(missing)
-          if [ -z "$gone" ]; then echo "GL: everything loads from the env"; exit 0; fi
-          echo "GL: missing from the env, trying apt:"; echo "$gone"
-          for try in 1 2 3; do
-            timeout 300 sudo apt-get -o Acquire::Retries=3 update -q \
-              && timeout 300 sudo apt-get -o Acquire::Retries=3 install -y -q libgl1 libegl1 libglu1-mesa && break
-            sleep 30
-          done
-          gone=$(missing)
-          if [ -n "$gone" ]; then echo "GL: still missing:"; echo "$gone"; exit 1; fi
+          if [ -z "$gone" ]; then
+            echo "GL: everything loads from the env"
+          else
+            echo "GL: missing from the env, trying apt:"; echo "$gone"
+            for try in 1 2 3; do
+              timeout 300 sudo apt-get -o Acquire::Retries=3 update -q \
+                && timeout 300 sudo apt-get -o Acquire::Retries=3 install -y -q libgl1 libegl1 libglu1-mesa && break
+              sleep 30
+            done
+            gone=$(missing)
+            [ -z "$gone" ] || echo "GL: still missing:"; echo "$gone"
+            [ -z "$gone" ]
+          fi
 
       - uses: actions/setup-node@v5
         with:
