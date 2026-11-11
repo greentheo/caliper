@@ -437,6 +437,10 @@ class DesignStore:
             **(_result(report) if report else {}),
             **(extra or {}),
         })
+        if action != "mirror":                    # a part's mirrors follow it, written again from it (CALI-161, #239)
+            from . import mirror
+
+            mirror.rebuild(self, part_id)
         return version
 
     def write_mesh_part(self, part_id: str, stl: bytes, *, origin: str = "whittled",

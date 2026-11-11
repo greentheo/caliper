@@ -343,6 +343,8 @@ def build_context(asm: Assembly, parts: dict[str, Geometry]) -> dict:
         "holes_aligned": lambda a, b, tol=0.5: measure.min_hole_misalignment(a, b) <= tol,
         # a part in another's pocket: how far its worst side is from the clearance (CALI-162, #240)
         "fit_off": lambda a, b, c=measure.POCKET_CLEARANCE_MM: measure.fit_off(a, b, c),
+        # whether a is b mirrored: the share of a's volume that differs (CALI-161, #239)
+        "mirrors": lambda a, b, plane=None: measure.mirror_off(a, b, plane),
         # per-part dimensional query
         "bbox": lambda part: measure.bounding_box(part),
         # tolerant comparisons (CALI-19)

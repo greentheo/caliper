@@ -170,6 +170,16 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
             kept.append(pid)
             said.append(f"- the {name}: built before, kept")
             continue
+        if p.mirror_of and p.mirror_of in built:          # flipped from its source: no designer (CALI-161, #239)
+            from . import mirror
+
+            v = mirror.make(store, pid, p.mirror_of, p.mirror_plane or "YZ", tuple(p.mirror_at or (0.0, 0.0, 0.0)),
+                            feedback=f"the plan's mirror of {p.mirror_of}")
+            built[pid] = store.part_geometry(pid)
+            store.append_log({"kind": "firstrun", "action": "built", "part": pid, "version": v, "mirror_of": p.mirror_of})
+            said.append(f"- the {name}: a mirror of the {p.mirror_of.replace('_', ' ')}, flipped, not designed")
+            emit("step", f"The {name}: a mirror of the {p.mirror_of.replace('_', ' ')}", step="built", part=pid)
+            continue
         emit("step", f"Building the {name}", step="build", part=pid)
         check = interfaces(store, pid, built)
         res = chat.author_part(store, pid, p.what + (f" ({p.made})" if p.made else ""), author=author,
