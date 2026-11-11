@@ -21,8 +21,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
-DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
 
+from . import llm
 from .spec import Assertion, Spec
 
 # M-bolt nominal → clearance hole diameter (mm), close fit.
@@ -258,16 +258,16 @@ def normalize_spec_dict(d: dict) -> dict:
 
 
 def llm_draft(intent: str, machine: Optional[str] = None, client=None, model: Optional[str] = None) -> IntakeResult:
-    model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
 
         client = Anthropic()
     # No assistant prefill: some models (e.g. claude-sonnet-4-6) reject a trailing assistant turn.
     # The system prompt asks for a bare JSON object and extract_json tolerates fences/prose anyway.
-    msg = client.messages.create(
+    msg = llm.ask(
+        client,
+        "intake",
         model=model,
-        max_tokens=2000,
         system=_SYSTEM,
         messages=[
             {"role": "user", "content": f"machine: {machine or 'generic'}\nintent: {intent}"},
@@ -289,6 +289,8 @@ def draft_spec(
     if use_llm:
         try:
             return llm_draft(intent, machine=machine, client=client)
+        except llm.Stopped:                       # never something else made quietly in its place
+            raise
         except Exception as e:  # SDK/key/network unavailable or bad response → deterministic fallback
             if os.environ.get("CALIPER_DEBUG"):
                 print(f"[intake] LLM path failed → offline: {type(e).__name__}: {e}", file=sys.stderr)

@@ -14,6 +14,7 @@ side by side.
 
 from __future__ import annotations
 
+import contextvars
 import threading
 import time
 import traceback
@@ -164,7 +165,8 @@ class JobRunner:
                     self._between()
             self._jobs[job.id] = job
             key_lock = self._locks.setdefault(job.lock, threading.Lock())
-        (self._studies if kind in STUDIES else self._pool).submit(self._run, job, fn, key_lock)
+        # the worker carries the request's context on (which design's log its Claude calls go on)
+        (self._studies if kind in STUDIES else self._pool).submit(contextvars.copy_context().run, self._run, job, fn, key_lock)
         return job
 
     def cancel(self, job_id: str) -> Optional[Job]:

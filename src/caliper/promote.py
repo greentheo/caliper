@@ -38,10 +38,10 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
+from . import llm
 from .design import DesignStore
 from .spec import Assertion, Spec
 
-DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
 
 #: The measurement vocabulary an assertion may use, by level. Kept here (rather than inferred) so the
 #: drafting prompt and the offline patterns can't drift from what the evaluator actually binds.
@@ -493,7 +493,6 @@ Rules:
 def llm_draft(store: DesignStore, part: str, feedback: str, client=None,
               model: Optional[str] = None) -> Draft:
     """Draft with Claude, then validate the result exactly as strictly as the offline path."""
-    model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
 
@@ -502,8 +501,8 @@ def llm_draft(store: DesignStore, part: str, feedback: str, client=None,
     ask = (f"{store.prompt_context(part)}\n\n"
            f"the user said this about '{part}': {feedback}\n\n"
            f"What single assertion would lock that in permanently?")
-    msg = client.messages.create(model=model, max_tokens=400, system=_DRAFT_SYSTEM,
-                                 messages=[{"role": "user", "content": ask}])
+    msg = llm.ask(client, "promote", model=model, system=_DRAFT_SYSTEM,
+                  messages=[{"role": "user", "content": ask}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     m = re.search(r"\{.*\}", text, re.S)
     data = json.loads(m.group(0) if m else text)
@@ -528,6 +527,8 @@ def draft(store: DesignStore, part: str, feedback: str, *, use_llm: bool = True,
             got = llm_draft(store, part, feedback, client=client)
             if got.proposal is not None or not got.measurable:
                 return got
+        except llm.Stopped as e:
+            llm.tell(store, e, "So I can't offer a rule from what you said just now.")
         except Exception as e:  # noqa: BLE001 — a failed draft must not sink the user's edit
             print(f"[promote] LLM drafting failed → offline: {type(e).__name__}: {e}", file=sys.stderr)
     return offline_draft(store, part, feedback)

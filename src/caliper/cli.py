@@ -12,6 +12,8 @@ import argparse
 import os
 import sys
 
+from . import llm
+
 
 def _load_dotenv() -> None:
     """Load KEY=VALUE pairs from a `.env` file (cwd, then repo root) without overriding the shell.
@@ -592,7 +594,11 @@ def main(argv: list[str] | None = None) -> int:
     if not getattr(args, "func", None):
         parser.print_help()
         return 0
-    return args.func(args)
+    try:
+        return args.func(args)
+    except llm.Stopped as e:                 # Claude declined or was cut off: said in its words (CALI-157)
+        print(llm.said(e), file=sys.stderr)
+        return 3
 
 
 if __name__ == "__main__":

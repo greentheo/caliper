@@ -34,11 +34,11 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from . import llm
 from .design import DesignStore
 from .errors import scrubbed
 from .spec import Assertion, Spec
 
-DEFAULT_MODEL = os.environ.get("CALIPER_MODEL", "claude-opus-4-8")
 
 #: What a brand-new part must clear before anything else is asked of it. A spec with no assertions can
 #: never pass (:attr:`Report.all_pass` requires at least one considered check), so the author loop would
@@ -358,7 +358,6 @@ If the message is ambiguous about WHICH part, use "answer" — do not guess."""
 def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
                  client=None, model: Optional[str] = None) -> Intent:
     """Route with Claude, given the design's parts as context. Raises on any failure (caller falls back)."""
-    model = model or DEFAULT_MODEL
     if client is None:
         from anthropic import Anthropic  # lazy; may be absent
 
@@ -377,8 +376,8 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
            f"means that part\n\n" if scope else "")
         + f"message: {message}"
     )
-    msg = client.messages.create(model=model, max_tokens=300, system=_CLASSIFY_SYSTEM,
-                                 messages=[{"role": "user", "content": ask}])
+    msg = llm.ask(client, "classify", model=model, system=_CLASSIFY_SYSTEM,
+                  messages=[{"role": "user", "content": ask}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
     m = re.search(r"\{.*\}", text, re.S)
     data = json.loads(m.group(0) if m else text)
@@ -703,8 +702,8 @@ def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = 
                 from anthropic import Anthropic  # lazy; may be absent
 
                 client = Anthropic()
-            msg = client.messages.create(
-                model=model or DEFAULT_MODEL, max_tokens=200, system=_DESCRIBE_SYSTEM,
+            msg = llm.ask(
+                client, "describe", model=model, system=_DESCRIBE_SYSTEM,
                 messages=[{"role": "user", "content": f"description as it was: {old or '(none)'}\n\n"
                                                       f"the change just made: {change}\n\nthe script now:\n{script}"}])
             text = " ".join("".join(b.text for b in msg.content if getattr(b, "type", None) == "text").split())
@@ -988,8 +987,8 @@ def explain(store: DesignStore, message: str, scope: Optional[str] = None, clien
         from anthropic import Anthropic  # lazy; may be absent
 
         client = Anthropic()
-    msg = client.messages.create(
-        model=model or DEFAULT_MODEL, max_tokens=400, system=_EXPLAIN_SYSTEM,
+    msg = llm.ask(
+        client, "explain", model=model, system=_EXPLAIN_SYSTEM,
         messages=[{"role": "user", "content": f"facts:\n{_facts(store, scope)}\n\nquestion: {message}"}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text").strip()
     if not text:
@@ -1003,16 +1002,19 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
     """Report the measured state. No geometry moves — so the answer is facts, not an opinion. With Claude
     (CALI-59), the question itself is answered from those facts, in plain words."""
     events = events if events is not None else []
+    stopped = None
     if note.startswith("offer a picture: "):           # "make it look like a dinosaur": offered, not done (#65)
         return TurnResult(action="answer", ok=True, part=scope, events=events, reply=_offer(note.split(": ", 1)[1]))
     if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
         try:
             return TurnResult(action="answer", ok=True, part=scope, events=events,
                               reply=explain(store, message, scope, client=client))
+        except llm.Stopped as e:                 # said, then the facts as they are
+            stopped = llm.said(e)
         except Exception:  # noqa: BLE001 — the facts as they are, then
             pass
     d = store.design
-    lines = [f"**{d.name}** — {d.prompt}" if d.prompt else f"**{d.name}**"]
+    lines = ([f"{stopped}. Here's what's measured:", ""] if stopped else []) + [f"**{d.name}** — {d.prompt}" if d.prompt else f"**{d.name}**"]
     if d.requirements:
         lines.append("")
         lines.append("Clarified so far:")
@@ -1146,6 +1148,8 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     for pid, err in part_errors.items():
         if pid != part_id:
             lines.append(f"⚠ {pid} won't build: {scrubbed(err)}")
+    if getattr(res, "error", None) and res.geometry is not None:     # a round that built is kept, and why it stopped there is said
+        lines.append(f"{res.error}.")
     return "\n".join(lines)
 
 
