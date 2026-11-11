@@ -265,7 +265,8 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     older = " (Checked on an older version: check again.)" if stale else ""
     v = verdicts.case(run, c, filled=filled, stale=stale, edge=edge)   # an older run's ✓ is "older version" (#132)
     if v["kind"] == "untrusted":                     # ran on a block: no ✓ from it (CALI-96); this wins
-        return _line(untrusted(pid, filled), "warn", study="load")   # the number: the panel, badged
+        return _line(untrusted(pid, filled) if filled else (f"Not trusted yet: the last strength check ran on a filled-in shape"   # the number: the panel, badged
+                     f"{', on an older version' if stale else ''}. Check it again."), "warn", study="load")   # the run's own record, the part since changed
     if v["kind"] == "unchecked" and (c.get("fea") or {}).get("supported") is False:     # couldn't run (#138 item 3)
         return _line(f"{c['name'][:1].upper() + c['name'][1:]}: not checked: {v['why']}. Check where it's held and "
                      f"pushed, then check it again." + older, v["status"], study="load")
