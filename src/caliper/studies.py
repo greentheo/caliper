@@ -185,7 +185,7 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
             return "nothing could come off and still hold", False
         if "whole_holds" in best and verdicts.station(best, whole=True)["kind"] == "fails":
             # the printed part holds at this step, but carving it makes the whole part fail (CALI-86)
-            return (f"{carved}, but the whole part is then {round(best['whole'], 1):g}x, and it needs "
+            return (f"{carved}, but the whole part is then {'no higher than ' if best.get('at_most') else ''}{round(best['whole'], 1):g}x, and it needs "
                     f"{r.get('min_safety', 2):g}x"), False
         v = verdicts.carve_step(best, r.get("filled"), r)     # on voxels too coarse to see its walls: no ✓ (#101)
         if not v["counts_as_pass"]:

@@ -38,6 +38,10 @@ NAME = "CARVED"
 OPEN = ("its carved shape doesn't close up into a solid (it isn't watertight), so it can't be built or checked: "
         "use another step, or carve it again")
 
+#: Rule 6 (#228 review): a step that carves away what holds the plywood's edge reads no higher than the part as drawn.
+CAPPED = ("A step that carves away what holds up an edge of the plywood reads no higher than the plywood as drawn: taking "
+          "support away can't make it stronger, and it may make it weaker, which the check can't say.")
+
 
 class NotClosed(ValueError):
     """A carved step whose shape isn't watertight, even repaired."""
@@ -68,6 +72,25 @@ def _closed(mesh):
 
 def runs_dir(store: DesignStore) -> str:
     return os.path.join(store.root, "carves")
+
+
+def station_under(under: Callable, grid, printed: np.ndarray) -> Callable:
+    """What holds up the plywood at a carve's step: the uncarved print's ``under``, and only where this step's printed
+    voxels are still within a voxel. Carve away what's under a held edge, and the plywood isn't held there (#70 item 6)."""
+    from scipy import ndimage
+
+    gap = ndimage.distance_transform_edt(~printed) * grid.spacing
+    origin, shape = np.asarray(grid.origin, float), np.asarray(gap.shape)
+
+    def kept(pts, *tol):
+        pts = np.asarray(pts, float)
+        cells = np.rint((pts - origin) / grid.spacing).astype(np.int64)
+        inside = np.all((cells >= 0) & (cells < shape), axis=1)
+        near = np.zeros(len(pts), dtype=bool)
+        near[inside] = gap[tuple(cells[inside].T)] <= grid.spacing
+        return under(pts, *tol) & near
+
+    return kept
 
 
 @one_at_a_time
@@ -148,8 +171,11 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         except ZeroDivisionError:              # whittle divides by the peak stress, and a step can read none (#202)
             raise ValueError("Can't carve it: a step of the carve read no stress in the part, so it has nothing to go by.") from None
         density = M.printed(mat["key"])["density"] / 1000.0           # g/cm³, solid
+        whole_under = ctx.get("under")                                  # the uncarved print: each step takes its own
         voxel_cm3 = ls.grid.voxel_volume / 1000.0
         printed0 = voxels0 = None
+        ceiling, capped = {}, False
+        ctx["plate_ceiling"] = ceiling                                 # Rule 6 (#228 review): filled at step 0
         for k, st in enumerate(sweep.stations):
             stop()                                                     # between steps: what's done is kept
             # the share of the printed part: whittle's own `removed` counts the wood it keeps too (CALI-86)
@@ -158,9 +184,15 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             removed = 1.0 - printed_voxels / voxels0 if voxels0 else 0.0
             emit("checking", f"step {k}: {removed:.0%} of the printed part carved away",
                  progress=0.7 + 0.3 * k / len(sweep.stations))
-            worst, sides, weak, span = None, None, None, False
+            worst, sides, weak, span, at_most = None, None, None, False, False
+            if whole_under is not None:
+                ctx["under"] = station_under(whole_under, ls.grid, st.design & ~wood)
             for i in range(len(ctx["loads"])):
                 case, r = L.check_load(ctx, i, min_safety, solid=st.design)
+                if k == 0 and (case.get("plate") or {}).get("done"):
+                    ceiling[i] = case["plate"]                         # as drawn: no carved step reads above it
+                at_most = at_most or bool((case.get("plate") or {}).get("as_drawn"))
+                capped = capped or at_most
                 span = span or L.fixed_ends({"min_safety": min_safety}, case)                  # no ✓ on an FEA alone between its holds (CALI-153)
                 if case.get("safety") is not None and (worst is None or case["safety"] < worst):
                     worst, weak = case["safety"], (case.get("plate") or {}).get("piece") if case["governs"] == "plate" \
@@ -185,6 +217,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             out.append({"index": k, "removed": round(removed, 3), "safety": sides, "holds": holds,
                         "whole": worst, "whole_holds": worst is not None and worst >= min_safety, "weakest": weak,  # producer
                         "printed_g": round(grams), "saved_g": round(printed0 - grams), "stl": f, "span": span,
+                        "at_most": at_most,                            # the whole part's number is a ceiling (Rule 6, #228)
                         **({} if fixed is not None else {"closed": False, "why": OPEN})})
             keep({**partial, "stations": out})
             if not holds and k > 0:
@@ -215,7 +248,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
                             f"Carved by whittle's sweep, {mat['name']} only: the "
                             + ("wood, " if wood.any() else "") + "where it's pushed and where it's held are kept.",
                             "Each step is checked by the strength check; using one rebuilds the part with that shape "
-                            "and checks it again: that's the number to go by.", *([mat["note"]] if mat.get("note") else [])]}
+                            "and checks it again: that's the number to go by.", *([CAPPED] if capped else []),
+                            *([mat["note"]] if mat.get("note") else []),
+                            *L.buckling_notes(ctx["pieces"], ctx["loads"], mat)]}
         keep(record)
         store.append_history(part_id, {"kind": "carve", "action": "studied", "run": rid, "stations": len(out)})
         store.append_log({"kind": "carve", "action": "studied", "part": part_id, "run": rid})

@@ -828,6 +828,27 @@ def plate_why(pl: Optional[dict]) -> Optional[str]:
     return pl["why"]
 
 
+#: What the check can't see, said wherever a wall carries the load in compression (#70 item 5). NEEDS ENGINEER CHECK:
+#: whether a hand plate-buckling check belongs in V1.
+BUCKLING = ("Buckling isn't checked: a thin wall carrying the load in compression can fold before it reaches its "
+            "strength, more so with a big cut-out.")
+
+
+def buckling_notes(pieces: list[dict], loads: list[dict], mat: dict) -> list[str]:
+    """:data:`BUCKLING`, if the part has a wall to carry a load in its own plane: a printed part, or a sheet standing in
+    line with one of its loads."""
+    if mat.get("printed"):
+        return [BUCKLING]
+    from .consistency import _frame
+
+    forces = [np.asarray(ld["force"], float) for ld in loads]
+    for pc in pieces:
+        if pc["kind"] == "sheet" and any(abs(float(_frame(p)[3] @ f)) < 0.3 * float(np.linalg.norm(f))
+                                         for p in pc["polys"] for f in forces):
+            return [BUCKLING]
+    return []
+
+
 #: The share of a load's own footprint over a hold at which it's a push straight down, not a span.
 ON_A_HOLD = 0.5
 
@@ -1113,6 +1134,16 @@ def _peak_in(ctx: dict, at: np.ndarray, spacing: float) -> dict:
     return {"in": name, **({"wall_mm": round(float(wall), 2)} if wall is not None else {})}
 
 
+def as_drawn_ceiling(drawn: Optional[dict], governs: str, safety: Optional[float], pl: Optional[dict]):
+    """Rule 6 (#228 review): a carve takes material away, so no step reads stronger than the plywood did as drawn. A step that carves under a
+    held edge loses the plate check and falls back to the FEA, which reads a plywood top high: the as-drawn plate's number across the grain,
+    the one it's judged by, is its ceiling. It's an upper bound, not the step's number (a plate held on three edges is weaker than on four), so
+    the plate is marked ``as_drawn`` and the step reads "no higher than" it. Returns ``(governs, safety, plate)``."""
+    if drawn and safety is not None and safety > drawn["safety_across"]:
+        return "plate", drawn["safety_across"], {**drawn, "as_drawn": True}
+    return governs, safety, pl
+
+
 def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     """One load through the FEA (on ``solid``, the part's voxels unless given) and the plate check.
     Returns ``(case, result)``; the case is the record's entry for it."""
@@ -1150,6 +1181,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
         options.append(("plate", pl["safety_across"]))
     governs, safety = min(((k, s) for k, s in options if s is not None), key=lambda x: x[1],
                           default=("fea", None))
+    governs, safety, pl = as_drawn_ceiling((ctx.get("plate_ceiling") or {}).get(i), governs, safety, pl)
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
                  "holds": bool(safety is not None and safety >= min_safety),  # producer
                  # where it's predicted to break, placed the same way: linear to failure, as wood is
@@ -1229,7 +1261,8 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         cases.append(case)
 
     fea_seconds = time.time() - t1
-    notes = [f"{mat['name']}: E {mat['E']:g} MPa, strength {mat['strength']:g} MPa — {mat['basis']}.", *NOTES]
+    notes = [f"{mat['name']}: E {mat['E']:g} MPa, strength {mat['strength']:g} MPa — {mat['basis']}.", *NOTES,
+             *buckling_notes(ctx["pieces"], loads, mat)]
     if mat.get("note"):
         notes.append(mat["note"])
     if ctx.get("note"):

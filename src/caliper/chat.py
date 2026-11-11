@@ -831,9 +831,9 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
         said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. {rec['offer']['said']}")
     elif best and best["saved_g"] and not v["counts_as_pass"]:
         said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. It could come off down to step "
-                    f"{best['index']} ({best['saved_g']} g less filament), but that isn't a part that holds: "
-                    + (f"the whole part is then {answers._times(best['whole'], need=rec.get('min_safety'))}." if v["kind"] == "fails" and best.get("whole") is not None else
-                       f"the voxels were too coarse to see its walls (not resolved): check it again finer first." if v["kind"] in ("unresolved", "unchecked") else f"{v['word']}.")
+                    f"{best['index']} ({best['saved_g']} g less filament), but that isn't a part known to hold: "
+                    + (f"the whole part is then {'no higher than ' if best.get('at_most') else ''}{answers._times(best['whole'], need=rec.get('min_safety'))}." if v["kind"] == "fails" and best.get("whole") is not None else
+                       f"the voxels were too coarse to see its walls (not resolved): check it again finer first." if v["kind"] in ("unresolved", "unchecked") else f"{v['word']}: {v['why']}." if v.get("why") else f"{v['word']}.")
                     + " Fix that first.")
     elif best and best["saved_g"]:
         said.append(f"I carved the printed part in {len(rec['stations']) - 1} steps. The step to use is step "

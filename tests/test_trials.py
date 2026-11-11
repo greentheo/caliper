@@ -34,7 +34,9 @@ def test_the_prediction_goes_from_the_load_to_where_it_breaks_as_a_range(checked
     at200 = next(s for s in pr["steps"] if s["lb"] == 200)["sag_mm"]
     assert at200 == [pytest.approx(lo * 200, abs=1e-3), pytest.approx(hi * 200, abs=1e-3)]
     # a sag of a few tenths of a millimetre: say what will see it
-    assert "dial indicator" in pr["measure_with"] and "tape measure won't" in pr["measure_with"]
+    # read from above beside the foot, its underside being closed in (#70 item 2)
+    assert "dial indicator" in pr["measure_with"] and "beside the foot" in pr["measure_with"] and pr["closed_under"]
+    assert "tape measure won't" in trials.measure_with(0.3)
     assert trials.measure_with(10).startswith("a tape measure")
 
 
@@ -306,8 +308,8 @@ def test_a_plate_checked_tops_sag_is_across_the_grain_as_its_strength_is(tmp_pat
     assert "deflection_across_mm" not in plate and plate.get("as") != "beam"          # what a plate writes
     pr = trials.predict(store, "step_stool")
     across = plate["deflection_mm"] / run["material"]["across"] / (case["lb"] * case["factor"])
-    assert pr["per_lb_mm"][1] == pytest.approx(across, rel=1e-3), pr["per_lb_mm"]
-    hi_200 = pr["per_lb_mm"][1] * 200 / 25.4
+    assert pr["per_lb_mm"][1] == pytest.approx(across * pr["spot"], rel=1e-3), pr["per_lb_mm"]      # and read beside the foot
+    hi_200 = pr["per_lb_mm"][1] / pr["spot"] * 200 / 25.4                              # under the foot
     assert 0.009 < hi_200 < 0.011, hi_200                                              # about 0.010 in at 200 lb
     assert "the grain taken the weaker way" in pr["basis"], pr["basis"]
 
