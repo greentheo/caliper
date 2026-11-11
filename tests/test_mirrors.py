@@ -262,3 +262,32 @@ def test_the_locked_check_stays_and_the_reply_says_what_it_measures(stool):
     assert len(lines) == 1 and lines[0].startswith("⚠ side_left_mirrors_side_right compares only overall size; "
                                                    "mirrors() says they differ by ")
     assert any(a.id == "side_left_mirrors_side_right" for a in stool.assembly.assertions)
+
+
+def test_a_mirror_s_own_script_can_t_be_mirrored(stool):
+    """Mutant 4: the script itself refuses a mirror of a mirror, not only make()."""
+    mirror.make(stool, "side_left", "side_right")
+    with pytest.raises(ValueError, match="itself a mirror"):
+        mirror.script("side_left", stool.read_script("side_left"), "YZ", (0, 0, 0))
+
+
+def test_the_plane_is_across_the_axis_the_two_are_apart_on(tmp_path):
+    """Mutant 5: a front and a back panel are apart in y: the plane is XZ, half way between them."""
+    s = DesignStore.create("a box", base=str(tmp_path / "designs"))
+    panel = ('import cadquery as cq\n\ndef build(params):\n    p = cq.Workplane("XY").box(300, 19, 200).translate((0, {y}, 100))\n'
+             '    return p.union(cq.Workplane("XY").box(40, 6, 40).translate((100, {y} + {o}, 150)))\n')
+    s.write_part("panel_front", panel.format(y=0, o=-12.5), intent="the front")
+    s.write_part("panel_back", panel.format(y=400, o=12.5), intent="the back")
+    mirror.make(s, "panel_back", "panel_front")
+    got = mirror.of(s.read_script("panel_back"))
+    assert got["plane"] == "XZ" and got["at"][1] == pytest.approx(200.0, abs=0.1)
+    assert s.part_geometry("panel_back").require_mesh().bounds[1][1] == pytest.approx(415.5, abs=0.01)
+
+
+def test_a_part_not_built_yet_isn_t_mirrored_in_the_chat(stool):
+    """Mutant 9: under a plan's review the parts aren't built; the plan edit mirrors them, not this."""
+    from caliper import chat
+
+    stool.design.part("side_left").version = 0       # planned, not built
+    stool.save()
+    assert chat._mirror_said(stool, "use the right side for both", None) is None
