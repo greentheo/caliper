@@ -2196,7 +2196,7 @@ function partView(p) {
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
     <h4>History</h4>
     <ul class="list">${p.history.slice().reverse().map(historyItem).join('')}</ul>
-    <details id="adv"><summary>Advanced — script &amp; spec</summary><div id="advBody" class="small muted">loading…</div></details>`;
+    <details id="adv"><summary>Advanced — script &amp; spec <span class="muted">${esc(p.id)}</span> ${origin}</summary><div id="advBody" class="small muted">loading…</div></details>`;
   const work = `${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
     <div id="loadBox">${loadView(p)}</div>` : ''}
     ${p.loads && p.role !== 'fixed' ? `<h4>Test it <span class="badge">the real one</span></h4>
@@ -2212,7 +2212,8 @@ function partView(p) {
   const make = p.built ? `<div id="makingBox">${makingView(p)}</div>
     <div id="patternBox">${patternView(p)}</div>
     <div id="cutplanBox">${cutplanView(p)}</div>` : '';
-  return `<h2>${esc(p.name || p.id)} ${origin}</h2>
+  // the heading is the part's own name; its id and how it was made are one click down, under Advanced (#70 item 21)
+  return `<h2>${esc(p.name || p.id)}</h2>
     <div class="muted small">v${p.version}</div>
     ${cardsView({ what, work, buy, make, params: `<div id="paramBox">${paramView(p)}</div>` })}`;
 }
