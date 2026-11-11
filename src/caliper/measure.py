@@ -730,14 +730,28 @@ POCKET_TOL_MM = 0.5
 POCKET_CLEARANCE_MM = 0.3
 
 
+#: Names for a pocket's sides, as the person says them.
+_SIDES = {"+z": "top", "-z": "bottom", "+y": "back", "-y": "front", "+x": "right", "-x": "left"}
+
+
+def _square(m) -> bool:
+    """Whether a part sits square to the axes: its axis-aligned box no bigger than its own oriented one."""
+    try:
+        return float(m.bounding_box.volume) <= 1.02 * float(m.bounding_box_oriented.volume)
+    except Exception:  # noqa: BLE001 — a box that can't be fitted: not known to be square
+        return False
+
+
 def pocket(inserted: Geometry, host: Any) -> dict:
     """The gaps round a part where it goes into another's pocket, slot or hole (CALI-162, #240: step-stool-4's sides
     had pockets for a 2×4 and a 3/4 in plywood stretcher in them, and the touch rules couldn't see it).
 
-    The axis it goes in along is the one it sticks out of the host on. From its centre line, half way into the host,
-    a ray each way across the other two axes finds the host's first wall: the gap that side is that distance less half
-    the part's size, negative where the part runs into the wall. A side with no wall (an open slot) has none.
-    ``{"in": bool, "axis": "x", "gaps": {"+y": mm or None, "-y": …, "+z": …, "-z": …}, "why": str}``."""
+    The axis it goes in along is the one it sticks out of the host on. At the entry, the middle and the end of the
+    part's run inside the host (#243 review: a pocket narrowing at its inner face passed on one depth), a ray each way
+    across the other two axes, from the part's centre line, finds the host's first wall: the gap that side is that
+    distance less half the part's size, negative where the part runs into the wall; the tightest of the three counts.
+    A side with no wall (an open slot) has none. A part not square to the axes isn't measured (#243: a tilted peg read
+    as too big). ``{"in": bool, "axis": "x", "gaps": {"+y": mm or None, …}, "why": str}``."""
     from . import spatial
 
     a, b = inserted.require_mesh(), _as_mesh(host)
@@ -748,9 +762,14 @@ def pocket(inserted: Geometry, host: Any) -> dict:
     lo, hi = max(alo[k], blo[k]), min(ahi[k], bhi[k])
     if out[k] <= 0 or hi - lo <= 0.05:
         return {"in": False, "axis": "xyz"[k], "gaps": {}, "why": "doesn't go into it"}
+    if not _square(a):
+        return {"in": False, "axis": "xyz"[k], "gaps": {}, "why": "goes in at an angle: its fit isn't measured"}
     centre = (alo + ahi) / 2.0
-    centre[k] = (lo + hi) / 2.0
-    if bool(spatial.contains(b, [centre])[0]):
+    edge = min(0.5, (hi - lo) / 4.0)
+    depths = [lo + edge, (lo + hi) / 2.0, hi - edge]
+    middle = centre.copy()
+    middle[k] = depths[1]
+    if bool(spatial.contains(b, [middle])[0]):
         return {"in": False, "axis": "xyz"[k], "gaps": {}, "why": "isn't in a pocket of it: its middle is in the solid"}
     gaps: dict = {}
     for i in (j for j in range(3) if j != k):
@@ -758,26 +777,34 @@ def pocket(inserted: Geometry, host: Any) -> dict:
         for sign in (1.0, -1.0):
             d = np.zeros(3)
             d[i] = sign
-            loc, _, _ = spatial.intersects_location(b, np.array([centre]), np.array([d]))
-            ahead = [float((p[i] - centre[i]) * sign) for p in loc if (p[i] - centre[i]) * sign > 1e-9]
-            gaps[("+" if sign > 0 else "-") + "xyz"[i]] = round(min(ahead) - half, 3) if ahead else None
+            seen = []
+            for depth in depths:
+                o = centre.copy()
+                o[k] = depth
+                loc, _, _ = spatial.intersects_location(b, np.array([o]), np.array([d]))
+                ahead = [float((p[i] - o[i]) * sign) for p in loc if (p[i] - o[i]) * sign > 1e-9]
+                if ahead:
+                    seen.append(min(ahead) - half)
+            gaps[("+" if sign > 0 else "-") + "xyz"[i]] = round(min(seen), 3) if seen else None
     return {"in": True, "axis": "xyz"[k], "gaps": gaps, "why": ""}
 
 
 def fit_off(inserted: Geometry, host: Any, clearance: float = POCKET_CLEARANCE_MM) -> float:
     """How far the worst side of a part in a pocket sits from ``clearance``, in mm: a fit passes within
-    :data:`POCKET_TOL_MM`. A part that doesn't go into the host raises (said, never a pass)."""
+    :data:`POCKET_TOL_MM`. Any overlap is past it, whatever the band (#243 review: −0.2 mm a side passed at 0.3 ± 0.5).
+    A part that doesn't go into the host, or goes in at an angle, raises (said, never a pass)."""
     got = pocket(inserted, host)
     if not got["in"]:
         raise ValueError(got["why"])
     sides = [g for g in got["gaps"].values() if g is not None]
     if not sides:
         raise ValueError("it has no wall on any side to fit against")
-    return round(max(abs(g - clearance) for g in sides), 3)
+    return round(max(abs(g - clearance) if g >= 0 else POCKET_TOL_MM + clearance - g for g in sides), 3)
 
 
 def pocket_said(a: str, b: str, got: dict, clearance: float = POCKET_CLEARANCE_MM) -> str:
-    """A fit in words, naming both parts and the play: "the stretcher has 19.1 mm of play in side_left's pocket"."""
+    """A fit in words, naming both parts and the play, on the sizes as drawn: "the stretcher has 19.1 mm of play in
+    side_left's pocket", and which sides are open."""
     name = a.replace("_", " ")
     if not got.get("in"):
         return f"the {name} {got.get('why') or 'is not in it'} ({b})"
@@ -791,15 +818,34 @@ def pocket_said(a: str, b: str, got: dict, clearance: float = POCKET_CLEARANCE_M
             tight.append(-total if total < 0 else -min(pair))
         elif max(abs(g - clearance) for g in pair) > POCKET_TOL_MM:
             loose.append(total)
+    proud = []
+    for side, g in got["gaps"].items():                # a side against one wall only: into it, or off it
+        if g is None or got["gaps"].get(("-" if side[0] == "+" else "+") + side[1]) is not None:
+            continue
+        if g < 0:
+            tight.append(-g)
+        elif abs(g - clearance) > POCKET_TOL_MM:      # standing off a slot's only wall (#243 re-check)
+            proud.append((side, g))
+    opened = [_SIDES[s] for s, g in got["gaps"].items() if g is None]
+    walls = sum(1 for g in got["gaps"].values() if g is not None)
+    open_said = f", open on the {' and '.join(opened)}: measured on {walls} side{'s' if walls != 1 else ''}" if opened else ""
+    if proud and not loose and not tight:
+        side, g = max(proud, key=lambda sg: sg[1])
+        return (f"the {name} doesn't sit in {b}'s slot: it's {g:.1f} mm off its {_SIDES[side]}{open_said}, on the "
+                "drawn sizes")
     if not loose and not tight:
         sides = [g for g in got["gaps"].values() if g is not None]
-        return f"the {name} sits in {b}'s pocket with {min(sides):.1f}–{max(sides):.1f} mm a side"
+        return (f"the {name} sits in {b}'s pocket with {min(sides):.1f}–{max(sides):.1f} mm a side{open_said}, on the "
+                "drawn sizes")
     said = []
     if loose:
         said.append(f"has {max(loose):.1f} mm of play in {b}'s pocket")
     if tight:
         said.append(f"is {max(tight):.1f} mm too big for {b}'s pocket" if not loose else f"is {max(tight):.1f} mm too big for it the other way")
-    return f"the {name} " + ", and ".join(said)
+    return f"the {name} " + ", and ".join(said) + f"{open_said}, on the drawn sizes"
+
+
+# ---------------------------------------------------------------------------
 # CALI-161 (#239) — whether one part is another's mirror, measured
 # ---------------------------------------------------------------------------
 _PLANES = {"YZ": 0, "XZ": 1, "XY": 2, "ZY": 0, "ZX": 1, "YX": 2}
@@ -823,7 +869,6 @@ def mirror_off(g: Geometry, other: Any, plane: Optional[str] = None) -> float:
     flip[k, k], flip[k, 3] = -1.0, 2.0 * at
     m = b.copy()
     m.apply_transform(flip)
-    m.invert() if m.volume < 0 else None           # a reflection turns the faces inside out
     vol = float(abs(a.volume))
     if vol <= 0:
         raise ValueError("the part has no volume to compare")

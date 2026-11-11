@@ -174,12 +174,28 @@ def _agrees(v: float, mm: float) -> bool:
     return abs(v - mm) <= SAME_MM or abs(v * 25.4 - mm) <= SAME_MM
 
 
-def shadows(pid: str, script: str, skeleton: list):
-    """Whether part ``pid``'s script reads the plan's shared sizes rather than setting its own (CALI-162, #240: both
-    sides of step-stool-4 set ``stretcher_w`` 38.1 mm and ``stretcher_h`` 88.9 mm, a 2×4, while the stretcher was 19 ×
-    101.6 mm). A ``PARAMS`` key with a skeleton's name and another value, or a near-name (same subject, a size word:
-    ``stretcher_w`` beside ``stretcher_thickness``), fails: "side_left sets its own stretcher thickness: 38.1 mm
-    against the plan's 19 mm". One :class:`AssertionResult`, ``skeleton_shadow``; a pass where none does."""
+def said_name(name: str) -> str:
+    """A number's name in words, by its size word: floor_t is "the floor thickness", stretcher_w "the stretcher width"."""
+    subject, size = _subject(name)
+    return f"{subject.replace('_', ' ')} {size}" if subject else name.replace("_", " ")
+
+
+def shadows(pid: str, script: str, skeleton: list, parts: Optional[list] = None):
+    """Whether part ``pid``'s script reads the plan's shared sizes rather than setting its own (CALI-162, #240).
+
+    A part's number is compared only with a plan **size** of the same subject and the same size word (#243 review:
+    by closest value, ``flange_t`` was taken for the flange width and ``stretcher_len`` for the stretcher's height;
+    by the word alone, a part's board height ``stretcher_h`` was taken for the plan's ``stretcher_height``, which is
+    where the stretcher sits). So:
+
+    - the plan's own name with another value fails: "side_left sets its own ply thickness: 25 mm against the plan's
+      19.05 mm"; so does ``stretcher_thickness`` against the plan's ``stretcher_t``;
+    - the same value under another name is a note, not a fail ("restates the plan's ply thickness as ply_t");
+    - a size of another part the plan doesn't name is a note ("the plan doesn't name the stretcher width: side_left
+      sets 19 mm");
+    - a part's own sizes (``top_t`` on the top), positions, counts and loads are never compared with a size.
+
+    One :class:`AssertionResult`, ``skeleton_shadow``: fail on a mismatch, else pass, with any notes as its detail."""
     from . import aero
     from . import plan as P
     from .evaluate import AssertionResult
@@ -189,26 +205,111 @@ def shadows(pid: str, script: str, skeleton: list):
     plan: dict = {}
     for s in skeleton or []:
         sv = s if isinstance(s, P.SkeletonValue) else P.SkeletonValue.model_validate(s)
-        plan[sv.name] = P.mm(sv) if P.mm(sv) is not None else float(sv.value)
-    said = []
+        plan[sv.name] = (P.mm(sv) if P.mm(sv) is not None else float(sv.value), P.kind_of(sv))
+    own = {pid, *pid.split("_")}
+    others = set(parts or []) - {pid}
+    wrong, notes = [], []
     for key, v in params.items():
         if not isinstance(v, (int, float)) or isinstance(v, bool):
             continue
-        if key in plan:
-            if not _agrees(float(v), plan[key]):
-                said.append(f"{pid} sets its own {key.replace('_', ' ')}: {v:g} mm against the plan's {plan[key]:g} mm")
+        if key in plan:                                # its own name: the same number, whatever kind it is
+            value, kind = plan[key]
+            if not _agrees(float(v), value):
+                unit = " mm" if kind in ("size", "position", "unclear") else ""
+                (notes if kind == "unclear" else wrong).append(
+                    f"the plan's {said_name(key)} may be where something sits: {pid} sets {v:g}{unit}, the plan {value:g}{unit}"
+                    if kind == "unclear" else f"{pid} sets its own {said_name(key)}: {v:g}{unit} against the plan's {value:g}{unit}")
             continue
         subject, size = _subject(key)
-        same = [n for n in plan if subject and _subject(n)[0] == subject]
-        if not same:
+        if not subject:
             continue
-        name = next((n for n in same if _subject(n)[1] == size), None) or min(same, key=lambda n: abs(plan[n] - v))
-        words = name.replace("_", " ")
-        said.append(f"{pid} sets its own {words}: {v:g} mm against the plan's {plan[name]:g} mm" if not _agrees(float(v), plan[name])
-                    else f"{pid} restates the plan's {words} as {key}: read {name} instead")
-    if not said:
-        return AssertionResult(SHADOW, expr, "pass", True, actual=0)
-    names = sorted({n for n in plan})
-    return AssertionResult(SHADOW, expr, "fail", False, actual=len(said),
-                           detail="; ".join(said) + f". Use the plan's numbers by their names in PARAMS ({', '.join(names)}), "
-                                  "never your own: a size two parts share is the plan's.")
+        same = [n for n, (_, kind) in plan.items() if kind in ("size", "unclear") and _subject(n) == (subject, size)]
+        if same:                                       # even a part's own size, where the plan shares it (#243 re-check)
+            name = same[0]
+            if _agrees(float(v), plan[name][0]):
+                notes.append(f"{pid} restates the plan's {said_name(name)} as {key}: read {name} instead")
+            elif plan[name][1] == "unclear":
+                notes.append(f"the plan's {said_name(name)} may be where something sits: {pid} sets {v:g} mm, the plan "
+                             f"{plan[name][0]:g} mm")
+            else:
+                wrong.append(f"{pid} sets its own {said_name(name)}: {v:g} mm against the plan's {plan[name][0]:g} mm")
+        elif subject in own:                           # a part's own size the plan doesn't share is its own
+            continue
+        elif subject in others:                        # another part's size, which the plan doesn't share
+            notes.append(f"the plan doesn't name the {said_name(key)}: {pid} sets it at {v:g} mm")
+    if not wrong:
+        return AssertionResult(SHADOW, expr, "pass", True, actual=0, detail="; ".join(notes))
+    return AssertionResult(SHADOW, expr, "fail", False, actual=len(wrong),
+                           detail="; ".join(wrong) + ". Use the plan's numbers by their names in PARAMS, never your "
+                                  "own: a size two parts share is the plan's." + (f" (Also: {'; '.join(notes)}.)" if notes else ""))
+
+
+#: The size words a part's section is said by, in the skeleton: its thickness and its height (#240).
+SECTION = ("thickness", "height")
+#: How much of its own box a part must fill to be read as a board, whose section is its two smaller sides (#243).
+BOARD_FILL = 0.9
+
+
+def known_section(skeleton: list, pid: str) -> dict:
+    """``{"thickness": name, "height": name}``: the sizes of part ``pid``'s section the skeleton names as sizes."""
+    from . import plan as P
+
+    out = {}
+    for s in skeleton or []:
+        sv = s if isinstance(s, P.SkeletonValue) else P.SkeletonValue.model_validate(s)
+        subject, size = _subject(sv.name)
+        if subject == pid and size in SECTION and P.kind_of(sv) == "size":
+            out.setdefault(size, sv.name)
+    return out
+
+
+def _section_name(skeleton: list, pid: str, word: str) -> str:
+    """The name a measured size goes under: ``{pid}_{word}``, or ``{pid}_t`` / ``{pid}_h`` where the plan's name is
+    something else already (step-stool-4's ``stretcher_height`` is where it sits)."""
+    full = f"{pid}_{word}"
+    taken = next((s for s in skeleton or [] if s.get("name") == full), None)
+    return full if taken is None or taken.get("source") == "measured" else f"{pid}_{word[0]}"
+
+
+def section(store, pid: str, geometry) -> list[dict]:
+    """Part ``pid``'s section as built, into the skeleton: whichever of its thickness and height (its two smaller
+    sizes) the plan doesn't already name as a size, source ``measured``, ``of`` the part (CALI-162, #240). Only for a
+    board, square to the axes and filling its box (#243 review: an L of 3 mm angle read as 50 mm thick); otherwise
+    any size measured off it before is dropped, said in its history, and []. Written again in place when measured
+    again."""
+    from .measure import _square
+
+    m = geometry.require_mesh()
+    box = float(m.bounding_box.volume)
+    if box <= 0 or float(abs(m.volume)) < BOARD_FILL * box or not _square(m):
+        old = [s for s in store.design.skeleton or [] if s.get("source") == "measured" and s.get("of") == pid]
+        if old:                                    # not a board now: its last measure would go stale (#243 re-check)
+            store.design.skeleton = [s for s in store.design.skeleton if s not in old]
+            store.save()
+            if store.design.part(pid):
+                store.append_history(pid, {"kind": "note", "said": "its measured section is dropped: it isn't a plain "
+                                           "board now (" + ", ".join(s["name"] for s in old) + ")"})
+        return []
+    lo, hi = m.bounds
+    dims = dict(zip(SECTION, sorted(float(b - a) for a, b in zip(lo, hi))[:2]))
+    planned = known_section([s for s in store.design.skeleton or [] if s.get("source") != "measured"], pid)
+    got = [{"name": _section_name(store.design.skeleton, pid, word), "value": round(v, 2), "unit": "mm",
+            "why": f"the {pid.replace('_', ' ')}'s {word} as built", "source": "measured", "kind": "size", "of": pid}
+           for word, v in dims.items() if word not in planned]
+    by = {g["name"]: g for g in got}
+    kept = [by.pop(s.get("name")) if s.get("name") in by and s.get("source") == "measured" else s
+            for s in store.design.skeleton or []]
+    names = {s.get("name") for s in kept}
+    store.design.skeleton = kept + [g for g in by.values() if g["name"] not in names]
+    store.save()
+    return got
+
+
+def remeasure(store, pid: str) -> list[dict]:
+    """A measured section of ``pid`` in the skeleton, measured again now it's changed (#243 review: never stale)."""
+    if not any(s.get("source") == "measured" and s.get("of") == pid for s in store.design.skeleton or []):
+        return []
+    try:
+        return section(store, pid, store.part_geometry(pid))
+    except Exception:  # noqa: BLE001 — a part that won't build keeps its last measure; its build says why
+        return []
