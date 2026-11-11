@@ -358,7 +358,7 @@ def refine_authored(
     """
     spec.intent = (spec.intent + "  " if spec.intent else "") + instruction
     feedback = (
-        "Apply this change to the part below, keeping the existing measured checks passing (change as "
+        "Apply this change to the script above, keeping the existing measured checks passing (change as "
         "little else as possible):\n  " + instruction + measured
     )
     tries = [] if tries is None else tries                 # the caller's, so a revision that raises still has its tries to log

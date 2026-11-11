@@ -238,3 +238,12 @@ def test_a_failed_builds_error_is_in_the_next_edit_request():
     assert got.geometry is not None and "WIDTH = 120.0" in got.script
     asked = c.calls[1]["messages"][0]["content"]
     assert "division by zero" in asked.split("--- what to change ---")[1]
+
+
+def test_the_change_points_at_the_script_above_it():
+    # the model reads it literally: in both requests the script comes first and the change after it (#232)
+    c = Fake(json.dumps({"edits": [ONE_LINE]}))
+    authoring.refine_authored(_spec(), SCRIPT, "make it 120 wide", client=c)
+    asked = c.calls[0]["messages"][0]["content"]
+    assert "the script above" in asked and "below" not in asked.split("--- what to change ---")[1]
+    assert asked.index(SCRIPT) < asked.index("the script above")
