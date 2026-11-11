@@ -149,7 +149,8 @@ def test_the_chat_says_the_design_measures_green_only_when_every_check_ran():
     waiting = Report([AssertionResult("a", "x > 0", "pass", 1), AssertionResult("b", "y > 0", "deferred", None)])
     green = Report([AssertionResult("a", "x > 0", "pass", 1)])
     assert chat._design_line(waiting) == "The whole design: 1 design check pass, 1 not checked yet."
-    assert chat._design_line(green) == "The whole design measures green."
+    assert chat._design_line(green) == ("The design's checks pass (the design's rules); whether a part fits snug in its "
+                                        "pocket isn't measured.")                                # what was measured (#241)
     assert chat._design_line(None) == ""
 
 

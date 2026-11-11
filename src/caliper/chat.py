@@ -125,6 +125,11 @@ class Intent:
     where: str = ""                   # for `picture`: which panel, in the person's words ("on the side")
     source: str = "offline"           # "offline" | "llm" | "injected"
     note: str = ""                    # why we routed this way (surfaced when we're unsure)
+    parts: list = field(default_factory=list)   # every part a change names, in plan order (#241); [part] for one
+
+    def __post_init__(self):
+        if not self.parts and self.part and self.action == "refine":
+            self.parts = [self.part]
 
 
 @dataclass
@@ -222,6 +227,44 @@ def named_part(message: str, parts: list[str]) -> Optional[str]:
     return hits[0][1]
 
 
+#: "both sides", "neither slot", "each leg", "all the legs": a word several parts share (#241)
+_GROUP = re.compile(r"\b(?:both|neither|either|each|every|all)\s+(?:of\s+)?(?:the\s+)?([a-z]+)", re.I)
+
+
+def _said_as(pid: str) -> str:
+    """A part's id as a person says it, as a pattern: "side_left", "side left" or "left side"."""
+    tokens = [t for t in pid.lower().split("_") if t]
+    orders = [tokens] + ([tokens[::-1]] if len(tokens) == 2 else [])
+    return "(?:" + "|".join([re.escape(pid.lower())] + [r"\s+".join(map(re.escape, o)) for o in orders]) + ")"
+
+
+def named_parts(message: str, parts: list[str]) -> list[str]:
+    """Every part a change names (CALI-163, #241: "make both sides…" went to one side), in the order of ``parts``.
+
+    Several only when the message says several: a word they share ("both sides", "the legs", "neither slot"), or names
+    joined by "and" or a comma ("the stretcher and the left side"). With a shared word, every part it names outright
+    comes too ("…; the stretcher doesn't fit"). Otherwise the one part :func:`named_part` finds: a part named only as a
+    reference ("make the carriage clear the rail") isn't changed."""
+    text = (message or "").lower()
+    words = _words(message)
+    direct = [pid for pid in parts if re.search(rf"\b{_said_as(pid)}\b", text)]
+    direct = [p for p in direct if not any(o != p and set(p.split("_")) < set(o.split("_")) for o in direct)]
+    stems = {w[:-1] for w in words if w.endswith("s") and len(w) > 3} | {m.group(1).rstrip("s") for m in _GROUP.finditer(text)}
+    grouped = {pid for stem in stems for pid in parts
+               if stem in pid.lower().split("_") and sum(stem in q.lower().split("_") for q in parts) >= 2}
+    if grouped:
+        return [pid for pid in parts if pid in grouped or pid in direct]
+    joined = set()
+    for a in direct:
+        for b in direct:
+            if a != b and re.search(rf"{_said_as(a)}\s*(?:,|\band\b|&)\s*(?:the\s+)?{_said_as(b)}", text):
+                joined |= {a, b}
+    if len(joined) >= 2:
+        return [pid for pid in parts if pid in joined]
+    one = named_part(message, parts)
+    return [one] if one else []
+
+
 def last_touched(store: DesignStore) -> Optional[str]:
     """The part an unscoped "undo" most likely means — the one most recently revised."""
     if not store.design.parts:
@@ -296,6 +339,10 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
         if target:
             return Intent(action="revert", part=target, note="asks to undo the last change")
 
+    several = named_parts(message, ids)
+    if len(several) > 1 and not question:          # by the request, not the selection (#241)
+        return Intent(action="refine", part=several[0], parts=several, note=f"names {len(several)} parts")
+
     if scope:
         if question:
             return Intent(action="answer", part=scope, note="a question about this part")
@@ -325,11 +372,15 @@ _CLASSIFY_SYSTEM = """You route a message in a CAD design conversation. Reply wi
  "part": "<existing part id, a new snake_case id, or null>",
  "intent": "<for author: a one-line description of the part to build; for picture: just the thing to draw, in
             a word or two (\"T-rex\", \"heart\"); else empty>",
- "where": "<for picture: which panel, in their words (\"the side\", \"the front\"), or empty>"}
+ "where": "<for picture: which panel, in their words (\"the side\", \"the front\"), or empty>",
+ "parts": ["<for refine: EVERY existing part id the request changes, the first being `part`>"]}
 
 - "refine": change an EXISTING part: its shape, or what its script says about it (what it's built
   from, what it must hold or carry, what it must keep clear). `part` must be one of the design's part
   ids. A new requirement on a part ("it has to hold me, 200 lb", "make it from 1/2 in ply") is a refine.
+- A request that names or implies several parts changes each of them: "both sides", "neither slot", "all the legs",
+  "the stretcher and the left side". List every one in `parts`, whichever part is selected. A part named only as a
+  reference ("make the carriage clear the rail") isn't in `parts`.
 - "author": build a NEW part. `part` is a new snake_case identifier; `intent` describes it, as the
   design's requirements have it: never a choice they don't make or one that contradicts them.
 - "revert": undo the last change to a part ("roll it back", "undo that"). `part` is that part.
@@ -394,8 +445,16 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
         raise ValueError(f"{action} targets unknown part {part!r}")
     if action == "author":
         part = part if part and part not in ids else part_id_from(message, ids)
-    return Intent(action=action, part=part, intent=str(data.get("intent") or message).strip(),
-                  where=str(data.get("where") or "").strip(), source="llm", note="routed by Claude")
+    several: list = []
+    if action == "refine":
+        named = [str(x) for x in (data.get("parts") or []) if x]
+        unknown = [x for x in named if x not in ids]
+        if unknown:
+            raise ValueError(f"refine names unknown part(s) {unknown!r}")
+        order = [p.id for p in store.design.parts]
+        several = [p for p in order if p in set(named) | {part}]
+    return Intent(action=action, part=several[0] if several else part, intent=str(data.get("intent") or message).strip(),
+                  where=str(data.get("where") or "").strip(), source="llm", note="routed by Claude", parts=several)
 
 
 Classifier = Callable[[DesignStore, str, Optional[str]], Intent]
@@ -472,8 +531,24 @@ def _design_line(report) -> str:
     if report is None or report.failures:
         return ""
     if report.all_pass and not report.waiting:
-        return "The whole design measures green."
+        # what was measured, not "green" (#241): its plan rules pass; whether a part fits its pocket isn't one of them
+        return (f"The design's checks pass ({', '.join(_kinds(report))}); whether a part fits snug in its pocket "
+                f"isn't measured.")
     return f"The whole design: {report.said()}."
+
+
+def _kinds(report) -> list[str]:
+    """What the design's checks measure, by kind, in a person's words: "touch", "no overlap", "fit", "clearance"."""
+    out: list[str] = []
+    for r in report.results:
+        e = r.expr or ""
+        kind = ("no overlap" if "interference(" in e
+                else "touch" if re.match(r"^\s*-[\d.]+\s*<=\s*min_clearance\(", e)
+                else "fit" if re.search(r"<=\s*min_clearance\(.*\)\s*<=", e)
+                else "clearance" if "min_clearance(" in e else "the design's rules")
+        if kind not in out:
+            out.append(kind)
+    return out
 
 
 def _fail_lines(report, only: Optional[list[str]] = None, limit: int = 6) -> list[str]:
@@ -547,8 +622,11 @@ def _features_of(store: DesignStore, part_id: str) -> Optional[dict]:
 def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, client=None,
                 max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
                 use_llm: bool = True, drafter=None, promote_feedback: bool = True, measured: str = "",
-                pick: Optional[dict] = None) -> TurnResult:
+                pick: Optional[dict] = None, focus: str = "", keep_same: bool = True) -> TurnResult:
     """Revise a part **that lives inside a design** and re-measure the whole thing.
+
+    ``focus`` is said to the designer only, after the request (#241: which of the parts it names this revision is
+    for). ``keep_same=False``: a revision that hands the script back as it was writes no version, and says so.
 
     The gap CALI-29 exists to close. Everything here is plumbing around one existing call —
     :func:`~caliper.authoring.refine_authored` — except the two things that make it safe: the revision
@@ -588,7 +666,8 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     tries: list = []
     res = None
     try:
-        res = authoring.refine_authored(spec, script, message, max_rounds=max_rounds, measured=measured,
+        res = authoring.refine_authored(spec, script, f"{message}\n\n{focus}" if focus else message,
+                                        max_rounds=max_rounds, measured=measured,
                                         ref_base=store.root, author=author, client=client, tries=tries)
     finally:
         # every revision's tries, each with its round, built or not: the ones that fail are the ones to see (#232 review)
@@ -611,6 +690,9 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
 
     uncarved = carve.carved(store.read_script(part_id))   # a carve fits the shape it was carved from (CALI-82)
     script = carve.uncarve(res.script)[0]
+    if not keep_same and script == carve.uncarve(prior)[0]:   # nothing to write: said, never a version that's the same (#241)
+        return TurnResult(action="refine", ok=False, part=part_id, events=events, error="unchanged",
+                          reply=f"The revision left **{part_id}** as it was.")
     from .authoring import params_from_spec
 
     version = store.write_part(part_id, script, feedback=message, action="refine",
@@ -1152,13 +1234,61 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     if fixed:
         lines.append(f"✓ It also fixed: {', '.join(fixed)}")
     if not broke and _design_line(after):
-        lines.append(_design_line(after).replace("measures green", "still measures green"))
+        lines.append(_design_line(after).replace("checks pass", "checks still pass"))
     for pid, err in part_errors.items():
         if pid != part_id:
             lines.append(f"⚠ {pid} won't build: {scrubbed(err)}")
     if getattr(res, "error", None) and res.geometry is not None:     # a round that built is kept, and why it stopped there is said
         lines.append(f"{res.error}.")
     return "\n".join(lines)
+
+
+_MIRROR = re.compile(r"\bmirror(?:s|ed|ing)?\b|\bmirror[- ]image\b|\bsymmetric", re.I)
+
+
+def _listed(xs: list[str]) -> str:
+    return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
+
+
+def refine_several(store: DesignStore, parts: list[str], message: str, **kw) -> TurnResult:
+    """An edit that names several parts changes each (CALI-163, #241), in plan order, each built and checked before the
+    next, and the reply says first what changed and what didn't: a tick only when every part named changed (rule 6:
+    "✓ revised side_left" over a request that named both sides read greener than it was)."""
+    events = kw.pop("events", None)
+    events = events if events is not None else []
+    done, left, results = [], [], []
+    for pid in parts:
+        others = [p for p in parts if p != pid]
+        focus = (f"This request names {_listed(parts)}. This revision is to {pid} only: {_listed(others)} "
+                 f"{'is' if len(others) == 1 else 'are'} revised on {'its' if len(others) == 1 else 'their'} own.")
+        r = refine_part(store, pid, message, events=events, focus=focus, keep_same=False, **kw)
+        results.append(r)
+        if r.version is not None:                  # it wrote a version: changed (one handed back as it was writes none)
+            done.append(pid)
+        else:
+            why = ("the revision left it as it was" if r.error == "unchanged"
+                   else f"it wouldn't build ({scrubbed(r.error)})" if r.error else "it wasn't revised")
+            left.append((pid, why))
+    mirror = bool(_MIRROR.search(message or ""))
+    whys = "; ".join(f"{pid} not changed: {why}" for pid, why in left)
+    if not done:
+        first = f"✗ Nothing changed: {_listed([p for p, _ in left])} ({whys})."
+    elif left:
+        first = f"! Changed {_listed(done)}; {whys}."
+    else:
+        first = f"{'✓' if not mirror and all(r.ok for r in results) else '!'} Changed {_listed(done)}."   # never over a break
+    lines = [first]
+    if mirror:
+        lines.append("Mirroring one part from another isn't something I can do yet (#239): each was revised on its own.")
+    lines.append("")
+    lines += ["\n\n".join(r.reply for r in results if r.reply)]
+    broke = sorted({b for r in results for b in r.broke})
+    last = next((r for r in reversed(results) if r.version is not None), results[-1])
+    return TurnResult(action="refine", ok=not left and not mirror and all(r.ok for r in results), part=parts[0],
+                      version=last.version, part_report=last.part_report, report=last.report, broke=broke,
+                      fixed=sorted({f for r in results for f in r.fixed} - set(broke)),
+                      part_errors={k: v for r in results for k, v in r.part_errors.items()},
+                      events=events, reply="\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
@@ -1471,12 +1601,17 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         store.append_log({"kind": "message", "text": message, "scope": scope,
                           "action": intent.action, "part": intent.part, "routed_by": intent.source})
 
-    again = _repeats(store, intent.part, message) if intent.action == "refine" and intent.part else None
+    several = intent.action == "refine" and len(intent.parts) > 1
+    again = _repeats(store, intent.part, message) if intent.action == "refine" and intent.part and not several else None
     if again is not None:                          # the last revision already did this: asked first (#98)
         from . import awaiting
 
         awaiting.park(store, "repeat", part=intent.part, message=message, pick=pick)
         result = TurnResult(action="ask", ok=True, part=intent.part, events=events, reply=again)
+    elif several:                                  # each part the request names (#241)
+        result = refine_several(store, intent.parts, message, author=author, client=client, max_rounds=max_rounds,
+                                events=events, on_event=on_event, use_llm=use_llm, drafter=drafter,
+                                promote_feedback=promote_feedback)
     elif intent.action == "refine" and intent.part:
         result = refine_part(store, intent.part, message, author=author, client=client, pick=pick,
                              max_rounds=max_rounds, events=events, on_event=on_event,
