@@ -921,7 +921,7 @@ $('newBtn').onclick = startNew;
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
-  if (first) { S.buildBubble = null; clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
+  if (first) { dropBuildFollow(); clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
   location.hash = encodeURIComponent(slug);
   if (first) showLoading(slug);
   let got;
@@ -1143,10 +1143,25 @@ function wireClarify() {
 }
 
 // the first build, said as it goes: what it's held to, the part, its strength, its patterns (CALI-59)
-const BUILD_STEPS = { goals: 'Writing down what it has to do', build: 'Building it',
+const BUILD_STEPS = { goals: 'Writing down what it has to do', plan: 'Planning its parts', build: 'Building it',
   strength: 'Checking it holds what it must', patterns: 'Drawing the patterns to cut it out',
   score: 'Scoring it against what it has to do' };
+function elapsedText(s) {
+  const t = Math.max(0, Math.round(s));
+  return t < 60 ? `${t} s` : `${Math.floor(t / 60)} min ${t % 60} s`;
+}
+function authoringWords(round) {
+  if (!round || round < 2) return 'writing the design';
+  const word = { 2: 'second', 3: 'third', 4: 'fourth' }[round];
+  return `writing the design: ${word ? `${word} try` : `try ${round}`}`;
+}
+// leaving a design doesn't stop its build: coming back follows it again, and the design you went to can be talked to
+function dropBuildFollow() {
+  S.following = null; S.buildFollow = (S.buildFollow || 0) + 1; S.busy = false; S.buildBubble = null;
+  $('send').disabled = false;
+}
 async function followBuild(jobId) {
+  const mine = S.buildFollow = (S.buildFollow || 0) + 1;
   S.following = jobId; S.busy = true; $('send').disabled = true;
   const t = $('thread');
   t.querySelectorAll('.actions').forEach((n) => n.remove());
@@ -1159,38 +1174,38 @@ async function followBuild(jobId) {
   S.buildBubble = cal;
   const head = cal.querySelector('.head');
   let at = null;
-  const mark = (k) => {
+  const mark = (k, text) => {
     if (!BUILD_STEPS[k]) return;
     cal.querySelectorAll('li').forEach((li) => {
       const before = Object.keys(BUILD_STEPS).indexOf(li.dataset.step) < Object.keys(BUILD_STEPS).indexOf(k);
       li.classList.toggle('done', before || li.classList.contains('done'));
       li.classList.toggle('now', li.dataset.step === k);
     });
-    at = k; since = Date.now(); head.innerHTML = `<span class="spin"></span>${esc(BUILD_STEPS[k])}…`;
+    at = k; said = text || BUILD_STEPS[k]; paint();
   };
-  // a long step (writing the design takes a minute or two) shows it's still going
-  let since = Date.now();
-  const tick = setInterval(() => {
-    if (!at || !cal.isConnected) return;
-    const s = Math.round((Date.now() - since) / 1000);
-    if (s >= 5) head.innerHTML = `<span class="spin"></span>${esc(BUILD_STEPS[at])}… <span class="muted small">${s} s</span>`;
-  }, 1000);
+  // how long the whole build has run, by the server's clock from its own first event: a reload or a switch of design doesn't restart it
+  let said = 'Starting', began = Date.now() / 1000;
+  const paint = () => { head.innerHTML = `<span class="spin"></span>${esc(said)}… <span class="muted small">${elapsedText(Date.now() / 1000 - began)}</span>`; };
+  paint();
+  const tick = setInterval(() => { if (cal.isConnected) paint(); }, 1000);
   try {
     await follow(jobId, (ev) => {
-      if (ev.kind === 'step') return ev.step === 'done' ? null : mark(ev.step);
+      if (ev.kind === 'started' && ev.t) { began = ev.t; paint(); }
+      if (ev.kind === 'step') return ev.step === 'done' ? null : mark(ev.step, ev.text);
       const li = at && cal.querySelector(`li[data-step="${at}"] .detail`);
-      const said = ev.kind === 'authoring' ? 'writing the design'
+      const line = ev.kind === 'authoring' ? authoringWords(ev.round)
         : ev.kind === 'built' ? 'it builds' : ev.kind === 'strength' ? ev.text
           : ev.kind === 'error' ? `⚠ ${ev.text}` : '';
-      if (li && said) li.textContent = ` · ${said}`;
+      if (li && line) li.textContent = ` · ${line}`;
     });
   } catch (e) {
     cal.classList.add('bad'); head.innerHTML = `⚠ ${esc(e.message)} `;
     head.append(reportLink(e.errorId, e.message));
   } finally {
     clearInterval(tick);
-    S.busy = false; $('send').disabled = false;
+    if (mine === S.buildFollow) { S.busy = false; $('send').disabled = false; S.following = null; }
   }
+  if (mine !== S.buildFollow) return;                            // left for another design, or followed again since
   if (!cal.classList.contains('bad')) S.buildBubble = null;      // the reply in the log says it now
   await refresh();
 }
@@ -1275,7 +1290,7 @@ $('msg').addEventListener('keydown', (e) => {
 function startNew() {
   // remember where we were: the button sits beside the design picker and is easy to hit by mistake
   const was = S.slug ? { slug: S.slug, name: S.design ? S.design.name : S.slug } : null;
-  S.slug = null; S.design = null; S.scope = null; S.buildBubble = null;
+  S.slug = null; S.design = null; S.scope = null; dropBuildFollow();
   clearPick(); pickHint();                        // nor to a design that doesn't exist yet (#196 review)
   for (const m of meshes.values()) scene.remove(m);
   meshes.clear(); clearStation();
@@ -3157,6 +3172,8 @@ async function pollRunning() {
   if (S.slug !== slug || !S.design) return;
   S.design.running = got.running;
   syncRunning();
+  const build = got.running.find((r) => r.kind === 'firstrun');   // started from another tab
+  if (build && S.following !== build.job) followBuild(build.job);
   for (const t of jobsHere()) {
     if (got.running.some((r) => r.job === t.job)) t.gone = 0;
     else if ((t.gone = (t.gone || 0) + 1) > 1) jobOver(t.job);
@@ -3165,7 +3182,7 @@ async function pollRunning() {
 // what's on the record and this page isn't following yet: after a reload, or coming back to the design
 function syncRunning() {
   for (const r of (S.design && S.design.running) || []) {
-    if (S.tracked[r.job]) continue;
+    if (r.kind === 'firstrun' || S.tracked[r.job]) continue;     // the first build has its own bubble in the thread
     trackJob(r.job, { kind: r.kind, part: r.part, text: r.text, waiting: r.waiting }).done.catch(() => {});   // jobOver re-reads
   }
 }
