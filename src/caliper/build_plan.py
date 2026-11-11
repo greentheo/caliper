@@ -209,6 +209,7 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
     # a measurement that threw is no pass (rule 6, #135 review): "not checked", with why, and the build isn't ok
     unmeasured = plainly(errors.get("<design>")) if report is None and errors.get("<design>") else ""
     whole = (report.said()[:1].upper() + report.said()[1:] + ".") if report is not None else ""
+    found = None
     if failed:
         pid, why = failed
         before = [x.replace("_", " ") for x in made[:made.index(pid)]]
@@ -219,9 +220,14 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
         # what wasn't checked, said: design checks are geometry, never whether it holds (#135 review)
         unchecked = [x for x in ("whether it holds (Check it holds)" if _unheld(store, built) else "",
                                  "the scorecard" if _unscored(store) else "") if x]
+        # what's measured wrong now every part exists, before any strength check (CALI-160, #238 slice A)
+        from . import review
+
+        found = review.findings(store, report) if report is not None else None
         reply = (f"I built the plan's {len(made)} parts, in order:\n" + "\n".join(said)
                  + (f"\n\nThe design checks: {report.said()}." if report is not None else
                     f"\n\nThe design checks: not checked: {unmeasured}." if unmeasured else "")
+                 + (f"\n\n{review.said(found)}" if found is not None else "")
                  + (f"\n\nNot checked yet: {' and '.join(unchecked)}. Run *Will it work?* next." if unchecked else ""))
     steps["plan"] = f"{status}: {len(built)} of {len(made)} parts"
     ok = not failed and not unmeasured and (report is None or verdicts.report(report.to_dict())["counts_as_pass"])
@@ -229,4 +235,5 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
     store.append_log({"kind": "reply", "action": "plan", "ok": ok, "reply": reply, "firstrun": True})
     emit("step", "Done", step="done")
     return {"part": failed[0] if failed else (made[-1] if made else None), "ok": ok, "steps": steps,
-            "reply": reply, "plan": status, "built": list(built)}
+            "reply": reply, "plan": status, "built": list(built),
+            **({"findings": found["findings"]} if not failed and found is not None else {})}
