@@ -1136,6 +1136,31 @@ def _not_closed(res) -> str:
             f"is.")
 
 
+def _overclaimed(store: DesignStore) -> list[str]:
+    """A locked check whose name says a part mirrors another but whose expression doesn't measure it, said with what
+    ``mirrors()`` measures (CALI-161, #239: step-stool-4's ``side_left_mirrors_side_right``, Theo's, kept as he took
+    it, compares the two bounding boxes' sides)."""
+    from . import measure, promote
+    from .assembly import _names
+
+    out = []
+    ids = {p.id for p in store.design.parts}
+    for a in store.assembly.assertions:
+        if not promote.overclaims(a.id, a.expr):
+            continue
+        pair = [n for n in sorted(_names(a.expr)) if n in ids]
+        named = [p for p in ids if p in a.id]
+        pair = sorted(named, key=a.id.index)[:2] if len(named) >= 2 else pair[:2]
+        what = "only overall size" if "bbox(" in a.expr else "something else"
+        try:
+            off = measure.mirror_off(store.part_geometry(pair[0]), store.part_geometry(pair[1]))
+            said = f"mirrors() says they differ by {off * 100:.1f}% of {pair[0]}'s volume"
+        except Exception as e:  # noqa: BLE001 — what couldn't be measured is said
+            said = f"mirrors() couldn't measure them ({scrubbed(e)})"
+        out.append(f"⚠ {a.id} compares {what}; {said}.")
+    return out
+
+
 def _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb: str, *, asked: str = "",
              prior: str = "", new: str = "", volumes=None) -> str:
     """The chat reply: what happened, what it measures, and — critically — what it broke. For a request, what was
@@ -1165,6 +1190,7 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
         lines.append(f"✓ It also fixed: {', '.join(fixed)}")
     if not broke and _design_line(after):
         lines.append(_design_line(after).replace("measures green", "still measures green"))
+    lines += _overclaimed(store)
     for pid, err in part_errors.items():
         if pid != part_id:
             lines.append(f"⚠ {pid} won't build: {scrubbed(err)}")

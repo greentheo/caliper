@@ -197,3 +197,68 @@ def test_its_pattern_says_to_flip_the_template(stool):
     assert pc["seen"].endswith("; a mirror of side_right: flip its template") and pc["mirror_of"] == "side_right"
     assert "a mirror of side_right: flip its template" in patterns.titles(pc)["full"]
     assert "mirror" not in patterns.pieces(stool, "side_right")[0]["seen"]
+
+
+# --- #239 addendum: a mirror check measures the mirror -------------------------------------------------------------------
+def test_mirrors_measures_the_mirror_not_the_bounding_boxes(stool):
+    """Today's v1 sides have the same bounding-box sides but aren't mirrors (the boss is on the inner face of the left);
+    a made mirror measures 0."""
+    from caliper import measure
+
+    off = measure.mirror_off(stool.part_geometry("side_left"), stool.part_geometry("side_right"))
+    assert off > 0.01
+    mirror.make(stool, "side_left", "side_right")
+    assert measure.mirror_off(stool.part_geometry("side_left"), stool.part_geometry("side_right"), "yz") < 0.001
+
+
+def test_mirrors_is_an_expression_a_design_check_can_use(stool):
+    from caliper.assembly import Assembly, evaluate_assembly
+    from caliper.spec import Assertion
+
+    asm = Assembly(name="s", parts=stool.assembly.parts, assertions=[
+        Assertion(id="left_mirrors_right", expr='mirrors(side_left, side_right, "yz") <= 0.001')])
+    (r,) = evaluate_assembly(asm, base_dir=stool.root).results
+    assert r.status == "fail" and r.actual > 0.01
+    mirror.make(stool, "side_left", "side_right")
+    (r,) = evaluate_assembly(asm, base_dir=stool.root).results
+    assert r.status == "pass"
+
+
+@pytest.mark.parametrize("aid,expr,flagged", [
+    ("side_left_mirrors_side_right", "-0.1 <= bbox(side_left).dx - bbox(side_right).dx <= 0.1", True),
+    ("sides_symmetric", "bbox(side_left).dz == bbox(side_right).dz", True),
+    ("left_identical_to_right", "bbox(side_left).dx >= 1", True),
+    ("left_same_as_right", "bbox(side_left).dx >= 1", True),
+    ("side_left_mirrors_side_right", 'mirrors(side_left, side_right, "yz") <= 0.001', False),
+    ("side_left_same_size_as_side_right", "bbox(side_left).dx == bbox(side_right).dx", False),
+    ("holes_match_bolt", "holes_aligned(side_left, side_right)", False),
+])
+def test_a_check_named_for_a_mirror_has_to_measure_one(aid, expr, flagged):
+    from caliper import promote
+
+    assert bool(promote.overclaims(aid, expr)) is flagged
+
+
+def test_promote_never_offers_a_check_named_greener_than_it_measures(stool):
+    from caliper import promote
+
+    got = promote._candidate(stool, "side_left_mirrors_side_right",
+                             "-0.1 <= bbox(side_left).dx - bbox(side_right).dx <= 0.1", "design", "side_left", "mirror it")
+    assert got.proposal is None and "mirrors(a, b, plane) does" in got.reason
+    assert 'mirrors(a, b, "yz")' in promote._DRAFT_SYSTEM and "never a comparison of" in promote._DRAFT_SYSTEM
+
+
+def test_the_locked_check_stays_and_the_reply_says_what_it_measures(stool):
+    """Theo's locked test is kept as he took it; the next reply that measures the design says what mirrors() says."""
+    from caliper import chat
+    from caliper.spec import Assertion
+
+    stool.assembly.assertions.append(Assertion(
+        id="side_left_mirrors_side_right",
+        expr="-0.1 <= (bbox(side_left).dx + bbox(side_left).dy + bbox(side_left).dz) - "
+             "(bbox(side_right).dx + bbox(side_right).dy + bbox(side_right).dz) <= 0.1"))
+    stool.save()
+    lines = chat._overclaimed(stool)
+    assert len(lines) == 1 and lines[0].startswith("⚠ side_left_mirrors_side_right compares only overall size; "
+                                                   "mirrors() says they differ by ")
+    assert any(a.id == "side_left_mirrors_side_right" for a in stool.assembly.assertions)
