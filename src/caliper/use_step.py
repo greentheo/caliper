@@ -23,6 +23,20 @@ UNSEEN = "The re-check can't see the walls of any step at this size, so it could
 UNKNOWN = ("This study didn't record how thin each step's walls are, so it can't say which step a re-check could settle: run the study again "
            "to know. The steps are in the study.")
 SAID = {"room": ROOM, "no_room": NO_ROOM, "unseen": UNSEEN, "unknown": UNKNOWN}
+#: the least a Lightening must save to get a button (#207). A labour threshold, not a safety one: every hole is a cut in the shop and a
+#: re-check, so a few ounces is the same waste as a 7¢ carve, paid in labour. A quarter pound or 5% of the part, whichever is larger,
+#: but never more than a pound: the labour doesn't grow with the part, and a pound saved is a pound carried (#252 review). The foreman's
+#: call for now; Theo can move it. It decides only whether there's a button: a deeper step over it is still named
+LIGHTEN_MIN = {"lb": 0.25, "share": 0.05, "most_lb": 1.0}
+
+
+def lighten_floor(part_lb: Optional[float]) -> float:
+    """:data:`LIGHTEN_MIN` for a part of this weight: ``min(1 lb, max(0.25 lb, 5%))``; a quarter pound where its weight isn't known."""
+    if not part_lb:
+        return LIGHTEN_MIN["lb"]
+    return min(LIGHTEN_MIN["most_lb"], max(LIGHTEN_MIN["lb"], LIGHTEN_MIN["share"] * part_lb))
+
+
 #: a deeper step only counts as given up if it saves this much more: "3.37 lb against 3.35" isn't worth a sentence
 GAVE_UP_BY = 1.05
 
@@ -46,11 +60,11 @@ def _strength(as_drawn: Optional[float], quote: float) -> str:
 
 
 def choose(steps: list[dict], need: float, saved: str, further: Callable[[dict], str], *, as_drawn: Optional[float] = None,
-           worth: Optional[Callable[[dict], Optional[float]]] = None) -> Optional[dict]:
+           worth: Optional[Callable[[dict], Optional[float]]] = None, least: Optional[float] = None) -> Optional[dict]:
     """The step to offer from those that pass, and what to say about it: ``{index, kind, quote, said, deepest, offers}``. ``saved`` is what
     a step saves; ``further`` says how far a step got, for what's given up; ``as_drawn`` is the part's number before any of it; ``worth``
     is what a step saves in dollars, where that's known. ``offers`` False: nothing to click. The re-check couldn't settle any step, or the
-    saving is too small to be worth it, and the card says which."""
+    saving is too small to be worth it, and the card says which. ``least``: the least ``saved`` worth a button (a Lightening's, #207)."""
     if not steps:
         return None
     seen = [st for st in steps if st.get("seen") is True]
@@ -61,7 +75,8 @@ def choose(steps: list[dict], need: float, saved: str, further: Callable[[dict],
         pick, kind = max(seen, key=own), "no_room"
     else:
         pick, kind = max(steps, key=own), "unknown" if any(st.get("seen") is None for st in steps) else "unseen"
-    deepest = max(steps, key=lambda st: st[saved])
+    deepest = max(seen or steps, key=lambda st: st[saved])          # one the re-check can see: that's one to choose (#207)
+    furthest = max(steps, key=lambda st: st[saved])
     out = {"index": pick["index"], "kind": kind, "quote": own(pick), "deepest": None, "offers": False, "said": SAID[kind]}
     if kind in ("unseen", "unknown"):
         return out
@@ -71,6 +86,15 @@ def choose(steps: list[dict], need: float, saved: str, further: Callable[[dict],
         return {**out, "kind": "small", "said": f"It would save about {_money(usd)} of material{', ' + cost if cost else ''}: too little to be worth "
                                                 f"a re-check, so it's left in the study."}
     gave_up = deepest[saved] > GAVE_UP_BY * pick[saved]
+    if least is not None and pick[saved] < least:   # the floor decides the button only: a deeper step over it is still named (#252)
+        named = gave_up and deepest[saved] >= least
+        return {**out, "kind": "small", "deepest": deepest["index"] if named else None,
+                "said": f"It would make it {further(pick)}{', ' + cost if cost else ''}: too little to be worth the cuts and a re-check, "
+                        f"so it's left in the study."
+                        + (f" The study got as far as {further(deepest)}, and that step is there to choose." if named else "")}
+    unseen = furthest.get("seen") is not True and furthest[saved] > GAVE_UP_BY * (deepest if gave_up else pick)[saved]
     return {**out, "offers": True, "deepest": deepest["index"] if gave_up else None,
             "said": SAID[kind] + (f" That takes it{cost[9:]}." if cost.startswith("taking it") else f" It comes {cost}." if cost else "")
-                    + (f" The study got as far as {further(deepest)}, and that step is there to choose." if gave_up else "")}
+                    + (f" The study got as far as {further(deepest)}, and that step is there to choose." if gave_up else "")
+                    + (f" The study got as far as {further(furthest)}, but the re-check can't see that step's walls, so it couldn't be "
+                       f"settled." if unseen else "")}
