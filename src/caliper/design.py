@@ -388,6 +388,13 @@ class DesignStore:
         """
         if not _ID_OK.match(part_id):
             raise ValueError(f"part id {part_id!r} must be a valid identifier (letters/digits/_)")
+        if action != "mirror":                    # a mirror's script is only ever its source's, flipped (#246 review)
+            from . import mirror
+
+            got = mirror.of(script)
+            if got is not None:
+                raise ValueError(f"that would be undone the next time {got['source']} changes: "
+                                 + mirror.said(part_id, got["source"]))
 
         entry = self.design.part(part_id)
         version = (entry.version if entry else 0) + 1
@@ -437,6 +444,10 @@ class DesignStore:
             **(_result(report) if report else {}),
             **(extra or {}),
         })
+        if action != "mirror":                    # a part's mirrors follow it, written again from it (CALI-161, #239)
+            from . import mirror
+
+            mirror.rebuild(self, part_id)
         if any(s.get("source") == "measured" and s.get("of") == part_id for s in self.design.skeleton or []):
             from . import skeleton                # a size measured off this part, measured again (#243 review)
 

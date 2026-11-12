@@ -63,6 +63,8 @@ DESIGN_VOCABULARY = """  min_clearance(a, b)              smallest gap between t
   hole_misalignment(a, b)          how far the nearest hole axes miss, mm
   holes_aligned(a, b, tol=0.5)     boolean
   bbox(part).dx / .dy / .dz        one part's size in mm
+  mirrors(a, b, "yz")              how far a is from b mirrored in place in that plane (yz, xz or xy), half way
+                                   between them: the largest gap between their surfaces, mm; a mirror is <= 0.2
   <part_id>                        every part in the design is bound by id"""
 
 #: CALI-68 (#28): how far a measurement can be off, on a part that's right. Parts are measured on a mesh
@@ -457,6 +459,9 @@ def _candidate(store: DesignStore, aid: str, expr: str, level: str, part: str, w
     measured size allows for what measuring it can be off by (CALI-68)."""
     if not _ID_OK.match(aid):
         return Draft(measurable=True, reason=f"bad assertion id {aid!r}", rejected=[aid])
+    claims = overclaims(aid, expr, [p.id for p in store.design.parts])
+    if claims:                                     # a name greener than its check is never offered (#239, rule 6)
+        return Draft(measurable=True, reason=claims, rejected=[f"{aid}: {expr}"])
     expr = allow_for_measuring(expr)
     aid = _unique_id(store, aid, level)
     v = validate(store, expr, level, part)
@@ -466,6 +471,39 @@ def _candidate(store: DesignStore, aid: str, expr: str, level: str, part: str, w
     return Draft(proposal=Proposal(id=aid, expr=expr, level=level, part=part, why=why,
                                    holds_now=v.holds, actual=v.actual, source=source,  # producer
                                    conflicts=conflicts(store, expr, level, part)))
+
+
+#: Words that claim one part's shape is another's (#239, #246 review: words, not part names, and about the shape).
+_CLAIM = {"mirror", "mirrors", "mirrored", "match", "matches", "matching", "same", "identical", "flipped", "flip",
+          "twin", "twins", "pair", "alike", "symmetric", "symmetrical"}
+#: Words that make a "same" about a size or a load, not a shape: width_same_as_base, symmetric_load_ok.
+_NOT_SHAPE = {"width", "height", "thickness", "length", "depth", "size", "diameter", "radius", "load", "loads",
+              "weight", "mass", "volume", "area", "t", "w", "h", "d", "l"}
+_WHERE = {"left", "right", "front", "back", "rear", "top", "bottom", "inner", "outer", "upper", "lower"}
+
+
+def overclaims(aid: str, expr: str, ids: Optional[list] = None) -> str:
+    """Why a check's name claims more than its expression measures, or "" (CALI-161, #239: ``side_left_mirrors_
+    side_right`` compared only the bounding boxes' sides). A name claims a mirror only when it names two parts (two
+    part ids, a plural of two of them, or two position words) and says mirror, match, same, identical, flipped, twin or
+    alike about their shape (#246 review: ``mirror_frame_wall`` is one part, ``width_same_as_base`` a size and
+    ``symmetric_load_ok`` a load). A claim with ``mirrors()`` in it measures what it says."""
+    if "mirrors(" in (expr or ""):
+        return ""
+    name = (aid or "").lower()
+    named = [p for p in ids or [] if re.search(rf"(?:^|_){re.escape(p.lower())}(?:_|$)", name)]
+    rest = name
+    for p in sorted(named, key=len, reverse=True):
+        rest = re.sub(rf"(?:^|_){re.escape(p.lower())}(?=_|$)", "_", rest)
+    words = [w for w in rest.split("_") if w]
+    if not any(w in _CLAIM for w in words) or any(w in _NOT_SHAPE for w in words):
+        return ""
+    plurals = [w[:-1] for w in words if w.endswith("s") and w not in _CLAIM and len(w) > 3]
+    siblings = any(sum(stem in p.lower().split("_") for p in ids or []) >= 2 for stem in plurals)
+    if len(named) >= 2 or siblings or len([w for w in words if w in _WHERE]) >= 2:
+        return (f"its name ({aid}) says one part mirrors or matches another, but {expr} doesn't measure that: "
+                "mirrors(a, b, plane) does")
+    return ""
 
 
 _DRAFT_SYSTEM = """You turn a piece of design feedback into ONE measurable Caliper assertion, or say it
@@ -486,7 +524,10 @@ Rules:
 - The expression must be a single Python comparison (>=, <=, ==, or a chained a <= x <= b).
 - Prefer the threshold the user actually stated. If they gave no number and none can be inferred from
   the design, set measurable=false rather than inventing one.
-- Aesthetic or vague feedback ("looks chunky", "cleaner", "nicer") is NOT measurable.""" % (
+- Aesthetic or vague feedback ("looks chunky", "cleaner", "nicer") is NOT measurable.
+- A mirror, symmetric, identical or "same as" request is mirrors(a, b, plane) <= 0.2, never a comparison of
+  bounding boxes. Name a check for what its expression measures: a bbox comparison is "<a>_same_size_as_<b>",
+  never "<a>_mirrors_<b>".""" % (
     PART_VOCABULARY, DESIGN_VOCABULARY)
 
 

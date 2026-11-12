@@ -359,3 +359,5 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
   .pickbar button { padding: 4px 8px; }
 }
 
+
+.tmirror { font-size: 11px; color: var(--muted); margin: 0 0 2px 30px; }

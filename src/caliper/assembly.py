@@ -341,6 +341,8 @@ def build_context(asm: Assembly, parts: dict[str, Geometry]) -> dict:
         # hole alignment across parts (CALI-25) — does a screw pass through both?
         "hole_misalignment": lambda a, b: measure.min_hole_misalignment(a, b),
         "holes_aligned": lambda a, b, tol=0.5: measure.min_hole_misalignment(a, b) <= tol,
+        # whether a is b mirrored in place: the largest gap between their surfaces, mm (CALI-161, #239)
+        "mirrors": lambda a, b, plane=None: measure.mirror_off(a, b, plane),
         # a part in another's pocket: how far its worst side is from the clearance (CALI-162, #240)
         "fit_off": lambda a, b, c=measure.POCKET_CLEARANCE_MM: measure.fit_off(a, b, c),
         # per-part dimensional query
