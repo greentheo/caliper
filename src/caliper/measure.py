@@ -843,3 +843,46 @@ def pocket_said(a: str, b: str, got: dict, clearance: float = POCKET_CLEARANCE_M
     if tight:
         said.append(f"is {max(tight):.1f} mm too big for {b}'s pocket" if not loose else f"is {max(tight):.1f} mm too big for it the other way")
     return f"the {name} " + ", and ".join(said) + f"{open_said}, on the drawn sizes"
+
+
+# ---------------------------------------------------------------------------
+# CALI-161 (#239) — whether one part is another's mirror, measured
+# ---------------------------------------------------------------------------
+_PLANES = {"YZ": 0, "XZ": 1, "XY": 2, "ZY": 0, "ZX": 1, "YX": 2}
+
+
+#: How far apart a mirror's surfaces may be and still be one (mm): a mesh's own facets differ by a little.
+MIRROR_MM = 0.2
+_MIRROR_SAMPLES = 3000
+
+
+def mirror_off(g: Geometry, other: Any, plane: Optional[str] = None) -> float:
+    """How far part ``g`` is from ``other`` mirrored in place, in mm: ``other`` reflected in ``plane`` (``"yz"``,
+    ``"xz"`` or ``"xy"``; across the axis their middles are furthest apart on, if not given) through the point half
+    way between them, and the largest distance from either one's surface to the other's, sampled (#246 review: a share
+    of volume read a true pair of thin printed cones 3% apart). 0 is an exact mirror; a mirror passes under
+    :data:`MIRROR_MM`. In place: an offset along the plane's own axis is taken up by the plane, the other two count.
+    Under the OCCT lock, as every build (#246 review)."""
+    from . import spatial
+    from .occt import OCCT
+
+    with OCCT:
+        a, b = g.require_mesh(), _as_mesh(other)
+        ca, cb = a.bounds.mean(axis=0), b.bounds.mean(axis=0)
+        if plane is None:
+            k = int(np.argmax(np.abs(ca - cb)))
+        else:
+            if str(plane).upper() not in _PLANES:
+                raise ValueError(f"a mirror's plane is yz, xz or xy, not {plane!r}")
+            k = _PLANES[str(plane).upper()]
+        at = (ca[k] + cb[k]) / 2.0
+        flip = np.eye(4)
+        flip[k, k], flip[k, 3] = -1.0, 2.0 * at
+        m = b.copy()
+        m.apply_transform(flip)                    # trimesh winds a reflected mesh outward again itself
+        worst = 0.0
+        for src, dst in ((a, m), (m, a)):
+            pts = np.vstack([src.vertices, trimesh.sample.sample_surface(src, _MIRROR_SAMPLES, seed=0)[0]])
+            _, dist, _ = spatial.closest_point(dst, pts)
+            worst = max(worst, float(np.max(dist)) if len(dist) else 0.0)
+        return round(worst, 3)

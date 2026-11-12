@@ -56,7 +56,7 @@ def drive(store: DesignStore, skeleton: list, said: str = "") -> dict:
     the plan says reads it, as a new version; then measure the whole design again. All or nothing. Returns
     ``{changed, rebuilt: {pid: [names]}, unmoved: {pid: why}, refused: {pid: why}, strength: [pids], report}``; no
     authoring call is made."""
-    from . import aero, load_study, sandbox
+    from . import aero, load_study, mirror, sandbox
 
     before = {s["name"]: s for s in (store.design.skeleton or [])}
     after = {(s if isinstance(s, dict) else s.model_dump())["name"]: (s if isinstance(s, dict) else s.model_dump())
@@ -67,7 +67,7 @@ def drive(store: DesignStore, skeleton: list, said: str = "") -> dict:
     changed = {n: (before[n]["value"], after[n]["value"]) for n in after
                if (before[n]["value"], before[n]["unit"]) != (after[n]["value"], after[n]["unit"])}
     out = {"changed": changed, "rebuilt": {}, "unmoved": {}, "refused": {}, "strength": [], "report": None,
-           "units": {n: after[n]["unit"] for n in changed}}
+           "follows": {}, "units": {n: after[n]["unit"] for n in changed}}
     if not changed:
         return out
     # what each reading part's script becomes, before anything is saved
@@ -75,6 +75,12 @@ def drive(store: DesignStore, skeleton: list, said: str = "") -> dict:
     for n in changed:
         old_mm, new_mm = _mm(before[n]), _mm(after[n])
         for pid in readers(store, n):
+            source = mirror.source_of(store, pid)
+            if source:                             # a mirror is never written: its source is, and it follows (#246)
+                out["follows"][pid] = source
+                pid = source
+            if n in out["rebuilt"].get(pid, []):
+                continue
             script = scripts.get(pid) or store.read_script(pid)
             own = aero.read_params(script) or {}
             if n not in own:
@@ -96,6 +102,9 @@ def drive(store: DesignStore, skeleton: list, said: str = "") -> dict:
         if not built.ok:
             tail = [ln for ln in (built.feedback or "").strip().splitlines() if ln.strip()]
             out["refused"][pid] = f"it won't build with it: {tail[-1].strip() if tail else 'the build failed'}"
+    for pid, script in scripts.items():             # every write checked before any is made (#246): a refusal changes nothing
+        if pid not in out["refused"] and mirror.of(script):
+            out["refused"][pid] = mirror.said(pid, mirror.of(script)["source"])
     if out["refused"]:                              # all or nothing: the skeleton and every part as they were
         out["rebuilt"] = {}
         return out

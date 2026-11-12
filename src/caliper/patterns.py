@@ -65,7 +65,10 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
     corner at (0, 0); and its holes in the same frame."""
     from .consistency import _frame
 
+    from . import mirror
+
     d = C.declared(store, part_id)
+    flip = mirror.source_of(store, part_id)       # its pattern is the source's, flipped: said on every page (#239)
     try:
         middle = store.part_geometry(part_id).require_mesh().bounds.mean(axis=0)
     except Exception:  # noqa: BLE001 — no solid to say which way is out: each piece from the face its outline gives
@@ -99,7 +102,8 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
         out.append({"name": it.get("name") or "piece", "material": it.get("material"), "thickness": t,
                     "label": f"{M.nominal(t)} {M.sheet(it['material'])['name']}" if it.get("material") in M.SHEETS
                     else f"{M.nominal(t)} sheet", "outline": pts, "holes": holes, "size": pts.max(axis=0),
-                    "face": face, "seen": f"this is the {face} face" if face == "outside" else f"this is the face {face}"})
+                    "face": face, "seen": (f"this is the {face} face" if face == "outside" else f"this is the face {face}")
+                    + (f"; a mirror of {flip}: flip its template" if flip else ""), **({"mirror_of": flip} if flip else {})})
     return out
 
 
