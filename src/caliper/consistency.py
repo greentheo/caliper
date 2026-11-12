@@ -20,6 +20,8 @@ A part that declares nothing gets none of these: there is nothing to disagree wi
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import math
 from typing import Optional
 
@@ -557,7 +559,7 @@ def _loads(mesh, declared: dict, pieces: list[dict], tol: float) -> AssertionRes
     except (ValueError, TypeError) as e:
         return AssertionResult(id="loads_land", expr="every load in loads() says how much and where",
                                status="fail", passed=False, actual=None,
-                               detail=f"{e} (see the loads() format)")
+                               detail=f"{scrubbed(e)} (see the loads() format)")
     rch = L.reach(tol, L.study_spacing(declared, mesh, pieces)[0])
     missed = []
     for item, support in [(h, True) for h in held] + [(ld, False) for ld in loads]:
@@ -654,7 +656,7 @@ def filled(store, part_id: str) -> Optional[str]:
                 elif vol is not None and not vol.passed and "filled in" in (vol.detail or ""):
                     out = vol.detail
         except Exception as e:  # noqa: BLE001 — closed, not open: a shape that couldn't be checked isn't trusted
-            return f"couldn't check its shape against its pieces ({type(e).__name__}: {e})"   # and not kept
+            return f"couldn't check its shape against its pieces ({type(e).__name__}: {scrubbed(e)})"   # and not kept
         _FILLED[key] = out
         while len(_FILLED) > 64:
             _FILLED.pop(next(iter(_FILLED)))
@@ -746,7 +748,7 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
     try:
         pieces = shapes(declared)
     except (ValueError, KeyError, TypeError) as e:
-        what = f"missing {e}" if isinstance(e, KeyError) else str(e)
+        what = f"missing {scrubbed(e)}" if isinstance(e, KeyError) else scrubbed(e)
         return [AssertionResult(id="construction_reads", expr="every piece is one Caliper can weigh",
                                 status="fail", passed=False, actual=None,
                                 detail=f"{what} (see the materials table and the piece formats)")]

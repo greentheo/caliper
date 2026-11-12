@@ -292,8 +292,8 @@ def test_construction_s_own_refusals_are_marked():
 @pytest.mark.parametrize("mk,said", [({"printed": [{"name": "sides", "filament_g": 726, "trust": "model"}]}, ("", "")),
                                      ({"printed": [{"name": "sides", "filament_g": 726, "trust": "rough"}]},
                                       ("a guess (the filament is a rough guess)", "")),
-                                     (None, ("a guess (the filament is by the model's solid)", "")),       # a failed slice, say
+                                     (None, ("a guess (the filament is the model's solid share)", "")),       # a failed slice, say
                                      ({"printed": [{"name": "sides", "filament_g": None, "pending": True}]},
-                                      ("a guess (the filament is by the model's solid)", "still slicing"))])
+                                      ("a guess (the filament is the model's solid share)", "still slicing"))])
 def test_only_the_slicer_s_own_figure_is_no_guess(mk, said):
     assert making.filament_said([making.filament(_rep(), mk), None]) == said

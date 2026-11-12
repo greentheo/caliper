@@ -42,6 +42,11 @@ def take_turn(emit: Optional[Callable] = None, stop: Optional[Callable[[], None]
         return False
     if emit:
         emit("waiting", WAITING)
+    from . import jobs
+
+    running = jobs.current()
+    if running is not None:              # a chat that turned into a study: it waits without holding a chat worker (#174)
+        running.park()
     told = time.monotonic()
     job = getattr(stop, "__self__", None)            # the job waiting, if it's one: its clock doesn't run (#211 review)
     if job is not None and hasattr(job, "waiting_since"):
@@ -65,6 +70,12 @@ def take_turn(emit: Optional[Callable] = None, stop: Optional[Callable[[], None]
         if job is not None and job.waiting_since:
             job.waited_s += time.time() - job.waiting_since
             job.waiting_since = None
+    if running is not None:              # its turn: its worker back, so what it does next is counted (#256 review)
+        try:
+            running.unpark()
+        except BaseException:            # asked to stop while it waited for one: the turn goes on to the next
+            _TURN.release()
+            raise
     _since = time.monotonic()
     return True
 

@@ -11,6 +11,8 @@ study to draw itself. A verdict from an older version says so.
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import math
 import re
 from typing import Optional
@@ -43,9 +45,10 @@ def promise(store: DesignStore, parts) -> str:
         except Exception:  # noqa: BLE001 — a part whose script won't say: the general words, never a wrong one
             items = []
         for it in items:
-            if not isinstance(it, dict):
+            if not isinstance(it, dict) or it.get("kind") == "lump":   # a hinge, glue or screws: no material (#209 review)
                 continue
-            made.add("printed" if it.get("kind") == "printed" else "wood" if it.get("material") in WOODS else "other")
+            mat = it.get("material", "lumber" if it.get("kind") == "stick" else None)    # as construction.piece() reads it
+            made.add("printed" if it.get("kind") == "printed" else "wood" if mat in WOODS else "other")
     if made == {"wood"} or not made:
         return PROMISE
     wood, printed, other = "wood" in made, "printed" in made, "other" in made
@@ -85,14 +88,21 @@ def _times(x: float, about: bool = False, need: Optional[float] = None) -> str:
     fail further under is cut to one place. Nothing under 10 rounds up to "more than 10" (CALI-88, #64 item 1)."""
     if x >= 10:
         return "more than 10 times over"
-    return ("about " if about else "") + f"{safety_num(x, need)} times over"
+    n = safety_num(x, need)
+    return ("about " if about and n != UNDER else "") + f"{n} times over"
+
+
+#: A safety under a tenth, said (#235 review): cut to one place it read "only 0 times over".
+UNDER = "under 0.1"
 
 
 def safety_num(x: float, need: Optional[float] = None) -> str:
     """A safety factor's number, as every reader says it (#208 review: one formatter, server and page; the page's
     ``safetyNum`` is the same rule): within 10% of ``need`` either way, two places, cut; a fail further under, one
     place, cut (1.67 is 1.6, not 1.7); else one place, rounded, but never up to 10. So no reader rounds a fail up
-    to its limit: 1.995 against 2 is 1.99, 0.999 against 1 is 0.99."""
+    to its limit: 1.995 against 2 is 1.99, 0.999 against 1 is 0.99. Under 0.1, :data:`UNDER` (#235 review)."""
+    if x < 0.1:
+        return UNDER
     if need is not None and need / NEAR_LIMIT < x < need * NEAR_LIMIT:
         n = math.floor(x * 100 + 1e-9) / 100           # near the line: the places that tell it from the line
     elif need is not None and x < need:
@@ -206,6 +216,10 @@ def _small_len(mm: float, inches: bool) -> str:
             f"{mm:.1f}".removesuffix(".0") if mm < 10 else f"{mm:.0f}") + " mm"
 
 
+#: What a shove in a sheet's plane doesn't check (#250 review): no new check, and racking is Theo's call.
+RACKING = "Racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid."
+
+
 def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     """What a ✗ adds about where it fails and how sure (#137 item 2), the same words on the part card and the design
     card (#139 review: the design card named the 0.25 mm webs, the part card the 5.2 mm wall at the peak). "" when
@@ -213,8 +227,11 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     if c.get("governs") == "buckling":
         rows = [r for r in c.get("buckling") or [] if r.get("done")]
         if rows:
-            wall = min(rows, key=lambda r: r["safety"])["piece"]
-            return (f" The {wall} folds first: it's too slender for the load running down it (a hand buckling check, "
+            w = min(rows, key=lambda r: r["safety"])
+            if w.get("down") is False:               # a shove in its plane: what's checked, and what isn't (#235, #250 review)
+                return (f" The {w['piece']} folds first, taken as squeezed end to end by a push that doesn't run down it: "
+                        f"the safe side for the sheet. {RACKING}")
+            return (f" The {w['piece']} folds first: it's too slender for the load running down it (a hand buckling check, "
                     f"its edges and stiffness taken on the safe side, and the whole load on it).")
     where, thin_here = worst_at(run, c, inches)
     wall = _wall(c["fea"]["wall_mm"], inches) if where else ""
@@ -271,7 +288,7 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     older = " (Checked on an older version: check again.)" if stale else ""
     v = verdicts.case(run, c, filled=filled, stale=stale, edge=edge)   # an older run's ✓ is "older version" (#132)
     if v["kind"] == "untrusted":                     # ran on a block: no ✓ from it (CALI-96); this wins
-        return _line(untrusted(pid, filled) if filled else (f"Not trusted yet: the last strength check ran on a filled-in shape"   # the number: the panel, badged
+        return _line(untrusted(pid, filled) if filled else (f"Not trusted yet: the last strength check ran on a solid with more in it than its pieces"   # the number: the panel, badged
                      f"{', on an older version' if stale else ''}. Check it again."), "warn", study="load")   # the run's own record, the part since changed
     if v["kind"] == "unchecked" and (c.get("fea") or {}).get("supported") is False:     # couldn't run (#138 item 3)
         return _line(f"{c['name'][:1].upper() + c['name'][1:]}: not checked: {v['why']}. Check where it's held and "
@@ -294,7 +311,9 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     elif v["kind"] == "close":                       # amber: it holds, near the line (CALI-88, #64 item 2)
         text = f"Holds {c['name'].lower()}, {over(c, need, rough)}: close to the {need:g} it needs."
     elif v["kind"] == "fails":
-        text = f"Doesn't hold {c['name'].lower()}: only {over(c, need, rough)}, and it needs {run['min_safety']:g}."
+        said = over(c, need, rough)
+        text = (f"Doesn't hold {c['name'].lower()}: {'' if said.startswith(UNDER) else 'only '}{said}, and it needs "
+                f"{run['min_safety']:g}.")
         if filled:                                   # a ✗ stays a ✗: the block failed, the part is weaker
             text += filled_fail(filled)
         else:                                        # where it fails first, and how sure (#137 item 2)
@@ -380,9 +399,9 @@ def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
         return f"Not resolved yet: the check was too coarse to see its {walls}. Check it again finer."
     return L.NOT_CHECKED
 def filled_fail(why: Optional[str]) -> str:
-    """What a ✗ adds when its check didn't run on the part as built (#89, #100's merge checks): on a filled-in shape,
+    """What a ✗ adds when its check didn't run on the part as built (#89, #100's merge checks): on a filled-in solid,
     the part as built is *likely* weaker (taking material away can, rarely, lower a peak); where its shape couldn't
-    be checked against its pieces, that is said, not "a filled-in shape", which isn't known."""
+    be checked against its pieces, that is said, not that it's filled in, which isn't known."""
     if (why or "").startswith(("couldn't", "Not trusted yet: I couldn't")):     # filled()'s, or untrusted()'s
         return " Its shape couldn't be checked against its pieces, so this number may not be the part's."
     # both causes, as the volume check says them (#64 item 12, #209 review): with a piece missing from construction()
@@ -569,7 +588,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                                   f"is no wider that way).", "warn", study="tip"))
             missing = tipping.unchecked(C.declared(store, pid), p.get("intent") or "")
         except Exception as e:  # noqa: BLE001 — said, never a crash of the card
-            work.append(_line(f"Tipping: not checked ({e}).", "warn", study="tip"))
+            work.append(_line(f"Tipping: not checked ({scrubbed(e)}).", "warn", study="tip"))
             missing = []
         if missing:                             # a seat's cases nobody checked, said (#86 item 3)
             work.append(_line("Not checked yet for a seat: " + "; ".join(missing) + ".", "warn", study="tip"))
@@ -774,8 +793,10 @@ def measured(store: DesignStore, state: dict) -> dict:
     if older:
         out["strength.stale"] = ("the " + " and the ".join(said[x] for x in older)
                                  + " changed since its strength check: check it again")
-    filled = [pid for pid in current if any(r["part"] == pid and r.get("version") == current[pid]
-                                            for r in state.get("load_runs") or []) and consistency.filled(store, pid)]
+    now_run = {pid: next((r for r in state.get("load_runs") or [] if r["part"] == pid and r.get("version") == current[pid]), None)
+               for pid in current}
+    # the run of this version says it ran on a filled solid, or filled() says so now (#70: the run's own word counts)
+    filled = [pid for pid in current if now_run[pid] and (now_run[pid].get("filled") or consistency.filled(store, pid))]
     if filled:                                         # a verdict measured on a filled-in solid isn't one (CALI-96)
         out["strength.filled"] = untrusted(filled[0], consistency.filled(store, filled[0]) or "")
     edged = [pid for pid in current if any(r["part"] == pid and r.get("version") == current[pid]
@@ -809,7 +830,7 @@ def measured(store: DesignStore, state: dict) -> dict:
         try:
             rep = C.report(store, p["id"])
         except Exception as e:  # noqa: BLE001 — a part that can't be weighed is unknown, never left out (#132)
-            weighed, unweighed = True, unweighed or f"not checked: the {part_name(p)} couldn't be weighed ({e})"
+            weighed, unweighed = True, unweighed or f"not checked: the {part_name(p)} couldn't be weighed ({scrubbed(e)})"
             continue
         weighed = True
         mk = None
@@ -857,6 +878,10 @@ def measured(store: DesignStore, state: dict) -> dict:
         guess, slicing_now = making.filament_said(reps)   # a goal on a guessed or still-slicing figure (#237 review)
         if guess:
             out["filament.rough"] = guess
+            if making.filament_bound(reps):         # the solid's share: an upper bound (#237 review)
+                out["filament.upper"] = True
+                out["filament.upper_lb"] = making.solid_share_lb(reps)   # what it may be over by: the floor's slack
+                out["filament.upper_usd"] = making.solid_share_usd(reps)  # a cost's share that could go either way (#250)
         if slicing_now:
             out["filament.pending"] = slicing_now
         if unprintable:                            # first: it stays this way however long the slicer takes
@@ -981,9 +1006,26 @@ def held_to(state: dict, now: dict) -> list[dict]:
         untrue = now.get("strength.filled") if strength else None
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-97)
         older = now.get("strength.stale") if strength else None
-        guess = None
+        guess, alone = None, False
         if c["metric"].startswith(("weight.", "cost.")):   # a guessed filament figure: no ✓ on it (#237 review)
             guess = now.get("filament.rough") if c["metric"] in now else rough_scored.get(c["metric"])
+            from . import making
+
+            # the solid's share bounds the plastic that stays in the part, its weight; not what's bought or laid down
+            # (supports, brim, purge): a cost goal on it stays an estimate until the slicer's figure is in (#250 review)
+            if guess and c["metric"] in now and now.get("filament.upper") and c["metric"].startswith("weight."):
+                low = verdicts.compare(v - (now.get("filament.upper_lb") or 0.0), c.get("op", ">="), c["limit"])   # the share at nothing
+                if making.settled_by_bound(c.get("op", ">="), met, low):
+                    guess = None                      # an upper bound that settles it: a pass under the limit (#237 review)
+                else:
+                    met = True                        # over the limit on an upper bound: may be under, an estimate, not a ✗
+            if guess and c["metric"] in now and now.get("filament.upper") and c["metric"].startswith("cost."):
+                op = c.get("op", ">=")             # the solid's share bounds no cost: an estimate either way (#250 review),
+                low = verdicts.compare(v - (now.get("filament.upper_usd") or 0.0), op, c["limit"])
+                if making.sure_without(op, low):  # unless the parts that aren't printed settle it alone
+                    guess, met, alone = None, low, True
+                else:
+                    met = True
         if c["metric"].startswith("print."):           # a rough print time runs low: no ✓ on it (#166)
             guess = now.get("print.rough") if c["metric"] in now else (
                 f"{'partly ' if re.match(r'[0-9]+ of ', rough_scored[c['metric']]) else ''}a guess "
@@ -1019,7 +1061,9 @@ def held_to(state: dict, now: dict) -> list[dict]:
                    need=c.get("limit") if isinstance(c.get("limit"), (int, float)) else None)
         failed = verdict["kind"] == "fails"
         why = (filled_fail(untrue) if failed and untrue   # still ✗
-               else f" {now['strength.coarse_fail']}" if failed and strength and now.get("strength.coarse_fail") else "")
+               else f" {now['strength.coarse_fail']}" if failed and strength and now.get("strength.coarse_fail")
+               else " The parts that aren't printed cost more than that alone, before any filament." if failed and alone   # (#250)
+               else "")
         if verdict["kind"] == "waiting":               # a part left out isn't covered by the rest (#132 review)
             out.append(_line(f"! {label}{assumed}: {num} for the rest, but {verdict['why']}.", "warn",
                              study="load" if strength else None, model=rests_on_model(c["metric"])))
@@ -1090,7 +1134,7 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         fails = [c for c in card["checks"] if c["status"] == "fail"]
         stale = bool(card.get("outdated")) or any(card.get("versions", {}).get(p["id"]) not in (None, p["version"])
                                                   for p in parts)
-        # never a pass: a check that couldn't run (#103 review), nor one measured on a filled-in shape (CALI-96)
+        # never a pass: a check that couldn't run (#103 review), nor one measured on a filled-in solid (CALI-96)
         untrusted, unresolved = s.get("untrusted") or 0, s.get("unresolved") or 0     # never a pass (CALI-110)
         edge = s.get("edge") or 0                                                      # nor middle only (CALI-94)
         span = s.get("span") or 0                                                      # nor not settled (CALI-153)

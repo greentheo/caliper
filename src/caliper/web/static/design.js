@@ -186,7 +186,9 @@ const fixed = (v, d) => (v == null ? '—' : Number(v).toFixed(d));
 // ------------------------------------------------------------- the part tree (#94, the mockup Theo approved)
 // Every part and its pieces: a colour by material (the legend), an eye, click to select, double-click to rename.
 // What's hidden is this viewer's: kept in the browser, per design, and still in every check.
-const TREE = { slug: undefined, parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, last: null };
+const TREE = { slug: undefined, parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, last: null,
+  waiting: new Set(), missed: {} };   // the designs with a move still waiting, and a move that failed while away, by slug (#251)
+const WAITING = 'Waiting for the job on this design to finish…';
 const pieceId = (pid, key) => `${pid}/${key}`;
 function seen() {
   if (TREE.slug !== S.slug) {
@@ -195,6 +197,8 @@ function seen() {
     try { kept = JSON.parse(localStorage.getItem(`caliper-tree:${S.slug}`)) || {}; } catch (e) { /* none, or none allowed */ }
     TREE.parts = new Set(kept.parts || []); TREE.pieces = new Set(kept.pieces || []);
     TREE.open = kept.open !== false; TREE.oneBody = !!kept.oneBody; TREE.rename = null;
+    TREE.saying = TREE.waiting.has(S.slug) ? WAITING : null;   // another design's wait isn't this one's; its own still is (#206, #251)
+    TREE.drag = null;
   }
   return TREE;
 }
@@ -347,18 +351,34 @@ function clearDrop() {
   document.querySelectorAll('#tree .drop-before, #tree .drop-after, #tree .drop-into').forEach((r) => r.classList.remove('drop-before', 'drop-after', 'drop-into'));
 }
 async function moveInTree(drag, target, zone) {
+  if (!S.design) return;                           // a design is loading: nothing to move in (#251 review)
   const next = dropped(S.design, drag, target, zone);
   if (!next) return;
-  const slow = setTimeout(() => { TREE.saying = 'Waiting for the job on this design to finish…'; renderTree(); }, 600);   // the lock can be minutes
+  const slug = S.slug;                            // the design it's moved in: another may be open by the time it's done (#206)
+  const slow = setTimeout(() => {                  // the lock can be minutes
+    TREE.waiting.add(slug);                        // said again if you come back to it while it waits (#251 review)
+    if (S.slug !== slug) return;
+    TREE.saying = WAITING; renderTree();
+  }, 600);
+  let got, err;
   try {
-    S.design = await api('POST', `/api/designs/${S.slug}/tree`, next);
+    got = await api('POST', `/api/designs/${slug}/tree`, next);
+  } catch (e) { err = e; }
+  clearTimeout(slow);
+  TREE.waiting.delete(slug);
+  if (S.slug !== slug) {                           // saved there; nothing of it belongs on this one. A failure is said back there
+    if (err) TREE.missed[slug] = `Your move of the ${drag.replace(/_/g, ' ')} in ${slug} didn't save: ${plainly(err.message)}`;   // as the drive line says it
+    return;
+  }
+  if (err) showErr(plainly(err.message));
+  else {
+    S.design = got;
     const t = seen(), up = next.parent[drag];
     if (up && t.parts.has(up)) {                  // under a hidden part, it's hidden as that part is
       [drag, ...underPart(S.design, drag)].forEach((x) => t.parts.add(x));
       keepTree();
     }
-  } catch (e) { showErr(plainly(e.message)); }
-  clearTimeout(slow);
+  }
   TREE.saying = null;
   render();
 }
@@ -372,7 +392,7 @@ function showDrop(row, zone) {
 }
 function treeDragStart(e) {
   const row = e.target.closest && e.target.closest('[data-drag]');
-  if (!row || TREE.rename || onPhone()) { e.preventDefault(); return; }
+  if (!row || TREE.rename || onPhone() || !S.design) { e.preventDefault(); return; }   // nothing to move in while one loads (#251)
   TREE.drag = row.dataset.drag;
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', TREE.drag);
@@ -380,7 +400,7 @@ function treeDragStart(e) {
 function treeDragOver(e) {
   const row = e.target.closest('[data-drag]');
   clearDrop();
-  if (!row || !TREE.drag || !dropped(S.design, TREE.drag, row.dataset.drag, 'into')) return;
+  if (!row || !TREE.drag || !S.design || !dropped(S.design, TREE.drag, row.dataset.drag, 'into')) return;
   e.preventDefault();
   showDrop(row, dropZone(e, row));
 }
@@ -388,9 +408,16 @@ function treeDrop(e) {
   const row = e.target.closest('[data-drag]'), drag = TREE.drag;
   clearDrop();
   TREE.drag = null;
-  if (!row || !drag) return;
+  if (!row || !drag || !S.design) return;
   e.preventDefault();
   moveInTree(drag, row.dataset.drag, dropZone(e, row));
+}
+// a move that failed while another design was open, said once you're back on its design (#251 review)
+function sayMissed() {
+  const said = TREE.missed[S.slug];
+  if (!said) return;
+  delete TREE.missed[S.slug];
+  showErr(said);
 }
 function treeDragLeave(e) {
   if (!e.relatedTarget || !$('tree').contains(e.relatedTarget)) clearDrop();
@@ -431,11 +458,18 @@ const noPieces = new Map();     // part id -> {version, why} that can't be drawn
 let stationMesh = null;         // a whittle station shown in place of its part
 const loader = new STLLoader();
 
+// framed by fit, and not moved since: a resize frames it again for the new shape (reviewer-2 on #250: 1024 to 701 px, or a phone
+// turned, cut the stool off at the edge until fit was pressed). Once the person moves the camera, a resize leaves it where they put it
+let fitted = false;
+function unfit() {
+  fitted = false;
+}
 function resize() {
   const w = viewer.clientWidth || 1, h = viewer.clientHeight || 1;
   renderer.setPixelRatio(devicePixelRatio);
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
+  if (fitted) frame();
 }
 new ResizeObserver(resize).observe(viewer);
 resize();
@@ -462,19 +496,28 @@ function fitGrid(box) {
   scene.add(grid);
 }
 
+// how much further back a view narrower than it is tall stands, so the part fits across it too (#70 item 20: at a 1024 px
+// window, fit cropped the stool). Across, the half-angle's tangent is the height's times the aspect, so the distance
+// grows by 1/aspect; 1 for a view as wide as it's tall or wider, as before
+function narrowBy(aspect) {
+  return aspect >= 1 ? 1 : 1 / aspect;
+}
+
 function frame() {
   const box = contentBox();
   if (box.isEmpty()) return;
   const c = box.getCenter(new THREE.Vector3());
   const r = box.getSize(new THREE.Vector3()).length() / 2 || 100;
-  const d = r * 2.3;
+  const d = r * 2.3 * narrowBy(camera.aspect);
   controls.target.copy(c);
   camera.position.set(c.x - d * 0.75, c.y - d * 0.95, c.z + d * 0.55);   // from behind-left, above
   camera.near = r / 200; camera.far = r * 200; camera.updateProjectionMatrix();
   controls.update();
   fitGrid(box);
+  fitted = true;
 }
 $('fitView').onclick = frame;
+controls.addEventListener('start', unfit);           // the person moved it: theirs now
 addEventListener('keydown', (e) => {
   if (e.key === 'f' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) frame();
 });
@@ -941,6 +984,7 @@ async function openDesign(slug) {
   S.design = got;
   doneLoading();
   render();
+  sayMissed();
   await syncParts(S.design, first);
 }
 // while a design loads the page isn't the old one: the new name, nothing of the old, and the chat off, so a message can't
@@ -958,7 +1002,9 @@ function showLoading(slug) {
   clearStation();
   $('inspector').innerHTML = `<h2>${esc(pickedName(slug))}</h2><div class="muted small"><span class="spin"></span>loading…</div>`;
   $('thread').innerHTML = '';
-  $('tree').hidden = true;
+  $('tree').hidden = true;                         // hidden till the new design lands, and nothing of the old left in it (#251)
+  $('tree').innerHTML = '';
+  TREE.saying = null;
   $('scopeRow').hidden = true;
   $('viewHint').textContent = 'loading…';
   $('msg').disabled = true; $('send').disabled = true;
@@ -2336,6 +2382,15 @@ function cutsText(cuts) {
   return [...n].map(([k, v]) => `${v} @ ${k}`).join(', ');
 }
 
+// the table, the pieces and the balance go by the model's solid; the part's weight above by its filament figure: said
+// where the two differ, so neither reads as the other (#237 review)
+function solidSaid(r) {
+  const more = r.filament_more_kg || 0;
+  if (Math.abs(more) < 0.005 || r.mass_lb == null) return '';
+  const solid = r.mass_lb - more * 2.20462;
+  return `<div class="small muted">The table below, the pieces' weights and the balance are the model's solid
+    (${lbs(solid)}); its weight above, ${lbs(r.mass_lb)}, goes by its filament figure.</div>`;
+}
 function builtResults(p, c) {
   const r = c.report, b = c.balance, changed = Object.keys(r.changed || {}).length;
   const mine = b && (b.parts || []).find((x) => x.part === p.id);
@@ -2360,6 +2415,7 @@ function builtResults(p, c) {
     <table class="st"><tr><th style="text-align:left">made of</th><th>lb</th><th>share</th></tr>
       ${r.materials.map((m) => `<tr><td style="text-align:left">${esc(m.label)}</td><td>${m.mass_lb}</td>
         <td>${pct(m.mass_kg / r.mass_kg)}</td></tr>`).join('')}</table>
+    ${solidSaid(r)}
     <h5 style="margin:12px 0 4px">To buy</h5>
     <ul class="list small">
       ${bom.sheets.map((g) => `<li><b>${g.count} × ${esc(g.label)}</b> <span class="muted">${sheetFt(g.stock_mm)} sheets · ${g.area_ft2} ft² of panels</span>
@@ -2799,7 +2855,7 @@ function carveChart(p, run) {
         : best.verdict && best.verdict.kind === 'span' ? `<b style="color:var(--amber)">not settled: ${esc(best.verdict.why)}</b>`    // CALI-153
         : best.verdict && (best.verdict.kind === 'unresolved' || best.verdict.kind === 'unchecked')    // #101
           ? `<b style="color:var(--amber)">${esc(best.verdict.word)}: the voxels were too coarse to see its walls, so no step can be said to hold yet</b>`
-        : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a filled-in shape' : `the whole part ${best.whole != null ? (best.at_most ? 'no higher than ' : '') + best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
+        : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a solid with more in it than its pieces' : `the whole part ${best.whole != null ? (best.at_most ? 'no higher than ' : '') + best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
       : run.offer ? '' : 'Nothing could come off and still hold.'}
       ${run.offer ? `<div class="${run.offer.kind === 'room' ? 'muted' : 'note-warn'} small" style="margin-top:4px">${esc(run.offer.said)}</div>` : ''}
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
@@ -2953,8 +3009,24 @@ function peakWhere(f) {
   return f && f.at ? `around ${len(f.at[2])} up` : 'in the part';
 }
 function lightenRuns(pid) { return (S.design.lighten_runs || []).filter((r) => r.part === pid); }
-// a Lightening's step under the floor is "too little", never "best"; an unseen or unknown one is still the step to use (#252)
-const lightenLead = (run) => (run.offer && run.offer.kind === 'small' ? 'Too little to use' : 'The step to use');
+// a Lightening's step, led by what's known (#252, #254): under the floor "too little"; one its re-check couldn't settle (unseen,
+// unknown) "Not settled"; "The step to use" only where there's a button, or an older run with no offer
+const lightenLead = (run) => (!run.offer ? 'The step to use' : run.offer.kind === 'small' ? 'Too little to use' : ['unseen', 'unknown'].includes(run.offer.kind) ? 'Not settled' : 'The step to use');
+// with no step to use, what's known (#255): "Nothing lighter still holds" only where the steps were checked and failed; a step
+// the check couldn't settle (too coarse, a span, untrusted) says so instead. A thinner sheet's estimate isn't a check
+function lightenNone(run) {
+  const deeper = run.stations.filter((x) => x.index && !x.estimate);
+  const unsure = deeper.find((x) => x.verdict && ['unresolved', 'unchecked', 'span'].includes(x.verdict.kind));
+  if (unsure) {
+    return unsure.verdict.kind === 'span' ? `Not settled: ${unsure.verdict.why}, so no step can be said to hold.`
+      : unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
+        : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.';
+  }
+  if (deeper.some((x) => !x.verdict || !['holds', 'close', 'fails'].includes(x.verdict.kind))) {
+    return 'Not settled: none of its steps could be checked, so no step can be said to hold.';
+  }
+  return 'Nothing lighter still holds.';
+}
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
   const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
@@ -2962,7 +3034,6 @@ function lightenView(p) {
     : run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
   const out = run && run.stations.find((x) => x.verdict && x.verdict.kind === 'fails');
   // steps the check was too coarse to call: their verdict's word, never "nothing lighter holds" (#136 review)
-  const unsure = run && !best && run.stations.find((x) => x.index && x.verdict && ['unresolved', 'unchecked', 'span'].includes(x.verdict.kind));
   const what = (x) => x.phase === 'thinner' ? `in ${esc(x.label)} sheet <span class="badge">estimate</span>`
     : x.phase === 'top' ? `${pct(x.removed)} of the walls + ${x.top_holes} hole${x.top_holes === 1 ? '' : 's'} in the top`
     : x.index ? `${pct(x.removed)} of the walls` : 'as it is';
@@ -2974,11 +3045,9 @@ function lightenView(p) {
       ${lightenBlocked(p) ? `<span class="muted small">${esc(lightenBlocked(p))}</span>` : ''}</div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
-      ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
+      ? (p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
         : `${lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
-      : unsure ? (unsure.verdict.kind === 'span' ? `Not settled: ${unsure.verdict.why}, so no step can be said to hold.` : unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
-        : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.')
-      : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
+      : lightenNone(run)}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
       ${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
       ${run.stations.map((x) => `<tr class="${x.estimate ? '' : 'pick'} ${x.index === on ? 'on' : ''}" ${x.estimate ? '' : `data-lst="${x.index}"`}>
@@ -2995,6 +3064,7 @@ function lightenView(p) {
 // else one place, half up, never up to 10. So 1.995 against 2 is 1.99, never "2x" under a "doesn't hold" badge.
 function safetyNum(x, need) {
   x = Number(x);
+  if (x < 0.1) return 'under 0.1';        // never "0x" (#235 review)
   let n;
   if (need != null && x > need / 1.1 && x < need * 1.1) n = Math.floor(x * 100 + 1e-9) / 100;
   else if (need != null && x < need) n = Math.floor(x * 10 + 1e-9) / 10;
@@ -3008,7 +3078,7 @@ const sx = (v, need) => (v == null ? '—' : `${safetyNum(v, need)}x`);
 // a part whose strength check ran on a filled-in solid has no "holds" anywhere (CALI-96)
 // why: a filled-in shape, or a shape that couldn't be checked against its pieces at all (it fails closed)
 const notTrusted = (why) => (String(why || '').startsWith("couldn't") ? "not trusted: its shape couldn't be checked"
-  : 'not trusted: a filled-in shape');
+  : 'not trusted: a solid with more in it than its pieces');
 const untrustedBadge = (p) => `<span class="badge bad">${notTrusted(p.untrusted)}</span>`;
 const partOf = (pid) => (S.design && S.design.parts.find((x) => x.id === pid)) || {};
 // CALI-97: a ✓ on an FEA too coarse to see its walls is no ✓. The server marks such a case (c.unresolved:
@@ -3098,6 +3168,7 @@ function foldedBy(c) {
   const w = done.length ? done.reduce((a, b) => (b.safety < a.safety ? b : a)) : null;
   if (!w) return 'the buckling check';
   const sides = w.edges_held === 2 ? 'held along both sides' : w.edges_held === 1 ? 'held along one side' : 'free along its sides, its top free to sway';
+  if (w.down === false) return `the buckling check on the ${esc(w.piece)}: a push that doesn't run down it, taken as a squeeze, the safe side for the sheet; racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid`;   // (#235, #250 review)
   return `the buckling check on the ${esc(w.piece)}: a plate ${sides}, its whole load on it`;
 }
 

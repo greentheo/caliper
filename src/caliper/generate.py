@@ -12,6 +12,8 @@ profile extrusion so the measurement layer (CALI-2) has a valid B-rep + mesh.
 
 from __future__ import annotations
 
+from .errors import scrub
+
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -171,7 +173,7 @@ def build(spec: Spec) -> BuildResult:
 
         return BuildResult(
             build_ok=False,
-            error=f"{type(e).__name__}: {e}\n{traceback.format_exc()}",
+            error=scrub(f"{type(e).__name__}: {e}\n{traceback.format_exc()}"),
             params=params,
         )
 

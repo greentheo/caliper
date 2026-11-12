@@ -29,6 +29,8 @@ and sees one geometry (``bbox``, ``min_wall``, ``body_count``…); a **design** 
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import ast
 import json
 import math
@@ -197,7 +199,7 @@ def validate(store: DesignStore, expr: str, level: str, part: Optional[str] = No
     try:
         ctx = _context(store, level, part)
     except Exception as e:  # noqa: BLE001 — a design that won't build can't validate anything
-        return Validation(ok=False, error=f"{type(e).__name__}: {e}")
+        return Validation(ok=False, error=f"{type(e).__name__}: {scrubbed(e)}")
 
     res = evaluate_assertion(Assertion(id="_candidate", expr=expr), ctx)
     if res.status in ("error", "deferred"):

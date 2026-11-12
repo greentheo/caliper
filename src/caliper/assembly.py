@@ -22,6 +22,8 @@ and the fit probes take *two* parts.
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import json
 import os
 import re
@@ -315,7 +317,7 @@ def load_parts_tolerant(asm: Assembly, base_dir: str = ".", skip=()) -> tuple[di
             else:
                 loaded[p.id] = Geometry.from_stl_posed(path, p.position, p.rotation)
         except Exception as e:  # noqa: BLE001 — collect, don't sink the assembly
-            errors[p.id] = str(e)[-300:]   # tail: that's where the actual exception lives
+            errors[p.id] = scrubbed(e)[-300:]   # tail: that's where the actual exception lives
     return loaded, errors
 
 

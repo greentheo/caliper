@@ -193,3 +193,143 @@ def test_a_study_just_begun_doesn_t_read_0_min(monkeypatch):
     monkeypatch.setattr(one_study, "_since", time.monotonic() - 2)
     assert "under a minute" in one_study._how_long(0)
 
+
+
+# --- the rest of #174: chats that wait hold no worker either ------------------------------------------------------------------
+def _chat_waits_for_the_turn(job):
+    """A chat that turns into a study (a carve, a picture) takes the turn inside the chat job, with no stop= passed."""
+    one_study.take_turn(lambda k, t="", **d: job.emit(k, t, **d))
+    one_study._TURN.release()
+
+
+@pytest.mark.parametrize("n", [8, 12])
+def test_with_chats_waiting_for_the_study_turn_another_chat_starts_straight_away(held, n):
+    """The night shift's note on #174 (#205's review): eight chats each running a check still filled the chat workers."""
+    r = jobs.JobRunner()
+    waiting = [r.submit("chat", _chat_waits_for_the_turn, lock=f"design:{i}") for i in range(n)]
+    end = time.time() + 5
+    while time.time() < end and not all(any(e.get("kind") == "waiting" for e in j.since(0)) for j in waiting):
+        time.sleep(0.02)
+    assert all(any(e.get("kind") == "waiting" for e in j.since(0)) for j in waiting)
+    began = threading.Event()
+    r.submit("chat", lambda j: began.set(), lock="design:other")
+    assert began.wait(2), "the chat waited behind chats waiting for the study turn"
+    _settle(r, held)
+
+
+def test_with_chats_queued_behind_their_design_another_design_s_chat_starts_straight_away():
+    """A chat queued behind another job on its design waited on that design's lock while holding a worker."""
+    r = jobs.JobRunner()
+    go, began = threading.Event(), threading.Event()
+    first = r.submit("chat", lambda j: go.wait(20), lock="design:a")
+    queued = [r.submit("chat", lambda j: None, lock="design:a") for _ in range(10)]
+    end = time.time() + 5
+    while time.time() < end and not all(any(e.get("kind") == "waiting" for e in j.since(0)) for j in queued):
+        time.sleep(0.02)
+    r.submit("chat", lambda j: began.set(), lock="design:b")
+    try:
+        assert began.wait(2), "the chat waited behind chats queued on another design"
+    finally:
+        go.set()
+    end = time.time() + 10
+    while time.time() < end and r.active():
+        time.sleep(0.02)
+    assert first.status == "done" and all(j.status == "done" for j in queued)
+
+
+def test_running_chats_are_still_held_to_the_worker_count():
+    """Waiting takes no worker; working does: at most `workers` chats run at once."""
+    r, mu, now, peak, go = jobs.JobRunner(workers=3), threading.Lock(), [0], [0], threading.Event()
+
+    def work(j):
+        with mu:
+            now[0] += 1
+            peak[0] = max(peak[0], now[0])
+        go.wait(0.3)
+        with mu:
+            now[0] -= 1
+
+    js = [r.submit("chat", work, lock=f"design:{i}") for i in range(9)]
+    end = time.time() + 10
+    while time.time() < end and r.active():
+        time.sleep(0.02)
+    assert all(j.status == "done" for j in js) and peak[0] == 3, peak
+
+
+def test_after_the_study_turn_a_chat_takes_its_worker_back(held):
+    """#256 review: a parked job never took its worker back, so work after the turn ran uncounted (2 workers, 8 chats, peak 4)."""
+    r, mu, now, peak = jobs.JobRunner(workers=2), threading.Lock(), [0], [0]
+
+    def chat(j):
+        one_study.take_turn(lambda k, t="", **d: j.emit(k, t, **d))
+        one_study._TURN.release()
+        with mu:
+            now[0] += 1
+            peak[0] = max(peak[0], now[0])
+        time.sleep(0.6)                                   # its work after the turn: counted against the workers
+        with mu:
+            now[0] -= 1
+
+    js = [r.submit("chat", chat, lock=f"design:{i}") for i in range(8)]
+    end = time.time() + 5
+    while time.time() < end and not all(any(e.get("kind") == "waiting" for e in j.since(0)) for j in js):
+        time.sleep(0.02)
+    held.set()                                            # the turn goes round, one at a time
+    end = time.time() + 20
+    while time.time() < end and r.active():
+        time.sleep(0.02)
+    assert all(j.status == "done" for j in js) and peak[0] == 2, peak
+
+
+def test_a_chat_cancelled_while_it_waits_for_a_worker_leaves_at_once():
+    r, gate, ran = jobs.JobRunner(workers=1), threading.Event(), []
+    first = r.submit("chat", lambda j: gate.wait(10), lock="design:a")
+    end = time.time() + 5
+    while time.time() < end and first.status != "running":
+        time.sleep(0.01)
+    second = r.submit("chat", lambda j: ran.append(1), lock="design:b")
+    time.sleep(0.3)                                       # past its design's lock, waiting for the one worker
+    r.cancel(second.id)
+    end = time.time() + 2
+    while time.time() < end and not second.over:
+        time.sleep(0.01)
+    try:
+        assert second.status == "cancelled" and ran == [], second.status
+    finally:
+        gate.set()
+    end = time.time() + 5
+    while time.time() < end and r.active():
+        time.sleep(0.02)
+    assert ran == [] and first.status == "done"
+
+
+def test_a_chat_cancelled_after_its_turn_while_it_waits_for_a_worker_passes_the_turn_on(held):
+    r, gate, ran = jobs.JobRunner(workers=1), threading.Event(), []
+
+    def chat(j):
+        one_study.take_turn(lambda k, t="", **d: j.emit(k, t, **d))
+        try:
+            ran.append("worked")
+        finally:
+            one_study._TURN.release()
+
+    waiting = r.submit("chat", chat, lock="design:a")
+    end = time.time() + 5
+    while time.time() < end and not any(e.get("kind") == "waiting" for e in waiting.since(0)):
+        time.sleep(0.01)
+    busy = r.submit("chat", lambda j: gate.wait(10), lock="design:b")           # takes the one worker it gave back
+    end = time.time() + 5
+    while time.time() < end and busy.status != "running":
+        time.sleep(0.01)
+    held.set()                                            # its turn comes, and it waits for the worker
+    time.sleep(0.4)
+    r.cancel(waiting.id)
+    end = time.time() + 3
+    while time.time() < end and not waiting.over:
+        time.sleep(0.01)
+    try:
+        assert waiting.status == "cancelled" and ran == [], (waiting.status, ran)
+        assert one_study._TURN.acquire(timeout=2), "the turn wasn't passed on"
+        one_study._TURN.release()
+    finally:
+        gate.set()

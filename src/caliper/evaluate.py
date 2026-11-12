@@ -17,6 +17,8 @@ records those assertions as ``deferred`` and excludes them from ``all_pass`` rat
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import ast
 import operator
 import threading
@@ -369,7 +371,7 @@ def build_context(
         try:
             return measure.largest_through_bore(g)
         except measure.NotMeasured as e:      # a mesh: a rule on it reads as not checked, never 0 (#66 item 5)
-            return _Unmeasured(str(e))
+            return _Unmeasured(scrubbed(e))
 
     ctx["largest_through_bore"] = _Lazy(bore)  # worked out only if a rule reads it (#259: 1.7 s on a 100-hole plate)
     # reference parts resolve to loaded geometry (for interference/min_clearance); opaque otherwise.
@@ -392,11 +394,11 @@ def evaluate_assertion(assertion, ctx: dict) -> AssertionResult:
             passed=passed, actual=actual, margin=margin,
         )
     except NotImplementedError as e:
-        return AssertionResult(assertion.id, assertion.expr, "deferred", None, detail=str(e))
+        return AssertionResult(assertion.id, assertion.expr, "deferred", None, detail=scrubbed(e))
     except Exception as e:  # noqa: BLE001 — surface any eval/measure failure as a structured error
         return AssertionResult(
             assertion.id, assertion.expr, "error", None,
-            detail=f"{type(e).__name__}: {e}",
+            detail=f"{type(e).__name__}: {scrubbed(e)}",
         )
 
 

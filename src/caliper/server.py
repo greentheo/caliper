@@ -10,6 +10,8 @@ Run with ``caliper serve`` (or ``make serve``).
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import hashlib
 import os
 import re
@@ -243,6 +245,18 @@ def create_app():
 
         return JSONResponse(status_code=422, content={"detail": llm.said(exc)})
 
+    from starlette.exceptions import HTTPException as _HTTPError
+
+    @app.exception_handler(_HTTPError)
+    async def _refused(request, exc):
+        # every route's detail goes out through one place (#174, #215 review): no home folder, design or secret in it
+        from fastapi.responses import JSONResponse
+
+        from . import errors
+
+        detail = errors.scrub(exc.detail) if isinstance(exc.detail, str) else exc.detail
+        return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=getattr(exc, "headers", None))
+
     @app.exception_handler(Exception)
     async def _crashed(request, exc):
         # kept on this machine for a report the person can choose to send (CALI-59)
@@ -393,7 +407,7 @@ def create_app():
                 report = evaluate_assembly(asm, base_dir=base, parts=geoms).to_dict()
                 collisions = [[a, b] for a, b, v in measure.pairwise_interference(geoms) if v > 1e-6]
         except Exception as e:  # noqa: BLE001 — evaluation itself failing still shouldn't 500
-            report, collisions = {"all_pass": False, "results": [], "error": str(e)}, []
+            report, collisions = {"all_pass": False, "results": [], "error": scrubbed(e)}, []
         return {"id": aid, "name": asm.name, "intent": asm.intent, "parts": parts,
                 "mates": mates, "report": report, "collisions": collisions,
                 "part_errors": part_errors}

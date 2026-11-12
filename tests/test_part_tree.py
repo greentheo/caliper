@@ -196,7 +196,9 @@ const store = {};
 globalThis.localStorage = { getItem: (k) => store[k] || null, setItem: (k, v) => { store[k] = v; } };
 function renderTree() { calls.push('tree'); }
 function saveTreeName(p, k) { calls.push(['save', p, k]); }
-const TREE = { slug: undefined, parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, last: null };
+const TREE = { slug: undefined, parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, last: null,
+  waiting: new Set(), missed: {} };
+const WAITING = 'Waiting for the job on this design to finish…';
 const pieceId = (pid, key) => `${pid}/${key}`;
 const EYE_ON = 'EYE-ON', EYE_OFF = 'EYE-OFF';
 const view = (over) => ({ parts: new Set(), pieces: new Set(), open: true, rename: null, scope: null, piece: null, oneBody: false, cant: null, ...over });

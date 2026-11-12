@@ -866,7 +866,7 @@ def _safety_cell(c: dict) -> tuple[str, str]:
     breaks = f"about {c['breaks_lb']:,.0f} lb" if c.get("breaks_lb") else "—"
     kind = (c.get("verdict") or {}).get("kind")
     if kind == "untrusted":                          # the check ran on a block: no number to build on
-        return "not trusted: checked on a filled-in shape", "—"
+        return "not trusted: checked on a solid with more in it than its pieces", "—"
     if (c.get("verdict") or {}).get("blind"):        # it saw no stress at all: not its walls (#202)
         return "not resolved: the check couldn't see any stress", "—"
     if kind in ("unresolved", "unchecked"):          # too coarse to see its walls: no ✓ (CALI-110)
@@ -921,10 +921,15 @@ def fasten_panels(pcs: list) -> str:
     return how + "; they're cut to the outside surface, so trim the inside corners to suit as they go on."
 
 
-def _promise(store: DesignStore, parts: list) -> str:
+def _promise(store: DesignStore, parts: list, strength: dict) -> str:
+    """The card's promise, with its rough note where a released part's verdict rests on the printed model, as the card says
+    it (#209 review: the book dropped it)."""
     from .answers import promise
+    from .load_study import ROUGH
 
-    return promise(store, parts)
+    said = promise(store, parts)
+    rough = any(c.get("rough") for pid in parts for c in strength.get(pid) or [])
+    return said + (" " + ROUGH if rough else "")
 
 
 def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], notes: list[str]) -> str:
@@ -1280,6 +1285,13 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
     for p in store.design.parts:
         if store.is_scripted(p.id):
             shutil.copy(store.script_path(p.id), os.path.join(root, "source", f"{p.id}-v{p.version:03d}.py"))
+            from .assembly import carved_file
+
+            mesh = carved_file(store.read_script(p.id))          # a carved part is its mesh: kept beside it (#70 item 10)
+            if mesh:
+                os.makedirs(os.path.join(root, "source", "carved"), exist_ok=True)
+                shutil.copy(os.path.join(store.part_dir(p.id), "carved", os.path.basename(mesh)),
+                            os.path.join(root, "source", "carved", os.path.basename(mesh)))
     for name in ("design.yaml", "assembly.yaml", scorecard.GOALS):
         if os.path.exists(os.path.join(store.root, name)):
             shutil.copy(os.path.join(store.root, name), os.path.join(root, "source", name))
@@ -1324,7 +1336,7 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
            "names": {p.id: p.label for p in store.design.parts if p.label},
            "grain": {pid: n for pid, n in said.items() if n},       # which way to cut each panel (CALI-126)
            "slug": os.path.basename(store.root), "versions": versions,
-           "promise": _promise(store, [p.id for p in built]),        # worded for what it's made of (#64 item 14)
+           "promise": _promise(store, [p.id for p in built], strength),        # worded for what it's made of (#64 item 14)
            "card": {"created": card["created"], "summary": card["summary"]},
            "ready": verdicts.summary(card["summary"])["counts_as_pass"],      # one verdict (CALI-112)
            "cutplans": {pid: plan["id"] for pid, plan in plans.items()},

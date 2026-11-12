@@ -77,9 +77,11 @@ def test_the_panel_says_too_little_only_of_a_step_under_the_floor():
     lead = lead[:lead.index("\n")]
     out = _run(_page([], extra=lead + """
 out = [lightenLead({ offer: { kind: 'small', offers: false } }), lightenLead({ offer: { kind: 'unseen', offers: false } }),
-       lightenLead({ offer: { kind: 'unknown', offers: false } }), lightenLead({ offer: { kind: 'room', offers: true } }), lightenLead({})];
+       lightenLead({ offer: { kind: 'unknown', offers: false } }), lightenLead({ offer: { kind: 'room', offers: true } }), lightenLead({}),
+       lightenLead({ offer: { kind: 'no_room', offers: true } })];
 """))
-    assert out == ["Too little to use", "The step to use", "The step to use", "The step to use", "The step to use"], out
+    # #254: an unseen or unknown step has no button and its re-check couldn't settle it: "Not settled", never "The step to use"
+    assert out == ["Too little to use", "Not settled", "Not settled", "The step to use", "The step to use", "The step to use"], out
 
 
 def test_the_panel_never_calls_a_step_under_the_floor_best():
@@ -173,3 +175,24 @@ def test_studies_says_why_there_s_nothing_to_use():
 def test_the_panel_doesn_t_call_a_step_with_no_button_the_step_to_use():
     js = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     assert "${lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>" in js
+
+
+@pytest.mark.parametrize("shape, said", [
+    # step-stool-2 (2026-10-30): its solid is filled in, so steps 1-17 are untrusted and step 18 fails
+    ([("untrusted", False)] * 17 + [("fails", False)], "Not settled: none of its steps could be checked, so no step can be said to hold."),
+    ([("fails", False), ("fails", False)], "Nothing lighter still holds."),            # the steps were checked, and failed
+    ([("fails", False), ("estimate", True)], "Nothing lighter still holds."),           # a thinner sheet's estimate isn't a check
+    ([("unchecked", False), ("fails", False)], "Not checked: its walls are too thin for the voxels, so no step can be said to hold."),
+    ([("unresolved", False)], "Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer."),
+])
+def test_with_no_step_to_use_the_panel_says_nothing_holds_only_where_the_steps_were_checked(shape, said):
+    """#255 (reviewer-2, the foreman): on step-stool-2 the panel said "Nothing lighter still holds" though steps 1-17 never
+    failed; they were untrusted. That claims more than the check found (Rule 6, the red way)."""
+    import json as _json
+
+    from .test_carve_click import _page, _run
+
+    stations = [{"index": 0, "verdict": {"kind": shape[0][0]}}] + [
+        {"index": i + 1, **({"estimate": True} if est else {}), "verdict": {"kind": kind, "why": "x"}} for i, (kind, est) in enumerate(shape)]
+    out = _run(_page(["lightenNone"], extra=f"out = lightenNone({{ stations: {_json.dumps(stations)} }});"))
+    assert out == said, out
