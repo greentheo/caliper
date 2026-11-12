@@ -466,3 +466,60 @@ def test_mirrors_takes_the_occt_lock(monkeypatch, stool):
     monkeypatch.setattr(occt, "OCCT", Lock())
     measure.mirror_off(left, right)
     assert seen == ["in", "out"]
+
+
+# --- #246, the last two (Theo's own stool) -------------------------------------------------------------------------------
+SIDE_Y = ('import cadquery as cq\n\nPARAMS = {{"top_height": 406.4, "t": 19.0}}\n\n\ndef build(params):\n'
+          '    p = {{**PARAMS, **(params or {{}})}}\n'
+          '    return cq.Workplane("XY").box(300, p["t"], p["top_height"]).translate((0, {y}, p["top_height"] / 2))\n\n\n'
+          'def construction(params, build=None):\n    p = {{**PARAMS, **(params or {{}})}}\n'
+          '    return [{{"name": "{name}", "kind": "sheet", "material": "plywood", "thickness": p["t"],\n'
+          '             "outline": [(-150, {y}, 0), (150, {y}, 0), (150, {y}, p["top_height"]), (-150, {y}, p["top_height"])]}}]\n')
+
+
+@pytest.fixture
+def ss4(tmp_path):
+    """Theo's sides, apart in y (they mirror in XZ), both reading the plan's top_height; side_left made side_right's mirror."""
+    from caliper import plan as P
+
+    s = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    P.save(s, P.validate({"parts": [{"id": "side_left", "what": "the left side"}, {"id": "side_right", "what": "the right side"}],
+                          "skeleton": [{"name": "top_height", "value": 16, "unit": "in", "why": "the top sits 16 in above the floor"}],
+                          "rules": [{"id": "right_reaches_top", "expr": "abs(bbox(side_right).max_z - top_height) <= 1", "source": "stated"},
+                                    {"id": "left_reaches_top", "expr": "abs(bbox(side_left).max_z - top_height) <= 1", "source": "stated"}]}),
+           status="built")
+    s.write_part("side_right", SIDE_Y.format(y=250, name="right side"), intent="the right side")
+    s.write_part("side_left", SIDE_Y.format(y=-250, name="left side"), intent="the left side")
+    mirror.make(s, "side_left", "side_right")
+    return s
+
+
+def test_a_shared_size_after_the_swap_moves_both_and_never_writes_the_mirror(ss4):
+    """Item 1: top_height 16 → 17 in stopped halfway, the guard refusing side_left after the top was written."""
+    from caliper import skeleton
+
+    sk = [{**s, "value": 17} for s in ss4.design.skeleton]
+    got = skeleton.drive(ss4, sk)
+    assert not got["refused"] and got["follows"] == {"side_left": "side_right"} and list(got["rebuilt"]) == ["side_right"]
+    assert mirror.source_of(ss4, "side_left") == "side_right"
+    for pid in ("side_left", "side_right"):
+        assert ss4.part_geometry(pid).require_mesh().bounds[1][2] == pytest.approx(17 * 25.4, abs=0.01)
+
+
+def test_a_refusal_anywhere_changes_nothing(ss4):
+    """All or nothing, checked before any write: one part refused, the skeleton and every part stay."""
+    from caliper import skeleton
+
+    ss4.write_part("side_right", SIDE_Y.format(y=250, name="right side").replace("406.4", "16.0"), intent="in inches")
+    versions = {p.id: p.version for p in ss4.design.parts}
+    got = skeleton.drive(ss4, [{**s, "value": 17} for s in ss4.design.skeleton])
+    assert got["refused"] and {p.id: p.version for p in ss4.design.parts} == versions
+    assert ss4.design.skeleton[0]["value"] == 16
+
+
+def test_names_flip_by_the_ids_whatever_the_plane(ss4):
+    """Item 2: Theo's sides mirror in XZ, and the left side's piece still said "right side"."""
+    assert mirror.of(ss4.read_script("side_left"))["plane"] == "XZ"
+    assert mirror.swap_words("side_left", "side_right") == ("right", "left")
+    assert C.declared(ss4, "side_left")["construction"][0]["name"] == "left side"
+    assert C.declared(ss4, "side_right")["construction"][0]["name"] == "right side"

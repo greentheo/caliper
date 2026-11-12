@@ -35,8 +35,9 @@ _CALIPER_POINTS = ("outline", "facets", "holes", "polygons", "a", "b", "at", "lo
                    "center", "centre", "origin", "start", "end")
 _CALIPER_VECTORS = ("normal", "direction", "dir", "axis")
 _CALIPER_I = {"YZ": 0, "XZ": 1, "XY": 2}[MIRROR_PLANE]
-#: the position words a flip in this plane swaps, in a piece's or a hole's name ("right side" is "left side" mirrored)
-_CALIPER_SWAP = [("left", "right"), ("front", "back"), ("top", "bottom")][_CALIPER_I]
+#: the words a piece's or a hole's name swaps: the ones the two parts' ids differ by ("right" and "left" for side_right's
+#: mirror side_left, whatever the plane), else the plane's own pair
+_CALIPER_SWAP = MIRROR_SWAP if globals().get("MIRROR_SWAP") else [("left", "right"), ("front", "back"), ("top", "bottom")][_CALIPER_I]
 
 
 def _caliper_triple(v):
@@ -109,8 +110,26 @@ if isinstance(globals().get("HOLES"), list):
 '''
 
 
-def script(source: str, source_script: str, plane: str, at) -> str:
-    """Part ``source``'s script, flipped in ``plane`` through ``at``: a mirrored part's whole script."""
+#: Words a part's id can differ from its twin's by, each with its opposite.
+_OPPOSITE = {"left": "right", "right": "left", "front": "back", "back": "front", "top": "bottom", "bottom": "top",
+             "upper": "lower", "lower": "upper", "inner": "outer", "outer": "inner", "rear": "front"}
+
+
+def swap_words(part_id: str, source: str):
+    """``(source's word, the mirror's word)`` where two ids differ by a position word and its opposite (side_right and
+    side_left: ``("right", "left")``), else None (#246: names flip by the ids, not the plane)."""
+    a, b = source.lower().split("_"), part_id.lower().split("_")
+    if len(a) != len(b):
+        return None
+    diff = [(x, y) for x, y in zip(a, b) if x != y]
+    if len(diff) == 1 and _OPPOSITE.get(diff[0][0]) == diff[0][1]:
+        return diff[0]
+    return None
+
+
+def script(source: str, source_script: str, plane: str, at, part_id: str = "") -> str:
+    """Part ``source``'s script, flipped in ``plane`` through ``at``: a mirrored part's whole script. ``part_id``, the
+    mirror's, gives the words its names swap."""
     plane = plane.upper()
     if plane not in PLANES:
         raise ValueError(f"a mirror's plane is YZ, XZ or XY, not {plane!r}")
@@ -121,7 +140,8 @@ def script(source: str, source_script: str, plane: str, at) -> str:
             f"# This part is {source}, mirrored in the {plane} plane through {at}. Change {source}, not this: it's\n"
             f"# written again whenever {source} is.\n"
             f"MIRROR_OF = {source!r}\nMIRROR_PLANE = {plane!r}\nMIRROR_AT = {at!r}\n"
-            "\n# --- Caliper: the source's script ---\n" + source_script.rstrip() + "\n" + WRAPPER)
+            + (f"MIRROR_SWAP = {swap_words(part_id, source)!r}\n" if swap_words(part_id, source) else "")
+            + "\n# --- Caliper: the source's script ---\n" + source_script.rstrip() + "\n" + WRAPPER)
 
 
 def of(script_text: str) -> Optional[dict]:
@@ -185,7 +205,7 @@ def make(store, part_id: str, source: str, plane: Optional[str] = None, at=None,
     if plane is None or at is None:
         got_plane, got_at = between(store, part_id, source) if store.design.part(part_id) else ("YZ", (0.0, 0.0, 0.0))
         plane, at = plane or got_plane, at if at is not None else got_at
-    text = script(source, store.read_script(source), plane, at)
+    text = script(source, store.read_script(source), plane, at, part_id)
     entry = store.design.part(source)
     return store.write_part(part_id, text, action="mirror", intent=f"a mirror of {source}",
                             feedback=feedback or f"made a mirror of {source}",
@@ -197,7 +217,7 @@ def rebuild(store, source: str) -> list[str]:
     done = []
     for pid in mirrors_of(store, source):
         got = of(store.read_script(pid))
-        text = script(source, store.read_script(source), got["plane"], got["at"])
+        text = script(source, store.read_script(source), got["plane"], got["at"], pid)
         if text != store.read_script(pid):
             entry = store.design.part(source)
             store.write_part(pid, text, action="mirror", feedback=f"rebuilt from {source} v{entry.version}",
