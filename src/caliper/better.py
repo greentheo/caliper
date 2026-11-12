@@ -243,7 +243,10 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
         if done is not None:
             offer = done.get("offer")
             best = next((st for st in done.get("stations") or [] if offer and st["index"] == offer["index"]), None)   # search
-            if settled and best and verdicts.lighten_step(best, p.get("untrusted"), done)["counts_as_pass"]:
+            ok = settled and best and verdicts.lighten_step(best, p.get("untrusted"), done)["counts_as_pass"]
+            if ok and not offer["offers"]:              # nothing to click: why, and it's in the study (#207)
+                results.append(_line("No step of the lightening to use", offer["said"], "", ""))
+            elif ok:
                 results.append(_line(
                     "Lighten it with holes where the wood isn't working",
                     f"{best['saved_lb']:g} lb lighter, still {_times(offer['quote'], about=True)} by the lightening's own "

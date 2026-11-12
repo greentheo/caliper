@@ -539,7 +539,12 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     thinner = _thinner(ctx, stations, tops, min_safety, density, C, M)
     stations += [dict(t, index=len(stations) + i) for i, t in enumerate(thinner)]
 
+    try:                                                 # what the part weighs, for the least worth a button (#207)
+        part_lb = C.report(store, part_id).get("mass_lb")
+    except Exception:  # noqa: BLE001 — not known: the quarter pound alone
+        part_lb = None
     record = {
+        "part_lb": part_lb,
         "id": rid, "part": part_id, "kind": "lighten", "created": time.time(), **seen, "cut": True,   # (CALI-152)
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
         "min_safety": min_safety, "material": mat["name"], "spacing_mm": round(s, 2),
@@ -666,7 +671,8 @@ def _offered(rec: dict) -> Optional[dict]:
     first = next((st for st in steps if st.get("index") == 0 and st.get("safety") is not None), None)
     # no ``worth``: holes come out of a sheet that's bought whole, so a Lightening saves weight and no money
     return use_step.choose(ok, float(rec.get("min_safety") or L.MIN_SAFETY), "saved_lb", lambda st: f"{st['saved_lb']:g} lb lighter",
-                           as_drawn=use_step.own(first) if first else None)
+                           as_drawn=use_step.own(first) if first else None,
+                           least=use_step.lighten_floor(rec.get("part_lb")))     # a few ounces gets no button (#207)
 
 
 def station_path(store: DesignStore, rid: str, index: int) -> str:
