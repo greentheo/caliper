@@ -43,7 +43,7 @@ def _author(s, feedback=None, prior=None):
 @pytest.fixture
 def quick(monkeypatch):
     pytest.importorskip("whittle")
-    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)        # coarse: quick, and it still has a verdict
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 4)   # 4 through, as a real run: at 2 its 19.05 mm sides are walls the voxels can't see, which only the top's plate check covers (#248)
 
 
 def _cards(store, pid):

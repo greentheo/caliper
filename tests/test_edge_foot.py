@@ -88,7 +88,9 @@ def _kid(tmp_path, monkeypatch, src, name):
     from caliper import load_study
 
     pytest.importorskip("whittle")
-    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    # four through: fine enough to see the printed walls, so the middle foot is the one thing unchecked (at two, the
+    # top's plate pass sat over walls the voxels couldn't see: not checked, #244)
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 4)
     store = DesignStore.create("a stool", base=str(tmp_path / name))
     store.write_part("stool", src.replace('"lb": 200', '"lb": 60').replace("an adult", "a kid"), intent="kid")
     with open(os.path.join(store.root, "scorecard.yaml"), "w") as f:

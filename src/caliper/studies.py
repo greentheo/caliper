@@ -118,7 +118,12 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
         if coarse:                              # a ✓ on an FEA too coarse to see its walls is no ✓ (CALI-97)
             word = "not checked: its walls are too thin for the voxels" if coarse[0][1]["kind"] == "unchecked" else \
                 "not resolved yet: too coarse to see its walls"
-            return f"{word} (the FEA read {safety_num(coarse[0][0]['safety'], r.get('min_safety'))}x)", None
+            c0 = coarse[0][0]                   # the check that governs, with its own number (#248 review)
+            read = f"{L.governing_words(c0)} read {safety_num(c0['safety'], r.get('min_safety'))}x"
+            fea = (c0.get("fea") or {}).get("safety")
+            if c0.get("governs", "fea") not in L.FEA and fea is not None:
+                read += f"; the FEA read {safety_num(fea, r.get('min_safety'))}x"
+            return f"{word} ({read})", None
         if v["kind"] == "fails":
             if r.get("filled"):                 # a ✗ on the block stays a ✗: the part as built is likely weaker
                 what += ", on a solid with more in it than its pieces: if it's filled in, the part as built is likely weaker"

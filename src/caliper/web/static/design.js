@@ -1829,7 +1829,8 @@ function trialView(p) {
   const chart = trialChart(pr, rows);
   return `<p class="small">Put the load where <b>${esc(pr.case)}</b> goes, in steps, and measure how far ${pr.closed_under ? `the ${esc(pr.where || 'top')} sags ${esc(pr.measured_at)}` : `the middle of
       the ${esc(pr.where || 'top')} sags`}. Measure it with ${esc(pr.measure_with)}.${pr.other_way ? ` ${esc(pr.other_way)}` : ''}
-      ${pr.breaks_lb ? `It should break at about <b>${pr.breaks_lb.toLocaleString()} lb</b>.` : pr.why_no_break ? `Where it would break isn't settled: ${esc(pr.why_no_break)}.` : 'Where it would break isn\'t settled: the check was too coarse to see its walls.'}
+      ${pr.breaks_lb ? `It should break at about <b>${pr.breaks_lb.toLocaleString()} lb</b>.` : pr.why_no_break ? (pr.why_no_break.startsWith('no prediction') ? `No prediction of where it breaks: ${esc(pr.why_no_break.replace(/^no prediction: /, ''))}.`   // (#248)
+        : `Where it would break isn't settled: ${esc(pr.why_no_break)}.`) : 'Where it would break isn\'t settled: the check was too coarse to see its walls.'}
       ${pr.over ? `That's ${esc(pr.over)}, as its card says.` : ''}</p>
     ${chart}
     <table class="st"><tr><th>load</th><th>should sag</th><th>sagged</th><th></th></tr>
@@ -2978,6 +2979,8 @@ function peakWhere(f) {
   return f && f.at ? `around ${len(f.at[2])} up` : 'in the part';
 }
 function lightenRuns(pid) { return (S.design.lighten_runs || []).filter((r) => r.part === pid); }
+// a Lightening's step under the floor is "too little", never "best"; an unseen or unknown one is still the step to use (#252)
+const lightenLead = (run) => (run.offer && run.offer.kind === 'small' ? 'Too little to use' : 'The step to use');
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
   const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
@@ -2998,7 +3001,7 @@ function lightenView(p) {
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
-        : `The step to use: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
+        : `${lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
       : unsure ? (unsure.verdict.kind === 'span' ? `Not settled: ${unsure.verdict.why}, so no step can be said to hold.` : unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
         : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.')
       : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}

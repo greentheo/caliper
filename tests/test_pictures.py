@@ -54,7 +54,7 @@ def test_what_a_jigsaw_cant_follow_is_smoothed_out_and_islands_dropped():
 @pytest.fixture
 def stool(tmp_path, monkeypatch):
     pytest.importorskip("whittle")
-    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)        # coarse: quick, and it still has a verdict
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 4)   # 4 through, as a real run: at 2 its 19.05 mm sides are walls the voxels can't see, which only the top's plate check covers (#248)
     store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
     store.write_part("stool", BOX_STOOL, intent="a box step stool")
     return store
@@ -192,7 +192,7 @@ def client(tmp_path, monkeypatch):
 
     from caliper.server import create_app
 
-    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 4)   # 4 through, as a real run: at 2 its 19.05 mm sides are walls the voxels can't see, which only the top's plate check covers (#248)
     monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))

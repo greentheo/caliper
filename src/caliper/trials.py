@@ -173,7 +173,9 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     all_round = closed and plate.get("as") != "beam"           # held all round: say which way the straightedge goes
     lo, hi = lo * spot, hi * spot
     span = L.fixed_ends(run, case)                             # not settled: nothing to load it up to (CALI-153)
-    breaks = None if L.unresolved(run, case) or span else case.get("breaks_lb")     # a plan isn't built up to a number nobody can read (#202)
+    unknown = L.unresolved(run, case)
+    gap = L.unseen(run, case) if unknown else ""                # another check governs; the FEA couldn't see a wall (#248)
+    breaks = None if unknown or span else case.get("breaks_lb")     # a plan isn't built up to a number nobody can read (#202)
     top = breaks or applied * 2
     step = 50 if top <= 1500 else 100                          # a sandbag at a time
     step = max(step, math.ceil(top / MOST_STEPS / step) * step)   # and a plan a person could carry out
@@ -198,10 +200,13 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
                           f"{beside_the_foot(plate, 'short') / spot:.0%} of that." if all_round and spot else None),
             # its safety as the card says it, against the same thing (#64 item 9); not a number to test against
             # where the break isn't settled
-            "why_no_break": "the check holds it fixed where it's held, so it may read too strong" if span else None,
-            "over": None if L.unresolved(run, case) or span else answers.over(case, run.get("min_safety")),
-            "basis": ("from an FEA too coarse to see its walls, so a rough guess until it's checked finer: "
-                      if L.unresolved(run, case) else "from an FEA that holds it fixed where it's held, so a real one may give more: "
+            "why_no_break": ("the check holds it fixed where it's held, so it may read too strong" if span else
+                             f"no prediction: the check couldn't see the wall: {gap}" if gap else
+                             "no prediction: the check was too coarse to see its walls" if unknown else None),
+            "over": None if unknown or span else answers.over(case, run.get("min_safety")),
+            "basis": ("from checks that couldn't see every wall, so a rough guess until it's checked again: " if gap else
+                      "from an FEA too coarse to see its walls, so a rough guess until it's checked finer: "
+                      if unknown else "from an FEA that holds it fixed where it's held, so a real one may give more: "
                       if span else "")                       # said, not hidden (CALI-110)
                      + "linear to breaking: the FEA's sag (joints solid, the stiff end)"
                      + ((" to the beam check's (resting on two edges, free to turn: the flexible end)" if plate.get("as") == "beam"

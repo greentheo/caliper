@@ -58,6 +58,9 @@ def test_it_goes_down_until_the_safety_runs_out(stool):
     """The walls first, then hole-saw holes in the top one at a time, then thinner sheet as an estimate:
     every step lighter than the last, until one doesn't hold."""
     rec = lighten.study(stool, "stool", steps=(0.5, 1.0))
+    from caliper import construction
+
+    assert rec["part_lb"] == construction.report(stool, "stool")["mass_lb"] and rec["part_lb"] > 1   # for its least worth a button (#207)
     walls = sorted(p["name"] for p in rec["panels"] if not p["stood_on"])
     assert walls == ["back", "front", "left", "right"] and [p["name"] for p in rec["panels"] if p["stood_on"]] == ["top"]
     first, *rest = rec["stations"]

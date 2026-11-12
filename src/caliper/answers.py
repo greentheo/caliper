@@ -292,6 +292,8 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
         return _line(f"{c['name'][:1].upper() + c['name'][1:]}: not checked: {v['why']}. Check where it's held and "
                      f"pushed, then check it again." + older, v["status"], study="load")
     if v["kind"] in ("unresolved", "unchecked"):     # an FEA that can't see the wall is no ✓ (CALI-97)
+        if v.get("why"):                             # which check holds, and what couldn't be seen, said once (#244, #248)
+            return _line(f"{c['name'][:1].upper() + c['name'][1:]}: {unseen_said(run, v)}" + older, "warn", study="load")
         return _line(coarse(run, inches) + older, "warn", study="load")
     if v["kind"] == "span":                          # the FEA alone, between its holds: no ✓ and no number (CALI-153)
         return _line(f"{c['name'][:1].upper() + c['name'][1:]}: not settled: {v['why']}." + older, "warn", study="load")
@@ -364,6 +366,13 @@ def worst_at(run: dict, c: dict, inches: bool) -> tuple[str, Optional[bool]]:
     where = (f"in the {fea['in']} " if fea.get("in") else "") + f"around z {_len(fea['at'][2], inches)}"
     s = run.get("spacing_mm")
     return where, (not L._sees(fea["wall_mm"] / s)) if s else None
+
+
+def unseen_said(run: dict, v: dict) -> str:
+    """A pass that rests on another check while the FEA couldn't see a wall (#244): "not checked: the seat's plate check holds
+    3.3 times over; the printed walls are too thin to check at this size (…). A hand check or …", each said once (#248)."""
+    return (f"not checked: {v['why']}. " + ("Check it again finer." if run.get("finer") else
+                                             "A hand check or a printed test piece is the way to know."))
 
 
 def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
@@ -740,9 +749,10 @@ def measured(store: DesignStore, state: dict) -> dict:
         out["strength.recheck"] = verdicts.UNCUT
     if any(v["kind"] == "span" for _, v in said):
         out["strength.span"] = verdicts.SPAN_WHY       # (CALI-153)
-    held = [r for r, v in said if v["kind"] in ("unresolved", "unchecked")]
+    held = [(r, v) for r, v in said if v["kind"] in ("unresolved", "unchecked")]
     if held:                                           # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
-        out["strength.unresolved"] = coarse(held[0], inches)
+        r, v = held[0]                                 # or on another check while the FEA couldn't see a wall (#244, #248)
+        out["strength.unresolved"] = (unseen_said(r, v)[:1].upper() + unseen_said(r, v)[1:]) if v.get("why") else coarse(r, inches)
     failed = [(r, c, v) for (r, c), (_, v) in zip(cases, said) if v["kind"] == "fails" and v.get("coarse")]
     if failed:                                         # ...and a ✗ on one says it, as the part card does (#139)
         out["strength.coarse_fail"] = fail_hedge(*failed[0], inches).strip() or coarse(failed[0][0], inches, holds=False)
