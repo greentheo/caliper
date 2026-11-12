@@ -90,6 +90,8 @@ _Q_CLAUSE = re.compile(r"^\s*(?:why|what|how|which|where|when|who|is|are|does|do
 #: (#212, round 3) a statement with no change in it: "I need it by Friday" isn't a revision.
 _STATEMENT = re.compile(r"^\s*i\s+need\s+(?:it|this|that|them)\s*(?:(?:by|before|for|on|soon|today|tomorrow|tonight|asap"
                         r"|now|this|next)\b.*)?[.!]?\s*$", re.I)    # not "I need them painted", a change (#70, reviewer-2)
+#: (#250 review) "I need them painted", "I need it wider": with nothing built, nothing to change, so no part named `i_need`
+_I_NEED = re.compile(r"^\s*i\s+need\s+(?:it|this|that|them)\b", re.I)
 #: (#70, reviewer-2) a clause that tells, not asks: "it's heavier than I thought"; its direction word is no request.
 _SAYS = re.compile(r"^\s*(?:it|this|that|they|these|those|i)(?:'s|'re|'m|\s+(?:is|are|was|were|am|seems?|looks?|feels?"
                    r"|thought|think|was))\b", re.I)
@@ -508,7 +510,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
         return Intent(action="answer", part=hit, note="reads as a question")
 
     wants_new = bool(_NEW_THING.search(message or "")) and not _ADD_SIZE.search(message or "")   # a size added: a revision
-    if not ids and not wants_new and _EXPLAIN.search(message or ""):
+    if not ids and not wants_new and (_EXPLAIN.search(message or "") or _I_NEED.search(message or "")):
         # "I don't get it, make it 2 inches taller" with nothing built: nothing to change, no part named `i_don` (#70)
         return Intent(action="answer", note="asks to explain, and there's nothing to change yet")
     if not wants_new and len(ids) == 1 and _MODIFY.search(message or ""):

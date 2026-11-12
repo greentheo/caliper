@@ -93,3 +93,19 @@ in a scratch shop.
    caught.
 2. **Item 20 pinned.** That's already in this PR's `test_leftovers_70b.py`: `narrowBy(0.5) == 2` and the 701–1279 px
    rule (cards under the view, the chat down both rows).
+
+**Rework from the review (the foreman's three).**
+1. **Rule 6: cost stays an estimate.** The solid's share bounds a weight, the plastic that stays in the part, not what's
+   bought or laid down (supports, brim, purge). So the bound now settles weight goals only. A cost goal on a printed
+   solid share is an estimate until the slicer's figure is in, on the card and the scorecard.
+   - Pinned: "$71 within its $71 cap" is an estimate, not a ✓.
+   - Over its cap it's a ✗, as on main: no bound settles cost either way. Raised with the foreman.
+   - The guess now reads "a guess (the filament is the model's solid share)", English after "is".
+2. **On an empty design, "I need them painted" or "I need it wider" gets an answer,** not a part named `i_need`.
+   That's the empty-design explain rule, extended to an "I need it/them/this…" statement that asks for no new
+   thing. "I need a bench" still authors.
+3. **The shove says what's checked and what isn't, separately:** "taken as squeezed end to end … : the safe side for
+   the sheet. Racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid." The
+   page's row says the same. No new check; racking is Theo's call.
+
+7 more mutants, all caught (one survivor at first now has its over-the-cap pin). The around-files (10) pass, 356.

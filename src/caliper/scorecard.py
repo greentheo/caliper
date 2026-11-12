@@ -544,7 +544,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         else:
             met = None
         low = verdicts.compare(v - upper_lb, op, lim) if number and c["metric"].startswith("weight.") else None
-        bounded = (filament_upper and number and c["metric"].startswith(("weight.", "cost."))
+        # the solid's share bounds a weight, not a cost: supports, brim and purge are bought too (#250 review)
+        bounded = (filament_upper and number and c["metric"].startswith("weight.")
                    and not making.settled_by_bound(op, met, low))   # an upper bound that doesn't settle it: an estimate (#237)
         if bounded:
             met = True
@@ -554,7 +555,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                                 incomplete="; ".join(left) if strength and left else None,
                                 estimate=m["source"] if m and m.get("trust") == "rough" and c["metric"].startswith("print.")
                                 else filament_guess if filament_guess and c["metric"].startswith(("weight.", "cost."))
-                                and (bounded or not filament_upper)
+                                and (bounded or not filament_upper or c["metric"].startswith("cost."))
                                 else None,
                                 # an old number on its limit, the run's or this goal's own (#214 review)
                                 recheck=(recheck or (verdicts.UNCUT if number and verdicts.goal_on_limit(

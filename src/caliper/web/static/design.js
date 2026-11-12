@@ -3122,7 +3122,7 @@ function foldedBy(c) {
   const w = done.length ? done.reduce((a, b) => (b.safety < a.safety ? b : a)) : null;
   if (!w) return 'the buckling check';
   const sides = w.edges_held === 2 ? 'held along both sides' : w.edges_held === 1 ? 'held along one side' : 'free along its sides, its top free to sway';
-  if (w.down === false) return `the buckling check on the ${esc(w.piece)}: a push that doesn't run down it taken as squeezing it end to end, the safe side`;   // (#235 review)
+  if (w.down === false) return `the buckling check on the ${esc(w.piece)}: a push that doesn't run down it, taken as a squeeze, the safe side for the sheet; racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid`;   // (#235, #250 review)
   return `the buckling check on the ${esc(w.piece)}: a plate ${sides}, its whole load on it`;
 }
 

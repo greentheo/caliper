@@ -214,6 +214,10 @@ def _small_len(mm: float, inches: bool) -> str:
             f"{mm:.1f}".removesuffix(".0") if mm < 10 else f"{mm:.0f}") + " mm"
 
 
+#: What a shove in a sheet's plane doesn't check (#250 review): no new check, and racking is Theo's call.
+RACKING = "Racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid."
+
+
 def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     """What a ✗ adds about where it fails and how sure (#137 item 2), the same words on the part card and the design
     card (#139 review: the design card named the 0.25 mm webs, the part card the 5.2 mm wall at the peak). "" when
@@ -222,10 +226,9 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
         rows = [r for r in c.get("buckling") or [] if r.get("done")]
         if rows:
             w = min(rows, key=lambda r: r["safety"])
-            if w.get("down") is False:               # a shove in its plane: taken as a squeeze, not one (#235 review)
+            if w.get("down") is False:               # a shove in its plane: what's checked, and what isn't (#235, #250 review)
                 return (f" The {w['piece']} folds first, taken as squeezed end to end by a push that doesn't run down it: "
-                        f"the safe side, as a shove more likely racks it than folds it (a hand buckling check, its edges and "
-                        f"stiffness taken on the safe side, and the whole load on it).")
+                        f"the safe side for the sheet. {RACKING}")
             return (f" The {w['piece']} folds first: it's too slender for the load running down it (a hand buckling check, "
                     f"its edges and stiffness taken on the safe side, and the whole load on it).")
     where, thin_here = worst_at(run, c, inches)
@@ -990,9 +993,10 @@ def held_to(state: dict, now: dict) -> list[dict]:
             guess = now.get("filament.rough") if c["metric"] in now else rough_scored.get(c["metric"])
             from . import making
 
-            if guess and c["metric"] in now and now.get("filament.upper"):
-                low = (verdicts.compare(v - (now.get("filament.upper_lb") or 0.0), c.get("op", ">="), c["limit"])
-                       if c["metric"].startswith("weight.") else None)     # with the printed share at nothing
+            # the solid's share bounds the plastic that stays in the part, its weight; not what's bought or laid down
+            # (supports, brim, purge): a cost goal on it stays an estimate until the slicer's figure is in (#250 review)
+            if guess and c["metric"] in now and now.get("filament.upper") and c["metric"].startswith("weight."):
+                low = verdicts.compare(v - (now.get("filament.upper_lb") or 0.0), c.get("op", ">="), c["limit"])   # the share at nothing
                 if making.settled_by_bound(c.get("op", ">="), met, low):
                     guess = None                      # an upper bound that settles it: a pass under the limit (#237 review)
                 else:

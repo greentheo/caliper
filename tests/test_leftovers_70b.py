@@ -159,7 +159,7 @@ const esc = (s) => String(s);
 out = [foldedBy({ buckling: [{ piece: 'top', done: true, safety: 20.9, down: false, edges_held: 0 }] }),
        foldedBy({ buckling: [{ piece: 'wall', done: true, safety: 2.6, down: true, edges_held: 0 }] })];
 """))
-    assert "a push that doesn't run down it taken as squeezing it end to end, the safe side" in out[0], out
+    assert "a push that doesn't run down it, taken as a squeeze, the safe side for the sheet" in out[0], out
     assert out[1].endswith("free along its sides, its top free to sway, its whole load on it"), out
 
 
@@ -469,3 +469,55 @@ out = { first, again, after: framed, aspect: camera.aspect };
     assert out == {"first": 1, "again": 2, "after": 2, "aspect": 0.5}
     js = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     assert "controls.addEventListener('start', unfit);" in js
+
+
+# --- #250 review -----------------------------------------------------------------------------------------------------------
+def test_a_cost_goal_on_the_solid_s_share_stays_an_estimate(mixed, monkeypatch):
+    """The review: "✓ The goal: $71, within its $71 cap" on the solid's share. It bounds the plastic that stays in the part, not
+    what's bought or laid down (supports, brim, purge): a cost goal on it is an estimate until the slicer's figure is in."""
+    from caliper import answers, design_api, printing, scorecard
+
+    monkeypatch.setattr(printing, "estimate", lambda *a, **k: dict(FAILED))
+    state = design_api.design_state(mixed)
+    usd = answers.measured(mixed, state)["cost.usd"]
+    _goal(mixed, "cost.usd", round(usd + 0.5, 2))                         # just within its cap
+    state = design_api.design_state(mixed)
+    now = answers.measured(mixed, state)
+    assert now.get("filament.upper")
+    (line,) = [ln for ln in answers.held_to(state, now) if "light enough" in ln["text"].lower()]
+    assert line["status"] != "ok" and "a guess" in line["text"], line
+    assert "the filament is the model's solid share" in line["text"], line
+    (check,) = [c for c in scorecard.compute(mixed)["checks"] if c.get("id") == "g"]
+    assert check["status"] == "estimate", check
+    _goal(mixed, "cost.usd", round(usd - 5, 2))                           # over its cap: a ✗, as on main (no bound settles cost)
+    (check,) = [c for c in scorecard.compute(mixed)["checks"] if c.get("id") == "g"]
+    assert check["status"] == "fail", check
+
+
+@pytest.mark.parametrize("message", ["I need them painted", "I need it wider", "I need them sanded smooth"])
+def test_on_an_empty_design_an_i_need_statement_has_nothing_to_change(designs, message):
+    """The review: "I need them painted" with nothing built authored a part named `i_need`."""
+    from caliper import chat
+
+    empty, _ = designs
+    assert chat.offline_classify(empty, message, None).action == "answer", message
+    assert chat.offline_classify(empty, "I need a bench", None).action == "author"         # a new thing still is one
+
+
+def test_the_shove_says_what_s_checked_and_what_isn_t():
+    """The review and the foreman: the squeeze is the safe side for the sheet; racking isn't checked, the FEA takes the joints as
+    solid. Separately, on the card and on the page."""
+    from caliper import answers
+
+    from .test_carve_click import _page, _run
+
+    c = {"governs": "buckling", "buckling": [{"piece": "top", "done": True, "safety": 0.5, "down": False}], "fea": {"safety": 9.0}}
+    said = answers.fail_hedge({"min_safety": 2.0}, c, {"kind": "fails"}, False)
+    assert ("The top folds first, taken as squeezed end to end by a push that doesn't run down it: the safe side for the sheet. "
+            "Racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid.") in said, said
+    assert "more likely racks" not in said
+    out = _run(_page(["foldedBy"], extra="""
+const esc = (s) => String(s);
+out = foldedBy({ buckling: [{ piece: 'top', done: true, safety: 20.9, down: false, edges_held: 0 }] });
+"""))
+    assert "taken as a squeeze, the safe side for the sheet" in out and "racking (the frame leaning over at its joints) isn't checked" in out, out

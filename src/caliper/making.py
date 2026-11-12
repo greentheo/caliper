@@ -91,7 +91,8 @@ def filament_said(reports) -> tuple[str, str]:
     groups = [g for r in reports if r for g in ((r.get("bom") or {}).get("printed") or [])]
     pending = "still slicing" if any(g.get("filament_pending") for g in groups) else ""
     off = [g.get("filament_from", FROM_SOLID) for g in groups if g.get("filament_from") != FROM_SLICER]
-    return (f"a guess (the filament is {off[0]})" if off else ""), pending
+    said = "the model's solid share" if off and off[0] == FROM_SOLID else (off[0] if off else "")   # read after "is" (#250 review)
+    return (f"a guess (the filament is {said})" if off else ""), pending
 
 
 def filament_bound(reports) -> bool:
