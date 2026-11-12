@@ -16,13 +16,15 @@ edges, each taken on the safe side:
   fold together (#235 review);
 - both unloaded edges held: ``k = min over m of (m b/a + a/(m b))²``, 4 for a long plate (Timoshenko eq. 9-7);
 - one held, one free: ``k = 0.425 + (b/a)²`` (Timoshenko §9.4; Bulson);
-- neither held: nothing stops its top moving sideways either, so it sways: fixed at its foot and free at its top, a
-  cantilever of twice its height, a quarter of Euler's ``π² E t² / (12 a²)`` (:data:`SWAY`; without 1 − ν², the lower).
-  A wall braced at its top by something across it would do better; that isn't looked for, so this errs safe.
+- neither held: it's a wide column. Braced at its top, it's pinned at both ends: Euler's ``π² E t² / (12 a²)`` (#264). A
+  wall is braced only by a piece found across its top edge (where the load comes in) that's across another wall's top too,
+  as a step resting on a stool's two sides is: a top on one lone wall moves with it. Unbraced, nothing stops its top
+  moving sideways, so it sways: fixed at its foot and free at its top, a cantilever of twice its height, a quarter of
+  Euler's (:data:`SWAY`; without 1 − ν², the lower).
 
 ``E`` is the panel's bending stiffness the weaker way, since which way the grain runs isn't known. For plywood that's
-across its face grain, where the outer plies run the wrong way: :data:`PLY_BENDING_ACROSS` of along. The whole of the case's factored load is taken on each wall in line with it: the safe side, as the share each
-wall carries isn't worked out. A panel this can't describe (not a rectangle, holes in it, loaded at a slant to its
+across its face grain, where the outer plies run the wrong way: :data:`PLY_BENDING_ACROSS` of along. Between two parallel walls either side of where it's applied, the case's factored load is shared by the lever
+rule, from their mid-planes (#264); any other wall in line, or a load given with no place, takes the whole of it, the safe side. A panel this can't describe (not a rectangle, holes in it, loaded at a slant to its
 edges) isn't checked, and says so. NEEDS ENGINEER CHECK (#42): the edge conditions, the sway, and E across the grain for plywood.
 """
 
@@ -49,21 +51,21 @@ PLY_BENDING_ACROSS = 0.1
 OFF_PLANE = 0.5
 
 
-def k_factor(a: float, b: float, held: int) -> float:
+def k_factor(a: float, b: float, held: int, braced: bool = False) -> float:
     """The buckling coefficient for loaded edges simply supported, and ``held`` (0, 1 or 2) unloaded edges simply supported, the
-    rest free. For ``held == 0`` it's the swaying wide column's, written as a plate's: ``SWAY (b/a)² (1 − ν²)``, so σ_cr is a
-    quarter of Euler's."""
+    rest free. For ``held == 0`` it's a wide column's, written as a plate's: swaying, ``SWAY (b/a)² (1 − ν²)``, a quarter of
+    Euler's; ``braced`` at its top (#264), pinned at both ends, ``(b/a)² (1 − ν²)``, Euler's."""
     r = a / b
     if held >= 2:
         return min((m / r + r / m) ** 2 for m in range(1, max(2, int(r) + 3)))
     if held == 1:
         return 0.425 + (1 / r) ** 2
-    return SWAY * (1 / r) ** 2 * (1 - NU ** 2)
+    return (1.0 if braced else SWAY) * (1 / r) ** 2 * (1 - NU ** 2)
 
 
-def critical_stress(E: float, t: float, a: float, b: float, held: int) -> float:
+def critical_stress(E: float, t: float, a: float, b: float, held: int, braced: bool = False) -> float:
     """σ_cr in MPa (``E`` in MPa, lengths in mm)."""
-    return k_factor(a, b, held) * math.pi ** 2 * E / (12 * (1 - NU ** 2)) * (t / b) ** 2
+    return k_factor(a, b, held, braced) * math.pi ** 2 * E / (12 * (1 - NU ** 2)) * (t / b) ** 2
 
 
 def weak_E(mat: dict) -> float:
@@ -115,7 +117,7 @@ def check(pieces: list[dict], load: dict, mat: dict, tol: float) -> list[dict]:
 
     f = np.asarray(load["force"], float) * float(load.get("factor", 1.0))
     size = float(np.linalg.norm(f))
-    out = []
+    out, walls = [], []
     if size <= 0:
         return out
     for pc in pieces:
@@ -148,12 +150,57 @@ def check(pieces: list[dict], load: dict, mat: dict, tol: float) -> list[dict]:
             a = float(np.mean([np.linalg.norm(edges[e]) for e in along]))
             b = float(np.mean([np.linalg.norm(edges[e]) for e in loaded]))
             held = sum(_held(pc, k, e, pieces, tol) for e in along)
-            E, t = weak_E(mat), float(pc["thickness"])
-            sigma = critical_stress(E, t, a, b, held)
-            p_cr = sigma * b * t
-            out.append({**row, "done": True, "height_mm": round(a, 1), "width_mm": round(b, 1), "thickness_mm": t,
-                        "edges_held": held, "k": round(k_factor(a, b, held), 3), "E_mpa": round(E, 1),
-                        "sigma_cr_mpa": round(sigma, 3), "p_cr_n": round(p_cr, 1), "safety": p_cr / push})
+            # where the load comes in: the loaded edge furthest up the push. What's across it, piece by piece (#264)
+            top = min(loaded, key=lambda e: float((poly[e] + poly[(e + 1) % 4]) @ d))
+            across = [o for o in pieces if o is not pc and _held(pc, k, top, [o], tol)] if held == 0 else []
+            mid = poly.mean(axis=0) + pc["sides"][k] * n * float(pc["thickness"]) / 2.0     # its mid-plane: where it bears
+            walls.append({"row": len(out), "pc": pc, "n": n, "mid": mid, "across": across, "push": push,
+                          "a": a, "b": b, "held": held})
+            out.append({**row, "done": True, "height_mm": round(a, 1), "width_mm": round(b, 1),
+                        "thickness_mm": float(pc["thickness"]), "edges_held": held})
+    for w in walls:
+        # braced only by a piece found across its top that's across another wall's top too: a top on one lone wall moves with
+        # it (#235's), a step across two sides holds both (#264). Found, never assumed (Rule 6)
+        w["by"] = next((o["name"] for o in w["across"] if any(o in v["across"] for v in walls if v is not w)), None)
+    shares = _shares(walls, load)
+    for w, share in zip(walls, shares):
+        r = out[w["row"]]
+        E, t = weak_E(mat), float(w["pc"]["thickness"])
+        braced = w["by"] is not None
+        sigma = critical_stress(E, t, w["a"], w["b"], w["held"], braced)
+        p_cr = sigma * w["b"] * t
+        push = w["push"] * share
+        r.update({"braced_by": w["by"], "share": round(share, 3), "load_n": round(push, 1),
+                  "k": round(k_factor(w["a"], w["b"], w["held"], braced), 3), "E_mpa": round(E, 1),
+                  "sigma_cr_mpa": round(sigma, 3), "p_cr_n": round(p_cr, 1), "safety": p_cr / push})
+    return out
+
+
+def _shares(walls: list[dict], load: dict) -> list[float]:
+    """Each wall's share of the load (#264): between the two parallel walls either side of where it's applied, by the lever
+    rule; any other wall, or a load with no place, or beyond its walls, the whole of it (the safe side, as before)."""
+    out = [1.0] * len(walls)
+    if load.get("lo") is None or load.get("hi") is None:
+        return out
+    at = (np.asarray(load["lo"], float) + np.asarray(load["hi"], float)) / 2.0
+    seen: set = set()
+    for i, w in enumerate(walls):
+        if i in seen:
+            continue
+        family = [j for j, v in enumerate(walls) if abs(float(v["n"] @ w["n"])) > 1 - 1e-3]
+        seen.update(family)
+        n = w["n"]
+        s = {j: float(walls[j]["mid"] @ n) for j in family}
+        s_at = float(at @ n)
+        below = [j for j in family if s[j] <= s_at]
+        above = [j for j in family if s[j] >= s_at]
+        if not below or not above:
+            continue
+        lo, hi = max(below, key=lambda j: s[j]), min(above, key=lambda j: s[j])
+        if lo == hi or s[hi] - s[lo] < 1e-9:
+            continue
+        out[lo] = (s[hi] - s_at) / (s[hi] - s[lo])
+        out[hi] = (s_at - s[lo]) / (s[hi] - s[lo])
     return out
 
 

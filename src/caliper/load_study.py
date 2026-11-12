@@ -906,8 +906,9 @@ def plate_why(pl: Optional[dict]) -> Optional[str]:
 BUCKLING = ("Buckling isn't checked: a thin wall carrying the load in compression can fold before it reaches its "
             "strength, more so with a big cut-out.")
 #: Said where every sheet in line with a load was checked for it by hand (CALI-159, #229).
-BUCKLING_CHECKED = ("Buckling is checked by hand for each wall the load runs down: as a flat plate, its whole load on it, "
-                    "its edges free where nothing meets them, and the plywood taken the weaker way (rough).")
+BUCKLING_CHECKED = ("Buckling is checked by hand for each wall the load runs down: as a flat plate, with its share of the load "
+                    "between two walls by the lever rule (else the whole of it), held at its top only by a piece found across "
+                    "it and another wall, its edges free where nothing meets them, and the plywood taken the weaker way (rough).")
 
 
 def buckling_notes(pieces: list[dict], loads: list[dict], mat: dict, tol: float = 2.0,

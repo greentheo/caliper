@@ -231,8 +231,11 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
             if w.get("down") is False:               # a shove in its plane: what's checked, and what isn't (#235, #250 review)
                 return (f" The {w['piece']} folds first, taken as squeezed end to end by a push that doesn't run down it: "
                         f"the safe side for the sheet. {RACKING}")
+            held = f"held at its top by the {w['braced_by']}, " if w.get("braced_by") else ""          # (#264)
+            share = (f"{w['share']:.0%} of the load on it, by the lever rule" if (w.get("share") or 1.0) < 1.0
+                     else "the whole load on it")
             return (f" The {w['piece']} folds first: it's too slender for the load running down it (a hand buckling check, "
-                    f"its edges and stiffness taken on the safe side, and the whole load on it).")
+                    f"{held}its edges and stiffness taken on the safe side, and {share}).")
     where, thin_here = worst_at(run, c, inches)
     wall = _wall(c["fea"]["wall_mm"], inches) if where else ""
     if v.get("coarse") and thin_here:                # among walls the voxels can't see: the fail may be the model's
