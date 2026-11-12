@@ -207,7 +207,7 @@ def test_fixing_the_break_is_reported_too(gantry):
     res = chat.turn(gantry, "pull it back off the rail", scope="carriage", use_llm=False,
                     author=_author(_box(dx=40, dy=20, y=40)), max_rounds=2)
     assert res.fixed == ["carriage_misses_rail"] and res.ok
-    assert "still measures green" in res.reply
+    assert "The design's checks still pass (no overlap)" in res.reply          # what was measured, not "green" (#241)
 
 
 def test_a_revision_that_never_builds_leaves_the_part_alone(gantry):

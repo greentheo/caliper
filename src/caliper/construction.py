@@ -46,6 +46,7 @@ import threading
 from typing import Optional
 
 from . import materials as M
+from .errors import Refused
 from .design import DesignStore
 
 #: Saw kerf between pieces cut from one sheet or stick.
@@ -570,13 +571,13 @@ def write_build(script: str, values: dict) -> str:
     """The script with these BUILD entries changed — comments and every other line untouched."""
     node = _build_node(ast.parse(script))
     if node is None:
-        raise KeyError(f"the script has no module-level {BUILD_NAME} dict")
+        raise Refused(f"the script has no module-level {BUILD_NAME} dict")
     spans = {k.value: (v.lineno, v.col_offset, v.end_lineno, v.end_col_offset)
              for k, v in zip(node.keys, node.values)
              if isinstance(k, ast.Constant) and isinstance(k.value, str)}
     missing = [k for k in values if k not in spans]
     if missing:
-        raise KeyError(f"{BUILD_NAME} has no entry for {', '.join(map(repr, missing))}")
+        raise Refused(f"{BUILD_NAME} has no entry for {', '.join(map(repr, missing))}")
     lines = script.splitlines(keepends=True)
     offsets = [0]
     for line in lines:
@@ -968,7 +969,7 @@ def adopt(store: DesignStore, part_id: str, values: dict) -> dict:
     script = store.read_script(part_id)
     saved = read_build(script)
     if saved is None:
-        raise KeyError(f"'{part_id}' has no {BUILD_NAME} dict to write choices into")
+        raise Refused(f"'{part_id}' has no {BUILD_NAME} dict to write choices into")
     changed = {k: v for k, v in values.items() if saved.get(k) != v}
     if not changed:
         return {"version": store.design.part(part_id).version, "build": saved, "changed": {}}

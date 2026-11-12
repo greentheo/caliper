@@ -52,6 +52,8 @@ async function api(method, url, body) {
     try { const j = await r.json(); msg = j.detail || j.error || msg; errorId = j.error_id || ''; } catch (e) { /* not JSON */ }
     const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
     if (errorId) { err.errorId = errorId; (window.__errIds = window.__errIds || {})[err.message] = errorId; }   // a crash the server kept (CALI-59)
+    // a 409 is a refusal the server meant, not a bug: it shows as a plain line with no Report it (#70 item 24)
+    if (r.status === 409) { err.refused = true; (window.__refused = window.__refused || {})[err.message] = true; }
     throw err;
   }
   return r.json();
@@ -1156,7 +1158,7 @@ function wireClarify() {
 }
 
 // the first build, said as it goes: its plan, and the part (CALI-157: the checks wait to be asked for)
-const BUILD_STEPS = { plan: 'Planning its parts', build: 'Building it' };
+const BUILD_STEPS = { plan: 'Planning its parts', build: 'Building it', measured: 'Measuring it for the parts it goes into' };
 function elapsedText(s) {
   const t = Math.max(0, Math.round(s));
   return t < 60 ? `${t} s` : `${Math.floor(t / 60)} min ${t % 60} s`;
@@ -2205,7 +2207,7 @@ function partView(p) {
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
     <h4>History</h4>
     <ul class="list">${p.history.slice().reverse().map(historyItem).join('')}</ul>
-    <details id="adv"><summary>Advanced — script &amp; spec</summary><div id="advBody" class="small muted">loading…</div></details>`;
+    <details id="adv"><summary>Advanced — script &amp; spec <span class="muted">${esc(p.id)}</span> ${origin}</summary><div id="advBody" class="small muted">loading…</div></details>`;
   const work = `${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
     <div id="loadBox">${loadView(p)}</div>` : ''}
     ${p.loads && p.role !== 'fixed' ? `<h4>Test it <span class="badge">the real one</span></h4>
@@ -2221,7 +2223,8 @@ function partView(p) {
   const make = p.built ? `<div id="makingBox">${makingView(p)}</div>
     <div id="patternBox">${patternView(p)}</div>
     <div id="cutplanBox">${cutplanView(p)}</div>` : '';
-  return `<h2>${esc(p.name || p.id)} ${origin}</h2>
+  // the heading is the part's own name; its id and how it was made are one click down, under Advanced (#70 item 21)
+  return `<h2>${esc(p.name || p.id)}</h2>
     <div class="muted small">v${p.version}</div>
     ${cardsView({ what, work, buy, make, params: `<div id="paramBox">${paramView(p)}</div>` })}`;
 }
@@ -2371,8 +2374,8 @@ function builtResults(p, c) {
       ${bom.lumps.map((g) => `<li><b>${esc(g.name)}</b> <span class="muted">${lbs(g.mass_kg * 2.20462)}</span></li>`).join('')}
       ${bom.fasteners ? `<li><b>${bom.fasteners.screws} × ${esc(bom.fasteners.screw)}</b> and <b>${esc(bom.fasteners.glue)}</b>
         <div class="muted small">${esc(bom.fasteners.basis)}</div></li>` : ''}
-      ${(bom.printed || []).map((g) => `<li><b>${esc(g.label)}</b>: ${esc(g.name)} <span class="muted">${g.filament_g} g of filament
-        (${g.volume_cm3} cm³ at ${Math.round(g.infill * 100)}% infill)</span></li>`).join('')}
+      ${(bom.printed || []).map((g) => `<li><b>${esc(g.label)}</b>: ${esc(g.name)} <span class="muted">${Math.round(g.filament_g)} g of filament${g.filament_from ? `, ${esc(g.filament_from)}` : ''}
+        (the model: ${g.volume_cm3} cm³ at ${Math.round(g.infill * 100)}% infill)</span></li>`).join('')}
     </ul>
     ${(r.notes || []).map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}
     <div class="muted small" style="margin-top:4px">Counts are a shopping estimate (panels packed on whole sheets, cuts on
@@ -3808,13 +3811,25 @@ async function showStation(pid, run, index) {
       ${st.metrics && st.metrics.drag != null ? ` · drag ${pct(st.metrics.drag)}` : ''}</span>`;
     bar.innerHTML = `${what}
       ${carved && st.closed === false ? `<span class="small" style="color:var(--bad)">Can't use this step: ${esc(st.why)}.</span>` : ''}
-      ${(lightened || carved) && !index ? '' : `<button class="primary" id="adoptBtn" ${(lightened || carved) && !holdsHere(st) ? `disabled title="${esc(st.verdict ? `It can't be used: ${st.verdict.word}` : '')}"` : ''}>${lightened ? 'Cut these holes in '
-        : carved ? 'Carve it like this: ' : framed ? 'Use these sizes for ' : parametric ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`}
+      ${stationAction(pid, run, index, st)}
       <button id="stationClose" class="ghost">×</button>`;
     $('stationClose').onclick = () => { clearStation(); renderInspector(); };
     if ($('adoptBtn')) $('adoptBtn').onclick = () => adoptStation(pid, run.id, index, run.kind);
     paint(); renderInspector();
   } catch (e) { showErr(e.message); }
+}
+// the bar's offer for a step: a Lighten or carve of an older version can't be cut in (the server refuses it, CALI-87),
+// so it isn't offered: the bar says to run it again (CALI-92, #70 item 24)
+function stationAction(pid, run, index, st) {
+  const lightened = run.kind === 'lighten', carved = run.kind === 'carve';
+  if ((lightened || carved) && !index) return '';
+  const now = partOf(pid).version;
+  if ((lightened || carved) && run.version != null && now != null && run.version !== now) {
+    return `<span class="small" id="staleRun">${lightened ? 'This lightening' : 'This carve'} is of v${run.version}, and the part
+      has changed since (it's v${now}): ${lightened ? 'lighten' : 'carve'} it again.</span>`;
+  }
+  return `<button class="primary" id="adoptBtn" ${(lightened || carved) && !holdsHere(st) ? `disabled title="${esc(st.verdict ? `It can't be used: ${st.verdict.word}` : '')}"` : ''}>${lightened ? 'Cut these holes in '
+    : carved ? 'Carve it like this: ' : run.kind === 'frame' ? 'Use these sizes for ' : run.kind === 'parametric' ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`;
 }
 function clearStation(keepBar) {
   if (stationMesh) { scene.remove(stationMesh); stationMesh.geometry.dispose(); stationMesh = null; }

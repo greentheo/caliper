@@ -161,7 +161,7 @@ def cost_and_waste(store: DesignStore, reports: dict, cutplans: dict) -> dict:
         for g in r["bom"].get("printed") or []:               # filament by weight (CALI-48)
             cost = g["filament_g"] / 1000 * M.printed(g["material"])["usd_per_kg"]
             lines.append({"part": pid, "item": f"{g['filament_g']:.0f} g of {g['label']} filament", "usd": round(cost, 2),
-                          "waste_usd": 0.0, "waste_pct": 0.0, "from": "by weight"})
+                          "waste_usd": 0.0, "waste_pct": 0.0, "from": g.get("filament_from") or "by weight"})
             bought_usd += cost
         for row in r["pieces_raw"]:
             if row["kind"] != "lump":
@@ -230,11 +230,18 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
 
     # what each part is built from: weight, keeps, the bill of materials
     emit("weighing", "what each part is built from")
-    reports, cutplans = {}, {}
+    from . import making
+
+    reports, cutplans, made = {}, {}, {}
     for p in store.design.parts:
         if not store.is_scripted(p.id) or not C.declares(store.read_script(p.id)):
             continue
         r = C.report(store, p.id)
+        try:                                   # how it's made, asked here: its weight and cost go by its filament (#70 item 23)
+            made[p.id] = making.plan(store, p.id)
+        except Exception as e:  # noqa: BLE001 — unknown is said by the shop check below, not a crash
+            made[p.id] = e
+        r = making.filament(r, made[p.id] if isinstance(made[p.id], dict) else None)
         r["pieces_raw"] = C.takeoff(C._items(C.declared(store, p.id)))
         reports[p.id] = r
         _metric(metrics, f"weight.{p.id}", r["mass_lb"], "lb", f"{p.id} weighs", "model", "construction",
@@ -252,8 +259,12 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     pieces_short = next((r["not_accounted"] for r in reports.values() if r.get("not_accounted")), None)    # nothing from them (CALI-155)
     b = C.balance(store, payload_lb=payload)
     unknown = {"note": "; ".join(b["unweighed"])} if b.get("unweighed") else {}    # never a lower total (#125)
-    _metric(metrics, "weight.total_lb", b["mass_lb"], "lb", f"everything, with {payload:g} lb aboard", "model", "balance",
-            **unknown)
+    # one weight (#237 review): the parts' weights by their one filament figure; the tongue, moment and CG stay the solid's
+    more_lb = sum(r.get("filament_more_kg") or 0.0 for r in reports.values()) * M.LB_KG
+    total_lb = None if b["mass_lb"] is None else round(b["mass_lb"] + more_lb, 1)
+    filament_guess = making.filament_said(reports.values())[0]
+    _metric(metrics, "weight.total_lb", total_lb, "lb", f"everything, with {payload:g} lb aboard",
+            "rough" if filament_guess else "model", filament_guess or "balance", **unknown)
     _metric(metrics, "hitch.tongue_lb", b["mass_lb"], "lb", "on the hitch's tongue, standing still", "model", "balance",
             **unknown)
     if b.get("moment_lbin") is not None:
@@ -361,20 +372,18 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     # cost & waste
     emit("cost", "pricing the stock")
     cw = cost_and_waste(store, reports, cutplans)
-    _metric(metrics, "cost.usd", None if pieces_short else cw["usd"], "$", "stock to buy", "guess", "materials.PRICES",
+    _metric(metrics, "cost.usd", None if pieces_short else cw["usd"], "$", "stock to buy", "rough" if filament_guess else "guess",
+            filament_guess or "materials.PRICES",
             note=pieces_short or cw["basis"])
     _metric(metrics, "waste.usd", None if pieces_short else cw["waste_usd"], "$", "of it left as offcut", "guess", "cut plan + prices")
     _metric(metrics, "waste.pct", None if pieces_short else round(cw["waste_pct"] * 100, 1), "%", "offcut, by cost", "measured", "cut plan")
 
     # can your shop make it (CALI-48): every piece routed to a tool or machine you have; printing costed
-    from . import making
-
     missing, hours, grams, planned, unplanned, guessed, unprintable = [], 0.0, 0.0, 0, [], "", ""
     for pid in reports:
-        try:
-            mk = making.plan(store, pid)
-        except Exception as e:  # noqa: BLE001 — unknown is said by the check, not a crash
-            unplanned.append(f"{pid}: {e}")
+        mk = made[pid]                         # planned above, with the weighing
+        if not isinstance(mk, dict):
+            unplanned.append(f"{pid}: {mk}")
             continue
         planned += 1
         missing += [f"{pid}: {m['name']} ({m['why']})" for m in mk["missing"]]
@@ -529,6 +538,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                                 edge=bool(edgeless) if strength else False,             # the middle only (CALI-94)
                                 incomplete="; ".join(left) if strength and left else None,
                                 estimate=m["source"] if m and m.get("trust") == "rough" and c["metric"].startswith("print.")
+                                else filament_guess if filament_guess and c["metric"].startswith(("weight.", "cost."))
                                 else None,
                                 # an old number on its limit, the run's or this goal's own (#214 review)
                                 recheck=(recheck or (verdicts.UNCUT if number and verdicts.goal_on_limit(

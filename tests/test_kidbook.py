@@ -221,3 +221,30 @@ def test_a_case_with_no_number_beside_one_that_holds_still_makes_the_book(stool,
     assert kidbook.make(stool, root, rec, ["stool"], {"groups": []}) == "kids.html"
     book = html.unescape(open(os.path.join(root, "kids.html")).read())
     assert "Don't stand on it yet" in book and "It should hold" not in book
+
+
+@pytest.mark.parametrize("pictured", [False, True])
+def test_each_step_s_picture_faces_the_panel_it_adds(tmp_path, pictured, monkeypatch):
+    """CALI-92 (#70 item 14): the book drew every step from one view, the side with the picture or else 35°, which looks
+    from the back: "Add the front" drew the front at the back, behind the rest. Each step now looks at the panel it adds."""
+    store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", BOX_STOOL + (HOLE.replace('"piece": "left"', '"piece": "left", "picture": "T-rex"')
+                                           if pictured else ""), intent="a box step stool")
+    every = release.pieces(store, "stool")
+    one = release.View(every, azimuth=kidbook.facing(every, {"left"} if pictured else set()))
+    missed = [p["name"] for p in every if kidbook.upright(p) and not kidbook.faces(every, p, one.cam)]
+    assert missed                                            # the book's one view has its back to some panel
+    seen = []
+    draw = release.draw
+    monkeypatch.setattr(release, "draw", lambda view, groups, *a, **k: (
+        seen.extend((g[0]["name"], view.cam) for g, how in groups if how == "now" and len(g) == 1),   # a step adds one piece
+        draw(view, groups, *a, **k))[1])
+    root = str(tmp_path / "release")
+    os.makedirs(root)
+    kidbook.make(store, root, {"design": "Box stool", "strength": {}}, ["stool"], {"groups": []})
+    named = {p["name"]: p for p in every}
+    upright = [(n, cam) for n, cam in seen if kidbook.upright(named[n])]
+    assert {n for n, _ in upright} >= set(missed)
+    assert all(kidbook.faces(every, named[n], cam) for n, cam in upright), [(n, cam) for n, cam in upright]
+    kept = [n for n, cam in upright if kidbook.faces(every, named[n], one.cam)]
+    assert kept and all(cam == one.cam for n, cam in upright if n in kept)    # the book's own view, where it already sees it

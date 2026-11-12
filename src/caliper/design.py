@@ -448,6 +448,10 @@ class DesignStore:
             from . import mirror
 
             mirror.rebuild(self, part_id)
+        if any(s.get("source") == "measured" and s.get("of") == part_id for s in self.design.skeleton or []):
+            from . import skeleton                # a size measured off this part, measured again (#243 review)
+
+            skeleton.remeasure(self, part_id)
         return version
 
     def write_mesh_part(self, part_id: str, stl: bytes, *, origin: str = "whittled",
