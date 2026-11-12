@@ -21,7 +21,7 @@ bulk/topological queries use the mesh. CadQuery is imported lazily so this modul
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -42,6 +42,8 @@ class Geometry:
     # at load; the B-rep solid is kept in its LOCAL frame, so feature probes that read the solid (holes)
     # transform their results by this pose to compare parts in the assembly frame. None == identity.
     pose: Any = None
+    #: its bores, worked out once (#261 review: the through test cost 1.77 s on a 100-hole plate, every evaluation)
+    _bores: Any = field(default=None, init=False, repr=False, compare=False)
 
     @classmethod
     def from_stl(cls, path: str) -> "Geometry":
@@ -300,7 +302,8 @@ class Hole:
     center: list[float]
     axis: list[float]
     diameter: float
-    depth: float
+    depth: float                      # along its axis (#259)
+    through: bool = False             # open at both ends at its own diameter: what passes all the way through (#259)
 
 
 class NotMeasured(NotImplementedError, ValueError):
@@ -320,7 +323,12 @@ def holes(g: Geometry) -> list[Hole]:
     """
     if g.solid is None:
         raise NotMeasured(MESH_HOLES)
-    return _holes_from_cadquery(g.solid)
+    if g._bores is None:                                 # once per geometry, as its mesh (#261 review)
+        hs = _holes_from_cadquery(g.solid)
+        for h in hs:                                     # which pass all the way through (#259)
+            h.through = _through(g.require_mesh(), h, getattr(g, "pose", None))
+        g._bores = hs
+    return list(g._bores)
 
 
 def _looks_in(face: Any, adaptor: Any, loc: Any, dir_: Any) -> bool:
@@ -340,10 +348,12 @@ def _looks_in(face: Any, adaptor: Any, loc: Any, dir_: Any) -> bool:
 
 
 def _holes_from_cadquery(wp: Any) -> list[Hole]:
+    """Each bore: the inward-looking cylindrical faces of one cylinder (a seam can split it), kept only where together they
+    make a full turn, so a fillet or an arc isn't one (#259); its depth along its axis."""
     import cadquery as cq  # lazy
 
     solid = wp.val() if hasattr(wp, "val") else wp
-    found: list[Hole] = []
+    groups: dict = {}
     for f in solid.Faces():
         if f.geomType() != "CYLINDER":
             continue
@@ -358,17 +368,54 @@ def _holes_from_cadquery(wp: Any) -> list[Hole]:
         dir_ = ax.Direction()
         if not _looks_in(f, adaptor, loc, dir_):       # a tube's outside, a rod, a boss: material inside it, not a hole (#23)
             continue
-        bb = f.BoundingBox()
-        depth = max(bb.xlen, bb.ylen, bb.zlen)
-        found.append(
-            Hole(
-                center=[loc.X(), loc.Y(), loc.Z()],
-                axis=[dir_.X(), dir_.Y(), dir_.Z()],
-                diameter=2.0 * radius,
-                depth=float(depth),
-            )
-        )
+        a = np.array([dir_.X(), dir_.Y(), dir_.Z()])
+        o = np.array([loc.X(), loc.Y(), loc.Z()])
+        v0, v1 = adaptor.FirstVParameter(), adaptor.LastVParameter()      # along the axis, from its origin
+        sign = 1.0 if a[np.argmax(np.abs(a))] > 0 else -1.0                # one direction for one axis
+        a_, lo, hi = a * sign, *sorted((v0 * sign, v1 * sign))
+        base = o - (o @ a_) * a_                                            # where the axis line crosses the plane through 0
+        key = (round(radius, 3), *np.round(a_, 4), *np.round(base, 3))
+        groups.setdefault(key, []).append({"r": radius, "a": a_, "base": base, "lo": (o @ a_) + lo, "hi": (o @ a_) + hi,
+                                           "turn": adaptor.LastUParameter() - adaptor.FirstUParameter()})
+    bores = []
+    for faces in groups.values():           # on one axis line, joined only where they meet along it: a seam's two halves are one
+        faces.sort(key=lambda x: x["lo"])  # bore, two coaxial holes in a U-bracket's two sides are two (#261 review)
+        for f in faces:
+            last = bores[-1] if bores and bores[-1]["key"] is faces else None
+            if last is not None and f["lo"] <= last["hi"] + 1e-6:
+                last["hi"], last["turn"] = max(last["hi"], f["hi"]), last["turn"] + f["turn"]
+            else:
+                bores.append({**f, "key": faces})
+    found: list[Hole] = []
+    for g in bores:
+        if g["turn"] < 2 * np.pi - 1e-6:                                    # a fillet, an arc: not a bore (#259)
+            continue
+        mid = g["base"] + g["a"] * (g["lo"] + g["hi"]) / 2.0
+        found.append(Hole(center=[float(x) for x in mid], axis=[float(x) for x in g["a"]], diameter=2.0 * g["r"],
+                          depth=float(g["hi"] - g["lo"])))
     return found
+
+
+def _through(mesh, h: "Hole", pose: Any = None) -> bool:
+    """Whether a bore is open at both ends at its own diameter: a ring just inside its wall, carried along its axis across the
+    whole part and past it, meets no material (#259). A counterbore narrows below it, a blind hole stops, a pocket sits over a
+    smaller hole: none of those passes."""
+    from . import spatial
+
+    a = np.asarray(h.axis, float)
+    c = np.asarray(h.center, float)
+    if pose is not None and not np.allclose(pose, np.eye(4)):         # the mesh is in the world frame, the solid in its own
+        R, t = np.asarray(pose)[:3, :3], np.asarray(pose)[:3, 3]
+        a, c = R @ a, R @ c + t
+    corners = np.array([[x, y, z] for x in mesh.bounds[:, 0] for y in mesh.bounds[:, 1] for z in mesh.bounds[:, 2]])
+    t = (corners - c) @ a
+    stations = np.linspace(t.min() - 1.0, t.max() + 1.0, int(min(400, max(20, (t.max() - t.min()) / 0.5))))
+    u = np.cross(a, [1.0, 0.0, 0.0] if abs(a[0]) < 0.9 else [0.0, 1.0, 0.0])
+    u /= np.linalg.norm(u)
+    w = np.cross(a, u)
+    ring = [0.9 * (h.diameter / 2.0) * (np.cos(k) * u + np.sin(k) * w) for k in np.linspace(0, 2 * np.pi, 12, endpoint=False)]
+    pts = np.array([c + s * a + p for s in stations for p in [np.zeros(3), *ring]])
+    return not bool(spatial.contains(mesh, pts).any())
 
 
 class Circle:
@@ -406,8 +453,11 @@ def holes_matching(
 
 
 def largest_through_bore(g: Geometry) -> float:
-    """Diameter of the largest cylindrical bore (0.0 if none detected)."""
-    return max((h.diameter for h in holes(g)), default=0.0)      # a mesh: NotMeasured, never a silent 0
+    """Diameter of the largest bore that passes all the way through (0.0 if none): a counterbore reads the hole through it, a
+    blind hole reads nothing, and a slot reads nothing, its round ends being half turns: a slot isn't a bore, the safe side (a
+    cable through a slot is another rule, #261 review) (#259: intake writes ``largest_through_bore >= 8`` for a cable, so a 14 mm counterbore over a 6 mm
+    hole passed)."""
+    return max((h.diameter for h in holes(g) if h.through), default=0.0)      # a mesh: NotMeasured, never a silent 0
 
 
 # ---------------------------------------------------------------------------
