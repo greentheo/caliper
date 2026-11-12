@@ -303,7 +303,7 @@ class Hole:
     axis: list[float]
     diameter: float
     depth: float                      # along its axis (#259)
-    through: bool = False             # open at both ends at its own diameter: what passes all the way through (#259)
+    through: Optional[bool] = None    # open at both ends at its own diameter (#259); None until a reader asks (is_through)
 
 
 class NotMeasured(NotImplementedError, ValueError):
@@ -324,11 +324,15 @@ def holes(g: Geometry) -> list[Hole]:
     if g.solid is None:
         raise NotMeasured(MESH_HOLES)
     if g._bores is None:                                 # once per geometry, as its mesh (#261 review)
-        hs = _holes_from_cadquery(g.solid)
-        for h in hs:                                     # which pass all the way through (#259)
-            h.through = _through(g.require_mesh(), h, getattr(g, "pose", None))
-        g._bores = hs
+        g._bores = _holes_from_cadquery(g.solid)         # whether each is through is worked out only when asked (#259)
     return list(g._bores)
+
+
+def is_through(g: Geometry, h: "Hole") -> bool:
+    """Whether a bore of ``g`` passes all the way through, worked out the first time it's asked and kept on it (#259)."""
+    if h.through is None:
+        h.through = _through(g.require_mesh(), h, getattr(g, "pose", None))
+    return h.through
 
 
 def _looks_in(face: Any, adaptor: Any, loc: Any, dir_: Any) -> bool:
@@ -457,7 +461,8 @@ def largest_through_bore(g: Geometry) -> float:
     blind hole reads nothing, and a slot reads nothing, its round ends being half turns: a slot isn't a bore, the safe side (a
     cable through a slot is another rule, #261 review) (#259: intake writes ``largest_through_bore >= 8`` for a cable, so a 14 mm counterbore over a 6 mm
     hole passed)."""
-    return max((h.diameter for h in holes(g) if h.through), default=0.0)      # a mesh: NotMeasured, never a silent 0
+    # largest first, stopping at the first that's through: a 100-hole plate tests one, not a hundred (#259)
+    return next((h.diameter for h in sorted(holes(g), key=lambda h: -h.diameter) if is_through(g, h)), 0.0)      # a mesh: NotMeasured, never a silent 0
 
 
 # ---------------------------------------------------------------------------

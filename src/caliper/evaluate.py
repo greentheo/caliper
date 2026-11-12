@@ -110,6 +110,8 @@ def _eval(node: ast.AST, ctx: dict) -> Any:
     if isinstance(node, ast.Name):
         if node.id not in ctx:
             raise SafeEvalError(f"unknown name {node.id!r}")
+        if isinstance(ctx[node.id], _Lazy):           # worked out now, once (#259)
+            ctx[node.id] = ctx[node.id].make()
         return ctx[node.id]
     if isinstance(node, ast.Attribute):
         if node.attr.startswith("_"):                  # no way out through a dunder chain (#103 review)
@@ -303,6 +305,13 @@ def load_references(spec: Spec, base_dir: str = ".") -> dict[str, Geometry]:
     return refs
 
 
+class _Lazy:
+    """A value worked out the first time a rule reads it, and kept (#259)."""
+
+    def __init__(self, make):
+        self.make = make
+
+
 class _Unmeasured:
     """A scalar this part can't have: anything that compares or does arithmetic with it raises NotMeasured."""
 
@@ -358,10 +367,13 @@ def build_context(
     ctx["is_manifold"] = measure.is_manifold(g)
     ctx["volume"] = measure.volume(g)
     ctx["min_wall"] = measure.min_wall_thickness(g)
-    try:
-        ctx["largest_through_bore"] = measure.largest_through_bore(g)
-    except measure.NotMeasured as e:          # a mesh: a rule on it reads as not checked, never 0 (#66 item 5)
-        ctx["largest_through_bore"] = _Unmeasured(scrubbed(e))
+    def bore():
+        try:
+            return measure.largest_through_bore(g)
+        except measure.NotMeasured as e:      # a mesh: a rule on it reads as not checked, never 0 (#66 item 5)
+            return _Unmeasured(scrubbed(e))
+
+    ctx["largest_through_bore"] = _Lazy(bore)  # worked out only if a rule reads it (#259: 1.7 s on a 100-hole plate)
     # reference parts resolve to loaded geometry (for interference/min_clearance); opaque otherwise.
     for ref in spec.references:
         ctx[ref.id] = references.get(ref.id) or SimpleNamespace(
