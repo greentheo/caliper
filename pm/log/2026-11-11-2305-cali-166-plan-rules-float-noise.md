@@ -27,3 +27,11 @@ The small follow-ups from tonight's reviews.
 
 **Tests:** 13 in `test_followups_249.py`. Nine fail on main; the rest pin what mustn't move. All 12 mutants are caught.
 The 19 around-files pass (453), so no part assertion or plan rule there moved.
+
+**The foreman's three from the review.**
+- **A two-sided band at the noise reads margin 0**, not −5.68e-14 (`0 <= top <= 431.8` at 17 in).
+- **`within()`, `fits()` and `approx()` use the same rule.** The one `REL_TOL`/`ABS_TOL` now lives in `tolerance`
+  (`close`, `at_most`), and the evaluator reads it there. `within(top, 0, 431.8)` at 17 in is pinned.
+- **The drive line uses part names:** "The side left follows the side right: both now 17 in."
+
+6 more mutants, all caught. The affected files (11) pass, 200.

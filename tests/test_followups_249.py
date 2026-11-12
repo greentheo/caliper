@@ -35,6 +35,22 @@ def test_nothing_a_person_could_measure_moves():
     assert _check("top > 431.8", top=17 * 25.4).status == "fail"
 
 
+def test_a_band_at_the_noise_reads_margin_0_and_the_helpers_agree():
+    """#253 review: a two-sided band at the noise read margin −5.68e-14; within() and fits() compared exactly."""
+    from caliper import tolerance
+
+    got = _check("0 <= top <= 431.8", top=17 * 25.4 + 1e-12)
+    assert got.status == "pass" and got.margin == 0.0, got
+    assert _check("431.8 >= top >= 0", top=17 * 25.4 + 1e-12).margin == 0.0
+    assert _check("within(top, 0, 431.8)", top=17 * 25.4 + 1e-12, within=tolerance.within).status == "pass"   # bound as build_context does
+    assert tolerance.within(17 * 25.4 + 1e-12, 0, 431.8) and tolerance.within(431.8, 17 * 25.4 + 1e-12, 500)
+    assert not tolerance.within(431.81, 0, 431.8)
+    hi = tolerance.fit_band("slip")[1]
+    assert tolerance.fits(hi * (1 + 1e-12), "slip") and not tolerance.fits(hi + 0.001, "slip")
+    assert tolerance.approx(0.30000000000000004, 0.2, tol=0.1) and not tolerance.approx(0.31, 0.2, tol=0.1)
+    assert tolerance.REL_TOL == tolerance.ABS_TOL == evaluate.REL_TOL == 1e-9
+
+
 def test_a_comparison_well_inside_keeps_its_margin():
     got = _check("top <= 500", top=431.8)
     assert got.status == "pass" and got.detail == "" and got.margin == pytest.approx(68.2)
@@ -57,7 +73,7 @@ def test_the_drive_s_reply_names_the_mirror_that_followed():
     result = {"changed": {"top_height": (16.0, 17.0)}, "units": {"top_height": "in"}, "rebuilt": {"side_right": ["top_height"]},
               "follows": {"side_left": "side_right"}, "unmoved": {}, "refused": {}, "strength": [], "report": None}
     said = skeleton.said(result)
-    assert "side_left follows side_right: both now 17 in." in said, said
+    assert "The side left follows the side right: both now 17 in." in said, said
     result["follows"] = {}
     assert "follows" not in skeleton.said(result)
 

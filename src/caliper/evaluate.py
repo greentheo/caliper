@@ -49,7 +49,7 @@ _UNARY = {ast.USub: operator.neg, ast.UAdd: operator.pos, ast.Not: operator.not_
 #: ``!=`` compare with :func:`math.isclose` at these, ``<=`` and ``>=`` are "less (or more), or close". Strict ``<`` and ``>`` stay
 #: strict. Nothing a person could measure moves: ``safety >= 2.0`` still fails at 1.995. A measuring tolerance is the rule's own
 #: (``abs(top_z - 431.8) <= 0.5``), never the evaluator's.
-REL_TOL = ABS_TOL = 1e-9
+REL_TOL, ABS_TOL = tolerance.REL_TOL, tolerance.ABS_TOL          # one rule, the helpers' too (#253)
 _CLOSE = (ast.Eq, ast.NotEq, ast.LtE, ast.GtE)
 
 
@@ -60,7 +60,7 @@ def _number(v) -> bool:
 def _compare(op, a, b) -> bool:
     """``a op b``, two numbers within float noise counting as equal."""
     if type(op) in _CLOSE and _number(a) and _number(b):
-        close = math.isclose(float(a), float(b), rel_tol=REL_TOL, abs_tol=ABS_TOL)
+        close = tolerance.close(a, b)
         return {ast.Eq: close, ast.NotEq: not close, ast.LtE: a <= b or close, ast.GtE: a >= b or close}[type(op)]
     return _CMPOPS[type(op)](a, b)
 
@@ -165,7 +165,7 @@ def _margin(node: ast.AST, ctx: dict) -> tuple[Optional[float], Any]:
         lhs = _eval(node.left, ctx)
         rhs = _eval(node.comparators[0], ctx)
         op = type(node.ops[0])
-        inside = lambda m: 0.0 if m < 0 and math.isclose(float(lhs), float(rhs), rel_tol=REL_TOL, abs_tol=ABS_TOL) else m  # noqa: E731
+        inside = lambda m: 0.0 if m < 0 and tolerance.close(lhs, rhs) else m  # noqa: E731 — float noise: on the line
         if op is ast.LtE:
             return inside(float(rhs - lhs)), lhs
         if op is ast.Lt:
@@ -185,10 +185,11 @@ def _margin(node: ast.AST, ctx: dict) -> tuple[Optional[float], Any]:
         mid = _eval(node.comparators[0], ctx)
         hi = _eval(node.comparators[1], ctx)
         ops = [type(o) for o in node.ops]
+        side = lambda a, b: 0.0 if a > b and tolerance.close(a, b) else float(b - a)   # noqa: E731 — b - a, noise is the line (#253)
         if all(o in (ast.Lt, ast.LtE) for o in ops):       # lo <= x <= hi
-            return float(min(mid - lo, hi - mid)), mid
+            return min(side(lo, mid), side(mid, hi)), mid
         if all(o in (ast.Gt, ast.GtE) for o in ops):        # hi >= x >= lo
-            return float(min(lo - mid, mid - hi)), mid
+            return min(side(mid, lo), side(hi, mid)), mid
     # bare bool / call / non-comparison
     return None, _eval(node, ctx)
 
