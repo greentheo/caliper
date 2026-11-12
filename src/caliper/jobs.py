@@ -73,6 +73,7 @@ class Job:
         self.waited_s = 0.0               # time spent waiting for the one study turn: not counted (#211 review)
         self.waiting_since: Optional[float] = None
         self._slot: Optional[threading.BoundedSemaphore] = None   # the chat worker it holds while it works (#174)
+        self._parked: Optional[threading.BoundedSemaphore] = None # the one it gave back to wait, taken again after (#256)
         self._mu = threading.Lock()
         self._stop = threading.Event()    # asked to stop (CALI-101)
 
@@ -104,11 +105,25 @@ class Job:
             raise TimedOut(self.limit_s)
 
     def park(self) -> None:
-        """It's about to wait (for the study turn): give back the chat worker it holds, so a job waiting takes none (#174).
-        It isn't taken again: a study runs under the one turn, which is the limit that matters for it."""
+        """It's about to wait (for the study turn): give back the chat worker it holds, so a job waiting takes none (#174)."""
         slot, self._slot = self._slot, None
         if slot is not None:
             slot.release()
+            self._parked = slot
+
+    def unpark(self) -> None:
+        """Its wait is over: take its worker back, so its work after the turn is counted (#256 review: with 2 workers, 8 chats
+        peaked at 4). Asked to stop while it waits for one: :class:`Cancelled`, at once."""
+        slot, self._parked = self._parked, None
+        if slot is not None:
+            take(slot, self._stop)
+            self._slot = slot
+
+    def give_back(self) -> None:
+        """Its worker back, if it holds one, and nothing to take again: it's over."""
+        self._parked = None
+        self.park()
+        self._parked = None
 
     def running_s(self) -> float:
         """How long it has worked: since it started, less the time it waited for its study turn (#211 review: two
@@ -137,6 +152,13 @@ AHEAD = {"release": "the build package", "picture": "the picture", "cutplan": "t
 WAITING_THREADS = 256
 #: The job this thread is running, for a wait deep inside it (the study turn) to give its worker back (#174).
 _CURRENT = threading.local()
+
+
+def take(slot: threading.BoundedSemaphore, stop: threading.Event) -> None:
+    """A worker, waited for a quarter second at a time: a job asked to stop while it waits leaves at once (#256)."""
+    while not slot.acquire(timeout=0.25):
+        if stop.is_set():
+            raise Cancelled()
 
 
 def current() -> Optional["Job"]:
@@ -250,11 +272,14 @@ class JobRunner:
                 if job.status == "cancelled":                 # cancelled while it waited (CALI-101)
                     return
             if slot is not None:              # then a worker, to do the work
-                slot.acquire()
+                try:
+                    take(slot, job._stop)
+                except Cancelled:             # cancelled while it waited for one: it leaves now (#256)
+                    return
                 job._slot = slot
             with self._mu:
                 if job.status == "cancelled":
-                    job.park()
+                    job.give_back()
                     return
                 job.status = "running"
                 job.started = time.time()
@@ -286,7 +311,7 @@ class JobRunner:
                 job.emit("error", job.error, trace=errors.scrub(tail[-1]) if tail else "")
             finally:
                 job.finished = time.time()
-                job.park()                    # its worker back, if it still holds one
+                job.give_back()               # its worker back, if it still holds one
                 _CURRENT.job = None
 
     def _prune(self) -> None:

@@ -70,6 +70,12 @@ def take_turn(emit: Optional[Callable] = None, stop: Optional[Callable[[], None]
         if job is not None and job.waiting_since:
             job.waited_s += time.time() - job.waiting_since
             job.waiting_since = None
+    if running is not None:              # its turn: its worker back, so what it does next is counted (#256 review)
+        try:
+            running.unpark()
+        except BaseException:            # asked to stop while it waited for one: the turn goes on to the next
+            _TURN.release()
+            raise
     _since = time.monotonic()
     return True
 
