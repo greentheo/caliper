@@ -367,7 +367,7 @@ async function moveInTree(drag, target, zone) {
   clearTimeout(slow);
   TREE.waiting.delete(slug);
   if (S.slug !== slug) {                           // saved there; nothing of it belongs on this one. A failure is said back there
-    if (err) TREE.missed[slug] = `Your move of ${drag} in ${slug} didn't save: ${plainly(err.message)}`;
+    if (err) TREE.missed[slug] = `Your move of the ${drag.replace(/_/g, ' ')} in ${slug} didn't save: ${plainly(err.message)}`;   // as the drive line says it
     return;
   }
   if (err) showErr(plainly(err.message));

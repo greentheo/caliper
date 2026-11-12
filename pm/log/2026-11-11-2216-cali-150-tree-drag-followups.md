@@ -58,3 +58,6 @@ mutants are caught (two survivors at first now have tests). The two tree files p
 - The `S.design` drag guards, the lost-move line and the returning waiting line stay.
 
 151 pass across the switch, pick, tree-move and part-tree files; 3 more mutants, all caught.
+
+**The lost-move line uses the part's name** (reviewer-2's nit, the foreman's yes): "Your move of the side left in
+step-stool-4 didn't save: …", as the drive line says a part. Pinned with `side_left`; its mutant is caught. 152 pass.

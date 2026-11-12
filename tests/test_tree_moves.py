@@ -415,8 +415,16 @@ def test_a_move_that_fails_on_another_design_is_said_back_on_it():
                    await moveInTree('c', 'a', 'into'); const away = errs.slice();
                    S.slug = 'x'; sayMissed(); const back = errs.slice(); sayMissed();
                    return { away, back, again: errs.length, left: TREE.missed };""")
-    assert got["away"] == [] and got["back"] == ["Your move of c in x didn't save: the design is locked"], got
+    assert got["away"] == [] and got["back"] == ["Your move of the c in x didn't save: the design is locked"], got
     assert got["again"] == 1 and got["left"] == {}
+
+
+def test_the_lost_move_names_the_part_as_a_person_says_it():
+    """reviewer-2 and the foreman on #251: "side_left" read as an id; the line says "the side left", as the drive line does."""
+    got = _drag("""S.design = { parts: [{ id: 'side_left' }, { id: 'stretcher' }], tree: {} };
+                   answer = () => { S.slug = 'y'; throw new Error('a job on this design is running'); };
+                   await moveInTree('side_left', 'stretcher', 'into'); S.slug = 'x'; sayMissed(); return errs;""")
+    assert got == ["Your move of the side left in x didn't save: a job on this design is running"], got
 
 
 def test_back_on_a_design_mid_wait_the_waiting_line_comes_back():
