@@ -13,6 +13,8 @@ its STL ready for the printer in the shop:
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import math
 import os
 import re
@@ -209,7 +211,7 @@ def estimate(stl_path: str, material: str, volume_mm, infill: float = M.PRINT_IN
                         _GAVE_UP.pop(key, None)
                 except Exception as e:  # noqa: BLE001 — a slice that crashed is said too, never restarted per ask
                     _GAVE_UP[key] = (time.monotonic(), {"hours": None, "filament_g": None, "usd": None, "trust": None,
-                                                        "from": f"no estimate ({e})", "slicer_failed": True})
+                                                        "from": f"no estimate ({scrubbed(e)})", "slicer_failed": True})
                 finally:
                     _PENDING.discard(key)
                     shutil.rmtree(keep, ignore_errors=True)

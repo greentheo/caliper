@@ -20,6 +20,8 @@ it), against ``min_safety``. Neither model checks the glue or the screws.
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import base64
 import json
 import math
@@ -1332,7 +1334,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         ctx = prepare(store, part_id, emit, spacing=spacing)
     except ValueError as e:
         # kept, so the card says why rather than offering a check that fails the same way (CALI-81)
-        store.append_history(part_id, {"kind": "load", "action": "failed", "why": str(e),
+        store.append_history(part_id, {"kind": "load", "action": "failed", "why": scrubbed(e),
                                        "version": store.design.part(part_id).version})
         raise
     loads, mat, held = ctx["loads"], ctx["mat"], ctx["held"]

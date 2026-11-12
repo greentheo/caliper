@@ -11,6 +11,8 @@ Measured once per version (and rule text, and where the part sits), in memory: a
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import re
 from typing import Optional
 
@@ -78,7 +80,7 @@ def measured(store: DesignStore, pid: str, geometry=None) -> list[dict]:
         g = geometry if geometry is not None else store.part_geometry(pid)
         rep = E.evaluate(spec, g, references=E.load_references(spec, store.root))
     except Exception as e:  # noqa: BLE001 — a part that won't build: its rules aren't measured, and say why
-        return [{**r, "status": "error", "verdict": verdicts.check("fail"), "said": f"{r['id']}: not measured ({e})"}
+        return [{**r, "status": "error", "verdict": verdicts.check("fail"), "said": f"{r['id']}: not measured ({scrubbed(e)})"}
                 for r in plain]
     inches = store.design.display_units == "in"
     where = None

@@ -57,6 +57,11 @@ _HOMES = re.compile(r"/(?:Users|home)/[^/\s'\"]+")
 #: API keys and tokens by their shape: a key must never reach a report or the page (#215 review).
 _SECRETS = re.compile(r"\b(?:sk-[A-Za-z0-9_\-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
                       r"|xox[abprs]-[A-Za-z0-9\-]{10,}|AKIA[0-9A-Z]{16})")
+#: ... by how they're sent, whatever the value (#174, #215 review): a Bearer header, a URL's user:password@, and a
+#: password=, token=, secret= or api_key= pair (or with a colon), whatever the value looks like
+_BEARER = re.compile(r"(\bbearer\s+)[A-Za-z0-9._~+/=\-]{6,}", re.I)
+_URL_CREDS = re.compile(r"(\b[a-z][a-z0-9+.\-]*://)[^/\s:@]+:[^/\s@]+@", re.I)
+_KV_SECRETS = re.compile(r"(\b(?:password|passwd|pwd|secret|token|api[_\-]?key|access[_\-]?key)\s*[=:]\s*)[^\s&'\",;)]+", re.I)
 #: ... and by where they're set, whatever they look like.
 _SECRET_ENV = re.compile(r"KEY|TOKEN|SECRET|PASSWORD", re.I)
 
@@ -69,6 +74,9 @@ def scrub(text: str) -> str:
     """Your home folder as ``~`` and any design's name as ``<design>``, so a report carries neither your user
     name nor anything you called a design."""
     text = _SECRETS.sub("<secret>", text or "")
+    text = _BEARER.sub(r"\1<secret>", text)
+    text = _URL_CREDS.sub(r"\1<secret>@", text)
+    text = _KV_SECRETS.sub(r"\1<secret>", text)
     for name, value in os.environ.items():
         if _SECRET_ENV.search(name) and len(value) >= 12:
             text = text.replace(value, "<secret>")

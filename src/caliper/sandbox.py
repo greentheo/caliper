@@ -16,6 +16,8 @@ The subprocess exports **STEP** (keeps the B-rep), which the parent re-imports i
 
 from __future__ import annotations
 
+from .errors import scrub, scrubbed
+
 import json
 import os
 import subprocess
@@ -84,8 +86,8 @@ def run_script(
         }
 
     if not status.get("ok"):
-        return RunResult(ok=False, error=status.get("error", "unknown sandbox error"),
-                         traceback=status.get("traceback", ""))
+        return RunResult(ok=False, error=scrub(status.get("error", "unknown sandbox error")),   # from the sandbox's process (#174)
+                         traceback=scrub(status.get("traceback", "")))
     if not os.path.isfile(step_path):
         return RunResult(ok=False, error="sandbox reported success but exported no STEP file")
 
@@ -104,7 +106,7 @@ def run_script(
     except Exception as e:  # noqa: BLE001
         import traceback as _tb
 
-        return RunResult(ok=False, error=f"could not import the authored STEP: {e}",
+        return RunResult(ok=False, error=f"could not import the authored STEP: {scrubbed(e)}",
                          traceback=_tb.format_exc())
     return RunResult(ok=True, geometry=geom, step_path=step_path, declared=status.get("declared") or None)
 
@@ -206,10 +208,10 @@ class BuildWorker:
         except (BrokenPipeError, BuildError) as e:
             self.failures += 1
             self._restart()
-            raise BuildError(str(e) or "the build worker died")
+            raise BuildError(scrubbed(e) or "the build worker died")
         if not header.get("ok"):
             self.failures += 1
-            raise BuildError(header.get("error", "build failed"))
+            raise BuildError(scrub(header.get("error", "build failed")))
         self.builds += 1
         nv = header["nv"]
         verts = np.frombuffer(payload[: 24 * nv], dtype="<f8").reshape(-1, 3).copy()

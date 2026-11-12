@@ -11,6 +11,8 @@ study to draw itself. A verdict from an older version says so.
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import math
 import re
 from typing import Optional
@@ -569,7 +571,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
                                   f"is no wider that way).", "warn", study="tip"))
             missing = tipping.unchecked(C.declared(store, pid), p.get("intent") or "")
         except Exception as e:  # noqa: BLE001 — said, never a crash of the card
-            work.append(_line(f"Tipping: not checked ({e}).", "warn", study="tip"))
+            work.append(_line(f"Tipping: not checked ({scrubbed(e)}).", "warn", study="tip"))
             missing = []
         if missing:                             # a seat's cases nobody checked, said (#86 item 3)
             work.append(_line("Not checked yet for a seat: " + "; ".join(missing) + ".", "warn", study="tip"))
@@ -809,7 +811,7 @@ def measured(store: DesignStore, state: dict) -> dict:
         try:
             rep = C.report(store, p["id"])
         except Exception as e:  # noqa: BLE001 — a part that can't be weighed is unknown, never left out (#132)
-            weighed, unweighed = True, unweighed or f"not checked: the {part_name(p)} couldn't be weighed ({e})"
+            weighed, unweighed = True, unweighed or f"not checked: the {part_name(p)} couldn't be weighed ({scrubbed(e)})"
             continue
         weighed = True
         mk = None

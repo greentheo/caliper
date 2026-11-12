@@ -18,6 +18,8 @@ part versions it scored, so the next one can say what changed and whether it's o
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import json
 import math
 import os
@@ -360,7 +362,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             _metric(metrics, "drag.kwh_per_100mi", round(n * aero.KWH_PER_N_PER_100MI, 2), "kWh/100 mi",
                     "energy to push it", "rough", "whittle drag model")
         except Exception as e:                # a drag score that can't be made is reported, not fatal
-            _metric(metrics, "drag.error", str(e), "", "drag couldn't be scored", "measured", "whittle")
+            _metric(metrics, "drag.error", scrubbed(e), "", "drag couldn't be scored", "measured", "whittle")
 
     # manufacturability: the cut plans
     sheets = sum(gr["sheets"] for cp in cutplans.values() if cp for gr in cp["sheets"])
@@ -442,9 +444,9 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             except (Cancelled, Moved):        # asked to stop, or starting again: not a check that couldn't run (#178 review)
                 raise
             except Exception as e:  # noqa: BLE001 — a check that can't run is unknown, not a crash
-                _metric(metrics, f"strength.{p.id}.error", str(e), "", f"{p.id}'s strength couldn't be checked",
+                _metric(metrics, f"strength.{p.id}.error", scrubbed(e), "", f"{p.id}'s strength couldn't be checked",
                         "model", "strength")
-                left.append(f"the {p.id.replace('_', ' ')}'s strength couldn't be checked ({e})")
+                left.append(f"the {p.id.replace('_', ' ')}'s strength couldn't be checked ({scrubbed(e)})")
                 continue
         from .answers import ran_safety
 

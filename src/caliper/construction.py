@@ -36,6 +36,8 @@ not a cut plan — that needs the joinery, and comes next.
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import ast
 import hashlib
 import json
@@ -833,7 +835,7 @@ def with_printed(store: DesignStore, part_id: str, items: list, d: Optional[dict
         if not closed(g, volume=True):        # closed, but its faces aren't wound as one solid
             raise ValueError("its mesh isn't a closed solid")
     except Exception as e:  # noqa: BLE001 — said, and the weight unknown: never a lower total
-        why = f"not checked: {e}" if str(e).startswith("its shape isn't closed") else f"{UNWEIGHED} ({e})"
+        why = f"not checked: {scrubbed(e)}" if scrubbed(e).startswith("its shape isn't closed") else f"{UNWEIGHED} ({scrubbed(e)})"
         return [{**it, "unweighed": why} if it.get("kind") == "printed" else it for it in items]
     return [{**it, "volume_mm3": float(abs(g.volume)), "area_mm2": float(g.area),
              "at": [float(v) for v in g.center_mass]} if it.get("kind") == "printed" else it for it in items]

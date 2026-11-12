@@ -12,6 +12,8 @@ the loop injects ``eval_fn`` — so the author/heal mechanism is fully testable 
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import ast
 import json
 import os
@@ -466,7 +468,7 @@ def _by_edits(editor, whole, tries: list):
             try:
                 new = apply_edits(prior, editor(spec, feedback, prior, error))
             except NoEdit as e:
-                error = str(e)
+                error = scrubbed(e)
                 tries.append({"round": rounds[0], "how": "edit failed", "seconds": round(time.time() - started, 1), "why": error})
                 continue
             tries.append({"round": rounds[0], "how": "edit", "seconds": round(time.time() - started, 1)})

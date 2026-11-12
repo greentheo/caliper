@@ -18,6 +18,8 @@ says how many checks ran, and to look at it.
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import re
 from typing import Optional
 
@@ -170,7 +172,7 @@ def _fit_findings(store: DesignStore) -> dict:
                 if not got["in"] and "doesn't go into it" in got["why"]:
                     got, slid = _slid_in(gi, gh)       # short of its pocket: measured at its mouth, and said
             except Exception as e:  # noqa: BLE001 — said apart, never as measured
-                unsure = f"whether the {_name(inner)} fits {host}'s pocket ({_plain(str(e))})"
+                unsure = f"whether the {_name(inner)} fits {host}'s pocket ({_plain(scrubbed(e))})"
                 continue
             sides = [g for g in (got.get("gaps") or {}).values() if g is not None]
             if not got["in"] or not sides:
@@ -285,7 +287,7 @@ def _mirror_findings(store: DesignStore) -> dict:
         try:
             off = measure.mirror_off(store.part_geometry(pid), store.part_geometry(src))
         except Exception as e:  # noqa: BLE001 — a pair that can't be compared is said apart, never passed
-            out["unmeasured"].append(f"couldn't compare {pid} with {src}, which the plan says it mirrors: {_plain(str(e))}")
+            out["unmeasured"].append(f"couldn't compare {pid} with {src}, which the plan says it mirrors: {_plain(scrubbed(e))}")
             continue
         out["measured"] += 1
         if off > measure.MIRROR_MM:              # mirrors() in mm, as a mirror check reads it (#246 review)
@@ -353,7 +355,7 @@ def _stated_findings(store: DesignStore) -> dict:
             try:
                 got = float(along(store.part_geometry(subject).require_mesh().extents))
             except Exception as e:  # noqa: BLE001
-                out["unmeasured"].append(f"couldn't measure the {_name(subject)}'s {size}: {_plain(str(e))}")
+                out["unmeasured"].append(f"couldn't measure the {_name(subject)}'s {size}: {_plain(scrubbed(e))}")
                 continue
             out["measured"] += 1
             if abs(got - want) > max(1.0, 0.01 * want):
