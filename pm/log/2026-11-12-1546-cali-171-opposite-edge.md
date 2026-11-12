@@ -30,3 +30,4 @@ parts, mirrors) pass, 588.
 **#269's rework merged forward** (a merge commit). The mirror is held to the same rule as the first strip: from outside
 the part it's on ("✗ … but fillet_strip_opposite goes 3 mm into stool."), pinned and its mutant caught. An unusable pick
 and a missing opposite edge both lead with "!". `test_added_part_fits` passes, 18.
+After the merge, the added-part, chat, routes, mirrors, several-parts and pick-scope files pass, 294.
