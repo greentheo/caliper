@@ -51,7 +51,9 @@ BASELINE_ASSERTIONS = (
 _QUESTION_LEAD = {"what", "how", "why", "where", "which", "who", "when", "is", "are", "does", "do",
                   "can", "could", "show", "list", "tell", "status"}
 _LEAD_FILLER = {"add", "also", "now", "please", "build", "create", "make", "generate", "give", "me",
-                "a", "an", "the", "some", "another", "new", "insert", "put", "design", "model"}
+                "a", "an", "the", "some", "another", "new", "insert", "put", "design", "model",
+                # the request itself, never the part's name: "I need a bench" is a bench, not `i_need` (#258)
+                "i", "d", "need", "want", "would", "like", "can", "could", "you", "we", "let", "s", "us", "get"}
 _BREAK_WORDS = {"it", "its", "that", "this", "for", "to", "with", "on", "in", "into", "which", "and",
                 "so", "at", "of", "from", "under", "over", "between", "next", "then"}
 _ADD_VERBS = re.compile(r"\b(add|create|build|make|generate|model|design|insert|need)\b")
