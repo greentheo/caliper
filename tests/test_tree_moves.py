@@ -197,17 +197,18 @@ const row = (id) => classes({ dataset: { drag: id }, getBoundingClientRect: () =
 const shown = [];
 const document = { querySelector: (q) => tpart(/"([^"]+)"/.exec(q)[1]), querySelectorAll: () => shown };
 const CSS = { escape: (s) => s };
-const TREE = { drag: null, rename: null, saying: null, parts: new Set() };
+const TREE = { drag: null, rename: null, saying: null, parts: new Set(), waiting: new Set(), missed: {} };
 let phone = false, posted = [], redraws = 0, trees = 0, errs = [], answer;
 const onPhone = () => phone;
-const S = { slug: 'x', design: DESIGN };
+const S = { slug: 'x', design: DESIGN }; const WAITING = 'Waiting for the job on this design to finish…';
 const seen = () => TREE; const keepTree = () => {}; const render = () => { redraws += 1; }; const renderTree = () => { trees += 1; };
 const showErr = (m) => errs.push(m); const plainly = (s) => s;
 const api = async (m, u, b) => { posted.push(b); if (answer) return answer(); return { ...S.design, tree: b }; };
 const tick = () => new Promise((r) => setImmediate(r));
 const ev = (el, y, extra) => ({ target: { closest: () => el }, clientY: y, preventDefault() { this.stopped = true; }, dataTransfer: { setData() {} }, ...extra });
 """
-_NAMES = ("treeRows", "underPart", "dropped", "dropZone", "clearDrop", "moveInTree", "showDrop", "treeDragStart", "treeDragOver", "treeDrop")
+_NAMES = ("treeRows", "underPart", "dropped", "dropZone", "clearDrop", "moveInTree", "showDrop", "treeDragStart", "treeDragOver", "treeDrop",
+          "sayMissed")
 
 
 def _drag(body, tree_=None):
@@ -342,8 +343,8 @@ def test_on_its_own_design_the_waiting_line_still_shows_and_goes():
 
 def test_a_switch_clears_the_waiting_line():
     src = open(JS).read()
-    script = ("const S = { slug: 'x' }; const localStorage = { getItem: () => null };\n"
-              "const TREE = { slug: 'x', saying: 'Waiting for the job on this design to finish…', drag: 'a', parts: new Set() };\n"
+    script = ("const S = { slug: 'x' }; const localStorage = { getItem: () => null }; const WAITING = 'Waiting for the job on this design to finish…';\n"
+              "const TREE = { slug: 'x', saying: WAITING, drag: 'a', parts: new Set(), waiting: new Set(), missed: {} };\n"
               + _fn(src, "seen") + "\nS.slug = 'y'; seen(); console.log(JSON.stringify({ saying: TREE.saying, drag: TREE.drag }));")
     got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
@@ -387,3 +388,76 @@ def test_the_waiting_line_stays_in_view_and_the_after_line_shows_over_a_chosen_l
     after = after[:after.index("}")]
     assert "position: absolute" in after and "bottom: 0" in after and "background: var(--accent)" in after
     assert ".tpart.drop-after {" not in css.replace(".tpart.drop-after::after", "")       # not an inset shadow under its rows
+
+
+# --- #251 review: a switch empties the tree at once; a lost move is said; a wait comes back -----------------------------
+def test_while_a_design_loads_nothing_in_the_tree_can_be_dragged_or_moved():
+    """reviewer-2 on #251: dragging the old design's rows during the next one's load threw "Cannot read properties of null
+    (reading 'tree')". With no design on screen, a drag doesn't start, a dragover isn't taken, and a drop or a move posts nothing."""
+    got = _drag("""S.design = null; const r = row('a');
+                   const s = ev(r, 1); treeDragStart(s);
+                   TREE.drag = 'b'; const o = ev(r, 10); treeDragOver(o);
+                   const d = ev(r, 10); treeDrop(d); await tick();
+                   await moveInTree('b', 'a', 'into');
+                   return { started: !s.stopped, taken: !!o.stopped, dropped: !!d.stopped, posted, errs, drag: TREE.drag };""")
+    assert got == {"started": False, "taken": False, "dropped": False, "posted": [], "errs": [], "drag": None}
+
+
+def test_while_a_design_loads_the_tree_says_so_with_no_rows():
+    src = open(JS).read()
+    head = ("const esc = (s) => String(s); const EYE_ON = 'o', EYE_OFF = 'x'; const renameRow = () => '';\n"
+            "const box = { hidden: true, innerHTML: '<div data-drag=\"a\">a</div>' }; const $ = (id) => (id === 'tree' ? box : null);\n"
+            "const document = { activeElement: { id: 'body' } }; const noPieces = new Map(); const pickedName = (s) => 'Stool B';\n"
+            "const S = { slug: 'b', opening: 'b', design: null };\n"
+            "const TREE = { parts: new Set(), pieces: new Set(), open: true, saying: 'Waiting for the job on this design to finish…' };\n"
+            "const seen = () => TREE; const onPhone = () => false;\n")
+    script = head + "".join(_fn(src, n) for n in ("treeRows", "underPart", "treeHtml", "renderTree")) + \
+        "\nrenderTree(); console.log(JSON.stringify({ hidden: box.hidden, html: box.innerHTML }));"
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    got = json.loads(got.stdout)
+    assert got["hidden"] is False and "Loading Stool B…" in got["html"], got
+    assert "data-drag" not in got["html"] and "Waiting" not in got["html"], got
+
+
+def test_a_switch_draws_the_tree_at_once():
+    src = open(JS).read()
+    body = src[src.index("function showLoading("):]
+    body = body[:body.index("\n}\n")]
+    assert "TREE.saying = null;" in body and "renderTree();" in body and "$('tree').hidden = true;" not in body
+
+
+def test_a_move_that_fails_on_another_design_is_said_back_on_it():
+    got = _drag("""answer = () => { S.slug = 'y'; throw new Error('the design is locked'); };
+                   await moveInTree('c', 'a', 'into'); const away = errs.slice();
+                   S.slug = 'x'; sayMissed(); const back = errs.slice(); sayMissed();
+                   return { away, back, again: errs.length, left: TREE.missed };""")
+    assert got["away"] == [] and got["back"] == ["Your move of c in x didn't save: the design is locked"], got
+    assert got["again"] == 1 and got["left"] == {}
+
+
+def test_back_on_a_design_mid_wait_the_waiting_line_comes_back():
+    src = open(JS).read()
+    script = ("const S = { slug: 'x' }; const localStorage = { getItem: () => null }; const WAITING = 'Waiting for the job on this design to finish…';\n"
+              "const TREE = { slug: 'x', saying: WAITING, drag: null, parts: new Set(), waiting: new Set(['x']), missed: {} };\n"
+              + _fn(src, "seen") + "\nS.slug = 'y'; seen(); const away = TREE.saying; S.slug = 'x'; seen();"
+              "\nconsole.log(JSON.stringify({ away, back: TREE.saying }));")
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    assert json.loads(got.stdout) == {"away": None, "back": "Waiting for the job on this design to finish…"}
+
+
+def test_a_move_is_waiting_from_its_slow_start_to_its_reply_on_whatever_design_is_open():
+    got = _drag("""let late; globalThis.setTimeout = (f, ms) => { if (ms === 600) late = f; return 1; }; globalThis.clearTimeout = () => {};
+                   let release; answer = () => new Promise((r) => { release = () => r(S.design); });
+                   const going = moveInTree('c', 'a', 'into'); await tick();
+                   S.slug = 'y'; late(); const during = [...TREE.waiting]; release(); await going;
+                   return { during, after: [...TREE.waiting] };""")
+    assert got == {"during": ["x"], "after": []}
+
+
+def test_a_design_that_opens_says_a_move_it_lost():
+    src = open(JS).read()
+    body = src[src.index("async function openDesign("):]
+    body = body[:body.index("\n}\n")]
+    assert "  S.design = got;\n  doneLoading();\n  render();\n  sayMissed();" in body

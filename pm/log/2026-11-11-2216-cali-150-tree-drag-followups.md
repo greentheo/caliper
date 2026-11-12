@@ -26,3 +26,21 @@ previews.
 **Tests:** 8 new in `test_tree_moves.py`, plus one assert on the drop test (the reply becomes the design shown).
 Five of the new tests fail on main. The other three pin wiring that works today. All 12 mutants are caught; one
 survivor at first (`S.design = got`) now has its assert. `test_tree_moves` and `test_part_tree` pass (93).
+
+**Rework from reviewer-2's review (the foreman's three).**
+1. **A switch draws the tree at once.** `showLoading` clears the waiting line and draws the tree as "Loading <name>…" with
+   no rows, so nothing of the old design is left to drag. Before, it only hid the tree, with the old rows still in it.
+   With no design loaded (`S.design` null), nothing in the tree moves:
+   - a drag doesn't start;
+   - a dragover or a drop isn't taken;
+   - `moveInTree` returns.
+
+   The `null`-`tree` TypeError can't come up. Checked in a browser: switching to the stool with its load slowed, the
+   tree read "Parts · Loading Step stool…" with no rows, then the stool's own tree came. No errors.
+2. **A move that fails while you're away is said when you're back:** "Your move of c in x didn't save: …", once
+   (`TREE.missed`, `sayMissed` after the design opens).
+3. **Back on a design whose move is still waiting, its waiting line comes back.** `TREE.waiting` holds each design
+   whose move has waited past 600 ms, until its reply.
+
+**Tests:** 7 more in `test_tree_moves.py`. `test_part_tree`'s copy of the TREE line now matches the page's. All 13
+mutants are caught (two survivors at first now have tests). The two tree files pass (100).
