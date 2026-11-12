@@ -18,7 +18,7 @@ It doesn't bite on anything stored: the box stool's offer is 3.35 lb, and its sm
 figures).
 
 **Tests:**
-- 15 in `test_lighten_floor.py`;
+- 12 cases in `test_lighten_floor.py` (8 tests, one over 5 weights);
 - `test_lighten`'s real run pins the recorded weight;
 - all 10 mutants are caught;
 - the around-files (7) pass, 177.
