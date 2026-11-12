@@ -79,7 +79,8 @@ def test_a_mirror_made_by_flipping_isn_t_a_finding(v1):
 
     mirror.make(v1, "side_right", "side_left")
     assert not [f for f in review.findings(v1)["findings"] if f["kind"] == "mirror"]
-    assert review._mirror_findings(v1) == ([], 0)          # not even measured: it's one by construction
+    got = review._mirror_findings(v1)
+    assert not got["findings"] and got["measured"] == 0   # not even measured: it's one by construction
 
 
 def test_a_part_restating_a_shared_size_is_a_finding(v1):
@@ -95,11 +96,14 @@ def test_a_part_restating_a_shared_size_is_a_finding(v1):
     assert "side_left sets its own stretcher height: 88.9 mm against the plan's 101.6 mm" in said
 
 
-def test_a_stated_number_nothing_reads_is_a_finding(v1):
+def test_a_stated_number_nothing_measures_is_a_note_not_a_check(v1):
+    """#247 review: named, not measured. Only a rule reads it on the solid; nothing does, so it's a note, not one of the N."""
+    before = review.findings(v1)["checks"]
     v1.design.skeleton = v1.design.skeleton + [{"name": "seat_height", "value": 9, "unit": "in", "source": "stated"}]
     v1.save()
-    (f,) = [f for f in review.findings(v1)["findings"] if f["kind"] == "stated"]
-    assert f["said"].startswith("you said seat height is ") and "no part reads it" in f["said"]
+    rec = review.findings(v1)
+    assert not [f for f in rec["findings"] if f["kind"] == "stated"] and rec["checks"] == before
+    assert any(n.startswith("you said seat height is ") and n.endswith("no check measures it") for n in rec["notes"])
 
 
 def test_the_build_s_reply_ends_with_the_list_and_makes_no_model_call(tmp_path):
@@ -119,3 +123,89 @@ def test_the_build_s_reply_ends_with_the_list_and_makes_no_model_call(tmp_path):
     assert set(calls) == {"side_left", "side_right", "stretcher"}
     assert "Measured after the build: " in got["reply"] and got["findings"]
     assert any(f["kind"] == "mirror" for f in got["findings"])
+
+
+
+# --- #247 review ---------------------------------------------------------------------------------------------------------
+PRE_243 = {**PLAN, "mates": [{"between": ["stretcher", "side_left"], "kind": "touch"}]}     # no fits_in: before #243
+FLUSH = STRETCHER.replace("box(384,", "box(373,").replace("translate((200,", "translate((201.5,")   # ends at each inner face
+
+
+@pytest.fixture
+def v1_unplanned(tmp_path):
+    """step-stool-4's v1 as its plan really was: written before #243, so no fits_in mate; the stretcher ends flush with
+    each side's inner face, at its pocket's mouth."""
+    s = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    P.save(s, P.validate(PRE_243), status="built")
+    s.write_part("side_left", SIDE.format(wall=15, x0=0), intent="the left side")
+    s.write_part("side_right", SIDE.format(wall=12, x0=388), intent="the right side")
+    s.write_part("stretcher", FLUSH, intent="the stretcher")
+    return s
+
+
+def test_a_plan_with_no_fit_still_gets_its_pockets_measured(v1_unplanned):
+    """Item 1: every mounted or touching pair gets a fit check, planned or not; both pockets are listed, with the play."""
+    fits = [f for f in review.findings(v1_unplanned)["findings"] if f["kind"] == "fit"]
+    assert {f["parts"][1] for f in fits} == {"side_left", "side_right"}
+    for f in fits:
+        assert "has 19.1 mm of play in" in f["said"] and "measured at the pocket's mouth (it ends flush with it, not in it)" in f["said"]
+        assert f["fix"].startswith("Size side_") and f["measured"]
+
+
+def test_a_part_that_sits_on_another_has_no_fit_listed(tmp_path):
+    """Neither goes into the other: nothing is listed, and nothing is said not measured."""
+    s = DesignStore.create("a shelf", base=str(tmp_path / "designs"))
+    P.save(s, P.validate({"parts": [{"id": "top", "what": "a top"}, {"id": "leg", "what": "a leg", "mounts_on": ["top"]}]}), status="built")
+    s.write_part("top", 'import cadquery as cq\n\ndef build(params):\n    return cq.Workplane("XY").box(400, 300, 19).translate((0, 0, 409.5))\n', intent="top")
+    s.write_part("leg", 'import cadquery as cq\n\ndef build(params):\n    return cq.Workplane("XY").box(40, 40, 400).translate((0, 0, 200))\n', intent="leg")
+    rec = review.findings(s)
+    assert not [f for f in rec["findings"] if f["kind"] == "fit"] and not rec["unmeasured"]
+
+
+def test_a_fit_that_errors_is_said_apart_and_not_counted(v1):
+    """Item 2: "couldn't measure", in words, with no exception's name, no fix, and out of N."""
+    v1.write_part("stretcher", STRETCHER.replace("p[\"stretcher_z\"]))", "p[\"stretcher_z\"] + 200))"), intent="up in the walls")
+    rec = review.findings(v1)
+    assert any(u.startswith("couldn't measure whether the stretcher fits side_left's pocket: ") and "Error" not in u
+               for u in rec["unmeasured"])
+    assert not [f for f in rec["findings"] if f["kind"] == "rule" and "fits" in f.get("id", "")]
+    text = review.said(rec)
+    assert f"checks measured" in text and "Not measured:" in text
+
+
+def test_a_part_off_its_slot_is_told_to_move():
+    assert review._fit_fix("the stretcher doesn't sit in side_left's slot: it's 90.5 mm off its front", "stretcher", "side_left", 0.3) \
+        == "Move the stretcher down into side_left's slot."
+    assert review._fit_fix("the stretcher has 19.1 mm of play in side_left's pocket", "stretcher", "side_left", 0.3) \
+        == "Size side_left's pocket to the stretcher: 0.3 mm a side."
+
+
+def test_a_stated_number_a_rule_reads_counts_and_one_a_part_names_is_a_note(v1):
+    """Item 3: stretcher_z is read only by the parts' PARAMS: a note; with a rule over it, a measured check."""
+    rec = review.findings(v1)
+    assert any("stretcher z" in n and "names it, but no check measures it" in n for n in rec["notes"])
+    plan = {**PLAN, "rules": [{"id": "low", "expr": "abs(bbox(stretcher).min_z + 50.8 - stretcher_z) <= 1", "source": "stated"}]}
+    P.save(v1, P.validate(plan), status="built")
+    assert not any("stretcher z" in n for n in review.findings(v1)["notes"])
+
+
+def test_a_stated_length_is_measured_on_its_part(v1):
+    v1.design.skeleton = v1.design.skeleton + [{"name": "stretcher_length", "value": 20, "unit": "in", "source": "stated"}]
+    v1.write_part("stretcher", STRETCHER.replace('PARAMS = {', 'PARAMS = {"stretcher_length": 508, '), intent="the stretcher")
+    v1.save()
+    (f,) = [f for f in review.findings(v1)["findings"] if f["kind"] == "stated"]
+    assert f["said"] == "you said stretcher length is 508 mm, and the stretcher is 384 mm long"    # 20 in, in mm
+    assert f["fix"].startswith("Make the stretcher 508 mm long")
+
+
+@pytest.mark.parametrize("what", ["the right side, mirrors side_left", "the right side, a mirror image of the left side"])
+def test_more_ways_to_say_mirror(v1, what):
+    plan = {**PLAN, "parts": [PLAN["parts"][0], {"id": "side_right", "what": what}, PLAN["parts"][2]]}
+    P.save(v1, P.validate(plan), status="built")
+    assert review.mirrored_pairs(v1)[0] == [("side_right", "side_left")]
+
+
+def test_a_mirror_said_of_nothing_is_a_note(v1):
+    plan = {**PLAN, "parts": [PLAN["parts"][0], {"id": "side_right", "what": "the right side, mirrored"}, PLAN["parts"][2]]}
+    P.save(v1, P.validate(plan), status="built")
+    assert "the plan says side_right is a mirror, but not of which part: it isn't compared" in review.findings(v1)["notes"]
