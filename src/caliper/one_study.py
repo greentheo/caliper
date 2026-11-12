@@ -42,6 +42,11 @@ def take_turn(emit: Optional[Callable] = None, stop: Optional[Callable[[], None]
         return False
     if emit:
         emit("waiting", WAITING)
+    from . import jobs
+
+    running = jobs.current()
+    if running is not None:              # a chat that turned into a study: it waits without holding a chat worker (#174)
+        running.park()
     told = time.monotonic()
     job = getattr(stop, "__self__", None)            # the job waiting, if it's one: its clock doesn't run (#211 review)
     if job is not None and hasattr(job, "waiting_since"):
