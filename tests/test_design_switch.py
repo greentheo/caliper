@@ -26,6 +26,7 @@ const clearStation = () => {};
 const clearPick = () => {}; const pickHint = () => {}; const dropBuildFollow = () => {};
 const showLoading = (slug) => { S.opening = slug; S.design = null; log.push(['loading', slug]); };
 const doneLoading = () => { S.opening = null; };
+const sayMissed = () => {};                        // a move lost while away, said once back (#251): its own tests
 const failed = []; const loadFailed = (slug, e) => failed.push([slug, e.message]);
 const meshes = new Map(), scene = { add() {}, remove() {} };
 const location = {};
@@ -156,15 +157,18 @@ const meshes = new Map([['p', {}]]), removed = [], scene = { remove: (m) => remo
 const clearStation = () => {};
 const pieces3d = new Map([['p', {}]]); const dropPieces = (p) => pieces3d.delete(p);
 const plainly = (m) => m;
+const TREE = { saying: 'Waiting for the job on this design to finish…' };   // showLoading clears it (#251)
 """
 
 
 def test_the_new_design_s_name_goes_up_at_once_and_nothing_of_the_old_stays():
     got = _run(("showLoading", "doneLoading", "pickedName"), """S.slug = 'new'; showLoading('new');
         return { h: parts.inspector.innerHTML, design: S.design, thread: parts.thread.innerHTML, meshes: meshes.size + pieces3d.size,
-                 msg: parts.msg.disabled, send: parts.send.disabled, tree: parts.tree.hidden };""", _LOADING)
+                 msg: parts.msg.disabled, send: parts.send.disabled, tree: parts.tree.hidden, rows: parts.tree.innerHTML,
+                 saying: TREE.saying };""", _LOADING)
     assert "New &lt;stool&gt;" in got["h"] and "loading" in got["h"]
     assert got["design"] is None and got["thread"] == "" and got["meshes"] == 0 and got["tree"] is True
+    assert got["rows"] == "" and got["saying"] is None                     # nothing of the old design's tree (#251)
     assert got["msg"] is True and got["send"] is True
 
 

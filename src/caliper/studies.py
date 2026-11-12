@@ -101,8 +101,8 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
             return "no loads", None
         v = verdicts.run(r, edge=edge)          # one verdict (CALI-112): a ✗ stays a ✗, then not trusted, …
         if v["kind"] == "untrusted":            # a block's number, not the part's: no "holds" (CALI-96)
-            return (f"not trusted: it ran on a filled-in shape"
-                    + (f" (the block read {safety_num(r['safety'], r.get('min_safety'))}x)" if r.get("safety") is not None else "")), None
+            return (f"not trusted: it ran on a solid with more in it than its pieces"
+                    + (f" (that solid read {safety_num(r['safety'], r.get('min_safety'))}x)" if r.get("safety") is not None else "")), None
         what = (f"{worst['name']}: {safety_num(worst['safety'], r.get('min_safety'))}x" if worst.get("safety") is not None
                 else worst["name"])
         unjoined = [x for c, x in zip(cases, v["cases"])
@@ -126,7 +126,7 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
             return f"{word} ({read})", None
         if v["kind"] == "fails":
             if r.get("filled"):                 # a ✗ on the block stays a ✗: the part as built is likely weaker
-                what += ", on a filled-in shape: the part as built is likely weaker"
+                what += ", on a solid with more in it than its pieces: if it's filled in, the part as built is likely weaker"
             elif any(x.get("coarse") for x in v["cases"]):
                 what += ", and the fail may be the model's: the voxels can't see its walls"
             return f"doesn't hold — weakest {what} (needs {r.get('min_safety', 2):g}x)", False
@@ -143,7 +143,7 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
         return f"{v['word']} — weakest {what}", None
     if kind == "lighten" and r.get("filled"):
         text, _ = _headline("lighten", {k: v for k, v in r.items() if k != "filled"})
-        return "not trusted, on a filled-in shape: " + text, None              # no step of it holds (CALI-96)
+        return "not trusted, on a solid with more in it than its pieces: " + text, None              # no step of it holds (CALI-96)
     if kind == "lighten":
         st = r.get("stations", [])
         # a thinner sheet's number is an estimate: never the lightest that holds (#132 review)

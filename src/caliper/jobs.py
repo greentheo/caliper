@@ -72,6 +72,8 @@ class Job:
         self.limit_s = LIMIT_S.get(kind)  # (#66 item 2)
         self.waited_s = 0.0               # time spent waiting for the one study turn: not counted (#211 review)
         self.waiting_since: Optional[float] = None
+        self._slot: Optional[threading.BoundedSemaphore] = None   # the chat worker it holds while it works (#174)
+        self._parked: Optional[threading.BoundedSemaphore] = None # the one it gave back to wait, taken again after (#256)
         self._mu = threading.Lock()
         self._stop = threading.Event()    # asked to stop (CALI-101)
 
@@ -102,6 +104,27 @@ class Job:
         if self.limit_s and self.started and self.running_s() > self.limit_s:
             raise TimedOut(self.limit_s)
 
+    def park(self) -> None:
+        """It's about to wait (for the study turn): give back the chat worker it holds, so a job waiting takes none (#174)."""
+        slot, self._slot = self._slot, None
+        if slot is not None:
+            slot.release()
+            self._parked = slot
+
+    def unpark(self) -> None:
+        """Its wait is over: take its worker back, so its work after the turn is counted (#256 review: with 2 workers, 8 chats
+        peaked at 4). Asked to stop while it waits for one: :class:`Cancelled`, at once."""
+        slot, self._parked = self._parked, None
+        if slot is not None:
+            take(slot, self._stop)
+            self._slot = slot
+
+    def give_back(self) -> None:
+        """Its worker back, if it holds one, and nothing to take again: it's over."""
+        self._parked = None
+        self.park()
+        self._parked = None
+
     def running_s(self) -> float:
         """How long it has worked: since it started, less the time it waited for its study turn (#211 review: two
         carves queued behind a third ran out their clock waiting)."""
@@ -125,6 +148,24 @@ LIMIT_S = {k: STUDY_LIMIT_S for k in STUDIES}
 #: what a job on a design is waiting for, when it's another job on that design that has it (#174)
 AHEAD = {"release": "the build package", "picture": "the picture", "cutplan": "the cut plan", "firstrun": "the first build", "chat": "the message before it"}
 
+#: Threads for the jobs that aren't studies, most of them waiting at any moment: the worker count limits how many work (#174).
+WAITING_THREADS = 256
+#: The job this thread is running, for a wait deep inside it (the study turn) to give its worker back (#174).
+_CURRENT = threading.local()
+
+
+def take(slot: threading.BoundedSemaphore, stop: threading.Event) -> None:
+    """A worker, waited for a quarter second at a time: a job asked to stop while it waits leaves at once (#256)."""
+    while not slot.acquire(timeout=0.25):
+        if stop.is_set():
+            raise Cancelled()
+
+
+def current() -> Optional["Job"]:
+    """The job this thread is running, if it's one of a runner's."""
+    return getattr(_CURRENT, "job", None)
+
+
 #: Every runner made, held weakly: the app's RUNNER and any a test makes.
 RUNNERS = weakref.WeakSet()
 
@@ -137,7 +178,10 @@ class JobRunner:
 
     def __init__(self, workers: int = 8, study_workers: int = 32):
         RUNNERS.add(self)                      # so a test can wait for every runner's jobs (CALI-97)
-        self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="caliper-job")
+        # a chat waiting (for its design's lock, or for the study turn) holds a thread but no worker (#174): ``workers`` jobs work
+        # at once, and the threads that wait are cheap
+        self._slots = threading.BoundedSemaphore(workers)
+        self._pool = ThreadPoolExecutor(max_workers=max(workers, WAITING_THREADS), thread_name_prefix="caliper-job")
         # studies wait their turn on a worker (#163): on workers of their own, so a queue of them can't hold up a chat (#174)
         self._studies = ThreadPoolExecutor(max_workers=study_workers, thread_name_prefix="caliper-study")
         self._jobs: dict[str, Job] = {}
@@ -166,7 +210,8 @@ class JobRunner:
             self._jobs[job.id] = job
             key_lock = self._locks.setdefault(job.lock, threading.Lock())
         # the worker carries the request's context on (which design's log its Claude calls go on)
-        (self._studies if kind in STUDIES else self._pool).submit(contextvars.copy_context().run, self._run, job, fn, key_lock)
+        (self._studies if kind in STUDIES else self._pool).submit(contextvars.copy_context().run, self._run, job, fn, key_lock,
+                                                                 None if kind in STUDIES else self._slots)
         return job
 
     def cancel(self, job_id: str) -> Optional[Job]:
@@ -217,17 +262,29 @@ class JobRunner:
         with self._mu:
             return next((j for j in self._jobs.values() if j.lock == job.lock and j is not job and j.status == "running"), None)
 
-    def _run(self, job: Job, fn: Callable[[Job], Any], key_lock: threading.Lock) -> None:
+    def _run(self, job: Job, fn: Callable[[Job], Any], key_lock: threading.Lock,
+             slot: Optional[threading.BoundedSemaphore] = None) -> None:
         if key_lock.locked():                 # not silence for as long as that takes: it can be hours (#174)
             ahead = self._ahead(job)
             job.emit("waiting", f"Waiting for {AHEAD.get(ahead.kind, 'another job') if ahead else 'another job'} on this design to finish.")
-        with key_lock:
+        with key_lock:                        # waited for with no worker held (#174)
             with self._mu:
                 if job.status == "cancelled":                 # cancelled while it waited (CALI-101)
+                    return
+            if slot is not None:              # then a worker, to do the work
+                try:
+                    take(slot, job._stop)
+                except Cancelled:             # cancelled while it waited for one: it leaves now (#256)
+                    return
+                job._slot = slot
+            with self._mu:
+                if job.status == "cancelled":
+                    job.give_back()
                     return
                 job.status = "running"
                 job.started = time.time()
             job.emit("started", job.label, limit_s=job.limit_s)
+            _CURRENT.job = job
             try:
                 job.result = fn(job)
                 job.status = "done"
@@ -254,6 +311,8 @@ class JobRunner:
                 job.emit("error", job.error, trace=errors.scrub(tail[-1]) if tail else "")
             finally:
                 job.finished = time.time()
+                job.give_back()               # its worker back, if it still holds one
+                _CURRENT.job = None
 
     def _prune(self) -> None:
         cutoff = time.time() - KEEP_FINISHED_S

@@ -75,11 +75,14 @@ _EXPLAIN = re.compile(r"\b(explain|plain (?:words|english)|more simply|what does
 #: simpler", "simpler please", "simpler words", or the word on its own).
 _CHANGE_VERBS = (r"(?:make|change|add|remove|move|use|set|put|cut|build|turn|swap|replace|widen|lengthen|shorten"
                  r"|thicken|raise|lower|give)")
+#: Where a request's verb starts a clause: after a stop, a colon, a dash, "and", "then", "so", or "can you" (#70, reviewer-2:
+#: "I don't get it - make it 2 inches taller" and "…, can you make it…" were dropped).
+_LEAD = (r"(?:(?:^|[,;:.!]|\s[-–—]|[–—])\s*(?:(?:and|then|but|so)\s+)?(?:(?:can|could|would|will)\s+you\s+)?"
+         r"|\b(?:and|then|also|just|now|so)\s+)")
 #: CALI-89 (#65 item 1, #212 review): a change asked for, as a request: its verb starts a clause ("…, make it 2
 #: inches taller", "and make the legs thicker"). Inside a question it's a word ("explain the build order", "how to cut
 #: the carriage"), and a question stays a question.
-_CHANGE = re.compile(r"(?:^|[,;.!]\s*(?:and\s+|then\s+|but\s+)?|\b(?:and|then|also|just|now)\s+)(?:please\s+)?"
-                     + _CHANGE_VERBS + r"\b", re.I)
+_CHANGE = re.compile(_LEAD + r"(?:please\s+)?" + _CHANGE_VERBS + r"\b", re.I)
 #: (#212, round 2) a request for other words, whatever verb starts it: "put it in plain English", "use plain words",
 #: "turn that into plain English". A question, unless it also asks for a size or a direction.
 _WORDS = re.compile(r"\b(?:plain (?:english|words|language)|(?:simpler|plainer) (?:words|terms|language)|eli5)\b", re.I)
@@ -90,9 +93,15 @@ _ADD_SIZE = re.compile(r"\badd\s+(?:another\s+)?\d[\d./ ]*\s*(?:in|inch|inches|m
 _Q_CLAUSE = re.compile(r"^\s*(?:why|what|how|which|where|when|who|is|are|does|do|did|can|could|would|should|will)\b",
                        re.I)
 #: (#212, round 3) a statement with no change in it: "I need it by Friday" isn't a revision.
-_STATEMENT = re.compile(r"^\s*i\s+need\s+(?:it|this|that|them)\b", re.I)
+_STATEMENT = re.compile(r"^\s*i\s+need\s+(?:it|this|that|them)\s*(?:(?:by|before|for|on|soon|today|tomorrow|tonight|asap"
+                        r"|now|this|next)\b.*)?[.!]?\s*$", re.I)    # not "I need them painted", a change (#70, reviewer-2)
+#: (#250 review) "I need them painted", "I need it wider": with nothing built, nothing to change, so no part named `i_need`
+_I_NEED = re.compile(r"^\s*i\s+need\s+(?:it|this|that|them)\b", re.I)
+#: (#70, reviewer-2) a clause that tells, not asks: "it's heavier than I thought"; its direction word is no request.
+_SAYS = re.compile(r"^\s*(?:it|this|that|they|these|those|i)(?:'s|'re|'m|\s+(?:is|are|was|were|am|seems?|looks?|feels?"
+                   r"|thought|think|was))\b", re.I)
 #: (#212) a change to what's there: "make it wider", "use 1/2 in plywood"; not "make a bench", nor "add …".
-_MODIFY = re.compile(r"(?:^|[,;.!]\s*(?:and\s+|then\s+)?|\b(?:and|then|also|just|now)\s+)(?:please\s+)?"
+_MODIFY = re.compile(_LEAD + r"(?:please\s+)?"
                      r"(?:make(?!\s+(?:me\s+)?(?:a|an|another|some|new|second|one more)\b)|change|remove|move|use|set"
                      r"|turn|swap|replace|widen|lengthen|shorten|thicken|raise|lower)\b|" + _ADD_SIZE.pattern, re.I)
 #: (#65 item 3) "make it look like X": a question, answered with the picture offered; nothing changes.
@@ -178,8 +187,12 @@ def _words(message: str) -> list[str]:
 def _changes_outside_questions(msg: str) -> bool:
     """A size or a direction asked for in a clause that isn't itself a question (#212, round 3: "use plain words: why
     is it so much heavier" asks why; "…and make it wider" asks for a change)."""
-    clauses = re.split(r"[,:;.!?]|\band\b|\bthen\b", msg)
-    return any((_MEASURE.search(c) or _DIRECTION.search(c)) for c in clauses if not _Q_CLAUSE.match(c))
+    out = []
+    for clause in re.split(r"[,:;.!?]|\s[-–—]\s|[–—]", msg):       # a dash ends a clause (#70, reviewer-2)
+        parts = re.split(r"\b(?:and|then)\b(?=\s+(?:please\s+)?" + _CHANGE_VERBS + r"\b)", clause) if _Q_CLAUSE.match(clause) \
+            else re.split(r"\band\b|\bthen\b", clause)            # "why is it wider and heavier" is one question
+        out += [p for p in parts if not _Q_CLAUSE.match(p) and not _SAYS.match(p)]   # nor is a statement a request
+    return any((_MEASURE.search(c) or _DIRECTION.search(c)) for c in out)
 
 
 def _is_question(message: str) -> bool:
@@ -219,13 +232,14 @@ def part_id_from(message: str, existing: set[str]) -> str:
     return out
 
 
-def named_part(message: str, parts: list[str]) -> Optional[str]:
-    """Which existing part does this message name? Longest match wins ('bar_v' beats 'bar')."""
+def named_part(message: str, parts: list[str], labels: Optional[dict] = None) -> Optional[str]:
+    """Which existing part does this message name? Longest match wins ('bar_v' beats 'bar'). ``labels``: the names given
+    in the tree ("Bathroom stool"), which the cards say (#70, reviewer-2: a renamed part's fix words authored a new part)."""
     words = set(_words(message))
     hits = []
     for pid in parts:
         # its id as written ("step_stool"), or as a person says it ("the step stool": #209 review, a card's words)
-        for tokens in (set(_words(pid)), set(pid.lower().split("_")) - {""}):
+        for tokens in (set(_words(pid)), set(pid.lower().split("_")) - {""}, set(_words((labels or {}).get(pid) or ""))):
             if tokens and tokens <= words:
                 hits.append((len(tokens), pid))
                 break
@@ -451,6 +465,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
     than guessing which part the user meant — a wrong guess spends an authoring run.
     """
     ids = [p.id for p in store.design.parts]
+    labels = {p.id: p.label for p in store.design.parts if p.label}
     question = _is_question(message)
 
     # "make it look like a dinosaur": the picture offered, nothing changed (#65 item 3)
@@ -460,7 +475,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
 
     # carve a printed part (CALI-82)
     if _CARVE.search(message or "") and not question and ids:
-        target = scope or named_part(message, ids) or (ids[0] if len(ids) == 1 else None)
+        target = scope or named_part(message, ids, labels) or (ids[0] if len(ids) == 1 else None)
         if target and _printed(store, target):
             return Intent(action="carve", part=target, note="carve the printed part where it isn't working")
 
@@ -470,7 +485,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
         from .pictures import BUILT_IN
 
         subject = pic.group("subject").strip()
-        target = scope or named_part(message, ids) or (ids[0] if len(ids) == 1 else None)
+        target = scope or named_part(message, ids, labels) or (ids[0] if len(ids) == 1 else None)
         thing = (subject.lower().split() or [""])[-1]
         if target and thing not in _STRUCTURE and (any(k in subject.lower() for k in BUILT_IN)
                        or re.search(r"\b(picture|drawing|silhouette|cut-?out|shape)\b", subject, re.I)):
@@ -478,7 +493,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
                           note="a picture to cut out of a panel")
 
     if _REVERT.search((message or "").lower()) and not question:
-        target = scope or named_part(message, ids) or last_touched(store)
+        target = scope or named_part(message, ids, labels) or last_touched(store)
         if target:
             return Intent(action="revert", part=target, note="asks to undo the last change")
 
@@ -493,13 +508,16 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
             return Intent(action="answer", part=scope, note="a question about this part")
         return Intent(action="refine", part=scope, note="scoped to the clicked part")
 
-    hit = named_part(message, ids)
+    hit = named_part(message, ids, labels)
     if hit and not question:
         return Intent(action="refine", part=hit, note=f"names the part {hit!r}")
     if question:
         return Intent(action="answer", part=hit, note="reads as a question")
 
     wants_new = bool(_NEW_THING.search(message or "")) and not _ADD_SIZE.search(message or "")   # a size added: a revision
+    if not ids and not wants_new and (_EXPLAIN.search(message or "") or _I_NEED.search(message or "")):
+        # "I don't get it, make it 2 inches taller" with nothing built: nothing to change, no part named `i_don` (#70)
+        return Intent(action="answer", note="asks to explain, and there's nothing to change yet")
     if not wants_new and len(ids) == 1 and _MODIFY.search(message or ""):
         # "make it 2 in wider" on a one-part design is that part, not a new one named "part" (#65)
         return Intent(action="refine", part=ids[0], note="a change, and the design has one part")
@@ -1274,7 +1292,7 @@ def _facts(store: DesignStore, scope: Optional[str]) -> str:
                           if v["kind"] in ("unresolved", "unchecked") or v.get("coarse") else "")
                        + ("; CHECKED IN THE MIDDLE ONLY: the front edge, where people stand, isn't, so this is no "
                           "verdict" if v["kind"] == "edge" else "")
-                       + ("; NOT TRUSTED: it ran on a filled-in shape" if v["kind"] == "untrusted" else "")
+                       + ("; NOT TRUSTED: it ran on a solid with more in it than its pieces" if v["kind"] == "untrusted" else "")
                        + (f"; NOT SETTLED: {v.get('why')}, so this number is no verdict" if v["kind"] == "span" else ""))
         out += [f"strength note: {n}" for n in (run.get("notes") or [])[:4]]
     said = [e for e in store.log() if e.get("kind") in ("message", "reply")][-6:]

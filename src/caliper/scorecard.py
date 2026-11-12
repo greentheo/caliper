@@ -244,8 +244,9 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         r = making.filament(r, made[p.id] if isinstance(made[p.id], dict) else None)
         r["pieces_raw"] = C.takeoff(C._items(C.declared(store, p.id)))
         reports[p.id] = r
-        _metric(metrics, f"weight.{p.id}", r["mass_lb"], "lb", f"{p.id} weighs", "model", "construction",
-                **({"note": r["unweighed"]} if r.get("unweighed") else {}))     # unknown, said (#125 review)
+        own = making.filament_said([r])[0]       # its own figure, labelled by where it came from (#237 review)
+        _metric(metrics, f"weight.{p.id}", r["mass_lb"], "lb", f"{p.id} weighs", "rough" if own else "model",
+                own or "construction", **({"note": r["unweighed"]} if r.get("unweighed") else {}))     # unknown, said (#125 review)
         for k in r.get("keeps") or []:
             checks.append({"id": f"keeps:{p.id}.{k['name']}", "label": f"{p.id} holds the {k['name']}",
                            "status": "pass" if k["clear"] else "fail", "value": k["depth_mm"], "margin": -k["depth_mm"],
@@ -263,6 +264,9 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     more_lb = sum(r.get("filament_more_kg") or 0.0 for r in reports.values()) * M.LB_KG
     total_lb = None if b["mass_lb"] is None else round(b["mass_lb"] + more_lb, 1)
     filament_guess = making.filament_said(reports.values())[0]
+    filament_upper = making.filament_bound(reports.values())
+    upper_lb = making.solid_share_lb(reports.values()) if filament_upper else 0.0     # what that bound may be over by
+    upper_usd = making.solid_share_usd(reports.values()) if filament_upper else 0.0   # a cost's share, either way (#250)
     _metric(metrics, "weight.total_lb", total_lb, "lb", f"everything, with {payload:g} lb aboard",
             "rough" if filament_guess else "model", filament_guess or "balance", **unknown)
     _metric(metrics, "hitch.tongue_lb", b["mass_lb"], "lb", "on the hitch's tongue, standing still", "model", "balance",
@@ -388,8 +392,11 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         planned += 1
         missing += [f"{pid}: {m['name']} ({m['why']})" for m in mk["missing"]]
         unprintable = unprintable or making.no_print_total(mk)
-        hours += sum(x["hours"] for x in mk["printed"])
-        grams += sum(x["filament_g"] for x in mk["printed"])
+        gone = next((x for x in mk["printed"] if x.get("hours") is None), None)
+        if gone is not None:                   # the slicer couldn't: no total, said (a None in the sum crashed the card)
+            unprintable = unprintable or f"can't be worked out: the slicer couldn't for the {gone['name']} ({gone.get('from')})"
+        hours += sum(x["hours"] for x in mk["printed"] if x.get("hours") is not None)
+        grams += sum(x["filament_g"] for x in mk["printed"] if x.get("filament_g") is not None)
         guessed = guessed or next((x["rough_said"] for x in mk["printed"] if x.get("rough_said")), "")
     if reports:
         # a ✓ only over what was worked out (#89, #137 P2 item 10: "✓ … 0 measured" where no part's plan could be
@@ -423,6 +430,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     no_breaks = None                  # a breaking load from a run that can't see the wall isn't one to read
     loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
     left = []                         # parts whose strength isn't known: never left out of the verdict (#132 review)
+    ran_filled = False                # a run of this version that ran on a solid with more in it than its pieces (#70)
     for p in store.design.parts:
         if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
             continue
@@ -455,6 +463,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                         + next((f": {c['why']}" for c in run["cases"]
                                 if (c.get("fea") or {}).get("supported") is False and c.get("why")), ""))
         said = [(c, verdicts.case(run, c)) for c in run["cases"]]
+        ran_filled = ran_filled or bool(run.get("filled"))
         uncut = uncut or not run.get("cut")
         recheck = recheck or (verdicts.UNCUT if any(v["kind"] == "recheck" for _, v in said) else None)
         span = span or (verdicts.SPAN_WHY if any(v["kind"] == "span" for _, v in said) else None)
@@ -502,6 +511,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
 
     untrue = next((why for p in store.design.parts if store.is_scripted(p.id)
                    and "def loads(" in store.read_script(p.id) for why in [filled(store, p.id)] if why), None)
+    if untrue is None and ran_filled:                  # the run of this version says so itself (#70)
+        untrue = load_study.FILLED_NOTE
     # loaded in the middle only, where a two-sided top is strongest: no pass from it (CALI-94, #106 review)
     from .consistency import MIDDLE_ONLY, bare_edge
 
@@ -533,12 +544,24 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             met = True
         else:
             met = None
+        low = verdicts.compare(v - upper_lb, op, lim) if number and c["metric"].startswith("weight.") else None
+        # the solid's share bounds a weight, not a cost: supports, brim and purge are bought too (#250 review)
+        bounded = (filament_upper and number and c["metric"].startswith("weight.")
+                   and not making.settled_by_bound(op, met, low))   # an upper bound that doesn't settle it: an estimate (#237)
+        if bounded:
+            met = True
+        # a cost on the solid's share is an estimate either way, unless the parts that aren't printed settle it alone (#250)
+        cost_on_share = filament_upper and number and c["metric"].startswith("cost.")
+        cost_sure = cost_on_share and making.sure_without(op, verdicts.compare(v - upper_usd, op, lim))
+        if cost_on_share and not cost_sure:              # settled without the share, its own number already says so
+            met = True
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-110)
         verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=(unsure or unsettled) if strength else None,
                                 edge=bool(edgeless) if strength else False,             # the middle only (CALI-94)
                                 incomplete="; ".join(left) if strength and left else None,
                                 estimate=m["source"] if m and m.get("trust") == "rough" and c["metric"].startswith("print.")
                                 else filament_guess if filament_guess and c["metric"].startswith(("weight.", "cost."))
+                                and (bounded or not filament_upper or (c["metric"].startswith("cost.") and not cost_sure))
                                 else None,
                                 # an old number on its limit, the run's or this goal's own (#214 review)
                                 recheck=(recheck or (verdicts.UNCUT if number and verdicts.goal_on_limit(
@@ -551,7 +574,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         elif status == "untrusted":
             checks.append({**c, "status": status, "value": m["value"] if m else None, "margin": None,
                            "unit": m["unit"] if m else "", "trust": ("not trusted: its shape couldn't be checked" if str(untrue).startswith("couldn't")
-                                    else "not trusted: a filled-in shape"), "note": untrue})   # which it is (#89)
+                                    else "not trusted: a solid with more in it than its pieces"), "note": untrue})   # which it is (#89)
         elif status == "unresolved":
             checks.append({**c, "status": status, "value": m["value"] if m else None, "unit": m["unit"] if m else "", "margin": None,
                            "trust": NOT_SEEN if saw_nothing else "not resolved: too coarse to see its walls", "note": unsure or unsettled})
