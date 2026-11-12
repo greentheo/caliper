@@ -77,9 +77,11 @@ def test_the_panel_says_too_little_only_of_a_step_under_the_floor():
     lead = lead[:lead.index("\n")]
     out = _run(_page([], extra=lead + """
 out = [lightenLead({ offer: { kind: 'small', offers: false } }), lightenLead({ offer: { kind: 'unseen', offers: false } }),
-       lightenLead({ offer: { kind: 'unknown', offers: false } }), lightenLead({ offer: { kind: 'room', offers: true } }), lightenLead({})];
+       lightenLead({ offer: { kind: 'unknown', offers: false } }), lightenLead({ offer: { kind: 'room', offers: true } }), lightenLead({}),
+       lightenLead({ offer: { kind: 'no_room', offers: true } })];
 """))
-    assert out == ["Too little to use", "The step to use", "The step to use", "The step to use", "The step to use"], out
+    # #254: an unseen or unknown step has no button and its re-check couldn't settle it: "Not settled", never "The step to use"
+    assert out == ["Too little to use", "Not settled", "Not settled", "The step to use", "The step to use", "The step to use"], out
 
 
 def test_the_panel_never_calls_a_step_under_the_floor_best():

@@ -2953,8 +2953,9 @@ function peakWhere(f) {
   return f && f.at ? `around ${len(f.at[2])} up` : 'in the part';
 }
 function lightenRuns(pid) { return (S.design.lighten_runs || []).filter((r) => r.part === pid); }
-// a Lightening's step under the floor is "too little", never "best"; an unseen or unknown one is still the step to use (#252)
-const lightenLead = (run) => (run.offer && run.offer.kind === 'small' ? 'Too little to use' : 'The step to use');
+// a Lightening's step, led by what's known (#252, #254): under the floor "too little"; one its re-check couldn't settle (unseen,
+// unknown) "Not settled"; "The step to use" only where there's a button, or an older run with no offer
+const lightenLead = (run) => (!run.offer ? 'The step to use' : run.offer.kind === 'small' ? 'Too little to use' : ['unseen', 'unknown'].includes(run.offer.kind) ? 'Not settled' : 'The step to use');
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
   const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
