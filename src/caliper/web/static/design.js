@@ -1511,7 +1511,7 @@ const paramUnit = (e) => (isLength(e) ? (inches() ? 'in' : 'mm') : e.unit === 'd
 const PARAM_WORD = { dia: 'diameter', bot: 'bottom', t: 'thickness', r: 'radius', h: 'height', w: 'width', d: 'depth', l: 'length' };
 function paramName(e) {
   const note = (e.note || '').replace(/\s*\([^)]*\)?\s*$/, '')
-    .replace(/^~?\d[\d./]*(\s+\d+\/\d+)?\s*(mm|in\b|inch(es)?\b|"|″)?\s*/i, '')
+    .replace(/^~?\d[\d./]*([\s-]+\d+\/\d+)?\s*(mm|in\b|inch(es)?\b|"|″)?[\s,;:]*/i, '')   // and the comma after it (#267 review)
     .replace(/[\s(]*\b(mm|in|inches|deg|degrees)\b\)?\.?\s*$/i, '').trim();
   const said = note.split(/\s+/).length >= 2 ? note : e.name.split('_').map((w) => PARAM_WORD[w] || w).join(' ');
   return said.charAt(0).toUpperCase() + said.slice(1);

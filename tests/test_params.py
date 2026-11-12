@@ -503,6 +503,10 @@ def test_the_panel_sits_after_will_it_work():
 @pytest.mark.parametrize("name,note,said", [
     ("foot_t", "Extra radial width of foot ring (~2.5 in + 1 in)", "Extra radial width of foot ring"),
     ("d", "", "Depth"),
+    # reviewer-2 on #267: the figure goes, and the comma after it with it
+    ("width", "24 in, side to side", "Side to side"),
+    ("height", "20 in, floor to the one big step's surface", "Floor to the one big step's surface"),
+    ("screw_len", "1-1/4 in, the screws", "The screws"),
 ])
 def test_more_of_the_stool_s_names(name, note, said):
     assert _page(f"return {{ s: paramName({{ name: {json.dumps(name)}, note: {json.dumps(note)} }}) }};")["s"] == said
@@ -592,3 +596,27 @@ def test_a_number_set_by_hand_leaves_no_stale_inches(store):
     params.set_value(s, "box", "w", 18, "in")
     line = next(ln for ln in s.read_script("box").splitlines() if '"w"' in ln)
     assert line.endswith("# 18 in wide"), line
+
+
+@pytest.mark.parametrize("name,old,new,comment,after", [
+    # reviewer-2 on #267: a lone figure that's another thing's size stays
+    ("flange_w", 50.8, 63.5, "fits a 3/8 in bolt with a washer", "fits a 3/8 in bolt with a washer"),
+    ("pocket_depth", 25.4, 31.75, "3/4 in ply sits in it", "3/4 in ply sits in it"),
+    ("top_depth", 279.4, 330.2, "deep enough for a 10 in foot", "deep enough for a 10 in foot"),
+    # a hyphenated mixed number is one figure: it's this number, so it's said as the new one, hyphen kept
+    ("screw_len", 31.75, 38.1, "1-1/4 in screws", "1-1/2 in screws"),
+    # and one that isn't this number stays whole
+    ("screw_len", 25.4, 38.1, "1-1/4 in screws", "1-1/4 in screws"),
+    # a lone figure that states the number is stale, and says the new one
+    ("width", 406.4, 431.8, "24 in, side to side", "17 in, side to side"),
+    ("top_depth", 355.6, 381.0, "11 in deep", "15 in deep"),
+    ("height", 406.4, 457.2, "20 in (floor to the step)", "18 in (floor to the step)"),
+    ("height", 406.4, 457.2, "~20 in", "~18 in"),
+])
+def test_a_lone_figure_is_stale_only_where_it_states_the_number(name, old, new, comment, after):
+    """reviewer-2's must-fix on #267: the fallback for an already-stale comment rewrote "fits a 3/8 in bolt" as "2 1/2 in
+    bolt". A lone figure is taken as stale only where it states the number: at the comment's start, followed by its end, a
+    comma, a bracket or a size word."""
+    script = f'PARAMS = {{\n    "{name}": {old},  # {comment}\n}}\n'
+    got = aero.set_params(script, {name: new}).splitlines()[1]
+    assert got.endswith(f"# {after}"), got

@@ -18,7 +18,25 @@ it: a Parameters edit, the skeleton's drive, and an adopted drag or frame study.
 
 **Tests:** 14 in `test_params.py`. 11 failed before; the other 3 pin what's left alone. Theo's shape of PARAMS is a
 synthetic copy, not his script. All 8 mutants are caught; one survived at first (a mixed number misread) and now has a
-case. The files that rewrite PARAMS (`test_params`, `test_aero`, `test_mirrors`) pass, 488.
+case. The 15 test files that rewrite PARAMS or drive the skeleton pass, 488 (params, aero, mirrors, skeleton drives,
+the plan and build-plan files, shared sizes, release and the rest).
 
 Next in #266: a part added to fit another reads its live numbers, the pick's coordinates become a requirement, "and the
 opposite edge" makes a mirror, a seating check runs before the reply, and the findings run after an added part.
+
+**Rework from reviewer-2's review (the foreman's must-fix).** The fallback for an already-stale comment rewrote a lone
+figure that was another thing's size: "fits a 3/8 in bolt" became "2 1/2 in bolt", and "3/4 in ply sits in it" became
+"1 1/4 in ply".
+- **A lone figure is stale only where it states the number:** first in the comment (a "~" may lead), then nothing, a
+  comma or bracket, or a size word (tall, wide, deep, long, high, thick). Theo's "# 20 in", "# 24 in, side to side" and
+  "# 11 in deep" are still put right. The bolt, the ply and "deep enough for a 10 in foot" stay.
+- **"1-1/4" is one mixed number.** As this number, it's said as "1-1/2", hyphen kept. Otherwise it stays whole; it was
+  "1-1 1/2".
+- **The Parameters label drops the comma after the figure** (reviewer-2's small ask): ", side to side" is "Side to side".
+
+**Not done:** the other small ask, putting Theo's other stale comments right without an edit (width "24 in", top_depth
+"11 in", rails "3 in", foot_overhang "2 in"). They're put right as each number is edited. A pass over a whole script
+when it's opened is left for #266's live-numbers part. That part changes what the designer reads anyway.
+
+**Tests:** 9 more in `test_params.py` and 3 label cases. The 5 review cases failed before. All 5 mutants are caught.
+`test_params` passes, 124, and `test_aero` and `test_mirrors` pass, 80.

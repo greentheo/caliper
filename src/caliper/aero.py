@@ -152,14 +152,17 @@ def write_params(script: str, values: dict[str, float], keep_float: bool = False
                                     if isinstance(k, ast.Constant) and k.value == name}, values)
 
 
-#: A length in a comment: "20 in", "3/4 in", "1 1/4 in", '2"', "101.6 mm" (CALI-171, #266).
-_FIGURE = re.compile(r"(?<![\w./])(\d+ \d+/\d+|\d+/\d+|\d+(?:\.\d+)?)\s*(in\b|inch(?:es)?\b|\"|″|mm\b)")
+#: A length in a comment: "20 in", "3/4 in", "1 1/4 in", "1-1/4 in", '2"', "101.6 mm" (CALI-171, #266).
+_FIGURE = re.compile(r"(?<![\w./])(\d+[ -]\d+/\d+|\d+/\d+|\d+(?:\.\d+)?)\s*(in\b|inch(?:es)?\b|\"|″|mm\b)")
+#: A lone figure that states the number (#267 review): first in the comment, and then nothing, a comma or bracket, or a size
+#: word. "fits a 3/8 in bolt" and "3/4 in ply sits in it" are another thing's size.
+_STATES = re.compile(r"\s*(?:$|[,;:()\[\]]|(?:tall|wide|deep|long|high|thick|across|thru|through)\b)", re.I)
 _INCH_MM = 25.4
 
 
 def _figure_mm(text: str, unit: str) -> float:
-    whole, _, frac = text.rpartition(" ") if "/" in text and " " in text else ("", "", text)
-    n = float(whole or 0) + (float(frac.split("/")[0]) / float(frac.split("/")[1]) if "/" in frac else float(frac))
+    m = re.fullmatch(r"(?:(\d+)[ -])?(\d+)/(\d+)", text)
+    n = float(m.group(1) or 0) + float(m.group(2)) / float(m.group(3)) if m else float(text)
     return n if unit == "mm" else n * _INCH_MM
 
 
@@ -180,7 +183,9 @@ def _restate(script: str, old: dict, values: dict) -> str:
     """Each rewritten number's comment, saying the new number (CALI-171, #266: ``"height": 406.4,  # 20 in`` misled the
     designer). A length figure in the comment that is the old number is said as the new one, in the comment's own unit;
     any other figure stays ("3/4 in plywood, 1 1/4 in screws"). A comment whose only figure is no number it had (already
-    stale from an edit before this one) says the new number too, where its name says it's a length. Nothing else changes."""
+    stale from an edit before this one) says the new number too, where its name says it's a length and the figure states it:
+    first in the comment, then nothing, a comma or bracket, or a size word (#267 review: "fits a 3/8 in bolt" stays).
+    Nothing else changes."""
     from . import params
 
     node = _params_node(ast.parse(script))
@@ -203,10 +208,13 @@ def _restate(script: str, old: dict, values: dict) -> str:
         figs = list(_FIGURE.finditer(note))
         near = lambda f: abs(_figure_mm(f.group(1), f.group(2)) - was) <= max(0.5, 0.01 * abs(was))   # noqa: E731
         hits = [f for f in figs if near(f)]
-        if not hits and len(figs) == 1 and params.unit_of(name, "") == "mm":   # a length by its name: "4 in a row" isn't one
-            hits = figs                                   # its one figure was already stale: it says this number
+        if (not hits and len(figs) == 1 and params.unit_of(name, "") == "mm"   # a length by its name: "4 in a row" isn't one
+                and re.fullmatch(r"#\s*~?\s*", note[:figs[0].start(1)]) and _STATES.match(note, figs[0].end())):
+            hits = figs                                   # its one figure, stating the number, was already stale: it says this one
         for f in reversed(hits):
             said = _format(new) if f.group(2) == "mm" else _inch_text(new)
+            if "-" in f.group(1):                         # "1-1/4" said as "1-1/2", as it was written
+                said = said.replace(" ", "-")
             note = note[:f.start(1)] + said + note[f.end(1):]
         lines[n - 1] = head + note
     return "".join(lines)
