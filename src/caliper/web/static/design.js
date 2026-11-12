@@ -287,11 +287,6 @@ function treeHtml(design, view) {
 function renderTree() {
   const box = $('tree');
   if (!box) return;
-  if (!S.design && S.opening) {                    // loading: the new name, and no rows of the old one to drag (#251 review)
-    box.hidden = false;
-    box.innerHTML = `<div class="tree-head"><span class="fold">▸ Parts</span><span class="note">Loading ${esc(pickedName(S.opening))}…</span></div>`;
-    return;
-  }
   const parts = S.design ? S.design.parts : [];
   box.hidden = !parts.length;
   if (!parts.length || document.activeElement === $('treeName')) return;       // never over a name being typed
@@ -991,8 +986,9 @@ function showLoading(slug) {
   clearStation();
   $('inspector').innerHTML = `<h2>${esc(pickedName(slug))}</h2><div class="muted small"><span class="spin"></span>loading…</div>`;
   $('thread').innerHTML = '';
-  TREE.saying = null;                              // the tree at once: the new name, nothing of the old (#251 review)
-  renderTree();
+  $('tree').hidden = true;                         // hidden till the new design lands, and nothing of the old left in it (#251)
+  $('tree').innerHTML = '';
+  TREE.saying = null;
   $('scopeRow').hidden = true;
   $('viewHint').textContent = 'loading…';
   $('msg').disabled = true; $('send').disabled = true;

@@ -403,28 +403,11 @@ def test_while_a_design_loads_nothing_in_the_tree_can_be_dragged_or_moved():
     assert got == {"started": False, "taken": False, "dropped": False, "posted": [], "errs": [], "drag": None}
 
 
-def test_while_a_design_loads_the_tree_says_so_with_no_rows():
-    src = open(JS).read()
-    head = ("const esc = (s) => String(s); const EYE_ON = 'o', EYE_OFF = 'x'; const renameRow = () => '';\n"
-            "const box = { hidden: true, innerHTML: '<div data-drag=\"a\">a</div>' }; const $ = (id) => (id === 'tree' ? box : null);\n"
-            "const document = { activeElement: { id: 'body' } }; const noPieces = new Map(); const pickedName = (s) => 'Stool B';\n"
-            "const S = { slug: 'b', opening: 'b', design: null };\n"
-            "const TREE = { parts: new Set(), pieces: new Set(), open: true, saying: 'Waiting for the job on this design to finish…' };\n"
-            "const seen = () => TREE; const onPhone = () => false;\n")
-    script = head + "".join(_fn(src, n) for n in ("treeRows", "underPart", "treeHtml", "renderTree")) + \
-        "\nrenderTree(); console.log(JSON.stringify({ hidden: box.hidden, html: box.innerHTML }));"
-    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
-    assert got.returncode == 0, got.stderr
-    got = json.loads(got.stdout)
-    assert got["hidden"] is False and "Loading Stool B…" in got["html"], got
-    assert "data-drag" not in got["html"] and "Waiting" not in got["html"], got
-
-
-def test_a_switch_draws_the_tree_at_once():
+def test_a_switch_empties_the_hidden_tree_at_once():
     src = open(JS).read()
     body = src[src.index("function showLoading("):]
     body = body[:body.index("\n}\n")]
-    assert "TREE.saying = null;" in body and "renderTree();" in body and "$('tree').hidden = true;" not in body
+    assert "$('tree').hidden = true;" in body and "$('tree').innerHTML = '';" in body and "TREE.saying = null;" in body
 
 
 def test_a_move_that_fails_on_another_design_is_said_back_on_it():

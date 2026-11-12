@@ -199,6 +199,7 @@ def test_a_rebuild_drops_an_edge_and_a_point_too():
 
 _OPEN = """
 const showLoading = () => {}; const doneLoading = () => {}; const render = () => {}; const syncParts = async () => {}; const loadFailed = () => {};
+const sayMissed = () => {};
 const location = {}; const api = async () => ({ parts: [{ id: 'stool', version: 9 }] });
 """
 

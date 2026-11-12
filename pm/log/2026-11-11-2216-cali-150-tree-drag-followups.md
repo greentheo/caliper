@@ -44,3 +44,17 @@ survivor at first (`S.design = got`) now has its assert. `test_tree_moves` and `
 
 **Tests:** 7 more in `test_tree_moves.py`. `test_part_tree`'s copy of the TREE line now matches the page's. All 13
 mutants are caught (two survivors at first now have tests). The two tree files pass (100).
+
+**CI at 8eabdd1: 7 design-switch tests failed.**
+- **Five were stubs missing the rework's new collaborators.** `test_design_switch`'s and `test_pick_scope`'s stub pages
+  had no `sayMissed`, now called by `openDesign`, and no `TREE`, now used by `showLoading`. They get the stubs; no
+  expectation moved.
+- **One test pinned the old draw order:** `test_design_switch::test_the_new_design_s_name_goes_up_at_once…` asserts
+  the tree is hidden while a design loads. reviewer-2 since found the old code already hid it from the switch to the
+  load, so A's rows were never on screen, and the TypeError came from a synthetic drop on hidden rows.
+- So, as the foreman asked, only the harmless part of the rework is kept. `showLoading` hides the tree as before, and
+  now also empties its rows and clears the waiting line. The "Loading <name>…" tree is dropped, and the test's hidden
+  assertion stands with two more: no rows, no waiting line.
+- The `S.design` drag guards, the lost-move line and the returning waiting line stay.
+
+151 pass across the switch, pick, tree-move and part-tree files; 3 more mutants, all caught.
