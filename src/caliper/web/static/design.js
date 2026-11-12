@@ -186,7 +186,9 @@ const fixed = (v, d) => (v == null ? '—' : Number(v).toFixed(d));
 // ------------------------------------------------------------- the part tree (#94, the mockup Theo approved)
 // Every part and its pieces: a colour by material (the legend), an eye, click to select, double-click to rename.
 // What's hidden is this viewer's: kept in the browser, per design, and still in every check.
-const TREE = { slug: undefined, parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, last: null };
+const TREE = { slug: undefined, parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, last: null,
+  waiting: new Set(), missed: {} };   // the designs with a move still waiting, and a move that failed while away, by slug (#251)
+const WAITING = 'Waiting for the job on this design to finish…';
 const pieceId = (pid, key) => `${pid}/${key}`;
 function seen() {
   if (TREE.slug !== S.slug) {
@@ -195,6 +197,8 @@ function seen() {
     try { kept = JSON.parse(localStorage.getItem(`caliper-tree:${S.slug}`)) || {}; } catch (e) { /* none, or none allowed */ }
     TREE.parts = new Set(kept.parts || []); TREE.pieces = new Set(kept.pieces || []);
     TREE.open = kept.open !== false; TREE.oneBody = !!kept.oneBody; TREE.rename = null;
+    TREE.saying = TREE.waiting.has(S.slug) ? WAITING : null;   // another design's wait isn't this one's; its own still is (#206, #251)
+    TREE.drag = null;
   }
   return TREE;
 }
@@ -347,18 +351,34 @@ function clearDrop() {
   document.querySelectorAll('#tree .drop-before, #tree .drop-after, #tree .drop-into').forEach((r) => r.classList.remove('drop-before', 'drop-after', 'drop-into'));
 }
 async function moveInTree(drag, target, zone) {
+  if (!S.design) return;                           // a design is loading: nothing to move in (#251 review)
   const next = dropped(S.design, drag, target, zone);
   if (!next) return;
-  const slow = setTimeout(() => { TREE.saying = 'Waiting for the job on this design to finish…'; renderTree(); }, 600);   // the lock can be minutes
+  const slug = S.slug;                            // the design it's moved in: another may be open by the time it's done (#206)
+  const slow = setTimeout(() => {                  // the lock can be minutes
+    TREE.waiting.add(slug);                        // said again if you come back to it while it waits (#251 review)
+    if (S.slug !== slug) return;
+    TREE.saying = WAITING; renderTree();
+  }, 600);
+  let got, err;
   try {
-    S.design = await api('POST', `/api/designs/${S.slug}/tree`, next);
+    got = await api('POST', `/api/designs/${slug}/tree`, next);
+  } catch (e) { err = e; }
+  clearTimeout(slow);
+  TREE.waiting.delete(slug);
+  if (S.slug !== slug) {                           // saved there; nothing of it belongs on this one. A failure is said back there
+    if (err) TREE.missed[slug] = `Your move of the ${drag.replace(/_/g, ' ')} in ${slug} didn't save: ${plainly(err.message)}`;   // as the drive line says it
+    return;
+  }
+  if (err) showErr(plainly(err.message));
+  else {
+    S.design = got;
     const t = seen(), up = next.parent[drag];
     if (up && t.parts.has(up)) {                  // under a hidden part, it's hidden as that part is
       [drag, ...underPart(S.design, drag)].forEach((x) => t.parts.add(x));
       keepTree();
     }
-  } catch (e) { showErr(plainly(e.message)); }
-  clearTimeout(slow);
+  }
   TREE.saying = null;
   render();
 }
@@ -372,7 +392,7 @@ function showDrop(row, zone) {
 }
 function treeDragStart(e) {
   const row = e.target.closest && e.target.closest('[data-drag]');
-  if (!row || TREE.rename || onPhone()) { e.preventDefault(); return; }
+  if (!row || TREE.rename || onPhone() || !S.design) { e.preventDefault(); return; }   // nothing to move in while one loads (#251)
   TREE.drag = row.dataset.drag;
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', TREE.drag);
@@ -380,7 +400,7 @@ function treeDragStart(e) {
 function treeDragOver(e) {
   const row = e.target.closest('[data-drag]');
   clearDrop();
-  if (!row || !TREE.drag || !dropped(S.design, TREE.drag, row.dataset.drag, 'into')) return;
+  if (!row || !TREE.drag || !S.design || !dropped(S.design, TREE.drag, row.dataset.drag, 'into')) return;
   e.preventDefault();
   showDrop(row, dropZone(e, row));
 }
@@ -388,9 +408,16 @@ function treeDrop(e) {
   const row = e.target.closest('[data-drag]'), drag = TREE.drag;
   clearDrop();
   TREE.drag = null;
-  if (!row || !drag) return;
+  if (!row || !drag || !S.design) return;
   e.preventDefault();
   moveInTree(drag, row.dataset.drag, dropZone(e, row));
+}
+// a move that failed while another design was open, said once you're back on its design (#251 review)
+function sayMissed() {
+  const said = TREE.missed[S.slug];
+  if (!said) return;
+  delete TREE.missed[S.slug];
+  showErr(said);
 }
 function treeDragLeave(e) {
   if (!e.relatedTarget || !$('tree').contains(e.relatedTarget)) clearDrop();
@@ -957,6 +984,7 @@ async function openDesign(slug) {
   S.design = got;
   doneLoading();
   render();
+  sayMissed();
   await syncParts(S.design, first);
 }
 // while a design loads the page isn't the old one: the new name, nothing of the old, and the chat off, so a message can't
@@ -974,7 +1002,9 @@ function showLoading(slug) {
   clearStation();
   $('inspector').innerHTML = `<h2>${esc(pickedName(slug))}</h2><div class="muted small"><span class="spin"></span>loading…</div>`;
   $('thread').innerHTML = '';
-  $('tree').hidden = true;
+  $('tree').hidden = true;                         // hidden till the new design lands, and nothing of the old left in it (#251)
+  $('tree').innerHTML = '';
+  TREE.saying = null;
   $('scopeRow').hidden = true;
   $('viewHint').textContent = 'loading…';
   $('msg').disabled = true; $('send').disabled = true;
