@@ -33,3 +33,10 @@ This branch stacks on #240 and has #239 merged in, since it uses their measures.
    - `said` drops its unused `inches`.
 
 15 tests in the file; all 9 of the rework's mutants are caught. Theo's v1 isn't pinned as itself, since that would put his own part scripts in the repo; the fixture is his plan's shape (no `fits_in`, the stretcher flush at each mouth).
+
+**The last fixes (the foreman's).**
+1. **A stated position is never measured as the part's size.** Only a skeleton size (`kind_of` == size) gets the extent check. A position such as `top_height` ("sits 16 in above the floor") is a note: "you said top height is 406.4 mm, where it sits; the top names it, but no check measures it". Never "make the top 406.4 mm tall".
+2. **A planned `fits_in` whose part stops at its pocket's mouth is measured there,** the same as a derived one. Pinned: v1 with #243's mates, both pockets measured with their play, none left "not measured".
+3. **"A mirror finish" is no mirror,** and gives no note.
+
+18 tests; the three mutants are caught.

@@ -209,3 +209,43 @@ def test_a_mirror_said_of_nothing_is_a_note(v1):
     plan = {**PLAN, "parts": [PLAN["parts"][0], {"id": "side_right", "what": "the right side, mirrored"}, PLAN["parts"][2]]}
     P.save(v1, P.validate(plan), status="built")
     assert "the plan says side_right is a mirror, but not of which part: it isn't compared" in review.findings(v1)["notes"]
+
+
+# --- #247, the last fixes ------------------------------------------------------------------------------------------------
+def test_a_stated_position_is_never_measured_as_a_size(tmp_path):
+    """Item 1: top_height "sits 16 in above the floor" is where the top is, not how tall: no "make the top 406.4 mm tall"."""
+    s = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    P.save(s, P.validate({"parts": [{"id": "top", "what": "the top"}],
+                          "skeleton": [{"name": "top_height", "value": 16, "unit": "in", "source": "stated",
+                                        "why": "the top of the plywood sits 16 in above the floor"}]}), status="built")
+    s.write_part("top", 'import cadquery as cq\n\nPARAMS = {"top_height": 406.4}\n\n\ndef build(params):\n'
+                        '    return cq.Workplane("XY").box(400, 300, 19).translate((0, 0, 396.9))\n', intent="the top")
+    rec = review.findings(s)
+    assert not [f for f in rec["findings"] if f["kind"] == "stated"]
+    assert any("top height is 406.4 mm, where it sits; the top names it, but no check measures it" in n for n in rec["notes"])
+
+
+@pytest.fixture
+def v1_planned(tmp_path):
+    """step-stool-4's v1 with #243's fits_in mates, the stretcher flush at each mouth."""
+    s = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    P.save(s, P.validate(PLAN), status="built")
+    s.write_part("side_left", SIDE.format(wall=15, x0=0), intent="the left side")
+    s.write_part("side_right", SIDE.format(wall=12, x0=388), intent="the right side")
+    s.write_part("stretcher", FLUSH, intent="the stretcher")
+    return s
+
+
+def test_a_planned_fit_short_of_its_pocket_is_measured_at_the_mouth(v1_planned):
+    """Item 2: the planned fits_in read "doesn't go into it" and went unmeasured; it's measured at the mouth now."""
+    rec = review.findings(v1_planned)
+    fits = [f for f in rec["findings"] if f.get("id", "").endswith("fits_in")]
+    assert {f["parts"][1] for f in fits} == {"side_left", "side_right"}
+    assert all("mm of play in" in f["said"] and "measured at the pocket's mouth" in f["said"] for f in fits)
+    assert not [u for u in rec["unmeasured"] if "fits" in u]
+
+
+def test_a_mirror_finish_is_no_mirror(v1):
+    plan = {**PLAN, "parts": [PLAN["parts"][0], {"id": "side_right", "what": "the right side, with a mirror finish"}, PLAN["parts"][2]]}
+    P.save(v1, P.validate(plan), status="built")
+    assert review.mirrored_pairs(v1) == ([], [])

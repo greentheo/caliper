@@ -24,7 +24,8 @@ from typing import Optional
 from .design import DesignStore
 
 #: "a mirror of side_left", "mirrors side_left", "a mirror image of the left side": a pair the plan calls mirrored
-_MIRROR_WORDS = re.compile(r"\bmirror(?:s|ed)?\b(?:(?:\s+image)?(?:\s+of)?\s+(?:the\s+)?([a-z_ ]+))?", re.I)
+_MIRROR_WORDS = re.compile(r"\bmirror(?:s|ed)?\b(?!\s+(?:finish|finished|polish|polished|shine|shiny|surface|bright|smooth|glass)\b)"
+                           r"(?:(?:\s+image)?(?:\s+of)?\s+(?:the\s+)?([a-z_ ]+))?", re.I)
 _EXCEPTION = re.compile(r"^\s*\w+(?:Error|Exception):\s*")
 
 
@@ -67,6 +68,13 @@ def _rule_findings(store: DesignStore, report) -> dict:
     whys = {r.get("id"): r.get("why") for r in (store.design.plan or {}).get("rules") or []}
     for r in report.results:
         mate = mates.get(r.id)
+        if r.status == "error" and mate is not None and mate.kind == "fits_in" and "doesn't go into it" in (r.detail or ""):
+            got = _mouth_fit(store, mate)              # short of its pocket: measured at the mouth, as a derived one (#247)
+            if got is not None:
+                out["measured"] += 1
+                if got:
+                    out["findings"].append(got)
+                continue
         if r.status == "error":
             what = (f"whether the {_name(mate.between[0])} fits {mate.between[1]}'s pocket" if mate is not None and mate.kind == "fits_in"
                     else f"the plan's check {r.id}")
@@ -100,6 +108,30 @@ def _rule_findings(store: DesignStore, report) -> dict:
             fix = "Change the parts it names so it passes, or the plan if the check is wrong."
         out["findings"].append({"kind": "rule", "id": r.id, "parts": parts, "said": said, "fix": fix, "measured": True})
     return out
+
+
+def _mouth_fit(store: DesignStore, mate):
+    """A planned fit whose part stops at its pocket's mouth, measured there (:func:`_slid_in`): the finding, ``{}`` where it
+    fits, or None where it can't be measured that way either."""
+    from . import measure
+
+    inner, host = mate.between
+    c = measure.POCKET_CLEARANCE_MM if mate.value is None else abs(mate.value)
+    try:
+        got, short = _slid_in(store.part_geometry(inner), store.part_geometry(host))
+    except Exception:  # noqa: BLE001 — left as the error it was
+        return None
+    sides = [g for g in (got.get("gaps") or {}).values() if g is not None]
+    if not got["in"] or not sides:
+        return None
+    off = max(abs(g - c) if g >= 0 else measure.POCKET_TOL_MM + c - g for g in sides)
+    if off <= measure.POCKET_TOL_MM:
+        return {}
+    where = f"it stops {short:.0f} mm short of going in" if short >= 0.5 else "it ends flush with it, not in it"
+    said = measure.pocket_said(inner, host, got, c).replace(
+        f"the {_name(inner)} ", f"the {_name(inner)}, measured at the pocket's mouth ({where}), ", 1)
+    return {"kind": "rule", "id": mate.id, "parts": [inner, host], "said": said, "measured": True,
+            "fix": _fit_fix(said, inner, host, c)}
 
 
 def _pairs(store: DesignStore) -> list[tuple[str, str]]:
@@ -307,7 +339,12 @@ def _stated_findings(store: DesignStore) -> dict:
             continue
         subject, size = _subject(s["name"])
         along, want = _ALONG.get(size), P.mm(sv)
-        if subject in named and along and want and _built(store, subject):
+        whose = [pid for pid, keys in named.items() if s["name"] in keys]
+        names_it = f"the {_name(whose[0])} names it, but " if whose else ""
+        if P.kind_of(sv) == "position":           # where it sits, not how big it is: never measured as its extent (#247)
+            out["notes"].append(f"{said}, where it sits; {names_it}no check measures it")
+            continue
+        if subject in named and along and want and P.kind_of(sv) == "size" and _built(store, subject):
             try:
                 got = float(along(store.part_geometry(subject).require_mesh().extents))
             except Exception as e:  # noqa: BLE001
@@ -320,8 +357,7 @@ def _stated_findings(store: DesignStore) -> dict:
                                         "fix": f"Make the {_name(subject)} {P.number(sv, inches)} {'tall' if size == 'height' else 'long'}, "
                                                f"or say what it should be."})
             continue
-        whose = [pid for pid, keys in named.items() if s["name"] in keys]
-        out["notes"].append(f"{said}; {'the ' + _name(whose[0]) + ' names it, but ' if whose else ''}no check measures it")
+        out["notes"].append(f"{said}; {names_it}no check measures it")
     return out
 
 
