@@ -39,6 +39,26 @@ def test_a_weight_under_goal_on_the_solid_s_upper_bound(mixed, monkeypatch, limi
     assert (check["status"] == "pass") is not guessed
 
 
+def test_a_weight_limit_under_the_wood_alone_is_a_sure_fail(mixed, monkeypatch):
+    """The upper bound is the printed share's only: the wood weighs what it weighs. A limit under the wood alone is a ✗, not
+    an estimate (#70, the book's 0.2 lb goal on the mixed stool read "estimate")."""
+    from caliper import answers, design_api, making, printing, scorecard
+
+    monkeypatch.setattr(printing, "estimate", lambda *a, **k: dict(FAILED))
+    state = design_api.design_state(mixed)
+    now = answers.measured(mixed, state)
+    wood = now["weight.total_lb"] - now["filament.upper_lb"]
+    assert 0.3 < wood < now["weight.total_lb"] - 0.3, now                # some of each
+    _goal(mixed, "weight.total_lb", round(wood - 0.2, 2))
+    state = design_api.design_state(mixed)
+    (line,) = [ln for ln in answers.held_to(state, answers.measured(mixed, state)) if "light enough" in ln["text"].lower()]
+    assert line["status"] == "bad" and "a guess" not in line["text"], line
+    (check,) = [c for c in scorecard.compute(mixed)["checks"] if c.get("id") == "g"]
+    assert check["status"] == "fail", check
+    assert making.settled_by_bound("<=", False, False) and not making.settled_by_bound("<=", False, True)
+    assert making.settled_by_bound(">=", True, True) and not making.settled_by_bound(">=", True, False)
+
+
 def test_a_part_s_weight_says_where_its_filament_came_from(mixed, monkeypatch):
     """Note 3: weight.table read trust model, source construction, while its value was the rough figure."""
     from caliper import printing, scorecard
@@ -130,6 +150,16 @@ def test_a_shove_in_a_sheet_s_plane_says_it_s_taken_as_a_squeeze():
     assert "the safe side" in said and "running down it (" not in said
     c["buckling"][0] = {**pressed, "safety": 0.5}
     assert answers.fail_hedge(run, c, {"kind": "fails"}, False).startswith(" The wall folds first: it's too slender for the load running down it")
+    # the page's "(by …)" says it too
+    from .test_carve_click import _page, _run
+
+    out = _run(_page(["foldedBy"], extra="""
+const esc = (s) => String(s);
+out = [foldedBy({ buckling: [{ piece: 'top', done: true, safety: 20.9, down: false, edges_held: 0 }] }),
+       foldedBy({ buckling: [{ piece: 'wall', done: true, safety: 2.6, down: true, edges_held: 0 }] })];
+"""))
+    assert "a push that doesn't run down it taken as squeezing it end to end, the safe side" in out[0], out
+    assert out[1].endswith("free along its sides, its top free to sway, its whole load on it"), out
 
 
 # --- #209's notes ----------------------------------------------------------------------------------------------------------
@@ -391,3 +421,25 @@ def test_a_carved_part_releases_its_carved_print_and_a_source_that_rebuilds(tmp_
     assert os.path.exists(os.path.join(root, "source", "carved", "carved-x-01.stl"))
     assert _carved(src, open(src).read()) is not None                     # it builds from the package alone
     assert "printer/stool/" in open(os.path.join(root, "index.html")).read()
+
+
+# --- item 20: a 1024 px window --------------------------------------------------------------------------------------------
+def test_fit_stands_back_for_a_view_narrower_than_it_is_tall():
+    """#70 item 20: fit cropped the stool in a narrow view. Across, the half-angle's tangent is the height's times the aspect."""
+    from .test_carve_click import _page, _run
+
+    out = _run(_page(["narrowBy"], extra="out = [narrowBy(1.6), narrowBy(1), narrowBy(0.5), narrowBy(375 / 700)];"))
+    assert out[:3] == [1, 1, 2] and out[3] == pytest.approx(700 / 375)
+
+
+def test_below_1280_px_the_cards_go_under_the_view():
+    """#70 item 20: at 1024 px the view was squeezed to about 220 px between the chat and the cards (checked in a browser at
+    1024, 800 and 1440 px: the view is 704 px wide at 1024, and the three columns are kept at 1440)."""
+    import pathlib
+
+    import caliper
+
+    css = (pathlib.Path(caliper.__file__).parent / "web" / "static" / "design.css").read_text()
+    rule = css[css.index("@media (min-width: 701px) and (max-width: 1279px)"):]
+    rule = rule[:rule.index("\n}\n")]
+    assert ".inspector { grid-column: 2; grid-row: 2;" in rule and ".chat { grid-column: 1; grid-row: 1 / span 2; }" in rule

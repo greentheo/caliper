@@ -859,6 +859,7 @@ def measured(store: DesignStore, state: dict) -> dict:
             out["filament.rough"] = guess
             if making.filament_bound(reps):         # the solid's share: an upper bound (#237 review)
                 out["filament.upper"] = True
+                out["filament.upper_lb"] = making.solid_share_lb(reps)   # what it may be over by: the floor's slack
         if slicing_now:
             out["filament.pending"] = slicing_now
         if unprintable:                            # first: it stays this way however long the slicer takes
@@ -989,7 +990,9 @@ def held_to(state: dict, now: dict) -> list[dict]:
             from . import making
 
             if guess and c["metric"] in now and now.get("filament.upper"):
-                if making.settled_by_bound(c.get("op", ">="), met):
+                low = (verdicts.compare(v - (now.get("filament.upper_lb") or 0.0), c.get("op", ">="), c["limit"])
+                       if c["metric"].startswith("weight.") else None)     # with the printed share at nothing
+                if making.settled_by_bound(c.get("op", ">="), met, low):
                     guess = None                      # an upper bound that settles it: a pass under the limit (#237 review)
                 else:
                     met = True                        # over the limit on an upper bound: may be under, an estimate, not a ✗

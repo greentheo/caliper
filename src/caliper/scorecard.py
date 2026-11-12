@@ -265,6 +265,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     total_lb = None if b["mass_lb"] is None else round(b["mass_lb"] + more_lb, 1)
     filament_guess = making.filament_said(reports.values())[0]
     filament_upper = making.filament_bound(reports.values())
+    upper_lb = making.solid_share_lb(reports.values()) if filament_upper else 0.0     # what that bound may be over by
     _metric(metrics, "weight.total_lb", total_lb, "lb", f"everything, with {payload:g} lb aboard",
             "rough" if filament_guess else "model", filament_guess or "balance", **unknown)
     _metric(metrics, "hitch.tongue_lb", b["mass_lb"], "lb", "on the hitch's tongue, standing still", "model", "balance",
@@ -542,8 +543,9 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             met = True
         else:
             met = None
+        low = verdicts.compare(v - upper_lb, op, lim) if number and c["metric"].startswith("weight.") else None
         bounded = (filament_upper and number and c["metric"].startswith(("weight.", "cost."))
-                   and not making.settled_by_bound(op, met))   # an upper bound that doesn't settle it: an estimate (#237)
+                   and not making.settled_by_bound(op, met, low))   # an upper bound that doesn't settle it: an estimate (#237)
         if bounded:
             met = True
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-110)

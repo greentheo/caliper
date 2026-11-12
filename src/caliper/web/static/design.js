@@ -453,12 +453,19 @@ function fitGrid(box) {
   scene.add(grid);
 }
 
+// how much further back a view narrower than it is tall stands, so the part fits across it too (#70 item 20: at a 1024 px
+// window, fit cropped the stool). Across, the half-angle's tangent is the height's times the aspect, so the distance
+// grows by 1/aspect; 1 for a view as wide as it's tall or wider, as before
+function narrowBy(aspect) {
+  return aspect >= 1 ? 1 : 1 / aspect;
+}
+
 function frame() {
   const box = contentBox();
   if (box.isEmpty()) return;
   const c = box.getCenter(new THREE.Vector3());
   const r = box.getSize(new THREE.Vector3()).length() / 2 || 100;
-  const d = r * 2.3;
+  const d = r * 2.3 * narrowBy(camera.aspect);
   controls.target.copy(c);
   camera.position.set(c.x - d * 0.75, c.y - d * 0.95, c.z + d * 0.55);   // from behind-left, above
   camera.near = r / 200; camera.far = r * 200; camera.updateProjectionMatrix();

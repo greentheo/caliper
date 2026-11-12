@@ -103,9 +103,18 @@ def filament_bound(reports) -> bool:
     return bool(off) and all(f == FROM_SOLID for f in off)
 
 
-def settled_by_bound(op: str, met: Optional[bool]) -> bool:
-    """Whether an upper bound settles a goal: under it and met, or at least it and not met."""
-    return met is not None and ((op in ("<=", "<") and met) or (op in (">=", ">") and not met))
+def settled_by_bound(op: str, met: Optional[bool], low_met: Optional[bool] = None) -> bool:
+    """Whether an upper bound settles a goal: under it and met, or at least it and not met; or the lower bound
+    (``low_met``, the goal judged with the solid's share at nothing) comes out the same, so a 0.2 lb limit under the
+    plywood's own pound is a sure ✗ (#70: the book's ✗ read as an estimate)."""
+    return met is not None and ((op in ("<=", "<") and met) or (op in (">=", ">") and not met)
+                                or (low_met is not None and low_met == met))
+
+
+def solid_share_lb(reports) -> float:
+    """The weight in pounds of the printed groups whose figure is the solid's share: what an upper bound may be over by."""
+    groups = [g for r in reports if r for g in ((r.get("bom") or {}).get("printed") or [])]
+    return sum(g.get("filament_g") or 0.0 for g in groups if g.get("filament_from", FROM_SOLID) == FROM_SOLID) / 1000 * C.M.LB_KG
 
 
 def no_print_total(mk: dict) -> str:

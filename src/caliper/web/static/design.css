@@ -333,6 +333,16 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
 .chip.pick { background: #4a3510; color: #ffe2a8; border-color: #6b5320; }
 .pick-x { border: 0; background: transparent; color: var(--muted); font-size: 16px; padding: 0 4px; }
 
+/* --- a small window (#70 item 20): at 1024 px the view was squeezed to about 220 px between the chat and the cards.
+   The chat keeps its column, and the cards drop under the view, which takes the width. ----------------------------- */
+@media (min-width: 701px) and (max-width: 1279px) {
+  .session { grid-template-columns: 320px minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); }
+  .chat { grid-column: 1; grid-row: 1 / span 2; }
+  .view { grid-column: 2; grid-row: 1; }
+  .inspector { grid-column: 2; grid-row: 2; border-left: 0; border-top: 1px solid var(--line); }
+  .studies-page { left: 320px; }
+}
+
 /* --- a phone: one pane at a time, and the part tree as a drawer (#164) ------- */
 .pane-tabs { display: none; }
 @media (max-width: 700px) {
