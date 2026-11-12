@@ -1037,9 +1037,11 @@ def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = 
 def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, client=None,
                 max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
                 use_llm: bool = True, drafter=None, promote_feedback: bool = True,
-                interfaces=None, repair_only=None, pick: Optional[dict] = None, on: Optional[str] = None) -> TurnResult:
+                interfaces=None, repair_only=None, pick: Optional[dict] = None, on: Optional[str] = None,
+                asked: str = "") -> TurnResult:
     """Author a brand-new part into the design, then measure the design with it in place. ``pick``, an edge picked on the
-    part ``on``: the new part must touch it, measured each round (CALI-171, #266)."""
+    part ``on``: the new part must touch it, measured each round (CALI-171, #266); "and the opposite edge" in what was
+    ``asked`` makes a mirror of it on the twin edge."""
     from . import authoring
 
     events = events if events is not None else []
@@ -1047,7 +1049,9 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     seat = _picked_edge(store, on, pick)
     if seat is not None:                         # the pick is a requirement, told and measured (#266)
         interfaces = _also(interfaces, lambda g, script: [_on_the_pick(g, seat)])
-    spec = _working_spec(store, part_id, intent + (_seat_words(seat) if seat else ""))
+    both = seat is not None and bool(_BOTH_EDGES.search(f"{asked} {intent}"))
+    spec = _working_spec(store, part_id, intent + (_seat_words(seat) if seat else "")
+                         + ("\n\nMake it for the picked edge only: the opposite one is made as its mirror." if both else ""))
 
     _emit(events, on_event, "authoring", f"authoring {part_id}…", part=part_id)
 
@@ -1091,10 +1095,27 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
         reply += "\n\n" + offer
     # where it sits, before anything else is said: never a ✓ over a measured miss (#266, rule 6)
     miss = _seat_miss(res.geometry, seat, part_id) if seat is not None else _drafted_miss(proposal, part_id)
+    twin, other = None, None
+    if both and miss is None:                    # "and the opposite edge": its mirror, on the twin edge (#266)
+        twin = _opposite_edge(store, seat)
+        if twin is None:
+            miss = (f"Built {part_id} on the edge you picked, but I found no edge on {seat['part']} opposite it, so there's "
+                    f"one strip.")
+        else:
+            from . import mirror
+
+            other = f"{part_id}_opposite"
+            mirror.make(store, other, part_id, twin["plane"], twin["at"], feedback=f"the opposite edge's {part_id}")
+            gap = _seat_gap(store.part_geometry(other), twin)
+            if gap > SEAT_MM:
+                miss = f"Built {part_id} and its mirror {other}, but {other} sits {round(gap, 2):g} mm off the opposite edge."
+            after, part_errors = _measure_design(store)
     if seat is not None and miss is None:
-        reply = reply.replace("\n", f"\nIt sits on the edge you picked on {seat['part']}.\n", 1)
+        reply = reply.replace("\n", f"\nIt sits on the edge you picked on {seat['part']}"
+                              + (f", and its mirror {other} sits on the opposite edge" if other else "") + ".\n", 1)
     if miss is not None:
-        reply = f"\u2717 {miss}\n\n" + reply.replace("\u2713 ", "", 1).replace("Every check on this part passes.\n", "")
+        mark = "!" if " found no edge " in miss else "\u2717"      # a strip that's right, and half of what was asked
+        reply = f"{mark} {miss}\n\n" + reply.replace("\u2713 ", "", 1).replace("Every check on this part passes.\n", "")
         return TurnResult(action="author", ok=False, part=part_id, version=version,
                           part_report=res.report, report=after, broke=broke, fixed=fixed,
                           part_errors=part_errors, proposal=proposal, events=events, reply=reply)
@@ -1159,6 +1180,38 @@ def _on_the_pick(geometry, seat: dict):
                            detail="" if ok else (f"it sits {round(gap, 2):g} mm off the edge picked on {seat['part']}, the line "
                                                  f"from {_pt(seat['points'][0])} to {_pt(seat['points'][-1])}: move it onto "
                                                  f"that edge"))
+
+
+#: "this edge and the opposite edge", "its mirror on the other side", "both edges" (#266).
+_BOTH_EDGES = re.compile(r"\b(?:the |its )?(?:opposite|other) (?:edge|side|corner)\b|\bits mirror\b|\bboth (?:edges|sides|corners)\b|"
+                         r"\bmirror(?:ed)? (?:it|one|strip)\b", re.I)
+
+
+def _opposite_edge(store: DesignStore, seat: dict) -> Optional[dict]:
+    """The edge opposite the picked one on its part: the picked edge flipped across the part's middle, on the axis it sits
+    furthest out on, where that lands on an edge of the part (within ``SEAT_MM``). ``{"part", "points", "said", "plane",
+    "at"}``, or None."""
+    import numpy as np
+
+    feats = _features_of(store, seat["part"])
+    if not feats:
+        return None
+    lo, hi = store.part_geometry(seat["part"]).require_mesh().bounds
+    pts = np.asarray(seat["points"], float)
+    mid, half = (lo + hi) / 2.0, np.maximum((hi - lo) / 2.0, 1e-9)
+    for k in sorted(range(3), key=lambda i: -abs(pts.mean(axis=0)[i] - mid[i]) / half[i]):
+        flipped = pts.copy()
+        flipped[:, k] = 2 * mid[k] - flipped[:, k]
+        if np.allclose(flipped, pts, atol=SEAT_MM) or np.allclose(flipped, pts[::-1], atol=SEAT_MM):
+            continue                                       # in the middle on this axis: its own mirror
+        for e in feats.get("edges") or []:
+            q = np.asarray(e.get("points") or [], float)
+            if q.shape == flipped.shape and (np.allclose(q, flipped, atol=SEAT_MM) or np.allclose(q[::-1], flipped, atol=SEAT_MM)):
+                at = [0.0, 0.0, 0.0]
+                at[k] = float(mid[k])
+                return {"part": seat["part"], "points": flipped.tolist(), "said": "the opposite edge",
+                        "plane": {0: "YZ", 1: "XZ", 2: "XY"}[k], "at": tuple(at)}
+    return None
 
 
 def _also(interfaces, more):
@@ -2184,7 +2237,8 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         result = author_part(store, intent.part, intent.intent or message, author=author,
                              client=client, max_rounds=max_rounds, events=events, on_event=on_event,
                              use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback,
-                             pick=pick, on=(pick or {}).get("part") or scope)   # the pick is a requirement (#266)
+                             pick=pick, on=(pick or {}).get("part") or scope,   # the pick is a requirement (#266)
+                             asked=message)
     else:
         result = answer(store, message, scope=scope or intent.part, note=intent.note, events=events,
                         use_llm=use_llm, client=client)

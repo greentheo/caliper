@@ -146,3 +146,91 @@ def test_a_pick_from_an_older_version_isn_t_taken_as_where_it_goes(stool):
     res = chat.author_part(s, "fillet_strip", "a 5 mm printed fillet strip on this edge", author=author, use_llm=False,
                            promote_feedback=False, pick=pick, on="stool")
     assert "the edge picked on stool" not in seen[0][0] and "sits on the edge you picked" not in res.reply, res.reply
+
+
+# --- "this edge and the opposite edge": a mirrored second strip ------------------------------------------------------------
+#: Two sides under a step: inside corners along y at x 19.05 and x 280.95, both at z 300.
+TWO_SIDES = STOOL.replace('''    side = cq.Workplane().box(t, d, h, centered=False)
+    step = cq.Workplane().box(w, d, t, centered=False).translate((0, 0, h))
+    return side.union(step)''', '''    side = lambda x0: cq.Workplane().box(t, d, h, centered=False).translate((x0, 0, 0))
+    step = cq.Workplane().box(w, d, t, centered=False).translate((0, 0, h))
+    return side(0).union(side(w - t)).union(step)''')
+assert TWO_SIDES != STOOL
+
+
+@pytest.fixture
+def two_sides(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    s = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    s.write_part("stool", TWO_SIDES, intent="two sides and a step")
+    feats = features.for_part(s, "stool")
+    edge = next(e for e in feats["edges"] if e.get("corner") == "inside" and abs(e["length"] - 200.0) < 1e-6
+                and abs(e["centre"][0] - 19.05) < 1e-6)
+    return s, {"part": "stool", "kind": "edge", "id": edge["id"], "said": "the inside corner", "version": feats["version"]}
+
+
+ASKED = "a 5 mm printed fillet strip I can glue onto this edge and the opposite edge"
+
+
+def test_this_edge_and_the_opposite_one_is_a_strip_and_its_mirror_each_seated(two_sides):
+    from caliper import mirror
+
+    s, pick = two_sides
+    author, seen = _author(0.0)
+    res = chat.author_part(s, "fillet_strip", ASKED, author=author, use_llm=False, promote_feedback=False, pick=pick, on="stool",
+                           asked=ASKED)
+    assert len(seen) == 1 and "the opposite one is made as its mirror" in seen[0][0], seen[0][0]   # one strip designed
+    assert mirror.source_of(s, "fillet_strip_opposite") == "fillet_strip"
+    other = s.part_geometry("fillet_strip_opposite").require_mesh().bounds
+    assert other[0][0] == pytest.approx(300.0 - 19.05 - 5.0, abs=1e-6) and other[1][0] == pytest.approx(300.0 - 19.05, abs=1e-6)
+    assert res.ok and "It sits on the edge you picked on stool, and its mirror fillet_strip_opposite sits on the opposite " \
+        "edge." in res.reply, res.reply
+
+
+def test_one_edge_asked_is_one_strip(two_sides):
+    s, pick = two_sides
+    author, seen = _author(0.0)
+    chat.author_part(s, "fillet_strip", "a 5 mm printed fillet strip on this edge", author=author, use_llm=False,
+                     promote_feedback=False, pick=pick, on="stool", asked="a 5 mm printed fillet strip on this edge")
+    assert s.design.part("fillet_strip_opposite") is None and "opposite" not in seen[0][0]
+
+
+def test_an_opposite_edge_that_isn_t_there_is_said_first(stool):
+    """The L has one side: no edge mirrors the picked one, so there's one strip, and the reply leads with why."""
+    s, pick = stool
+    author, _ = _author(0.0)
+    res = chat.author_part(s, "fillet_strip", ASKED, author=author, use_llm=False, promote_feedback=False, pick=pick, on="stool",
+                           asked=ASKED)
+    assert not res.ok and s.design.part("fillet_strip_opposite") is None
+    assert res.reply.startswith("! Built fillet_strip on the edge you picked, but I found no edge on stool opposite it, so "
+                                "there's one strip."), res.reply
+
+
+def test_a_turn_passes_the_person_s_own_words(stool, monkeypatch):
+    """The classifier's summary of a new part can drop "and the opposite edge": what was asked goes along too."""
+    s, pick = stool
+    got = {}
+    monkeypatch.setattr(chat, "author_part", lambda store, pid, intent, **kw: got.update(kw) or chat.TurnResult(
+        action="author", ok=True, part=pid, reply="built"))
+    chat.turn(s, ASKED, scope="stool", pick=pick, use_llm=False,
+              classifier=lambda *a, **k: chat.Intent(action="author", part="fillet_strip", intent="a fillet strip",
+                                                       source="injected"))
+    assert got["asked"] == ASKED, got
+
+
+def test_the_person_s_words_decide_it_when_the_summary_drops_them(two_sides):
+    s, pick = two_sides
+    chat.author_part(s, "fillet_strip", "a 5 mm printed fillet strip", author=_author(0.0)[0], use_llm=False,
+                     promote_feedback=False, pick=pick, on="stool", asked=ASKED)
+    assert s.design.part("fillet_strip_opposite") is not None
+
+
+def test_a_mirror_measured_off_the_opposite_edge_leads_the_reply(two_sides, monkeypatch):
+    """The mirror is measured on its edge as the first is on the pick, not assumed to land: a gap there is said first."""
+    s, pick = two_sides
+    real = chat._seat_gap
+    monkeypatch.setattr(chat, "_seat_gap", lambda g, seat: 3.0 if seat["said"] == "the opposite edge" else real(g, seat))
+    res = chat.author_part(s, "fillet_strip", ASKED, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
+                           on="stool", asked=ASKED)
+    assert not res.ok and res.reply.startswith("✗ Built fillet_strip and its mirror fillet_strip_opposite, but "
+                                               "fillet_strip_opposite sits 3 mm off the opposite edge."), res.reply
