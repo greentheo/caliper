@@ -68,6 +68,20 @@ def test_the_floor_decides_the_button_only_and_a_deeper_step_over_it_is_still_na
     assert "there to choose" not in use_step.choose(under, 2.0, "saved_lb", _lb, least=0.25)["said"]
 
 
+def test_the_panel_says_too_little_only_of_a_step_under_the_floor():
+    """#252 re-check: keyed on offers === false, an unseen or unknown step read "Too little to use"."""
+    from .test_carve_click import _page, _run
+
+    js = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    lead = js[js.index("const lightenLead = (run) =>"):]
+    lead = lead[:lead.index("\n")]
+    out = _run(_page([], extra=lead + """
+out = [lightenLead({ offer: { kind: 'small', offers: false } }), lightenLead({ offer: { kind: 'unseen', offers: false } }),
+       lightenLead({ offer: { kind: 'unknown', offers: false } }), lightenLead({ offer: { kind: 'room', offers: true } }), lightenLead({})];
+"""))
+    assert out == ["Too little to use", "The step to use", "The step to use", "The step to use", "The step to use"], out
+
+
 def test_the_panel_never_calls_a_step_under_the_floor_best():
     js = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     assert "'Its best step'" not in js and "'Too little to use'" in js
@@ -158,4 +172,4 @@ def test_studies_says_why_there_s_nothing_to_use():
 
 def test_the_panel_doesn_t_call_a_step_with_no_button_the_step_to_use():
     js = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
-    assert "${run.offer && run.offer.offers === false ? 'Too little to use' : 'The step to use'}: <b>${lbs(best.saved_lb)} lighter</b>" in js
+    assert "${lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>" in js
