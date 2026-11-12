@@ -395,6 +395,9 @@ class DesignStore:
             if got is not None:
                 raise ValueError(f"that would be undone the next time {got['source']} changes: "
                                  + mirror.said(part_id, got["source"]))
+            from . import follows
+
+            follows.refuse_cycle(self, part_id, script)    # A follows B follows A: refused in words (#266)
 
         entry = self.design.part(part_id)
         version = (entry.version if entry else 0) + 1
@@ -448,6 +451,9 @@ class DesignStore:
             from . import mirror
 
             mirror.rebuild(self, part_id)
+        from . import follows                     # the parts that read its numbers, written again from them (#266)
+
+        follows.update(self, part_id)
         if any(s.get("source") == "measured" and s.get("of") == part_id for s in self.design.skeleton or []):
             from . import skeleton                # a size measured off this part, measured again (#243 review)
 

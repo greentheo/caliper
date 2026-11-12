@@ -893,6 +893,11 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     reply = _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb="revised",
                      asked=message, prior=prior, new=script,
                      volumes=(was, _volume(store, part_id)))
+    from . import follows
+
+    followed = follows.said(store)                  # the parts that read its numbers moved with them, said (#266)
+    if followed:
+        reply += "\n\n" + followed[:1].upper() + followed[1:] + "."
     if uncarved:
         reply += "\n\n" + carve.DROPPED
     on_pick = None
@@ -1050,7 +1055,13 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     if seat is not None:                         # the pick is a requirement, told and measured (#266)
         interfaces = _also(interfaces, lambda g, script: _on_the_pick(g, seat, store))
     both = seat is not None and bool(_BOTH_EDGES.search(f"{asked} {intent}"))
-    spec = _working_spec(store, part_id, intent + (_seat_words(seat) if seat else "")
+    from . import follows
+
+    if on and on != part_id and store.design.part(on):   # what it's added on: its numbers, read live, never copied (#266)
+        interfaces = _also(interfaces, lambda g, script: [follows.check(script, follows.sources_of(store, script, on),
+                                                                        part_id, on)])
+    spec = _working_spec(store, part_id, intent + (follows.told(store, on) if on and on != part_id else "")
+                         + (_seat_words(seat) if seat else "")
                          + ("\n\nMake it for the picked edge only: the opposite one is made as its mirror." if both else ""))
 
     _emit(events, on_event, "authoring", f"authoring {part_id}…", part=part_id)

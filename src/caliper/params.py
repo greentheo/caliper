@@ -247,6 +247,11 @@ def set_values(store: DesignStore, pid: str, changes: list[dict]) -> dict:
     version = store.write_part(pid, new, action="params", feedback=said,
                                extra={"params": {n: [entries[n]["value"], round(mm, 3)] for n, mm in values.items()}},
                                built=(new, {}, built.geometry))      # its trial build is this version's (#97)
+    from . import follows
+
+    followed = follows.said(store)                   # the parts that read these numbers moved with them (#266)
+    if followed:
+        said = f"{said}; {followed}"
     after = _shape(store.part_geometry(pid))
     report, errors = store.evaluate(tolerant=True)
     moved = before is None or after != before
