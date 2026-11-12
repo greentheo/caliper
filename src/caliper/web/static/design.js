@@ -3157,19 +3157,30 @@ function loadCase(p, run, c, i) {
       : `<div class="small" style="margin-top:2px">Safety <b>${sx(c.safety, run.min_safety)}</b>
         <span class="muted">(by ${c.governs === 'buckling' ? foldedBy(c) : c.governs === 'plate' ? (pl && pl.grain ? `the plate check, ${beamGrain(pl)}` : 'the plate check, with the grain the wrong way') : 'the FEA'}; it needs ${run.min_safety}x)</span>
         ${c.breaks_lb ? ` · breaks at about <b>${Number(c.breaks_lb).toLocaleString()} lb</b> there` : ''}</div>`}
+      ${jointsLine(c, run)}
       ${plate}${fea}${by}
       ${c.heat ? `<div class="actions"><button data-heat="${i}" class="${on ? 'primary' : ''}">${on ? 'Showing the stress' : 'Show the stress'}</button></div>` : ''}
     </div>`;
 }
 
 // the hand buckling check that governs a case (CALI-159, #229): which wall, and what it was taken as
+// a pass that rests on a wall held square by a joint nothing checks: amber at most, and why, as answers.joint_said says it (#265)
+function jointsLine(c, run) {
+  const b = c.verdict && c.verdict.joints ? c.verdict.brace : null;
+  if (!b) return '';
+  return `<div class="small" style="margin-top:2px"><b>Joints not checked:</b> the ${esc(b.piece)} is held square at its top by its
+    joint to the ${esc(b.braced_by)}, which isn't checked${b.sway_safety != null ? `; if that joint gives, it racks (leans over with
+    the walls beside it) and folds at ${safetyNum(b.sway_safety, run.min_safety)}x` : ''}.</div>`;
+}
+
 function foldedBy(c) {
   const done = (c.buckling || []).filter((r) => r.done);
   const w = done.length ? done.reduce((a, b) => (b.safety < a.safety ? b : a)) : null;
   if (!w) return 'the buckling check';
   const sides = w.edges_held === 2 ? 'held along both sides' : w.edges_held === 1 ? 'held along one side'
-    : `free along its sides, ${w.braced_by ? `held at its top by the ${esc(w.braced_by)}` : 'its top free to sway'}`;   // (#264)
-  const share = w.share != null && w.share < 1 ? `${Math.round(w.share * 100)}% of the load on it, by the lever rule` : 'its whole load on it';
+    : `free along its sides, ${w.braced_by ? `its top held square by its joint to the ${esc(w.braced_by)}, which isn't checked`
+      + (w.sway_safety != null ? ` (it racks and folds at ${safetyNum(w.sway_safety)}x if that joint gives)` : '') : 'its top free to sway'}`;   // (#264, #265)
+  const share = w.share != null && w.share !== 1 ? `${Math.round(w.share * 100)}% of the load on it, by the lever rule` : 'its whole load on it';
   if (w.down === false) return `the buckling check on the ${esc(w.piece)}: a push that doesn't run down it, taken as a squeeze, the safe side for the sheet; racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid`;   // (#235, #250 review)
   return `the buckling check on the ${esc(w.piece)}: a plate ${sides}, ${share}`;
 }

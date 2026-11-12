@@ -220,6 +220,14 @@ def _small_len(mm: float, inches: bool) -> str:
 RACKING = "Racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid."
 
 
+def joint_said(row: dict, need) -> str:
+    """What a wall held square by an unchecked joint stands on (#265): which joint, and what it reads if that gives."""
+    return (f"the {row['piece']} is held square at its top by its joint to the {row['braced_by']}, which isn't checked; if that "
+            f"joint gives, it racks (leans over with the walls beside it) and folds at {_times(row['sway_safety'], need=need)}"
+            if row.get("sway_safety") is not None else
+            f"the {row['piece']} is held square at its top by its joint to the {row['braced_by']}, which isn't checked")
+
+
 def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     """What a ✗ adds about where it fails and how sure (#137 item 2), the same words on the part card and the design
     card (#139 review: the design card named the 0.25 mm webs, the part card the 5.2 mm wall at the peak). "" when
@@ -231,11 +239,12 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
             if w.get("down") is False:               # a shove in its plane: what's checked, and what isn't (#235, #250 review)
                 return (f" The {w['piece']} folds first, taken as squeezed end to end by a push that doesn't run down it: "
                         f"the safe side for the sheet. {RACKING}")
-            held = f"held at its top by the {w['braced_by']}, " if w.get("braced_by") else ""          # (#264)
-            share = (f"{w['share']:.0%} of the load on it, by the lever rule" if (w.get("share") or 1.0) < 1.0
+            held = (f", its top held square by its joint to the {w['braced_by']}, which isn't checked" if w.get("braced_by")
+                    else "")                                                                   # (#264, #265)
+            share = (f"{w['share']:.0%} of the load on it, by the lever rule" if (w.get("share") or 1.0) != 1.0
                      else "the whole load on it")
             return (f" The {w['piece']} folds first: it's too slender for the load running down it (a hand buckling check, "
-                    f"{held}its edges and stiffness taken on the safe side, and {share}).")
+                    f"its {'sides' if w.get('braced_by') else 'edges'} and stiffness taken on the safe side{held}, and {share}).")
     where, thin_here = worst_at(run, c, inches)
     wall = _wall(c["fea"]["wall_mm"], inches) if where else ""
     if v.get("coarse") and thin_here:                # among walls the voxels can't see: the fail may be the model's
@@ -310,7 +319,10 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
     rough, need = L.rough(run, c), run.get("min_safety")
     if v["kind"] == "holds":
-        text = f"Holds {c['name'].lower()}, {over(c, need, rough)}."
+        text = f"Holds {c['name'].lower()}, {over(c, need, rough)}." + (
+            f" Its joints aren't checked: {joint_said(v['brace'], need)}." if v.get("joints") else "")   # (#265, the cap lifted)
+    elif v["kind"] == "close" and v.get("joints"):   # amber: it holds if a joint does (#265)
+        text = f"Holds {c['name'].lower()}, {over(c, need, rough)}, if its joints do: {joint_said(v['brace'], need)}."
     elif v["kind"] == "close":                       # amber: it holds, near the line (CALI-88, #64 item 2)
         text = f"Holds {c['name'].lower()}, {over(c, need, rough)}: close to the {need:g} it needs."
     elif v["kind"] == "fails":

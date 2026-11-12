@@ -16,16 +16,22 @@ edges, each taken on the safe side:
   fold together (#235 review);
 - both unloaded edges held: ``k = min over m of (m b/a + a/(m b))²``, 4 for a long plate (Timoshenko eq. 9-7);
 - one held, one free: ``k = 0.425 + (b/a)²`` (Timoshenko §9.4; Bulson);
-- neither held: it's a wide column. Braced at its top, it's pinned at both ends: Euler's ``π² E t² / (12 a²)`` (#264). A
-  wall is braced only by a piece found across its top edge (where the load comes in) that's across another wall's top too,
-  as a step resting on a stool's two sides is: a top on one lone wall moves with it. Unbraced, nothing stops its top
-  moving sideways, so it sways: fixed at its foot and free at its top, a cantilever of twice its height, a quarter of
-  Euler's (:data:`SWAY`; without 1 − ν², the lower).
+- neither held: it's a wide column. Braced at its top, it's taken as pinned at both ends: Euler's ``π² E t² / (12 a²)``
+  (#264). A wall is braced only by a piece found across its top edge (where the load comes in) that's across another
+  wall's top too, as a step resting on a stool's two sides is: a top on one lone wall moves with it. That takes its top
+  as held square by its joint to that piece, and the joint isn't checked (#265). If it gives, the walls under the piece
+  RACK: they lean over together, a parallelogram, each swaying at its share of the load (``sway_safety`` on the row). So a
+  pass that rests on a brace reads amber at most, "joints not checked" (:data:`verdicts.JOINT_CAP`). Unbraced, nothing
+  stops its top moving sideways, so it sways: fixed at its foot and free at its top, a cantilever of twice its height, a
+  quarter of Euler's (:data:`SWAY`; without 1 − ν², the lower).
 
 ``E`` is the panel's bending stiffness the weaker way, since which way the grain runs isn't known. For plywood that's
-across its face grain, where the outer plies run the wrong way: :data:`PLY_BENDING_ACROSS` of along. Between two parallel walls either side of where it's applied, the case's factored load is shared by the lever
-rule, from their mid-planes (#264); any other wall in line, or a load given with no place, takes the whole of it, the safe side. A panel this can't describe (not a rectangle, holes in it, loaded at a slant to its
-edges) isn't checked, and says so. NEEDS ENGINEER CHECK (#42): the edge conditions, the sway, and E across the grain for plywood.
+across its face grain, where the outer plies run the wrong way: :data:`PLY_BENDING_ACROSS` of along. Two parallel walls the loaded piece rests on share the case's
+factored load by the lever rule, from their mid-planes (#264); a wall under another piece (a divider stopping short of the step)
+takes none of it (#265). A load beyond both walls levers: the near wall takes more than all of it (1.29 at a 150 mm overhang on a
+400 mm stool), and the far one is lifted, pulled rather than pushed, so it isn't checked for folding. Any other wall in line, or a
+load given with no place, takes the whole of it, the safe side. A panel this can't describe (not a rectangle, holes in it, loaded at a slant to its
+edges) isn't checked, and says so. NEEDS ENGINEER CHECK (#42): the edge conditions, the sway, the braced top's joint (#222), and E across the grain for plywood.
 """
 
 from __future__ import annotations
@@ -112,7 +118,9 @@ def _held(pc: dict, k: int, e: int, pieces: list[dict], tol: float) -> bool:
 
 def check(pieces: list[dict], load: dict, mat: dict, tol: float) -> list[dict]:
     """Each sheet in line with ``load`` (its force within :data:`IN_PLANE` of the sheet's plane): its buckling check, or why it
-    isn't checked. ``load["force"]`` is in N, before its factor."""
+    isn't checked. ``load["force"]`` is in N, before its factor. A row says what its wall was taken as: ``braced_by`` (the piece
+    whose unchecked joint is taken to hold its top square, or None), ``share`` (of the load, by the lever rule), and for a braced
+    wall ``sway_safety``, what it reads if that joint gives and it racks (#264, #265)."""
     from .consistency import _frame
 
     f = np.asarray(load["force"], float) * float(load.get("factor", 1.0))
@@ -152,19 +160,25 @@ def check(pieces: list[dict], load: dict, mat: dict, tol: float) -> list[dict]:
             held = sum(_held(pc, k, e, pieces, tol) for e in along)
             # where the load comes in: the loaded edge furthest up the push. What's across it, piece by piece (#264)
             top = min(loaded, key=lambda e: float((poly[e] + poly[(e + 1) % 4]) @ d))
-            across = [o for o in pieces if o is not pc and _held(pc, k, top, [o], tol)] if held == 0 else []
+            across = [o for o in pieces if o is not pc and _held(pc, k, top, [o], tol)]   # what it bears under (#265)
             mid = poly.mean(axis=0) + pc["sides"][k] * n * float(pc["thickness"]) / 2.0     # its mid-plane: where it bears
             walls.append({"row": len(out), "pc": pc, "n": n, "mid": mid, "across": across, "push": push,
                           "a": a, "b": b, "held": held})
             out.append({**row, "done": True, "height_mm": round(a, 1), "width_mm": round(b, 1),
                         "thickness_mm": float(pc["thickness"]), "edges_held": held})
     for w in walls:
-        # braced only by a piece found across its top that's across another wall's top too: a top on one lone wall moves with
-        # it (#235's), a step across two sides holds both (#264). Found, never assumed (Rule 6)
-        w["by"] = next((o["name"] for o in w["across"] if any(o in v["across"] for v in walls if v is not w)), None)
-    shares = _shares(walls, load)
-    for w, share in zip(walls, shares):
+        # held square at its top only by a piece found across it that's across another wall's top too: a top on one lone wall
+        # turns with it (#235's); a step across two sides can hold them square through its joints to them, which aren't checked
+        # (#265: they can rack, leaning together). Found, never assumed (Rule 6)
+        w["by"] = (next((o["name"] for o in w["across"] if any(o in v["across"] for v in walls if v is not w)), None)
+                   if w["held"] == 0 else None)
+    shares, lifted = _shares(walls, load)
+    for i, (w, share) in enumerate(zip(walls, shares)):
         r = out[w["row"]]
+        if i in lifted:                                   # beyond the load the other way: pulled, not pushed (#265)
+            out[w["row"]] = {k_: r[k_] for k_ in ("piece", "load_n", "down")} | {
+                "done": False, "why": "the load lifts it here: it's pulled, not pushed, so this load can't fold it"}
+            continue
         E, t = weak_E(mat), float(w["pc"]["thickness"])
         braced = w["by"] is not None
         sigma = critical_stress(E, t, w["a"], w["b"], w["held"], braced)
@@ -173,35 +187,41 @@ def check(pieces: list[dict], load: dict, mat: dict, tol: float) -> list[dict]:
         r.update({"braced_by": w["by"], "share": round(share, 3), "load_n": round(push, 1),
                   "k": round(k_factor(w["a"], w["b"], w["held"], braced), 3), "E_mpa": round(E, 1),
                   "sigma_cr_mpa": round(sigma, 3), "p_cr_n": round(p_cr, 1), "safety": p_cr / push})
+        if braced:                                        # if its joint gives, it racks: what it reads swaying, the same share
+            r["sway_safety"] = critical_stress(E, t, w["a"], w["b"], w["held"]) * w["b"] * t / push
     return out
 
 
-def _shares(walls: list[dict], load: dict) -> list[float]:
-    """Each wall's share of the load (#264): between the two parallel walls either side of where it's applied, by the lever
-    rule; any other wall, or a load with no place, or beyond its walls, the whole of it (the safe side, as before)."""
-    out = [1.0] * len(walls)
+def _shares(walls: list[dict], load: dict) -> tuple[list[float], set]:
+    """Each wall's share of the load (#264, #265), and the walls it lifts. Only between two parallel walls the same piece rests on
+    (the one loaded: a step across both): between them, by the lever rule from their mid-planes; beyond both, the near one takes
+    the lever rule's share, over 1, and the far one is lifted. Any other wall, or a load with no place, takes the whole of it."""
+    out, lifted = [1.0] * len(walls), set()
     if load.get("lo") is None or load.get("hi") is None:
-        return out
+        return out, lifted
     at = (np.asarray(load["lo"], float) + np.asarray(load["hi"], float)) / 2.0
-    seen: set = set()
     for i, w in enumerate(walls):
-        if i in seen:
-            continue
-        family = [j for j, v in enumerate(walls) if abs(float(v["n"] @ w["n"])) > 1 - 1e-3]
-        seen.update(family)
-        n = w["n"]
-        s = {j: float(walls[j]["mid"] @ n) for j in family}
-        s_at = float(at @ n)
-        below = [j for j in family if s[j] <= s_at]
-        above = [j for j in family if s[j] >= s_at]
-        if not below or not above:
-            continue
-        lo, hi = max(below, key=lambda j: s[j]), min(above, key=lambda j: s[j])
-        if lo == hi or s[hi] - s[lo] < 1e-9:
-            continue
-        out[lo] = (s[hi] - s_at) / (s[hi] - s[lo])
-        out[hi] = (s_at - s[lo]) / (s[hi] - s[lo])
-    return out
+        for j in range(i + 1, len(walls)):
+            v = walls[j]
+            if abs(float(v["n"] @ w["n"])) < 1 - 1e-3 or not any(o in v["across"] for o in w["across"]):
+                continue                                  # not parallel, or not under one piece
+            n = w["n"]
+            si, sj, s_at = float(w["mid"] @ n), float(v["mid"] @ n), float(at @ n)
+            if abs(sj - si) < 1e-9:
+                continue
+            between = [x for x in range(len(walls)) if x not in (i, j) and abs(float(walls[x]["n"] @ n)) > 1 - 1e-3
+                       and any(o in walls[x]["across"] for o in w["across"])
+                       and min(si, sj) < float(walls[x]["mid"] @ n) < max(si, sj)]
+            if between:                                   # a nearer pair under the same piece decides it
+                continue
+            fi = (sj - s_at) / (sj - si)                  # the lever rule: each the other's distance from the load
+            fj = (s_at - si) / (sj - si)
+            for x, f in ((i, fi), (j, fj)):
+                if f < 0:
+                    lifted.add(x)
+                elif out[x] == 1.0 or f > out[x]:
+                    out[x] = f
+    return out, lifted
 
 
 def governing(rows: list[dict]) -> Optional[dict]:
