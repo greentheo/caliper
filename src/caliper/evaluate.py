@@ -18,7 +18,6 @@ records those assertions as ``deferred`` and excludes them from ``all_pass`` rat
 from __future__ import annotations
 
 import ast
-import math
 import operator
 import threading
 from dataclasses import dataclass, field
