@@ -292,7 +292,8 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
 .pdone { font-size: 12px; color: var(--ok); margin-top: 6px; }
 /* the part tree, above the chat (#94, the mockup Theo approved) */
 .tree { flex: 0 1 auto; max-height: 45%; overflow-y: auto; border-bottom: 1px solid var(--line); padding: 8px 8px 10px; }
-.tree-head { display: flex; align-items: center; gap: 8px; padding: 2px 6px 6px; }
+.tree-head { display: flex; align-items: center; gap: 8px; padding: 2px 6px 6px;
+  position: sticky; top: -8px; z-index: 2; background: var(--panel); }   /* its waiting line stays in view as the tree scrolls (#206) */
 .tree-head .fold { background: transparent; border: 0; padding: 0; font-size: 12px; font-weight: 600; letter-spacing: .6px;
   text-transform: uppercase; color: var(--muted); cursor: pointer; }
 .tree-head .note { margin-left: auto; font-size: 12px; color: var(--muted); }
@@ -300,7 +301,11 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
 .trow.piece { margin-left: 22px; }
 .trow.part { cursor: grab; }
 .trow.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
-.trow.drop-after, .tpart.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.trow.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+/* below a part's block, drawn over its rows: a chosen last row's background hid an inset line (#206) */
+.tpart { position: relative; }
+.tpart.drop-after::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
+  background: var(--accent); pointer-events: none; z-index: 1; }
 .trow.drop-into { outline: 1px solid var(--accent); outline-offset: -1px; background: #1b2a3d; }
 .trow.on { background: #1b2a3d; }
 .trow.ref .tname { color: var(--muted); }

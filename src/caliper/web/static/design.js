@@ -195,6 +195,7 @@ function seen() {
     try { kept = JSON.parse(localStorage.getItem(`caliper-tree:${S.slug}`)) || {}; } catch (e) { /* none, or none allowed */ }
     TREE.parts = new Set(kept.parts || []); TREE.pieces = new Set(kept.pieces || []);
     TREE.open = kept.open !== false; TREE.oneBody = !!kept.oneBody; TREE.rename = null;
+    TREE.saying = null; TREE.drag = null;          // another design's wait isn't this one's (#206)
   }
   return TREE;
 }
@@ -349,16 +350,26 @@ function clearDrop() {
 async function moveInTree(drag, target, zone) {
   const next = dropped(S.design, drag, target, zone);
   if (!next) return;
-  const slow = setTimeout(() => { TREE.saying = 'Waiting for the job on this design to finish…'; renderTree(); }, 600);   // the lock can be minutes
+  const slug = S.slug;                            // the design it's moved in: another may be open by the time it's done (#206)
+  const slow = setTimeout(() => {                  // the lock can be minutes
+    if (S.slug !== slug) return;
+    TREE.saying = 'Waiting for the job on this design to finish…'; renderTree();
+  }, 600);
+  let got, err;
   try {
-    S.design = await api('POST', `/api/designs/${S.slug}/tree`, next);
+    got = await api('POST', `/api/designs/${slug}/tree`, next);
+  } catch (e) { err = e; }
+  clearTimeout(slow);
+  if (S.slug !== slug) return;                     // saved there; nothing of it belongs on this one
+  if (err) showErr(plainly(err.message));
+  else {
+    S.design = got;
     const t = seen(), up = next.parent[drag];
     if (up && t.parts.has(up)) {                  // under a hidden part, it's hidden as that part is
       [drag, ...underPart(S.design, drag)].forEach((x) => t.parts.add(x));
       keepTree();
     }
-  } catch (e) { showErr(plainly(e.message)); }
-  clearTimeout(slow);
+  }
   TREE.saying = null;
   render();
 }

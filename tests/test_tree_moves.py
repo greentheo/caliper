@@ -221,8 +221,9 @@ def _drag(body, tree_=None):
 
 def test_a_drop_posts_the_move_and_redraws():
     got = _drag("""const e = ev(row('a'), 1); TREE.drag = 'd'; treeDrop(e); await tick();
-                   return { posted, redraws, stopped: !!e.stopped, drag: TREE.drag };""")
+                   return { posted, redraws, stopped: !!e.stopped, drag: TREE.drag, now: S.design.tree };""")
     assert got["posted"] == [{"order": ["d", "a", "b", "c"], "parent": {}}] and got["redraws"] == 1 and got["stopped"] and got["drag"] is None
+    assert got["now"] == got["posted"][0]                                 # the design as saved is the one shown
 
 
 def test_on_a_phone_a_drag_doesn_t_start():
@@ -312,3 +313,77 @@ def test_the_handlers_are_wired():
     for name in ("dragstart', treeDragStart", "dragover', treeDragOver", "drop', treeDrop"):
         assert name in src
 
+
+
+# --- CALI-150 (#206): the waiting line, the last row, and the wiring -----------------------------------------------------
+def test_a_reply_that_comes_after_a_switch_doesn_t_land_on_the_other_design():
+    """reviewer-2 on #204: the waiting line followed to another design for about 32 s, saying "this design"."""
+    got = _drag("""const before = S.design; answer = () => { S.slug = 'y'; return { parts: [], tree: { order: ['z'] } }; };
+                   await moveInTree('c', 'a', 'into'); return { same: S.design === before, saying: TREE.saying, redraws, errs };""")
+    assert got == {"same": True, "saying": None, "redraws": 0, "errs": []}
+
+
+def test_the_waiting_line_never_comes_up_on_another_design():
+    got = _drag("""let late; globalThis.setTimeout = (f, ms) => { if (ms === 600) late = f; return 1; }; globalThis.clearTimeout = () => {};
+                   let release; answer = () => new Promise((r) => { release = () => r(S.design); });
+                   const going = moveInTree('c', 'a', 'into'); await tick();
+                   S.slug = 'y'; late(); const shown = TREE.saying; release(); await going;
+                   return { shown, trees };""")
+    assert got == {"shown": None, "trees": 0}
+
+
+def test_on_its_own_design_the_waiting_line_still_shows_and_goes():
+    got = _drag("""let late; globalThis.setTimeout = (f, ms) => { if (ms === 600) late = f; return 1; }; globalThis.clearTimeout = () => {};
+                   let release; answer = () => new Promise((r) => { release = () => r(S.design); });
+                   const going = moveInTree('c', 'a', 'into'); await tick(); late(); const shown = TREE.saying; release(); await going;
+                   return { shown, after: TREE.saying, redraws };""")
+    assert got == {"shown": "Waiting for the job on this design to finish…", "after": None, "redraws": 1}
+
+
+def test_a_switch_clears_the_waiting_line():
+    src = open(JS).read()
+    script = ("const S = { slug: 'x' }; const localStorage = { getItem: () => null };\n"
+              "const TREE = { slug: 'x', saying: 'Waiting for the job on this design to finish…', drag: 'a', parts: new Set() };\n"
+              + _fn(src, "seen") + "\nS.slug = 'y'; seen(); console.log(JSON.stringify({ saying: TREE.saying, drag: TREE.drag }));")
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    assert json.loads(got.stdout) == {"saying": None, "drag": None}
+
+
+def _render(phone, saying="null"):
+    src = open(JS).read()
+    head = ("const esc = (s) => String(s); const EYE_ON = 'o', EYE_OFF = 'x'; const renameRow = () => '';\n"
+            "const box = { hidden: false, innerHTML: '' }; const $ = (id) => (id === 'tree' ? box : null);\n"
+            "const document = { activeElement: { id: 'body' } }; const noPieces = new Map();\n"
+            "const S = { slug: 'x', scope: null, piece: null, pick: false, design: " + json.dumps(
+                {"parts": [{"id": "a", "version": 1}, {"id": "b", "version": 1}], "tree": {}}) + " };\n"
+            f"const TREE = {{ parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, saying: {saying} }};\n"
+            f"const seen = () => TREE; const onPhone = () => {phone};\n")
+    script = head + "".join(_fn(src, n) for n in ("treeRows", "underPart", "treeHtml", "renderTree")) + "\nrenderTree(); console.log(box.innerHTML);"
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    return got.stdout
+
+
+def test_the_real_tree_drags_on_a_desktop_and_not_on_a_phone():
+    """reviewer-2 on #204: eight mutants on renderTree's wiring survived; it's run here, not its parts."""
+    assert _render("false").count('draggable="true"') == 2 and "needs a wider window" not in _render("false")
+    assert "draggable" not in _render("true") and "Moving parts needs a wider window" in _render("true")
+    assert "Waiting for the job on this design" in _render("false", "'Waiting for the job on this design to finish…'")
+
+
+def test_the_phone_is_the_css_phone_and_turning_it_redraws_the_tree():
+    src, css = open(JS).read(), open(JS.replace("design.js", "design.css")).read()
+    assert "const PHONE = window.matchMedia('(max-width: 700px)');" in src and "@media (max-width: 700px) {" in css
+    assert "PHONE.addEventListener('change', () => renderTree());" in src
+
+
+def test_the_waiting_line_stays_in_view_and_the_after_line_shows_over_a_chosen_last_row():
+    """The header scrolled away with the tree; a chosen last row's background covered the part's inset line."""
+    css = open(JS.replace("design.js", "design.css")).read()
+    head = css[css.index(".tree-head {"):]
+    assert "position: sticky" in head[:head.index("}")]
+    after = css[css.index(".tpart.drop-after::after {"):]
+    after = after[:after.index("}")]
+    assert "position: absolute" in after and "bottom: 0" in after and "background: var(--accent)" in after
+    assert ".tpart.drop-after {" not in css.replace(".tpart.drop-after::after", "")       # not an inset shadow under its rows
