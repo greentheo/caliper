@@ -2956,6 +2956,21 @@ function lightenRuns(pid) { return (S.design.lighten_runs || []).filter((r) => r
 // a Lightening's step, led by what's known (#252, #254): under the floor "too little"; one its re-check couldn't settle (unseen,
 // unknown) "Not settled"; "The step to use" only where there's a button, or an older run with no offer
 const lightenLead = (run) => (!run.offer ? 'The step to use' : run.offer.kind === 'small' ? 'Too little to use' : ['unseen', 'unknown'].includes(run.offer.kind) ? 'Not settled' : 'The step to use');
+// with no step to use, what's known (#255): "Nothing lighter still holds" only where the steps were checked and failed; a step
+// the check couldn't settle (too coarse, a span, untrusted) says so instead. A thinner sheet's estimate isn't a check
+function lightenNone(run) {
+  const deeper = run.stations.filter((x) => x.index && !x.estimate);
+  const unsure = deeper.find((x) => x.verdict && ['unresolved', 'unchecked', 'span'].includes(x.verdict.kind));
+  if (unsure) {
+    return unsure.verdict.kind === 'span' ? `Not settled: ${unsure.verdict.why}, so no step can be said to hold.`
+      : unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
+        : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.';
+  }
+  if (deeper.some((x) => !x.verdict || !['holds', 'close', 'fails'].includes(x.verdict.kind))) {
+    return 'Not settled: none of its steps could be checked, so no step can be said to hold.';
+  }
+  return 'Nothing lighter still holds.';
+}
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
   const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
@@ -2963,7 +2978,6 @@ function lightenView(p) {
     : run && run.stations.filter(holdsHere).reduce((a, x) => (!a || x.saved_lb > a.saved_lb ? x : a), null);
   const out = run && run.stations.find((x) => x.verdict && x.verdict.kind === 'fails');
   // steps the check was too coarse to call: their verdict's word, never "nothing lighter holds" (#136 review)
-  const unsure = run && !best && run.stations.find((x) => x.index && x.verdict && ['unresolved', 'unchecked', 'span'].includes(x.verdict.kind));
   const what = (x) => x.phase === 'thinner' ? `in ${esc(x.label)} sheet <span class="badge">estimate</span>`
     : x.phase === 'top' ? `${pct(x.removed)} of the walls + ${x.top_holes} hole${x.top_holes === 1 ? '' : 's'} in the top`
     : x.index ? `${pct(x.removed)} of the walls` : 'as it is';
@@ -2977,9 +2991,7 @@ function lightenView(p) {
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
         : `${lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
-      : unsure ? (unsure.verdict.kind === 'span' ? `Not settled: ${unsure.verdict.why}, so no step can be said to hold.` : unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
-        : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.')
-      : 'Nothing lighter still holds.'}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
+      : lightenNone(run)}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
       ${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
       ${run.stations.map((x) => `<tr class="${x.estimate ? '' : 'pick'} ${x.index === on ? 'on' : ''}" ${x.estimate ? '' : `data-lst="${x.index}"`}>
