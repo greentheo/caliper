@@ -297,3 +297,31 @@ def test_a_mirror_that_goes_into_the_part_leads_the_reply(two_sides, monkeypatch
                            on="stool", asked=ASKED)
     assert not res.ok and res.reply.startswith("✗ Built fillet_strip and its mirror fillet_strip_opposite, but "
                                                "fillet_strip_opposite goes 3 mm into stool."), res.reply
+
+
+# --- #238's findings after any added part, not only after a plan's build --------------------------------------------------
+def test_the_findings_run_after_an_added_part_and_say_nothing_is_not_right(stool):
+    s, pick = stool
+    res = chat.author_part(s, "fillet_strip", "a 5 mm printed fillet strip on this edge", author=_author(0.0)[0], use_llm=False,
+                           promote_feedback=False, pick=pick, on="stool")
+    assert res.ok and "Measured after the build: nothing found in " in res.reply, res.reply
+    assert "That's what the checks see, not that it's right: look at it." in res.reply
+
+
+def test_a_finding_about_the_new_part_leads_the_reply(stool, monkeypatch):
+    from caliper import review
+
+    s, pick = stool
+    found = {"findings": [{"kind": "fit", "parts": ["fillet_strip", "stool"], "said": "the fillet strip is 2 mm into the stool",
+                           "fix": "Move it out.", "measured": 2.0}], "checks": 3, "unmeasured": [], "notes": []}
+    monkeypatch.setattr(review, "findings", lambda store, report=None: found)
+    res = chat.author_part(s, "fillet_strip", "a 5 mm printed fillet strip on this edge", author=_author(0.0)[0], use_llm=False,
+                           promote_feedback=False, pick=pick, on="stool")
+    assert not res.ok and res.reply.startswith("! Built fillet_strip, but the checks after it found 1 thing to fix with it: "
+                                               "the fillet strip is 2 mm into the stool."), res.reply
+    assert "- The fillet strip is 2 mm into the stool (fillet_strip, stool). Move it out." in res.reply
+    # one about another part is listed, and isn't this part's miss
+    found["findings"][0]["parts"] = ["stool"]
+    res = chat.author_part(s, "fillet_strip_2", "a 5 mm printed fillet strip on this edge", author=_author(0.0)[0],
+                           use_llm=False, promote_feedback=False, pick=pick, on="stool")
+    assert res.ok and res.reply.startswith("✓ built") and "(stool). Move it out." in res.reply, res.reply

@@ -1126,12 +1126,23 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
             elif gap > SEAT_MM:
                 miss = f"Built {part_id} and its mirror {other}, but {other} sits {round(gap, 2):g} mm off the opposite edge."
             after, part_errors = _measure_design(store)
+    from . import review
+
+    try:                                         # #238's findings after any added part, not only a plan's build (#266)
+        found = review.findings(store, after)
+    except Exception as e:  # noqa: BLE001 — the part stands; only the look at it is lost, and said
+        found = {"findings": [], "checks": 0, "unmeasured": [f"the design's findings ({scrubbed(e)})"], "notes": []}
+    reply += "\n\n" + review.said(found)
+    mine = [f for f in found["findings"] if part_id in (f.get("parts") or [])]
+    if miss is None and mine:                    # measured wrong with it: no ✓ over that (rule 6)
+        miss = (f"Built {part_id}, but the checks after it found {len(mine)} thing{'s' if len(mine) != 1 else ''} to fix "
+                f"with it: " + "; ".join(f["said"] for f in mine) + ".")
     if seat is not None and miss is None:
         reply = reply.replace("\n", f"\nIt sits on the edge you picked on {seat['part']}"
                               + (f", and its mirror {other} sits on the opposite edge" if other else "") + ".\n", 1)
     if miss is not None:
         # half of what was asked, or a pick it couldn't use: not known to be wrong, so not a cross
-        mark = "!" if " found no edge " in miss or "couldn't place it" in miss else "\u2717"
+        mark = "!" if " found no edge " in miss or "couldn't place it" in miss or "the checks after it" in miss else "\u2717"
         reply = f"{mark} {miss}\n\n" + reply.replace("\u2713 ", "", 1).replace("Every check on this part passes.\n", "")
         return TurnResult(action="author", ok=False, part=part_id, version=version,
                           part_report=res.report, report=after, broke=broke, fixed=fixed,
