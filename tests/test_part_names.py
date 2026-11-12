@@ -38,3 +38,15 @@ def test_on_an_empty_design_i_need_a_bench_authors_a_bench(tmp_path):
     empty = DesignStore.create("nothing yet", base=str(tmp_path))
     got = chat.offline_classify(empty, "I need a bench", None)
     assert (got.action, got.part) == ("author", "bench")
+
+
+@pytest.mark.parametrize("message", ["I want it taller", "I'd like it wider", "can you make it shorter", "I need it wider",
+                                     "I need them painted", "could you please make them smaller", "let's make it taller"])
+def test_on_an_empty_design_a_request_about_it_has_nothing_to_change(tmp_path, message):
+    """#262 re-check: #250's rule caught "I need it wider" but not "I want it taller", which went to the designer. One request
+    phrase (`_REQUEST`) for both rules, so they can't drift."""
+    from caliper.design import DesignStore
+
+    empty = DesignStore.create("nothing yet", base=str(tmp_path))
+    assert chat.offline_classify(empty, message, None).action == "answer", message
+    assert chat.offline_classify(empty, "I want a bench", None).action == "author"       # a new thing still is one
