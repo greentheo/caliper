@@ -1037,13 +1037,17 @@ def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = 
 def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, client=None,
                 max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
                 use_llm: bool = True, drafter=None, promote_feedback: bool = True,
-                interfaces=None, repair_only=None) -> TurnResult:
-    """Author a brand-new part into the design, then measure the design with it in place."""
+                interfaces=None, repair_only=None, pick: Optional[dict] = None, on: Optional[str] = None) -> TurnResult:
+    """Author a brand-new part into the design, then measure the design with it in place. ``pick``, an edge picked on the
+    part ``on``: the new part must touch it, measured each round (CALI-171, #266)."""
     from . import authoring
 
     events = events if events is not None else []
     before, _ = _measure_design(store)
-    spec = _working_spec(store, part_id, intent)
+    seat = _picked_edge(store, on, pick)
+    if seat is not None:                         # the pick is a requirement, told and measured (#266)
+        interfaces = _also(interfaces, lambda g, script: [_on_the_pick(g, seat)])
+    spec = _working_spec(store, part_id, intent + (_seat_words(seat) if seat else ""))
 
     _emit(events, on_event, "authoring", f"authoring {part_id}…", part=part_id)
 
@@ -1085,10 +1089,104 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
                                        events=events, on_event=on_event)
     if offer:
         reply += "\n\n" + offer
+    # where it sits, before anything else is said: never a ✓ over a measured miss (#266, rule 6)
+    miss = _seat_miss(res.geometry, seat, part_id) if seat is not None else _drafted_miss(proposal, part_id)
+    if seat is not None and miss is None:
+        reply = reply.replace("\n", f"\nIt sits on the edge you picked on {seat['part']}.\n", 1)
+    if miss is not None:
+        reply = f"\u2717 {miss}\n\n" + reply.replace("\u2713 ", "", 1).replace("Every check on this part passes.\n", "")
+        return TurnResult(action="author", ok=False, part=part_id, version=version,
+                          part_report=res.report, report=after, broke=broke, fixed=fixed,
+                          part_errors=part_errors, proposal=proposal, events=events, reply=reply)
 
     return TurnResult(action="author", ok=bool(res.ok) and not broke, part=part_id, version=version,
                       part_report=res.report, report=after, broke=broke, fixed=fixed,
                       part_errors=part_errors, proposal=proposal, events=events, reply=reply)
+
+
+#: How close a part added on a picked edge must come to it, everywhere along it (#266).
+SEAT_MM = 0.5
+
+
+def _picked_edge(store: DesignStore, on: Optional[str], pick: Optional[dict]) -> Optional[dict]:
+    """The edge picked on part ``on``, in the design's coordinates: ``{"part", "points", "said"}``; None for no edge pick, or
+    one whose part changed since (its ids were that version's)."""
+    if not pick or pick.get("kind") != "edge" or not on:
+        return None
+    feats = _features_of(store, on)
+    if not feats or pick.get("version") not in (None, feats.get("version")):
+        return None
+    edge = next((e for e in feats.get("edges") or [] if e["id"] == pick.get("id")), None)
+    if edge is None or len(edge.get("points") or []) < 2:
+        return None
+    return {"part": on, "points": [[float(c) for c in p] for p in edge["points"]], "said": pick.get("said") or "the edge"}
+
+
+def _pt(p) -> str:
+    return "(" + ", ".join(f"{round(c, 2):g}" for c in p) + ")"
+
+
+def _seat_words(seat: dict) -> str:
+    """The requirement as the designer reads it: where the picked edge is, in its coordinates (#266: they were ignored)."""
+    pts = seat["points"]
+    return (f"\n\nIt goes on the edge picked on {seat['part']} ({seat['said']}): the line from {_pt(pts[0])} to {_pt(pts[-1])}"
+            + (f" through {len(pts) - 2} more points" if len(pts) > 2 else "")
+            + f", in mm in the design's coordinates, which are this new part's. Its surface must touch that edge along its "
+            f"whole length, within {SEAT_MM:g} mm: measured, not assumed.")
+
+
+def _seat_gap(geometry, seat: dict) -> float:
+    """How far the part is from the picked edge at its worst, in mm: the edge sampled along its length, each point's distance to
+    the part's surface."""
+    import numpy as np
+
+    from . import spatial
+
+    pts = np.asarray(seat["points"], float)
+    samples = np.concatenate([a + np.linspace(0.0, 1.0, 9)[:, None] * (b - a) for a, b in zip(pts[:-1], pts[1:])])
+    _, dist, _ = spatial.on_surface(geometry.require_mesh(), samples)
+    return float(np.max(dist))
+
+
+def _on_the_pick(geometry, seat: dict):
+    """The pick as a round's check: fails, and is repaired, until the part touches the picked edge (#266)."""
+    from .evaluate import AssertionResult
+
+    gap = _seat_gap(geometry, seat)
+    ok = gap <= SEAT_MM
+    return AssertionResult(id="on_the_pick", expr=f"touches the edge picked on {seat['part']}", status="pass" if ok else "fail",
+                           passed=ok, actual=round(gap, 2), margin=round(SEAT_MM - gap, 2),
+                           detail="" if ok else (f"it sits {round(gap, 2):g} mm off the edge picked on {seat['part']}, the line "
+                                                 f"from {_pt(seat['points'][0])} to {_pt(seat['points'][-1])}: move it onto "
+                                                 f"that edge"))
+
+
+def _also(interfaces, more):
+    """``interfaces`` with another check added each round."""
+    if interfaces is None:
+        return more
+    return lambda g, script: list(interfaces(g, script)) + list(more(g, script))
+
+
+def _seat_miss(geometry, seat: dict, part_id: str) -> Optional[str]:
+    """The reply's first line when the built part doesn't sit on the pick (#266), else None."""
+    if geometry is None:
+        return None
+    gap = _seat_gap(geometry, seat)
+    if gap <= SEAT_MM:
+        return None
+    return f"Built {part_id}, but it sits {round(gap, 2):g} mm off the edge you picked on {seat['part']}: not where you asked."
+
+
+def _drafted_miss(proposal, part_id: str) -> Optional[str]:
+    """The drafted fit test, measured off now (``min_clearance(new, other) <= x`` at 76.75): the reply's first line (#266)."""
+    if proposal is None or proposal.holds_now is not False:
+        return None
+    m = re.match(r"\s*(?:min_clearance|clearance)\(\s*(\w+)\s*,\s*(\w+)\s*\)\s*<=", proposal.expr or "")
+    if not m or part_id not in m.groups() or not isinstance(proposal.actual, (int, float)):
+        return None
+    other = m.group(2) if m.group(1) == part_id else m.group(1)
+    return f"Built {part_id}, but it sits {round(float(proposal.actual), 2):g} mm off {other}: not where you asked."
 
 
 def _accept(store: DesignStore, proposal, events: list[Event], on_event) -> TurnResult:
@@ -2085,7 +2183,8 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
     elif intent.action == "author" and intent.part:
         result = author_part(store, intent.part, intent.intent or message, author=author,
                              client=client, max_rounds=max_rounds, events=events, on_event=on_event,
-                             use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
+                             use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback,
+                             pick=pick, on=(pick or {}).get("part") or scope)   # the pick is a requirement (#266)
     else:
         result = answer(store, message, scope=scope or intent.part, note=intent.note, events=events,
                         use_llm=use_llm, client=client)
