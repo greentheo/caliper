@@ -21,7 +21,7 @@ bulk/topological queries use the mesh. CadQuery is imported lazily so this modul
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -42,6 +42,8 @@ class Geometry:
     # at load; the B-rep solid is kept in its LOCAL frame, so feature probes that read the solid (holes)
     # transform their results by this pose to compare parts in the assembly frame. None == identity.
     pose: Any = None
+    #: its bores, worked out once (#261 review: the through test cost 1.77 s on a 100-hole plate, every evaluation)
+    _bores: Any = field(default=None, init=False, repr=False, compare=False)
 
     @classmethod
     def from_stl(cls, path: str) -> "Geometry":
@@ -321,10 +323,12 @@ def holes(g: Geometry) -> list[Hole]:
     """
     if g.solid is None:
         raise NotMeasured(MESH_HOLES)
-    hs = _holes_from_cadquery(g.solid)
-    for h in hs:                                         # which pass all the way through (#259)
-        h.through = _through(g.mesh, h)
-    return hs
+    if g._bores is None:                                 # once per geometry, as its mesh (#261 review)
+        hs = _holes_from_cadquery(g.solid)
+        for h in hs:                                     # which pass all the way through (#259)
+            h.through = _through(g.require_mesh(), h, getattr(g, "pose", None))
+        g._bores = hs
+    return list(g._bores)
 
 
 def _looks_in(face: Any, adaptor: Any, loc: Any, dir_: Any) -> bool:
@@ -371,11 +375,19 @@ def _holes_from_cadquery(wp: Any) -> list[Hole]:
         a_, lo, hi = a * sign, *sorted((v0 * sign, v1 * sign))
         base = o - (o @ a_) * a_                                            # where the axis line crosses the plane through 0
         key = (round(radius, 3), *np.round(a_, 4), *np.round(base, 3))
-        g = groups.setdefault(key, {"r": radius, "a": a_, "base": base, "lo": (o @ a_) + lo, "hi": (o @ a_) + hi, "turn": 0.0})
-        g["lo"], g["hi"] = min(g["lo"], (o @ a_) + lo), max(g["hi"], (o @ a_) + hi)
-        g["turn"] += adaptor.LastUParameter() - adaptor.FirstUParameter()
+        groups.setdefault(key, []).append({"r": radius, "a": a_, "base": base, "lo": (o @ a_) + lo, "hi": (o @ a_) + hi,
+                                           "turn": adaptor.LastUParameter() - adaptor.FirstUParameter()})
+    bores = []
+    for faces in groups.values():           # on one axis line, joined only where they meet along it: a seam's two halves are one
+        faces.sort(key=lambda x: x["lo"])  # bore, two coaxial holes in a U-bracket's two sides are two (#261 review)
+        for f in faces:
+            last = bores[-1] if bores and bores[-1]["key"] is faces else None
+            if last is not None and f["lo"] <= last["hi"] + 1e-6:
+                last["hi"], last["turn"] = max(last["hi"], f["hi"]), last["turn"] + f["turn"]
+            else:
+                bores.append({**f, "key": faces})
     found: list[Hole] = []
-    for g in groups.values():
+    for g in bores:
         if g["turn"] < 2 * np.pi - 1e-6:                                    # a fillet, an arc: not a bore (#259)
             continue
         mid = g["base"] + g["a"] * (g["lo"] + g["hi"]) / 2.0
@@ -384,7 +396,7 @@ def _holes_from_cadquery(wp: Any) -> list[Hole]:
     return found
 
 
-def _through(mesh, h: "Hole") -> bool:
+def _through(mesh, h: "Hole", pose: Any = None) -> bool:
     """Whether a bore is open at both ends at its own diameter: a ring just inside its wall, carried along its axis across the
     whole part and past it, meets no material (#259). A counterbore narrows below it, a blind hole stops, a pocket sits over a
     smaller hole: none of those passes."""
@@ -392,6 +404,9 @@ def _through(mesh, h: "Hole") -> bool:
 
     a = np.asarray(h.axis, float)
     c = np.asarray(h.center, float)
+    if pose is not None and not np.allclose(pose, np.eye(4)):         # the mesh is in the world frame, the solid in its own
+        R, t = np.asarray(pose)[:3, :3], np.asarray(pose)[:3, 3]
+        a, c = R @ a, R @ c + t
     corners = np.array([[x, y, z] for x in mesh.bounds[:, 0] for y in mesh.bounds[:, 1] for z in mesh.bounds[:, 2]])
     t = (corners - c) @ a
     stations = np.linspace(t.min() - 1.0, t.max() + 1.0, int(min(400, max(20, (t.max() - t.min()) / 0.5))))
@@ -439,7 +454,8 @@ def holes_matching(
 
 def largest_through_bore(g: Geometry) -> float:
     """Diameter of the largest bore that passes all the way through (0.0 if none): a counterbore reads the hole through it, a
-    blind hole reads nothing (#259: intake writes ``largest_through_bore >= 8`` for a cable, so a 14 mm counterbore over a 6 mm
+    blind hole reads nothing, and a slot reads nothing, its round ends being half turns: a slot isn't a bore, the safe side (a
+    cable through a slot is another rule, #261 review) (#259: intake writes ``largest_through_bore >= 8`` for a cable, so a 14 mm counterbore over a 6 mm
     hole passed)."""
     return max((h.diameter for h in holes(g) if h.through), default=0.0)      # a mesh: NotMeasured, never a silent 0
 
