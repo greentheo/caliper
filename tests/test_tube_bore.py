@@ -123,3 +123,64 @@ def test_a_posed_part_s_bores_are_tested_where_its_mesh_is():
     through = cq.Workplane("XY").box(40, 40, 6).faces(">Z").workplane().hole(8)
     assert measure.largest_through_bore(posed(blind)) == 0.0          # tested in its own frame, it read as through
     assert measure.largest_through_bore(posed(through)) == pytest.approx(8.0)
+
+
+# --- #259 follow-up: the through test only where a rule reads it, largest first --------------------------------------------
+@pytest.fixture(scope="module")
+def plate100():
+    return cq.Workplane("XY").box(200, 200, 5).faces(">Z").workplane().rarray(18, 18, 10, 10).hole(6)
+
+
+def _counting(monkeypatch):
+    calls = []
+    real = measure._through
+
+    def counted(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(measure, "_through", counted)
+    return calls
+
+
+def test_a_build_whose_rules_don_t_read_the_bore_pays_nothing_for_it(plate100, monkeypatch):
+    """Each build makes a new Geometry, and its context worked the bore out eagerly: about 1.7 s on a 100-hole plate."""
+    from caliper import evaluate
+    from caliper.spec import Assertion, Spec
+
+    calls = _counting(monkeypatch)
+    ctx = evaluate.build_context(Spec(part="x"), _g(plate100))
+    assert evaluate.evaluate_assertion(Assertion(id="v", expr="volume > 0"), ctx).status == "pass"
+    assert evaluate.evaluate_assertion(Assertion(id="h", expr="holes_matching(6, count=100)"), ctx).status == "pass"
+    assert calls == []                                    # holes counted, none tested for through
+
+
+def test_the_bore_is_tried_largest_first_and_stops_at_the_first_through(plate100, monkeypatch):
+    from caliper import evaluate
+    from caliper.spec import Assertion, Spec
+
+    calls = _counting(monkeypatch)
+    ctx = evaluate.build_context(Spec(part="x"), _g(plate100))
+    assert evaluate.evaluate_assertion(Assertion(id="b", expr="largest_through_bore >= 6"), ctx).status == "pass"
+    assert len(calls) == 1                                # the first 6 mm hole is through: done
+
+
+def test_largest_first_skips_a_bigger_blind_hole():
+    part = (cq.Workplane("XY").box(60, 40, 10).faces(">Z").workplane().pushPoints([(-15, 0)]).hole(12, depth=4)
+            .faces(">Z").workplane().pushPoints([(15, 0)]).hole(5))
+    assert measure.largest_through_bore(_g(part)) == pytest.approx(5.0)
+
+
+@pytest.mark.parametrize("small_at", [-15, 15])
+def test_the_largest_through_bore_wins_wherever_it_is(small_at):
+    part = (cq.Workplane("XY").box(60, 40, 10).faces(">Z").workplane().pushPoints([(small_at, 0)]).hole(5)
+            .faces(">Z").workplane().pushPoints([(-small_at, 0)]).hole(12))
+    assert measure.largest_through_bore(_g(part)) == pytest.approx(12.0)
+
+
+def test_a_bore_once_worked_out_isn_t_tested_again(plate100, monkeypatch):
+    calls = _counting(monkeypatch)
+    g = _g(plate100)
+    measure.largest_through_bore(g)
+    measure.largest_through_bore(g)
+    assert len(calls) == 1
