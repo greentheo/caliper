@@ -26,3 +26,7 @@ caught. Two survived at first:
 
 The around-files (chat, routes, first build, shared sizes, tipping, promote, build plan, pick scope, features, several
 parts, mirrors) pass, 588.
+
+**#269's rework merged forward** (a merge commit). The mirror is held to the same rule as the first strip: from outside
+the part it's on ("✗ … but fillet_strip_opposite goes 3 mm into stool."), pinned and its mutant caught. An unusable pick
+and a missing opposite edge both lead with "!". `test_added_part_fits` passes, 18.
