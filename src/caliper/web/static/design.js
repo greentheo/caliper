@@ -2799,7 +2799,7 @@ function carveChart(p, run) {
         : best.verdict && best.verdict.kind === 'span' ? `<b style="color:var(--amber)">not settled: ${esc(best.verdict.why)}</b>`    // CALI-153
         : best.verdict && (best.verdict.kind === 'unresolved' || best.verdict.kind === 'unchecked')    // #101
           ? `<b style="color:var(--amber)">${esc(best.verdict.word)}: the voxels were too coarse to see its walls, so no step can be said to hold yet</b>`
-        : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a filled-in shape' : `the whole part ${best.whole != null ? (best.at_most ? 'no higher than ' : '') + best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
+        : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a solid with more in it than its pieces' : `the whole part ${best.whole != null ? (best.at_most ? 'no higher than ' : '') + best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
       : run.offer ? '' : 'Nothing could come off and still hold.'}
       ${run.offer ? `<div class="${run.offer.kind === 'room' ? 'muted' : 'note-warn'} small" style="margin-top:4px">${esc(run.offer.said)}</div>` : ''}
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
@@ -2972,7 +2972,7 @@ function lightenView(p) {
       ${lightenBlocked(p) ? `<span class="muted small">${esc(lightenBlocked(p))}</span>` : ''}</div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
-      ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
+      ? (p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
         : `The step to use: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
       : unsure ? (unsure.verdict.kind === 'span' ? `Not settled: ${unsure.verdict.why}, so no step can be said to hold.` : unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
         : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.')
@@ -2993,6 +2993,7 @@ function lightenView(p) {
 // else one place, half up, never up to 10. So 1.995 against 2 is 1.99, never "2x" under a "doesn't hold" badge.
 function safetyNum(x, need) {
   x = Number(x);
+  if (x < 0.1) return 'under 0.1';        // never "0x" (#235 review)
   let n;
   if (need != null && x > need / 1.1 && x < need * 1.1) n = Math.floor(x * 100 + 1e-9) / 100;
   else if (need != null && x < need) n = Math.floor(x * 10 + 1e-9) / 10;
@@ -3006,7 +3007,7 @@ const sx = (v, need) => (v == null ? '—' : `${safetyNum(v, need)}x`);
 // a part whose strength check ran on a filled-in solid has no "holds" anywhere (CALI-96)
 // why: a filled-in shape, or a shape that couldn't be checked against its pieces at all (it fails closed)
 const notTrusted = (why) => (String(why || '').startsWith("couldn't") ? "not trusted: its shape couldn't be checked"
-  : 'not trusted: a filled-in shape');
+  : 'not trusted: a solid with more in it than its pieces');
 const untrustedBadge = (p) => `<span class="badge bad">${notTrusted(p.untrusted)}</span>`;
 const partOf = (pid) => (S.design && S.design.parts.find((x) => x.id === pid)) || {};
 // CALI-97: a ✓ on an FEA too coarse to see its walls is no ✓. The server marks such a case (c.unresolved:
@@ -3096,6 +3097,7 @@ function foldedBy(c) {
   const w = done.length ? done.reduce((a, b) => (b.safety < a.safety ? b : a)) : null;
   if (!w) return 'the buckling check';
   const sides = w.edges_held === 2 ? 'held along both sides' : w.edges_held === 1 ? 'held along one side' : 'free along its sides, its top free to sway';
+  if (w.down === false) return `the buckling check on the ${esc(w.piece)}: a push that doesn't run down it taken as squeezing it end to end, the safe side`;   // (#235 review)
   return `the buckling check on the ${esc(w.piece)}: a plate ${sides}, its whole load on it`;
 }
 

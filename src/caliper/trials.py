@@ -205,7 +205,8 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
                       if span else "")                       # said, not hidden (CALI-110)
                      + "linear to breaking: the FEA's sag (joints solid, the stiff end)"
                      + ((" to the beam check's (resting on two edges, free to turn: the flexible end)" if plate.get("as") == "beam"
-                         else " to the plate check's (held all round, edges free to turn"
+                         else " to the plate check's (" + ("on a ring beneath it" if plate.get("support") == "ring"   # (#209 review)
+                                                            else "held all round") + ", edges free to turn"
                         + (", the grain taken the weaker way, as its strength is" if weaker else "")
                         + ": the flexible end)")   # (#64 item 7, #209 review)
                         if flex is not None else "")

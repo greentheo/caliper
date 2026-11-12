@@ -128,7 +128,8 @@ def check(pieces: list[dict], load: dict, mat: dict, tol: float) -> list[dict]:
             d = f - (f @ n) * n
             push = float(np.linalg.norm(d))
             d /= push
-            row = {"piece": pc["name"], "load_n": round(push, 1)}
+            # whether it runs down the sheet: a shove in its plane is taken as a squeeze too, the safe side (#235 review)
+            row = {"piece": pc["name"], "load_n": round(push, 1), "down": bool(d[2] < -(1 - SQUARE))}
             why = None
             if len(poly) != 4 or len(pc["polys"]) != 1:
                 why = "it isn't a plain rectangle"

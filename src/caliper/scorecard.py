@@ -428,6 +428,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     no_breaks = None                  # a breaking load from a run that can't see the wall isn't one to read
     loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
     left = []                         # parts whose strength isn't known: never left out of the verdict (#132 review)
+    ran_filled = False                # a run of this version that ran on a solid with more in it than its pieces (#70)
     for p in store.design.parts:
         if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
             continue
@@ -460,6 +461,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                         + next((f": {c['why']}" for c in run["cases"]
                                 if (c.get("fea") or {}).get("supported") is False and c.get("why")), ""))
         said = [(c, verdicts.case(run, c)) for c in run["cases"]]
+        ran_filled = ran_filled or bool(run.get("filled"))
         uncut = uncut or not run.get("cut")
         recheck = recheck or (verdicts.UNCUT if any(v["kind"] == "recheck" for _, v in said) else None)
         span = span or (verdicts.SPAN_WHY if any(v["kind"] == "span" for _, v in said) else None)
@@ -507,6 +509,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
 
     untrue = next((why for p in store.design.parts if store.is_scripted(p.id)
                    and "def loads(" in store.read_script(p.id) for why in [filled(store, p.id)] if why), None)
+    if untrue is None and ran_filled:                  # the run of this version says so itself (#70)
+        untrue = load_study.FILLED_NOTE
     # loaded in the middle only, where a two-sided top is strongest: no pass from it (CALI-94, #106 review)
     from .consistency import MIDDLE_ONLY, bare_edge
 
@@ -561,7 +565,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         elif status == "untrusted":
             checks.append({**c, "status": status, "value": m["value"] if m else None, "margin": None,
                            "unit": m["unit"] if m else "", "trust": ("not trusted: its shape couldn't be checked" if str(untrue).startswith("couldn't")
-                                    else "not trusted: a filled-in shape"), "note": untrue})   # which it is (#89)
+                                    else "not trusted: a solid with more in it than its pieces"), "note": untrue})   # which it is (#89)
         elif status == "unresolved":
             checks.append({**c, "status": status, "value": m["value"] if m else None, "unit": m["unit"] if m else "", "margin": None,
                            "trust": NOT_SEEN if saw_nothing else "not resolved: too coarse to see its walls", "note": unsure or unsettled})
