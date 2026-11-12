@@ -13,6 +13,8 @@ proposes one, the review and saving are built on it.
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import ast
 import re
 from typing import Literal, Optional
@@ -229,7 +231,7 @@ def validate(data, drop_bad_rules: bool = False) -> Plan:
         except PlanError as e:
             if not drop_bad_rules:
                 raise PlanError(str(e), rule=r.id, hint=getattr(e, "hint", None)) from e
-            said = str(e).removeprefix(f"the check {r.id!r} ")          # the check named once (#130 review)
+            said = scrubbed(e).removeprefix(f"the check {r.id!r} ")          # the check named once (#130 review)
             left.append(f"the check {r.id!r} ({r.expr}): {said}")       # one rule never sinks the plan (CALI-119)
     # validate's own left-out checks only: never what a planner's answer claims was left out (#130 review); a
     # revision adds the prior plan's (revise)
@@ -747,7 +749,7 @@ def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[
         except PlanError as e:
             if attempt == 2:
                 raise
-            ask = (f"{content}\n\nYour last plan was refused: {e}" + (f" ({e.hint})" if getattr(e, "hint", None) else "")
+            ask = (f"{content}\n\nYour last plan was refused: {scrubbed(e)}" + (f" ({e.hint})" if getattr(e, "hint", None) else "")
                    + ". Answer with the whole plan again, with that fixed and everything else as it was.")
     raise AssertionError("unreachable")
 

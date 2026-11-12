@@ -18,6 +18,8 @@ engineering brief on #42 (section 2) cites them. NEEDS ENGINEER CHECK: the value
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 from typing import Optional
 
 import numpy as np
@@ -96,7 +98,7 @@ def check(store: DesignStore, part_id: str) -> list[dict]:
     except Exception as e:  # noqa: BLE001 — every case says it wasn't checked, and why; none holds
         return [{"name": c.get("name", "a tipping case"), "safety": None, "checked": False,
                  "factor": float(c.get("factor", 1.0)), "verdict": verdicts.meets(None, None),
-                 "why": f"not checked: {e}"} for c in cases]
+                 "why": f"not checked: {scrubbed(e)}"} for c in cases]
     for case, ld in zip(cases, parse_loads(cases)):
         f = np.asarray(ld["force"], float)
         at = (np.asarray(ld["lo"], float) + np.asarray(ld["hi"], float)) / 2

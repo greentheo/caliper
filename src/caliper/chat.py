@@ -1127,7 +1127,7 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
     try:                                           # never on a mirror on its own: it'd be undone (#246 review)
         mirror.refuse_if_mirror(store, part_id, "carve")
     except ValueError as e:
-        return TurnResult(action="carve", ok=False, part=part_id, events=events, reply=f"{e}.")
+        return TurnResult(action="carve", ok=False, part=part_id, events=events, reply=f"{scrubbed(e)}.")
     try:
         rec = carve.study(store, part_id, emit=lambda k, t="", **d: _emit(events, on_event, k, t, part=part_id, **d))
     except (ValueError, ImportError) as e:
@@ -1169,7 +1169,7 @@ def picture_part(store: DesignStore, part_id: str, subject: str, where: str = ""
     try:                                           # never on a mirror on its own: it'd be undone (#246 review)
         mirror.refuse_if_mirror(store, part_id, "cut a picture into")
     except ValueError as e:
-        return TurnResult(action="picture", ok=False, part=part_id, events=events, reply=f"{e}.")
+        return TurnResult(action="picture", ok=False, part=part_id, events=events, reply=f"{scrubbed(e)}.")
     subject = re.sub(r"^(?:a|an|the|some)\s+", "", (subject or "picture").strip(), flags=re.I) or "picture"
     # just the thing: "T-rex silhouette cut into the side panel" -> "T-rex"
     subject = re.split(r"\s+(?:silhouette|cut|cutout|cut-out|shape|picture|drawing|on|onto|into|out of|in)\b",

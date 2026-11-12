@@ -32,6 +32,8 @@ run say what it did and didn't model.
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import io
 import json
 import os
@@ -96,7 +98,7 @@ def health(base: Optional[str] = None) -> dict:
         return {"ok": True, "url": base or WHITTLE_URL,
                 "materials": sorted(info.get("materials", {}))}
     except WhittleError as e:
-        return {"ok": False, "url": base or WHITTLE_URL, "error": str(e)}
+        return {"ok": False, "url": base or WHITTLE_URL, "error": scrubbed(e)}
 
 
 def upload(stl: bytes, name: str, base: Optional[str] = None) -> dict:

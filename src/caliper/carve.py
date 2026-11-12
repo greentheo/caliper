@@ -15,6 +15,8 @@ carve (it no longer fits) and says so.
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import json
 import os
 import re
@@ -277,7 +279,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
         raise
     except BaseException as e:
         # a carve that fails says so, with what it finished: it doesn't read "not finished" forever (CALI-103)
-        keep({**partial, "stations": out, "status": "failed", "error": f"{type(e).__name__}: {e}"})
+        keep({**partial, "stations": out, "status": "failed", "error": f"{type(e).__name__}: {scrubbed(e)}"})
         raise
 
 

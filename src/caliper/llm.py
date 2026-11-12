@@ -6,6 +6,8 @@ Every request goes through :func:`ask`, named by its job in :data:`JOBS`, so a j
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import contextvars
 import logging
 import os
@@ -64,7 +66,7 @@ class CutOff(Stopped):
 
 def said(e: Exception) -> str:
     """What to tell the person when Claude gave no usable answer: the one place these words are read from."""
-    return str(e)
+    return scrubbed(e)
 
 
 def tell(store, e: Exception, then: str = "") -> str:

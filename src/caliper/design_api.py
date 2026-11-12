@@ -11,6 +11,8 @@ follows it on ``GET /api/jobs/{id}/events`` (Server-Sent Events, CALI-31).
 
 from __future__ import annotations
 
+from .errors import scrubbed
+
 import math
 import os
 import re
@@ -415,7 +417,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         try:
             report, part_errors = store.evaluate(tolerant=True)
         except Exception as e:  # noqa: BLE001
-            part_errors = {"<design>": f"{type(e).__name__}: {e}"}
+            part_errors = {"<design>": f"{type(e).__name__}: {scrubbed(e)}"}
     proposal = promote.pending(store)
     runs = {"load": load_study.list_runs(store), "lighten": lighten.list_runs(store), "carve": carve.list_runs(store),
             "frame": frame_study.list_runs(store), "patterns": patterns.list_runs(store),
@@ -994,7 +996,7 @@ def router():
             except Exception as e:
                 # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87)
                 s.append_log({"kind": "reply", "action": "picture", "part": pid, "ok": False,
-                              "reply": f"I couldn't put it on: {type(e).__name__}: {e}"})
+                              "reply": f"I couldn't put it on: {type(e).__name__}: {scrubbed(e)}"})
                 raise
             s.append_log({"kind": "reply", "action": "picture", "part": pid, "version": res.version, "ok": res.ok,
                           "reply": res.reply})
