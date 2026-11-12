@@ -18,6 +18,7 @@ records those assertions as ``deferred`` and excludes them from ``all_pass`` rat
 from __future__ import annotations
 
 import ast
+import math
 import operator
 import threading
 from dataclasses import dataclass, field
@@ -44,6 +45,24 @@ _CMPOPS = {
     ast.GtE: operator.ge, ast.Eq: operator.eq, ast.NotEq: operator.ne,
 }
 _UNARY = {ast.USub: operator.neg, ast.UAdd: operator.pos, ast.Not: operator.not_}
+#: Float noise, not a measuring tolerance (#249): 17 in is 17 × 25.4 = 431.79999999999995 mm, which failed ``== 431.8``. ``==`` and
+#: ``!=`` compare with :func:`math.isclose` at these, ``<=`` and ``>=`` are "less (or more), or close". Strict ``<`` and ``>`` stay
+#: strict. Nothing a person could measure moves: ``safety >= 2.0`` still fails at 1.995. A measuring tolerance is the rule's own
+#: (``abs(top_z - 431.8) <= 0.5``), never the evaluator's.
+REL_TOL = ABS_TOL = 1e-9
+_CLOSE = (ast.Eq, ast.NotEq, ast.LtE, ast.GtE)
+
+
+def _number(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _compare(op, a, b) -> bool:
+    """``a op b``, two numbers within float noise counting as equal."""
+    if type(op) in _CLOSE and _number(a) and _number(b):
+        close = math.isclose(float(a), float(b), rel_tol=REL_TOL, abs_tol=ABS_TOL)
+        return {ast.Eq: close, ast.NotEq: not close, ast.LtE: a <= b or close, ast.GtE: a >= b or close}[type(op)]
+    return _CMPOPS[type(op)](a, b)
 
 
 class SafeEvalError(Exception):
@@ -108,7 +127,7 @@ def _eval(node: ast.AST, ctx: dict) -> Any:
         left = _eval(node.left, ctx)
         for op, comp in zip(node.ops, node.comparators):
             right = _eval(comp, ctx)
-            if type(op) not in _CMPOPS or not _CMPOPS[type(op)](left, right):
+            if type(op) not in _CMPOPS or not _compare(op, left, right):
                 return False
             left = right
         return True
@@ -146,12 +165,17 @@ def _margin(node: ast.AST, ctx: dict) -> tuple[Optional[float], Any]:
         lhs = _eval(node.left, ctx)
         rhs = _eval(node.comparators[0], ctx)
         op = type(node.ops[0])
-        if op in (ast.LtE, ast.Lt):
+        inside = lambda m: 0.0 if m < 0 and math.isclose(float(lhs), float(rhs), rel_tol=REL_TOL, abs_tol=ABS_TOL) else m  # noqa: E731
+        if op is ast.LtE:
+            return inside(float(rhs - lhs)), lhs
+        if op is ast.Lt:
             return float(rhs - lhs), lhs
-        if op in (ast.GtE, ast.Gt):
+        if op is ast.GtE:
+            return inside(float(lhs - rhs)), lhs
+        if op is ast.Gt:
             return float(lhs - rhs), lhs
         if op is ast.Eq:
-            return -abs(float(lhs - rhs)), lhs
+            return inside(-abs(float(lhs - rhs))), lhs
         if op is ast.NotEq:
             return abs(float(lhs - rhs)), lhs
     if isinstance(node, ast.Compare) and len(node.ops) == 2:

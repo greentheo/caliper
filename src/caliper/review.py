@@ -26,6 +26,9 @@ from .design import DesignStore
 #: "a mirror of side_left", "mirrors side_left", "a mirror image of the left side": a pair the plan calls mirrored
 _MIRROR_WORDS = re.compile(r"\bmirror(?:s|ed)?\b(?!\s+(?:finish|finished|polish|polished|shine|shiny|surface|bright|smooth|glass)\b)"
                            r"(?:(?:\s+image)?(?:\s+of)?\s+(?:the\s+)?([a-z_ ]+))?", re.I)
+#: a mirror word about a feature, not a part: "bolt holes mirrored to match the side flanges" (#249)
+_FEATURE_BEFORE = re.compile(r"\b(?:holes?|slots?|cut-?outs?|patterns?|features?|pockets?|notches?|tabs?|grooves?|ribs?|chamfers?"
+                             r"|fillets?|flanges?)\s+(?:(?:are|is|be|get|were)\s+)?$", re.I)
 _EXCEPTION = re.compile(r"^\s*\w+(?:Error|Exception):\s*")
 
 
@@ -260,6 +263,8 @@ def mirrored_pairs(store: DesignStore) -> tuple[list[tuple[str, str]], list[str]
         words = " ".join(str(p.get(k) or "") for k in ("what", "intent"))
         if not src:
             m = _MIRROR_WORDS.search(words)
+            if m and _FEATURE_BEFORE.search(words[:m.start()]):
+                m = None                             # its holes or slots are mirrored: not the part (#249)
             src = named_part(m.group(1), [i for i in ids if i != p["id"]]) if m and m.group(1) else None
             if m and src is None:
                 unpaired.append(p["id"])

@@ -419,8 +419,7 @@ def unseen(run: dict, case: dict) -> str:
     if walls is None:                                  # an older run: only its thinnest is known, and where
         where = run.get("thinnest_where") or {}
         if not where or where.get("piece") in cleared:   # what else it couldn't see isn't known: the safe side
-            return (f"this run doesn't say which walls its voxels couldn't see (its thinnest is {thin:g} mm, {voxels}): "
-                    f"check it again")
+            return f"{OLDER_RUN}: check it again"
         walls = [{"mm": thin, **where}]
     left = [w for w in walls if w.get("piece") not in cleared or not w.get("piece")]
     if not left:
@@ -428,6 +427,10 @@ def unseen(run: dict, case: dict) -> str:
     w = left[0]
     what = f"the {w['piece'].replace('_', ' ')} is" if w.get("piece") else "the printed walls are"
     return f"{what} too thin to check at this size ({w['mm']:g} mm, {voxels})"
+
+
+#: An older run, from before every unseen wall was recorded (#249): it isn't known which it couldn't see, so none is claimed.
+OLDER_RUN = "this run is from before unseen walls were recorded"
 
 
 def governing_words(case: dict) -> str:

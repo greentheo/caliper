@@ -201,10 +201,13 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
             # its safety as the card says it, against the same thing (#64 item 9); not a number to test against
             # where the break isn't settled
             "why_no_break": ("the check holds it fixed where it's held, so it may read too strong" if span else
+                             f"no prediction: {gap}" if gap.startswith(L.OLDER_RUN) else          # it doesn't say which (#249)
                              f"no prediction: the check couldn't see the wall: {gap}" if gap else
                              "no prediction: the check was too coarse to see its walls" if unknown else None),
             "over": None if unknown or span else answers.over(case, run.get("min_safety")),
-            "basis": ("from checks that couldn't see every wall, so a rough guess until it's checked again: " if gap else
+            "basis": ("from a run from before unseen walls were recorded, so a rough guess until it's checked again: "
+                      if gap.startswith(L.OLDER_RUN) else
+                      "from checks that couldn't see every wall, so a rough guess until it's checked again: " if gap else
                       "from an FEA too coarse to see its walls, so a rough guess until it's checked finer: "
                       if unknown else "from an FEA that holds it fixed where it's held, so a real one may give more: "
                       if span else "")                       # said, not hidden (CALI-110)
