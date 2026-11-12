@@ -129,19 +129,19 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
         return _make("unchecked", why=c.get("why") or "nothing connects where it's pushed to where it's held")
     held = c.get("holds")  # producer: the study's own number, judged here
     off = _unresolved(run, c)
-    if not held:                                       # a ✗ stays a ✗ (CALI-97): its words say if the model may be wrong
-        return _make("fails", safety, coarse=off)
+    if not held:                                       # a ✗ stays a ✗ (CALI-97): its words say if the model may be wrong,
+        from .load_study import FEA, judged_by         # only where the FEA judges it: unseen softens a pass, never a resolved ✗ (#248)
+
+        return _make("fails", safety, coarse=off and judged_by(run, c) in FEA)
     if filled or run.get("filled"):
         return _make("untrusted", safety, why=filled or run.get("filled"))
     if off:
-        from .load_study import judged_by, unseen
+        from .answers import safety_num
+        from .load_study import governing_words, unseen
 
-        gap = unseen(run, c)                          # what couldn't be seen, beside what holds (#244)
-        by = judged_by(run, c)
-        piece = ((c.get("plate") or {}).get("piece") if by == "plate" else
-                 next((r.get("piece") for r in c.get("buckling") or [] if r.get("done")), None) if by == "buckling" else None)
-        what = f"the {piece.replace('_', ' ')}" if piece else f"the {by} check"
-        why = (f"{what} holds {safety:.2f}x; {gap}" if gap and safety is not None else "")
+        gap = unseen(run, c)                          # what couldn't be seen, beside the check that holds and its number (#244, #248)
+        why = (f"{governing_words(c)} holds {safety_num(safety, run.get('min_safety'))} times over; {gap}"
+               if gap and safety is not None else "")
         return _make("unchecked" if not run.get("finer") else "unresolved", safety, **({"why": why} if why else {}))
     from .load_study import fixed_ends
 

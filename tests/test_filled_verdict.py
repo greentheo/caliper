@@ -37,9 +37,9 @@ UNTRUSTED = ('Not trusted yet: the strength check ran on a solid with more in it
              'pieces" or "add the missing piece to the stool".')     # naming the part: they reach it from anywhere
 
 
-def _checked(tmp_path, monkeypatch, src):
+def _checked(tmp_path, monkeypatch, src, through=2):
     pytest.importorskip("whittle")
-    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", through)
     store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
     store.write_part("stool", src, intent="a box step stool")
     with open(os.path.join(store.root, "scorecard.yaml"), "w") as f:
@@ -90,7 +90,9 @@ def test_the_books_dont_print_a_holding_line_for_it(tmp_path, monkeypatch):
 
 
 def test_the_same_box_built_hollow_still_reads_as_it_holds(tmp_path, monkeypatch):
-    store, rec = _checked(tmp_path, monkeypatch, BOX_STOOL)
+    # at 4 voxels through, as a real run: at 2, its 19.05 mm sides are walls the voxels can't see, and the top's plate check
+    # doesn't clear them (#248 review), so it's rightly "not checked"
+    store, rec = _checked(tmp_path, monkeypatch, BOX_STOOL, through=4)
     assert consistency.filled(store, "stool") is None
     part = answers.answers(store, design_api.design_state(store), "stool")[1]
     strength = [ln for ln in part["lines"] if ln.get("study") == "load"]
