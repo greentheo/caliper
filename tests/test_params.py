@@ -529,3 +529,66 @@ def test_two_numbers_changed_at_once_say_nothing_about_what_was_built(store, mon
     assert not [n for n in both["notes"] if "built" in n]
     one = params.set_value(store, "box", "fillet_r", 1.5)
     assert "asked this, built that" in one["notes"]
+
+
+# --- CALI-171 (#266): a number's comment says the number it has ------------------------------------------------------------
+#: Theo's step-stool-5 after its Parameters edits read ``"height": 406.4,  # 20 in``, and the designer read the comment. The shape
+#: of his PARAMS, not his script.
+STOOL = '''PARAMS = {
+    "height": 508.0,      # 20 in
+    "width": 609.6,       # 24 in
+    "top_depth": 279.4,   # 11 in deep
+    "ply_t": 19.05,       # 3/4 in plywood, 1 1/4 in screws
+    "rail_h": 101.6,      # rails, 4 in tall (101.6 mm)
+    "splay": 10.0,        # 10 deg
+    "slats": 4,           # 4 in a row
+    "gap": 3.0,           # 3 mm
+    "lip": 31.75,         # 1 1/4 in
+}
+'''
+
+
+@pytest.mark.parametrize("name,new,before,after", [
+    ("height", 406.4, "# 20 in", "# 16 in"),                                         # Theo's: no "20 in" left
+    ("width", 406.4, "# 24 in", "# 16 in"),
+    ("top_depth", 355.6, "# 11 in deep", "# 14 in deep"),
+    ("ply_t", 12.7, "# 3/4 in plywood, 1 1/4 in screws", "# 1/2 in plywood, 1 1/4 in screws"),   # only the figure that's this number
+    ("rail_h", 152.4, "# rails, 4 in tall (101.6 mm)", "# rails, 6 in tall (152.4 mm)"),
+    ("height", 500.0, "# 20 in", "# 19.685 in"),                                     # not a 32nd: said as the page says it
+    ("splay", 12.0, "# 10 deg", "# 10 deg"),                                         # not a length: as it was
+    ("slats", 5, "# 4 in a row", "# 4 in a row"),                                    # a count: "4 in" isn't inches
+    ("gap", 2.5, "# 3 mm", "# 2.5 mm"),
+    ("lip", 38.1, "# 1 1/4 in", "# 1 1/2 in"),                                       # a whole and a fraction, read as one
+])
+def test_a_rewritten_number_s_comment_says_the_new_number(name, new, before, after):
+    """CALI-171 (#266): a Parameters edit (and the skeleton's, and an adopted study's) rewrites the number's figure in its
+    comment, in the comment's own unit; any other figure in it stays."""
+    line = next(ln for ln in STOOL.splitlines() if f'"{name}"' in ln)
+    assert line.endswith(before)
+    got = next(ln for ln in aero.set_params(STOOL, {name: new}).splitlines() if f'"{name}"' in ln)
+    assert got.endswith(after), got
+    assert [ln for ln in aero.set_params(STOOL, {name: new}).splitlines() if f'"{name}"' not in ln] == \
+        [ln for ln in STOOL.splitlines() if f'"{name}"' not in ln]                   # nothing else touched
+
+
+def test_a_comment_already_stale_from_before_is_put_right_on_the_next_edit():
+    """Theo's script already read ``"width": 406.4,  # 24 in``: its one figure is no number it has had since, so it says the new
+    one."""
+    stale = STOOL.replace('"width": 609.6,       # 24 in', '"width": 406.4,       # 24 in')
+    got = next(ln for ln in aero.set_params(stale, {"width": 431.8}).splitlines() if '"width"' in ln)
+    assert got.endswith("# 17 in"), got
+
+
+def test_setting_several_at_once_rewrites_each_comment():
+    got = aero.set_params(STOOL, {"height": 406.4, "width": 406.4, "top_depth": 355.6})
+    assert "20 in" not in got and "24 in" not in got and "11 in" not in got
+    assert '"height": 406.4,      # 16 in' in got and '"top_depth": 355.6,   # 14 in deep' in got, got
+
+
+def test_a_number_set_by_hand_leaves_no_stale_inches(store):
+    """Through the Parameters route's own path: the stored script's comment follows."""
+    s = store
+    s.write_part("box", BOX.replace('"w": 400.0,         # width of the box', '"w": 406.4,         # 16 in wide'), intent="a box")
+    params.set_value(s, "box", "w", 18, "in")
+    line = next(ln for ln in s.read_script("box").splitlines() if '"w"' in ln)
+    assert line.endswith("# 18 in wide"), line
