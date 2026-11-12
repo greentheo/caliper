@@ -244,8 +244,9 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         r = making.filament(r, made[p.id] if isinstance(made[p.id], dict) else None)
         r["pieces_raw"] = C.takeoff(C._items(C.declared(store, p.id)))
         reports[p.id] = r
-        _metric(metrics, f"weight.{p.id}", r["mass_lb"], "lb", f"{p.id} weighs", "model", "construction",
-                **({"note": r["unweighed"]} if r.get("unweighed") else {}))     # unknown, said (#125 review)
+        own = making.filament_said([r])[0]       # its own figure, labelled by where it came from (#237 review)
+        _metric(metrics, f"weight.{p.id}", r["mass_lb"], "lb", f"{p.id} weighs", "rough" if own else "model",
+                own or "construction", **({"note": r["unweighed"]} if r.get("unweighed") else {}))     # unknown, said (#125 review)
         for k in r.get("keeps") or []:
             checks.append({"id": f"keeps:{p.id}.{k['name']}", "label": f"{p.id} holds the {k['name']}",
                            "status": "pass" if k["clear"] else "fail", "value": k["depth_mm"], "margin": -k["depth_mm"],
@@ -263,6 +264,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     more_lb = sum(r.get("filament_more_kg") or 0.0 for r in reports.values()) * M.LB_KG
     total_lb = None if b["mass_lb"] is None else round(b["mass_lb"] + more_lb, 1)
     filament_guess = making.filament_said(reports.values())[0]
+    filament_upper = making.filament_bound(reports.values())
     _metric(metrics, "weight.total_lb", total_lb, "lb", f"everything, with {payload:g} lb aboard",
             "rough" if filament_guess else "model", filament_guess or "balance", **unknown)
     _metric(metrics, "hitch.tongue_lb", b["mass_lb"], "lb", "on the hitch's tongue, standing still", "model", "balance",
@@ -388,8 +390,11 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
         planned += 1
         missing += [f"{pid}: {m['name']} ({m['why']})" for m in mk["missing"]]
         unprintable = unprintable or making.no_print_total(mk)
-        hours += sum(x["hours"] for x in mk["printed"])
-        grams += sum(x["filament_g"] for x in mk["printed"])
+        gone = next((x for x in mk["printed"] if x.get("hours") is None), None)
+        if gone is not None:                   # the slicer couldn't: no total, said (a None in the sum crashed the card)
+            unprintable = unprintable or f"can't be worked out: the slicer couldn't for the {gone['name']} ({gone.get('from')})"
+        hours += sum(x["hours"] for x in mk["printed"] if x.get("hours") is not None)
+        grams += sum(x["filament_g"] for x in mk["printed"] if x.get("filament_g") is not None)
         guessed = guessed or next((x["rough_said"] for x in mk["printed"] if x.get("rough_said")), "")
     if reports:
         # a ✓ only over what was worked out (#89, #137 P2 item 10: "✓ … 0 measured" where no part's plan could be
@@ -533,12 +538,17 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             met = True
         else:
             met = None
+        bounded = (filament_upper and number and c["metric"].startswith(("weight.", "cost."))
+                   and not making.settled_by_bound(op, met))   # an upper bound that doesn't settle it: an estimate (#237)
+        if bounded:
+            met = True
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-110)
         verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=(unsure or unsettled) if strength else None,
                                 edge=bool(edgeless) if strength else False,             # the middle only (CALI-94)
                                 incomplete="; ".join(left) if strength and left else None,
                                 estimate=m["source"] if m and m.get("trust") == "rough" and c["metric"].startswith("print.")
                                 else filament_guess if filament_guess and c["metric"].startswith(("weight.", "cost."))
+                                and (bounded or not filament_upper)
                                 else None,
                                 # an old number on its limit, the run's or this goal's own (#214 review)
                                 recheck=(recheck or (verdicts.UNCUT if number and verdicts.goal_on_limit(

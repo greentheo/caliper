@@ -94,6 +94,20 @@ def filament_said(reports) -> tuple[str, str]:
     return (f"a guess (the filament is {off[0]})" if off else ""), pending
 
 
+def filament_bound(reports) -> bool:
+    """Whether every printed figure that isn't the slicer's is the solid's share, an upper bound on what it weighs (#237
+    review): a "weighs under" goal that passes on it passes, and a "weighs at least" one that fails on it fails. A rough
+    guess can run either way, so it's never a bound."""
+    groups = [g for r in reports if r for g in ((r.get("bom") or {}).get("printed") or [])]
+    off = [g.get("filament_from", FROM_SOLID) for g in groups if g.get("filament_from") != FROM_SLICER]
+    return bool(off) and all(f == FROM_SOLID for f in off)
+
+
+def settled_by_bound(op: str, met: Optional[bool]) -> bool:
+    """Whether an upper bound settles a goal: under it and met, or at least it and not met."""
+    return met is not None and ((op in ("<=", "<") and met) or (op in (">=", ">") and not met))
+
+
 def no_print_total(mk: dict) -> str:
     """Why a print total can't be given for this part: a printed piece it can't make isn't in ``printed``, so a sum over that
     would read as the whole (#179 review, rule 6). "" where there's no such piece."""

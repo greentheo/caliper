@@ -2326,6 +2326,15 @@ function cutsText(cuts) {
   return [...n].map(([k, v]) => `${v} @ ${k}`).join(', ');
 }
 
+// the table, the pieces and the balance go by the model's solid; the part's weight above by its filament figure: said
+// where the two differ, so neither reads as the other (#237 review)
+function solidSaid(r) {
+  const more = r.filament_more_kg || 0;
+  if (Math.abs(more) < 0.005 || r.mass_lb == null) return '';
+  const solid = r.mass_lb - more * 2.20462;
+  return `<div class="small muted">The table below, the pieces' weights and the balance are the model's solid
+    (${lbs(solid)}); its weight above, ${lbs(r.mass_lb)}, goes by its filament figure.</div>`;
+}
 function builtResults(p, c) {
   const r = c.report, b = c.balance, changed = Object.keys(r.changed || {}).length;
   const mine = b && (b.parts || []).find((x) => x.part === p.id);
@@ -2350,6 +2359,7 @@ function builtResults(p, c) {
     <table class="st"><tr><th style="text-align:left">made of</th><th>lb</th><th>share</th></tr>
       ${r.materials.map((m) => `<tr><td style="text-align:left">${esc(m.label)}</td><td>${m.mass_lb}</td>
         <td>${pct(m.mass_kg / r.mass_kg)}</td></tr>`).join('')}</table>
+    ${solidSaid(r)}
     <h5 style="margin:12px 0 4px">To buy</h5>
     <ul class="list small">
       ${bom.sheets.map((g) => `<li><b>${g.count} × ${esc(g.label)}</b> <span class="muted">${sheetFt(g.stock_mm)} sheets · ${g.area_ft2} ft² of panels</span>
