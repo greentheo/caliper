@@ -1308,11 +1308,15 @@ NOTES = [
 ]
 
 
+#: What a run on a solid with more in it than its pieces says (#209 review): with a piece missing from construction(), the solid may be the part as built.
+FILLED_NOTE = ("This ran on a solid with more in it than its pieces: its shape filled in, or a piece missing from its construction. Its numbers "
+               "are that solid's.")
+
 #: what a check says where it gave no result that can be read
 NO_RESULT = {"unchecked": "not checked: its walls are too thin for the voxels",
              "span": "not settled: the check holds its ends fixed",
              "unresolved": "not resolved yet: check it again finer",
-             "untrusted": "not trusted: it ran on a filled-in shape"}
+             "untrusted": "not trusted: it ran on a solid with more in it than its pieces"}
 
 
 def done_words(n: int, v: dict, worst: Optional[float]) -> str:
@@ -1404,7 +1408,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
 
     if filled(store, part_id):                        # what this number rests on (CALI-96)
         record["filled"] = True
-        notes.append("This ran on a filled-in shape, not the part as built: its numbers are the block's.")
+        notes.append(FILLED_NOTE)
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
     from . import verdicts

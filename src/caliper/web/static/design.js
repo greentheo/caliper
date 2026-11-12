@@ -431,11 +431,18 @@ const noPieces = new Map();     // part id -> {version, why} that can't be drawn
 let stationMesh = null;         // a whittle station shown in place of its part
 const loader = new STLLoader();
 
+// framed by fit, and not moved since: a resize frames it again for the new shape (reviewer-2 on #250: 1024 to 701 px, or a phone
+// turned, cut the stool off at the edge until fit was pressed). Once the person moves the camera, a resize leaves it where they put it
+let fitted = false;
+function unfit() {
+  fitted = false;
+}
 function resize() {
   const w = viewer.clientWidth || 1, h = viewer.clientHeight || 1;
   renderer.setPixelRatio(devicePixelRatio);
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
+  if (fitted) frame();
 }
 new ResizeObserver(resize).observe(viewer);
 resize();
@@ -462,19 +469,28 @@ function fitGrid(box) {
   scene.add(grid);
 }
 
+// how much further back a view narrower than it is tall stands, so the part fits across it too (#70 item 20: at a 1024 px
+// window, fit cropped the stool). Across, the half-angle's tangent is the height's times the aspect, so the distance
+// grows by 1/aspect; 1 for a view as wide as it's tall or wider, as before
+function narrowBy(aspect) {
+  return aspect >= 1 ? 1 : 1 / aspect;
+}
+
 function frame() {
   const box = contentBox();
   if (box.isEmpty()) return;
   const c = box.getCenter(new THREE.Vector3());
   const r = box.getSize(new THREE.Vector3()).length() / 2 || 100;
-  const d = r * 2.3;
+  const d = r * 2.3 * narrowBy(camera.aspect);
   controls.target.copy(c);
   camera.position.set(c.x - d * 0.75, c.y - d * 0.95, c.z + d * 0.55);   // from behind-left, above
   camera.near = r / 200; camera.far = r * 200; camera.updateProjectionMatrix();
   controls.update();
   fitGrid(box);
+  fitted = true;
 }
 $('fitView').onclick = frame;
+controls.addEventListener('start', unfit);           // the person moved it: theirs now
 addEventListener('keydown', (e) => {
   if (e.key === 'f' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) frame();
 });
@@ -2336,6 +2352,15 @@ function cutsText(cuts) {
   return [...n].map(([k, v]) => `${v} @ ${k}`).join(', ');
 }
 
+// the table, the pieces and the balance go by the model's solid; the part's weight above by its filament figure: said
+// where the two differ, so neither reads as the other (#237 review)
+function solidSaid(r) {
+  const more = r.filament_more_kg || 0;
+  if (Math.abs(more) < 0.005 || r.mass_lb == null) return '';
+  const solid = r.mass_lb - more * 2.20462;
+  return `<div class="small muted">The table below, the pieces' weights and the balance are the model's solid
+    (${lbs(solid)}); its weight above, ${lbs(r.mass_lb)}, goes by its filament figure.</div>`;
+}
 function builtResults(p, c) {
   const r = c.report, b = c.balance, changed = Object.keys(r.changed || {}).length;
   const mine = b && (b.parts || []).find((x) => x.part === p.id);
@@ -2360,6 +2385,7 @@ function builtResults(p, c) {
     <table class="st"><tr><th style="text-align:left">made of</th><th>lb</th><th>share</th></tr>
       ${r.materials.map((m) => `<tr><td style="text-align:left">${esc(m.label)}</td><td>${m.mass_lb}</td>
         <td>${pct(m.mass_kg / r.mass_kg)}</td></tr>`).join('')}</table>
+    ${solidSaid(r)}
     <h5 style="margin:12px 0 4px">To buy</h5>
     <ul class="list small">
       ${bom.sheets.map((g) => `<li><b>${g.count} × ${esc(g.label)}</b> <span class="muted">${sheetFt(g.stock_mm)} sheets · ${g.area_ft2} ft² of panels</span>
@@ -2799,7 +2825,7 @@ function carveChart(p, run) {
         : best.verdict && best.verdict.kind === 'span' ? `<b style="color:var(--amber)">not settled: ${esc(best.verdict.why)}</b>`    // CALI-153
         : best.verdict && (best.verdict.kind === 'unresolved' || best.verdict.kind === 'unchecked')    // #101
           ? `<b style="color:var(--amber)">${esc(best.verdict.word)}: the voxels were too coarse to see its walls, so no step can be said to hold yet</b>`
-        : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a filled-in shape' : `the whole part ${best.whole != null ? (best.at_most ? 'no higher than ' : '') + best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
+        : `<b class="bad">${best.verdict && best.verdict.kind === 'untrusted' ? 'not trusted: a solid with more in it than its pieces' : `the whole part ${best.whole != null ? (best.at_most ? 'no higher than ' : '') + best.whole + 'x' : 'unchecked'}, so it doesn't hold`}</b>`}.`
       : run.offer ? '' : 'Nothing could come off and still hold.'}
       ${run.offer ? `<div class="${run.offer.kind === 'room' ? 'muted' : 'note-warn'} small" style="margin-top:4px">${esc(run.offer.said)}</div>` : ''}
       ${stale ? '<span class="badge">older version</span>' : ''}</div>
@@ -2974,7 +3000,7 @@ function lightenView(p) {
       ${lightenBlocked(p) ? `<span class="muted small">${esc(lightenBlocked(p))}</span>` : ''}</div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
-      ? (p.untrusted ? 'Not trusted: its strength check ran on a filled-in shape, so no step can be said to hold.'
+      ? (p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
         : `${lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
       : unsure ? (unsure.verdict.kind === 'span' ? `Not settled: ${unsure.verdict.why}, so no step can be said to hold.` : unsure.verdict.kind === 'unchecked' ? 'Not checked: its walls are too thin for the voxels, so no step can be said to hold.'
         : 'Not resolved yet: the check was too coarse to see its walls, so no step can be said to hold. Check it again finer.')
@@ -2995,6 +3021,7 @@ function lightenView(p) {
 // else one place, half up, never up to 10. So 1.995 against 2 is 1.99, never "2x" under a "doesn't hold" badge.
 function safetyNum(x, need) {
   x = Number(x);
+  if (x < 0.1) return 'under 0.1';        // never "0x" (#235 review)
   let n;
   if (need != null && x > need / 1.1 && x < need * 1.1) n = Math.floor(x * 100 + 1e-9) / 100;
   else if (need != null && x < need) n = Math.floor(x * 10 + 1e-9) / 10;
@@ -3008,7 +3035,7 @@ const sx = (v, need) => (v == null ? '—' : `${safetyNum(v, need)}x`);
 // a part whose strength check ran on a filled-in solid has no "holds" anywhere (CALI-96)
 // why: a filled-in shape, or a shape that couldn't be checked against its pieces at all (it fails closed)
 const notTrusted = (why) => (String(why || '').startsWith("couldn't") ? "not trusted: its shape couldn't be checked"
-  : 'not trusted: a filled-in shape');
+  : 'not trusted: a solid with more in it than its pieces');
 const untrustedBadge = (p) => `<span class="badge bad">${notTrusted(p.untrusted)}</span>`;
 const partOf = (pid) => (S.design && S.design.parts.find((x) => x.id === pid)) || {};
 // CALI-97: a ✓ on an FEA too coarse to see its walls is no ✓. The server marks such a case (c.unresolved:
@@ -3098,6 +3125,7 @@ function foldedBy(c) {
   const w = done.length ? done.reduce((a, b) => (b.safety < a.safety ? b : a)) : null;
   if (!w) return 'the buckling check';
   const sides = w.edges_held === 2 ? 'held along both sides' : w.edges_held === 1 ? 'held along one side' : 'free along its sides, its top free to sway';
+  if (w.down === false) return `the buckling check on the ${esc(w.piece)}: a push that doesn't run down it, taken as a squeeze, the safe side for the sheet; racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid`;   // (#235, #250 review)
   return `the buckling check on the ${esc(w.piece)}: a plate ${sides}, its whole load on it`;
 }
 
