@@ -256,6 +256,8 @@ function treeHtml(design, view) {
       <button class="tname" data-sel="${esc(p.id)}"${fixed ? ' data-fixed="1"' : ''}>${esc(p.name || p.id)}</button>
       <span class="side">${fixed ? 'reference' : `v${p.version}`}</span></div>`
       + (editing && view.rename.key == null ? renameRow(p.id, null, view.rename.draft) : '')
+      + (p.mirror_of ? `<div class="tmirror">a mirror of ${esc(p.mirror_of)}: change it there
+        <button class="linkish" data-unmirror="${esc(p.id)}">break the mirror</button></div>` : '')   // (#246 review)
       + (cant ? `<div class="tcant">can't draw this part's pieces: ${esc(cant)}</div>` : '');
     const pieces = (p.pieces || []).map((pc) => {
       const pcOff = off || (!oneBody && view.pieces.has(pieceId(p.id, pc.key)));
@@ -288,6 +290,12 @@ function renderTree() {
     oneBody: t.oneBody, cant });
   if (t.rename && $('treeName')) { $('treeName').focus(); $('treeName').select(); }
 }
+async function unmirror(part) {             // a mirror made a part of its own again, its shape kept (#246 review)
+  try {
+    S.design = await api('POST', `/api/designs/${S.slug}/parts/${part}/unmirror`);
+  } catch (e) { showErr(plainly(e.message)); }
+  render();
+}
 async function saveTreeName(part, key) {
   const label = $('treeName').value;
   $('treeName').blur();
@@ -301,6 +309,7 @@ async function saveTreeName(part, key) {
 function treeClick(el, now) {
   const d = el.dataset, t = seen();
   if (d.fold) { t.open = !t.open; keepTree(); renderTree(); return 'fold'; }
+  if (d.unmirror) { unmirror(d.unmirror); return 'unmirror'; }
   if (d.renameSave) { saveTreeName(d.part, d.key != null ? d.key : null); return 'save'; }
   if (d.eye) {
     const set = d.key != null ? t.pieces : t.parts, id = d.key != null ? pieceId(d.eye, d.key) : d.eye;

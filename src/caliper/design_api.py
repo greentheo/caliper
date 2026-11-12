@@ -20,7 +20,7 @@ from typing import Optional, Union
 
 from pydantic import BaseModel, field_validator
 
-from . import (aero, better, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
+from . import (aero, mirror, better, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
                lighten,
                load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, tree, verdicts)
 from . import llm
@@ -398,6 +398,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "label": p.label, "name": p.label or p.id,      # the name a person reads; the id never changes (#94)
             "pieces": tree.pieces(store, p.id) if construction.declares(script) else [],
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
+            "mirror_of": mirror.of(script)["source"] if mirror.of(script) else None,     # (#246 review)
             "stl_url": f"/api/designs/{slug}/parts/{p.id}.stl?v={p.version}",
             "bbox": _bbox(store, p.id, geo),
             # each measured on the part as it is now, with its verdict (#137 item 1)
@@ -769,6 +770,19 @@ def router():
             return {"version": got["version"], "said": got["said"], "warning": got["warning"], "notes": got["notes"],
                     "design": design_state(store)}
 
+    @r.post("/api/designs/{slug}/parts/{pid}/unmirror")
+    def unmirror_part(slug: str, pid: str):
+        """Break a mirror (#246 review): the part keeps its flipped shape as a script of its own."""
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None:
+                raise HTTPException(404, f"no part {pid!r}")
+            try:
+                mirror.unmirror(store, pid)
+            except ValueError as e:
+                raise HTTPException(409, str(e))
+            return design_state(store)
+
     @r.post("/api/designs/{slug}/tree")
     def set_tree(slug: str, req: TreeLayout):
         """Move a part in the tree (#94): display only, so no part's id, file, version or check changes."""
@@ -1096,6 +1110,10 @@ def router():
         store = load(slug)
         if store.design.part(req.part) is None:
             raise HTTPException(status_code=404, detail=f"no part {req.part!r}")
+        try:                                  # a mirror is carved through its source, never on its own (#246 review)
+            mirror.refuse_if_mirror(store, req.part, "carve")
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
         if not _aero_available():
             raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
         refuse_a_stale_run(store, req, "carve", carve)
@@ -1144,6 +1162,10 @@ def router():
             carve.refuse_if_carved(store.read_script(req.part), "holes", "lighten it")
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
+        try:                                     # nor a mirror on its own: its source is (#246 review)
+            mirror.refuse_if_mirror(store, req.part, "lighten")
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e))
         if not _aero_available():
             raise HTTPException(status_code=503, detail="whittle isn't installed in Caliper's environment")
         refuse_a_stale_run(store, req, "lighten", lighten)

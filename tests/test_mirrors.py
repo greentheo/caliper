@@ -206,9 +206,9 @@ def test_mirrors_measures_the_mirror_not_the_bounding_boxes(stool):
     from caliper import measure
 
     off = measure.mirror_off(stool.part_geometry("side_left"), stool.part_geometry("side_right"))
-    assert off > 0.01
+    assert off > 5.0                                          # mm: the boss on the wrong face
     mirror.make(stool, "side_left", "side_right")
-    assert measure.mirror_off(stool.part_geometry("side_left"), stool.part_geometry("side_right"), "yz") < 0.001
+    assert measure.mirror_off(stool.part_geometry("side_left"), stool.part_geometry("side_right"), "yz") < measure.MIRROR_MM
 
 
 def test_mirrors_is_an_expression_a_design_check_can_use(stool):
@@ -216,9 +216,9 @@ def test_mirrors_is_an_expression_a_design_check_can_use(stool):
     from caliper.spec import Assertion
 
     asm = Assembly(name="s", parts=stool.assembly.parts, assertions=[
-        Assertion(id="left_mirrors_right", expr='mirrors(side_left, side_right, "yz") <= 0.001')])
+        Assertion(id="left_mirrors_right", expr='mirrors(side_left, side_right, "yz") <= 0.2')])
     (r,) = evaluate_assembly(asm, base_dir=stool.root).results
-    assert r.status == "fail" and r.actual > 0.01
+    assert r.status == "fail" and r.actual > 5.0
     mirror.make(stool, "side_left", "side_right")
     (r,) = evaluate_assembly(asm, base_dir=stool.root).results
     assert r.status == "pass"
@@ -229,14 +229,14 @@ def test_mirrors_is_an_expression_a_design_check_can_use(stool):
     ("sides_symmetric", "bbox(side_left).dz == bbox(side_right).dz", True),
     ("left_identical_to_right", "bbox(side_left).dx >= 1", True),
     ("left_same_as_right", "bbox(side_left).dx >= 1", True),
-    ("side_left_mirrors_side_right", 'mirrors(side_left, side_right, "yz") <= 0.001', False),
+    ("side_left_mirrors_side_right", 'mirrors(side_left, side_right, "yz") <= 0.2', False),
     ("side_left_same_size_as_side_right", "bbox(side_left).dx == bbox(side_right).dx", False),
     ("holes_match_bolt", "holes_aligned(side_left, side_right)", False),
 ])
 def test_a_check_named_for_a_mirror_has_to_measure_one(aid, expr, flagged):
     from caliper import promote
 
-    assert bool(promote.overclaims(aid, expr)) is flagged
+    assert bool(promote.overclaims(aid, expr, ["side_left", "side_right"])) is flagged
 
 
 def test_promote_never_offers_a_check_named_greener_than_it_measures(stool):
@@ -260,7 +260,7 @@ def test_the_locked_check_stays_and_the_reply_says_what_it_measures(stool):
     stool.save()
     lines = chat._overclaimed(stool)
     assert len(lines) == 1 and lines[0].startswith("⚠ side_left_mirrors_side_right compares only overall size; "
-                                                   "mirrors() says they differ by ")
+                                                   "mirrors() says their surfaces are up to ")
     assert any(a.id == "side_left_mirrors_side_right" for a in stool.assembly.assertions)
 
 
@@ -291,3 +291,178 @@ def test_a_part_not_built_yet_isn_t_mirrored_in_the_chat(stool):
     stool.design.part("side_left").version = 0       # planned, not built
     stool.save()
     assert chat._mirror_said(stool, "use the right side for both", None) is None
+
+
+# --- #246 review --------------------------------------------------------------------------------------------------------
+def test_a_parameters_edit_on_a_mirror_goes_to_its_source_and_isn_t_lost(stool):
+    """Item 1, seen on the page: side_left's leg width set by hand, then side_right changed, and side_left's edit was undone."""
+    from caliper import params
+
+    mirror.make(stool, "side_left", "side_right")
+    got = params.set_values(stool, "side_left", [{"name": "h", "value": 450}])
+    assert got["said"].startswith("side_left mirrors side_right: I changed side_right, and side_left follows it.")
+    assert mirror.source_of(stool, "side_left") == "side_right"
+    stool.write_part("side_right", stool.read_script("side_right").replace('"d": 300.0', '"d": 320.0'))
+    top = stool.part_geometry("side_left").require_mesh().bounds[1][2]
+    assert top == pytest.approx(450.0, abs=0.01)                # the edit stands: it was made on the source
+
+
+def test_nothing_writes_a_mirror_s_own_script_but_its_source(stool):
+    mirror.make(stool, "side_left", "side_right")
+    edited = stool.read_script("side_left").replace('"h": 400.0', '"h": 300.0')
+    with pytest.raises(ValueError, match="that would be undone the next time side_right changes: side_left mirrors "
+                                         "side_right: change side_right and side_left follows it, or break the mirror first"):
+        stool.write_part("side_left", edited, action="carve")
+
+
+@pytest.mark.parametrize("how", ["carve", "picture"])
+def test_a_carve_or_a_picture_on_a_mirror_is_refused_with_the_way_out(stool, how):
+    from caliper import chat
+
+    mirror.make(stool, "side_left", "side_right")
+    res = (chat.carve_part(stool, "side_left") if how == "carve" else chat.picture_part(stool, "side_left", "heart"))
+    assert not res.ok and "side_left mirrors side_right" in res.reply and "break the mirror first" in res.reply
+    assert stool.design.part("side_left").version == 2
+
+
+def test_no_mirror_of_a_mirror_from_the_source_s_end(stool):
+    """Item 2: side_left mirrors side_right; side_right can't now become another part's mirror."""
+    mirror.make(stool, "side_left", "side_right")
+    stool.write_part("side_extra", RIGHT.replace('"w": 400.0', '"w": 600.0'), intent="another")
+    with pytest.raises(ValueError, match="side_right has a mirror, side_left: break that first, or make side_left a "
+                                         "mirror of side_extra too"):
+        mirror.make(stool, "side_right", "side_extra")
+
+
+def test_a_cycle_names_both_parts(stool):
+    from caliper import plan as P
+
+    mirror.make(stool, "side_left", "side_right")
+    with pytest.raises(ValueError, match="side_right and side_left are already one script: side_left mirrors side_right"):
+        mirror.make(stool, "side_right", "side_left")
+    with pytest.raises(P.PlanError, match="'a' and 'b' each mirror the other: one of them has to be the source"):
+        P.validate({"parts": [{"id": "a", "what": "x", "mirror_of": "b"}, {"id": "b", "what": "x", "mirror_of": "a"}]})
+
+
+def test_asking_again_writes_nothing(stool):
+    from caliper import chat
+
+    mirror.make(stool, "side_left", "side_right")
+    res = chat.turn(stool, "use the right side for both", use_llm=False, author=_no_designer)
+    assert res.reply.startswith("**side_left** already mirrors side_right: nothing to change.")
+    assert stool.design.part("side_left").version == 2
+
+
+PANEL = 'import cadquery as cq\n\ndef build(params):\n    return cq.Workplane("XY").box({dx}, {dy}, {dz}).translate(({x}, {y}, {z}))\n'
+
+
+@pytest.fixture
+def box(tmp_path):
+    """A box of five panels: top, bottom, left, right and back."""
+    s = DesignStore.create("a box", base=str(tmp_path / "designs"))
+    for pid, dims in {"panel_top": (400, 300, 19, 0, 0, 300), "panel_bottom": (400, 300, 19, 0, 0, 0),
+                      "panel_left": (19, 300, 300, -200, 0, 150), "panel_right": (19, 300, 300, 200, 0, 150),
+                      "panel_back": (400, 19, 300, 0, 150, 150)}.items():
+        s.write_part(pid, PANEL.format(dx=dims[0], dy=dims[1], dz=dims[2], x=dims[3], y=dims[4], z=dims[5]), intent=pid)
+    return s
+
+
+def test_for_all_of_them_asks_first_and_a_yes_does_it(box):
+    """Item 3: "use the top panel for all of them" made four panels mirrors. Only its twin is offered, and asked."""
+    from caliper import chat
+
+    res = chat.turn(box, "use the top panel for all of them", use_llm=False, author=_no_designer)
+    assert res.action == "ask" and res.reply.startswith("Make panel_bottom a mirror of panel_top?")
+    assert not [p.id for p in box.design.parts if mirror.source_of(box, p.id)]
+    res = chat.turn(box, "yes", use_llm=False, author=_no_designer)
+    assert mirror.source_of(box, "panel_bottom") == "panel_top"
+    assert [p.id for p in box.design.parts if mirror.source_of(box, p.id)] == ["panel_bottom"]
+
+
+def test_both_takes_only_the_twin(box):
+    from caliper import chat
+
+    res = chat.turn(box, "use the left panel for both", use_llm=False, author=_no_designer)
+    assert res.action == "mirror" and [p.id for p in box.design.parts if mirror.source_of(box, p.id)] == ["panel_right"]
+
+
+def test_a_size_asked_for_all_isn_t_a_mirror(box):
+    from caliper import chat
+
+    assert chat._mirror_said(box, "pick the top panel thickness for all panels", None) is None
+
+
+@pytest.mark.parametrize("aid,flagged", [("symmetric_load_ok", False), ("width_same_as_base", False),
+                                         ("mirror_frame_wall", False), ("sides_match", True),
+                                         ("side_left_same_width_as_side_right", False)])
+def test_the_promote_guard_checks_claims_not_words(aid, flagged):
+    """Item 4: a load, a size and one part pass; two parts said to match, with no mirrors(), are refused."""
+    from caliper import promote
+
+    ids = ["side_left", "side_right", "mirror_frame", "base"]
+    assert bool(promote.overclaims(aid, "bbox(side_left).dx == bbox(side_right).dx", ids)) is flagged
+
+
+def test_piece_and_hole_names_flip_with_the_part(tmp_path):
+    s = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    named = RIGHT.replace('"piece": "side panel"', '"piece": "right side panel"').replace(
+        '"name": "side panel"', '"name": "right side panel"')
+    s.write_part("side_right", named, intent="the right side")
+    s.write_part("side_left", LEFT_V1, intent="the left side")
+    mirror.make(s, "side_left", "side_right")
+    d = C.declared(s, "side_left")
+    assert d["construction"][0]["name"] == "left side panel" and d["holes"][0]["piece"] == "left side panel"
+    assert C.declared(s, "side_right")["construction"][0]["name"] == "right side panel"
+
+
+def test_the_tree_marks_a_mirror_and_offers_to_break_it(stool):
+    from fastapi.testclient import TestClient
+
+    from caliper import design_api
+    from caliper.server import create_app
+
+    from .test_small_words import _js
+
+    mirror.make(stool, "side_left", "side_right")
+    state = design_api.design_state(stool)
+    p = next(x for x in state["parts"] if x["id"] == "side_left")
+    assert p["mirror_of"] == "side_right"
+    html = _js(["treeRows", "treeHtml", "renameRow"], "return treeHtml(%s, {parts: new Set(), pieces: new Set(), open: true, scope: null, canDrag: false});"
+               % __import__("json").dumps({"parts": [p], "tree": {}}), "const EYE_ON = '', EYE_OFF = ''; const pieceId = (a, b) => a + '/' + b;")
+    assert "a mirror of side_right" in html and 'data-unmirror="side_left"' in html
+    import os
+    os.environ["CALIPER_DESIGNS"] = os.path.dirname(stool.root)
+    got = TestClient(create_app()).post(f"/api/designs/{stool.design.slug}/parts/side_left/unmirror").json()
+    assert next(x for x in got["parts"] if x["id"] == "side_left")["mirror_of"] is None
+
+
+def test_mirrors_is_in_mm_and_in_place(tmp_path):
+    """Item 5: the largest gap between the surfaces, mm; a mirror moved 1 mm across the plane reads about 1 mm."""
+    from caliper import measure
+    from caliper.measure import Geometry
+    import trimesh
+
+    a = trimesh.creation.cone(radius=20, height=40, sections=64)
+    a.apply_translation((100, 0, 0))
+    b = a.copy()
+    b.apply_transform(trimesh.transformations.reflection_matrix((0, 0, 0), (1, 0, 0)))
+    assert measure.mirror_off(Geometry.from_mesh(a), Geometry.from_mesh(b), "yz") < measure.MIRROR_MM
+    b.apply_translation((0, 1, 0))
+    assert measure.mirror_off(Geometry.from_mesh(a), Geometry.from_mesh(b), "yz") == pytest.approx(1.0, abs=0.05)
+
+
+def test_mirrors_takes_the_occt_lock(monkeypatch, stool):
+    from caliper import measure, occt
+
+    seen = []
+
+    class Lock:
+        def __enter__(self):
+            seen.append("in")
+
+        def __exit__(self, *a):
+            seen.append("out")
+    left, right = stool.part_geometry("side_left"), stool.part_geometry("side_right")   # built before, under the real lock
+    monkeypatch.setattr(occt, "OCCT", Lock())
+    measure.mirror_off(left, right)
+    assert seen == ["in", "out"]

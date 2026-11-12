@@ -388,6 +388,13 @@ class DesignStore:
         """
         if not _ID_OK.match(part_id):
             raise ValueError(f"part id {part_id!r} must be a valid identifier (letters/digits/_)")
+        if action != "mirror":                    # a mirror's script is only ever its source's, flipped (#246 review)
+            from . import mirror
+
+            got = mirror.of(script)
+            if got is not None:
+                raise ValueError(f"that would be undone the next time {got['source']} changes: "
+                                 + mirror.said(part_id, got["source"]))
 
         entry = self.design.part(part_id)
         version = (entry.version if entry else 0) + 1

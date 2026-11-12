@@ -200,8 +200,13 @@ def set_values(store: DesignStore, pid: str, changes: list[dict]) -> dict:
     them, one new version, all or none (numbers that only work together can't leave a half-way part). Returns
     ``{version, said, value, moved, report, failed, notes, warning}``; raises ValueError, saying why, for a name it doesn't have, a
     unit it can't read, a value outside its range, or values the part won't build with (nothing written then)."""
-    from . import load_study, sandbox
+    from . import load_study, mirror, sandbox
 
+    source = mirror.source_of(store, pid)
+    if source:                                    # a mirror's numbers are its source's: set there, said (#246 review)
+        got = set_values(store, source, changes)
+        return {**got, "said": f"{pid} mirrors {source}: I changed {source}, and {pid} follows it. {got['said']}",
+                "part": source}
     if not changes:
         raise ValueError("there's no number to set")
     names = [c["name"] for c in changes]
