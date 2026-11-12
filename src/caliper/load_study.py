@@ -378,13 +378,31 @@ def blind(run: dict, case: dict) -> bool:
 
 def unresolved(run: dict, case: dict) -> bool:
     """A verdict the FEA governs at fewer than RESOLVE_MIN voxels across the thinnest wall: too coarse to see it. Or one that saw no
-    stress to judge by (:func:`blind`)."""
+    stress to judge by (:func:`blind`). Or one where another check governs, by being lowest, while the FEA ran and couldn't see a
+    printed wall that no hand check covers (CALI-164, #244: the bar stool's seat plate read "holds, 3.31×" over a cone whose 5.8 mm
+    wall the voxels couldn't see; its true safety could be under 3.31, so the case is unknown)."""
     if blind(run, case):
         return True
     thin, s = run.get("thinnest_mm"), run.get("spacing_mm")
-    if judged_by(run, case) != "fea" or not (thin and s):
+    if not (thin and s) or _sees(run.get("across") or thin / s):    # as the run counted it, not from its rounded sizes
         return False
-    return not _sees(run.get("across") or thin / s)    # as the run counted it, not from its rounded sizes
+    return judged_by(run, case) == "fea" or bool(unseen(run, case))
+
+
+def unseen(run: dict, case: dict) -> str:
+    """Where another check governs a case and the FEA, which ran, couldn't see the thinnest wall: what couldn't be seen, in
+    words (#244). A sheet is the plate check's to judge, not the FEA's, so a sheet too thin for the voxels is no gap; a
+    printed wall, or one the run doesn't say, is. "" when nothing is unseen."""
+    fea = case.get("fea") or {}
+    if judged_by(run, case) == "fea" or fea.get("supported") is not True or fea.get("safety") is None:
+        return ""
+    thin, s = run.get("thinnest_mm"), run.get("spacing_mm")
+    if not (thin and s) or _sees(run.get("across") or thin / s):
+        return ""
+    if (run.get("thinnest_where") or {}).get("piece"):
+        return ""
+    return (f"the printed walls are too thin to check at this size ({thin:g} mm, needs {RESOLVE_MIN:g} voxels across, "
+            f"and these are {s:g} mm)")
 
 
 def unchecked(run: dict, case: dict) -> bool:

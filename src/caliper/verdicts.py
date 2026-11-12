@@ -134,7 +134,15 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
     if filled or run.get("filled"):
         return _make("untrusted", safety, why=filled or run.get("filled"))
     if off:
-        return _make("unchecked" if not run.get("finer") else "unresolved", safety)
+        from .load_study import judged_by, unseen
+
+        gap = unseen(run, c)                          # what couldn't be seen, beside what holds (#244)
+        by = judged_by(run, c)
+        piece = ((c.get("plate") or {}).get("piece") if by == "plate" else
+                 next((r.get("piece") for r in c.get("buckling") or [] if r.get("done")), None) if by == "buckling" else None)
+        what = f"the {piece.replace('_', ' ')}" if piece else f"the {by} check"
+        why = (f"{what} holds {safety:.2f}x; {gap}" if gap and safety is not None else "")
+        return _make("unchecked" if not run.get("finer") else "unresolved", safety, **({"why": why} if why else {}))
     from .load_study import fixed_ends
 
     if fixed_ends(run, c):

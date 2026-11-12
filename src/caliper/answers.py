@@ -277,7 +277,9 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
         return _line(f"{c['name'][:1].upper() + c['name'][1:]}: not checked: {v['why']}. Check where it's held and "
                      f"pushed, then check it again." + older, v["status"], study="load")
     if v["kind"] in ("unresolved", "unchecked"):     # an FEA that can't see the wall is no ✓ (CALI-97)
-        return _line(coarse(run, inches) + older, "warn", study="load")
+        which = (f"{c['name'][:1].upper() + c['name'][1:]}: not checked: {v['why'][:1].upper()}{v['why'][1:]}. "
+                 if v.get("why") else "")          # which check holds, and what couldn't be seen (#244)
+        return _line(which + coarse(run, inches) + older, "warn", study="load")
     if v["kind"] == "span":                          # the FEA alone, between its holds: no ✓ and no number (CALI-153)
         return _line(f"{c['name'][:1].upper() + c['name'][1:]}: not settled: {v['why']}." + older, "warn", study="load")
     if v["kind"] == "edge":                          # the middle only: no ✓ for where people stand (CALI-94)
