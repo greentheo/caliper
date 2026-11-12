@@ -323,6 +323,22 @@ def holes(g: Geometry) -> list[Hole]:
     return _holes_from_cadquery(g.solid)
 
 
+def _looks_in(face: Any, adaptor: Any, loc: Any, dir_: Any) -> bool:
+    """Whether a cylindrical face's outward normal points at its axis: the material is outside it, so it's a hole (#23). A tube's
+    outer wall, a rod or a boss looks out, away from its axis."""
+    from OCP.BRepGProp import BRepGProp_Face  # type: ignore
+    from OCP.gp import gp_Pnt, gp_Vec  # type: ignore
+
+    u = (adaptor.FirstUParameter() + adaptor.LastUParameter()) / 2.0
+    v = (adaptor.FirstVParameter() + adaptor.LastVParameter()) / 2.0
+    p, n = gp_Pnt(), gp_Vec()
+    BRepGProp_Face(face.wrapped).Normal(u, v, p, n)      # the face's own orientation: outward from the material
+    to_p = np.array([p.X() - loc.X(), p.Y() - loc.Y(), p.Z() - loc.Z()])
+    axis = np.array([dir_.X(), dir_.Y(), dir_.Z()])
+    radial = to_p - (to_p @ axis) * axis                 # from the axis out to the surface
+    return float(radial @ np.array([n.X(), n.Y(), n.Z()])) < 0.0
+
+
 def _holes_from_cadquery(wp: Any) -> list[Hole]:
     import cadquery as cq  # lazy
 
@@ -340,6 +356,8 @@ def _holes_from_cadquery(wp: Any) -> list[Hole]:
         ax = cyl.Axis()
         loc = ax.Location()
         dir_ = ax.Direction()
+        if not _looks_in(f, adaptor, loc, dir_):       # a tube's outside, a rod, a boss: material inside it, not a hole (#23)
+            continue
         bb = f.BoundingBox()
         depth = max(bb.xlen, bb.ylen, bb.zlen)
         found.append(
