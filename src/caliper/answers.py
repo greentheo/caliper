@@ -354,6 +354,11 @@ def worst_at(run: dict, c: dict, inches: bool) -> tuple[str, Optional[bool]]:
 def unseen_said(run: dict, v: dict) -> str:
     """A pass that rests on another check while the FEA couldn't see a wall (#244): "not checked: the seat's plate check holds
     3.3 times over; the printed walls are too thin to check at this size (…). A hand check or …", each said once (#248)."""
+    from . import load_study as L
+
+    if L.OLDER_RUN in v["why"]:                      # one next step; the hand check only if a re-run can't see it either (#249)
+        return (f"not checked: {v['why']}." + (" If it still can't see its walls, a hand check or a printed test piece is the way "
+                                               "to know." if run.get("too_thin") else ""))
     return (f"not checked: {v['why']}. " + ("Check it again finer." if run.get("finer") else
                                              "A hand check or a printed test piece is the way to know."))
 

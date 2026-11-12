@@ -144,6 +144,10 @@ def said(result: dict) -> str:
             f"{_part(p)} ({', '.join(ns)})" for p, ns in result["rebuilt"].items()) + ".")
     else:
         lines.append("No part reads it: nothing rebuilt.")
+    for m, src in (result.get("follows") or {}).items():   # a mirror moved through its source, said (#249)
+        if src in result["rebuilt"]:
+            now = ", ".join(f"{ch[n][1]:g} {units.get(n, '')}".rstrip() for n in result["rebuilt"][src] if n in ch)
+            lines.append(f"{_part(m)[:1].upper() + _part(m)[1:]} follows {_part(src)}: both now {now}.")
     for pid, why in result.get("unmoved", {}).items():
         lines.append(f"! {_part(pid)[:1].upper() + _part(pid)[1:]}: {why}.")
     for pid, why in (result.get("failed") or {}).items():

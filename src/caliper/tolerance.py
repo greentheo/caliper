@@ -14,7 +14,21 @@ hard threshold that loses to a 0.01 mm ray-cast wobble.
 
 from __future__ import annotations
 
+import math
 from typing import Optional
+
+#: Float noise, not a measuring tolerance (#249, #253): two numbers this close compare as equal, in the evaluator and in these
+#: helpers alike. 17 in is 17 × 25.4 = 431.79999999999995 mm. Nothing a person could measure moves.
+REL_TOL = ABS_TOL = 1e-9
+
+
+def close(a: float, b: float) -> bool:
+    return math.isclose(float(a), float(b), rel_tol=REL_TOL, abs_tol=ABS_TOL)
+
+
+def at_most(a: float, b: float) -> bool:
+    """``a <= b``, or the same number within float noise."""
+    return float(a) <= float(b) or close(a, b)
 
 # Clearance bands in mm (gap between the part and what it mates to). Negative = interference (overlap).
 # Tuned for FDM: a typical printed clearance that "just slides" is ~0.2 mm regardless of size.
@@ -64,15 +78,15 @@ def fit_classes() -> list[str]:
 # ---------------------------------------------------------------------------
 def approx(actual: float, nominal: float, tol: float = 0.1) -> bool:
     """True if ``actual`` is within ``±tol`` of ``nominal`` — absorbs measurement noise / round-off."""
-    return abs(float(actual) - float(nominal)) <= float(tol)
+    return at_most(abs(float(actual) - float(nominal)), tol)
 
 
 def within(actual: float, lo: float, hi: float) -> bool:
     """True if ``lo <= actual <= hi`` (a tolerance band as a function call)."""
-    return float(lo) <= float(actual) <= float(hi)
+    return at_most(lo, actual) and at_most(actual, hi)
 
 
 def fits(clearance: float, kind: str = DEFAULT_FIT, nominal: Optional[float] = None) -> bool:
     """True if a measured ``clearance`` (mm) lands in the band for fit class ``kind``."""
     lo, hi = fit_band(kind, nominal)
-    return lo <= float(clearance) <= hi
+    return at_most(lo, clearance) and at_most(clearance, hi)
