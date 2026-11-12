@@ -1044,9 +1044,9 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
 
     events = events if events is not None else []
     before, _ = _measure_design(store)
-    seat = _picked_edge(store, on, pick)
+    seat, unusable = _picked_edge(store, on, pick)
     if seat is not None:                         # the pick is a requirement, told and measured (#266)
-        interfaces = _also(interfaces, lambda g, script: [_on_the_pick(g, seat)])
+        interfaces = _also(interfaces, lambda g, script: _on_the_pick(g, seat, store))
     spec = _working_spec(store, part_id, intent + (_seat_words(seat) if seat else ""))
 
     _emit(events, on_event, "authoring", f"authoring {part_id}…", part=part_id)
@@ -1090,11 +1090,14 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     if offer:
         reply += "\n\n" + offer
     # where it sits, before anything else is said: never a ✓ over a measured miss (#266, rule 6)
-    miss = _seat_miss(res.geometry, seat, part_id) if seat is not None else _drafted_miss(proposal, part_id)
+    miss = (_seat_miss(res.geometry, seat, part_id, store) if seat is not None
+            else f"Built {part_id}, but I couldn't place it against your pick: {unusable}" if unusable   # said first (#269)
+            else _drafted_miss(proposal, part_id))
     if seat is not None and miss is None:
         reply = reply.replace("\n", f"\nIt sits on the edge you picked on {seat['part']}.\n", 1)
     if miss is not None:
-        reply = f"\u2717 {miss}\n\n" + reply.replace("\u2713 ", "", 1).replace("Every check on this part passes.\n", "")
+        mark = "!" if "couldn't place it" in miss else "\u2717"      # not known to be wrong: not a cross
+        reply = f"{mark} {miss}\n\n" + reply.replace("\u2713 ", "", 1).replace("Every check on this part passes.\n", "")
         return TurnResult(action="author", ok=False, part=part_id, version=version,
                           part_report=res.report, report=after, broke=broke, fixed=fixed,
                           part_errors=part_errors, proposal=proposal, events=events, reply=reply)
@@ -1108,18 +1111,39 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
 SEAT_MM = 0.5
 
 
-def _picked_edge(store: DesignStore, on: Optional[str], pick: Optional[dict]) -> Optional[dict]:
-    """The edge picked on part ``on``, in the design's coordinates: ``{"part", "points", "said"}``; None for no edge pick, or
-    one whose part changed since (its ids were that version's)."""
-    if not pick or pick.get("kind") != "edge" or not on:
-        return None
+#: How far it may go into the part it sits on: the measuring allowance, about 0 (#269 review).
+INTO_MM = 0.2
+
+
+def _picked_edge(store: DesignStore, on: Optional[str], pick: Optional[dict]) -> tuple[Optional[dict], Optional[str]]:
+    """The edge picked on part ``on``, in the design's coordinates (``{"part", "points", "said"}``), and, for a pick that
+    can't be used, why, as the person reads it (#269 review): an older version, a face or point where an edge was needed,
+    edges that can't be worked out. ``(None, None)`` with no pick."""
+    if not pick or not on:
+        return None, None
+    if pick.get("kind") != "edge":
+        return None, f"you picked a {pick.get('kind') or 'spot'}, and a part that sits on an edge needs the edge: pick it."
     feats = _features_of(store, on)
-    if not feats or pick.get("version") not in (None, feats.get("version")):
-        return None
+    if not feats:
+        return None, f"I couldn't work out {on}'s edges."
+    if pick.get("version") not in (None, feats.get("version")):
+        return None, f"you picked it on v{pick['version']}, and {on} is v{feats.get('version')} now: pick it again."
     edge = next((e for e in feats.get("edges") or [] if e["id"] == pick.get("id")), None)
     if edge is None or len(edge.get("points") or []) < 2:
-        return None
-    return {"part": on, "points": [[float(c) for c in p] for p in edge["points"]], "said": pick.get("said") or "the edge"}
+        return None, f"the edge you picked isn't one of {on}'s now: pick it again."
+    return {"part": on, "points": [[float(c) for c in p] for p in edge["points"]], "said": pick.get("said") or "the edge"}, None
+
+
+def _into(geometry, store: DesignStore, on: str) -> float:
+    """How deep the new part goes into ``on`` as it's placed, in mm (0 where it's outside it)."""
+    from . import measure
+
+    placed = next((p for p in store.assembly.parts if p.id == on), None)
+    mesh = store.part_geometry(on).require_mesh()
+    if placed is not None and (any(placed.position or ()) or any(placed.rotation or ())):
+        mesh = mesh.copy()
+        mesh.apply_transform(measure.pose_matrix(placed.position, placed.rotation))
+    return float(measure._penetration_depth(geometry.require_mesh(), mesh))
 
 
 def _pt(p) -> str:
@@ -1148,17 +1172,27 @@ def _seat_gap(geometry, seat: dict) -> float:
     return float(np.max(dist))
 
 
-def _on_the_pick(geometry, seat: dict):
-    """The pick as a round's check: fails, and is repaired, until the part touches the picked edge (#266)."""
+def _on_the_pick(geometry, seat: dict, store: Optional[DesignStore] = None) -> list:
+    """The pick as a round's checks: fails, and is repaired, until the part touches the picked edge (#266), from outside
+    the part it's on (#269 review: half inside it, or inside its panel with a corner on the edge, isn't sitting on it)."""
     from .evaluate import AssertionResult
 
     gap = _seat_gap(geometry, seat)
     ok = gap <= SEAT_MM
-    return AssertionResult(id="on_the_pick", expr=f"touches the edge picked on {seat['part']}", status="pass" if ok else "fail",
+    out = [AssertionResult(id="on_the_pick", expr=f"touches the edge picked on {seat['part']}", status="pass" if ok else "fail",
                            passed=ok, actual=round(gap, 2), margin=round(SEAT_MM - gap, 2),
                            detail="" if ok else (f"it sits {round(gap, 2):g} mm off the edge picked on {seat['part']}, the line "
                                                  f"from {_pt(seat['points'][0])} to {_pt(seat['points'][-1])}: move it onto "
-                                                 f"that edge"))
+                                                 f"that edge"))]
+    if store is not None:
+        depth = _into(geometry, store, seat["part"])
+        clear = depth <= INTO_MM
+        out.append(AssertionResult(id="outside_the_pick", expr=f"doesn't go into {seat['part']}",
+                                   status="pass" if clear else "fail", passed=clear, actual=round(depth, 2),
+                                   margin=round(INTO_MM - depth, 2),
+                                   detail="" if clear else f"it goes {round(depth, 1):g} mm into {seat['part']}: it should sit "
+                                                           f"on it, against its faces, not in them"))
+    return out
 
 
 def _also(interfaces, more):
@@ -1168,10 +1202,13 @@ def _also(interfaces, more):
     return lambda g, script: list(interfaces(g, script)) + list(more(g, script))
 
 
-def _seat_miss(geometry, seat: dict, part_id: str) -> Optional[str]:
-    """The reply's first line when the built part doesn't sit on the pick (#266), else None."""
+def _seat_miss(geometry, seat: dict, part_id: str, store: Optional[DesignStore] = None) -> Optional[str]:
+    """The reply's first line when the built part doesn't sit on the pick (#266), or goes into its part (#269), else None."""
     if geometry is None:
         return None
+    depth = _into(geometry, store, seat["part"]) if store is not None else 0.0
+    if depth > INTO_MM:
+        return f"Built {part_id}, but it goes {round(depth, 1):g} mm into {seat['part']}: it should sit on it."
     gap = _seat_gap(geometry, seat)
     if gap <= SEAT_MM:
         return None

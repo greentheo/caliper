@@ -138,11 +138,63 @@ def test_a_strip_on_half_the_edge_doesn_t_sit_on_it(stool):
     assert not res.ok and res.reply.startswith("✗ Built fillet_strip, but it sits 100 mm off the edge you picked"), res.reply
 
 
-def test_a_pick_from_an_older_version_isn_t_taken_as_where_it_goes(stool):
-    """The pick's ids were that version's: after the stool changes, its edge may be another one. Not used, so not claimed."""
+def test_a_pick_from_an_older_version_is_said_first_and_not_used(stool):
+    """The pick's ids were that version's: after the stool changes, its edge may be another one. Not used, said at the top
+    with why, and no ✓ over where it went (#269 review)."""
     s, pick = stool
     s.write_part("stool", STOOL.replace('"h": 300.0', '"h": 350.0'), intent="a side and a step")
     author, seen = _author(0.0)
     res = chat.author_part(s, "fillet_strip", "a 5 mm printed fillet strip on this edge", author=author, use_llm=False,
                            promote_feedback=False, pick=pick, on="stool")
     assert "the edge picked on stool" not in seen[0][0] and "sits on the edge you picked" not in res.reply, res.reply
+    assert not res.ok and res.reply.startswith("! Built fillet_strip, but I couldn't place it against your pick: you picked "
+                                               "it on v1, and stool is v2 now: pick it again."), res.reply
+    assert "✓" not in res.reply.split("\n\n")[1].split("\n")[0], res.reply
+
+
+def test_a_face_picked_where_an_edge_is_needed_is_said_first(stool):
+    s, pick = stool
+    face = {**pick, "kind": "face", "id": "f0"}
+    res = chat.author_part(s, "fillet_strip", "a 5 mm printed fillet strip here", author=_author(0.0)[0], use_llm=False,
+                           promote_feedback=False, pick=face, on="stool")
+    assert not res.ok and res.reply.startswith("! Built fillet_strip, but I couldn't place it against your pick: you picked a "
+                                               "face, and a part that sits on an edge needs the edge: pick it."), res.reply
+
+
+def test_a_pick_whose_part_s_edges_can_t_be_worked_out_is_said_first(stool, monkeypatch):
+    s, pick = stool
+    monkeypatch.setattr(chat, "_features_of", lambda store, pid: None)
+    res = chat.author_part(s, "fillet_strip", "a 5 mm printed fillet strip on this edge", author=_author(0.0)[0],
+                           use_llm=False, promote_feedback=False, pick=pick, on="stool")
+    assert not res.ok and res.reply.startswith("! Built fillet_strip, but I couldn't place it against your pick: I couldn't "
+                                               "work out stool's edges."), res.reply
+
+
+#: (#269 review) Touching the edge from inside isn't sitting on it: a block centred on the corner, half in the side and the
+#: step, and a strip inside the side panel with its corner on the edge.
+HALF_IN = STRIP.format(lift=0.0).replace('translate((19.05, 0, 300.0 - p["r"] + 0.0))',
+                                         'translate((19.05 - p["r"] / 2, 0, 300.0 - p["r"] / 2))')
+IN_PANEL = STRIP.format(lift=0.0).replace('translate((19.05, 0, 300.0 - p["r"] + 0.0))',
+                                          'translate((19.05 - p["r"], 0, 300.0 - p["r"]))')
+
+
+#: how deep each goes: the half-inside block's buried corner is 2.5 mm in each way from the L's inside corner, 2.5√2 from it
+@pytest.mark.parametrize("script,depth", [(HALF_IN, 2.5 * 2 ** 0.5), (IN_PANEL, 5.0)], ids=["half inside", "inside the panel"])
+def test_a_strip_that_goes_into_the_picked_part_doesn_t_sit_on_it(stool, script, depth):
+    assert script != STRIP.format(lift=0.0)
+    s, pick = stool
+    seen = []
+
+    def author(spec, feedback, prior):
+        seen.append(feedback)
+        return script if len(seen) == 1 else STRIP.format(lift=0.0)
+    res = chat.author_part(s, "fillet_strip", "a 5 mm printed fillet strip on this edge", author=author, use_llm=False,
+                           promote_feedback=False, pick=pick, on="stool", max_rounds=3)
+    assert len(seen) == 2 and "goes" in seen[1] and "into stool: it should sit on it" in seen[1], seen[1]
+    assert res.ok, res.reply                                       # repaired: seated from outside
+    # and one that stays in: said first, never a ✓
+    res = chat.author_part(s, "fillet_strip_2", "a 5 mm printed fillet strip on this edge", author=lambda *a: script,
+                           use_llm=False, promote_feedback=False, pick=pick, on="stool", max_rounds=1)
+    assert not res.ok and res.reply.startswith("✗ Built fillet_strip_2, but it goes "), res.reply
+    said = float(res.reply.split("it goes ")[1].split(" mm")[0])
+    assert said == pytest.approx(depth, abs=0.6) and "into stool: it should sit on it." in res.reply.split("\n")[0], res.reply
