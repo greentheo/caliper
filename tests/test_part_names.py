@@ -13,6 +13,19 @@ from caliper import chat
     ("could you build me a planter box", "planter_box"),
     ("I'd like a bird house", "bird_house"),
     ("please add a corner bracket", "corner_bracket"),          # as before
+    ("we need a dog bed", "dog_bed"),
+    ("let's make a kids table", "kids_table"),
+    ("I would like a coat rack", "coat_rack"),
+    # #262 review: a request word inside a name is part of the name, never where it ends
+    ("build a trash can enclosure", "trash_can"),
+    ("make a watering can stand", "watering_can"),
+    ("add a soda can holder", "soda_can"),
+    ("add a can crusher", "can_crusher"),
+    ("add a like button", "like_button"),
+    ("add an I-beam", "i_beam"),
+    ("add a D-ring", "d_ring"),
+    ("add a get-well card holder", "get_well"),
+    ("can opener mount", "can_opener"),                         # "can" at the start, not "can you": the name's
 ])
 def test_a_new_part_is_named_for_what_s_asked_for(message, pid):
     assert chat.part_id_from(message, set()) == pid

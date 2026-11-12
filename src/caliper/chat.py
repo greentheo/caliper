@@ -51,9 +51,12 @@ BASELINE_ASSERTIONS = (
 _QUESTION_LEAD = {"what", "how", "why", "where", "which", "who", "when", "is", "are", "does", "do",
                   "can", "could", "show", "list", "tell", "status"}
 _LEAD_FILLER = {"add", "also", "now", "please", "build", "create", "make", "generate", "give", "me",
-                "a", "an", "the", "some", "another", "new", "insert", "put", "design", "model",
-                # the request itself, never the part's name: "I need a bench" is a bench, not `i_need` (#258)
-                "i", "d", "need", "want", "would", "like", "can", "could", "you", "we", "let", "s", "us", "get"}
+                "a", "an", "the", "some", "another", "new", "insert", "put", "design", "model"}
+#: (#258) the request itself, as a phrase at the very start, never the part's name: "I need a bench" is a bench, not `i_need`.
+#: Only there: a "can" inside a name ("a trash can enclosure", "a can crusher") is the name's (#262 review)
+_REQUEST = re.compile(r"^\s*(?:please\s+)?(?:i\s+(?:really\s+)?(?:need|want|would\s+(?:like|love)|'?d\s+(?:like|love))"
+                      r"|i'd\s+(?:like|love)|we\s+(?:need|want|would\s+like|'?d\s+like)|(?:can|could|would|will)\s+you(?:\s+please)?"
+                      r"|let'?s)\b", re.I)
 _BREAK_WORDS = {"it", "its", "that", "this", "for", "to", "with", "on", "in", "into", "which", "and",
                 "so", "at", "of", "from", "under", "over", "between", "next", "then"}
 _ADD_VERBS = re.compile(r"\b(add|create|build|make|generate|model|design|insert|need)\b")
@@ -195,7 +198,7 @@ def _is_question(message: str) -> bool:
 
 def part_id_from(message: str, existing: set[str]) -> str:
     """Derive a readable, unique, identifier-safe part id from "add a corner bracket" → ``corner_bracket``."""
-    words = [w for w in _words(message) if not w[0].isdigit()]
+    words = [w for w in _words(_REQUEST.sub("", message or "", count=1)) if not w[0].isdigit()]
     i = 0
     while i < len(words) and words[i] in _LEAD_FILLER:
         i += 1
