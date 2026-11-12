@@ -1804,7 +1804,8 @@ function trialView(p) {
   const chart = trialChart(pr, rows);
   return `<p class="small">Put the load where <b>${esc(pr.case)}</b> goes, in steps, and measure how far ${pr.closed_under ? `the ${esc(pr.where || 'top')} sags ${esc(pr.measured_at)}` : `the middle of
       the ${esc(pr.where || 'top')} sags`}. Measure it with ${esc(pr.measure_with)}.${pr.other_way ? ` ${esc(pr.other_way)}` : ''}
-      ${pr.breaks_lb ? `It should break at about <b>${pr.breaks_lb.toLocaleString()} lb</b>.` : pr.why_no_break ? `Where it would break isn't settled: ${esc(pr.why_no_break)}.` : 'Where it would break isn\'t settled: the check was too coarse to see its walls.'}
+      ${pr.breaks_lb ? `It should break at about <b>${pr.breaks_lb.toLocaleString()} lb</b>.` : pr.why_no_break ? (pr.why_no_break.startsWith('no prediction') ? `No prediction of where it breaks: ${esc(pr.why_no_break.replace(/^no prediction: /, ''))}.`   // (#248)
+        : `Where it would break isn't settled: ${esc(pr.why_no_break)}.`) : 'Where it would break isn\'t settled: the check was too coarse to see its walls.'}
       ${pr.over ? `That's ${esc(pr.over)}, as its card says.` : ''}</p>
     ${chart}
     <table class="st"><tr><th>load</th><th>should sag</th><th>sagged</th><th></th></tr>

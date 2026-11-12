@@ -156,3 +156,25 @@ def test_the_design_card_says_it_once_with_the_check_that_holds(tmp_path):
     assert now["strength.unresolved"] == ("Not checked: the seat's plate check holds 3.3 times over; the printed walls are too "
                                           "thin to check at this size (5.8 mm, needs 4 voxels across, and these are 2.6 mm). "
                                           "A hand check or a printed test piece is the way to know.")
+
+
+def test_a_trial_s_prediction_says_why_there_s_no_break_to_test_against(tmp_path, monkeypatch):
+    """#248 CI: an unknown case has no breaking load to load it up to; the plan says why, never None unexplained."""
+    from caliper import trials
+    from caliper.design import DesignStore
+
+    store = DesignStore.create("a bar stool", base=str(tmp_path))
+    store.write_part("stool", "def build(params):\n    return None\n", intent="x")
+    c = {**_case("plate", 3.31, 6.7), "lb": 200.0, "factor": 2.0, "breaks_lb": 1300.0,
+         "fea": {"supported": True, "safety": 6.7, "deflection_mm": 0.2},
+         "plate": {"piece": "seat", "done": True, "safety_across": 3.31, "deflection_mm": 0.4}}
+    run = {**RUN, "id": "r1", "version": 1, "material": {"key": "plywood", "E": 8000.0, "across": 0.5}, "cases": [c]}
+    monkeypatch.setattr(trials, "_run", lambda s, pid: run)
+    pr = trials.predict(store, "stool")
+    assert pr["breaks_lb"] is None and pr["over"] is None
+    assert pr["why_no_break"] == ("no prediction: the check couldn't see the wall: the printed walls are too thin to check "
+                                  "at this size (5.8 mm, needs 4 voxels across, and these are 2.6 mm)"), pr["why_no_break"]
+    assert pr["basis"].startswith("from checks that couldn't see every wall, so a rough guess until it's checked again: ")
+    run["cases"] = [{**c, "governs": "fea", "safety": 6.7}]                # the FEA governs, too coarse to see its walls
+    pr = trials.predict(store, "stool")
+    assert pr["why_no_break"] == "no prediction: the check was too coarse to see its walls" and pr["breaks_lb"] is None
