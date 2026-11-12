@@ -52,6 +52,11 @@ _QUESTION_LEAD = {"what", "how", "why", "where", "which", "who", "when", "is", "
                   "can", "could", "show", "list", "tell", "status"}
 _LEAD_FILLER = {"add", "also", "now", "please", "build", "create", "make", "generate", "give", "me",
                 "a", "an", "the", "some", "another", "new", "insert", "put", "design", "model"}
+#: (#258) the request itself, as a phrase at the very start, never the part's name: "I need a bench" is a bench, not `i_need`.
+#: Only there: a "can" inside a name ("a trash can enclosure", "a can crusher") is the name's (#262 review)
+_REQUEST = re.compile(r"^\s*(?:please\s+)?(?:i\s+(?:really\s+)?(?:need|want|would\s+(?:like|love)|'?d\s+(?:like|love))"
+                      r"|i'd\s+(?:like|love)|we\s+(?:need|want|would\s+like|'?d\s+like)|(?:can|could|would|will)\s+you(?:\s+please)?"
+                      r"|let'?s)\b", re.I)
 _BREAK_WORDS = {"it", "its", "that", "this", "for", "to", "with", "on", "in", "into", "which", "and",
                 "so", "at", "of", "from", "under", "over", "between", "next", "then"}
 _ADD_VERBS = re.compile(r"\b(add|create|build|make|generate|model|design|insert|need)\b")
@@ -90,8 +95,14 @@ _Q_CLAUSE = re.compile(r"^\s*(?:why|what|how|which|where|when|who|is|are|does|do
 #: (#212, round 3) a statement with no change in it: "I need it by Friday" isn't a revision.
 _STATEMENT = re.compile(r"^\s*i\s+need\s+(?:it|this|that|them)\s*(?:(?:by|before|for|on|soon|today|tomorrow|tonight|asap"
                         r"|now|this|next)\b.*)?[.!]?\s*$", re.I)    # not "I need them painted", a change (#70, reviewer-2)
-#: (#250 review) "I need them painted", "I need it wider": with nothing built, nothing to change, so no part named `i_need`
-_I_NEED = re.compile(r"^\s*i\s+need\s+(?:it|this|that|them)\b", re.I)
+#: (#250 review, #262 re-check) "I need them painted", "I want it taller": what's left of a request ("I want", "can you", …) when it asks about something already there: "it taller",
+#: "make them smaller". With nothing built, that has nothing to change, so it answers. The request is _REQUEST's, one for both rules
+_OF_IT = re.compile(r"^\s*(?:\w+\s+)?(?:it|this|that|them)\b", re.I)
+
+
+def _asks_of_it(message: str) -> bool:
+    m = _REQUEST.match(message or "")
+    return bool(m) and bool(_OF_IT.match(message[m.end():]))
 #: (#70, reviewer-2) a clause that tells, not asks: "it's heavier than I thought"; its direction word is no request.
 _SAYS = re.compile(r"^\s*(?:it|this|that|they|these|those|i)(?:'s|'re|'m|\s+(?:is|are|was|were|am|seems?|looks?|feels?"
                    r"|thought|think|was))\b", re.I)
@@ -206,7 +217,7 @@ def _is_question(message: str) -> bool:
 
 def part_id_from(message: str, existing: set[str]) -> str:
     """Derive a readable, unique, identifier-safe part id from "add a corner bracket" → ``corner_bracket``."""
-    words = [w for w in _words(message) if not w[0].isdigit()]
+    words = [w for w in _words(_REQUEST.sub("", message or "", count=1)) if not w[0].isdigit()]
     i = 0
     while i < len(words) and words[i] in _LEAD_FILLER:
         i += 1
@@ -510,7 +521,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
         return Intent(action="answer", part=hit, note="reads as a question")
 
     wants_new = bool(_NEW_THING.search(message or "")) and not _ADD_SIZE.search(message or "")   # a size added: a revision
-    if not ids and not wants_new and (_EXPLAIN.search(message or "") or _I_NEED.search(message or "")):
+    if not ids and not wants_new and (_EXPLAIN.search(message or "") or _asks_of_it(message)):
         # "I don't get it, make it 2 inches taller" with nothing built: nothing to change, no part named `i_don` (#70)
         return Intent(action="answer", note="asks to explain, and there's nothing to change yet")
     if not wants_new and len(ids) == 1 and _MODIFY.search(message or ""):
