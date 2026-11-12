@@ -1,6 +1,7 @@
 """CALI-92 (#70), the leftovers' second part: the reviewer's weight notes from #237, #235's three, #209's notes, the
 filled() follow-up, the router's edge cases, and items 10 and 20. Stubbed models only."""
 
+import os
 import re
 
 import pytest
@@ -443,3 +444,28 @@ def test_below_1280_px_the_cards_go_under_the_view():
     rule = css[css.index("@media (min-width: 701px) and (max-width: 1279px)"):]
     rule = rule[:rule.index("\n}\n")]
     assert ".inspector { grid-column: 2; grid-row: 2;" in rule and ".chat { grid-column: 1; grid-row: 1 / span 2; }" in rule
+
+
+def test_a_resize_frames_it_again_until_the_camera_is_moved():
+    """reviewer-2 on #250: a live resize past square (1024 to 701 px, or a phone turned) left the stool framed for the old aspect, cut
+    off at the edge, until fit was pressed. A resize re-frames while the camera is where fit put it; once it's moved, it's left alone."""
+    from .test_carve_click import _page, _run
+
+    out = _run(_page(["narrowBy", "frame", "resize", "unfit"], extra="""
+let fitted = false, framed = 0;
+const viewer = { clientWidth: 400, clientHeight: 800 };
+const renderer = { setPixelRatio() {}, setSize() {} };
+const camera = { aspect: 1, position: { set() { framed += 1; } }, updateProjectionMatrix() {} };
+const controls = { target: { copy() {} }, update() {} };
+const v3 = () => ({ length: () => 100 });
+const THREE = { Vector3: function () {} };
+const contentBox = () => ({ isEmpty: () => false, getCenter: () => ({ x: 0, y: 0, z: 0 }), getSize: () => v3() });
+const fitGrid = () => {}; const devicePixelRatio = 1;
+frame(); const first = framed;
+resize(); const again = framed;
+unfit(); resize();
+out = { first, again, after: framed, aspect: camera.aspect };
+"""))
+    assert out == {"first": 1, "again": 2, "after": 2, "aspect": 0.5}
+    js = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    assert "controls.addEventListener('start', unfit);" in js

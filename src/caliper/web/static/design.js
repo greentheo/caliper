@@ -431,11 +431,18 @@ const noPieces = new Map();     // part id -> {version, why} that can't be drawn
 let stationMesh = null;         // a whittle station shown in place of its part
 const loader = new STLLoader();
 
+// framed by fit, and not moved since: a resize frames it again for the new shape (reviewer-2 on #250: 1024 to 701 px, or a phone
+// turned, cut the stool off at the edge until fit was pressed). Once the person moves the camera, a resize leaves it where they put it
+let fitted = false;
+function unfit() {
+  fitted = false;
+}
 function resize() {
   const w = viewer.clientWidth || 1, h = viewer.clientHeight || 1;
   renderer.setPixelRatio(devicePixelRatio);
   renderer.setSize(w, h, false);
   camera.aspect = w / h; camera.updateProjectionMatrix();
+  if (fitted) frame();
 }
 new ResizeObserver(resize).observe(viewer);
 resize();
@@ -480,8 +487,10 @@ function frame() {
   camera.near = r / 200; camera.far = r * 200; camera.updateProjectionMatrix();
   controls.update();
   fitGrid(box);
+  fitted = true;
 }
 $('fitView').onclick = frame;
+controls.addEventListener('start', unfit);           // the person moved it: theirs now
 addEventListener('keydown', (e) => {
   if (e.key === 'f' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) frame();
 });

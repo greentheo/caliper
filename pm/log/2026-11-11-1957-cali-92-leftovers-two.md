@@ -84,3 +84,12 @@ in a scratch shop.
   now has a page test.
 - `test_filled_verdict`'s expectations moved to the both-causes words.
 - The 27 around-files: 728 pass, with 1 failure, the 0.2 lb goal above (fixed in the code).
+
+**reviewer-2's two small asks on item 20.**
+1. **A resize re-frames until the camera is moved.** A live resize past square (1024 to 701 px, or a phone turned)
+   left the stool framed for the old shape, cut off at the edge. Now, while the camera is where fit put it, a resize
+   runs fit again. Once the person orbits, pans or zooms (the controls' `start`), a resize leaves it alone.
+   Checked live in a browser, 1024 to 701 px with no fit pressed: the whole stool stays framed. 4 mutants, all
+   caught.
+2. **Item 20 pinned.** That's already in this PR's `test_leftovers_70b.py`: `narrowBy(0.5) == 2` and the 701–1279 px
+   rule (cards under the view, the chat down both rows).
