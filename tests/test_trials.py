@@ -15,7 +15,7 @@ pytest.importorskip("cadquery")
 @pytest.fixture
 def checked(tmp_path, monkeypatch):
     pytest.importorskip("whittle")
-    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 4)   # 4 through, as a real run: at 2 its 19.05 mm sides are walls the voxels can't see, which only the top's plate check covers (#248)
     store = DesignStore.create("a box stool", base=str(tmp_path / "designs"))
     store.write_part("stool", BOX_STOOL, intent="a box step stool")
     store.design.display_units = "in"

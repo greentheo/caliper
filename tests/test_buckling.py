@@ -213,6 +213,7 @@ def test_a_lone_thin_wall_sways_and_folds_long_before_it_crushes(tmp_path, monke
     assert round(raw, 2) == 0.02 and V.cut(raw) == 0.01
     assert row["safety"] == c["safety"] == 0.01 and c["governs"] == "buckling" and not c["holds"]
     assert c["fea"]["safety"] > 100 * c["safety"]
+    assert rec["unseen"] == [{"mm": 6.35, "piece": "wall"}]           # every wall it couldn't see is recorded (#248 review)
     assert verdicts.case(rec, c)["kind"] == "fails"
     # the card names the wall that folds, not where the FEA's stress peaks (#235 review)
     said = answers.fail_hedge(rec, c, verdicts.case(rec, c), False)
