@@ -202,6 +202,8 @@ def validate(data, drop_bad_rules: bool = False) -> Plan:
             src = next((q for q in plan.parts if q.id == p.mirror_of), None)
             if src is None or src.id == p.id:
                 raise PlanError(f"{p.id!r} is a mirror of {p.mirror_of!r}, which isn't another part of the plan")
+            if src.mirror_of == p.id:              # a cycle, said with both parts (#246 review)
+                raise PlanError(f"{p.id!r} and {src.id!r} each mirror the other: one of them has to be the source")
             if src.mirror_of is not None:
                 raise PlanError(f"{p.id!r} mirrors {src.id!r}, which is itself a mirror: mirror {src.mirror_of!r} instead")
     for m in plan.mates:

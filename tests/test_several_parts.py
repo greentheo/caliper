@@ -117,7 +117,7 @@ def test_mirroring_is_said_as_not_done_yet(stool):
     taller = {"side_left": _box(dx=20, dy=300, x=0).replace("10)", "60)"),
               "side_right": _box(dx=20, dy=300, x=300).replace("10)", "60)")}
     res = chat.turn(stool, "mirror both sides and make them taller", use_llm=False, author=_by_part(stool, taller))
-    assert "Mirroring one part from another isn't something I can do yet" in res.reply.splitlines()[1]
+    assert "Each was revised on its own, not mirrored" in res.reply.splitlines()[1]
     assert not res.ok and "✓" not in res.reply.splitlines()[0]
 
 
@@ -178,14 +178,14 @@ TALLER = {"side_left": _box(dx=20, dy=300, x=0).replace("10)", "60)"),
           "side_right": _box(dx=20, dy=300, x=300).replace("10)", "60)")}
 
 
-@pytest.mark.parametrize("message", ["make both sides the right side, and taller", "use the left side for both sides, taller",
+@pytest.mark.parametrize("message", ["make both sides the right side, and taller",
                                      "make the left side match the other, and both sides taller"])
 def test_theo_s_own_words_for_a_mirror_get_no_tick(stool, message):
     """Item 3: "make both sides the right side" is a mirror in other words: said as not done yet (#239), and no ✓."""
     res = chat.turn(stool, message, use_llm=False, author=_by_part(stool, TALLER))
     lines = res.reply.splitlines()
     assert lines[0].startswith("! Changed") and "✓" not in lines[0] and not res.ok
-    assert lines[1].startswith("Mirroring one part from another isn't something I can do yet")
+    assert lines[1].startswith("Each was revised on its own, not mirrored")
 
 
 def test_a_comment_only_edit_isn_t_a_change(stool):
@@ -341,7 +341,7 @@ def test_identical_and_like_the_right_one_are_a_mirror(stool, message):
     res = chat.turn(stool, message, use_llm=False, author=_by_part(stool, TALLER))
     lines = res.reply.splitlines()
     assert "✓" not in lines[0] and not res.ok
-    assert lines[1].startswith("Mirroring one part from another isn't something I can do yet")
+    assert lines[1].startswith("Each was revised on its own, not mirrored")
 
 
 @pytest.mark.parametrize("message,mirror", [("copy the right side onto both sides", True),
@@ -361,3 +361,14 @@ def test_and_joins_two_requests_not_a_request_and_a_complaint(message, want):
 def test_two_complaints_joined_by_and_are_asked_about():
     assert chat.targets("the top is too thin and the legs wobble", LEGS) == (
         [], "Which do you want changed: the legs, or the top? Say which (or both), and I'll change it.")
+
+
+
+def test_one_side_for_both_and_more_mirrors_and_says_the_rest_isn_t_done(stool):
+    """Since #239: "use the left side for both sides, taller" mirrors, and says "taller" is still to ask for: no ✓."""
+    from caliper import mirror
+
+    res = chat.turn(stool, "use the left side for both sides, taller", use_llm=False, author=lambda *a: pytest.fail("no designer"))
+    assert mirror.source_of(stool, "side_right") == "side_left" and not res.ok
+    assert res.reply.splitlines()[0] == ("! Only the mirror is done: the rest of what you asked (\"taller\") isn't yet. Ask "
+                                         "for it on side_left now, and side_right follows.")

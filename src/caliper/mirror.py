@@ -35,6 +35,8 @@ _CALIPER_POINTS = ("outline", "facets", "holes", "polygons", "a", "b", "at", "lo
                    "center", "centre", "origin", "start", "end")
 _CALIPER_VECTORS = ("normal", "direction", "dir", "axis")
 _CALIPER_I = {"YZ": 0, "XZ": 1, "XY": 2}[MIRROR_PLANE]
+#: the position words a flip in this plane swaps, in a piece's or a hole's name ("right side" is "left side" mirrored)
+_CALIPER_SWAP = [("left", "right"), ("front", "back"), ("top", "bottom")][_CALIPER_I]
 
 
 def _caliper_triple(v):
@@ -53,10 +55,24 @@ def _caliper_map(x, point):
     return x
 
 
+def _caliper_rename(s):
+    import re as _re
+
+    a, b = _CALIPER_SWAP
+    def swap(m):
+        w = m.group(0)
+        to = b if w.lower() == a else a
+        return to.capitalize() if w[:1].isupper() else to
+    return _re.sub(rf"\\b(?:{a}|{b})\\b", swap, s, flags=_re.I)
+
+
 def _caliper_tree(x):
     if isinstance(x, dict):
         out = {}
         for k, v in x.items():
+            if k in ("name", "piece") and isinstance(v, str):
+                out[k] = _caliper_rename(v)
+                continue
             out[k] = (_caliper_map(v, True) if k in _CALIPER_POINTS else _caliper_map(v, False) if k in _CALIPER_VECTORS
                       else _caliper_tree(v))
         if _caliper_triple(out.get("lo")) and _caliper_triple(out.get("hi")):    # a box's corners, low and high again
@@ -155,8 +171,17 @@ def make(store, part_id: str, source: str, plane: Optional[str] = None, at=None,
     version."""
     if part_id == source:
         raise ValueError("a part can't mirror itself")
+    if source_of(store, part_id) == source:          # asked again: already so, nothing written (#246 review)
+        return store.design.part(part_id).version
+    if source_of(store, source) == part_id:
+        raise ValueError(f"{part_id} and {source} are already one script: {source} mirrors {part_id}")
     if source_of(store, source):
-        raise ValueError(f"{source} is itself a mirror of {source_of(store, source)}: mirror that instead")
+        raise ValueError(f"{source} is itself a mirror of {source_of(store, source)}: make {part_id} a mirror of "
+                         f"{source_of(store, source)} instead")
+    followers = mirrors_of(store, part_id)
+    if followers:                                     # no mirror of a mirror, from either end (#246 review)
+        raise ValueError(f"{part_id} has a mirror, {_listed(followers)}: break that first, or make "
+                         f"{followers[0]} a mirror of {source} too")
     if plane is None or at is None:
         got_plane, got_at = between(store, part_id, source) if store.design.part(part_id) else ("YZ", (0.0, 0.0, 0.0))
         plane, at = plane or got_plane, at if at is not None else got_at
@@ -192,3 +217,21 @@ def unmirror(store, part_id: str) -> int:
     own = own.replace(HEAD.format(source=got["source"]), f"# --- a copy of {got['source']}, mirrored: its own now ---", 1)
     return store.write_part(part_id, own, action="unmirror", feedback=f"no longer a mirror of {got['source']}",
                             extra={"unmirrored_from": got["source"]})
+
+
+def _listed(xs: list) -> str:
+    return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
+
+
+def said(part_id: str, source: str) -> str:
+    """Where a change asked of a mirror goes, in words."""
+    return (f"{part_id} mirrors {source}: change {source} and {part_id} follows it, or break the mirror first (say "
+            f"\"make {part_id} its own part\")")
+
+
+def refuse_if_mirror(store, part_id: str, what: str = "") -> None:
+    """Refuse a change asked of a mirror that can't go to its source, saying where to make it (#246 review: a carve or a
+    Lighten on the mirror would be undone the next time its source changed, with nothing said). ValueError."""
+    source = source_of(store, part_id)
+    if source:
+        raise ValueError((f"I can't {what} {part_id} on its own: " if what else "") + said(part_id, source))

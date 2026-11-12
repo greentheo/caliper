@@ -1103,9 +1103,13 @@ def _decline(store: DesignStore, proposal, events: list[Event], on_event) -> Tur
 
 def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) -> TurnResult:
     """CALI-82: carve a printed part in steps (``carve.study``); the reply says the lightest that holds."""
-    from . import carve
+    from . import carve, mirror
 
     events = events if events is not None else []
+    try:                                           # never on a mirror on its own: it'd be undone (#246 review)
+        mirror.refuse_if_mirror(store, part_id, "carve")
+    except ValueError as e:
+        return TurnResult(action="carve", ok=False, part=part_id, events=events, reply=f"{e}.")
     try:
         rec = carve.study(store, part_id, emit=lambda k, t="", **d: _emit(events, on_event, k, t, part=part_id, **d))
     except (ValueError, ImportError) as e:
@@ -1141,9 +1145,13 @@ def carve_part(store: DesignStore, part_id: str, *, events=None, on_event=None) 
 def picture_part(store: DesignStore, part_id: str, subject: str, where: str = "", *, points=None, events=None,
                  on_event=None, use_llm: bool = True, client=None, strength: bool = True) -> TurnResult:
     """CALI-78: a picture cut out of one of the part's panels, checked it still holds (``pictures.put``)."""
-    from . import pictures
+    from . import mirror, pictures
 
     events = events if events is not None else []
+    try:                                           # never on a mirror on its own: it'd be undone (#246 review)
+        mirror.refuse_if_mirror(store, part_id, "cut a picture into")
+    except ValueError as e:
+        return TurnResult(action="picture", ok=False, part=part_id, events=events, reply=f"{e}.")
     subject = re.sub(r"^(?:a|an|the|some)\s+", "", (subject or "picture").strip(), flags=re.I) or "picture"
     # just the thing: "T-rex silhouette cut into the side panel" -> "T-rex"
     subject = re.split(r"\s+(?:silhouette|cut|cutout|cut-out|shape|picture|drawing|on|onto|into|out of|in)\b",
@@ -1419,7 +1427,7 @@ def _overclaimed(store: DesignStore) -> list[str]:
     out = []
     ids = {p.id for p in store.design.parts}
     for a in store.assembly.assertions:
-        if not promote.overclaims(a.id, a.expr):
+        if not promote.overclaims(a.id, a.expr, sorted(ids)):
             continue
         pair = [n for n in sorted(_names(a.expr)) if n in ids]
         named = [p for p in ids if p in a.id]
@@ -1427,7 +1435,7 @@ def _overclaimed(store: DesignStore) -> list[str]:
         what = "only overall size" if "bbox(" in a.expr else "something else"
         try:
             off = measure.mirror_off(store.part_geometry(pair[0]), store.part_geometry(pair[1]))
-            said = f"mirrors() says they differ by {off * 100:.1f}% of {pair[0]}'s volume"
+            said = f"mirrors() says their surfaces are up to {off:g} mm apart"
         except Exception as e:  # noqa: BLE001 — what couldn't be measured is said
             said = f"mirrors() couldn't measure them ({scrubbed(e)})"
         out.append(f"⚠ {a.id} compares {what}; {said}.")
@@ -1553,7 +1561,8 @@ def refine_several(store: DesignStore, parts: list[str], message: str, *, scope:
     if pick and scope and scope not in parts:      # said, not dropped (#242 re-check)
         lines.append(f"What you picked is on {scope}, which this doesn't change: the pick wasn't used.")
     if mirror:
-        lines.append("Mirroring one part from another isn't something I can do yet (#239): each was revised on its own.")
+        lines.append("Each was revised on its own, not mirrored: to make one the other's mirror, say \"use the right "
+                     "side for both\" (or name the one to keep), and the other becomes its mirror (#239).")
     lines.append("")
     lines += ["\n\n".join(r.reply for r in results if r.reply)]
     broke = sorted({b for r in results for b in r.broke})
@@ -1713,6 +1722,8 @@ def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Op
         return TurnResult(action="ask", ok=True, part=pid, events=events,
                           reply={"remove": f"Kept {pid}.", "repeat": "Left it as it is.",
                                  "fix_rule": f"Left it: {aw.get('rule')} still doesn't hold."}.get(aw["kind"], "Left it."))
+    if aw["kind"] == "mirrors":                       # "make these 3 panels mirrors of the top panel?" yes (#246)
+        return _mirror_these(store, pid, [t for t in aw.get("targets") or [] if store.design.part(t)], aw.get("message") or "")
     if aw["kind"] == "remove":
         if store.design.part(pid or "") is None:
             return TurnResult(action="remove", ok=False, part=pid, events=events, reply=f"There's no {pid} to remove.")
@@ -1782,7 +1793,7 @@ def _part_said(words: str, ids: list[str], among: Optional[list] = None) -> Opti
     return pool[0] if len(pool) == 1 else None
 
 
-def _siblings(pid: str, ids: list[str]) -> list[str]:
+def _mirror_siblings(pid: str, ids: list[str]) -> list[str]:
     """The parts whose id differs from ``pid``'s only by where it is (side_left, side_right)."""
     mine = [t for t in pid.lower().split("_") if t not in _WHERE]
     return [i for i in ids if i != pid and [t for t in i.lower().split("_") if t not in _WHERE] == mine]
@@ -1805,6 +1816,8 @@ def _mirror_said(store: DesignStore, message: str, scope: Optional[str]) -> Opti
             return TurnResult(action="mirror", ok=True, part=pid, version=v,
                               reply=(f"**{pid}** is its own part now (v{v}): it keeps the mirrored shape, and no longer "
                                      f"follows {source}. Ask for the change you want on it."))
+    if _SIZE_ASKED.search(text):                   # "pick the top panel thickness for all panels": a size, not a mirror
+        return None
     for pattern in _SWAP:
         m = pattern.search(text)
         if m is None:
@@ -1813,29 +1826,79 @@ def _mirror_said(store: DesignStore, message: str, scope: Optional[str]) -> Opti
         if source is None:
             continue
         dst = _part_said(m.group("dst"), ids) if "dst" in pattern.groupindex and m.group("dst") else None
-        targets = [dst] if dst else _siblings(source, ids)
-        targets = [t for t in targets if t and t != source]
         built = lambda i: bool(store.design.part(i) and store.design.part(i).version and store.is_scripted(i))  # noqa: E731
+        if dst:
+            targets = [dst] if dst != source else []
+        else:                                      # only a like-for-like twin, and only one without asking (#246 review)
+            if not built(source) or not all(built(t) for t in _mirror_siblings(source, ids)):
+                continue                           # a plan under review mirrors in the plan, not here
+            targets = [t for t in _mirror_siblings(source, ids) if _twin(store, source, t)]
+            if not targets and built(source):
+                return TurnResult(action="mirror", ok=False, part=source,
+                                  reply=f"Nothing here is the {source.replace('_', ' ')}'s shape, so nothing can be its "
+                                        f"mirror. Say which part to mirror it as: \"make <part> a mirror of {source}\".")
+            if _WIDE.search(text) or len(targets) > 1:
+                from . import awaiting
+
+                awaiting.park(store, "mirrors", part=source, targets=targets, message=text)
+                return TurnResult(action="ask", ok=True, part=source,
+                                  reply=f"Make {_listed_ids(targets)} {'mirrors' if len(targets) > 1 else 'a mirror'} of "
+                                        f"{source}? {'They' if len(targets) > 1 else 'It'}'d lose "
+                                        f"{'their' if len(targets) > 1 else 'its'} own script (kept in the versions). "
+                                        f"Say yes, or name the one: \"make {targets[0]} a mirror of {source}\".")
         if not targets or not built(source) or not all(built(t) for t in targets):
             continue                               # a plan under review mirrors in the plan, not here
-        said = []
-        try:
-            for t in targets:
-                was = store.design.part(t).version
-                v = mirror.make(store, t, source, feedback=text)
-                got = mirror.of(store.read_script(t))
-                said.append(f"**{t}** is now a mirror of {source} (v{v}), flipped in the {got['plane']} plane "
-                            f"{'xyz'[mirror.PLANES[got['plane']]]} = {got['at'][mirror.PLANES[got['plane']]]:g} mm. "
-                            f"Its own script is kept as v{was} in its versions.")
-        except ValueError as e:
-            return TurnResult(action="mirror", ok=False, part=source, reply=f"I couldn't mirror it: {scrubbed(e)}.")
-        report, errors = _measure_design(store)
-        line = _design_line(report)
-        return TurnResult(action="mirror", ok=not errors and (report is None or not report.failures), part=targets[0],
-                          version=store.design.part(targets[0]).version, report=report, part_errors=errors,
-                          reply="\n".join(said) + f"\n\nOne script for {_listed_ids([source, *targets])}: a change to "
-                                f"either changes both, and it cost no designer time." + (f"\n{line}" if line else ""))
+        return _mirror_these(store, source, targets, text)
     return None
+
+
+#: A mirror request about a size is about the size: "pick the top panel thickness for all panels" (#246 review)
+_SIZE_ASKED = re.compile(r"\b(?:thickness|thick|width|wide|height|tall|length|long|depth|deep|size|diameter|radius)\b", re.I)
+#: More than a pair: asked first, never done in one go (#246 review: "for all of them" made four panels mirrors)
+_WIDE = re.compile(r"\b(?:all|every|each)\b", re.I)
+
+
+def _twin(store: DesignStore, a: str, b: str, share: float = 0.2) -> bool:
+    """Whether two parts are the same shape give or take: each axis's extent within ``share`` of the other's (a top
+    panel and a side panel aren't, though their sorted sizes are the same)."""
+    try:
+        ea = store.part_geometry(a).require_mesh().extents
+        eb = store.part_geometry(b).require_mesh().extents
+    except Exception:  # noqa: BLE001 — a part that won't build isn't known to be a twin
+        return False
+    return all(abs(x - y) <= share * max(x, y, 1e-9) for x, y in zip(ea, eb))
+
+
+def _mirror_these(store: DesignStore, source: str, targets: list[str], text: str) -> TurnResult:
+    """Make each of ``targets`` a mirror of ``source``, and say so: what's already one, what was made, what couldn't be."""
+    from . import mirror
+
+    said = []
+    try:
+        for t in targets:
+            if mirror.source_of(store, t) == source:     # asked again: already so, nothing written (#246 review)
+                said.append(f"**{t}** already mirrors {source}: nothing to change.")
+                continue
+            was = store.design.part(t).version
+            v = mirror.make(store, t, source, feedback=text)
+            got = mirror.of(store.read_script(t))
+            said.append(f"**{t}** is now a mirror of {source} (v{v}), flipped in the {got['plane']} plane "
+                        f"{'xyz'[mirror.PLANES[got['plane']]]} = {got['at'][mirror.PLANES[got['plane']]]:g} mm. "
+                        f"Its own script is kept as v{was} in its versions.")
+    except ValueError as e:
+        return TurnResult(action="mirror", ok=False, part=source, reply="\n".join(said + [f"I couldn't mirror it: {scrubbed(e)}."]))
+    report, errors = _measure_design(store)
+    line = _design_line(report)
+    made = any("is now a mirror" in x for x in said)
+    more = (_MORE.search(text) or _DIRECTION.search(text)) if text else None   # "…for both sides, taller": not done
+    if more:
+        said.insert(0, f"! Only the mirror is done: the rest of what you asked (\"{more.group(0)}\") isn't yet. Ask for it "
+                       f"on {source} now, and {_listed_ids(targets)} follow{'s' if len(targets) == 1 else ''}.")
+    return TurnResult(action="mirror", ok=not more and not errors and (report is None or not report.failures),
+                      part=targets[0], version=store.design.part(targets[0]).version, report=report, part_errors=errors,
+                      reply="\n".join(said) + (f"\n\nOne script for {_listed_ids([source, *targets])}: a change to "
+                                               f"either changes both, and it cost no designer time." if made else "")
+                      + (f"\n{line}" if line and made else ""))
 
 
 def _listed_ids(xs: list[str]) -> str:
