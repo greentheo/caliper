@@ -864,6 +864,7 @@ def measured(store: DesignStore, state: dict) -> dict:
             if making.filament_bound(reps):         # the solid's share: an upper bound (#237 review)
                 out["filament.upper"] = True
                 out["filament.upper_lb"] = making.solid_share_lb(reps)   # what it may be over by: the floor's slack
+                out["filament.upper_usd"] = making.solid_share_usd(reps)  # a cost's share that could go either way (#250)
         if slicing_now:
             out["filament.pending"] = slicing_now
         if unprintable:                            # first: it stays this way however long the slicer takes
@@ -988,7 +989,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
         untrue = now.get("strength.filled") if strength else None
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-97)
         older = now.get("strength.stale") if strength else None
-        guess = None
+        guess, alone = None, False
         if c["metric"].startswith(("weight.", "cost.")):   # a guessed filament figure: no ✓ on it (#237 review)
             guess = now.get("filament.rough") if c["metric"] in now else rough_scored.get(c["metric"])
             from . import making
@@ -1001,6 +1002,13 @@ def held_to(state: dict, now: dict) -> list[dict]:
                     guess = None                      # an upper bound that settles it: a pass under the limit (#237 review)
                 else:
                     met = True                        # over the limit on an upper bound: may be under, an estimate, not a ✗
+            if guess and c["metric"] in now and now.get("filament.upper") and c["metric"].startswith("cost."):
+                op = c.get("op", ">=")             # the solid's share bounds no cost: an estimate either way (#250 review),
+                low = verdicts.compare(v - (now.get("filament.upper_usd") or 0.0), op, c["limit"])
+                if making.sure_without(op, low):  # unless the parts that aren't printed settle it alone
+                    guess, met, alone = None, low, True
+                else:
+                    met = True
         if c["metric"].startswith("print."):           # a rough print time runs low: no ✓ on it (#166)
             guess = now.get("print.rough") if c["metric"] in now else (
                 f"{'partly ' if re.match(r'[0-9]+ of ', rough_scored[c['metric']]) else ''}a guess "
@@ -1036,7 +1044,9 @@ def held_to(state: dict, now: dict) -> list[dict]:
                    need=c.get("limit") if isinstance(c.get("limit"), (int, float)) else None)
         failed = verdict["kind"] == "fails"
         why = (filled_fail(untrue) if failed and untrue   # still ✗
-               else f" {now['strength.coarse_fail']}" if failed and strength and now.get("strength.coarse_fail") else "")
+               else f" {now['strength.coarse_fail']}" if failed and strength and now.get("strength.coarse_fail")
+               else " The parts that aren't printed cost more than that alone, before any filament." if failed and alone   # (#250)
+               else "")
         if verdict["kind"] == "waiting":               # a part left out isn't covered by the rest (#132 review)
             out.append(_line(f"! {label}{assumed}: {num} for the rest, but {verdict['why']}.", "warn",
                              study="load" if strength else None, model=rests_on_model(c["metric"])))

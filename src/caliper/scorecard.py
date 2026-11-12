@@ -266,6 +266,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     filament_guess = making.filament_said(reports.values())[0]
     filament_upper = making.filament_bound(reports.values())
     upper_lb = making.solid_share_lb(reports.values()) if filament_upper else 0.0     # what that bound may be over by
+    upper_usd = making.solid_share_usd(reports.values()) if filament_upper else 0.0   # a cost's share, either way (#250)
     _metric(metrics, "weight.total_lb", total_lb, "lb", f"everything, with {payload:g} lb aboard",
             "rough" if filament_guess else "model", filament_guess or "balance", **unknown)
     _metric(metrics, "hitch.tongue_lb", b["mass_lb"], "lb", "on the hitch's tongue, standing still", "model", "balance",
@@ -549,13 +550,18 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                    and not making.settled_by_bound(op, met, low))   # an upper bound that doesn't settle it: an estimate (#237)
         if bounded:
             met = True
+        # a cost on the solid's share is an estimate either way, unless the parts that aren't printed settle it alone (#250)
+        cost_on_share = filament_upper and number and c["metric"].startswith("cost.")
+        cost_sure = cost_on_share and making.sure_without(op, verdicts.compare(v - upper_usd, op, lim))
+        if cost_on_share and not cost_sure:              # settled without the share, its own number already says so
+            met = True
         # one verdict (CALI-112): a ✗ stays a ✗, then not trusted (CALI-96), then not resolved (CALI-110)
         verdict = verdicts.goal(met, untrusted=untrue if strength else None, unresolved=(unsure or unsettled) if strength else None,
                                 edge=bool(edgeless) if strength else False,             # the middle only (CALI-94)
                                 incomplete="; ".join(left) if strength and left else None,
                                 estimate=m["source"] if m and m.get("trust") == "rough" and c["metric"].startswith("print.")
                                 else filament_guess if filament_guess and c["metric"].startswith(("weight.", "cost."))
-                                and (bounded or not filament_upper or c["metric"].startswith("cost."))
+                                and (bounded or not filament_upper or (c["metric"].startswith("cost.") and not cost_sure))
                                 else None,
                                 # an old number on its limit, the run's or this goal's own (#214 review)
                                 recheck=(recheck or (verdicts.UNCUT if number and verdicts.goal_on_limit(

@@ -109,3 +109,10 @@ in a scratch shop.
    page's row says the same. No new check; racking is Theo's call.
 
 7 more mutants, all caught (one survivor at first now has its over-the-cap pin). The around-files (10) pass, 356.
+
+**The foreman on the cost question: an estimate both ways.** The solid's share isn't a bound on what's bought either way:
+supports and brim add to it, and infill takes away. So a cost goal on it is an estimate over its cap as well as under
+it. It's a sure ✗ only where the parts that aren't printed (wood, bought parts) are over the cap alone
+(`making.solid_share_usd`, `sure_without`). That line says so: "The parts that aren't printed cost more than that
+alone, before any filament." Both cases are pinned on the card and the scorecard; 6 mutants, one equivalent (that
+line is simplified). The around-files (6) pass, 135.

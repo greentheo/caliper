@@ -489,7 +489,28 @@ def test_a_cost_goal_on_the_solid_s_share_stays_an_estimate(mixed, monkeypatch):
     assert "the filament is the model's solid share" in line["text"], line
     (check,) = [c for c in scorecard.compute(mixed)["checks"] if c.get("id") == "g"]
     assert check["status"] == "estimate", check
-    _goal(mixed, "cost.usd", round(usd - 5, 2))                           # over its cap: a ✗, as on main (no bound settles cost)
+    _goal(mixed, "cost.usd", round(usd - 5, 2))                           # over its cap: an estimate too, either way (#250 review)
+    state = design_api.design_state(mixed)
+    (line,) = [ln for ln in answers.held_to(state, answers.measured(mixed, state)) if "light enough" in ln["text"].lower()]
+    assert line["status"] == "warn" and "a guess" in line["text"], line
+    (check,) = [c for c in scorecard.compute(mixed)["checks"] if c.get("id") == "g"]
+    assert check["status"] == "estimate", check
+
+
+def test_a_cost_cap_under_the_parts_that_aren_t_printed_is_a_sure_fail(mixed, monkeypatch):
+    """The foreman (#250): a sure ✗ only where the wood and bought parts alone are over the cap, and it says so."""
+    from caliper import answers, design_api, printing, scorecard
+
+    monkeypatch.setattr(printing, "estimate", lambda *a, **k: dict(FAILED))
+    state = design_api.design_state(mixed)
+    now = answers.measured(mixed, state)
+    rest = now["cost.usd"] - now["filament.upper_usd"]
+    assert 1 < rest < now["cost.usd"] - 1, now                              # some of each
+    _goal(mixed, "cost.usd", round(rest - 1, 2))
+    state = design_api.design_state(mixed)
+    (line,) = [ln for ln in answers.held_to(state, answers.measured(mixed, state)) if "light enough" in ln["text"].lower()]
+    assert line["status"] == "bad" and "a guess" not in line["text"], line
+    assert line["text"].endswith("The parts that aren't printed cost more than that alone, before any filament."), line
     (check,) = [c for c in scorecard.compute(mixed)["checks"] if c.get("id") == "g"]
     assert check["status"] == "fail", check
 

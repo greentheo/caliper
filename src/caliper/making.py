@@ -112,6 +112,19 @@ def settled_by_bound(op: str, met: Optional[bool], low_met: Optional[bool] = Non
                                 or (low_met is not None and low_met == met))
 
 
+def solid_share_usd(reports) -> float:
+    """The filament dollars of the printed groups whose figure is the solid's share: what a cost could be off by either way
+    (supports and brim add, infill takes away), so a cost goal is sure only where it's settled without them (#250 review)."""
+    groups = [g for r in reports if r for g in ((r.get("bom") or {}).get("printed") or [])]
+    return sum((g.get("filament_g") or 0.0) / 1000 * C.M.printed(g["material"])["usd_per_kg"]
+               for g in groups if g.get("filament_from", FROM_SOLID) == FROM_SOLID)
+
+
+def sure_without(op: str, low_met: Optional[bool]) -> bool:
+    """Whether a goal is settled with the printed share at nothing: over a cap without it, or at least its minimum."""
+    return low_met is not None and ((op in ("<=", "<") and not low_met) or (op in (">=", ">") and low_met))
+
+
 def solid_share_lb(reports) -> float:
     """The weight in pounds of the printed groups whose figure is the solid's share: what an upper bound may be over by."""
     groups = [g for r in reports if r for g in ((r.get("bom") or {}).get("printed") or [])]
