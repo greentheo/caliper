@@ -330,6 +330,16 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
     return case
 
 
+def step_case(c: dict) -> dict:
+    """A lightening step's case as it's kept: its numbers, and the walls the buckling check took as braced, so a step resting
+    on an unchecked joint reads as its case does (#265)."""
+    walls = [{k: r.get(k) for k in ("piece", "done", "safety", "braced_by", "sway_safety")}
+             for r in c.get("buckling") or [] if r.get("done")]
+    return {"name": c["name"], "safety": c.get("safety"), "governs": c.get("governs"),
+            "fea_safety": (c.get("fea") or {}).get("safety"), "breaks_lb": c.get("breaks_lb"),
+            "in": (c.get("fea") or {}).get("in"), **({"buckling": walls} if walls else {})}
+
+
 def estimate_numbers(raw: float, min_safety: float) -> dict:
     """A thinner sheet's estimate: kept cut toward safe and judged as kept (CALI-152, #214 review)."""
     safety = V.cut(raw)
@@ -517,9 +527,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
               "top_holes": sum(len(chosen[p["name"]]) for p in tops),
               "safety": safety, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
               "span": any(L.fixed_ends({"min_safety": min_safety}, c) for c in cases),     # no ✓ on an FEA alone between its holds (CALI-153)
-              "cases": [{"name": c["name"], "safety": c.get("safety"), "governs": c.get("governs"),
-                         "fea_safety": (c.get("fea") or {}).get("safety"), "breaks_lb": c.get("breaks_lb"),
-                         "in": (c.get("fea") or {}).get("in")} for c in cases],
+              "cases": [step_case(c) for c in cases],
               "panels": {p["name"]: [to_3d(p, h) for h in holes.get(p["name"], [])] for p in plist + tops}}
         if stations and st["saved_lb"] <= stations[-1]["saved_lb"] + 1e-3:
             continue                                     # the clean-up ate this step: nothing new

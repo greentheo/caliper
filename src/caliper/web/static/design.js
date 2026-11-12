@@ -2073,6 +2073,8 @@ function asOf(card) {
 function scoreMark(c, stale, when) {
   if (c.status === 'fail') return '<span style="color:var(--bad)">✗</span>';
   if (stale && c.status === 'pass') return `<span style="color:var(--amber)" title="${esc(when)}">·</span>`;
+  if (c.joints && c.status === 'pass') return c.joints_kind === 'holds' ? `<span title="${esc(c.joints)}">✓</span>`   // (#265)
+    : `<span style="color:var(--amber)" title="${esc(c.joints)}">!</span>`;
   return c.status === 'pass' ? '✓' : c.status === 'proposed' ? '◇'
     : c.status === 'unresolved' || c.status === 'untrusted' || c.status === 'estimate' ? '<span style="color:var(--amber)">!</span>' : '?';
 }

@@ -910,7 +910,7 @@ BUCKLING_CHECKED = ("Buckling is checked by hand for each wall the load runs dow
                     "meets them, the plywood taken the weaker way (rough), and its share of the load where it and another wall carry "
                     "one piece, by the lever rule (else the whole of it). A wall with both sides free is taken as held square at its "
                     "top by its joint to a piece across it and another wall, which isn't checked: if that joint gives, the walls "
-                    "rack (lean over together), so a pass that rests on it reads amber, joints not checked.")
+                    "rack (lean over together), so a pass that rests on it says so: joints not checked.")
 
 
 def buckling_notes(pieces: list[dict], loads: list[dict], mat: dict, tol: float = 2.0,

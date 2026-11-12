@@ -89,10 +89,10 @@ KINDS = {
     "close": ("warn", "holds, close to the line", True),
     "holds": ("ok", "holds", True),
 }
-#: What a pass that rests on a wall held square by an unchecked joint reads, at most (#265, the foreman's call until Theo answers
-#: #222's question 1): two walls under one step can rack, and full Euler holds only if the joint to the step holds their tops
-#: square. "close" is amber; set it to "holds" (✓, the note kept) if Theo says an unchecked joint may read ✓.
-JOINT_CAP = "close"
+#: What a pass that rests on a wall held square by an unchecked joint reads, at most (#265): two walls under one step can rack,
+#: and full Euler holds only if the joint to the step holds their tops square. Theo, on #222's question 1: "go with ✓ with a
+#: note for joints", so "holds", and "joints not checked" goes with it on every surface. "close" would make it amber.
+JOINT_CAP = "holds"
 JOINTS_WHY = "joints not checked"
 
 
@@ -180,7 +180,7 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
         return _make("recheck", safety, why=UNCUT)
     kind = "close" if near(safety, run.get("min_safety")) else "holds"
     brace = rests_on_brace(run, c)
-    if brace is not None:                             # a pass resting on an unchecked joint: amber at most, and why (#265)
+    if brace is not None:                             # a pass resting on an unchecked joint: JOINT_CAP at most, and why (#265)
         return _make(JOINT_CAP if kind == "holds" else kind, safety, why=JOINTS_WHY, joints=True, brace=brace)
     return _make(kind, safety)
 
@@ -242,6 +242,8 @@ def summary(s: Optional[dict]) -> dict:
     if s.get("unknown") or not (s.get("pass") or s.get("estimate")):
         return _make("waiting", why="a check isn't settled")
     # a guessed print time isn't a ✓, and it doesn't stop a design being ready to cut (#166: with no slicer, nothing could be)
+    if s.get("joints"):                         # nor does a pass resting on an unchecked joint; it's said (#265)
+        return _make(JOINT_CAP, why=JOINTS_WHY, joints=True, guess=bool(s.get("estimate")))
     return _make("holds", why="", guess=bool(s.get("estimate")))
 
 
@@ -255,7 +257,7 @@ STATUS = {"holds": "pass", "fails": "fail", "untrusted": "untrusted", "unresolve
 def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Optional[str] = None,
          edge: bool = False, stale: bool = False, incomplete: Optional[str] = None,
          estimate: Optional[str] = None, close: bool = False, recheck: Optional[str] = None,
-         span: Optional[str] = None) -> dict:
+         span: Optional[str] = None, joints: Optional[str] = None) -> dict:
     """A goal on a metric: ``met`` (None when there's no number). A ✗ stays a ✗ (a fail on a filled-in block is
     certain: the part as built is weaker still); then not trusted, not resolved, middle only, scored before the last
     change, a part left out, a number that's partly a guess (``estimate``, #166: a rough print time runs low, so a ✓
@@ -282,6 +284,8 @@ def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Op
         return _make("waiting", why=incomplete)
     if estimate:
         return _make("estimate", why=estimate)
+    if joints:                                 # a pass resting on a joint nothing checks: JOINT_CAP at most (#265), and why
+        return _make("close" if close else JOINT_CAP, why=joints, joints=True)
     return _make("close" if close else "holds")
 
 
@@ -388,6 +392,10 @@ def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = N
         return _make(coarse(run), st.get("safety"))
     if old_on_limit(run, st.get("safety"), (run or {}).get("min_safety")):   # an old number on its limit (#214)
         return _make("recheck", st.get("safety"), why=UNCUT)
+    need = {"min_safety": (run or {}).get("min_safety")}
+    brace = next((b for c in st.get("cases") or [] for b in [rests_on_brace(need, c)] if b is not None), None)
+    if v["counts_as_pass"] and brace is not None:      # a step resting on an unchecked joint, as its case would (#265)
+        return _make(JOINT_CAP if v["kind"] == "holds" else v["kind"], st.get("safety"), why=JOINTS_WHY, joints=True, brace=brace)
     return v
 
 

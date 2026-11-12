@@ -844,6 +844,7 @@ def _status(card: dict, smaller: int = 0) -> str:
     s = card["summary"]
     if verdicts.summary(s)["counts_as_pass"]:            # one verdict (CALI-112)
         guess = ", print time is a guess" if s.get("estimate") else ""       # never a ✓, never in the way (#166)
+        guess += ", but its joints aren't checked: see Will it hold?" if s.get("joints") else ""        # said (#265)
         but = (f", but {smaller} panel{' is' if smaller == 1 else 's are'} cut smaller than the model: see the cut lists"
                if smaller else "")                                           # never a quiet "ready" over it (#183 review)
         return f'<span class="status ready">Ready to cut — {s["pass"]} of {len(card["checks"])} checks pass{guess}{but}</span>'
@@ -879,6 +880,11 @@ def _safety_cell(c: dict) -> tuple[str, str]:
         return f"check it again: {verdicts.UNCUT}", "—"
     if kind not in verdicts.SETTLED:                 # any other kind: its word, never a number to build on
         return _e((c.get("verdict") or {}).get("word") or "not checked"), "—"
+    if (c.get("verdict") or {}).get("joints"):       # it holds if its joints do, and they aren't checked (#265)
+        from .answers import _times
+
+        return _e(_times(c["safety"], bool(c.get("rough")), c.get("min_safety")).replace(" times over", "x")
+                  + ", if its joints hold: not checked"), breaks
     if (c.get("verdict") or {}).get("coarse"):       # a ✗ stays a ✗, not as a settled number (#191)
         from .answers import safety_num            # the one formatter (#208 review): 1.995 never reads 2
 
@@ -889,8 +895,11 @@ def _safety_cell(c: dict) -> tuple[str, str]:
     return _e(_times(c["safety"], bool(c.get("rough")), c.get("min_safety")).replace(" times over", "x")), breaks
 
 
-def _mark(status: str) -> str:
-    """A scorecard check's mark in the book, from its one verdict (CALI-112): ✓ only for a pass."""
+def _mark(status: str, joints_kind: Optional[str] = None) -> str:
+    """A scorecard check's mark in the book, from its one verdict (CALI-112): ✓ only for a pass, and for one resting on a
+    joint nothing checks, only where :data:`verdicts.JOINT_CAP` lets it (#265); its trust column says the joints either way."""
+    if joints_kind and joints_kind != "holds" and status == "pass":
+        return "<span class='fail'>!</span>"
     v = verdicts.check(status)
     return ("<span class='pass'>✓</span>" if v["counts_as_pass"] else "<span class='fail'>✗</span>"
             if v["kind"] == "fails" else "?" if v["kind"] == "waiting" else f"<span class='fail'>{v['word']}</span>")
@@ -1075,7 +1084,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
     out.append("<h2 class='page'>Scorecard, as released</h2><table><tr><th></th><th>check</th><th class='n'>value</th>"
                "<th class='n'>margin</th><th>trust</th></tr>")
     for c in card["checks"]:
-        mark = _mark(c["status"])
+        mark = _mark(c["status"], c.get("joints_kind"))
         out.append(f"<tr><td>{mark}</td><td>{_e(c.get('label') or c['id'])}</td>"
                    f"<td class='n'>{_num(c.get('value'), c.get('unit', ''))}</td><td class='n'>{_num(c.get('margin'))}</td>"
                    f"<td>{'<span class=trust>' + _e(TRUST.get(c['trust'], c['trust'])) + '</span>' if c.get('trust') else ''}</td></tr>")

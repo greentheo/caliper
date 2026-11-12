@@ -21,7 +21,8 @@ edges, each taken on the safe side:
   wall's top too, as a step resting on a stool's two sides is: a top on one lone wall moves with it. That takes its top
   as held square by its joint to that piece, and the joint isn't checked (#265). If it gives, the walls under the piece
   RACK: they lean over together, a parallelogram, each swaying at its share of the load (``sway_safety`` on the row). So a
-  pass that rests on a brace reads amber at most, "joints not checked" (:data:`verdicts.JOINT_CAP`). Unbraced, nothing
+  pass that rests on a brace says "joints not checked" wherever it's read (✓ with that note, Theo's call on #222;
+  :data:`verdicts.JOINT_CAP`). Unbraced, nothing
   stops its top moving sideways, so it sways: fixed at its foot and free at its top, a cantilever of twice its height, a
   quarter of Euler's (:data:`SWAY`; without 1 − ν², the lower).
 

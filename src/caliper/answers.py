@@ -771,6 +771,10 @@ def measured(store: DesignStore, state: dict) -> dict:
         out["strength.recheck"] = verdicts.UNCUT
     if any(v["kind"] == "span" for _, v in said):
         out["strength.span"] = verdicts.SPAN_WHY       # (CALI-153)
+    braced = next(((r, v) for r, v in said if v.get("joints")), None)
+    if braced:                                         # a pass resting on a joint nothing checks: which, said everywhere (#265)
+        line = joint_said(braced[1]["brace"], braced[0].get("min_safety"))
+        out["strength.joints"] = line[:1].upper() + line[1:]
     held = [(r, v) for r, v in said if v["kind"] in ("unresolved", "unchecked")]
     if held:                                           # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
         r, v = held[0]                                 # or on another check while the FEA couldn't see a wall (#244, #248)
@@ -1055,7 +1059,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
                                 recheck=(now.get("strength.recheck") or (verdicts.UNCUT if verdicts.goal_on_limit(
                                     bool(now.get("strength.uncut")), c["metric"], v, c.get("limit"), c.get("op", ">="))
                                     else None)) if strength else None,
-                                span=now.get("strength.span") if strength else None)
+                                span=now.get("strength.span") if strength else None,
+                                joints=now.get("strength.joints") if strength else None)   # said; JOINT_CAP at most (#265)
         if verdict["kind"] == "estimate":
             out.append(_line(f"! {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}, {guess}.", "warn"))
             continue
@@ -1078,7 +1083,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
         why = (filled_fail(untrue) if failed and untrue   # still ✗
                else f" {now['strength.coarse_fail']}" if failed and strength and now.get("strength.coarse_fail")
                else " The parts that aren't printed cost more than that alone, before any filament." if failed and alone   # (#250)
-               else "")
+               else f" {verdict['why']}." if verdict.get("joints") else "")                                   # (#265)
         if verdict["kind"] == "waiting":               # a part left out isn't covered by the rest (#132 review)
             out.append(_line(f"! {label}{assumed}: {num} for the rest, but {verdict['why']}.", "warn",
                              study="load" if strength else None, model=rests_on_model(c["metric"])))
@@ -1091,7 +1096,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
         if c["metric"] == "strength.safety" and isinstance(c.get("limit"), (int, float)):
             # what it does, then what it needs: "2 times over (assumed): 3.11x" read as holding 2 times over (#64 item 15)
             need = f"; it needs {c['limit']:g}{', assumed' if assumed else ''}"
-            said = f"{mark} {_without_need(label)}, {num}" + against(now.get("strength.case") or {}, need)
+            said = (f"{mark} {_without_need(label)}, {num}" + against(now.get("strength.case") or {}, need)
+                    + (", if its joints hold: not checked" if verdict.get("joints") else ""))
         else:
             said = f"{mark} {label}{assumed}: {num}" + _against(c, failed, units.get(c['metric'], ''))
         out.append(_line(said + later,
@@ -1159,12 +1165,14 @@ def design(store: DesignStore, state: dict) -> list[dict]:
                 else "No check passes yet")
         rest = ([f"{untrusted} not trusted"] * bool(untrusted) + [f"{unresolved} not resolved"] * bool(unresolved)
                 + [f"{edge} middle only"] * bool(edge) + [f"{span} not settled"] * bool(span) + [f"{waits} not checked yet"] * bool(waits)
+                + [f"{s.get('joints')} with its joints not checked"] * bool(s.get("joints"))                   # passes, its joints said (#265)
                 + [f"{s.get('estimate')} a guess"] * bool(s.get("estimate")))
         work.append(_line(said + (
             f", {s['fail']} fail" + (f" ({s['unsettled']} not settled: too coarse to see its walls)" if s.get("unsettled") else "") + ": " + "; ".join((c.get("label") or c["id"]) for c in fails[:2]) if fails else "")
             + (f"{',' if s['pass'] or fails else ':'} " + ", ".join(rest) if rest else "") + "."
             + (" (A part has changed since: score it again.)" if stale else ""),
-            "bad" if fails else "warn" if stale or rest or not verdicts.summary(s)["counts_as_pass"] else "ok"))
+            "bad" if fails else "warn" if stale or [x for x in rest if "joints" not in x]
+            or verdicts.summary(s)["status"] != "ok" else "ok"))   # a note on its joints is amber only as JOINT_CAP says (#265)
     elif not work and not broken:
         work.append(_line("Nothing to hold it to yet: say what it must do.", "warn"))
     work = broken + work
