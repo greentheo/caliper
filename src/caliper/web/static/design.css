@@ -47,6 +47,7 @@ a.btn:hover { border-color: var(--accent); }
 .ghostlink:hover { color: var(--ink); }
 .errbar { background: #3a1d1f; color: #ffb4b4; border-bottom: 1px solid var(--bad);
   padding: 6px 14px; font: 12px/1.4 ui-monospace, monospace; }
+.errbar.plain { background: var(--panel2); color: var(--ink); border-bottom-color: var(--line); font-family: inherit; font-size: 13px; }
 
 /* --- the three columns ---------------------------------------------------- */
 .session { flex: 1; display: grid; grid-template-columns: 360px minmax(0, 1fr) 380px; min-height: 0; }

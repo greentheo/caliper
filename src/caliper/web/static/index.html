@@ -14,7 +14,10 @@
       __err.push(msg);
       const b = document.getElementById('errbar');
       if (b) {
-        b.hidden = false; b.textContent = '⚠ ' + msg + ' ';
+        // a refusal the server meant (a 409) is a plain line: nothing broke, so nothing to report (#70 item 24)
+        const refused = !!(window.__refused || {})[msg];
+        b.hidden = false; b.classList.toggle('plain', refused); b.textContent = (refused ? '' : '⚠ ') + msg + ' ';
+        if (refused) return;
         // CALI-59: a report the person reads first, and sends themselves if they want to
         const r = document.createElement('button'); r.className = 'linkish'; r.dataset.report = '';
         r.textContent = 'Report it…'; b.append(r);
