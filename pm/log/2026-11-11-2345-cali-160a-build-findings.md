@@ -15,3 +15,5 @@ This branch stacks on #240 and has #239 merged in, since it uses their measures.
 **Tests:** 6 in `test_build_findings.py`, all stubbed, real geometry.
 
 **Checks.** 6 tests in `test_build_findings.py`, one updated after #243's rework (the shadow finding needs the same size word). All 8 mutants are caught; the flipped-mirror skip, which survived at first, is pinned as not measured. The around-files (build plan, first build, show-it-first, first run) pass (87).
+
+**After #243 merged and #246's rework.** Main and #246's branch are merged in. The mirror finding now reads `mirrors()` in mm, as #246 measures it: a pair the plan calls mirrored is a finding when its surfaces are more than 0.2 mm apart in place ("their surfaces are up to 41.6 mm apart"). The PR now targets main. 198 around-files pass.

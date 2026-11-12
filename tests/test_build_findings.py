@@ -61,7 +61,7 @@ def test_v1_lists_both_pocket_misfits_the_mirror_and_the_left_side_miss(v1):
     assert left["fix"] in ("Size side_left's pocket to the stretcher: 0.3 mm a side.", "Move the stretcher or side_left so they meet.")
     assert any(f["said"].startswith("the stretcher doesn't meet side_left: ") for f in rec["findings"])
     mirror = said[("mirror", ("side_right", "side_left"))]
-    assert "the plan says side_right mirrors side_left, but they differ by" in mirror["said"]
+    assert "the plan says side_right mirrors side_left, but their surfaces are up to " in mirror["said"]
     assert mirror["fix"] == "Make side_right the mirror of side_left."
     assert all(f["measured"] for f in rec["findings"]) and rec["checks"] >= 4
 

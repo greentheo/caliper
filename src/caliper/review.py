@@ -8,7 +8,7 @@ proposes:
 
 - a plan rule or mate that fails (a pocket's fit says its play: "the stretcher has 19.1 mm of play in side_left's
   pocket");
-- a pair the plan calls mirrored whose shapes differ by more than 1% (``mirrors()``, #239);
+- a pair the plan calls mirrored whose surfaces are more than 0.2 mm apart, mirrored in place (``mirrors()``, #239);
 - a part that sets its own copy of a size the plan shares (#240);
 - a number the person stated that no part and no rule reads, so nothing measures it.
 
@@ -23,8 +23,6 @@ from typing import Optional
 
 from .design import DesignStore
 
-#: How far a pair the plan calls mirrored may differ, as a share of a part's volume, before it's a finding.
-MIRROR_SHARE = 0.01
 _MIRROR_WORDS = re.compile(r"\bmirror(?:\s+image)?\s+of\s+(?:the\s+)?(\w+)", re.I)
 
 
@@ -109,9 +107,9 @@ def _mirror_findings(store: DesignStore) -> tuple[list[dict], int]:
                         "said": f"the plan says {pid} mirrors {src}, and they couldn't be compared ({e})",
                         "fix": f"Make {pid} the mirror of {src}."})
             continue
-        if off > MIRROR_SHARE:
+        if off > measure.MIRROR_MM:              # mirrors() in mm, as a mirror check reads it (#246 review)
             out.append({"kind": "mirror", "parts": [pid, src], "measured": True,
-                        "said": f"the plan says {pid} mirrors {src}, but they differ by {off * 100:.0f}% of {pid}'s volume",
+                        "said": f"the plan says {pid} mirrors {src}, but their surfaces are up to {off:.1f} mm apart",
                         "fix": f"Make {pid} the mirror of {src}."})
     return out, checked
 
