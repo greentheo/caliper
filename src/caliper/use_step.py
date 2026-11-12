@@ -23,14 +23,18 @@ UNSEEN = "The re-check can't see the walls of any step at this size, so it could
 UNKNOWN = ("This study didn't record how thin each step's walls are, so it can't say which step a re-check could settle: run the study again "
            "to know. The steps are in the study.")
 SAID = {"room": ROOM, "no_room": NO_ROOM, "unseen": UNSEEN, "unknown": UNKNOWN}
-#: the least a Lightening must save to get a button (#207): every hole is a cut in the shop and a re-check, so a few ounces is the same
-#: waste as a 7¢ carve, paid in labour. A quarter pound or 5% of the part, whichever is larger. A judgment call, like USE_MIN_USD
-LIGHTEN_MIN = {"lb": 0.25, "share": 0.05}
+#: the least a Lightening must save to get a button (#207). A labour threshold, not a safety one: every hole is a cut in the shop and a
+#: re-check, so a few ounces is the same waste as a 7¢ carve, paid in labour. A quarter pound or 5% of the part, whichever is larger,
+#: but never more than a pound: the labour doesn't grow with the part, and a pound saved is a pound carried (#252 review). The foreman's
+#: call for now; Theo can move it. It decides only whether there's a button: a deeper step over it is still named
+LIGHTEN_MIN = {"lb": 0.25, "share": 0.05, "most_lb": 1.0}
 
 
 def lighten_floor(part_lb: Optional[float]) -> float:
-    """:data:`LIGHTEN_MIN` for a part of this weight; a quarter pound where its weight isn't known."""
-    return max(LIGHTEN_MIN["lb"], LIGHTEN_MIN["share"] * part_lb) if part_lb else LIGHTEN_MIN["lb"]
+    """:data:`LIGHTEN_MIN` for a part of this weight: ``min(1 lb, max(0.25 lb, 5%))``; a quarter pound where its weight isn't known."""
+    if not part_lb:
+        return LIGHTEN_MIN["lb"]
+    return min(LIGHTEN_MIN["most_lb"], max(LIGHTEN_MIN["lb"], LIGHTEN_MIN["share"] * part_lb))
 
 
 #: a deeper step only counts as given up if it saves this much more: "3.37 lb against 3.35" isn't worth a sentence
@@ -81,10 +85,13 @@ def choose(steps: list[dict], need: float, saved: str, further: Callable[[dict],
     if usd is not None and usd < USE_MIN_USD:
         return {**out, "kind": "small", "said": f"It would save about {_money(usd)} of material{', ' + cost if cost else ''}: too little to be worth "
                                                 f"a re-check, so it's left in the study."}
-    if least is not None and pick[saved] < least:
-        return {**out, "kind": "small", "said": f"It would make it {further(pick)}{', ' + cost if cost else ''}: too little to be worth the cuts "
-                                                f"and a re-check, so it's left in the study."}
     gave_up = deepest[saved] > GAVE_UP_BY * pick[saved]
+    if least is not None and pick[saved] < least:   # the floor decides the button only: a deeper step over it is still named (#252)
+        named = gave_up and deepest[saved] >= least
+        return {**out, "kind": "small", "deepest": deepest["index"] if named else None,
+                "said": f"It would make it {further(pick)}{', ' + cost if cost else ''}: too little to be worth the cuts and a re-check, "
+                        f"so it's left in the study."
+                        + (f" The study got as far as {further(deepest)}, and that step is there to choose." if named else "")}
     unseen = furthest.get("seen") is not True and furthest[saved] > GAVE_UP_BY * (deepest if gave_up else pick)[saved]
     return {**out, "offers": True, "deepest": deepest["index"] if gave_up else None,
             "said": SAID[kind] + (f" That takes it{cost[9:]}." if cost.startswith("taking it") else f" It comes {cost}." if cost else "")

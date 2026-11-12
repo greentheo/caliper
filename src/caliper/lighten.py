@@ -658,6 +658,15 @@ def load_run(store: DesignStore, rid: str) -> Optional[dict]:
         return None
     with open(path) as f:
         rec = json.load(f)
+    if rec.get("part_lb") is None:                  # older: of this version, the part weighs what its construction says now (#252)
+        part = store.design.part(rec.get("part"))
+        if part is not None and rec.get("version") == part.version:
+            from . import construction as C
+
+            try:
+                rec["part_lb"] = C.report(store, rec["part"]).get("mass_lb")
+            except Exception:  # noqa: BLE001 — can't be read: the quarter pound alone
+                pass
     rec["offer"] = _offered(rec)
     return rec
 

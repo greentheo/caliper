@@ -22,3 +22,17 @@ figures).
 - `test_lighten`'s real run pins the recorded weight;
 - all 10 mutants are caught;
 - the around-files (7) pass, 177.
+
+**Rework from the review (the foreman's three).**
+1. **The floor decides only whether there's a button.** It tested the step `choose` picked, so with a 0.1 lb (no room)
+   or 0.2 lb (room) pick, the card said "too little" while a 1 lb step that's seen and holds sat in the study. Now
+   under the floor it still says "The study got as far as 1 lb lighter, and that step is there to choose" where a
+   deeper seen step is over the floor.
+   - The card leads "The lightening's step isn't offered", and the panel says "Too little to use", never "best".
+   - Both of the reviewer's cases are pinned.
+2. **The floor is `min(1 lb, max(0.25 lb, 5% of the part))`**, in `LIGHTEN_MIN` with the reason: it's labour, not
+   safety, and a pound saved is a pound carried. The foreman's call for now; Theo can move it.
+3. **An older run of the current version** takes the part's weight from its construction now. The quarter pound is
+   only where that can't be read. A run of an older version doesn't take today's weight.
+
+16 tests in the file; 8 more mutants, all caught. The quick around-files pass (172).

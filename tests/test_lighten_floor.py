@@ -20,9 +20,11 @@ def _lb(st):
 
 
 def test_the_floor_is_one_named_number():
-    assert use_step.LIGHTEN_MIN == {"lb": 0.25, "share": 0.05}
+    assert use_step.LIGHTEN_MIN == {"lb": 0.25, "share": 0.05, "most_lb": 1.0}
     assert use_step.lighten_floor(None) == 0.25 and use_step.lighten_floor(2.0) == 0.25      # 5% of 2 lb is 0.1
-    assert use_step.lighten_floor(20.0) == pytest.approx(1.0)                                # 5% of 20 lb
+    assert use_step.lighten_floor(10.0) == pytest.approx(0.5)                                # 5% bites between 5 and 20 lb
+    assert use_step.lighten_floor(20.0) == pytest.approx(1.0)
+    assert use_step.lighten_floor(40.0) == 1.0               # a pound saved is a pound carried, whatever it comes off (#252 review)
 
 
 def test_under_the_floor_there_s_no_button_and_it_says_what_it_would_save():
@@ -52,6 +54,53 @@ def _lighten(tmp_path, saved, part_lb=None):
     return lighten.load_run(s, "r1")
 
 
+@pytest.mark.parametrize("kind, steps", [
+    ("no_room", [{"index": 1, "safety": 2.9, "saved_lb": 0.1, "seen": True}, {"index": 2, "safety": 2.4, "saved_lb": 1.0, "seen": True}]),
+    ("room", [{"index": 1, "safety": 4.0, "saved_lb": 0.2, "seen": True}, {"index": 2, "safety": 2.5, "saved_lb": 1.0, "seen": True}]),
+])
+def test_the_floor_decides_the_button_only_and_a_deeper_step_over_it_is_still_named(kind, steps):
+    """#252 review, Rule 6: the floor tested the step it picked, and the card said "too little" while a 1 lb step held in the
+    study, four to ten times the floor."""
+    got = use_step.choose(steps, 2.0, "saved_lb", _lb, as_drawn=4.2, least=0.25)
+    assert got["kind"] == "small" and got["offers"] is False and got["index"] == 1 and got["deepest"] == 2, got
+    assert got["said"].endswith("The study got as far as 1 lb lighter, and that step is there to choose."), got["said"]
+    under = [steps[0], {**steps[1], "saved_lb": 0.24}]                      # deeper, but under the floor too: not named
+    assert "there to choose" not in use_step.choose(under, 2.0, "saved_lb", _lb, least=0.25)["said"]
+
+
+def test_the_panel_never_calls_a_step_under_the_floor_best():
+    js = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    assert "'Its best step'" not in js and "'Too little to use'" in js
+
+
+def test_an_older_run_of_this_version_takes_the_part_s_weight_now(tmp_path):
+    """#252 review: 0.25 lb is the most-offering floor, not the safe side. A run of the current version without part_lb takes the
+    weight construction gives now; a quarter pound only where that can't be read."""
+    from caliper import lighten
+    from caliper.design import DesignStore
+
+    from .test_load_study import BOX_STOOL
+
+    s = DesignStore.create("x", base=str(tmp_path))
+    s.write_part("p", BOX_STOOL, intent="x")
+    from caliper import construction
+
+    weight = construction.report(s, "p")["mass_lb"]
+    assert use_step.lighten_floor(weight) > 0.4 > use_step.LIGHTEN_MIN["lb"]   # 5% of it is over the 0.4 lb step
+    d = os.path.join(lighten.runs_dir(s), "r1")
+    os.makedirs(d)
+    st = [{"index": 0, "removed": 0, "safety": 6.0, "holds": True, "saved_lb": 0},
+          {"index": 1, "removed": 0.1, "safety": 5.9, "holds": True, "saved_lb": 0.4}]
+    rec = {"id": "r1", "part": "p", "version": s.design.part("p").version, "min_safety": 2.0, "spacing_mm": 2.0, "thinnest_mm": 19.0,
+           "across": 9.5, "stations": st}
+    with open(os.path.join(d, "run.json"), "w") as f:
+        json.dump(rec, f)
+    assert lighten.load_run(s, "r1")["offer"]["offers"] is False             # 0.4 lb under 5% of the box stool
+    with open(os.path.join(d, "run.json"), "w") as f:
+        json.dump({**rec, "version": rec["version"] - 1}, f)                 # an older version's: its weight isn't now's
+    assert lighten.load_run(s, "r1")["offer"]["offers"] is True
+
+
 @pytest.mark.parametrize("saved, part_lb, offers", [
     (0.2, None, False),          # a few ounces, part unknown: the quarter pound
     (0.3, None, True),
@@ -77,7 +126,7 @@ def test_the_card_gives_no_use_it_and_says_why(tmp_path):
                                                  {"index": 1, "saved_lb": 0.4, "safety": 3.05, "holds": True}]})
     (line,) = [ln for ln in _offers(store, "stool") if ln["action"] in ("lighten_use", "lighten", "")]
     assert line["action"] == "" and line["button"] == ""
-    assert line["text"].startswith("No step of the lightening to use: it would make it 0.4 lb lighter"), line["text"]
+    assert line["text"].startswith("The lightening's step isn't offered: it would make it 0.4 lb lighter"), line["text"]
     assert "too little to be worth the cuts and a re-check" in line["text"]
 
 
@@ -109,4 +158,4 @@ def test_studies_says_why_there_s_nothing_to_use():
 
 def test_the_panel_doesn_t_call_a_step_with_no_button_the_step_to_use():
     js = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
-    assert "${run.offer && run.offer.offers === false ? 'Its best step' : 'The step to use'}: <b>${lbs(best.saved_lb)} lighter</b>" in js
+    assert "${run.offer && run.offer.offers === false ? 'Too little to use' : 'The step to use'}: <b>${lbs(best.saved_lb)} lighter</b>" in js
