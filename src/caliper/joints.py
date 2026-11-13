@@ -27,6 +27,8 @@ from typing import Optional
 
 import numpy as np
 
+from .fasteners import WOOD
+
 NAME = "JOINTS"
 #: The kinds a joint can be (#222's proposal, and the through tenon from step-stool-5).
 KINDS = ("butt", "bevel", "mitre", "rabbet", "dado", "pocket screw", "dowel", "glue block", "printed connector",
@@ -129,7 +131,8 @@ def _through(host: dict, piece: dict, tol: float) -> Optional[dict]:
     return {"through": through, "notch": ends == 1, "points": q[inside], "frame": (o, u, v, n)}
 
 
-def contacts(pieces: list[dict], tol: float, reach: Optional[float] = None, at: Optional[dict] = None) -> dict:
+def contacts(pieces: list[dict], tol: float, reach: Optional[float] = None, at: Optional[dict] = None,
+             materials: Optional[tuple] = WOOD) -> dict:
     """``{(a, b): {"how": "edge" | "through" | "into" | "notch" | "face", "length_mm", "on": {key: [(u, v), ...]}}}``, keyed by
     the pieces' keys, sorted: every pair of wood pieces that touch. An edge on a face as ``fasteners.joints`` finds it; a sheet
     run through another (``through``) or set into it (``into``, a dado or rabbet) from the pieces' own planes; and a piece lying
@@ -137,11 +140,16 @@ def contacts(pieces: list[dict], tol: float, reach: Optional[float] = None, at: 
     them, and the rim reads this finder now). ``on``: where on each sheet the other one meets it, its own (u, v), probed just
     past each face within ``reach`` (the tolerance by default), at ``at[sheet key]``'s (u, v) points where given (Lighten's
     cells), else a grid over its face: one finder for the joint list, the shopping list and Lighten's rim, which passes its
-    own reach (#275 review). A pair is a joint by ``tol`` alone, whatever the reach."""
+    own reach (#275 review). A pair is a joint by ``tol`` alone, whatever the reach. ``materials``: the pieces it looks
+    between, wood for the joint list and the shopping list (glue and screws); None, every piece, for Lighten's rim, which
+    keeps whatever meets a panel, a steel tube or a foam side (#281 review)."""
     from . import fasteners
 
+    def ours(pc):
+        return materials is None or pc.get("material") in materials
+
     out = {k: {"how": "edge", "length_mm": mm} for k, mm in fasteners.edge_joints(pieces, tol).items()}
-    wood = [pc for pc in pieces if pc.get("material") in fasteners.WOOD and pc["kind"] == "sheet"]
+    wood = [pc for pc in pieces if ours(pc) and pc["kind"] == "sheet"]
     for host in wood:
         for piece in wood:
             if piece is host:
@@ -155,7 +163,7 @@ def contacts(pieces: list[dict], tol: float, reach: Optional[float] = None, at: 
             out[key] = {"how": how, "length_mm": 2.0 * across}
     for key, c in out.items():
         c["on"] = {}
-    sticks = [pc for pc in pieces if pc.get("material") in fasteners.WOOD and pc["kind"] != "sheet" and pc.get("a") is not None]
+    sticks = [pc for pc in pieces if ours(pc) and pc["kind"] != "sheet" and pc.get("a") is not None]
     _footprints(wood, wood + sticks, out, tol, tol if reach is None else reach, at or {})
     return out
 

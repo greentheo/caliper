@@ -207,3 +207,72 @@ def test_a_run_s_short_keeps_close_with_a_note():
     run = _held(2.1, wood_joints=4)
     assert verdicts.case(run, run["cases"][0])["short"] == "holds 2.1x, close to the line, and joints not checked"
     assert verdicts.run(run)["short"] == "holds 2.1x, close to the line, and joints not checked", verdicts.run(run)
+
+
+# --- 5: the rim sees every material; the joint list, wood (#281 review) -----------------------------------------------------
+def _pieces(script, tmp_path):
+    pytest.importorskip("cadquery")
+    from caliper import construction as C
+    from caliper import fasteners
+    from caliper.consistency import _sides, shapes, tolerance
+    from caliper.design import DesignStore
+
+    s = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    s.write_part("stool", script, intent="a stool")
+    mesh = s.part_geometry("stool").require_mesh()
+    pcs = shapes(C.declared(s, "stool"))
+    _sides(mesh, pcs)
+    fasteners.keys(pcs)
+    return pcs, tolerance(mesh)
+
+
+def _rim(pcs, tol, name, s=5.0):
+    """Lighten's rim on one panel, as panels() reads it: its cells, and each cell's centre in 3D."""
+    import numpy as np
+
+    from caliper import lighten
+    from caliper.consistency import _frame
+
+    pc = next(p for p in pcs if p["name"] == name)
+    o, u, v, _, flat = _frame(pc["polys"][0])
+    lo = flat.min(axis=0)
+    shape = tuple(int(x) for x in np.ceil(np.ptp(flat, axis=0) / s))
+    ij = np.stack(np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing="ij"), -1).reshape(-1, 2)
+    g = lo + (ij + 0.5) * s
+    met = lighten._met({"pieces": pcs, "tol": tol}, [pc], {id(pc): (lo, shape, g)}, s)[id(pc)]
+    return met, o + g[:, :1] * u + g[:, 1:] * v
+
+
+STEEL = CLEATED.replace('"c": 38.1', '"c": 25.4').replace(
+    '{"name": "cleat", "kind": "stick", "material": "lumber", "size": "2x2",',
+    '{"name": "tube", "kind": "stick", "material": "steel", "outer": 25.4, "wall": 1.65,')
+XPS = CLEATED.replace('{"name": "left side", "kind": "sheet", "material": "plywood",',
+                      '{"name": "left side", "kind": "sheet", "material": "xps",')
+
+
+@pytest.mark.parametrize("script, other, c", [(STEEL, "tube", 25.4), (XPS, "cleat", 38.1)], ids=["steel tube", "xps side"])
+def test_the_rim_keeps_a_piece_of_any_material(script, other, c, tmp_path):
+    """A steel tube on a plywood side, or a lumber brace on a foam side: the rim keeps the wood (the foam) under it, and the
+    foam side keeps its joint rim under the step, while the joint list and the shopping list stay wood's."""
+    from caliper import fasteners, joints
+
+    assert script != CLEATED and script.count(other) >= 1
+    pcs, tol = _pieces(script, tmp_path)
+    met, xyz = _rim(pcs, tol, "left side")
+    under = abs(xyz[:, 2] - 300.0) < c / 2 - 5.0                                    # cells under the tube or brace
+    assert under.sum() > 20 and met[under].all(), (under.sum(), met[under].sum())
+    top = xyz[:, 2] > 457.2 - 2.0                                                    # its top edge, under the step
+    assert top.sum() > 5 and met[top].all(), (top.sum(), met[top].sum())
+    assert not met[(abs(xyz[:, 2] - 150.0) < 20.0)].any()                           # its middle, free to cut
+    pair = tuple(sorted((other, "left side")))
+    assert pair not in joints.contacts(pcs, tol)                                     # the joint list: wood to wood
+    assert pair not in fasteners.joints(pcs, tol)
+    assert pair in joints.contacts(pcs, tol, materials=None)                         # every material: the rim's
+
+
+def test_lighten_s_rim_passes_every_material():
+    import inspect
+
+    from caliper import lighten
+
+    assert "materials=None" in inspect.getsource(lighten._met)

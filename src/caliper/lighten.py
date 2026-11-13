@@ -137,7 +137,7 @@ def _met(ctx: dict, sheets: list, grids: dict, s: float) -> dict:
 
     fasteners.keys(ctx["pieces"])
     found = J.contacts(ctx["pieces"], ctx["tol"], reach=ctx["tol"] + 0.75 * s,
-                       at={pc["key"]: grids[id(pc)][2] for pc in sheets})
+                       at={pc["key"]: grids[id(pc)][2] for pc in sheets}, materials=None)   # any material (#281 review)
     out = {}
     for pc in sheets:
         lo, shape, g = grids[id(pc)]
