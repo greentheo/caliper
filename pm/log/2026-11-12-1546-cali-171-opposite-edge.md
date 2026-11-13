@@ -31,3 +31,26 @@ parts, mirrors) pass, 588.
 the part it's on ("✗ … but fillet_strip_opposite goes 3 mm into stool."), pinned and its mutant caught. An unusable pick
 and a missing opposite edge both lead with "!". `test_added_part_fits` passes, 18.
 After the merge, the added-part, chat, routes, mirrors, several-parts and pick-scope files pass, 294.
+
+**Rework from the review (the foreman's four).**
+1. **`_BOTH_EDGES` reads edge or corner wording only:** "this edge and the opposite edge", "both corners", "the other
+   side's edge", "its twin". Words about the strip itself are one strip, pinned: "rounded on both sides", "I'll sand the
+   other side smooth", "mirror the profile".
+2. **The reply names which edge it mirrored to:**
+   - by the host's piece where it has pieces ("the right side's inside corner": the piece the twin is on and the picked
+     edge isn't);
+   - else by its line ("the line from (280.95, 0, 300) to (280.95, 200, 300)");
+   - a host with twins on two axes is asked about, not guessed: "! … it has an opposite edge across x, the line from …,
+     and one across y, …: say which." Nothing's mirrored.
+3. **Two edges asked for with one picked** ("this edge and this edge", "these two edges", "this edge and that one"):
+   "! Built fillet_strip on the edge you picked, but I have one edge picked: pick the other one too, or say "the
+   opposite edge"." Never one strip with a silent ✓.
+4. **From #269:**
+   - the depth into the picked part is measured without swallowing an error. One that can't be measured reads "!
+     … I couldn't measure whether it goes into stool, so it isn't known to sit on it", and the round's result waits
+     (deferred), never a pass;
+   - "Every check on this part passes" is taken out under any "!" or "✗", wherever the line falls;
+   - and from the review's notes: what a mirror breaks counts, since broke and fixed are worked out again with it in.
+
+**Tests:** 13 more in `test_added_part_fits.py`; 11 failed before. All 9 mutants are caught. The added-part, chat, routes,
+mirrors, several-parts, pick-scope and verdicts files pass, 346.
