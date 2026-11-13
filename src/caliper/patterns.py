@@ -45,6 +45,7 @@ MARGIN = 0.4                    # what a home printer can't print, inches
 OVERLAP = 0.5                   # each page overlaps the next by this much, inches
 BORDER = 0.1 * IN               # room round a piece on the full-size pages (just off the line), mm
 CALIBRATE_IN = 4.0              # the projector's calibration square
+LINE_FONT, LINE_PX, WRAP = 14, 18, 150     # a page's words: 14 px is about 6.7 pt printed (#283 review: 12 px was small)
 
 
 def inches(mm: float) -> str:
@@ -166,6 +167,31 @@ def _faced(pts: np.ndarray, bevels: list, flat_of, shown: bool):
     return out, back, bev
 
 
+def _extent(pc: dict):
+    """What a piece's pages must cover: its outline, and a dashed line or a cut past it (#283 review: a bevel's other face
+    proud of the outline fell off the full-size pages). ``(lo, size)`` in the piece's frame, ``lo`` at most (0, 0)."""
+    pts = [np.asarray(pc["outline"], float)]
+    pts += [np.asarray([a, b], float) for a, b in pc.get("back") or []]
+    pts += [np.asarray(c["poly"], float) for c in pc.get("cuts") or []]
+    allp = np.vstack(pts)
+    lo = np.minimum(allp.min(axis=0), 0.0)
+    hi = np.maximum(allp.max(axis=0), np.asarray(pc["size"], float))
+    return lo, hi - lo
+
+
+def _proud(pc: dict) -> list[float]:
+    """How far each bevel's dashed line sits outside the solid outline (mm), for the ones that do: the other face is bigger
+    there, so the blank needs that much more wood (#283 review)."""
+    from .consistency import _edge_dist2d, _inside2d
+
+    out = []
+    for a, b in pc.get("back") or []:
+        mid = (np.asarray(a, float) + np.asarray(b, float)) / 2.0
+        if not _inside2d(mid[None], np.asarray(pc["outline"], float))[0]:
+            out.append(float(_edge_dist2d(mid[None], np.asarray(pc["outline"], float))[0]))
+    return out
+
+
 def marks_lines(pc: dict) -> list[str]:
     """What a piece's page says about its marks: bevels, mortises and dados, screws (CALI-177)."""
     from . import marks as K
@@ -173,6 +199,11 @@ def marks_lines(pc: dict) -> list[str]:
     out = []
     if pc.get("bevels"):
         out.append(K.bevel_line([b["angle"] for b in pc["bevels"]]))
+        proud = _proud(pc)
+        if proud:
+            n = len(proud)
+            out.append(f"Leave {inches(max(proud))} past the solid line along the {n} edge{'s' if n != 1 else ''} whose "
+                       f"dashed line is outside it: the other face is bigger there, so cut the blank big enough first.")
     if pc.get("chamfers"):
         out.append(K.chamfer_line(pc["chamfers"]))
     nm = {"mortise": 0, "notch": 0, "dado": 0, "rabbet": 0}
@@ -219,11 +250,17 @@ def _draw_marks(dr, pc: dict, X, Y, font=None, labels: bool = True):
         _dashes(dr, (X(a[0]), Y(a[1])), (X(b[0]), Y(b[1])))
     if labels:
         cx, cy = (float(np.mean([X(x) for x, _ in pc["outline"]])), float(np.mean([Y(y) for _, y in pc["outline"]])))
-        for bv in pc.get("bevels") or []:
+        backs = pc.get("back") or []
+        for i, bv in enumerate(pc.get("bevels") or []):
             (ax, ay), (bx, by) = bv["line"]
             mx, my = X((ax + bx) / 2), Y((ay + by) / 2)
             k = math.hypot(cx - mx, cy - my) or 1.0
-            dr.text((mx + (cx - mx) / k * 24 - 5, my + (cy - my) / k * 24 - 8), "B", fill="black", font=font)   # inside it
+            gap = 0.0
+            if i < len(backs):                           # clear of its own dashed line, whichever side it's on
+                (qx, qy), (rx, ry) = backs[i]
+                gap = math.hypot(X((qx + rx) / 2) - mx, Y((qy + ry) / 2) - my)
+            off = 24 + gap
+            dr.text((mx + (cx - mx) / k * off - 5, my + (cy - my) / k * off - 8), "B", fill="black", font=font)   # inside it
         n_ = len(pc["outline"])
         for ch in pc.get("chamfers") or []:
             (ax, ay), (bx, by) = pc["outline"][ch["edge"]], pc["outline"][(ch["edge"] + 1) % n_]
@@ -242,9 +279,8 @@ def _draw_marks(dr, pc: dict, X, Y, font=None, labels: bool = True):
             for i in range(len(poly)):
                 _dashes(dr, poly[i], poly[(i + 1) % len(poly)])
             tag = f"D{ng}"
-        if labels:
-            cx, cy = np.mean([q[0] for q in poly]), np.mean([q[1] for q in poly])
-            dr.text((cx + 6, cy - 8), tag, fill="black", font=font)
+        if labels:                                       # beside it, not across its outline
+            dr.text((max(q[0] for q in poly) + 8, np.mean([q[1] for q in poly]) - 8), tag, fill="black", font=font)
     for sc in pc.get("screws") or []:
         for x, y in sc["at"]:
             _crosshair(dr, X(x), Y(y))
@@ -304,19 +340,21 @@ def measure_page(pc: dict):
     img, dr = _page(landscape=True)
     W, H = img.size
     lines = _measure_lines(pc)
-    left, top, right, bottom = 1.0 * DPI, max(1.35 * DPI, 0.72 * DPI + (len(lines) + 1) * 16), W - 0.6 * DPI, H - 1.0 * DPI
+    left, top, right, bottom = (1.0 * DPI, max(1.35 * DPI, 0.72 * DPI + (len(lines) + 1) * LINE_PX), W - 0.6 * DPI,
+                                H - 1.0 * DPI)
     sx, sy = pc["size"]
-    k = min((right - left) / sx, (bottom - top) / sy)          # px per mm
-    X = lambda x: left + x * k                                  # noqa: E731
-    Y = lambda y: bottom - y * k                                # noqa: E731
+    lo, span = _extent(pc)                                     # a dashed line past the outline stays on the page
+    k = min((right - left) / span[0], (bottom - top) / span[1])          # px per mm
+    X = lambda x: left + (x - lo[0]) * k                        # noqa: E731
+    Y = lambda y: bottom - (y - lo[1]) * k                      # noqa: E731
     f, small, big = _font(15), _font(12), _font(24)
-    # the 1 in grid, numbered from the bottom-left corner
+    # the 1 in grid, numbered from the bottom-left corner, its numbers clear of anything drawn past the outline
     for i in range(int(sx // IN) + 1):
         dr.line([(X(i * IN), Y(0)), (X(i * IN), Y(sy))], fill=(215, 215, 215), width=1)
-        dr.text((X(i * IN) - 4, Y(0) + 6), str(i), fill=(120, 120, 120), font=small)
+        dr.text((X(i * IN) - 4, Y(lo[1]) + 6), str(i), fill=(120, 120, 120), font=small)
     for j in range(int(sy // IN) + 1):
         dr.line([(X(0), Y(j * IN)), (X(sx), Y(j * IN))], fill=(215, 215, 215), width=1)
-        dr.text((X(0) - 22, Y(j * IN) - 7), str(j), fill=(120, 120, 120), font=small)
+        dr.text((X(lo[0]) - 22, Y(j * IN) - 7), str(j), fill=(120, 120, 120), font=small)
     dr.polygon([(X(x), Y(y)) for x, y in pc["outline"]], outline="black", width=4)
     for n, h in enumerate(pc["holes"], 1):
         dr.polygon([(X(x), Y(y)) for x, y in h], fill=(235, 235, 235), outline="black", width=3)
@@ -324,12 +362,12 @@ def measure_page(pc: dict):
         dr.text((X(cx) - 10, Y(cy) - 14), f"H{n}", fill="black", font=big)
     _draw_marks(dr, pc, X, Y, font=f)
     # overall size: dimension lines along the bottom and up the left
-    _dimension(dr, (X(0), Y(0) + 40), (X(sx), Y(0) + 40), inches(sx), f)
-    _dimension(dr, (X(0) - 60, Y(0)), (X(0) - 60, Y(sy)), inches(sy), f)
+    _dimension(dr, (X(0), Y(lo[1]) + 40), (X(sx), Y(lo[1]) + 40), inches(sx), f)
+    _dimension(dr, (X(lo[0]) - 60, Y(0)), (X(lo[0]) - 60, Y(sy)), inches(sy), f)
     # the title and how to read it
     dr.text((0.6 * DPI, 0.35 * DPI), titles(pc)["measure"], fill="black", font=big)
     for i, ln in enumerate(lines):
-        dr.text((0.6 * DPI, 0.72 * DPI + i * 16), ln, fill=(60, 60, 60), font=small)
+        dr.text((0.6 * DPI, 0.72 * DPI + i * LINE_PX), ln, fill=(60, 60, 60), font=_font(LINE_FONT))
     return img
 
 
@@ -353,7 +391,7 @@ def _measure_lines(pc: dict) -> list[str]:
     lines += marks_lines(pc)
     import textwrap
 
-    return [w for ln in lines for w in textwrap.wrap(ln, 175)][:24]
+    return [w for ln in lines for w in textwrap.wrap(ln, WRAP)][:24]
 
 
 def _dimension(dr, a, b, text: str, font):
@@ -379,7 +417,8 @@ def _dimension(dr, a, b, text: str, font):
 def tiles(pc: dict) -> tuple[list, tuple[int, int], bool]:
     """Print and tape: the piece at full size across letter pages, a map page first. Returns
     ``(pages, (cols, rows), landscape)``."""
-    sx, sy = pc["size"] + 2 * BORDER
+    lo, span = _extent(pc)                                       # (#283 review) a dashed line past the outline prints
+    sx, sy = span + 2 * BORDER
     best = None
     for landscape in (False, True):
         pw, ph = (PAGE[1], PAGE[0]) if landscape else PAGE
@@ -395,8 +434,8 @@ def tiles(pc: dict) -> tuple[list, tuple[int, int], bool]:
         for c in range(cols):
             img, dr = _page(landscape)
             W, H = img.size
-            x0 = c * step[0] - BORDER                            # piece mm at the page's printable left
-            y0 = (rows - 1 - r) * step[1] - BORDER               # and at its printable bottom (row 1 on top)
+            x0 = lo[0] + c * step[0] - BORDER                    # piece mm at the page's printable left
+            y0 = lo[1] + (rows - 1 - r) * step[1] - BORDER       # and at its printable bottom (row 1 on top)
             X = lambda x: MARGIN * DPI + (x - x0) * k            # noqa: E731
             Y = lambda y: H - MARGIN * DPI - (y - y0) * k        # noqa: E731
             # the overlap with the next page right and the next page down, shaded
@@ -431,45 +470,61 @@ def _map(pc: dict, cols: int, rows: int, step) -> object:
     """The first page for a piece: how its pages go together."""
     img, dr = _page(landscape=True)
     W, H = img.size
-    sx, sy = pc["size"] + 2 * BORDER
-    k = min((W - 2 * DPI) / (cols * step[0] + OVERLAP * IN), (H - 2.6 * DPI) / (rows * step[1] + OVERLAP * IN))
+    lo, _ = _extent(pc)
+    said = map_lines(pc)
+    top = 0.75 * DPI + (len(said) + 1) * LINE_PX
+    k = min((W - 2 * DPI) / (cols * step[0] + OVERLAP * IN), (H - top - 0.9 * DPI) / (rows * step[1] + OVERLAP * IN))
     ox, oy = DPI, H - 0.8 * DPI
-    X = lambda x: ox + (x + BORDER) * k                          # noqa: E731
-    Y = lambda y: oy - (y + BORDER) * k                          # noqa: E731
+    X = lambda x: ox + (x - lo[0] + BORDER) * k                  # noqa: E731
+    Y = lambda y: oy - (y - lo[1] + BORDER) * k                  # noqa: E731
     for r in range(rows):
         for c in range(cols):
-            x0, y0 = c * step[0] - BORDER, (rows - 1 - r) * step[1] - BORDER
+            x0, y0 = lo[0] + c * step[0] - BORDER, lo[1] + (rows - 1 - r) * step[1] - BORDER
             box = [X(x0), Y(y0 + step[1] + OVERLAP * IN), X(x0 + step[0] + OVERLAP * IN), Y(y0)]
             dr.rectangle(box, outline=(150, 150, 150), width=2)
             dr.text((box[0] + 8, box[1] + 6), f"{chr(65 + r)}{c + 1}", fill=(110, 110, 110), font=_font(22))
     dr.polygon([(X(x), Y(y)) for x, y in pc["outline"]], outline="black", width=3)
     for h in pc["holes"]:
         dr.polygon([(X(x), Y(y)) for x, y in h], outline="black", width=2)
+    _draw_marks(dr, pc, X, Y, font=_font(13))
     dr.text((0.6 * DPI, 0.35 * DPI), titles(pc, cols, rows)["full"],
             fill="black", font=_font(24))
+    for i, ln in enumerate(said):
+        dr.text((0.6 * DPI, 0.75 * DPI + i * LINE_PX), ln, fill=(60, 60, 60), font=_font(LINE_FONT))
+    return img
+
+
+def map_lines(pc: dict) -> list[str]:
+    """The full-size cover's words, wrapped: how to put the pages together, and what each mark means (#283 review: the
+    full-size pages carried B, M1 and + with nothing saying what they were)."""
     import textwrap
 
-    say = ("Print at 100% (no fit to page) and check the 3 in ruler on each page. Trim each page's right and "
+    say = ["Print at 100% (no fit to page) and check the 3 in ruler on each page. Trim each page's right and "
            "bottom margins, lay it over the next page so its grey strip covers the matching strip and the grid "
            "lines meet, and tape. Then tape the pattern to the board, or prick through the line every inch with "
-           "an awl and join the dots. A hole: drill a 3/8 in hole inside its line to start the jigsaw.")
-    for i, ln in enumerate(textwrap.wrap(say, 175)):
-        dr.text((0.6 * DPI, 0.75 * DPI + i * 16), ln, fill=(60, 60, 60), font=_font(12))
-    return img
+           "an awl and join the dots. A hole: drill a 3/8 in hole inside its line to start the jigsaw."]
+    return [w for ln in say + marks_lines(pc) for w in textwrap.wrap(ln, WRAP)][:24]
 
 
 def project_svg(pc: dict) -> str:
     """Project and trace: the piece at full size, white on black, and a calibration square."""
+    import textwrap
+
     sx, sy = pc["size"]
+    lo, span = _extent(pc)
+    said = [w_ for ln in marks_lines(pc) for w_ in textwrap.wrap(ln, 110)]   # what each mark is (#283 review)
     cal = CALIBRATE_IN * IN
     pad = 1.0 * IN
-    w, h = sx + cal + 3 * pad, max(sy, cal) + 2 * pad + 0.6 * IN
-    fmt = lambda pts: " ".join(f"{x + pad:.2f},{h - pad - y:.2f}" for x, y in pts)   # noqa: E731
+    words = 0.6 * IN + 12.0 * len(said)
+    w, h = span[0] + cal + 3 * pad, max(span[1], cal) + 2 * pad + words
+    fmt = lambda pts: " ".join(f"{x - lo[0] + pad:.2f},{h - pad - (y - lo[1]):.2f}" for x, y in pts)   # noqa: E731
     grid = "".join(f'<line x1="{pad + i * IN:.1f}" y1="{h - pad:.1f}" x2="{pad + i * IN:.1f}" y2="{h - pad - sy:.1f}"/>'
                    for i in range(int(sx // IN) + 1))
     grid += "".join(f'<line x1="{pad:.1f}" y1="{h - pad - j * IN:.1f}" x2="{pad + sx:.1f}" y2="{h - pad - j * IN:.1f}"/>'
                     for j in range(int(sy // IN) + 1))
-    cx = pad * 2 + sx
+    cx = pad * 2 + span[0]
+    lines = "".join(f'<text x="{pad:.2f}" y="{0.5 * IN + 12.0 * (i + 1):.2f}" fill="white" font-size="8" '
+                    f'font-family="sans-serif">{html.escape(ln)}</text>' for i, ln in enumerate(said))
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w / IN:.3f}in" height="{h / IN:.3f}in" '
             f'viewBox="0 0 {w:.2f} {h:.2f}">'
             f'<rect width="100%" height="100%" fill="black"/>'
@@ -483,7 +538,7 @@ def project_svg(pc: dict) -> str:
             f'zoom until this is {CALIBRATE_IN:g} in square</text>'
             f'<text x="{pad:.2f}" y="{0.5 * IN:.2f}" fill="white" font-size="9" font-family="sans-serif">'
             f'{html.escape(pc["name"])}: {html.escape(pc["label"])}, {html.escape(pc["seen"])}. Line the board\'s corner up with the bottom-left '
-            f'corner, then trace.</text></svg>')
+            f'corner, then trace: the solid lines. Dashed lines are the other face\'s, or a groove.</text>' + lines + '</svg>')
 
 
 def _svg_marks(pc: dict, fmt) -> str:
@@ -497,6 +552,29 @@ def _svg_marks(pc: dict, fmt) -> str:
         for x, y in sc["at"]:
             out += (f'<polyline points="{fmt([(x - 5, y), (x + 5, y)])}" stroke="white" stroke-width="0.8"/>'
                     f'<polyline points="{fmt([(x, y - 5), (x, y + 5)])}" stroke="white" stroke-width="0.8"/>')
+
+    def label(x, y, tag):
+        (X_, Y_), = [tuple(float(v) for v in q.split(",")) for q in fmt([(x, y)]).split()]
+        return f'<text x="{X_:.2f}" y="{Y_:.2f}" fill="#ffd166" font-size="9" font-family="sans-serif">{tag}</text>'
+
+    c0 = np.asarray(pc["outline"], float).mean(axis=0)
+    for tag, edges in (("B", [b["line"] for b in pc.get("bevels") or []]),
+                       ("C", [(pc["outline"][ch["edge"]], pc["outline"][(ch["edge"] + 1) % len(pc["outline"])])
+                              for ch in pc.get("chamfers") or []])):
+        for a, b in edges:
+            m = (np.asarray(a, float) + np.asarray(b, float)) / 2.0
+            d = c0 - m
+            m = m + d / (np.linalg.norm(d) or 1.0) * 12.0                 # inside the piece, clear of the line
+            out += label(m[0], m[1], tag)
+    nm = ng = 0
+    for c in pc.get("cuts") or []:
+        if c["kind"] in ("mortise", "notch"):
+            nm += 1
+            tag = f"{'M' if c['kind'] == 'mortise' else 'N'}{nm}"
+        else:
+            ng += 1
+            tag = f"D{ng}"
+        out += label(float(c["poly"][:, 0].max()) + 3.0, float(c["poly"][:, 1].mean()), tag)
     return out
 
 

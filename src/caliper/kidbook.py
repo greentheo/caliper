@@ -207,11 +207,21 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
     pictured = {h["piece"] for pid in part_ids for h in H.read(store.read_script(pid)) if h.get("picture")}
     view = release.View(every, azimuth=facing(every, pictured))
     # what to get
+    from . import marks as K
+
+    made = {}                                    # what the patterns mark: slots, bevels, screw holes (CALI-177)
+    for pid in part_ids:
+        try:
+            made[pid] = K.of(store, pid)
+        except Exception:  # noqa: BLE001 — the book goes without them
+            made[pid] = {}
     things = [re.sub(r"\s*\([^)]*\)", "", f"{r['qty']} {r['item']}") for g in shop["groups"] for r in g["rows"]]
     tools = ["a pencil and a long ruler", "sandpaper"]
     hand = set(S.read().get("hand") or [])
     tools += [t for t in ("jigsaw", "drill") if t in hand or not hand]
     if any(r for g in shop["groups"] for r in g["rows"] if "screw" in r["item"]):
+        if any(K.summary(m)["on"] for m in made.values() if m):    # the holes the patterns mark (#283 review)
+            tools.append(f"a {K.CLEARANCE_BIT} drill bit and a countersink, for the holes at each + on the patterns")
         tools.append(f"a {PILOT_BIT} drill bit for the pilot holes")      # (#64 item 8)
     tools += ["two clamps", "safety glasses (everyone)", "ear defenders (a jigsaw is loud)",
               "a grown-up for the saw and the drill"]
@@ -237,6 +247,18 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
     if holes:
         cut += (f" For {'the ' + ' and the '.join(pictures) if pictures else 'each hole'}, the grown-up drills a "
                 "hole just inside the line first: the jigsaw blade goes in through it.")
+    slots = list(dict.fromkeys(k.split(" #")[0] for m in made.values() if m for k, kind, _, _ in K.summary(m)["cuts"]
+                               if kind == "mortise"))
+    if slots:                                    # the mortises the patterns mark: cut before the stringer goes in (#283 review)
+        cut += (f" For the slot in the {' and the '.join(slots)} (the grey box on {'each' if len(slots) > 1 else 'its'} "
+                f"pattern), the grown-up drills a hole just inside the line first: the jigsaw blade goes in through it.")
+    angles = sorted({round(a) for m in made.values() if m for _, a, _ in K.summary(m)["bevels"]})
+    if angles:                                   # the bevels: the saw tilted, never cut square (#283 review)
+        tilt = " or ".join(f"{a:g}°" for a in angles) + (" (each pattern says which)" if len(angles) > 1 else "")
+        cut += (f" Some edges are marked B on the patterns: for those, the grown-up tilts the saw to {tilt}, printed "
+                f"side up.")
+    if any(K.summary(m)["chamfers"] for m in made.values() if m):
+        cut += " Edges marked C get their corner planed off afterwards: the grown-up does that with a block plane."
     pages.append({"title": "Cut them out", "say": cut, "grownup": True, "img": None})
     pages.append({"title": "Sand the edges", "say": "Sand every edge until it's smooth to touch, so nobody gets a "
                                                      "splinter. Round the corners a little.", "img": None})
@@ -267,16 +289,30 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
                 say = f"Stand the {words[pc['key']]} up where the picture shows. This one is the start."
                 n_screws = 0
             else:
-                pairs = [tuple(sorted((pc["key"], a))) for a in against]
-                n_screws = sum(counted[k]["n"] if k in counted else screws_for(joints[k]) for k in pairs)
-                if n_screws:
-                    say = (f"Put glue on the edges where the {words[pc['key']]} touches {_together(against, wood, words)}. "
-                           f"A grown-up clamps it and drills a {PILOT_BIT} pilot hole for each screw, so the wood won't "
-                           f"split. Then the grown-up drives in {n_screws} screws. You stand an arm's length behind, in "
-                           f"your safety glasses and ear defenders.")      # short sentences, read aloud (#209 review)
-                else:                                                      # a tenon glued in its mortise: no screws
-                    say = (f"Put glue in the holes, then push the {words[pc['key']]} through "
-                           f"{_together(against, wood, words)}. No screws here: the glue holds it.")
+                pair = {a: tuple(sorted((pc["key"], a))) for a in against}
+                n_of = {a: counted[k]["n"] if k in counted else screws_for(joints[k]) for a, k in pair.items()}
+                n_screws = sum(n_of.values())
+                screwed = [a for a in against if n_of[a]]
+                tenons = [a for a in against if not n_of[a] and (counted.get(pair[a]) or {}).get("host")]
+                said = []
+                for a in tenons:                                           # glued in its mortise: which way it goes (#283 review)
+                    c = counted[pair[a]]
+                    if c["piece"] == pc["key"]:
+                        said.append(f"Put glue in the hole in the {words[a]}, then push the {words[pc['key']]} through it.")
+                    else:
+                        said.append(f"Put glue in the hole in the {words[pc['key']]}, then slide it onto the end of the "
+                                    f"{words[a]}.")
+                if screwed:
+                    said.append(f"Put glue on the edges where the {words[pc['key']]} touches {_together(screwed, wood, words)}. "
+                                f"A grown-up clamps it and drills a {PILOT_BIT} pilot hole for each screw, so the wood won't "
+                                f"split. Then the grown-up drives in {n_screws} screws. You stand an arm's length behind, in "
+                                f"your safety glasses and ear defenders.")  # short sentences, read aloud (#209 review)
+                elif tenons:
+                    said.append("No screws here: the glue holds it.")
+                else:                                                      # held without screws, as its JOINTS says
+                    said.append(f"Put glue on the edges where the {words[pc['key']]} touches {_together(against, wood, words)}, "
+                                f"and clamp it until the glue dries. No screws here.")
+                say = " ".join(said)
             img = f"kids/step-{len(pages) + 1:02d}.png"
             with open(os.path.join(root, img), "wb") as f:
                 f.write(release.draw(step_view(every, new, view), [(done, "done"), ([new], "now")]))

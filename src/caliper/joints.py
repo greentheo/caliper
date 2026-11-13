@@ -311,6 +311,7 @@ def listed(store, pid: str) -> list[dict]:
             said.add(tuple(two))
     for key, c in sorted(found.items()):
         if key not in said:
+            glued = c["how"] in ("through", "notch")      # glued in its mortise, as the patterns and the book say (#283 review)
             out.append({"pieces": list(key), "kind": {"through": "through tenon", "into": "dado", "notch": "notch"}.get(c["how"], "butt"),
-                        "fix": list(ASSUMED_FIX), "assumed": True, **({} if ok else {"unread": UNREAD})})
+                        "fix": ["glue"] if glued else list(ASSUMED_FIX), "assumed": True, **({} if ok else {"unread": UNREAD})})
     return out

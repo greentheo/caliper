@@ -712,7 +712,8 @@ def shopping(store: DesignStore, plans: dict, bom: dict, lumps: dict, ctx: dict)
         kinds = sorted({b["fasteners"]["screw"] for b in bom.values() if b.get("fasteners")})
         add("hardware", " / ".join(kinds), f"{screws} (a box of {100 if screws > 50 else 50})",
             max(screws, 50) * P["screw_each"],
-            f"the joints, a screw every 6 in; drill a {PILOT_BIT} pilot hole for each")    # (#64 item 8)
+            f"the joints: 1 1/2 in from each end of a joint, then no more than 6 in apart (at each + on the patterns); "
+            f"drill a {PILOT_BIT} pilot hole for each")    # (#64 item 8; #283 review: the rule the marks use)
         ml = sum((b.get("fasteners") or {}).get("glue_ml", 0) for b in bom.values())
         add("hardware", "wood glue", "an 8 oz bottle" if ml <= 236 else f"{math.ceil(ml / 236)} × 8 oz bottles",
             P["wood_glue_8oz"] * max(1, math.ceil(ml / 236)), "every joint, before the screws")

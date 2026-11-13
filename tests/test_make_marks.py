@@ -485,3 +485,93 @@ def test_a_true_bevel_is_still_one(tmp_path):
     m = marks.of(_store(tmp_path, EDGED.replace('EDGE = "EDGE"', 'EDGE = "bevel20"'), "a board"), "stool")
     (b,) = m["bevels"]["side"]
     assert abs(b["angle"] - 20.0) < 0.5 and m["chamfers"] == {}, b
+
+
+# --- #283 review (reviewer-2): the kids' book, the full-size pages and the projector ----------------------------------------
+def _kids(store, tmp_path, shop=None):
+    import re
+
+    from caliper import kidbook
+
+    root = str(tmp_path / "rel")
+    os.makedirs(root, exist_ok=True)
+    kidbook.make(store, root, {"design": "a stool", "strength": {}}, ["stool"], shop or {"groups": []})
+    import html
+
+    return html.unescape(re.sub(r"\s+", " ", open(os.path.join(root, "kids.html")).read()))
+
+
+def test_the_kids_book_has_the_stringer_through_the_sides_whichever_goes_on_last(tenoned, tmp_path):
+    page = _kids(tenoned, tmp_path)
+    assert "push the right side through the stringer" not in page, page
+    assert "Put glue in the hole in the left side, then push the stringer through it." in page, page
+    assert "Put glue in the hole in the right side, then slide it onto the end of the stringer." in page, page
+
+
+def test_the_kids_book_cuts_the_slots_first(tenoned, tmp_path):
+    page = _kids(tenoned, tmp_path)
+    assert ("For the slot in the left side and the right side (the grey box on each pattern), the grown-up drills a "
+            "hole just inside the line first: the jigsaw blade goes in through it.") in page, page
+
+
+def test_the_kids_book_tilts_the_saw_for_the_bevels(splayed, tmp_path):
+    page = _kids(splayed, tmp_path)
+    assert "Some edges are marked B on the patterns: for those, the grown-up tilts the saw to 10°, printed side up." in page
+
+
+def test_the_kids_book_s_tools_match_the_holes_on_the_patterns(tenoned, tmp_path):
+    shop = {"groups": [{"rows": [{"qty": "20", "item": "#8 × 1 1/4 in wood screws"}]}]}
+    page = _kids(tenoned, tmp_path, shop)
+    assert "a 3/16 in drill bit and a countersink, for the holes at each + on the patterns" in page, page
+    assert "a 1/8 in drill bit for the pilot holes" in page
+
+
+def test_the_full_size_pages_reach_a_dashed_line_outside_the_outline(splayed):
+    """The side's foot: its inside face is 1/8 in proud, so the dashed line is outside the solid one; the tiles cover it."""
+    from caliper import patterns
+
+    side = {p["name"]: p for p in patterns.pieces(splayed, "stool")}["back side"]
+    lo, size = patterns._extent(side)
+    assert lo[0] < -3.0 or lo[1] < -3.0, lo                                          # the dashed line, past the outline
+    pages, (cols, rows), _ = patterns.tiles(side)
+    img = np.asarray(pages[1].convert("L")) < 100                                    # A1: the top-left page
+    cols_dark = img[:, :300].sum(axis=0)
+    left = int(np.argmax(cols_dark >= 0.9 * cols_dark.max()))                        # the outline's solid left edge
+    assert left > 0 and img[:, max(0, left - 28):left - 10].sum() >= 200, (left, img[:, max(0, left - 28):left - 10].sum())
+
+
+def test_the_projector_and_the_full_size_cover_say_what_the_marks_are(tenoned, splayed):
+    from caliper import patterns
+
+    side = {p["name"]: p for p in patterns.pieces(splayed, "stool")}["back side"]
+    svg = patterns.project_svg(side)
+    assert ">B</text>" in svg and "saw at 10°, this face up" in svg, svg[-1500:]
+    left = {p["name"]: p for p in patterns.pieces(tenoned, "stool")}["left side"]
+    svg = patterns.project_svg(left)
+    assert ">M1</text>" in svg and "cut 5 in x 3/4 in" in svg and "3/16 in clearance hole" in svg
+    assert any("cut 5 in x 3/4 in" in ln for ln in patterns.map_lines(left)), patterns.map_lines(left)
+
+
+def test_a_dashed_line_outside_the_solid_one_says_to_leave_the_wood(splayed):
+    from caliper import patterns
+
+    side = {p["name"]: p for p in patterns.pieces(splayed, "stool")}["back side"]
+    said = " ".join(patterns.marks_lines(side))
+    assert "Leave 1/8 in past the solid line along the 1 edge whose dashed line is outside it" in said, said
+
+
+def test_a_through_tenon_is_listed_glued_not_screwed(tenoned):
+    from caliper import joints
+
+    got = {tuple(j["pieces"]): j for j in joints.listed(tenoned, "stool")}
+    assert got[("left side", "stringer")]["fix"] == ["glue"] and got[("left side", "step")]["fix"] == ["glue", "screws"], got
+
+
+def test_the_shopping_line_says_the_screw_rule(tenoned):
+    from caliper import release
+
+    rows = release.shopping(tenoned, {}, {"stool": {"fasteners": {"screws": 20, "screw": "#8 × 1 1/4 in wood screws",
+                                                                  "glue_ml": 40}}}, {}, {})
+    (screw,) = [r for g in rows["groups"] for r in g["rows"] if "wood screws" in r["item"]]
+    assert "1 1/2 in from each end of a joint, then no more than 6 in apart" in screw["for"], screw
+    assert "a screw every 6 in" not in screw["for"]
