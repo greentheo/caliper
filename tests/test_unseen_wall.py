@@ -135,7 +135,9 @@ def test_studies_names_the_governing_check_with_its_own_number():
     from caliper import studies
 
     text, ok = studies._headline("load", {**RUN, "safety": 3.31, "cases": [_case("plate", 3.31, 6.7)]})
-    assert text == "not checked: its walls are too thin for the voxels (the seat's plate check read 3.3x; the FEA read 6.7x)", text
+    # what couldn't be seen, as the card says it, with the governing check's number and the FEA's (#276)
+    assert text == ("not checked: the seat's plate check holds 3.3 times over; the printed walls are too thin to check at this "
+                    "size (5.8 mm, needs 4 voxels across, and these are 2.6 mm); the FEA read 6.7x"), text
     text, _ = studies._headline("load", {**RUN, "safety": 2.05, "cases": [_case("fea", 2.05, 2.05)]})
     assert text == "not checked: its walls are too thin for the voxels (the FEA read 2.05x)", text
 

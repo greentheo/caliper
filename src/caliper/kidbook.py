@@ -299,7 +299,7 @@ def _strength_page(strength: dict, parts: Optional[list] = None) -> dict:
     kinds += ["waiting" for pid in (parts or []) if not strength.get(pid)]      # a part left out: not checked
     if not kinds:
         kinds = ["waiting"]                              # nothing checked at all: not checked
-    held = [f"It should hold {c['name'].lower()}, {answers.over(c, c.get('min_safety'))}"
+    held = [f"It should hold {answers.lowered(c['name'])}, {answers.over(c, c.get('min_safety'))}"
             f"{answers.IF_JOINTS if (c.get('verdict') or {}).get('joints') else ''}." for c, k in zip(cases, kinds)
             if k in verdicts.PASSES]
     if "fails" in kinds:

@@ -336,17 +336,20 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
         return _line(f"{c['name'][:1].upper() + c['name'][1:]}: {MIDDLE_ONLY}." + older, "warn", study="load")
     # a verdict on the printed model says so in a word, and why one click down by the promise (CALI-86)
     rough, need = L.rough(run, c), run.get("min_safety")
+    brace = ""
+    if v.get("joints"):                              # what it rests on that isn't checked (#265, #272)
+        said = joint_said(v["brace"], need)
+        brace = said if (v.get("brace") or {}).get("trim") else f"its joints aren't checked: {said}"
     if v["kind"] == "holds":
-        text = f"Holds {c['name'].lower()}, {over(c, need, rough)}." + (
-            (f" {joint_said(v['brace'], need)[:1].upper()}{joint_said(v['brace'], need)[1:]}." if (v.get("brace") or {}).get("trim")
-             else f" Its joints aren't checked: {joint_said(v['brace'], need)}.") if v.get("joints") else "")   # (#265, #272)
-    elif v["kind"] == "close" and v.get("joints"):   # amber: it holds if a joint does (#265)
-        text = f"Holds {c['name'].lower()}, {over(c, need, rough)}, if its joints do: {joint_said(v['brace'], need)}."
-    elif v["kind"] == "close":                       # amber: it holds, near the line (CALI-88, #64 item 2)
-        text = f"Holds {c['name'].lower()}, {over(c, need, rough)}: close to the {need:g} it needs."
+        text = f"Holds {lowered(c['name'])}, {over(c, need, rough)}." + (f" {brace[:1].upper()}{brace[1:]}." if brace else "")
+    elif v["kind"] == "close" and brace and not v.get("near"):   # amber by the cap, not its number: it holds if a joint does (#265)
+        text = f"Holds {lowered(c['name'])}, {over(c, need, rough)}, if its joints do: {joint_said(v['brace'], need)}."
+    elif v["kind"] == "close":                       # amber: it holds, near the line (CALI-88, #64 item 2), and both said (#276)
+        text = (f"Holds {lowered(c['name'])}, {over(c, need, rough)}: close to the {need:g} it needs"
+                + (f", and {brace}." if brace else "."))
     elif v["kind"] == "fails":
         said = over(c, need, rough)
-        text = (f"Doesn't hold {c['name'].lower()}: {'' if said.startswith(UNDER) else 'only '}{said}, and it needs "
+        text = (f"Doesn't hold {lowered(c['name'])}: {'' if said.startswith(UNDER) else 'only '}{said}, and it needs "
                 f"{run['min_safety']:g}.")
         if filled:                                   # a ✗ stays a ✗: the block failed, the part is weaker
             text += filled_fail(filled)
@@ -402,6 +405,14 @@ def worst_at(run: dict, c: dict, inches: bool) -> tuple[str, Optional[bool]]:
     where = (f"in the {fea['in']} " if fea.get("in") else "") + f"around z {_len(fea['at'][2], inches)}"
     s = run.get("spacing_mm")
     return where, (not L._sees(fea["wall_mm"] / s)) if s else None
+
+
+def lowered(name: str) -> str:
+    """A case's name inside a sentence: its words lowercased, but never a standard's or an acronym's ("EN 14183", "ASTM"): a
+    word with a digit or a second capital keeps its case (#276: the kid's book read "en 14183")."""
+    import re
+
+    return re.sub(r"\S+", lambda m: m.group(0) if re.search(r"\d|.[A-Z]", m.group(0)) else m.group(0).lower(), name)
 
 
 def unseen_said(run: dict, v: dict) -> str:

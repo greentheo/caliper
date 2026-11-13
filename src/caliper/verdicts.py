@@ -132,12 +132,13 @@ RANK = list(KINDS)
 def _make(kind: str, safety=None, **extra) -> dict:
     status, word, counts = KINDS[kind]
     if extra.get("joints") and counts:                  # a pass resting on an unchecked joint says so, whatever its tone (#265)
-        word = f"holds, {JOINTS_WHY}"
+        # near its limit as well, both: by its number, never by the cap (JOINT_CAP "close" isn't near the line) (#276)
+        word = f"holds, close to the line, and {JOINTS_WHY}" if extra.get("near") else f"holds, {JOINTS_WHY}"
     if safety is not None and kind == "fails":           # a ✗'s number is cut, never rounded up toward its limit:
         safety = math.floor(safety * 10 + 1e-9) / 10     # 1.96 against 2 read "doesn't hold 2.0x" (CALI-88, #64)
     short = f"{word} {safety:.1f}x" if safety is not None and kind in ("holds", "fails", "close") else word
     if extra.get("joints") and counts and safety is not None:
-        short = f"holds {safety:.1f}x, {JOINTS_WHY}"
+        short = f"holds {safety:.1f}x, {'close to the line, and ' if extra.get('near') else ''}{JOINTS_WHY}"
     return {"status": status, "kind": kind, "word": word, "short": short, "counts_as_pass": counts, **extra}
 
 
@@ -193,7 +194,8 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
         trim, wood = ({"trim": list(run["trim"])} if run.get("trim") else None), wood_brace(run)
         brace = {**trim, **wood} if trim and wood else trim or wood
     if brace is not None:                             # a pass resting on an unchecked joint: JOINT_CAP at most, and why (#265)
-        return _make(JOINT_CAP if kind == "holds" else kind, safety, why=JOINTS_WHY, joints=True, brace=brace)
+        return _make(JOINT_CAP if kind == "holds" else kind, safety, why=JOINTS_WHY, joints=True, brace=brace,
+                     **({"near": True} if kind == "close" else {}))
     return _make(kind, safety)
 
 
@@ -297,7 +299,7 @@ def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Op
     if estimate:
         return _make("estimate", why=estimate)
     if joints:                                 # a pass resting on a joint nothing checks: JOINT_CAP at most (#265), and why
-        return _make("close" if close else JOINT_CAP, why=joints, joints=True)
+        return _make("close" if close else JOINT_CAP, why=joints, joints=True, **({"near": True} if close else {}))
     return _make("close" if close else "holds")
 
 
@@ -408,7 +410,8 @@ def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = N
     brace = next((b for c in st.get("cases") or [] for b in [rests_on_brace(need, c)] if b is not None), None) \
         or wood_brace(run)                             # its joints, from the run it comes from (#275)
     if v["counts_as_pass"] and brace is not None:      # a step resting on an unchecked joint, as its case would (#265)
-        return _make(JOINT_CAP if v["kind"] == "holds" else v["kind"], st.get("safety"), why=JOINTS_WHY, joints=True, brace=brace)
+        return _make(JOINT_CAP if v["kind"] == "holds" else v["kind"], st.get("safety"), why=JOINTS_WHY, joints=True, brace=brace,
+                     **({"near": True} if v["kind"] == "close" else {}))
     return v
 
 

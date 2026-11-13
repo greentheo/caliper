@@ -951,10 +951,13 @@ BUCKLING_CHECKED = ("Buckling is checked by hand for each wall the load runs dow
 
 
 def buckling_notes(pieces: list[dict], loads: list[dict], mat: dict, tol: float = 2.0,
-                   sheet_mat: Optional[dict] = None) -> list[str]:
+                   sheet_mat: Optional[dict] = None, printed_names: Optional[list] = None) -> list[str]:
     """What's said of buckling, if the part has a wall to carry a load in its own plane: :data:`BUCKLING` for a printed
-    part, or where a sheet in line with a load couldn't be checked (naming it, and why); else :data:`BUCKLING_CHECKED`."""
-    if mat.get("printed"):
+    part, or where a sheet in line with a load couldn't be checked (naming it, and why); else :data:`BUCKLING_CHECKED`. On a
+    part of sheets and printed pieces, each judged as what it is: its sheets checked in their own material, its printed
+    pieces (``printed_names``, given for a sheet part only) named as not checked (#276: step-stool-5 v4 read "Buckling isn't
+    checked" with every sheet checked). A mostly printed part's printed walls carry the load: not checked, as before."""
+    if mat.get("printed") and (printed_names is None or sheet_mat is None or sheet_mat.get("printed")):
         return [BUCKLING]
     from . import buckling as B
 
@@ -965,8 +968,15 @@ def buckling_notes(pieces: list[dict], loads: list[dict], mat: dict, tol: float 
     for r in rows:
         if not r["done"]:
             left.setdefault(r["piece"], r["why"])
+    names = list(printed_names or []) if mat.get("printed") else []
     if left:
+        left.update({n: "it's printed" for n in names})
         return [BUCKLING + " Not on " + "; ".join(f"the {p}: {why}" for p, why in left.items()) + "."]
+    if names:
+        many = len(names) > 1 or names[0].rstrip().endswith("s")
+        are, they = ("are", "they're") if many else ("is", "it's")
+        return [BUCKLING_CHECKED + f" The {' and the '.join(names)} {are}n't checked for buckling: {they} printed, and only "
+                f"sheets are."]
     return [BUCKLING_CHECKED]
 
 
@@ -1370,6 +1380,8 @@ NO_RESULT = {"unchecked": "not checked: its walls are too thin for the voxels",
 def done_words(n: int, v: dict, worst: Optional[float]) -> str:
     """The last line of a check. A number only beside a result: where the card withholds it, so does this (#178 review)."""
     said = {"holds": "it holds", "fails": "it doesn't hold", **NO_RESULT}.get(v["kind"], v["word"])
+    if v["kind"] in ("unresolved", "unchecked") and v.get("why"):   # what couldn't be seen, as the card says it (#276)
+        said = f"not checked: {v['why']}"
     return f"{n} load(s) checked: " + said + (f", {worst:g}x" if worst and v["kind"] not in NO_RESULT else "")
 
 
@@ -1405,7 +1417,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
 
     fea_seconds = time.time() - t1
     notes = [f"{mat['name']}: E {mat['E']:g} MPa, strength {mat['strength']:g} MPa — {mat['basis']}.", *NOTES,
-             *buckling_notes(ctx["pieces"], loads, mat, ctx["tol"], ctx.get("plate_mat"))]
+             *buckling_notes(ctx["pieces"], loads, mat, ctx["tol"], ctx.get("plate_mat"),
+                             printed_names=[p["name"] for p in printed_pieces(ctx["declared"])]
+                             if ctx.get("rest") is not None else None)]          # a sheet part's printed pieces (#276)
     if mat.get("note"):
         notes.append(mat["note"])
     if ctx.get("note"):
@@ -1537,10 +1551,24 @@ def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
         got = dict(got or {"why": "made_of", "lighten": ""})
         if got.get("why") in ("unresolved", "too_thin") and _only_trim_unseen(store, part_id):
             got["lighten"] = ""                       # Lighten leaves the printed trim out of its study (#272 re-check)
+            got["lead"] = unseen_lead(default_check(store, part_id))   # and its panel says why the check reads "not checked" (#276)
         return {**got, "carve": "It's mostly sheet wood: it's lightened, not carved"}
     if study == "carve":
         return {**(got or {"why": "made_of", "carve": ""}), "lighten": "It's mostly printed: it's carved, not lightened"}
     return got
+
+
+def unseen_lead(rec: Optional[dict]) -> str:
+    """What the Lighten panel leads with where its part's check couldn't see (or size) only printed pieces, which Lighten leaves
+    out (#276): the same words as the card, and why Lighten still runs. "" where nothing is unseen."""
+    rec = rec or {}
+    names = list(rec.get("unsized") or []) or [u["piece"] for u in rec.get("unseen") or [] if u.get("piece")]
+    if not names:
+        return ""
+    many = len(names) > 1 or names[0].rstrip().endswith("s")
+    said = (unseen(rec, {}) if rec.get("unsized") else
+            f"the {' and the '.join(names)} {'are' if many else 'is'} too thin for the check to see")
+    return f"{said[:1].upper()}{said[1:]}. Lighten leaves {'them' if many else 'it'} out and cuts only the sheets."
 
 
 def _only_trim_unseen(store: DesignStore, part_id: str) -> bool:

@@ -121,9 +121,11 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
             c0 = coarse[0][0]                   # the check that governs, with its own number (#248 review)
             read = f"{L.governing_words(c0)} read {safety_num(c0['safety'], r.get('min_safety'))}x"
             fea = (c0.get("fea") or {}).get("safety")
-            if c0.get("governs", "fea") not in L.FEA and fea is not None:
-                read += f"; the FEA read {safety_num(fea, r.get('min_safety'))}x"
-            return f"{word} ({read})", None
+            feas = (f"the FEA read {safety_num(fea, r.get('min_safety'))}x"
+                    if c0.get("governs", "fea") not in L.FEA and fea is not None else "")
+            if coarse[0][1].get("why"):         # what couldn't be seen, as the card says it, the check's number in it (#276)
+                return f"not checked: {coarse[0][1]['why']}" + (f"; {feas}" if feas else ""), None
+            return f"{word} ({read}{'; ' + feas if feas else ''})", None
         if v["kind"] == "fails":
             if r.get("filled"):                 # a ✗ on the block stays a ✗: the part as built is likely weaker
                 what += ", on a solid with more in it than its pieces: if it's filled in, the part as built is likely weaker"
@@ -133,7 +135,7 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
         if v.get("joints"):                     # its joints said, not "close to the line"; green only as JOINT_CAP lets it (#265)
             from .answers import joint_said
 
-            return (f"holds, joints not checked — weakest {what}; {joint_said(v['brace'], r.get('min_safety'))}"
+            return (f"{v['word']} — weakest {what}; {joint_said(v['brace'], r.get('min_safety'))}"   # close too (#276)
                     f" (needs {r.get('min_safety', 2):g}x)"), (True if v["kind"] == "holds" else None)
         if v["kind"] == "holds":
             return f"holds — weakest {what}", True
