@@ -1437,6 +1437,16 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "cut": True,                  # its numbers are kept cut toward safe (CALI-152): one on its limit is settled
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
     }
+    wooden = [pc for pc in ctx["pieces"] if pc.get("material") in ("plywood", "lumber")]
+    if len(wooden) > 1:                               # its joints, taken as solid wood: said on every verdict (#222 slice A)
+        from . import joints as J
+
+        try:
+            n = len(J.listed(store, part_id))
+        except Exception:  # noqa: BLE001 — not counted, and still said: never a bare ✓ (#275 review)
+            n = "uncounted"
+        if n:
+            record["wood_joints"] = n
     if ctx.get("trim"):                               # glued trim, left out: said on the verdict (#272)
         record["trim"] = list(ctx["trim"])
     thin = ctx.get("thinnest")
@@ -1672,7 +1682,10 @@ def load_run(store: DesignStore, rid: str) -> Optional[dict]:
     if not os.path.exists(path):
         return None
     with open(path) as f:
-        return json.load(f)
+        rec = json.load(f)
+    from .joints import mark_uncounted
+
+    return mark_uncounted(store, rec)                 # read before its joints were counted: still said (#275)
 
 
 def heat_path(store: DesignStore, rid: str, index: int) -> str:

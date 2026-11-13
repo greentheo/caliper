@@ -40,7 +40,16 @@ def keys(pieces: list[dict]) -> None:
 
 def joints(pieces: list[dict], tol: float) -> dict:
     """``{(a, b): mm}``: the length of contact between each pair of wood pieces that touch, by each piece's ``key``
-    (see :func:`keys`, which this sets)."""
+    (see :func:`keys`, which this sets): an edge on a face, and a piece through or set into another (CALI-156, #222: the
+    edge probes alone missed step-stool-5's through-mortised stringer, so the shopping list had no fixings there)."""
+    from . import joints as J
+
+    keys(pieces)
+    return {k: c["length_mm"] for k, c in J.contacts(pieces, tol).items()}
+
+
+def edge_joints(pieces: list[dict], tol: float) -> dict:
+    """``{(a, b): mm}``: where an edge of one wood sheet meets another piece."""
     from .consistency import _frame, segment_distance, slab_distance
 
     keys(pieces)

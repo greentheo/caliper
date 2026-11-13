@@ -195,7 +195,7 @@ def test_the_sample_stool_is_unchanged(tmp_path):
     store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
     run = load_study.list_runs(store, "step_stool")[0]
     v = verdicts.run(run)
-    assert v["kind"] == "holds" and v["short"] == "holds 3.1x"
+    assert v["kind"] == "holds" and v["short"] == "holds 3.1x, joints not checked"  # #275
 
 
 # --- every reader says it, and none gives the number as a verdict -------------------------------------------------

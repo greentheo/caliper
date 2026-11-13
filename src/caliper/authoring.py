@@ -275,6 +275,10 @@ def improve(
         report = evaluate(spec, run.geometry, machine, references=references)
         # CALI-54: what the script says it's built from is measured against what it built
         report.results.extend(consistency.check(run.declared, run.geometry))
+        # CALI-156 (#222) slice A: its JOINTS name pieces that touch, and a piece through another has its mortise
+        from . import joints
+
+        report.results.extend(joints.check(script, run.declared, getattr(run.geometry, "mesh", None)))
         # CALI-107: a requested feature builds or the script says why not; a silent fallback fails the round
         from . import fallbacks
 
