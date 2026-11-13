@@ -95,7 +95,7 @@ def test_the_page_disables_carve_and_lighten_with_the_reason():
     import inspect
 
     from caliper import load_study
-    words = inspect.getsource(load_study.blocked)
+    words = inspect.getsource(load_study._blocked)          # blocked() adds the Lighten-or-Carve rule over it (#272)
     assert "can't be carved by strength" in words and "can't be lightened by strength" in words
 
 
@@ -266,7 +266,7 @@ def test_lighten_on_a_coarse_run_says_not_resolved_not_nothing_holds():
         run = {"id": "r", "part": "a", "notes": [], "stations": [
             {"index": 0, "saved_lb": 0, "safety": 3.0, "verdict": {"kind": kind, "counts_as_pass": False}},
             {"index": 1, "saved_lb": 1.0, "safety": 2.5, "verdict": {"kind": kind, "counts_as_pass": False}}]}
-        return _run(_page(["lightenView", "lightenBlocked", "lightenNone"], consts=["esc", "holdsHere"], extra=(
+        return _run(_page(["lightenView", "lightenBlocked", "lightenNone", "lightenChanged"], consts=["esc", "holdsHere"], extra=(
             f"const S = {{design: {{lighten_runs: [{_json.dumps(run)}]}}, station: null}};\n"
             "function lightenRuns() { return S.design.lighten_runs; } function defaultCheck() { return null; }\n"
             "function sx(v) { return v + 'x'; } function pct(v) { return v; } function lbs(v) { return v + ' lb'; }\n"

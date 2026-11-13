@@ -65,7 +65,7 @@ def test_the_design_s_record_says_what_s_running(api):
     time.sleep(0.05)
     (r,) = c.get(f"/api/designs/{slug}").json()["running"]
     assert r == {"job": jid, "kind": "load", "part": "box", "text": "checking the first load", "waiting": False, "stopping": False,
-                 "elapsed_s": r["elapsed_s"]}                 # how long it's run, for a first build's bubble (CALI-154)
+                 "elapsed_s": r["elapsed_s"], "version": 1}       # the version it's of: a change under it is said (#268)                 # how long it's run, for a first build's bubble (CALI-154)
     assert c.get(f"/api/designs/{other}").json()["running"] == []          # the same part id on another design isn't it
     gate.set()
     _wait(jobs.RUNNER.get(jid))
@@ -160,7 +160,8 @@ def _run(names, body):
     return json.loads(got.stdout)
 
 
-ALL = ("trackJob", "jobOver", "rereadWhenBack", "pollRunning", "syncRunning", "jobPart", "jobOff", "jobHtml", "paintJobs", "cancelJob")
+ALL = ("trackJob", "jobOver", "rereadWhenBack", "pollRunning", "syncRunning", "jobPart", "jobOff", "jobHtml", "changedUnder",
+       "paintJobs", "cancelJob")
 
 
 def test_a_job_on_the_record_is_followed_once_however_often_it_redraws():

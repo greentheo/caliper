@@ -174,7 +174,7 @@ def test_studies_says_why_there_s_nothing_to_use():
 
 def test_the_panel_doesn_t_call_a_step_with_no_button_the_step_to_use():
     js = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
-    assert "${lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>" in js
+    assert "lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>" in js     # an older run's lead says whose step (#272)
 
 
 @pytest.mark.parametrize("shape, said", [

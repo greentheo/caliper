@@ -2806,7 +2806,8 @@ function loadView(p) {
         to see its ${wallLen(runs[0].thinnest_mm)} walls">Check it again finer${runs[0].finer.minutes ? ` (about ${runs[0].finer.minutes} min)` : ' (how long: unknown)'}</button>` : ''}</div>
     <div id="lProgress"></div>
     ${runs.length ? loadResults(p, runs[pick], runs) : ''}
-    ${p.printed ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : (runs.length ? lightenView(p) : '')}`;
+    ${p.study === 'carve' ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : ''}
+    ${lightenShown(p, runs) ? lightenView(p) : ''}`;
 }
 
 // carve it (CALI-82): a printed part, carved free-form where it isn't working; each step checked
@@ -3031,6 +3032,17 @@ function lightenNone(run) {
   }
   return 'Nothing lighter still holds.';
 }
+// the Lighten panel: on a part of sheets with a strength check, and on any part with a Lighten run, though it's changed since
+// (#268: v4 put printed strips in Theo's stool, the part read as printed, and its v3 run wasn't drawn at all)
+function lightenShown(p, runs) {     // the rule the card and blocked() read: Lighten or Carve, never both (#272)
+  return p.study === 'lighten' && (lightenRuns(p.id).length > 0 || runs.length > 0);
+}
+// a run of an older version: which, and what to do; its steps stay to look at, never to cut in (stationAction)
+function lightenChanged(run, p) {
+  if (!run || run.version == null || run.version === p.version) return '';
+  return `Lightened v${run.version}, and you've changed it since (v${p.version}). ${lightenBlocked(p) ? `${esc(lightenBlocked(p))}.`
+    : 'Lighten it again.'} Or look at v${run.version}'s steps below: they can't be cut into v${p.version}.`;   // (#272 re-check)
+}
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
   const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
@@ -3050,9 +3062,9 @@ function lightenView(p) {
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
-        : `${lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
+        : `${run.version != null && run.version !== p.version ? `v${run.version}'s lightest step that holds` : lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer && (run.version == null || run.version === p.version) ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
       : lightenNone(run)}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
-      ${run.version !== p.version ? ' <span class="badge bad">the part has changed since</span>' : ''}</div>
+      ${lightenChanged(run, p) ? `<div class="small" style="color:var(--amber);margin-top:4px">${lightenChanged(run, p)}</div>` : ''}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
       ${run.stations.map((x) => `<tr class="${x.estimate ? '' : 'pick'} ${x.index === on ? 'on' : ''}" ${x.estimate ? '' : `data-lst="${x.index}"`}>
         <td>${x.index}</td><td style="text-align:left">${what(x)}</td><td>${lbs(x.saved_lb)}</td>
@@ -3172,6 +3184,11 @@ function loadCase(p, run, c, i) {
 function jointsLine(c, run) {
   const b = c.verdict && c.verdict.joints ? c.verdict.brace : null;
   if (!b) return '';
+  if (b.trim) {                                     // a sheet part's glued trim, left out of the check (#272)
+    const many = b.trim.length > 1 || /s\s*$/.test(b.trim[0]);
+    return `<div class="small" style="margin-top:2px"><b>Not checked:</b> the ${esc(b.trim.join(' and the '))} ${many ? 'are' : 'is'}
+      glued trim, left out of the check.</div>`;
+  }
   return `<div class="small" style="margin-top:2px"><b>Joints not checked:</b> the ${esc(b.piece)} is held square at its top by its
     joint to the ${esc(b.braced_by)}, which isn't checked${b.sway_safety != null ? `; if that joint gives, it racks (leans over with
     the walls beside it) and folds at ${safetyNum(b.sway_safety, run.min_safety)}x` : ''}.</div>`;
@@ -3251,7 +3268,7 @@ async function startLighten(p, again) {
   try {
     const runs = loadRuns(p.id);
     const { job_id } = await api('POST', `/api/designs/${S.slug}/lighten`, { part: p.id, min_safety: runs[0] ? runs[0].min_safety : 2, again: !!again });
-    await trackJob(job_id, { kind: 'lighten', part: p.id, text: 'starting…' }).done;
+    await trackJob(job_id, { kind: 'lighten', part: p.id, version: p.version, text: 'starting…' }).done;
     if (S.slug !== slug) return;                  // finished with another design open: that design's view stays
     clearStation();
     await refresh();
@@ -3322,7 +3339,7 @@ async function pollRunning() {
 function syncRunning() {
   for (const r of (S.design && S.design.running) || []) {
     if (r.kind === 'firstrun' || S.tracked[r.job]) continue;     // the first build has its own bubble in the thread
-    trackJob(r.job, { kind: r.kind, part: r.part, text: r.text, waiting: r.waiting }).done.catch(() => {});   // jobOver re-reads
+    trackJob(r.job, { kind: r.kind, part: r.part, version: r.version, text: r.text, waiting: r.waiting }).done.catch(() => {});   // jobOver re-reads
   }
 }
 function jobPart(id) { return (((S.design && S.design.parts) || []).find((p) => p.id === id) || {}).name || id; }
@@ -3336,7 +3353,16 @@ function jobHtml(t, named) {
   const pct = typeof t.progress === 'number' ? Math.round(t.progress * 100) : null;
   return `<div class="job-line">${pct != null ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ''}
     <div class="small muted">${named ? `${esc(JOB_NAME[t.kind])}${t.part ? ` of ${esc(jobPart(t.part))}` : ''}: ` : ''}${esc(t.text || 'running…')}
-    ${t.waiting ? `<button class="ghost wait-cancel" data-job-cancel="${esc(t.job)}">Cancel</button>` : ''}</div></div>`;
+    ${t.waiting ? `<button class="ghost wait-cancel" data-job-cancel="${esc(t.job)}">Cancel</button>` : ''}</div>${changedUnder(t)}</div>`;
+}
+// a run whose part changed while it ran: said as soon as the change lands, not when it finishes (#268: Theo's v3 Lighten
+// finished on v4 and he couldn't find it)
+function changedUnder(t) {
+  const now = t.part && S.design ? ((S.design.parts || []).find((p) => p.id === t.part) || {}).version : null;
+  if (t.version == null || now == null || now === t.version || !['lighten', 'load'].includes(t.kind)) return '';
+  return `<div class="small" style="color:var(--amber)">You've changed ${esc(jobPart(t.part))} since this started (it was
+    v${t.version}, it's v${now} now): ${t.kind === 'lighten' ? 'its steps will be of' : 'what it finds will be'} v${t.version}.
+    It's kept, under ${t.kind === 'lighten' ? 'Make it lighter' : 'its strength check'}.</div>`;
 }
 function paintJobs() {
   const note = $('jobNote');
@@ -3393,7 +3419,7 @@ async function startLoad(p, spacing) {
   try {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/load-study`,
       { part: p.id, min_safety: +$('lSafety').value || 2, ...(spacing ? { spacing_mm: spacing } : {}) });
-    await trackJob(job_id, { kind: 'load', part: p.id, text: 'starting…' }).done;
+    await trackJob(job_id, { kind: 'load', part: p.id, version: p.version, text: 'starting…' }).done;
     if (S.slug !== slug) return;          // finished with another design open: its stress picture isn't this design's, whatever the part's called
     S.loadRun[p.id] = 0;
     S.trial = null;                       // the test is set beside the check that just ran, not the one before (#89)

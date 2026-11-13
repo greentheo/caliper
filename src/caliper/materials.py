@@ -192,7 +192,10 @@ def table() -> str:
     for key, m in STICKS.items():
         sizes = ", ".join(m["sizes"]) if m["sizes"] else "square tube by outer and wall (mm)"
         lines.append(f"  - {key}: {m['name']}, {inches(m['stock_len'])} lengths; {sizes}")
-    lines.append("Printed (\"kind\": \"printed\": the whole solid build() makes is 3D printed):")
+    lines.append("Printed (\"kind\": \"printed\": the whole solid build() makes is 3D printed; with \"rest\": true, what the "
+                 "sheets and sticks aren't). Beside sheets, give it \"section\": its working size in mm (a 5 mm fillet strip: 5), "
+                 "and \"trim\": true when it's decorative, glued on and carrying no load (a fillet strip, an edge band): the "
+                 "strength check leaves trim out and says so:")
     for key, m in PRINTS.items():
         lines.append(f"  - {key}: {m['name']}")
     lines.append("Coverings (a sheet's \"covers\", or \"kind\": \"covering\"):")
