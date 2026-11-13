@@ -210,6 +210,49 @@ cuts them from whatever `build()` returns and adds them to the named pieces, so 
 or list them in `construction()` yourself. Keep `HOLES` as it is. If you change a panel's size or move it,
 say so in your reply: its holes were placed for the panel as it was, and the study should be run again.
 
+## How its pieces join: JOINTS
+
+For a part of more than one piece, say how each pair that touches is joined: a module-level `JOINTS` list, plain data like
+`HOLES`, so Caliper reads it without running anything. Each entry is two piece names (as `construction()` names them) and a
+kind; the geometry is Caliper's, from the pieces themselves.
+
+```python
+JOINTS = [
+    # the top rests on each side's top edge, cut 10° so it sits flat: the load goes through wood, not screws
+    {"pieces": ["top", "side front"], "kind": "bevel", "fix": ["glue", "screws"]},
+    {"pieces": ["top", "side back"], "kind": "bevel", "fix": ["glue", "screws"]},
+    # the stretcher ties the feet against the splay: a glue block in each inside corner, face to face
+    {"pieces": ["stretcher", "side front"], "kind": "glue block", "fix": ["glue", "screws"]},
+    {"pieces": ["stretcher", "side back"], "kind": "glue block", "fix": ["glue", "screws"]},
+]
+```
+
+- `kind`: `butt` (an edge against a face), `bevel` (a butt whose edge is cut to lie flush; Caliper gives the angle),
+  `mitre`, `rabbet` or `dado` (a step or a groove in one piece that the other sits in), `pocket screw`, `dowel`,
+  `glue block` (a strip glued into the inside corner, face to face with both), `printed connector`, `through tenon`, `notch`.
+- `fix`: what holds it, some of `glue`, `screws` and `dowels`.
+- Optional: `at` (x, y, z), a point on the joint where two pieces touch in more than one place; `depth` for a rabbet or a
+  dado (half the thickness for a rabbet, a third for a dado if not given); `count` for dowels.
+- A contact with no entry is still a joint: a butt, glued and screwed (a through tenon or a notch, glued), said as assumed.
+- A rabbet or a dado is built as one: cut the step into the piece whose face the other's edge meets, in `build()` and in
+  its `construction()` outline, and run the other piece into it by the step's depth.
+
+Choose each joint by these rules, in this order:
+
+1. **Bearing first.** The piece a load lands on rests on the piece that holds it up: a top on the sides, a shelf in a dado
+   or on a cleat. The fixings only locate it. A top between the sides, held by screws into its edges, carries the load in
+   the screws: don't.
+2. **Sideways load through face glue:** a rabbet, a dado, a lap or a glue block, so glue joins face to face. Never edge glue
+   (glue to an edge or end grain holds next to nothing).
+3. **Never pull a screw out of an edge.** No load is carried by screws in withdrawal from a plywood edge or end grain.
+4. **A splay or a rack needs a tie:** a stretcher whose joints carry the thrust in face glue or screws in shear.
+5. **The shop decides what's possible.** The joints this shop can make are under "Your shop", below; the round fails a
+   joint it can't make, and names what it needs. When the strong joint needs a tool the shop hasn't got, say so in your
+   reply ("a dado would carry this in glue; it needs a router or table saw") rather than quietly settling for a weaker one.
+
+A request can begin "About this joint between the side and the top: …": the person picked that seam. Change that pair's
+entry, as the request asks, and build it that way.
+
 ## How far a search may go: RANGES
 
 ```python

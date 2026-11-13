@@ -75,7 +75,28 @@ def system_prompt() -> str:
 
     with open(REFERENCE) as f:
         reference = f.read()
-    return f"{_SYSTEM}{reference}\n\n## The materials table\n\n{materials.table()}\n"
+    return f"{_SYSTEM}{reference}\n\n## The materials table\n\n{materials.table()}\n\n{shop_section()}\n"
+
+
+def shop_section() -> str:
+    """The shop the part is made in, for the designer: its tools and the joints it can make (CALI-178, #222 §3)."""
+    from . import shop as S
+
+    have = S.read()
+    machines = [m.get("kind") or m.get("id") for m in have.get("machines") or []]
+    out = ["## Your shop", "",
+           f"Hand tools: {', '.join(have.get('hand') or []) or 'none said'}. Machines: {', '.join(machines) or 'none'}.",
+           f"Joints it can make: {', '.join(S.joint_kinds(have))}."]
+    needs: dict = {}
+    from .joints import KINDS
+
+    for k in KINDS:
+        need = S.joint_needs(k, have)
+        if need:
+            needs.setdefault(need, []).append(k)
+    if needs:
+        out.append("Not without another tool: " + "; ".join(f"{' and '.join(ks)} ({need})" for need, ks in needs.items()) + ".")
+    return "\n".join(out)
 
 
 def _the_spec(spec: Spec) -> str:

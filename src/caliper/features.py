@@ -247,10 +247,17 @@ def _length(mm: float, inches: bool) -> str:
     return _len(mm, inches)
 
 
-def with_words(features: dict, inches: bool) -> dict:
-    """The features with what each is called, in the person's units, for the chip."""
+def with_words(features: dict, inches: bool, joint=None) -> dict:
+    """The features with what each is called, in the person's units, for the chip. ``joint``, a part's
+    :func:`joints.namer`: an edge on the seam where two pieces meet is said as their joint (CALI-178, #222 slice D)."""
+    edges = []
+    for e in features.get("edges") or []:
+        words = said(features, "edge", e["id"], inches)
+        j = joint(e["local"]) if joint and e.get("local") and words else None
+        edges.append({**e, "said": f"joint between {j['said'][len('the joint between '):]}: {words[len('edge: '):]}",
+                      "joint": j} if j else {**e, "said": words})
     return {**features, "faces": [{**f, "said": said(features, "face", f["id"], inches)} for f in features.get("faces") or []],
-            "edges": [{**e, "said": said(features, "edge", e["id"], inches)} for e in features.get("edges") or []]}
+            "edges": edges}
 
 
 _FACE_WORD = {"plane": "flat face", "cylinder": "cylinder", "cone": "cone", "sphere": "sphere", "torus": "rounded face",

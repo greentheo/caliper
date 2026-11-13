@@ -33,11 +33,53 @@ HAND = {
     "hacksaw": "steel tube to length, slowly",
     "welder": "steel tube and plate joined",
     "angle grinder": "steel plate, roughly",
+    # the joints' tools (CALI-178, #222 slice D): what makes a rabbet, a dado, a pocket screw or a dowel
+    "table saw": "straight rips and crosscuts in sheets and boards, and rabbets and dados with a dado stack",
+    "pocket-hole jig": "angled pocket holes, for pocket screws",
+    "doweling jig": "straight dowel holes across a joint",
 }
+
+#: What makes each joint (CALI-178, #222 §3): any one of the hand tools, or a machine of that kind. A joint not listed, or
+#: listed with nothing, needs only what every shop has (a drill and a saw): a butt, or a glue block.
+JOINT_TOOLS = {
+    "bevel": ("circular saw", "table saw"),
+    "mitre": ("circular saw", "table saw", "chop saw"),
+    "rabbet": ("table saw", "router"),
+    "dado": ("table saw", "router"),
+    "pocket screw": ("pocket-hole jig",),
+    "dowel": ("doweling jig",),
+    "printed connector": ("printer",),
+    "through tenon": ("jigsaw", "router"),
+    "notch": ("jigsaw", "router"),
+}
+#: How a tool is said when it's missing.
+_TOOL_SAID = {"router": "a router", "printer": "a 3D printer"}
 DEFAULT = {"hand": ["jigsaw", "drill", "circular saw"], "machines": []}
 MACHINES = ("router", "plasma", "printer")
 #: The thickest a jigsaw goes through wood comfortably.
 JIGSAW_MAX_MM = 1.5 * IN
+
+
+def joint_needs(kind: str, shop: Optional[dict] = None) -> Optional[str]:
+    """What a joint of ``kind`` needs that the shop hasn't got, said ("a table saw or a router"); None where the shop can
+    make it, or it needs nothing special."""
+    tools = JOINT_TOOLS.get(kind) or ()
+    if not tools:
+        return None
+    shop = read() if shop is None else shop
+    hand = set(shop.get("hand") or [])
+    if any(t in hand or (t in MACHINES and machine(shop, t)) for t in tools):
+        return None
+    said = [_TOOL_SAID.get(t) or f"a {t}" for t in tools if t not in ("chop saw",) or len(tools) == 1]
+    return " or ".join(said)
+
+
+def joint_kinds(shop: Optional[dict] = None) -> list[str]:
+    """The joints this shop can make, in the joints' own order."""
+    from .joints import KINDS
+
+    shop = read() if shop is None else shop
+    return [k for k in KINDS if joint_needs(k, shop) is None]
 
 
 def path() -> str:

@@ -839,6 +839,17 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
         return res
 
     picked_from = _features_of(store, part_id) if pick else None    # the part as it was picked on (#109)
+    joint_pick = None
+    if pick and pick.get("kind") == "edge" and picked_from:     # a picked seam names its joint (CALI-178, #222 slice D)
+        from . import joints as J
+
+        kind = J.asked_kind(pick.get("text") or message)
+        edge = next((e for e in picked_from.get("edges") or [] if e["id"] == pick.get("id")), None)
+        if kind and edge and edge.get("local"):
+            joint = J.namer(store, part_id)(edge["local"])
+            if joint:
+                joint_pick = (joint, kind)
+                focus = f"{focus}\n\n{J.focus(joint, kind, edge['local'])}" if focus else J.focus(joint, kind, edge["local"])
     before, _ = _measure_design(store)
     spec = _working_spec(store, part_id, entry.intent)
     script = store.read_script(part_id)
@@ -904,7 +915,13 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     if pick:                                        # did it land on what was picked? Only what can be measured is said
         from . import features
 
-        check = features.landed(picked_from, _features_of(store, part_id), pick, message, store.design.display_units == "in")
+        if joint_pick:                              # the joint's entry, checked: landed, missed or couldn't tell (#222 §3)
+            from . import joints as J
+
+            check = J.landed(prior, script, store, part_id, *joint_pick, inches=store.design.display_units == "in")
+        else:
+            check = features.landed(picked_from, _features_of(store, part_id), pick, message,
+                                    store.design.display_units == "in")
         on_pick = check["landed"]
         short = on_pick is False or on_pick == features.PARTIAL      # what was asked for didn't happen
         if short:                                   # the same words next time are a retry, not "v2 already did that" (#177)
