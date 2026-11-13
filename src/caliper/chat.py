@@ -1101,30 +1101,30 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     if seat is not None and miss is None and _TWO_EDGES.search(f"{asked} {intent}") and not both:   # (#270 review)
         miss = (f"Built {part_id} on the edge you picked, but I have one edge picked: pick the other one too, or say "
                 f"\"the opposite edge\".")
+    maybe = seat is not None and miss is None and not both and bool(_MAYBE_MIRROR.search(f"{asked} {intent}"))
+    if maybe:                                    # words that might mean a mirror: asked, never a ✓ over one strip (#273)
+        twins = _opposite_edges(store, seat)
+        if len(twins) == 1:
+            from . import awaiting
+
+            awaiting.park(store, "mirror_edge", part=part_id, seat=seat, twins=twins)
+            miss = (f"Built {part_id} on the edge you picked: one strip. Do you want its mirror on the opposite edge too, "
+                    f"{_edge_said(store, seat, twins[0])}? Say yes.")
+        elif len(twins) > 1:
+            miss = _which_twin(store, part_id, seat, twins)
+        else:
+            miss = (f"Built {part_id} on the edge you picked: one strip. I found no edge on {seat['part']} opposite it to "
+                    f"mirror it to.")
     if both and miss is None:                    # "and the opposite edge": its mirror, on the twin edge (#266)
         twins = _opposite_edges(store, seat)
         if not twins:
             miss = (f"Built {part_id} on the edge you picked, but I found no edge on {seat['part']} opposite it, so there's "
                     f"one strip.")
-        elif len(twins) > 1:                     # twins on two axes: asked, never guessed (#270 review)
-            ways = [f"across {'xyz'[t['axis']]}, the line from {_pt(t['points'][0])} to {_pt(t['points'][-1])}" for t in twins]
-            miss = (f"Built {part_id} on the edge you picked, but it has an opposite edge {ways[0]}, and one "
-                    + ", and one ".join(w.replace("an opposite edge ", "") for w in ways[1:]) + ": say which.")
+        elif len(twins) > 1:                     # twins on two axes: asked, never guessed (#270 review), with an answer (#273)
+            miss = _which_twin(store, part_id, seat, twins)
         else:
-            from . import mirror
-
             twin = twins[0]
-            other = f"{part_id}_opposite"
-            mirror.make(store, other, part_id, twin["plane"], twin["at"], feedback=f"the opposite edge's {part_id}")
-            gap = _seat_gap(store.part_geometry(other), twin)
-            depth = _into(store.part_geometry(other), store, seat["part"])   # from outside, as the first (#269)
-            if depth is None:
-                miss = (f"Built {part_id} and its mirror {other}, but I couldn't measure whether {other} goes into "
-                        f"{seat['part']}, so it isn't known to sit on it.")
-            elif depth > INTO_MM:
-                miss = f"Built {part_id} and its mirror {other}, but {other} goes {round(depth, 1):g} mm into {seat['part']}."
-            elif gap > SEAT_MM:
-                miss = f"Built {part_id} and its mirror {other}, but {other} sits {round(gap, 2):g} mm off the opposite edge."
+            other, miss = _mirror_onto(store, part_id, seat, twin)
             after, part_errors = _measure_design(store)
             broke, fixed = _delta(before, after)            # with the mirror in: what it breaks counts too (#270 review)
             if broke and after is not None:
@@ -1173,8 +1173,79 @@ def _picked_edge(store: DesignStore, on: Optional[str], pick: Optional[dict]) ->
     return {"part": on, "points": [[float(c) for c in p] for p in edge["points"]], "said": pick.get("said") or "the edge"}, None
 
 
-#: What leads a reply with "!", not a cross: half of what was asked, a pick it couldn't use, what couldn't be measured.
-_NOT_WRONG = (" found no edge ", "couldn't place it", "couldn't measure", "I have one edge picked", ": say which.")
+#: What leads a reply with "!", not a cross: half of what was asked, a pick it couldn't use, what couldn't be measured, a
+#: question.
+_NOT_WRONG = (" found no edge ", "couldn't place it", "couldn't measure", "I have one edge picked", "Say \"across the",
+              ": one strip.")
+#: Words that might mean a mirror, though not as "the opposite edge" says it: asked about, never a ✓ over one strip (#273).
+_MAYBE_MIRROR = re.compile(r"\bmirror|\bopposite\b|\bother side\b", re.I)
+#: An axis as a person says it.
+_AXIS_WORD = {0: "width", 1: "depth", 2: "height"}
+_AXIS = re.compile(r"\bacross (?:the )?(?:(width|x)|(depth|y)|(height|z))\b", re.I)
+
+
+def _which_twin(store: DesignStore, part_id: str, seat: dict, twins: list) -> str:
+    """Twins on two axes: asked, with an answer it reads next turn ("across the width"), parked (#270, #273)."""
+    from . import awaiting
+
+    awaiting.park(store, "mirror_edge", part=part_id, seat=seat, twins=twins)
+    ways = [f"across the {_AXIS_WORD[t['axis']]} ({'xyz'[t['axis']]}), the line from {_pt(t['points'][0])} to "
+            f"{_pt(t['points'][-1])}" for t in twins]
+    says = " or ".join(f"\"across the {_AXIS_WORD[t['axis']]}\"" for t in twins)
+    return (f"Built {part_id} on the edge you picked, but it has an opposite edge {ways[0]}, and one "
+            + ", and one ".join(ways[1:]) + f". Say {says}.")
+
+
+def _mirror_onto(store: DesignStore, part_id: str, seat: dict, twin: dict) -> tuple[str, Optional[str]]:
+    """``part_id``'s mirror on the twin edge, measured there as it was on the pick: ``(its id, the miss or None)``."""
+    from . import mirror
+
+    other = f"{part_id}_opposite"
+    mirror.make(store, other, part_id, twin["plane"], tuple(twin["at"]), feedback=f"the opposite edge's {part_id}")
+    gap = _seat_gap(store.part_geometry(other), twin)
+    depth = _into(store.part_geometry(other), store, seat["part"])   # from outside, as the first (#269)
+    if depth is None:
+        return other, (f"Built {part_id} and its mirror {other}, but I couldn't measure whether {other} goes into "
+                       f"{seat['part']}, so it isn't known to sit on it.")
+    if depth > INTO_MM:
+        return other, f"Built {part_id} and its mirror {other}, but {other} goes {round(depth, 1):g} mm into {seat['part']}."
+    if gap > SEAT_MM:
+        return other, f"Built {part_id} and its mirror {other}, but {other} sits {round(gap, 2):g} mm off the opposite edge."
+    return other, None
+
+
+def _mirror_answer(store: DesignStore, aw: dict, message: str, **kw) -> Optional[TurnResult]:
+    """The answer to "do you want its mirror too?" (yes, no) or "say across the width or the depth" (#273). Anything else
+    lets the question lapse."""
+    from . import awaiting
+
+    twins = aw.get("twins") or []
+    if len(twins) > 1:
+        m = _AXIS.search(message)
+        awaiting.clear(store)
+        k = None if m is None else next(i for i, g in enumerate(m.groups()) if g)
+        twin = next((t for t in twins if t["axis"] == k), None)
+        if twin is None:
+            return None
+    else:
+        yes = awaiting.reads(message)
+        awaiting.clear(store)
+        if yes is None:
+            return None
+        if not yes:
+            return TurnResult(action="ask", ok=True, part=aw.get("part"), events=kw.get("events") or [], reply="Left it: one strip.")
+        twin = twins[0]
+    pid = aw.get("part")
+    if not twins or store.design.part(pid or "") is None:
+        return None
+    other, miss = _mirror_onto(store, pid, aw["seat"], twin)
+    report, part_errors = _measure_design(store)
+    reply = (f"{'!' if any(w in miss for w in _NOT_WRONG) else chr(0x2717)} {miss}" if miss else
+             f"Made {pid}'s mirror {other}: it sits on the opposite edge, {_edge_said(store, aw['seat'], twin)}.")
+    if report is not None:
+        reply += f"\n\nThe design checks: {report.said()}."
+    return TurnResult(action="mirror", ok=miss is None, part=other, events=kw.get("events") or [], report=report,
+                      part_errors=part_errors, reply=reply)
 
 
 def _into(geometry, store: DesignStore, on: str) -> Optional[float]:
@@ -1993,6 +2064,8 @@ def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Op
     aw = awaiting.pending(store)
     if aw is None:
         return None
+    if aw["kind"] == "mirror_edge":                    # "its mirror too?" or "across the width or the depth?" (#273)
+        return _mirror_answer(store, aw, message, **kw)
     if aw["kind"] == "grain_way":                      # "which way?": a bare direction answers it, for that piece
         from . import grain
 

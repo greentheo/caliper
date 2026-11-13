@@ -300,14 +300,98 @@ def test_a_mirror_that_goes_into_the_part_leads_the_reply(two_sides, monkeypatch
 
 
 # --- #270 review ---------------------------------------------------------------------------------------------------------------
-@pytest.mark.parametrize("asked", ["a 5 mm fillet strip rounded on both sides, on this edge",
-                                   "a 5 mm fillet strip on this edge; I'll sand the other side smooth",
-                                   "a fillet strip on this edge, mirror the profile so it's symmetric"])
-def test_words_about_the_strip_itself_make_one_strip(two_sides, asked):
+def test_words_about_the_strip_itself_make_one_strip(two_sides):
     s, pick = two_sides
+    asked = "a 5 mm fillet strip rounded on both sides, on this edge"
     res = chat.author_part(s, "fillet_strip", asked, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
                            on="stool", asked=asked)
     assert s.design.part("fillet_strip_opposite") is None and res.ok, res.reply
+
+
+# --- #273: words that might mean a mirror ask; "say which" has an answer --------------------------------------------------------
+@pytest.mark.parametrize("asked", ["a 5 mm fillet strip on this edge; mirror it on the other side",
+                                   "a fillet strip on this edge and the one opposite",
+                                   "a 5 mm fillet strip on this edge; I'll sand the other side smooth",
+                                   "a fillet strip on this edge, mirror the profile so it's symmetric"])
+def test_words_that_might_mean_a_mirror_ask_never_a_tick_over_one(two_sides, asked):
+    """#241's pattern: "mirror it on the other side" missed the matcher and made one strip under a ✓."""
+    s, pick = two_sides
+    res = chat.author_part(s, "fillet_strip", asked, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
+                           on="stool", asked=asked)
+    assert s.design.part("fillet_strip_opposite") is None and not res.ok
+    assert res.reply.startswith("! Built fillet_strip on the edge you picked: one strip. Do you want its mirror on the "
+                                "opposite edge too, the line from (280.95, 0, 300) to (280.95, 200, 300)? Say yes."), res.reply
+    from caliper import awaiting
+
+    assert awaiting.pending(s)["kind"] == "mirror_edge"
+
+
+def test_yes_makes_the_mirror_it_asked_about(two_sides):
+    s, pick = two_sides
+    asked = "a 5 mm fillet strip on this edge; mirror it on the other side"
+    chat.author_part(s, "fillet_strip", asked, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
+                     on="stool", asked=asked)
+    res = chat.turn(s, "yes", use_llm=False)
+    assert s.design.part("fillet_strip_opposite") is not None and res.ok, res.reply
+    assert res.reply.startswith("Made fillet_strip's mirror fillet_strip_opposite: it sits on the opposite edge, the line "
+                                "from (280.95, 0, 300) to (280.95, 200, 300)."), res.reply
+
+
+def test_no_leaves_one_strip(two_sides):
+    s, pick = two_sides
+    asked = "a 5 mm fillet strip on this edge; mirror it on the other side"
+    chat.author_part(s, "fillet_strip", asked, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
+                     on="stool", asked=asked)
+    res = chat.turn(s, "no", use_llm=False)
+    assert s.design.part("fillet_strip_opposite") is None and res.reply == "Left it: one strip.", res.reply
+
+
+def _box4(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    s = DesignStore.create("a box", base=str(tmp_path / "designs"))
+    s.write_part("stool", BOX4, intent="four walls")
+    feats = features.for_part(s, "stool")
+    edge = next(e for e in feats["edges"] if e.get("corner") == "inside" and abs(e["centre"][0] - 19.05) < 1e-6
+                and abs(e["centre"][1] - 19.05) < 1e-6)
+    pick = {"part": "stool", "kind": "edge", "id": edge["id"], "said": "an inside corner", "version": feats["version"]}
+    strip = """import cadquery as cq
+
+PARAMS = {"r": 5.0}
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    return cq.Workplane().box(p["r"], p["r"], 300.0, centered=False).translate((19.05, 19.05, 0))
+"""
+    chat.author_part(s, "fillet_strip", ASKED, author=lambda *a: strip, use_llm=False, promote_feedback=False, pick=pick,
+                     on="stool", asked=ASKED)
+    return s
+
+
+@pytest.mark.parametrize("answer,at", [("across the width", (280.95, 19.05)), ("across x", (280.95, 19.05)),
+                                       ("across the depth", (19.05, 280.95)), ("mirror it across y", (19.05, 280.95))])
+def test_say_which_has_an_answer(tmp_path, monkeypatch, answer, at):
+    s = _box4(tmp_path, monkeypatch)
+    res = chat.turn(s, answer, use_llm=False)
+    assert s.design.part("fillet_strip_opposite") is not None, res.reply
+    lo, hi = s.part_geometry("fillet_strip_opposite").require_mesh().bounds
+    assert ((lo[0] + hi[0]) / 2 - at[0]) ** 2 + ((lo[1] + hi[1]) / 2 - at[1]) ** 2 < (5.0 ** 2), (lo, hi)
+    assert res.reply.startswith("Made fillet_strip's mirror fillet_strip_opposite: it sits on the opposite edge"), res.reply
+
+
+def test_say_which_is_parked_so_the_answer_reads_against_it(tmp_path, monkeypatch):
+    from caliper import awaiting
+
+    s = _box4(tmp_path, monkeypatch)
+    aw = awaiting.pending(s)
+    assert aw["kind"] == "mirror_edge" and aw["part"] == "fillet_strip" and len(aw["twins"]) == 2
+
+
+def test_an_answer_that_names_no_axis_lets_the_question_lapse(tmp_path, monkeypatch):
+    s = _box4(tmp_path, monkeypatch)
+    from caliper import awaiting
+
+    assert chat._awaited(s, "make it blue", None, events=[], on_event=None) is None and awaiting.pending(s) is None
 
 
 @pytest.mark.parametrize("asked", ["a fillet strip on this edge and the opposite edge", "fillet strips in both corners",
@@ -380,9 +464,10 @@ def build(params):
     res = chat.author_part(s, "fillet_strip", ASKED, author=lambda *a: strip, use_llm=False, promote_feedback=False, pick=pick,
                            on="stool", asked=ASKED)
     assert s.design.part("fillet_strip_opposite") is None and not res.ok
-    assert res.reply.startswith("! Built fillet_strip on the edge you picked, but it has an opposite edge across x, the line "
-                                "from (280.95, 19.05, 0) to (280.95, 19.05, 300), and one across y, the line from (19.05, "
-                                "280.95, 0) to (19.05, 280.95, 300): say which."), res.reply
+    assert res.reply.startswith("! Built fillet_strip on the edge you picked, but it has an opposite edge across the width "
+                                "(x), the line from (280.95, 19.05, 0) to (280.95, 19.05, 300), and one across the depth (y), "
+                                "the line from (19.05, 280.95, 0) to (19.05, 280.95, 300). Say \"across the width\" or "
+                                "\"across the depth\"."), res.reply   # an answer it reads (#273)
 
 
 @pytest.mark.parametrize("asked", ["a fillet strip on this edge and this edge", "fillet strips on these two edges",
