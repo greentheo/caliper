@@ -500,3 +500,47 @@ def test_every_check_passes_never_sits_under_a_bang(two_sides):
                            use_llm=False, promote_feedback=False, pick=pick, on="stool",
                            asked="a fillet strip on this edge and this edge")
     assert res.reply.startswith("!") and "Every check on this part passes" not in res.reply, res.reply
+
+
+# --- #274 review -----------------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("answer,at", [("the depth one", (19.05, 280.95)), ("depth", (19.05, 280.95)),
+                                       ("the width one", (280.95, 19.05)), ("width please", (280.95, 19.05))])
+def test_a_short_answer_naming_the_axis_is_read(tmp_path, monkeypatch, answer, at):
+    s = _box4(tmp_path, monkeypatch)
+    res = chat.turn(s, answer, use_llm=False)
+    lo, hi = s.part_geometry("fillet_strip_opposite").require_mesh().bounds
+    assert ((lo[0] + hi[0]) / 2 - at[0]) ** 2 + ((lo[1] + hi[1]) / 2 - at[1]) ** 2 < 25.0, (answer, res.reply)
+
+
+def test_a_short_answer_naming_no_axis_is_said_not_understood_and_the_question_stays(tmp_path, monkeypatch):
+    from caliper import awaiting
+
+    s = _box4(tmp_path, monkeypatch)
+    res = chat.turn(s, "that one", use_llm=False)
+    assert res.reply == 'I didn\'t catch which: say "across the width" or "across the depth".', res.reply
+    assert awaiting.pending(s)["kind"] == "mirror_edge" and s.design.part("fillet_strip_opposite") is None
+
+
+def test_a_stale_answer_is_refused_in_words(two_sides):
+    """The strip or the host changed since it asked: its edges may be others now."""
+    s, pick = two_sides
+    asked = "a 5 mm fillet strip on this edge; mirror it on the other side"
+    chat.author_part(s, "fillet_strip", asked, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
+                     on="stool", asked=asked)
+    s.write_part("stool", TWO_SIDES.replace('"h": 300.0', '"h": 320.0'), intent="two sides and a step")
+    res = chat.turn(s, "yes", use_llm=False)
+    assert s.design.part("fillet_strip_opposite") is None
+    assert res.reply == ("I didn't make the mirror: stool has changed since I asked (it was v1, it's v2 now), so its "
+                         "opposite edge may be another. Pick the edge again and ask."), res.reply
+
+
+def test_no_test_is_offered_while_a_mirror_question_is_open(two_sides):
+    """One parked question at a time: a "yes" can only mean the mirror."""
+    from caliper import awaiting, promote
+
+    s, pick = two_sides
+    asked = "a 5 mm fillet strip on this edge; mirror it on the other side"
+    res = chat.author_part(s, "fillet_strip", asked, author=_author(0.0)[0], use_llm=False, pick=pick, on="stool", asked=asked,
+                           drafter=lambda *a, **k: [{"id": "seated", "expr": "min_clearance(fillet_strip, stool) <= 0.2"}])
+    assert awaiting.pending(s)["kind"] == "mirror_edge"
+    assert "lock that in as a test" not in res.reply and promote.pending(s) is None, res.reply
