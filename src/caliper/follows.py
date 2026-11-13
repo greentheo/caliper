@@ -52,10 +52,15 @@ def _follow_word(pid: str) -> str:
 
 
 def followers_of(store, source: str) -> list[str]:
-    """The parts whose ``FOLLOWS`` read ``source``."""
+    """The parts whose ``FOLLOWS`` read ``source``. Never a mirror: its generated script carries its source's ``FOLLOWS``, and
+    it follows through its source, written again from it (#271 review: taken as a follower of its own, writing it was
+    refused, and a Parameters change stopped half way)."""
+    from . import mirror
+
     out = []
     for p in store.design.parts:
-        if p.id != source and store.is_scripted(p.id) and any(s == source for s, _ in declared(store.read_script(p.id)).values()):
+        if (p.id != source and store.is_scripted(p.id) and not mirror.source_of(store, p.id)
+                and any(s == source for s, _ in declared(store.read_script(p.id)).values())):
             out.append(p.id)
     return out
 
@@ -161,7 +166,8 @@ def check(script: str, sources: dict[str, Optional[dict]], part_id: str, on: Opt
         have = sources.get(src)
         kept = f"{mine[n]:g}{_unit(n)}" if n in mine else "its own"
         if have is None:
-            notes.append(f"{n} follows {src}'s {key}, but there's no {src} in the design now: it keeps {kept}")
+            notes.append(f"{n} follows {part_said(src)}'s {key}, but there's no {part_said(src)[4:]} in the design now: "
+                         f"it keeps {kept}")
         elif key not in have:
             notes.append(f"{n} follows {part_said(src)}'s {key}, but {part_said(src)} has no {key} now: it keeps {kept}")
         elif n in mine and abs(float(mine[n]) - float(have[key])) > SAME_MM:

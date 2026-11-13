@@ -87,7 +87,7 @@ def test_a_cycle_is_refused_in_words(two):
 def test_a_follower_says_when_what_it_follows_isn_t_there():
     """A source removed or renamed: said on its next build, and it keeps its last values."""
     r = follows.check(STRIP.replace('("stool", "h")', '("stool_v2", "h")'), {"stool": aero.read_params(STOOL)}, "inside_fillets")
-    assert r.status == "pass" and "follows stool_v2's h, but there's no stool_v2 in the design now: it keeps 406.4 mm" \
+    assert r.status == "pass" and "follows the stool v2's h, but there's no stool v2 in the design now: it keeps 406.4 mm" \
         in r.detail, r.detail
     r = follows.check(STRIP.replace('("stool", "t")', '("stool", "ply")'), {"stool": aero.read_params(STOOL)}, "inside_fillets")
     assert r.status == "pass" and "the stool has no ply now: it keeps 19.05 mm" in r.detail, r.detail
@@ -140,3 +140,47 @@ def test_a_change_asked_in_the_chat_says_what_followed(two):
     assert "The inside fillets follow the stool: stool_h now 457.2 mm." in res.reply, res.reply
     assert aero.read_params(s.read_script("inside_fillets"))["stool_h"] == pytest.approx(457.2)
     assert follows.said(s) == ""                                                   # said once, in its own turn
+
+
+# --- #271 review ---------------------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("mirror_first", [False, True], ids=["follower first", "mirror first"])
+def test_a_follower_s_mirror_follows_through_its_source_in_either_order(two, mirror_first):
+    """A mirror's generated script carries its source's FOLLOWS. Taken as a follower of its own, writing it failed, so
+    Parameters on the stool stopped half way (the stool at 18 in, the strips at 16). The mirror follows its source."""
+    from caliper import mirror
+
+    s = two
+    mirror.make(s, "inside_fillets_opposite", "inside_fillets", "YZ", (150.0, 0.0, 0.0))
+    if mirror_first:
+        s.design.parts.sort(key=lambda p: p.id != "inside_fillets_opposite")
+        s.save()
+    assert [p.id for p in s.design.parts].index("inside_fillets_opposite") < [p.id for p in s.design.parts].index(
+        "inside_fillets") if mirror_first else True
+    assert follows.followers_of(s, "stool") == ["inside_fillets"]
+    params.set_value(s, "stool", "h", 18, "in")
+    for pid in ("inside_fillets", "inside_fillets_opposite"):
+        assert s.part_geometry(pid).require_mesh().bounds[1][2] == pytest.approx(457.2, abs=1e-6), pid
+
+
+def test_a_removed_source_is_said_by_its_name():
+    r = follows.check(STRIP.replace('("stool", "h")', '("stool_v2", "h")'), {"stool": aero.read_params(STOOL)}, "inside_fillets")
+    assert "stool_h follows the stool v2's h, but there's no stool v2 in the design now: it keeps 406.4 mm" in r.detail, r.detail
+
+
+def test_the_parameters_panel_says_what_followed(two):
+    """The panel's done line was the page's own words: the strips moved and nothing said so."""
+    from .test_params import _page
+
+    got = params.set_value(two, "stool", "h", 18, "in")
+    assert got["followed"] == "the inside fillets follow the stool: stool_h now 457.2 mm"
+    done = '{part: "box", version: 5, said: "h to 18 in", followed: "the inside fillets follow the stool: stool_h now 457.2 mm"}'
+    h = _page(f"return {{ h: paramsHtml(P, state(), {done}) }};")["h"]
+    assert '<div class="pnote">The inside fillets follow the stool: stool_h now 457.2 mm.</div>' in h, h
+
+
+def test_the_route_carries_what_followed():
+    import inspect
+
+    from caliper import design_api
+
+    assert '"followed": got.get("followed")' in inspect.getsource(design_api)
