@@ -109,7 +109,10 @@ def test_a_lighten_says_the_printed_pieces_are_left_alone(tmp_path):
     s = DesignStore.create("a part", base=str(tmp_path / "designs"))
     s.write_part("p", WITH_STRIPS, intent="a part")
     s.write_part("q", BOX_STOOL, intent="a part")
-    assert lighten.printed_untouched(s, "p") == "The fillet strip is left out of this study and isn't cut: it's glued trim."
+    assert lighten.printed_untouched(s, "p") == ("The fillet strip is left out of this study and isn't cut: Lighten cuts only the "
+                                                 "sheets, and these steps don't check it.")      # not declared trim (#272)
+    s.write_part("t", WITH_STRIPS.replace('"rest": True}]', '"rest": True, "trim": True}]'), intent="a part")
+    assert lighten.printed_untouched(s, "t") == "The fillet strip is left out of this study and isn't cut: it's glued trim."
     assert lighten.printed_untouched(s, "q") is None
     src = inspect.getsource(lighten.study)
     assert "untouched = printed_untouched(store, part_id)" in src and '"notes": [*([untouched] if untouched else []),' in src

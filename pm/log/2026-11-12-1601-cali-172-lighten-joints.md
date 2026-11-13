@@ -151,3 +151,7 @@ Theo's script stays his. All 10 mutants are caught; one survived at first (a wal
 After this round, the Lighten, mixed, held-span, unseen-wall, coarse-step, Make it better, running, load-study,
 braced-wall, buckling, verdicts, bar-stool, newest-run, carve, resolved, wording, answers, construction and materials files
 pass, 572 (the one at first was a test pinning Lighten on an unchecked version, now given a check). The whole suite is CI's.
+
+**Page re-check (reviewer-2):** the untouched note said "glued trim" of every printed piece. Now that's said only of
+declared trim. Any other printed piece reads "The fillet strip is left out of this study and isn't cut: Lighten cuts only
+the sheets, and these steps don't check it." Both are pinned, and the mutant is caught. The Lighten files pass, 42.

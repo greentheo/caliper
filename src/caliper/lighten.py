@@ -373,18 +373,27 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
 
 
 def printed_untouched(store: DesignStore, part_id: str) -> Optional[str]:
-    """A sheet part's printed pieces, which a Lighten leaves out of its study and never cuts, said (#272): "The fillet strips
-    are left out of this study and aren't cut: they're glued trim." None where it has none."""
+    """A sheet part's printed pieces, which a Lighten leaves out of its study and never cuts, said (#272). Declared trim is
+    "glued trim"; any other printed piece is said as only what's known of it: "The fillet strip is left out of this study
+    and isn't cut: Lighten cuts only the sheets, and these steps don't check it." None where it has none."""
     from . import construction as C
 
-    names = [it.get("name") or "piece" for it in C.declared(store, part_id).get("construction") or []
-             if isinstance(it, dict) and it.get("kind") == "printed"]
-    if not names:
+    pieces = L.printed_pieces(C.declared(store, part_id))
+    if not pieces:
         return None
-    many = len(names) > 1 or names[0].rstrip().endswith("s")          # "the fillet strips are", "the strip is"
-    return (f"The {' and the '.join(names)} {'are' if many else 'is'} left out of this study and {'are' if many else 'is'}n't "
-            f"cut: {'they' if many else 'it'}'re glued trim." if many else
-            f"The {names[0]} is left out of this study and isn't cut: it's glued trim.")
+
+    def said(names, tail):
+        many = len(names) > 1 or names[0].rstrip().endswith("s")          # "the fillet strips are", "the strip is"
+        return (f"The {' and the '.join(names)} {'are' if many else 'is'} left out of this study and "
+                f"{'are' if many else 'is'}n't cut: " + tail(many) + ".")
+    out = []
+    trim = [p["name"] for p in pieces if p["trim"]]
+    rest = [p["name"] for p in pieces if not p["trim"]]
+    if trim:
+        out.append(said(trim, lambda many: "they're glued trim" if many else "it's glued trim"))
+    if rest:
+        out.append(said(rest, lambda many: f"Lighten cuts only the sheets, and these steps don't check {'them' if many else 'it'}"))
+    return " ".join(out)
 
 
 def sheets_only(ctx: dict):
