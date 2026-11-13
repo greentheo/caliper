@@ -139,6 +139,13 @@ def _plate_material(store: DesignStore, part_id: str, piece: Optional[str]) -> O
         return None
 
 
+def _if_joints(run: dict, case: dict) -> str:
+    """A pass resting on joints nothing checks says so here too, as its card does (#275 review)."""
+    from . import answers, verdicts
+
+    return answers.IF_JOINTS if verdicts.case(run, case).get("joints") else ""
+
+
 def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     """For the worst load the part was checked for: the sag at each step to where it should break, as a range,
     and what to measure it with. None without a strength check on this version."""
@@ -204,7 +211,7 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
                              f"no prediction: {gap}" if gap.startswith(L.OLDER_RUN) else          # it doesn't say which (#249)
                              f"no prediction: the check couldn't see the wall: {gap}" if gap else
                              "no prediction: the check was too coarse to see its walls" if unknown else None),
-            "over": None if unknown or span else answers.over(case, run.get("min_safety")),
+            "over": None if unknown or span else answers.over(case, run.get("min_safety")) + _if_joints(run, case),
             "basis": ("from a run from before unseen walls were recorded, so a rough guess until it's checked again: "
                       if gap.startswith(L.OLDER_RUN) else
                       "from checks that couldn't see every wall, so a rough guess until it's checked again: " if gap else

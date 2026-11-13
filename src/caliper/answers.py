@@ -28,6 +28,9 @@ ORDER = ("bad", "warn", "ok", "info")
 PROMISE = ("A prediction, not a certificate: it rests on the loads it was given and on textbook strengths for "
            "the material. Real wood varies and so do joints, so test it gently before you trust it with a person.")
 #: A chat reply that quotes a strength number points to the promise (CALI-88, #64 item 16).
+#: What a pass resting on joints nothing checks says after its number, on every reader (#265; #275 review: the kid's book and
+#: the trial panel too).
+IF_JOINTS = ", if its joints hold: not checked"
 PROMISE_POINTER = "That's a prediction, not a certificate: its card says what it rests on."
 
 
@@ -223,12 +226,20 @@ RACKING = "Racking (the frame leaning over at its joints) isn't checked: the FEA
 
 def joint_said(row: dict, need) -> str:
     """What a wall held square by an unchecked joint stands on (#265): which joint, and what it reads if that gives. A sheet
-    part's glued trim, left out of the check: which (#272)."""
+    part's glued trim, left out of the check: which (#272). A part's joints taken as solid wood, with no wall resting on one:
+    how many (#222 slice A); with its trim, both said."""
+    said = []
     if row.get("trim"):
         names = row["trim"]
         many = len(names) > 1 or names[0].rstrip().endswith("s")
-        return (f"the {' and the '.join(names)} {'are' if many else 'is'}n't checked: {'they' if many else 'it'}'re glued trim"
-                if many else f"the {names[0]} isn't checked: it's glued trim")
+        said.append(f"the {' and the '.join(names)} {'are' if many else 'is'}n't checked: {'they' if many else 'it'}'re glued trim"
+                    if many else f"the {names[0]} isn't checked: it's glued trim")
+    if row.get("wood") or (row.get("joints_n") is not None and not row.get("piece")):
+        n = row.get("joints_n")
+        said.append(f"the check takes its {n} joint{'s' if n != 1 else ''} as solid wood" if n is not None
+                    else "the check takes its joints as solid wood")
+    if said:
+        return "; ".join(said)
     return (f"the {row['piece']} is held square at its top by its joint to the {row['braced_by']}, which isn't checked; if that "
             f"joint gives, it racks (leans over with the walls beside it) and folds at {_times(row['sway_safety'], need=need)}"
             if row.get("sway_safety") is not None else
@@ -1105,7 +1116,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
             # what it does, then what it needs: "2 times over (assumed): 3.11x" read as holding 2 times over (#64 item 15)
             need = f"; it needs {c['limit']:g}{', assumed' if assumed else ''}"
             said = (f"{mark} {_without_need(label)}, {num}" + against(now.get("strength.case") or {}, need)
-                    + (", if its joints hold: not checked" if verdict.get("joints") else ""))
+                    + (IF_JOINTS if verdict.get("joints") else ""))
         else:
             said = f"{mark} {label}{assumed}: {num}" + _against(c, failed, units.get(c['metric'], ''))
         out.append(_line(said + later,
