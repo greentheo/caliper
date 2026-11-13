@@ -1349,12 +1349,13 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
         cl = os.path.join(src, "cutlist.txt")
         if os.path.exists(cl):
             with open(cl) as f:
-                text = f.read()
+                text = tree.relabelled(store, pid, f.read())     # what the person calls it (#185)
             if "marks" not in plan and (ctx.get("marks") or {}).get(pid):    # a plan made before the marks (CALI-177)
                 from . import marks as K
 
-                text = text.rstrip("\n") + "\n" + "\n".join(K.cutlist_lines(ctx["marks"][pid])) + "\n"
-            cut_texts.append(tree.relabelled(store, pid, text))     # what the person calls it (#185)
+                text = (text.rstrip("\n") + "\n"
+                        + tree.relabelled(store, pid, "\n".join(K.cutlist_lines(ctx["marks"][pid]))) + "\n")
+            cut_texts.append(text)
     with open(os.path.join(root, "cutlist.txt"), "w") as f:
         f.write("\n".join(cut_texts))
     os.makedirs(os.path.join(root, "source"))
@@ -1412,7 +1413,8 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
            "names": {p.id: p.label for p in store.design.parts if p.label},
            "grain": {pid: n for pid, n in said.items() if n},       # which way to cut each panel (CALI-126)
            "joints": {pid: j for pid, j in ((p.id, _joints_of(store, p.id)) for p in built) if j},   # (CALI-156, #222)
-           "marks": {pid: K.cutlist_lines(mk) for pid, mk in ctx["marks"].items() if K.cutlist_lines(mk)},  # (CALI-177)
+           "marks": {pid: [tree.relabelled(store, pid, ln) for ln in K.cutlist_lines(mk)]          # (CALI-177), named
+                     for pid, mk in ctx["marks"].items() if K.cutlist_lines(mk)},                   # as the person calls them
            "slug": os.path.basename(store.root), "versions": versions,
            "promise": _promise(store, [p.id for p in built], strength),        # worded for what it's made of (#64 item 14)
            "card": {"created": card["created"], "summary": card["summary"]},

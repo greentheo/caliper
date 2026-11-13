@@ -152,7 +152,10 @@ def _edge_face(mesh, p, q, d, out, N, t: float, fs) -> Optional[dict]:
     is square; None otherwise (square, a small chamfer or a round-over, a taper, or not read): nothing to mark."""
     starts = np.array([p + f_ * (q - p) + N * (w * t) - out * t for f_ in fs for w in DEPTHS])
     try:
-        locs, ray, tri = mesh.ray.intersects_location(starts, np.repeat(out[None], len(starts), axis=0), multiple_hits=True)
+        from . import spatial                        # every mesh query under the one lock (CALI-103)
+
+        locs, ray, tri = spatial.intersects_location(mesh, starts, np.repeat(out[None], len(starts), axis=0),
+                                                     multiple_hits=True)
     except Exception:  # noqa: BLE001 — no rays: the edge isn't read, never guessed
         return None
     pts, nor = [], []
