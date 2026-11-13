@@ -870,6 +870,12 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
         notes.append("Tubes weighed along their centrelines, joint to joint, one length where a tube runs "
                      "straight through — within a few percent; exact cuts (mitres, copes) come with the cut plan.")
     bom_ = bom(rows)
+    from . import joints as J
+
+    try:                                   # how its pieces join, said and assumed (CALI-156, #222 slice A)
+        joined = J.listed(store, part_id) if len(items) > 1 else []
+    except Exception:  # noqa: BLE001 — the weights stand without the list
+        joined = []
     # what holds the wood together: glue and screws along its joints (the four-questions spec, step 1)
     if sum(1 for it in items if it.get("kind") in ("sheet", "stick") and it.get("material") in ("plywood", "lumber")) > 1:
         try:
@@ -897,7 +903,7 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
             if not k["clear"]:
                 notes.append(f"The {k['name']} doesn't fit: the outside cuts {k['depth_mm']:.0f} mm "
                              f"({k['depth_mm'] / M.IN:.1f} in) into the space it needs.")
-    return {"part": part_id, "source": source, "build": used, "saved": saved, "keeps": keeps,
+    return {"part": part_id, "source": source, "build": used, "saved": saved, "keeps": keeps, "joints": joined,
             "changed": {k: v for k, v in used.items() if k in saved and saved[k] != v},
             "choices": choices(used, d.get("build_options")),
             # unknown, not the rest's: a part whose printed piece can't be weighed has no weight (#125 review)

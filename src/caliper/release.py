@@ -1067,6 +1067,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
         out.append(f"<div class='step'><h3><span class='k'>{s['n']}</span>{_e(s['title'])}</h3>"
                    f"<img class='draw' src='{_e(s['img'])}' alt='step {s['n']}'><ol>"
                    + "".join(f"<li>{_e(d)}</li>" for d in s["do"]) + "</ol></div>")
+    out += joints_html(rec, name)                    # how its pieces join, said and assumed (CALI-156, #222)
     # will it hold (CALI-71): every load, its safety, and where it should break — with room for where it did
     if rec.get("strength"):
         out.append("<h2 class='page'>Will it hold?</h2><table><tr><th>part</th><th>carrying</th>"
@@ -1135,6 +1136,30 @@ def _strength(store: DesignStore, versions: dict) -> dict:
             out[pid] = [{**{k: c.get(k) for k in ("name", "lb", "factor", "safety", "breaks_lb", "governs")},
                          "min_safety": run.get("min_safety"), "rough": load_study.rough(run, c), "verdict": verdicts.case(run, c, filled=why, edge=edge)}
                         for c in run["cases"]]
+    return out
+
+
+def _joints_of(store: DesignStore, pid: str) -> list:
+    from . import joints
+
+    try:
+        return joints.listed(store, pid)
+    except Exception:  # noqa: BLE001 — the book goes without the list, not without the book
+        return []
+
+
+def joints_html(rec: dict, name=lambda pid: pid) -> list[str]:
+    """The book's joints (CALI-156, #222 slice A): each one, its kind and what holds it, an assumed one said so, and that the
+    strength check takes them as solid wood."""
+    rows = [(pid, j) for pid, js in (rec.get("joints") or {}).items() for j in js]
+    if not rows:
+        return []
+    out = ["<h2>How it joins</h2><table><tr><th>part</th><th>pieces</th><th>joint</th><th>held by</th></tr>"]
+    for pid, j in rows:
+        kind = j["kind"] + (" (assumed: none was said)" if j.get("assumed") else "")
+        out.append(f"<tr><td>{_e(name(pid))}</td><td>{_e(' and '.join(j['pieces']))}</td><td>{_e(kind)}</td>"
+                   f"<td>{_e(' and '.join(j.get('fix') or []))}</td></tr>")
+    out.append("</table><p class='note'>The strength check takes these joints as solid wood: they aren't checked.</p>")
     return out
 
 
@@ -1344,6 +1369,7 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
     rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength, "making": made, "cut_smaller": consistency.cut_smaller(store, [p.id for p in built]),
            "names": {p.id: p.label for p in store.design.parts if p.label},
            "grain": {pid: n for pid, n in said.items() if n},       # which way to cut each panel (CALI-126)
+           "joints": {pid: j for pid, j in ((p.id, _joints_of(store, p.id)) for p in built) if j},   # (CALI-156, #222)
            "slug": os.path.basename(store.root), "versions": versions,
            "promise": _promise(store, [p.id for p in built], strength),        # worded for what it's made of (#64 item 14)
            "card": {"created": card["created"], "summary": card["summary"]},

@@ -1380,6 +1380,16 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "cut": True,                  # its numbers are kept cut toward safe (CALI-152): one on its limit is settled
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
     }
+    wooden = [pc for pc in ctx["pieces"] if pc.get("material") in ("plywood", "lumber")]
+    if len(wooden) > 1:                               # its joints, taken as solid wood: said on every verdict (#222 slice A)
+        from . import joints as J
+
+        try:
+            n = len(J.listed(store, part_id))
+        except Exception:  # noqa: BLE001 — not counted: not said, never a guess
+            n = 0
+        if n:
+            record["wood_joints"] = n
     thin = ctx.get("thinnest")
     if thin:                                          # can the FEA see its thinnest wall? (CALI-97)
         record["thinnest_mm"] = round(thin, 2)

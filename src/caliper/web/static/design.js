@@ -2341,6 +2341,15 @@ function triedFor() {      // every part's what-ifs, so the balance shows them t
   return out;
 }
 
+// how its pieces join (CALI-156, #222 slice A): each joint, its kind and what holds it, an assumed one said so
+function jointsHtml(r) {
+  const js = (r && r.joints) || [];
+  if (!js.length) return '';
+  return `<h5 style="margin:12px 0 4px">How it joins</h5><ul class="list small">${js.map((j) => `<li>${esc(j.pieces.join(' and '))}:
+    ${esc(j.kind)}${j.assumed ? ' <span class="muted">(assumed: none was said)</span>' : ''}, ${esc((j.fix || []).join(' and '))}</li>`).join('')}</ul>
+    <div class="muted small">The strength check takes these joints as solid wood: they aren't checked.</div>`;
+}
+
 function buildView(p) {
   if (p.not_accounted) return `<div class="small muted">No cut plan yet: its pieces don't account for its solid.</div>`;
   const c = S.built[p.id];
@@ -2436,6 +2445,7 @@ function builtResults(p, c) {
       ${(bom.printed || []).map((g) => `<li><b>${esc(g.label)}</b>: ${esc(g.name)} <span class="muted">${Math.round(g.filament_g)} g of filament${g.filament_from ? `, ${esc(g.filament_from)}` : ''}
         (the model: ${g.volume_cm3} cm³ at ${Math.round(g.infill * 100)}% infill)</span></li>`).join('')}
     </ul>
+    ${jointsHtml(r)}
     ${(r.notes || []).map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}
     <div class="muted small" style="margin-top:4px">Counts are a shopping estimate (panels packed on whole sheets, cuts on
       whole sticks); the cut plan below nests the real shapes. Densities: <code>materials.py</code>.</div>
@@ -3170,6 +3180,9 @@ function loadCase(p, run, c, i) {
 function jointsLine(c, run) {
   const b = c.verdict && c.verdict.joints ? c.verdict.brace : null;
   if (!b) return '';
+  if (b.joints_n != null && !b.piece) {             // a part's joints taken as solid wood (#222 slice A)
+    return `<div class="small" style="margin-top:2px"><b>Joints not checked:</b> the check takes its ${b.joints_n} joint${b.joints_n === 1 ? '' : 's'} as solid wood.</div>`;
+  }
   return `<div class="small" style="margin-top:2px"><b>Joints not checked:</b> the ${esc(b.piece)} is held square at its top by its
     joint to the ${esc(b.braced_by)}, which isn't checked${b.sway_safety != null ? `; if that joint gives, it racks (leans over with
     the walls beside it) and folds at ${safetyNum(b.sway_safety, run.min_safety)}x` : ''}.</div>`;

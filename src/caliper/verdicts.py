@@ -180,6 +180,8 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
         return _make("recheck", safety, why=UNCUT)
     kind = "close" if near(safety, run.get("min_safety")) else "holds"
     brace = rests_on_brace(run, c)
+    if brace is None and run.get("wood_joints"):     # a part of wood pieces: every joint taken as solid (#222 slice A)
+        brace = {"joints_n": int(run["wood_joints"])}
     if brace is not None:                             # a pass resting on an unchecked joint: JOINT_CAP at most, and why (#265)
         return _make(JOINT_CAP if kind == "holds" else kind, safety, why=JOINTS_WHY, joints=True, brace=brace)
     return _make(kind, safety)
