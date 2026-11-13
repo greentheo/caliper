@@ -1561,6 +1561,7 @@ function paramsHtml(p, st, done) {
   const foot = dirty.length ? `<div class="pfoot"><span class="small muted">Rebuilds as v${p.version + 1}, then re-checks the whole design.</span>
     <button class="primary" data-param-rebuild="1"${blocked || st.saving ? ' disabled' : ''}>${st.saving ? 'Rebuilding…' : 'Rebuild'}</button></div>` : '';
   const said = done && done.part === p.id && done.version === p.version ? `<div class="pdone">v${done.version} written: ${esc(done.said)} set exactly as typed; the whole design re-measured.</div>
+    ${done.followed ? `<div class="pnote">${esc(done.followed.charAt(0).toUpperCase() + done.followed.slice(1))}.</div>` : ''}
     ${done.warning ? `<div class="pnote warn">${esc(done.warning)}.</div>` : ''}${(done.notes || []).map((n) => `<div class="pnote">${esc(n)}.</div>`).join('')}` : '';
   return `<section class="params"><div class="phead"><b>Parameters</b><span class="small muted">set by hand, no Claude call</span></div>
     ${body}${foot}${st.err ? `<div class="pnote bad">${esc(st.err)}</div>` : ''}${said}</section>`;
@@ -1613,7 +1614,8 @@ async function rebuildParams(p) {
   try {
     const got = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/params`, { values: rows.map((r) => ({
       name: r.e.name, value: r.read.value, ...(r.read.unit ? { unit: r.read.unit } : {}) })) });
-    S.paramsDone = { part: p.id, version: got.version, said: paramsSaid(rows), warning: got.warning, notes: got.notes };
+    S.paramsDone = { part: p.id, version: got.version, said: paramsSaid(rows), warning: got.warning, notes: got.notes,
+      followed: got.followed };                    // the parts that read these numbers moved too: said (#271 review)
     S.design = got.design;
     render();
     await syncParts(S.design, false);             // the model on screen is the new one, not the one it was (#171)
