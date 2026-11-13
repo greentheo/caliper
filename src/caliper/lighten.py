@@ -79,22 +79,29 @@ def panels(ctx: dict, stood_on: bool = False) -> list[dict]:
     centres = np.asarray(ls.grid.origin) + s * np.argwhere(ls.solid)
     idx = np.argwhere(ls.solid)
     out = []
+    grids = {}
     for pc in ctx["pieces"]:
         if pc["kind"] != "sheet" or len(pc["polys"]) != 1 or _loaded_face_on(pc, ctx["loads"], ctx["tol"]) != stood_on:
             continue
-        poly, side, t = pc["polys"][0], pc["sides"][0], pc["thickness"]
-        o, u, v, n, flat = _frame(poly)
+        flat = _frame(pc["polys"][0])[4]
         lo = flat.min(axis=0)
         shape = np.maximum(np.ceil((flat.max(axis=0) - lo) / s).astype(int), 1)
-        g = np.stack(np.meshgrid((np.arange(shape[0]) + 0.5) * s + lo[0],
-                                 (np.arange(shape[1]) + 0.5) * s + lo[1], indexing="ij"), -1).reshape(-1, 2)
+        grids[id(pc)] = (lo, shape, np.stack(np.meshgrid((np.arange(shape[0]) + 0.5) * s + lo[0],
+                                                         (np.arange(shape[1]) + 0.5) * s + lo[1], indexing="ij"), -1).reshape(-1, 2))
+    met = _met(ctx, [pc for pc in ctx["pieces"] if id(pc) in grids], grids, s)
+    for pc in ctx["pieces"]:
+        if id(pc) not in grids:
+            continue
+        poly, side, t = pc["polys"][0], pc["sides"][0], pc["thickness"]
+        o, u, v, n, flat = _frame(poly)
+        lo, shape, g = grids[id(pc)]
         inside = _inside2d(g, flat).reshape(shape)
         rim = (_edge_dist2d(g, flat) < RIM_MM).reshape(shape)
         for pic in pc.get("pictures") or []:     # a picture cut out (CALI-78) keeps a web of wood round it
             rel = np.asarray(pic, float) - o
             ring = np.stack([rel @ u, rel @ v], axis=1)
             rim |= (_inside2d(g, ring) | (_edge_dist2d(g, ring) < MIN_WEB_MM)).reshape(shape)
-        joints = _contacts(pc, ctx["pieces"], o, u, v, n * side, t, g, s, ctx["tol"]).reshape(shape) & inside
+        joints = met[id(pc)].reshape(shape) & inside
         keep_out = None
         if joints.any():                          # a piece meeting it inside its outline: a rim round that too (#268)
             from scipy.spatial import cKDTree
@@ -120,28 +127,27 @@ def panels(ctx: dict, stood_on: bool = False) -> list[dict]:
     return out
 
 
-def _contacts(pc: dict, pieces: list, o, u, v, n, t: float, g: np.ndarray, s: float, tol: float) -> np.ndarray:
-    """Which of a panel's cells another piece meets (#268): a piece passing through it (a stringer's mortise), set into it,
-    or touching a face (a cleat, a rail): each crosses or touches a face, so each cell is probed just past each face. One
-    within a tolerance and most of a cell of another piece is a joint, so the cells cover the whole zone (the safe side)."""
-    from .consistency import segment_distance, slab_distance
+def _met(ctx: dict, sheets: list, grids: dict, s: float) -> dict:
+    """Which of each panel's cells another piece meets (#268), from the one contact finder the joint list and the shopping list
+    read (``joints.contacts``, #280): a piece through it (a stringer's mortise), set into it, on its edge or lying on its face (a
+    cleat, a rail), probed just past each face at each cell, within a tolerance and most of a cell, so the cells cover the
+    whole zone (the safe side). ``{id(piece): bool per cell}``."""
+    from . import fasteners
+    from . import joints as J
 
-    flat_pts = o + g[:, :1] * u + g[:, 1:] * v
-    probes = [flat_pts + n * w for w in (-tol, t + tol)]
-    reach = tol + 0.75 * s
-    out = np.zeros(len(g), dtype=bool)
-    for other in pieces:
-        if other is pc:
-            continue
-        for pr in probes:
-            if other["kind"] == "sheet":
-                d = np.min([slab_distance(pr, op, other["thickness"], sd) for op, sd in zip(other["polys"], other["sides"])],
-                           axis=0)
-            elif other.get("a") is not None:
-                d = segment_distance(pr, other["a"], other["b"]) - other.get("half", 0.0)
-            else:
-                continue
-            out |= d <= reach
+    fasteners.keys(ctx["pieces"])
+    found = J.contacts(ctx["pieces"], ctx["tol"], reach=ctx["tol"] + 0.75 * s,
+                       at={pc["key"]: grids[id(pc)][2] for pc in sheets}, materials=None)   # any material (#281 review)
+    out = {}
+    for pc in sheets:
+        lo, shape, g = grids[id(pc)]
+        mask = np.zeros(len(g), dtype=bool)
+        for c in found.values():
+            pts = c["on"].get(pc["key"])
+            if pts:
+                cell = np.floor((np.asarray(pts) - lo) / s).astype(int)
+                mask[cell[:, 0] * shape[1] + cell[:, 1]] = True
+        out[id(pc)] = mask
     return out
 
 

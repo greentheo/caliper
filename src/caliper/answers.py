@@ -31,6 +31,16 @@ PROMISE = ("A prediction, not a certificate: it rests on the loads it was given 
 #: What a pass resting on joints nothing checks says after its number, on every reader (#265; #275 review: the kid's book and
 #: the trial panel too).
 IF_JOINTS = ", if its joints hold: not checked"
+#: The same where all it rests on is glued trim, left out of the check (#279 review).
+IF_TRIM = ", its glued trim not checked"
+
+
+def if_braced(v: Optional[dict]) -> str:
+    """What a pass resting on something unchecked says after its number: its joints, or its glued trim where that's all."""
+    v = v or {}
+    if not v.get("joints"):
+        return ""
+    return IF_TRIM if verdicts.brace_why(v.get("brace")) == verdicts.TRIM_WHY else IF_JOINTS
 PROMISE_POINTER = "That's a prediction, not a certificate: its card says what it rests on."
 
 
@@ -805,6 +815,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     if braced:                                         # a pass resting on a joint nothing checks: which, said everywhere (#265)
         line = joint_said(braced[1]["brace"], braced[0].get("min_safety"))
         out["strength.joints"] = line[:1].upper() + line[1:]
+        out["strength.brace"] = braced[1]["brace"]
     held = [(r, v) for r, v in said if v["kind"] in ("unresolved", "unchecked")]
     if held:                                           # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
         r, v = held[0]                                 # or on another check while the FEA couldn't see a wall (#244, #248)
@@ -1090,7 +1101,8 @@ def held_to(state: dict, now: dict) -> list[dict]:
                                     bool(now.get("strength.uncut")), c["metric"], v, c.get("limit"), c.get("op", ">="))
                                     else None)) if strength else None,
                                 span=now.get("strength.span") if strength else None,
-                                joints=now.get("strength.joints") if strength else None)   # said; JOINT_CAP at most (#265)
+                                joints=now.get("strength.joints") if strength else None,   # said; JOINT_CAP at most (#265)
+                                brace=now.get("strength.brace") if strength else None)
         if verdict["kind"] == "estimate":
             out.append(_line(f"! {label}{assumed}: {_num(c['metric'], v, units.get(c['metric'], ''))}, {guess}.", "warn"))
             continue
@@ -1127,7 +1139,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
             # what it does, then what it needs: "2 times over (assumed): 3.11x" read as holding 2 times over (#64 item 15)
             need = f"; it needs {c['limit']:g}{', assumed' if assumed else ''}"
             said = (f"{mark} {_without_need(label)}, {num}" + against(now.get("strength.case") or {}, need)
-                    + (IF_JOINTS if verdict.get("joints") else ""))
+                    + if_braced(verdict))
         else:
             said = f"{mark} {label}{assumed}: {num}" + _against(c, failed, units.get(c['metric'], ''))
         out.append(_line(said + later,
