@@ -1470,6 +1470,18 @@ def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
     ``{"why": "already_fails" | "too_thin" | "unsupported" | "unchecked", "carve": words, "lighten": words or ""}``, or
     None. ``unchecked``: no strength check of this version (#144, on Theo's own stool, whose v7 has none): the card
     offered Carve and the button was live until the carve's own resolution check refused the click."""
+    from .studies import made_of
+
+    got = _blocked(store, part_id)
+    study = made_of(store, part_id)["study"]     # Lighten or Carve, never both, by where its volume is (#272)
+    if study == "lighten":
+        return {**(got or {"why": "made_of", "lighten": ""}), "carve": "It's mostly sheet wood: it's lightened, not carved"}
+    if study == "carve":
+        return {**(got or {"why": "made_of", "carve": ""}), "lighten": "It's mostly printed: it's carved, not lightened"}
+    return got
+
+
+def _blocked(store: DesignStore, part_id: str) -> Optional[dict]:
     fails = already_fails(store, part_id)        # carving only takes material away (#137 item 3)
     if fails:
         return {"why": "already_fails", "carve": f"{fails}, then carve",
@@ -1485,6 +1497,11 @@ def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
                 "Its walls are too thin for the voxel check at this size, so it can't be carved by strength",
                 "lighten": f"Can't lighten it by strength: {said}" if said else
                 "Its walls are too thin for the voxel check at this size, so it can't be lightened by strength"}
+    if rec.get("resolved") is False:              # a Lighten waits for a check that can see its walls (#272 review)
+        where, thin = (rec.get("thinnest_where") or {}).get("piece"), rec.get("thinnest_mm")
+        what = f"the {where} ({thin:.0f} mm)" if where and thin else f"its thinnest walls ({thin:.0f} mm)" if thin else "its walls"
+        return {"why": "unresolved", "carve": "",
+                "lighten": f"Its check couldn't see {what}: check it again finer, or lighten without them"}
     if any((c.get("fea") or {}).get("supported") is False for c in rec.get("cases") or []):
         return {"why": "unsupported", "carve": "its voxels don't connect the load to a support yet, so a carve can't run",
                 "lighten": ""}               # a lightening's holes are checked by the hand checks too

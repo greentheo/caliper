@@ -338,14 +338,15 @@ def test_before_a_check_the_only_line_is_check_it_first(tmp_path):
 
 
 def test_a_printed_part_is_never_offered_lighten(tmp_path):
-    """Plywood on printed sides: the page has no Lighten panel for a printed part, and Studies says so."""
+    """Plywood on printed sides, mostly printed: the page has no Lighten panel for it, and Studies says why in the
+    Lighten-or-Carve rule's words (#272)."""
     from .test_mixed import MIXED
 
     store = _store(tmp_path, MIXED, "stool")
     _check(store, "stool", 3.0)
     assert not [ln for ln in _offers(store, "stool") if "lighten" in ln["action"]]
     menu = {m["kind"]: m for m in studies.menu(design_api.design_state(store)["parts"][0])}
-    assert not menu["lighten"]["ready"] and menu["lighten"]["why"] == "printed parts get carved instead, not lightened with holes"
+    assert not menu["lighten"]["ready"] and menu["lighten"]["why"] == "It's mostly printed: it's carved, not lightened"
 
 
 def _with_cases(store, pid, cases, safety):
@@ -583,11 +584,17 @@ def post(tmp_path, monkeypatch):
 
 
 FINISHED = {"carve": _carved, "lighten": _lightened}
+#: the part each is run on: Lighten or Carve, never both, by where its volume is (#272): a printed tube is carved, and the same
+#: tube said in plywood is lightened
+SHEET_TUBE = TUBE.replace('''    return [{"name": "tube", "kind": "printed", "material": b["material"], "infill": b["infill"]}]''',
+                          '''    return [{"name": "tube", "kind": "sheet", "material": "plywood", "thickness": 4.0,
+             "outline": [(30, 0, 0), (30, 0, 80), (-30, 0, 80), (-30, 0, 0)]}]''')
+PART = {"carve": TUBE, "lighten": SHEET_TUBE}
 
 
 @pytest.mark.parametrize("kind", ["carve", "lighten"])
 def test_a_stale_button_can_t_start_a_second_run_of_a_finished_version(tmp_path, post, kind):
-    store = _store(tmp_path, TUBE, "tube")
+    store = _store(tmp_path, PART[kind], "tube")
     _check(store, "tube", 3.0)
     FINISHED[kind](store, "tube")
     got = post(store, kind)
@@ -596,7 +603,7 @@ def test_a_stale_button_can_t_start_a_second_run_of_a_finished_version(tmp_path,
 
 @pytest.mark.parametrize("kind", ["carve", "lighten"])
 def test_a_run_asked_for_again_goes_ahead(tmp_path, post, kind):
-    store = _store(tmp_path, TUBE, "tube")
+    store = _store(tmp_path, PART[kind], "tube")
     _check(store, "tube", 3.0)
     FINISHED[kind](store, "tube")
     assert post(store, kind, again=True).status_code == 200
@@ -604,9 +611,9 @@ def test_a_run_asked_for_again_goes_ahead(tmp_path, post, kind):
 
 @pytest.mark.parametrize("kind", ["carve", "lighten"])
 def test_a_finished_run_of_an_older_version_doesn_t_stop_this_one(tmp_path, post, kind):
-    store = _store(tmp_path, TUBE, "tube")
+    store = _store(tmp_path, PART[kind], "tube")
     FINISHED[kind](store, "tube")
-    store.write_part("tube", TUBE, intent="again")
+    store.write_part("tube", PART[kind], intent="again")
     _check(store, "tube", 3.0)
     assert post(store, kind).status_code == 200
 
@@ -614,7 +621,7 @@ def test_a_finished_run_of_an_older_version_doesn_t_stop_this_one(tmp_path, post
 @pytest.mark.parametrize("kind", ["carve", "lighten"])
 def test_what_blocked_says_stops_it_even_asked_again(tmp_path, post, kind):
     """The same test the buttons read: a stale button on a part that now fails is refused, with why."""
-    store = _store(tmp_path, TUBE, "tube")
+    store = _store(tmp_path, PART[kind], "tube")
     _check(store, "tube", 0.5)
     for extra in ({}, {"again": True}):
         got = post(store, kind, **extra)
@@ -630,7 +637,7 @@ def test_a_carve_on_an_unchecked_version_is_refused_with_why(tmp_path, post):
 
 @pytest.mark.parametrize("kind", ["carve", "lighten"])
 def test_a_first_run_goes_ahead(tmp_path, post, kind):
-    store = _store(tmp_path, TUBE, "tube")
+    store = _store(tmp_path, PART[kind], "tube")
     _check(store, "tube", 3.0)
     assert post(store, kind).status_code == 200
 
@@ -662,9 +669,9 @@ def test_only_the_again_buttons_say_again():
 
 
 def test_a_lighten_on_a_new_unchecked_version_is_no_repeat(tmp_path, post):
-    store = _store(tmp_path, TUBE, "tube")
+    store = _store(tmp_path, SHEET_TUBE, "tube")
     _lightened(store, "tube")
-    store.write_part("tube", TUBE, intent="again")
+    store.write_part("tube", SHEET_TUBE, intent="again")
     assert post(store, "lighten").status_code == 200
 
 

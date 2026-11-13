@@ -161,14 +161,15 @@ def _carve_offer(store: DesignStore, state: dict, p: dict, mk: dict) -> Optional
     it (#144 review: ``load_study.blocked``, the one test both read: it already fails, or its walls are too thin)."""
     from . import load_study as L
 
-    if not mk.get("printed") or not p.get("loads") or p.get("carved"):
+    if not mk.get("printed") or not p.get("loads") or p.get("carved") or p.get("study", "carve") != "carve":   # (#272)
         return None
     aims = [o.get("metric") or "" for o in (state.get("goals") or {}).get("objectives") or []]
     if not any(m.startswith(("print.", "weight.")) for m in aims):
         return None
     stop = L.blocked(store, p["id"])
-    if stop and stop["why"] != "unchecked":
+    if stop and stop.get("carve") and stop["why"] != "unchecked":
         return None
+    stop = stop if stop and stop["why"] == "unchecked" else None
     try:
         name = next((it.get("name") for it in C.declared(store, p["id"]).get("construction") or []
                      if isinstance(it, dict) and it.get("kind") == "printed"), None)

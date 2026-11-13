@@ -303,9 +303,10 @@ def test_a_part_that_turned_printed_keeps_its_lighten_run_on_show():
     the v3 Lighten run wasn't drawn anywhere."""
     out = _js(["lightenShown"], """
 S.lightenRuns = [{part: 'step_stool', version: 3}];
-out = [lightenShown({id: 'step_stool', printed: true}, []), lightenShown({id: 'step_stool', printed: false}, [{}]),
-       lightenShown({id: 'other', printed: true}, [{}]), lightenShown({id: 'other', printed: false}, [])];""")
-    assert out == [True, True, False, False]
+out = [lightenShown({id: 'step_stool', printed: true, study: 'lighten'}, []), lightenShown({id: 'other', study: 'lighten'}, [{}]),
+       lightenShown({id: 'other', printed: true, study: 'carve'}, [{}]), lightenShown({id: 'other', study: 'lighten'}, []),
+       lightenShown({id: 'step_stool', printed: true, study: 'carve'}, [{}])];""")
+    assert out == [True, True, False, False, False]          # by the one rule (#272 review), never "anything printed"
 
 
 def test_an_older_run_says_which_version_and_what_to_do():
@@ -342,3 +343,30 @@ def test_the_job_html_carries_the_change_and_the_record_carries_the_version():
     src = inspect.getsource(design_api)
     assert src.count('"version": store.design.part(req.part).version}') == 2            # a load check's and a Lighten's
     assert '"version": j.meta.get("version")' in inspect.getsource(design_api._running)
+
+
+
+# --- #272 review ---------------------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("hole,want", [(60.0, 4.57), (250.0, 1.35)])
+def test_a_wall_held_on_one_side_is_read_at_the_column_by_its_free_edge(hole, want):
+    """The reviewer's wall: 330 × 492 mm, 3/4 in, held on one side and braced at its top, at 1,112 N. Held on one side alone, a
+    narrower strip reads stronger (11.92× whatever the hole), so the row never fell. The strip between the hole and the free
+    edge is a column: 4.57× with a 60 mm hole and 1.35× (a fail) with a 250 mm one."""
+    from shapely.geometry import box
+
+    from caliper import buckling as B
+
+    w, a, t, E, n = 330.2, 491.6, 19.05, 800.0, 1112.0
+    p = {"name": "side", "o": np.zeros(3), "u": np.array([0.0, 1.0, 0.0]), "v": np.array([0.0, 0.0, 1.0]),
+         "flat": np.array([[0.0, 0.0], [w, 0.0], [w, a], [0.0, a]])}
+    sigma = B.critical_stress(E, t, a, w, 1)
+    row = {"piece": "side", "done": True, "down": True, "load_n": n, "edges_held": 1, "braced_by": "step", "E_mpa": E,
+           "height_mm": a, "width_mm": w, "thickness_mm": t, "sigma_cr_mpa": sigma, "safety": sigma * w * t / n}
+    assert round(row["safety"], 2) == 11.93
+    load = {"name": "standing", "force": np.array([0.0, 0.0, -n]), "factor": 1.0}
+    got = lighten.holed_buckling({**_case(row), "governs": "fea"}, [p], {"side": [box((w - hole) / 2, 100.0, (w + hole) / 2, 300.0)]},
+                                 load, 2.0)
+    r = got["buckling"][0]
+    assert r["safety"] == pytest.approx(want, abs=0.01), r
+    assert r["model"] == "the strip between the hole and its free edge, a column, braced at its top"
+    assert got["holds"] is (want >= 2.0)

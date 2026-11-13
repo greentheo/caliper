@@ -95,7 +95,7 @@ def test_the_page_disables_carve_and_lighten_with_the_reason():
     import inspect
 
     from caliper import load_study
-    words = inspect.getsource(load_study.blocked)
+    words = inspect.getsource(load_study._blocked)          # blocked() adds the Lighten-or-Carve rule over it (#272)
     assert "can't be carved by strength" in words and "can't be lightened by strength" in words
 
 

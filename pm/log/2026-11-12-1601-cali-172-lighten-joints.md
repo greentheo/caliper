@@ -70,3 +70,39 @@ All 30 mutants are caught: one more survived at first (a braced holed wall) and 
 After the merge from main and model (a): the Lighten, Lighten-floor, coarse-steps, running, braced-walls, buckling,
 load-study, carve-stale and use-it-margin files pass, 203. The verdict guard (`test_verdicts`) caught `holed_buckling`
 setting the case's `holds`; it's a producer, as `check_load` is, and is marked so.
+
+**Rework from the reviews (the foreman's rulings).**
+1. **Lighten or Carve, one rule, never both** (`studies.made_of`). It goes by where the part's volume is:
+   - printed pieces under half of it make a sheet part, lightened;
+   - most of it printed makes a printed part, carved.
+
+   The printed volume is the printed "rest" as the weights measure it, else the whole less the wood. The panel
+   (`lightenShown`, `loadView`), Make it better (`better.offers`, `_carve_offer`), Studies (`menu`) and `blocked()` all
+   read it; `blocked()` turns the other study off in words ("It's mostly sheet wood: it's lightened, not carved"). On the
+   step-stool-5 copy: 147,548 mm³ printed against 12.8 million mm³ of wood, 1.1%, so a sheet part. In the page it shows
+   Make it lighter only, with Carve off in those words. Pinned on four synthetic parts: all sheet, sheet with a printed
+   strip, printed with a plywood seat, and all printed.
+2. **A Lighten leaves printed pieces alone and says so:** "The printed fillet strip isn't touched: Lighten cuts holes in
+   the sheets only." (`printed_untouched`, in the run's notes).
+3. **Rule 6, a wall held on one side:** the lower of the held strip and the strip between the hole and the free edge, a
+   column at its share. On the reviewer's 330 × 492 mm wall: 4.57× with a 60 mm hole and 1.35× (a fail) with a 250 mm
+   one, where it read 11.92× whatever the hole. Held on both sides stays (a): each strip is held on its outer edge.
+4. **Lighten waits for a check that can see its walls:** "Its check couldn't see the printed fillet strips (13 mm):
+   check it again finer, or lighten without them" (`blocked()`, why `unresolved`).
+5. **An older version's run leads with whose step it is:** "v3's lightest step that holds: …", never "The step to use".
+   Checked in the page.
+
+**The around-file failures at first (23):**
+- 12 were the code's: `made_of` read a stand-in store (None or a SimpleNamespace) in test_carve_no_stress,
+  test_coarse_steps, test_wording, test_newest_run and test_preflight_bar_stool. It now gives no rule for a store it
+  can't read.
+- One was mine: Studies' "it has no sheet pieces" reason for an all-printed part, dropped and now back.
+- 10 were the tests', pinning the old rule or its text:
+  - test_make_it_better ran both studies on one printed tube; a Lighten there now runs on the tube said in plywood;
+  - the menu's lighten words for a mostly printed part are now the rule's;
+  - test_coarse_steps reads `_blocked`'s words;
+  - test_lighten_floor and test_small_words pinned old text.
+
+All 12 rework mutants are caught; one survived at first (the untouched-prints note, then pinned only by its source) and
+now has a real test.
+After the rework: the Lighten-joints, Lighten, Lighten-or-Carve and verdicts files pass in full, with their real studies (72). The 23 files from the wide run that failed pass after the fixes (239 + 148). The whole suite is CI's.

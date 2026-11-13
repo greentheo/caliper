@@ -372,6 +372,19 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
     return case
 
 
+def printed_untouched(store: DesignStore, part_id: str) -> Optional[str]:
+    """A sheet part's printed pieces, which a Lighten leaves alone, said (#272 review): "The printed fillet strip isn't
+    touched: Lighten cuts holes in the sheets only." None where it has none."""
+    from . import construction as C
+
+    names = [it.get("name") or "piece" for it in C.declared(store, part_id).get("construction") or []
+             if isinstance(it, dict) and it.get("kind") == "printed"]
+    if not names:
+        return None
+    return (f"The printed {', '.join(names)} {'isn' if len(names) == 1 else 'aren'}'t touched: Lighten cuts holes in the "
+            f"sheets only.")
+
+
 def step_case(c: dict) -> dict:
     """A lightening step's case as it's kept: its numbers, and the walls the buckling check took as braced, so a step resting
     on an unchecked joint reads as its case does (#265)."""
@@ -410,9 +423,12 @@ def holed_buckling(case: dict, plist: list[dict], holes: dict, load: dict, min_s
     cut out is where buckling matters most). A holed wall is taken at its narrowest strip of wood, square to the load, over
     that whole width (the safe side of splitting it into the strips either side of a hole):
 
-    - where the solid wall had a held side, the strip is held on that side and free at the hole: Timoshenko's
-      one-held-one-free plate, ``k = 0.425 + (b/a)²`` (the foreman's call on #268: on test_lighten's box stool, each side
-      wall taking half the load, that's 32.53× where a free column would read 3.07× and the solid wall 89.47×);
+    - held on both sides, each strip either side of the hole is held on its outer edge and free at the hole: Timoshenko's
+      one-held-one-free plate, ``k = 0.425 + (b/a)²`` (the foreman's call on #268: on test_lighten's box stool, 32.53×
+      where a free column would read 3.07× and the solid wall 89.47×);
+    - held on one side, the lower of that and the strip between the hole and the wall's free edge, free on both sides,
+      as a column at its share of the load (#272 review: alone, the held strip reads stronger as the hole widens, so the
+      hole never lowered the row);
     - with no held side, a column, braced or swaying as its row says.
 
     The row says which (``model``). One whose strip can't be found isn't checked, and says so. The case's safety and what
@@ -436,11 +452,20 @@ def holed_buckling(case: dict, plist: list[dict], holes: dict, load: dict, min_s
                                                      "can't be found"})
             continue
         held = min(int(r.get("edges_held") or 0), 1)          # a held side stays held; the hole's side is free
-        braced = {"braced": True} if r.get("braced_by") and not held else {}
-        sigma = B.critical_stress(r["E_mpa"], r["thickness_mm"], r["height_mm"], left, held, **braced)
+        braced = {"braced": True} if r.get("braced_by") else {}
+        top = "braced at its top" if braced else "its top free to sway"
+        # the strip between the hole and the free edge is free on both sides: a column, at its share of the load (#272 review:
+        # held on one side alone, a narrower strip reads stronger, so the hole could never lower it)
+        column = B.critical_stress(r["E_mpa"], r["thickness_mm"], r["height_mm"], left, 0, **braced)
+        sigma = column
+        model = f"a column of the strip beside the hole, {top}"
+        if held:
+            one = B.critical_stress(r["E_mpa"], r["thickness_mm"], r["height_mm"], left, 1)
+            if int(r.get("edges_held") or 0) >= 2 or one < column:   # held both sides: each strip held on its outer edge
+                sigma, model = one, "the strip beside the hole, held on one side"
+            else:                                  # held on one side: the strip by its free edge is a column (#272 review)
+                model = f"the strip between the hole and its free edge, a column, {top}"
         p_cr = sigma * left * r["thickness_mm"]
-        model = ("the strip beside the hole, held on one side" if held else
-                 f"a column of the strip beside the hole, {'braced at its top' if braced else 'its top free to sway'}")
         rows.append({**r, "holed": True, "narrowest_mm": round(left, 1), "edges_held": held, "model": model,
                      "sigma_cr_mpa": round(sigma, 3),
                      "p_cr_n": round(p_cr, 1), "safety": V.cut(min(r["safety"], p_cr / r["load_n"]))})
@@ -553,6 +578,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     s, mat = ctx["spacing"], ctx["mat"]
     seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)
     plist, tops = panels(ctx), panels(ctx, stood_on=True)
+    untouched = printed_untouched(store, part_id)        # said in the run's notes (#272)
     # a panel stood on that already has holes is judged as it is (judge_holed), and gets no more
     tops = [p for p in tops if not any(pc["name"] == p["name"] and pc.get("holes") for pc in ctx["pieces"])]
     if not plist and not tops:
@@ -685,7 +711,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
         "rules": {"rim_mm": RIM_MM, "min_hole_mm": MIN_HOLE_MM, "min_web_mm": MIN_WEB_MM, "round_mm": ROUND_MM,
                   "hole_saw_mm": HOLE_SAW_MM},
         "stations": stations,
-        "notes": [
+        "notes": [*([untouched] if untouched else []),
             "The walls first: holes all the way through, so a jigsaw (or a router) can cut them, with a 1.5 in "
             "solid rim round each panel where it's glued and screwed, no hole or strip between holes narrower "
             "than 1.5 in, corners rounded to 1/2 in.",

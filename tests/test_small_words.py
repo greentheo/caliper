@@ -93,7 +93,11 @@ def test_folding_a_panel_repaints_where_its_job_is_said():
 
 def test_the_lighten_line_doesn_t_read_as_if_it_was_carved():
     src = open(studies.__file__).read()
-    assert "printed parts get carved instead, not lightened with holes" in src and "its printed part is carved" not in src
+    # since #272 the words are the Lighten-or-Carve rule's, read by blocked(), the card and this list alike
+    from caliper import load_study
+
+    assert "its printed part is carved" not in src
+    assert "It's mostly printed: it's carved, not lightened" in open(load_study.__file__).read()
 
 
 def _plan(tmp_path, monkeypatch, lb, breaks):

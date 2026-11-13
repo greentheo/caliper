@@ -394,6 +394,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             # sheet pieces: lightened with holes (a printed part is carved) (#92)
             "sheets": bool(re.search(r"""["']kind["']\s*:\s*["']sheet["']""", script)),
             "carved": carved_file(script) is not None,          # one reader, anchored (#70 item 9)
+            # Lighten or Carve, never both, by where its volume is: what the panel, the card and blocked() read (#272)
+            "study": studies.made_of(store, p.id)["study"],
             # its strength rests on a filled-in solid (or a shape that couldn't be checked): no "holds" (CALI-96)
             "untrusted": consistency.filled(store, p.id) if "def loads(" in script else None,
             "not_accounted": consistency.not_accounted(store, p.id) if construction.declares(script) else None,  # (CALI-155)

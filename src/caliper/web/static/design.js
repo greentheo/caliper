@@ -2804,7 +2804,7 @@ function loadView(p) {
         to see its ${wallLen(runs[0].thinnest_mm)} walls">Check it again finer${runs[0].finer.minutes ? ` (about ${runs[0].finer.minutes} min)` : ' (how long: unknown)'}</button>` : ''}</div>
     <div id="lProgress"></div>
     ${runs.length ? loadResults(p, runs[pick], runs) : ''}
-    ${p.printed ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : ''}
+    ${p.study === 'carve' ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : ''}
     ${lightenShown(p, runs) ? lightenView(p) : ''}`;
 }
 
@@ -3032,8 +3032,8 @@ function lightenNone(run) {
 }
 // the Lighten panel: on a part of sheets with a strength check, and on any part with a Lighten run, though it's changed since
 // (#268: v4 put printed strips in Theo's stool, the part read as printed, and its v3 run wasn't drawn at all)
-function lightenShown(p, runs) {
-  return lightenRuns(p.id).length > 0 || (!p.printed && runs.length > 0);
+function lightenShown(p, runs) {     // the rule the card and blocked() read: Lighten or Carve, never both (#272)
+  return p.study === 'lighten' && (lightenRuns(p.id).length > 0 || runs.length > 0);
 }
 // a run of an older version: which, and what to do; its steps stay to look at, never to cut in (stationAction)
 function lightenChanged(run, p) {
@@ -3060,7 +3060,7 @@ function lightenView(p) {
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
-        : `${lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
+        : `${run.version != null && run.version !== p.version ? `v${run.version}'s lightest step that holds` : lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
       : lightenNone(run)}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
       ${lightenChanged(run, p) ? `<div class="small" style="color:var(--amber);margin-top:4px">${lightenChanged(run, p)}</div>` : ''}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
