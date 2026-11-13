@@ -149,24 +149,25 @@ def _close_case(**more):
 BRACED = {"buckling": [{"done": True, "piece": "left side", "braced_by": "step", "safety": 6.0, "sway_safety": 1.5}]}
 
 
-@pytest.mark.parametrize("more, extra, note", [
+@pytest.mark.parametrize("more, extra, note, what", [
     (BRACED, {}, "its joints aren't checked: the left side is held square at its top by its joint to the step, which isn't "
-                 "checked; if that joint gives, it racks (leans over with the walls beside it) and folds at 1.5 times over"),
-    ({}, {"trim": ["fillet strip"]}, "the fillet strip isn't checked: it's glued trim"),
+                 "checked; if that joint gives, it racks (leans over with the walls beside it) and folds at 1.5 times over",
+     "joints"),
+    ({}, {"trim": ["fillet strip"]}, "the fillet strip isn't checked: it's glued trim", "glued trim"),   # trim alone: #280
 ], ids=["joints", "trim"])
-def test_a_close_pass_with_a_note_says_both(more, extra, note):
+def test_a_close_pass_with_a_note_says_both(more, extra, note, what):
     from caliper import studies
 
     run = {"id": "r", "part": "stool", "version": 1, "min_safety": 2.0, "safety": 2.1, "cut": True,
            "cases": [_close_case(**more)], **extra}
     v = verdicts.case(run, run["cases"][0])
     assert v["kind"] == "close" and v["joints"], v
-    assert v["word"] == "holds, close to the line, and joints not checked", v
-    assert v["short"] == "holds 2.1x, close to the line, and joints not checked", v
+    assert v["word"] == f"holds, close to the line, and {what} not checked", v
+    assert v["short"] == f"holds 2.1x, close to the line, and {what} not checked", v
     text = answers._case_line("stool", run, run["cases"][0], None, False, False)["text"]
     assert text == f"Holds stepping up, 2.1 times over 400 lb (200 lb, twice over): close to the 2 it needs, and {note}.", text
     head, _ = studies._headline("load", run)
-    assert head.startswith("holds, close to the line, and joints not checked — weakest"), head
+    assert head.startswith(f"holds, close to the line, and {what} not checked — weakest"), head
 
 
 def test_close_by_the_cap_isn_t_close_to_the_line(monkeypatch):
