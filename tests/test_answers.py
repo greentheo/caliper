@@ -59,7 +59,8 @@ def test_a_strength_check_becomes_a_verdict_and_an_older_one_says_so(store):
         json.dump({"id": "t", "part": "stool", "version": 1, "created": 1.0, "min_safety": 2, "holds": True,
                    "cases": [{"name": "An adult stepping up", "safety": 3.11, "holds": True}]}, f)
     work = answers.answers(store, design_api.design_state(store), "stool")[1]
-    assert work["status"] == "ok" and work["lines"][0]["text"] == "Holds an adult stepping up, 3.1 times over."
+    assert work["status"] == "ok" and work["lines"][0]["text"] == ("Holds an adult stepping up, 3.1 times over. "
+                                                         "Its joints aren't checked: the check takes its joints as solid wood.")  # #275: no bare ✓ on wood
     store.write_part("stool", BOX_STOOL, intent="a stool")                  # v2: the check is now older
     work = answers.answers(store, design_api.design_state(store), "stool")[1]
     assert work["status"] == "warn" and "older version" in work["lines"][0]["text"]

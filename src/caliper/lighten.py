@@ -675,6 +675,9 @@ def load_run(store: DesignStore, rid: str) -> Optional[dict]:
                 rec["part_lb"] = C.report(store, rec["part"]).get("mass_lb")
             except Exception:  # noqa: BLE001 — can't be read: the quarter pound alone
                 pass
+    from .joints import mark_uncounted
+
+    mark_uncounted(store, rec)                         # its steps say the joints aren't checked (#275)
     rec["offer"] = _offered(rec)
     return rec
 

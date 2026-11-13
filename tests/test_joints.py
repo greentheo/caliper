@@ -280,3 +280,99 @@ def test_built_from_draws_the_list():
     from .test_carve_click import JS, _fn
 
     assert "${jointsHtml(r)}" in open(JS).read()
+
+
+# --- #275 review -----------------------------------------------------------------------------------------------------------
+def test_a_proud_through_tenon_reads_one_way_mortises_in_the_sides_only(tmp_path):
+    """The stringer stands 1 in proud of each side: it's the tenon. The mortise goes in each side, never in the stringer."""
+    _, d, pcs, tol, mesh = _built(tmp_path, PROUD)
+    (r,) = [x for x in joints.check(PROUD, d, mesh) if x.id == "mortises"]
+    assert r.status == "fail"
+    assert r.detail.count("cut the mortise into") == 2, r.detail
+    assert "cut the mortise into the left side's outline" in r.detail and "cut the mortise into the right side's outline" in r.detail
+    assert "the stringer's outline" not in r.detail and "into the bottom stringer's outline" not in r.detail, r.detail
+
+
+@pytest.mark.parametrize("written", [
+    'JOINTS = [{"pieces": ["step", s], "kind": "bevel", "fix": ["glue"]} for s in ("left side", "right side")]',
+    'JOINTS = []\nfor _s in ("left side", "right side"):\n    JOINTS.append({"pieces": ["step", _s], "kind": "bevel", "fix": ["glue"]})',
+], ids=["a comprehension", "a loop's appends"])
+def test_joints_that_aren_t_plain_data_fail_the_round_in_words(tmp_path, written):
+    script = STOOL.replace(STOOL[STOOL.index("JOINTS = ["):STOOL.index("]\n\n\ndef _boxes")] + "]", written)
+    assert script != STOOL and "JOINTS" in script
+    _, d, _, _, mesh = _built(tmp_path, script)
+    (r,) = [x for x in joints.check(script, d, mesh) if x.id == "joints"]
+    assert r.status == "fail" and "JOINTS isn't plain data: write it as a list of dicts" in r.detail, r.detail
+
+
+def test_annotated_joints_are_read(tmp_path):
+    script = STOOL.replace("JOINTS = [", "JOINTS: list = [")
+    assert script != STOOL
+    assert [j["kind"] for j in joints.read(script)] == ["bevel", "butt"]
+
+
+def test_a_said_joint_is_never_listed_as_unsaid_when_it_can_t_be_read(tmp_path):
+    script = STOOL.replace(STOOL[STOOL.index("JOINTS = ["):STOOL.index("]\n\n\ndef _boxes")] + "]",
+                           'JOINTS = [{"pieces": ["step", s], "kind": "bevel"} for s in ("left side", "right side")]')
+    s, *_ = _built(tmp_path, script)
+    got = joints.listed(s, "stool")
+    assert got and all(j["assumed"] and j.get("unread") for j in got), got
+
+
+def test_an_unlisted_set_in_contact_is_an_assumed_dado(tmp_path):
+    s, *_ = _built(tmp_path, DADO)
+    got = {tuple(j["pieces"]): j for j in joints.listed(s, "stool")}
+    assert got[("left side", "shelf")]["kind"] == "dado" and got[("left side", "shelf")]["assumed"], got
+
+
+def test_no_bare_tick_on_a_multi_piece_wood_part(tmp_path):
+    """#275 review: a run made before slice A, an uncounted one, a Lighten step: each reads ✓ with "joints not checked"."""
+    import json
+    import os
+
+    from caliper import answers, lighten, load_study, verdicts
+
+    s, *_ = _built(tmp_path, LOADED)
+    case = _case()
+    old = {"id": "20261101-000000-old0", "part": "stool", "kind": "load", "version": 1, "created": 1.0, "min_safety": 2.0,
+           "cut": True, "cases": [case], "safety": 5.0, "holds": True}
+    d = os.path.join(load_study.runs_dir(s), old["id"])
+    os.makedirs(d)
+    json.dump(old, open(os.path.join(d, "run.json"), "w"))
+    rec = load_study.load_run(s, old["id"])
+    assert rec["wood_joints"] == "uncounted"
+    v = verdicts.case(rec, case)
+    assert v["joints"] is True and v["brace"] == {"joints_n": None, "wood": True}, v
+    text = answers._case_line("stool", {**rec, "cases": []}, case, None, False, False)["text"]
+    assert "Its joints aren't checked: the check takes its joints as solid wood." in text, text
+    # a Lighten step, from the run it comes from
+    st = {"index": 1, "holds": True, "safety": 5.0, "saved_lb": 1.0, "cases": [{"name": "c", "safety": 5.0, "governs": "fea"}]}
+    step = verdicts.lighten_step(st, None, {"min_safety": 2.0, "wood_joints": "uncounted"})
+    assert step["joints"] is True and "joints not checked" in step["short"], step
+    # one piece of wood: nothing to say
+    assert not joints.wooden("PARAMS = {}\\ndef construction(p, b=None):\\n    return [{'kind': 'sheet', 'material': 'plywood'}]")
+    assert joints.wooden(LOADED)
+
+
+def test_the_page_says_an_uncounted_part_s_joints():
+    from .test_carve_click import _page, _run
+
+    line = _run(_page(["jointsLine", "safetyNum"], consts=["esc"], extra="""
+out = jointsLine({verdict: {joints: true, brace: {joints_n: null, wood: true}}}, {min_safety: 2});"""))
+    assert "<b>Joints not checked:</b> the check takes its joints as solid wood." in " ".join(line.split()), line
+
+
+
+def test_contacts_say_where_on_each_piece_with_one_reach(tmp_path):
+    """#275: one finder for the joint list, the shopping list and Lighten's rim, so each piece's contact has a place."""
+    import numpy as np
+
+    _, _, pcs, tol, _ = _built(tmp_path, PROUD)
+    c = joints.contacts(pcs, tol)[("bottom stringer", "left side")]
+    on = np.asarray(c["on"]["left side"])
+    assert len(on) and on[:, 0].min() >= 304.8 / 2 - 19.05 and on[:, 0].max() <= 304.8 / 2 + 19.05, on   # where it passes
+    assert on[:, 1].min() >= 50.8 - 19.05 and on[:, 1].max() <= 50.8 + 76.2 + 19.05
+    step = joints.contacts(pcs, tol)[("left side", "step")]["on"]["left side"]
+    assert step and min(p[1] for p in step) > 457.2 - 25.0                          # the step meets the side at its top
+    wide = joints.contacts(pcs, tol, reach=tol + 10.0)[("bottom stringer", "left side")]["on"]["left side"]
+    assert len(wide) > len(on)                                                     # a wider reach takes in more of the face

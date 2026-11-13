@@ -223,8 +223,10 @@ RACKING = "Racking (the frame leaning over at its joints) isn't checked: the FEA
 def joint_said(row: dict, need) -> str:
     """What a wall held square by an unchecked joint stands on (#265): which joint, and what it reads if that gives. A part's
     joints taken as solid wood, with no wall resting on one: how many (#222 slice A)."""
-    if row.get("joints_n") is not None and not row.get("piece"):
-        return f"the check takes its {row['joints_n']} joint{'s' if row['joints_n'] != 1 else ''} as solid wood"
+    if row.get("wood") or (row.get("joints_n") is not None and not row.get("piece")):
+        n = row.get("joints_n")
+        return (f"the check takes its {n} joint{'s' if n != 1 else ''} as solid wood" if n is not None
+                else "the check takes its joints as solid wood")
     return (f"the {row['piece']} is held square at its top by its joint to the {row['braced_by']}, which isn't checked; if that "
             f"joint gives, it racks (leans over with the walls beside it) and folds at {_times(row['sway_safety'], need=need)}"
             if row.get("sway_safety") is not None else

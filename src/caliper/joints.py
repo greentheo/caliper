@@ -35,20 +35,43 @@ FIXES = ("glue", "screws", "dowels")
 ASSUMED_FIX = ["glue", "screws"]
 
 
-def read(script: str) -> list:
-    """The ``JOINTS`` a script carries, from its text, never run: [] where it has none, or isn't plain data."""
+#: What :func:`readable` says of a ``JOINTS`` that isn't plain data: the round fails on it, never drops it (#275 review).
+UNREAD = f"{NAME} isn't plain data: write it as a list of dicts"
+
+
+def readable(script: str) -> tuple[bool, list]:
+    """``(ok, joints)``: the ``JOINTS`` a script carries, from its text, never run (``JOINTS = [...]`` or annotated,
+    ``JOINTS: list = [...]``). ``(True, [])`` where it has none; ``(False, [])`` where it has one that isn't plain data (a
+    comprehension, a loop's appends): said, never dropped."""
     try:
         tree = ast.parse(script or "")
     except SyntaxError:
-        return []
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and len(node.targets) == 1 and getattr(node.targets[0], "id", None) == NAME:
-            try:
-                got = ast.literal_eval(node.value)
-            except (ValueError, SyntaxError, TypeError):
-                return []
-            return [j for j in got if isinstance(j, dict)] if isinstance(got, list) else []
-    return []
+        return True, []
+    value, built = None, False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == NAME for t in node.targets):
+            value = node.value if value is None else value
+        elif isinstance(node, ast.AnnAssign) and getattr(node.target, "id", None) == NAME and node.value is not None:
+            value = node.value if value is None else value
+        elif isinstance(node, ast.AugAssign) and getattr(node.target, "id", None) == NAME:
+            built = True                              # JOINTS += [...]
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+              and getattr(node.func.value, "id", None) == NAME):
+            built = True                              # JOINTS.append(...), .extend(...)
+    if built:
+        return False, []
+    if value is None:
+        return True, []
+    try:
+        got = ast.literal_eval(value)
+    except (ValueError, SyntaxError, TypeError):
+        return False, []
+    return (True, [j for j in got if isinstance(j, dict)]) if isinstance(got, list) else (False, [])
+
+
+def read(script: str) -> list:
+    """The ``JOINTS`` a script carries, as plain data; [] where it has none or can't be read (:func:`readable` says which)."""
+    return readable(script)[1]
 
 
 def _said(name: str) -> str:
@@ -82,13 +105,18 @@ def _through(host: dict, piece: dict, tol: float) -> Optional[dict]:
         return None                                  # all of it at the host's own edge: an edge on a face, not a mortise
     near = _inside2d(q, flat) & (w > -tol) & (w < t + tol)
     span = (float(w[near].min()), float(w[near].max()))
-    return {"through": span[0] <= tol and span[1] >= t - tol, "points": q[inside], "frame": (o, u, v, n)}
+    through = span[0] <= tol and span[1] >= t - tol
+    if through and float(_edge_dist2d(q[inside], flat).min()) <= 2.0 * tol:
+        return None                                  # it reaches the host's edge: the host is the tenon, not the mortise (#275)
+    return {"through": through, "points": q[inside], "frame": (o, u, v, n)}
 
 
-def contacts(pieces: list[dict], tol: float) -> dict:
-    """``{(a, b): {"how": "edge" | "through" | "into", "length_mm"}}``, keyed by the pieces' keys, sorted: every pair of wood
-    pieces that touch. An edge on a face as ``fasteners.joints`` finds it; a sheet run through another (``through``) or
-    set into it (``into``, a dado or rabbet) from the pieces' own planes."""
+def contacts(pieces: list[dict], tol: float, reach: Optional[float] = None) -> dict:
+    """``{(a, b): {"how": "edge" | "through" | "into", "length_mm", "on": {key: [(u, v), ...]}}}``, keyed by the pieces' keys,
+    sorted: every pair of wood pieces that touch. An edge on a face as ``fasteners.joints`` finds it; a sheet run through
+    another (``through``) or set into it (``into``, a dado or rabbet) from the pieces' own planes. ``on``: where on each
+    sheet the other one meets it, its own (u, v), probed just past each face within ``reach`` (the tolerance by default):
+    one finder for the joint list, the shopping list and Lighten's rim, which passes its own reach (#275 review)."""
     from . import fasteners
 
     out = {k: {"how": "edge", "length_mm": mm} for k, mm in fasteners.edge_joints(pieces, tol).items()}
@@ -103,7 +131,36 @@ def contacts(pieces: list[dict], tol: float) -> dict:
             key = tuple(sorted((host["key"], piece["key"])))
             across = float(np.ptp(got["points"], axis=0).max()) if len(got["points"]) > 1 else 0.0
             out[key] = {"how": "through" if got["through"] else "into", "length_mm": 2.0 * across}
+    for key, c in out.items():
+        c["on"] = {}
+    _footprints(wood, out, tol if reach is None else reach)
     return out
+
+
+def _footprints(sheets: list[dict], found: dict, reach: float) -> None:
+    """Where on each sheet each piece it touches meets it: its face sampled, probed just past each face, kept within ``reach``
+    of the other piece. Into ``found[key]["on"][sheet key]`` as (u, v) points in that sheet's frame."""
+    from .consistency import _frame, polygon_samples, slab_distance
+
+    for a in sheets:
+        if len(a["polys"]) != 1:
+            continue
+        o, u, v, n, _ = _frame(a["polys"][0])
+        n = n * a["sides"][0]
+        face = polygon_samples(a["polys"][0], n=64)
+        uv = np.stack([(face - o) @ u, (face - o) @ v], axis=1)
+        probes = [face - n * reach, face + n * (float(a["thickness"]) + reach)]
+        for b in sheets:
+            if b is a:
+                continue
+            key = tuple(sorted((a["key"], b["key"])))
+            if key not in found:
+                continue
+            hit = np.zeros(len(face), dtype=bool)
+            for pr in probes:
+                hit |= np.min([slab_distance(pr, op, b["thickness"], sd) for op, sd in zip(b["polys"], b["sides"])], axis=0) <= reach
+            if hit.any():
+                found[key]["on"][a["key"]] = [tuple(map(float, p)) for p in uv[hit]]
 
 
 def _host_mortises(pieces: list[dict], tol: float) -> list[str]:
@@ -154,8 +211,9 @@ def check(script: str, declared: Optional[dict], mesh) -> list:
     fasteners.keys(pieces)
     names = {pc.get("name") for pc in pieces}
     touching = {frozenset(k) for k in contacts(pieces, tol)}
-    wrong = []
-    for j in read(script):
+    ok, said_joints = readable(script)
+    wrong = [] if ok else [UNREAD]
+    for j in said_joints:
         two = [p for p in j.get("pieces") or [] if isinstance(p, str)]
         missing = [p for p in two if p not in names]
         for p in missing:
@@ -181,6 +239,29 @@ def check(script: str, declared: Optional[dict], mesh) -> list:
     return out
 
 
+def wooden(script: str) -> bool:
+    """Whether a part's script declares more than one wood piece, from its text (cheap, for a run read before its joints were
+    counted, #275 review): two sheet or stick pieces of plywood or lumber, or one built in a loop."""
+    import re
+
+    kinds = len(re.findall(r"""["']kind["']\s*:\s*["'](?:sheet|stick)["']""", script or ""))
+    wood = re.search(r"""["'](?:plywood|lumber)["']""", script or "")
+    looped = re.search(r"def construction\(.*?(?:\bfor\b)", script or "", re.S)
+    return bool(wood) and (kinds >= 2 or (kinds == 1 and bool(looped)))
+
+
+def mark_uncounted(store, rec: Optional[dict]) -> Optional[dict]:
+    """A strength or Lighten run read before its joints were counted, on a part of wood pieces: ``wood_joints: "uncounted"``,
+    so its ✓ still says the joints aren't checked, with no count (#275 review: no bare ✓ on a multi-piece wood part)."""
+    if rec and "wood_joints" not in rec and rec.get("part"):
+        try:
+            if store.design.part(rec["part"]) is not None and store.is_scripted(rec["part"]) and wooden(store.read_script(rec["part"])):
+                rec["wood_joints"] = "uncounted"
+        except Exception:  # noqa: BLE001 — as it was read
+            pass
+    return rec
+
+
 def listed(store, pid: str) -> list[dict]:
     """A part's joints, as Built-from and the book list them: its ``JOINTS`` entries, then every other contact as an assumed
     butt (or through tenon), glue and screws. ``[{"pieces": [a, b], "kind", "fix", "assumed"}]``, pieces sorted."""
@@ -189,6 +270,7 @@ def listed(store, pid: str) -> list[dict]:
     from .consistency import _sides, shapes, tolerance
 
     script = store.read_script(pid)
+    ok, said_joints = readable(script)
     try:
         mesh = store.part_geometry(pid).require_mesh()
         pieces = shapes(C.declared(store, pid))
@@ -198,13 +280,13 @@ def listed(store, pid: str) -> list[dict]:
     fasteners.keys(pieces)
     found = contacts(pieces, tolerance(mesh))
     out, said = [], set()
-    for j in read(script):
+    for j in said_joints:
         two = sorted(p for p in j.get("pieces") or [] if isinstance(p, str))
         if len(two) == 2 and tuple(two) in found:
             out.append({"pieces": two, "kind": j.get("kind"), "fix": list(j.get("fix") or []), "assumed": False})
             said.add(tuple(two))
     for key, c in sorted(found.items()):
         if key not in said:
-            out.append({"pieces": list(key), "kind": "through tenon" if c["how"] == "through" else "butt",
-                        "fix": list(ASSUMED_FIX), "assumed": True})
+            out.append({"pieces": list(key), "kind": {"through": "through tenon", "into": "dado"}.get(c["how"], "butt"),
+                        "fix": list(ASSUMED_FIX), "assumed": True, **({} if ok else {"unread": True})})
     return out

@@ -1386,8 +1386,8 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
 
         try:
             n = len(J.listed(store, part_id))
-        except Exception:  # noqa: BLE001 — not counted: not said, never a guess
-            n = 0
+        except Exception:  # noqa: BLE001 — not counted, and still said: never a bare ✓ (#275 review)
+            n = "uncounted"
         if n:
             record["wood_joints"] = n
     thin = ctx.get("thinnest")
@@ -1545,7 +1545,10 @@ def load_run(store: DesignStore, rid: str) -> Optional[dict]:
     if not os.path.exists(path):
         return None
     with open(path) as f:
-        return json.load(f)
+        rec = json.load(f)
+    from .joints import mark_uncounted
+
+    return mark_uncounted(store, rec)                 # read before its joints were counted: still said (#275)
 
 
 def heat_path(store: DesignStore, rid: str, index: int) -> str:

@@ -75,7 +75,8 @@ def test_the_design_cards_strength_line_reads_as_the_parts_does(tmp_path):
     store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
     lines = [ln["text"] for c in answers.answers(store, design_api.design_state(store)) for ln in c["lines"]]
     # and what N is against, as the part card says it (#208 review)
-    assert "✓ Holds Dad (200 lb), 3.1 times over 400 lb (200 lb, twice over; it needs 2, assumed)." in lines, lines
+    assert ("✓ Holds Dad (200 lb), 3.1 times over 400 lb (200 lb, twice over; it needs 2, assumed), if its joints hold: "
+            "not checked. The check takes its joints as solid wood.") in lines, lines  # #275: no bare ✓ on wood
     assert not [t for t in lines if "2 times over (assumed)" in t], lines
 
 
@@ -132,12 +133,12 @@ def test_the_card_the_kids_book_the_trial_panel_and_the_build_book_say_the_same(
     store = samples.open_sample("step-stool", base=str(tmp_path / "designs"))
     said = "3.1 times over 400 lb (200 lb, twice over)"
     card = [ln["text"] for ln in answers.answers(store, design_api.design_state(store), "step_stool")[1]["lines"]]
-    assert f"Holds 200 lb adult stepping up, {said}." in card, card
+    assert f"Holds 200 lb adult stepping up, {said}. Its joints aren't checked: the check takes its joints as solid wood." in card, card  # #275
     strength = release._strength(store, {p.id: p.version for p in store.design.parts})
     assert said in kidbook._strength_page(strength, ["step_stool"])["say"]
     assert trials.predict(store, "step_stool")["over"] == said
     (c,) = strength["step_stool"]
-    assert release._safety_cell(c)[0] == "3.1x" and (c["lb"], c["factor"]) == (200, 2)   # its row says "200 lb × 2"
+    assert release._safety_cell(c)[0] == "3.1x, if its joints hold: not checked" and (c["lb"], c["factor"]) == (200, 2)   # its row says "200 lb × 2"
 
 
 

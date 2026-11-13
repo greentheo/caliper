@@ -3182,8 +3182,9 @@ function loadCase(p, run, c, i) {
 function jointsLine(c, run) {
   const b = c.verdict && c.verdict.joints ? c.verdict.brace : null;
   if (!b) return '';
-  if (b.joints_n != null && !b.piece) {             // a part's joints taken as solid wood (#222 slice A)
-    return `<div class="small" style="margin-top:2px"><b>Joints not checked:</b> the check takes its ${b.joints_n} joint${b.joints_n === 1 ? '' : 's'} as solid wood.</div>`;
+  if (b.wood || (b.joints_n != null && !b.piece)) { // a part's joints taken as solid wood, counted or not (#222, #275)
+    const n = b.joints_n;
+    return `<div class="small" style="margin-top:2px"><b>Joints not checked:</b> the check takes its ${n != null ? `${n} joint${n === 1 ? '' : 's'}` : 'joints'} as solid wood.</div>`;
   }
   return `<div class="small" style="margin-top:2px"><b>Joints not checked:</b> the ${esc(b.piece)} is held square at its top by its
     joint to the ${esc(b.braced_by)}, which isn't checked${b.sway_safety != null ? `; if that joint gives, it racks (leans over with
