@@ -596,3 +596,15 @@ def test_an_earlier_test_offer_doesn_t_take_the_mirror_question_s_yes(two_sides)
     assert promote.pending(s) is None
     res = chat.turn(s, "yes", use_llm=False)
     assert s.design.part("fillet_strip_opposite") is not None and res.reply.startswith("Made fillet_strip's mirror"), res.reply
+
+
+def test_no_module_level_name_in_chat_is_assigned_twice():
+    """#274's CI: a second _REQUEST shadowed #262's, and "I need a bench" named a part i_need. A name of its own each."""
+    import ast
+    import collections
+
+    tree = ast.parse(open(chat.__file__).read())
+    names = [t.id for n in tree.body if isinstance(n, ast.Assign) for t in n.targets if isinstance(t, ast.Name)]
+    names += [n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))]
+    twice = [k for k, c in collections.Counter(names).items() if c > 1]
+    assert not twice, twice

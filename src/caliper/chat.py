@@ -1217,8 +1217,9 @@ _AXIS_SHORT = re.compile(r"^(?:(?:the|across the|across)\s+)?(?:(width|wide|x)|(
                          r"(?:\s+(?:one|edge|side|way|please))*[.!]?$", re.I)
 
 
-#: A message that's a request of its own, not an answer: it lets a parked question lapse.
-_REQUEST = re.compile(r"^(?:please\s+)?(?:make|add|change|move|remove|turn|put|set|cut|build|give|use|mirror)\b", re.I)
+#: A message that's a request of its own, not an answer: it lets a parked question lapse. (Not #262's ``_REQUEST``, the
+#: words a request opens with: a name of its own, so neither shadows the other.)
+_OWN_REQUEST = re.compile(r"^(?:please\s+)?(?:make|add|change|move|remove|turn|put|set|cut|build|give|use|mirror)\b", re.I)
 
 
 def _versions(store: DesignStore, part_id: str, seat: dict) -> dict:
@@ -1269,7 +1270,7 @@ def _mirror_answer(store: DesignStore, aw: dict, message: str, **kw) -> Optional
         twin = next((t for t in twins if t["axis"] == k), None)
         if twin is None:
             if (len(words.split()) <= 4 and awaiting.reads(words) is None    # a short answer it can't read: said, still asked
-                    and not _REQUEST.match(words)):                     # "make it blue" is a request of its own
+                    and not _OWN_REQUEST.match(words)):                 # "make it blue" is a request of its own
                 says = " or ".join(f"\"across the {_AXIS_WORD[t['axis']]}\"" for t in twins)
                 return TurnResult(action="ask", ok=False, part=aw.get("part"), events=kw.get("events") or [],
                                   reply=f"I didn't catch which: say {says}.")
