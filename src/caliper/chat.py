@@ -1273,7 +1273,9 @@ def _seat_miss(geometry, seat: dict, part_id: str, store: Optional[DesignStore] 
 
 def _drafted_miss(proposal, part_id: str) -> Optional[str]:
     """The drafted fit test, measured off now (``min_clearance(new, other) <= x`` at 76.75): the reply's first line (#266)."""
-    if proposal is None or proposal.holds_now is not False:
+    from . import verdicts
+
+    if proposal is None or verdicts.rule(proposal.holds_now)["kind"] != "fails":   # one verdict on it, not worked out here
         return None
     m = re.match(r"\s*(?:min_clearance|clearance)\(\s*(\w+)\s*,\s*(\w+)\s*\)\s*<=", proposal.expr or "")
     if not m or part_id not in m.groups() or not isinstance(proposal.actual, (int, float)):
