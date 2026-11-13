@@ -562,6 +562,14 @@ def test_a_stale_answer_is_refused_in_words(two_sides):
                          "opposite edge may be another. Pick the edge again and ask."), res.reply
 
 
+def _offers_a_test(pid):
+    """A drafter that always offers to lock in a fit test, as the promote job does."""
+    from caliper import promote
+
+    return lambda *a, **k: promote.Draft(proposal=promote.Proposal(id="seated", expr=f"min_clearance({pid}, stool) <= 0.2",
+                                                                   level="design", part=pid, holds_now=True))
+
+
 def test_no_test_is_offered_while_a_mirror_question_is_open(two_sides):
     """One parked question at a time: a "yes" can only mean the mirror."""
     from caliper import awaiting, promote
@@ -569,6 +577,22 @@ def test_no_test_is_offered_while_a_mirror_question_is_open(two_sides):
     s, pick = two_sides
     asked = "a 5 mm fillet strip on this edge; mirror it on the other side"
     res = chat.author_part(s, "fillet_strip", asked, author=_author(0.0)[0], use_llm=False, pick=pick, on="stool", asked=asked,
-                           drafter=lambda *a, **k: [{"id": "seated", "expr": "min_clearance(fillet_strip, stool) <= 0.2"}])
+                           drafter=_offers_a_test("fillet_strip"))
     assert awaiting.pending(s)["kind"] == "mirror_edge"
     assert "lock that in as a test" not in res.reply and promote.pending(s) is None, res.reply
+
+
+def test_an_earlier_test_offer_doesn_t_take_the_mirror_question_s_yes(two_sides):
+    """#274 re-check: an unanswered test offer from an earlier turn survived the mirror question, and "yes" locked the test."""
+    from caliper import promote
+
+    s, pick = two_sides
+    chat.author_part(s, "first_strip", "a strip", author=_author(0.0)[0], use_llm=False, pick=pick, on="stool",
+                     drafter=_offers_a_test("first_strip"))
+    assert promote.pending(s) is not None                                         # offered, not answered
+    asked = "a 5 mm fillet strip on this edge; mirror it on the other side"
+    chat.author_part(s, "fillet_strip", asked, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
+                     on="stool", asked=asked)
+    assert promote.pending(s) is None
+    res = chat.turn(s, "yes", use_llm=False)
+    assert s.design.part("fillet_strip_opposite") is not None and res.reply.startswith("Made fillet_strip's mirror"), res.reply

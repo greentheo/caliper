@@ -1103,6 +1103,10 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     mirror_words = seat is not None and (both or bool(_MAYBE_MIRROR.search(f"{asked} {intent}")))
     early = _opposite_edges(store, seat) if mirror_words else []
     asks = mirror_words and (len(early) > 1 or (not both and len(early) == 1))
+    if asks:                                     # and an earlier one left unanswered goes: "yes" means the mirror (#274)
+        from . import promote
+
+        promote.clear(store)
     proposal, offer = _offer_promotion(store, part_id, intent, use_llm=use_llm, client=client,
                                        drafter=drafter, enabled=promote_feedback and not asks,
                                        events=events, on_event=on_event)
