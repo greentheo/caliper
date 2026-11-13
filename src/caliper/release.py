@@ -870,6 +870,8 @@ def _safety_cell(c: dict) -> tuple[str, str]:
         return "not trusted: checked on a solid with more in it than its pieces", "—"
     if (c.get("verdict") or {}).get("blind"):        # it saw no stress at all: not its walls (#202)
         return "not resolved: the check couldn't see any stress", "—"
+    if kind in ("unresolved", "unchecked") and (c.get("verdict") or {}).get("why"):   # what couldn't be seen, as the card says (#279 review)
+        return _e(f"not checked: {c['verdict']['why']}"), "—"
     if kind in ("unresolved", "unchecked"):          # too coarse to see its walls: no ✓ (CALI-110)
         return "not resolved: too coarse to see its walls", "—"
     if kind == "edge":                               # where people stand wasn't loaded (CALI-94)
@@ -881,10 +883,10 @@ def _safety_cell(c: dict) -> tuple[str, str]:
     if kind not in verdicts.SETTLED:                 # any other kind: its word, never a number to build on
         return _e((c.get("verdict") or {}).get("word") or "not checked"), "—"
     if (c.get("verdict") or {}).get("joints"):       # it holds if its joints do, and they aren't checked (#265)
-        from .answers import IF_JOINTS, _times
+        from .answers import _times, if_braced
 
         return _e(_times(c["safety"], bool(c.get("rough")), c.get("min_safety")).replace(" times over", "x")
-                  + IF_JOINTS), breaks
+                  + if_braced(c.get("verdict"))), breaks
     if (c.get("verdict") or {}).get("coarse"):       # a ✗ stays a ✗, not as a settled number (#191)
         from .answers import safety_num            # the one formatter (#208 review): 1.995 never reads 2
 

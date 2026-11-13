@@ -429,6 +429,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     unsettled = None                  # a ✗ on one: a ✗ stays a ✗, and says the fail may be the model's (#191)
     span = None                       # the FEA alone, on a part bending between its holds (CALI-153)
     joints = None                     # a pass resting on a wall held square by a joint nothing checks (#265)
+    brace = None                      # what it rests on: joints, or glued trim alone (#280)
     uncut, recheck = False, None      # a run made before the rounding fix, and one of its cases on its limit (#214)
     no_breaks = None                  # a breaking load from a run that can't see the wall isn't one to read
     loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
@@ -474,6 +475,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             from .answers import joint_said
 
             joints = next((joint_said(v["brace"], run.get("min_safety")) for _, v in said if v.get("joints")), None)
+            brace = next((v["brace"] for _, v in said if v.get("joints")), None)
         sure = [(c, v) for c, v in said if v["kind"] in verdicts.SETTLED and not v.get("coarse")]
         breaks = [c["breaks_lb"] for c, _ in sure if c.get("breaks_lb")]
         hedged = next(((c, v) for c, v in said if v["kind"] == "fails" and v.get("coarse")), None)
@@ -573,7 +575,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                                 # an old number on its limit, the run's or this goal's own (#214 review)
                                 recheck=(recheck or (verdicts.UNCUT if number and verdicts.goal_on_limit(
                                     uncut, c["metric"], v, lim, op) else None)) if strength else None,
-                                span=span if strength else None, joints=joints if strength else None)
+                                span=span if strength else None, joints=joints if strength else None,
+                                brace=brace if strength else None)
         status = verdicts.STATUS[verdict["kind"]]
         if verdict["kind"] == "estimate":     # a rough print time runs low: never a pass (#166)
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"], "margin": None, "trust": "rough",
@@ -603,7 +606,7 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             checks.append({**c, "status": status, "value": m["value"], "unit": m["unit"],
                            "margin": round(v - lim if op == ">=" else lim - v, 3), "trust": m["trust"],
                            # a pass, said: what it rests on isn't checked (#265)
-                           **({"trust": "joints not checked", "joints": verdict["why"], "joints_kind": verdict["kind"]}
+                           **({"trust": verdicts.brace_why(verdict.get("brace")), "joints": verdict["why"], "joints_kind": verdict["kind"]}
                               if verdict.get("joints") else {})})
     previous = list_cards(store, 1)
     # a change is the design's, never the scorer's: against a card from an older scorer there's no "was" (#125 review)

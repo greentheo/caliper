@@ -27,6 +27,8 @@ from typing import Optional
 
 import numpy as np
 
+from .fasteners import WOOD
+
 NAME = "JOINTS"
 #: The kinds a joint can be (#222's proposal, and the through tenon from step-stool-5).
 KINDS = ("butt", "bevel", "mitre", "rabbet", "dado", "pocket screw", "dowel", "glue block", "printed connector",
@@ -129,16 +131,25 @@ def _through(host: dict, piece: dict, tol: float) -> Optional[dict]:
     return {"through": through, "notch": ends == 1, "points": q[inside], "frame": (o, u, v, n)}
 
 
-def contacts(pieces: list[dict], tol: float, reach: Optional[float] = None) -> dict:
-    """``{(a, b): {"how": "edge" | "through" | "into", "length_mm", "on": {key: [(u, v), ...]}}}``, keyed by the pieces' keys,
-    sorted: every pair of wood pieces that touch. An edge on a face as ``fasteners.joints`` finds it; a sheet run through
-    another (``through``) or set into it (``into``, a dado or rabbet) from the pieces' own planes. ``on``: where on each
-    sheet the other one meets it, its own (u, v), probed just past each face within ``reach`` (the tolerance by default):
-    one finder for the joint list, the shopping list and Lighten's rim, which passes its own reach (#275 review)."""
+def contacts(pieces: list[dict], tol: float, reach: Optional[float] = None, at: Optional[dict] = None,
+             materials: Optional[tuple] = WOOD) -> dict:
+    """``{(a, b): {"how": "edge" | "through" | "into" | "notch" | "face", "length_mm", "on": {key: [(u, v), ...]}}}``, keyed by
+    the pieces' keys, sorted: every pair of wood pieces that touch. An edge on a face as ``fasteners.joints`` finds it; a sheet
+    run through another (``through``) or set into it (``into``, a dado or rabbet) from the pieces' own planes; and a piece lying
+    on a sheet's face (``face``: a cleat, a doubled panel), which edge probes never see (#280: Lighten's rim kept wood under
+    them, and the rim reads this finder now). ``on``: where on each sheet the other one meets it, its own (u, v), probed just
+    past each face within ``reach`` (the tolerance by default), at ``at[sheet key]``'s (u, v) points where given (Lighten's
+    cells), else a grid over its face: one finder for the joint list, the shopping list and Lighten's rim, which passes its
+    own reach (#275 review). A pair is a joint by ``tol`` alone, whatever the reach. ``materials``: the pieces it looks
+    between, wood for the joint list and the shopping list (glue and screws); None, every piece, for Lighten's rim, which
+    keeps whatever meets a panel, a steel tube or a foam side (#281 review)."""
     from . import fasteners
 
+    def ours(pc):
+        return materials is None or pc.get("material") in materials
+
     out = {k: {"how": "edge", "length_mm": mm} for k, mm in fasteners.edge_joints(pieces, tol).items()}
-    wood = [pc for pc in pieces if pc.get("material") in fasteners.WOOD and pc["kind"] == "sheet"]
+    wood = [pc for pc in pieces if ours(pc) and pc["kind"] == "sheet"]
     for host in wood:
         for piece in wood:
             if piece is host:
@@ -152,32 +163,47 @@ def contacts(pieces: list[dict], tol: float, reach: Optional[float] = None) -> d
             out[key] = {"how": how, "length_mm": 2.0 * across}
     for key, c in out.items():
         c["on"] = {}
-    _footprints(wood, out, tol if reach is None else reach)
+    sticks = [pc for pc in pieces if ours(pc) and pc["kind"] != "sheet" and pc.get("a") is not None]
+    _footprints(wood, wood + sticks, out, tol, tol if reach is None else reach, at or {})
     return out
 
 
-def _footprints(sheets: list[dict], found: dict, reach: float) -> None:
-    """Where on each sheet each piece it touches meets it: its face sampled, probed just past each face, kept within ``reach``
-    of the other piece. Into ``found[key]["on"][sheet key]`` as (u, v) points in that sheet's frame."""
-    from .consistency import _frame, polygon_samples, slab_distance
+def _footprints(sheets: list[dict], others: list[dict], found: dict, tol: float, reach: float, at: dict) -> None:
+    """Where on each sheet each piece it touches meets it: its face sampled (or ``at`` its key's (u, v) points), probed just
+    past each face, kept within ``reach`` of the other piece, a sheet or a stick. Into ``found[key]["on"][sheet key]`` as (u, v)
+    points in that sheet's frame. A pair no other probe found, within ``tol`` of a face, is a ``face`` contact."""
+    from .consistency import _frame, polygon_samples, segment_distance, slab_distance
 
     for a in sheets:
         if len(a["polys"]) != 1:
             continue
         o, u, v, n, _ = _frame(a["polys"][0])
         n = n * a["sides"][0]
-        face = polygon_samples(a["polys"][0], n=64)
-        uv = np.stack([(face - o) @ u, (face - o) @ v], axis=1)
-        probes = [face - n * reach, face + n * (float(a["thickness"]) + reach)]
-        for b in sheets:
+        if a["key"] in at:
+            uv = np.asarray(at[a["key"]], float).reshape(-1, 2)
+            face = o + uv[:, :1] * u + uv[:, 1:] * v
+        else:
+            face = polygon_samples(a["polys"][0], n=64)
+            uv = np.stack([(face - o) @ u, (face - o) @ v], axis=1)
+        probes = [face - n * tol, face + n * (float(a["thickness"]) + tol)]      # just past each face, as Lighten's rim did
+        for b in others:
             if b is a:
                 continue
             key = tuple(sorted((a["key"], b["key"])))
-            if key not in found:
-                continue
-            hit = np.zeros(len(face), dtype=bool)
+            d = np.full(len(face), np.inf)
             for pr in probes:
-                hit |= np.min([slab_distance(pr, op, b["thickness"], sd) for op, sd in zip(b["polys"], b["sides"])], axis=0) <= reach
+                if b["kind"] == "sheet":
+                    d = np.minimum(d, np.min([slab_distance(pr, op, b["thickness"], sd)
+                                              for op, sd in zip(b["polys"], b["sides"])], axis=0))
+                else:
+                    d = np.minimum(d, segment_distance(pr, b["a"], b["b"]) - b.get("half", 0.0))
+            hit = d <= reach
+            if key not in found:
+                if not (d <= tol).any():
+                    continue
+                touch = uv[d <= tol]
+                found[key] = {"how": "face", "on": {},
+                              "length_mm": float(np.ptp(touch, axis=0).max()) if len(touch) > 1 else 0.0}
             if hit.any():
                 found[key]["on"][a["key"]] = [tuple(map(float, p)) for p in uv[hit]]
 

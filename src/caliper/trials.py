@@ -143,7 +143,7 @@ def _if_joints(run: dict, case: dict) -> str:
     """A pass resting on joints nothing checks says so here too, as its card does (#275 review)."""
     from . import answers, verdicts
 
-    return answers.IF_JOINTS if verdicts.case(run, case).get("joints") else ""
+    return answers.if_braced(verdicts.case(run, case))
 
 
 def predict(store: DesignStore, part_id: str) -> Optional[dict]:

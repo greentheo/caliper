@@ -300,7 +300,7 @@ def _strength_page(strength: dict, parts: Optional[list] = None) -> dict:
     if not kinds:
         kinds = ["waiting"]                              # nothing checked at all: not checked
     held = [f"It should hold {answers.lowered(c['name'])}, {answers.over(c, c.get('min_safety'))}"
-            f"{answers.IF_JOINTS if (c.get('verdict') or {}).get('joints') else ''}." for c, k in zip(cases, kinds)
+            f"{answers.if_braced(c.get('verdict'))}." for c, k in zip(cases, kinds)
             if k in verdicts.PASSES]
     if "fails" in kinds:
         # it failed its check: not a kid's to try at all (rule 6), and not "it should hold" (CALI-112's audit)
