@@ -260,6 +260,9 @@ def check(script: str, declared: Optional[dict], mesh) -> list:
     fasteners.keys(pieces)
     names = {pc.get("name") for pc in pieces}
     touching = {frozenset(k) for k in contacts(pieces, tol)}
+    from . import shop as shop_
+
+    have = shop_.read()
     ok, said_joints = readable(script)
     wrong = [] if ok else [UNREAD]
     for j in said_joints:
@@ -280,6 +283,10 @@ def check(script: str, declared: Optional[dict], mesh) -> list:
             if fix:
                 said.append(f"the fix \"{', '.join(fix)}\", which isn't glue, screws or dowels")
             wrong.append(f"{NAME} gives {_said(two[0])} and {_said(two[1])} " + ", and ".join(said))
+        elif shop_.joint_needs(kind, have) is not None:      # the shop decides what's possible (CALI-178, #222 §3)
+            wrong.append(f"{NAME} makes {_said(two[0])} and {_said(two[1])} a {kind}, which needs "
+                         f"{shop_.joint_needs(kind, have)}, and your shop hasn't got one: choose a joint it can make, or say "
+                         f"what it needs")
     out = [AssertionResult(id="joints", expr=f"its {NAME} name pieces that touch, with a kind and fix Caliper knows",
                            status="fail" if wrong else "pass", passed=not wrong, actual=len(wrong), detail="; ".join(wrong))]
     mort = _host_mortises(sheets, tol)
@@ -339,3 +346,180 @@ def listed(store, pid: str) -> list[dict]:
             out.append({"pieces": list(key), "kind": {"through": "through tenon", "into": "dado", "notch": "notch"}.get(c["how"], "butt"),
                         "fix": list(ASSUMED_FIX), "assumed": True, **({} if ok else {"unread": UNREAD})})
     return out
+
+
+# ---------------------------------------------------------------------------------------------------------------------------
+# A pick names a joint (CALI-178, #222 slice D)
+# ---------------------------------------------------------------------------------------------------------------------------
+#: The kinds a joint check can measure in the pieces here: a rabbet's or a dado's step (#285 review). A bevel's angle and a
+#: mortise come with the make side's marks (#283); until then they're said as the entry only, never "Checked".
+MEASURED = ("rabbet", "dado")
+#: What a joint check says when it can't tell: landed and missed each need positive evidence, as for an edge (#177).
+NOT_MEASURED = "I couldn't tell whether that joint changed the way you asked."
+UNDO = ' Say "roll it back" to undo it.'
+#: The kinds a request can ask for, and the words it might use: the longer phrases first.
+_ASK = (("pocket screw", r"pocket[- ]?(?:screw|hole)s?"), ("glue block", r"glue[- ]?blocks?"),
+        ("printed connector", r"printed connectors?"), ("through tenon", r"(?:through[- ])?tenons?"),
+        ("mitre", r"mit(?:re|er)(?:ed|s)?"), ("rabbet", r"rabbet(?:ed|s)?|rebate(?:d|s)?"), ("dado", r"dado(?:e?s)?"),
+        ("dowel", r"dowel(?:s|led|ed)?"), ("bevel", r"bevel(?:led|ed|s)?"), ("notch", r"notch(?:ed|es)?"),
+        ("butt", r"butt(?:[- ]joint)?s?"))
+
+
+def _pieces_of(store, pid: str):
+    """A part's pieces with their sides and keys, and its tolerance; ``([], 0)`` where it has none to read."""
+    from . import construction as C
+    from . import fasteners
+    from .consistency import _sides, shapes, tolerance
+
+    try:
+        mesh = store.part_geometry(pid).require_mesh()
+        pieces = shapes(C.declared(store, pid))
+    except Exception:  # noqa: BLE001 — no pieces: no joints to name
+        return [], 0.0
+    _sides(mesh, [pc for pc in pieces if pc["kind"] == "sheet"])
+    fasteners.keys(pieces)
+    return pieces, tolerance(mesh)
+
+
+def _distance(pc: dict, P: np.ndarray) -> float:
+    from .consistency import segment_distance, slab_distance
+
+    if pc["kind"] == "sheet":
+        return float(min(slab_distance(P, poly, pc["thickness"], side).min() for poly, side in zip(pc["polys"], pc["sides"])))
+    if pc.get("a") is not None:
+        return float((segment_distance(P, pc["a"], pc["b"]) - pc.get("half", 0.0)).min())
+    return float("inf")
+
+
+def namer(store, pid: str):
+    """``name(point)``: the joint a point in the script's frame lies on, ``{"pieces", "said", "kind"}``, or None. A point is
+    on a joint where it's on both pieces' surfaces (within twice the tolerance) and they touch; a corner where three meet is
+    no one joint, so None."""
+    pieces, tol = _pieces_of(store, pid)
+    if not pieces:
+        return lambda point: None
+    found = contacts(pieces, tol)
+    by = {pc["key"]: pc for pc in pieces}
+    try:
+        kinds = {tuple(j["pieces"]): j["kind"] for j in listed(store, pid)}
+    except Exception:  # noqa: BLE001 — named without its kind
+        kinds = {}
+
+    def name(point) -> Optional[dict]:
+        P = np.asarray(point, float).reshape(1, 3)
+        near = sorted((max(_distance(by[a], P), _distance(by[b], P)), (a, b)) for a, b in found)
+        near = [x for x in near if x[0] <= 2.0 * tol]
+        if not near or (len(near) > 1 and near[1][0] <= near[0][0] + 0.5):
+            return None
+        key = near[0][1]
+        return {"pieces": list(key), "said": f"the joint between the {key[0]} and the {key[1]}", "kind": kinds.get(key, "butt")}
+    return name
+
+
+def asked_kind(text: str) -> Optional[str]:
+    """The kind of joint a request asks for ("make that a rabbet"), or None."""
+    import re
+
+    for kind, rx in _ASK:
+        if re.search(rf"\b(?:{rx})\b", text or "", re.I):
+            return kind
+    return None
+
+
+def focus(joint: dict, kind: str, at) -> str:
+    """What the designer is told when a request is about a picked joint (#222 §3): which entry, what kind, where."""
+    a, b = joint["pieces"]
+    at = tuple(round(float(v), 2) for v in at)
+    return (f"The picked edge is {joint['said']}. Make that joint a {kind}: set its JOINTS entry, pieces [\"{a}\", \"{b}\"], "
+            f"to \"kind\": \"{kind}\" with \"at\": {at}, keeping its \"fix\" (add the entry if it has none). Build it that way "
+            f"in build() and construction() too: for a rabbet or a dado, cut the step into the piece whose face the other's "
+            f"edge meets, and run the other piece into it by the step's depth.")
+
+
+def sunk(a: dict, b: dict) -> float:
+    """How far one sheet's edge runs into the other's thickness at their joint (mm): a rabbet's or a dado's step, as the
+    pieces are declared; 0 for an edge that stops at the face."""
+    from .consistency import _frame, _inside2d
+
+    best = 0.0
+    for edge, host in ((a, b), (b, a)):
+        if host["kind"] != "sheet" or edge["kind"] != "sheet" or len(host["polys"]) != 1:
+            continue
+        o, u, v, n, flat = _frame(host["polys"][0])
+        N, t = n * host["sides"][0], float(host["thickness"])
+        for poly, side in zip(edge["polys"], edge["sides"]):
+            Ne = _frame(poly)[3] * side
+            mid = poly + Ne * float(edge["thickness"]) / 2.0             # its corners at mid-thickness
+            rel = mid - o
+            q, w = np.stack([rel @ u, rel @ v], axis=1), rel @ N
+            keep = _inside2d(q, flat) & (w > 0.0) & (w < t)
+            if keep.any():
+                best = max(best, float(np.minimum(w[keep], t - w[keep]).max()))
+    return best
+
+
+def landed(before_script: str, after_script: str, store, pid: str, joint: dict, kind: str, inches: bool) -> dict:
+    """Did "make that a rabbet" land on the picked joint? ``{"said", "landed": True, False or None}``, as
+    :func:`features.landed` says it (#177): landed, its entry now has that kind, the pieces still touch, and a rabbet or dado
+    shows as the step; missed, its entry is unchanged; couldn't tell, anything else."""
+    key = tuple(joint["pieces"])
+
+    def entry(script):
+        return next((j.get("kind") for j in read(script)
+                     if tuple(sorted(p for p in j.get("pieces") or [] if isinstance(p, str))) == key), None)
+
+    was, now = entry(before_script), entry(after_script)
+    said = joint["said"]
+    if now == kind:
+        if kind not in MEASURED:                     # "Checked" only for what's measured (#285 review, rule 6)
+            return {"said": f"Its JOINTS entry now says {kind}: the shape isn't checked here.", "landed": None}
+        pieces, tol = _pieces_of(store, pid)
+        if not pieces:
+            return {"said": NOT_MEASURED, "landed": None}
+        if key not in contacts(pieces, tol):
+            return {"said": f"Its JOINTS entry says {kind}, but the {key[0]} and the {key[1]} don't touch now." + UNDO,
+                    "landed": False}
+        by = {pc["key"]: pc for pc in pieces}
+        depth = sunk(by[key[0]], by[key[1]])
+        if depth <= tol:                             # the step asked for isn't in the pieces: a miss (#285 review)
+            return {"said": f"Its JOINTS entry says {kind}, but the pieces show no step: neither runs into the other."
+                            + UNDO, "landed": False}
+        from .release import inches as _in
+
+        deep = _in(depth) if inches else f"{depth:.0f} mm"
+        return {"said": f"Checked: {said} is now a {kind}, {deep} deep.", "landed": True}
+    if now == was:
+        before = was or f"{joint.get('kind') or 'butt'} (assumed)"
+        return {"said": f"{said[0].upper()}{said[1:]} is still a {before}: its JOINTS entry didn't change." + UNDO,
+                "landed": False}
+    if now is None:
+        return {"said": f"Its JOINTS entry is gone, not a {kind}." + UNDO, "landed": False}
+    return {"said": f"Its JOINTS entry now says {now}, not {kind}." + UNDO, "landed": False}   # another kind: a miss
+
+
+def beside(store, pid: str, point, corner: Optional[str] = None) -> Optional[str]:
+    """What to say when a joint is asked of an edge that isn't one: an edge on one piece, beside the flush seam where it meets
+    another (the seam is no edge in the joined solid, so it can't be picked). None where no joint is near it (#285 review)."""
+    pieces, tol = _pieces_of(store, pid)
+    if not pieces:
+        return None
+    P = np.asarray(point, float).reshape(1, 3)
+    on = [pc for pc in pieces if _distance(pc, P) <= 2.0 * tol]
+    if len(on) != 1:
+        return None
+    me = on[0]
+    near = []
+    for a, b in contacts(pieces, tol):
+        if me["key"] not in (a, b):
+            continue
+        other = next(pc for pc in pieces if pc["key"] == (b if a == me["key"] else a))
+        reach = 1.5 * max(float(me.get("thickness") or 0.0), float(other.get("thickness") or 0.0)) + 2.0 * tol
+        d = _distance(other, P)
+        if d <= reach:
+            near.append((d, (a, b)))
+    if not near:
+        return None
+    a, b = min(near)[1]
+    what = f"the {me['key']}'s {corner} corner" if corner else f"an edge of the {me['key']}"
+    return (f"That edge is {what}, not where two pieces meet. The joint between the {a} and the {b} is where they meet "
+            f"inside: pick that inside corner, or name the pieces (\"the joint between the {a} and the {b}\").")

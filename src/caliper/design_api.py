@@ -819,7 +819,13 @@ def router():
 
         store = load(slug)
         try:
-            return features.with_words(features.for_part(store, pid), store.design.display_units == "in")
+            from . import joints
+
+            try:                                   # an edge on a seam is said as its joint (CALI-178, #222 slice D)
+                name = joints.namer(store, pid)
+            except Exception:  # noqa: BLE001 — the edges, said as edges
+                name = None
+            return features.with_words(features.for_part(store, pid), store.design.display_units == "in", joint=name)
         except KeyError:
             raise HTTPException(404, f"no part {pid!r}")
         except Exception as e:  # noqa: BLE001 — a part that doesn't build has no faces to pick: said, as for its pieces (#172)
