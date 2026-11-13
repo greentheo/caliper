@@ -211,18 +211,45 @@ NOT_CHECKED = ("Not checked: its walls are too thin for the voxel check at this 
                "test piece is the way to know.")
 
 
-def _thin(declared: dict, mesh, pieces: list[dict]) -> tuple[list, Optional[float], dict, list]:
+def printed_pieces(declared: dict) -> list[dict]:
+    """A part's printed pieces as its script declares them: ``{"name", "section" (mm or None), "trim" (bool)}`` (#272).
+    On a sheet part, a printed piece is judged by the size it declares, never measured: the printed rest is a boolean of the
+    whole less the sheets, and on step-stool-5 it held films and slivers (a 29,000 mm³ film, a 367 mm median "wall"), and a
+    fillet always comes to an edge (0.13 mm), which describes the shape, not the piece (the foreman's call)."""
+    out = []
+    for it in declared.get("construction") or []:
+        if isinstance(it, dict) and it.get("kind") == "printed":
+            sec = it.get("section")
+            out.append({"name": it.get("name") or "printed piece",
+                        "section": float(sec) if isinstance(sec, (int, float)) and sec > 0 else None,
+                        "trim": bool(it.get("trim"))})
+    return out
+
+
+def _thin(declared: dict, mesh, pieces: list[dict], rest=None) -> tuple[list, Optional[float], dict, list]:
     """Every piece's thinnest dimension, and a printed part's thinnest wall (measured). The thinnest, not a
     percentile: a thin neck the load goes through is a sliver of the surface, and a percentile let 5 mm voxels
     "see" a spool hung from a 0.6 mm neck and call it ✓ (#100, the reviewer's spool; rule 6). Where the thinnest
     spot is only a lip, the cap says "not checked", the safe side. And where the thinnest is: ``{"piece": name}``,
     or ``{"at": (x, y, z)}`` for a measured wall, so a line can say where to thicken it (#136 review). And every wall, as
-    ``(mm, where)``, for :func:`unseen_walls` (#248 review)."""
+    ``(mm, where)``, for :func:`unseen_walls` (#248 review). ``rest``, a sheet part's printed pieces' own solid: they're
+    measured on it and named, the sheets by their thickness, never the whole mesh (#272 re-check: on step-stool-5 v4 the
+    whole mesh's thinnest "wall" was a plywood foot's tip, 13 mm, where the sheets alone resolve)."""
     walls, at = None, None
-    if any(isinstance(it, dict) and it.get("kind") == "printed" for it in declared.get("construction") or []):
+    printed = [it.get("name") for it in declared.get("construction") or []
+               if isinstance(it, dict) and it.get("kind") == "printed"]
+    if printed:
         from .measure import Geometry, thinnest_wall
 
-        walls, at = thinnest_wall(Geometry.from_mesh(mesh))
+        if rest is not None:                           # a sheet part's printed pieces: by the size the script declares (#272)
+            sized = [(float(it["section"]), it.get("name")) for it in printed_pieces(declared)
+                     if not it["trim"] and it["section"]]
+            walls, at = (min(sized)[0] if sized else None), None
+            printed = [min(sized)[1]] if sized else printed
+        else:
+            walls, at = thinnest_wall(Geometry.from_mesh(mesh))
+    if walls is not None and not (walls > 0):
+        walls = None
     named = ([(pc["thickness"], pc.get("name")) for pc in pieces if pc["kind"] == "sheet"]
              + [(2 * pc["half"], pc.get("name")) for pc in pieces if pc["kind"] == "stick"])
     thin = [t for t, _ in named] + ([walls] if walls and walls > 0 else [])
@@ -230,10 +257,11 @@ def _thin(declared: dict, mesh, pieces: list[dict]) -> tuple[list, Optional[floa
     if thin:
         least = min(thin)
         if walls and walls > 0 and walls == least:
-            where = {"at": at} if at else {}
+            where = {"at": at} if at else {"piece": printed[0]} if rest is not None and printed and printed[0] else {}
         else:
             where = next(({"piece": n} for t, n in named if t == least and n), {})
-    found = [(t, {"piece": n} if n else {}) for t, n in named] + ([(walls, {"at": at} if at else {})] if walls and walls > 0 else [])
+    printed_at = {"at": at} if at else {"piece": printed[0]} if rest is not None and printed and printed[0] else {}
+    found = [(t, {"piece": n} if n else {}) for t, n in named] + ([(walls, printed_at)] if walls and walls > 0 else [])
     return thin, walls, where, found
 
 
@@ -393,6 +421,8 @@ def unresolved(run: dict, case: dict) -> bool:
     wall the voxels couldn't see; its true safety could be under 3.31, so the case is unknown)."""
     if blind(run, case):
         return True
+    if run.get("unsized"):                            # a printed piece of no declared size: not checked (#272)
+        return True
     thin, s = run.get("thinnest_mm"), run.get("spacing_mm")
     if not (thin and s) or _sees(run.get("across") or thin / s):    # as the run counted it, not from its rounded sizes
         return False
@@ -408,6 +438,11 @@ def unseen(run: dict, case: dict) -> str:
     A wall is cleared only by a check of that same piece (#248, the foreman's scope): a sheet's own plate check clears that
     sheet, and nothing else does. A run that doesn't list what it couldn't see is unknown, the safe side. "" when nothing is
     unseen."""
+    if run.get("unsized"):                            # its size isn't declared, so it isn't measured either (#272)
+        names = run["unsized"]
+        many = len(names) > 1 or names[0].rstrip().endswith("s")
+        return (f"the {' and the '.join(names)} {'are' if many else 'is'}n't checked: {'their' if many else 'its'} size "
+                f"isn't declared")
     fea = case.get("fea") or {}
     if judged_by(run, case) in FEA or fea.get("supported") is not True or fea.get("safety") is None:
         return ""
@@ -427,7 +462,9 @@ def unseen(run: dict, case: dict) -> str:
     if not left:
         return ""
     w = left[0]
-    what = f"the {w['piece'].replace('_', ' ')} is" if w.get("piece") else "the printed walls are"
+    name = (w.get("piece") or "").replace("_", " ")
+    what = (f"the {name} {'are' if name.rstrip().endswith('s') else 'is'}" if name   # "the fillet strips are" (#272)
+            else "the printed walls are")
     return f"{what} too thin to check at this size ({w['mm']:g} mm, {voxels})"
 
 
@@ -1100,11 +1137,14 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     mat = printed or sheet_mat or material(pieces)
     _sides(mesh, pieces)
     tol = tolerance(mesh)
-    thins, walls, where, found = _thin(declared, mesh, pieces)
+    from .studies import made_of
+
+    trim = bool(printed and wood and rest is not None and made_of(store, part_id)["study"] == "lighten")
+    thins, walls, where, found = _thin(declared, mesh, pieces, rest if trim else None)   # (#272 re-check)
     volume, longest = float(abs(mesh.volume)), float(max(mesh.extents))
     least = finest(volume, longest, FINER_BUDGET)       # as fine as any run of it may go (CALI-97)
-    if spacing is None:
-        spacing, coarse = spacing_for(pieces, volume, longest, walls)
+    if spacing is None:                                 # a sheet part's voxels sized by its sheets (#272 re-check)
+        spacing, coarse = spacing_for(pieces, volume, longest, None if trim else walls)
     elif spacing < least:                               # asked for finer than a study may take: as fine as it may
         coarse = (f"Asked for {spacing:g} mm voxels, finer than a study of a part this size may take: it ran at "
                   f"{least:.2f} mm.")
@@ -1149,7 +1189,10 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
            "mat": mat, "tol": tol, "spacing": spacing, "coarse": coarse, "held": held, "ls": ls,
            "thinnest": min(thins) if thins else None, "finest": least, "thinnest_where": where, "found": found,
            "thin_said": thin_words(store, part_id, min(thins), where, least, bool(printed)) if thins else None,
-           "attach": attach, "plate_mat": sheet_mat or mat, "grow": grow}
+           "attach": attach, "plate_mat": sheet_mat or mat, "grow": grow, "rest": rest if trim else None,
+           # a sheet part's printed pieces: trim left out with a note, one of no declared size not checked (#272)
+           "trim": [p["name"] for p in printed_pieces(declared) if p["trim"]] if trim else [],
+           "unsized": [p["name"] for p in printed_pieces(declared) if not p["trim"] and not p["section"]] if trim else []}
     ctx["patches"] = _held_patches(ctx)
     if printed and wood:
         _two_materials(ctx, wood, sheet_mat, rest)
@@ -1380,6 +1423,8 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "cut": True,                  # its numbers are kept cut toward safe (CALI-152): one on its limit is settled
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
     }
+    if ctx.get("trim"):                               # glued trim, left out: said on the verdict (#272)
+        record["trim"] = list(ctx["trim"])
     thin = ctx.get("thinnest")
     if thin:                                          # can the FEA see its thinnest wall? (CALI-97)
         record["thinnest_mm"] = round(thin, 2)
@@ -1409,6 +1454,10 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
                     record["thin_said"] = ctx["thin_said"]
                 notes.append(f"{seen} {RESOLVE_MIN:g} across would take more voxels than a study of a part this "
                              f"size may: {NOT_CHECKED}")
+    if ctx.get("unsized"):                            # a printed piece of no declared size isn't checked (#272, #244)
+        record["unsized"] = list(ctx["unsized"])
+        record["resolved"] = False
+        record["unseen"] = (record.get("unseen") or []) + [{"mm": None, "piece": n} for n in ctx["unsized"]]
     from .consistency import filled
 
     if filled(store, part_id):                        # what this number rests on (CALI-96)
@@ -1475,10 +1524,23 @@ def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
     got = _blocked(store, part_id)
     study = made_of(store, part_id)["study"]     # Lighten or Carve, never both, by where its volume is (#272)
     if study == "lighten":
-        return {**(got or {"why": "made_of", "lighten": ""}), "carve": "It's mostly sheet wood: it's lightened, not carved"}
+        got = dict(got or {"why": "made_of", "lighten": ""})
+        if got.get("why") in ("unresolved", "too_thin") and _only_trim_unseen(store, part_id):
+            got["lighten"] = ""                       # Lighten leaves the printed trim out of its study (#272 re-check)
+        return {**got, "carve": "It's mostly sheet wood: it's lightened, not carved"}
     if study == "carve":
         return {**(got or {"why": "made_of", "carve": ""}), "lighten": "It's mostly printed: it's carved, not lightened"}
     return got
+
+
+def _only_trim_unseen(store: DesignStore, part_id: str) -> bool:
+    """Whether every wall the default check couldn't see (or had no size for) is a printed piece: on a sheet part, Lighten
+    leaves those out."""
+    rec = default_check(store, part_id)
+    unseen = (rec or {}).get("unseen") or []
+    printed = {it.get("name") for it in C.declared(store, part_id).get("construction") or []
+               if isinstance(it, dict) and it.get("kind") == "printed"}
+    return bool(unseen) and all(u.get("piece") in printed for u in unseen)
 
 
 def _blocked(store: DesignStore, part_id: str) -> Optional[dict]:
@@ -1489,7 +1551,8 @@ def _blocked(store: DesignStore, part_id: str) -> Optional[dict]:
     rec = default_check(store, part_id)
     if rec is None:                              # what it holds, how thin its walls, how long a carve: all from it
         return {"why": "unchecked", "carve": "Check it holds first: a carve starts from its strength check",
-                "lighten": ""}               # a lightening's holes are checked as it goes, by hand checks too
+                # and so does a lightening: one rule, as Carve (#272: v4 had no check, and Lighten was live)
+                "lighten": "Check it holds first: a lightening starts from its strength check"}
     if rec.get("too_thin"):                      # none a study may make can see its walls (#101, #136)
         said = rec.get("thin_said")
         return {"why": "too_thin",
@@ -1499,15 +1562,44 @@ def _blocked(store: DesignStore, part_id: str) -> Optional[dict]:
                 "Its walls are too thin for the voxel check at this size, so it can't be lightened by strength"}
     if rec.get("resolved") is False:              # a Lighten waits for a check that can see its walls (#272 review)
         where, thin = (rec.get("thinnest_where") or {}).get("piece"), rec.get("thinnest_mm")
+        if not where and (rec.get("thinnest_where") or {}).get("at"):
+            where = piece_at(store, part_id, rec["thinnest_where"]["at"])   # named by its piece, not a coordinate
         what = f"the {where} ({thin:.0f} mm)" if where and thin else f"its thinnest walls ({thin:.0f} mm)" if thin else "its walls"
         return {"why": "unresolved", "carve": "",
-                "lighten": f"Its check couldn't see {what}: check it again finer, or lighten without them"}
+                "lighten": f"Its check couldn't see {what}: check it again finer"}   # its sheets: Lighten needs them (#272)
     if any((c.get("fea") or {}).get("supported") is False for c in rec.get("cases") or []):
         return {"why": "unsupported", "carve": "its voxels don't connect the load to a support yet, so a carve can't run",
                 "lighten": ""}               # a lightening's holes are checked by the hand checks too
     if rec.get("cases") and all(blind(rec, c) for c in rec["cases"]):     # #202: one case that read stress is enough to carve by
         return {"why": "no_stress", "carve": NO_STRESS, "lighten": ""}
     return None
+
+
+def piece_at(store: DesignStore, part_id: str, at) -> Optional[str]:
+    """The construction piece nearest a point: the sheet it's in, else the printed piece (#272 re-check: a thin wall said as
+    "around (8.0, 555.3, 6.6)" names nothing a person can find)."""
+    from .consistency import _sides, segment_distance, shapes, slab_distance
+
+    try:
+        declared = C.declared(store, part_id)
+        pieces = shapes(declared)
+        _sides(store.part_geometry(part_id).require_mesh(), [pc for pc in pieces if pc["kind"] == "sheet"])
+    except Exception:  # noqa: BLE001 — unnamed, then
+        return None
+    p = np.asarray([at], float)
+    best, name = None, None
+    for pc in pieces:
+        if pc["kind"] == "sheet":
+            d = min(float(slab_distance(p, op, pc["thickness"], sd)[0]) for op, sd in zip(pc["polys"], pc["sides"]))
+        elif pc["kind"] == "stick":
+            d = float(segment_distance(p, pc["a"], pc["b"])[0] - pc["half"])
+        else:
+            continue
+        if best is None or d < best:
+            best, name = d, pc.get("name")
+    printed = next((it.get("name") for it in declared.get("construction") or []
+                    if isinstance(it, dict) and it.get("kind") == "printed"), None)
+    return name if best is not None and best <= 1.0 or not printed else printed
 
 
 def already_fails(store: DesignStore, part_id: str) -> Optional[str]:

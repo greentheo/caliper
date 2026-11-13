@@ -672,7 +672,9 @@ def test_a_lighten_on_a_new_unchecked_version_is_no_repeat(tmp_path, post):
     store = _store(tmp_path, SHEET_TUBE, "tube")
     _lightened(store, "tube")
     store.write_part("tube", SHEET_TUBE, intent="again")
-    assert post(store, "lighten").status_code == 200
+    assert post(store, "lighten").json()["detail"].startswith("Check it holds first")   # it waits for a check (#272)
+    _check(store, "tube", 3.0)
+    assert post(store, "lighten").status_code == 200              # checked: the older version's run is no repeat
 
 
 @pytest.mark.parametrize("run,done", [("{ part: 'p', version: 3 }", True), ("{ part: 'p', version: 3, status: 'done' }", True),

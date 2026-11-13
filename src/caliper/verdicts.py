@@ -180,6 +180,8 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
         return _make("recheck", safety, why=UNCUT)
     kind = "close" if near(safety, run.get("min_safety")) else "holds"
     brace = rests_on_brace(run, c)
+    if brace is None and run.get("trim"):            # glued trim left out of the check: said on every surface (#272)
+        brace = {"trim": list(run["trim"])}
     if brace is not None:                             # a pass resting on an unchecked joint: JOINT_CAP at most, and why (#265)
         return _make(JOINT_CAP if kind == "holds" else kind, safety, why=JOINTS_WHY, joints=True, brace=brace)
     return _make(kind, safety)

@@ -106,3 +106,48 @@ setting the case's `holds`; it's a producer, as `check_load` is, and is marked s
 All 12 rework mutants are caught; one survived at first (the untouched-prints note, then pinned only by its source) and
 now has a real test.
 After the rework: the Lighten-joints, Lighten, Lighten-or-Carve and verdicts files pass in full, with their real studies (72). The 23 files from the wide run that failed pass after the fixes (239 + 148). The whole suite is CI's.
+
+**Last round (caliper-reviewer, reviewer-2's page re-check, the foreman's calls).**
+1. **The free strip beside a hole in a wall held on one side is pinned top and bottom.** It's joined to the solid wall above
+   and below, so its ends don't sway, whatever `braced_by` says. The test row now comes from `buckling.check` on a real wall
+   held on one side (11.93× solid): 4.57× with a 60 mm hole and 1.35× with a 250 mm one.
+2. **Lighten waits for a check, as Carve does:** with no check of the version, `blocked()` gives "Check it holds first: a
+   lightening starts from its strength check". The panel, Studies, Make it better and `POST /lighten` all read it. On
+   step-stool-5 v4 Lighten was live with no check.
+3. **What a sheet part can see is judged per piece (`_thin`, `prepare`).** The sheets go by their thickness, and the voxels
+   are sized by them. A printed piece goes by the size its script declares, never by a measure: the printed rest is a
+   boolean of the whole less the sheets, and on step-stool-5 it held films and slivers (a 29,000 mm³ film, a 367 mm
+   median "wall"). A fillet always comes to an edge (0.13 mm), which describes the shape, not the piece. On the whole mesh,
+   v4's thinnest "wall" had been a plywood foot's tip (13 mm, given as a coordinate). Now:
+   - a printed entry can carry `"section"` (its working size, mm) and `"trim": true` (decorative, glued, carrying no
+     load), and the designer's materials table asks for both;
+   - **declared trim** is left out of what the check must see, and a pass carries the note on every surface the joints
+     note travels to (#265's path): "The fillet strip isn't checked: it's glued trim.";
+   - **a declared section** is the piece's size;
+   - **neither** (Theo's v4 strips, until they're declared) means not checked, said by name: "the fillet strip isn't
+     checked: its size isn't declared" (#244). Theo's script isn't edited.
+4. **A Lighten on a sheet part studies the sheets (`sheets_only`).** The printed trim's voxels are left out of its FEA, and
+   what it can see is judged on the sheets, so its steps resolve there. It says so: "The inside corner fillet strips are
+   left out of this study and aren't cut: they're glued trim." A check that couldn't see only that trim doesn't hold
+   Lighten back. A wall Lighten works on still does: "Its check couldn't see the left (13 mm): check it again finer",
+   named by its piece where the record gives only a point (`piece_at`). "Lighten without them" is no longer said: the
+   note above is what it means.
+5. **The small asks:**
+   - a plural piece reads "are" ("the inside corner fillet strips are too thin to check");
+   - the changed-since line is in sentences;
+   - an older run's lead offers no step "there to choose".
+
+**On a scratch copy of step-stool-5** (a real v4 check, run locally, not committed), before the declared sizes:
+- the check ran at 4.76 mm voxels, sized by the sheets, and named "inside corner fillet strips";
+- measured on their own solid, the strips' thinnest wall read 0.13 mm (the feather edge), and the rest's components
+  showed why no measure of that boolean can stand in for a section;
+- Lighten isn't blocked. It trims 1,088 voxels of strip and sees its sheets (19.05 mm, 4 across: resolved).
+
+With the declared sizes, v4's strips (no section, no trim) read "aren't checked: their size isn't declared" until the script
+says what they are.
+
+**Tests:** 8 more in `test_lighten_or_carve.py`, on a real check's record from a synthetic sheet stool with a printed strip.
+Theo's script stays his. All 10 mutants are caught; one survived at first (a wall given as a point) and now has a test.
+After this round, the Lighten, mixed, held-span, unseen-wall, coarse-step, Make it better, running, load-study,
+braced-wall, buckling, verdicts, bar-stool, newest-run, carve, resolved, wording, answers, construction and materials files
+pass, 572 (the one at first was a test pinning Lighten on an unchecked version, now given a check). The whole suite is CI's.

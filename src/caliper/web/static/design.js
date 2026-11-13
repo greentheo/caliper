@@ -3038,8 +3038,8 @@ function lightenShown(p, runs) {     // the rule the card and blocked() read: Li
 // a run of an older version: which, and what to do; its steps stay to look at, never to cut in (stationAction)
 function lightenChanged(run, p) {
   if (!run || run.version == null || run.version === p.version) return '';
-  return `Lightened v${run.version}; you've changed it since (v${p.version}): ${lightenBlocked(p) ? esc(lightenBlocked(p))
-    : 'Lighten it again'}, or look at v${run.version}'s steps below (they can't be cut into v${p.version}).`;
+  return `Lightened v${run.version}, and you've changed it since (v${p.version}). ${lightenBlocked(p) ? `${esc(lightenBlocked(p))}.`
+    : 'Lighten it again.'} Or look at v${run.version}'s steps below: they can't be cut into v${p.version}.`;   // (#272 re-check)
 }
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
@@ -3060,7 +3060,7 @@ function lightenView(p) {
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
-        : `${run.version != null && run.version !== p.version ? `v${run.version}'s lightest step that holds` : lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
+        : `${run.version != null && run.version !== p.version ? `v${run.version}'s lightest step that holds` : lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer && (run.version == null || run.version === p.version) ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
       : lightenNone(run)}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
       ${lightenChanged(run, p) ? `<div class="small" style="color:var(--amber);margin-top:4px">${lightenChanged(run, p)}</div>` : ''}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th style="text-align:left">what comes out</th><th>lighter</th><th>safety</th><th></th></tr>
@@ -3182,6 +3182,11 @@ function loadCase(p, run, c, i) {
 function jointsLine(c, run) {
   const b = c.verdict && c.verdict.joints ? c.verdict.brace : null;
   if (!b) return '';
+  if (b.trim) {                                     // a sheet part's glued trim, left out of the check (#272)
+    const many = b.trim.length > 1 || /s\s*$/.test(b.trim[0]);
+    return `<div class="small" style="margin-top:2px"><b>Not checked:</b> the ${esc(b.trim.join(' and the '))} ${many ? 'are' : 'is'}
+      glued trim, left out of the check.</div>`;
+  }
   return `<div class="small" style="margin-top:2px"><b>Joints not checked:</b> the ${esc(b.piece)} is held square at its top by its
     joint to the ${esc(b.braced_by)}, which isn't checked${b.sway_safety != null ? `; if that joint gives, it racks (leans over with
     the walls beside it) and folds at ${safetyNum(b.sway_safety, run.min_safety)}x` : ''}.</div>`;

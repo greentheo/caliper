@@ -222,7 +222,13 @@ RACKING = "Racking (the frame leaning over at its joints) isn't checked: the FEA
 
 
 def joint_said(row: dict, need) -> str:
-    """What a wall held square by an unchecked joint stands on (#265): which joint, and what it reads if that gives."""
+    """What a wall held square by an unchecked joint stands on (#265): which joint, and what it reads if that gives. A sheet
+    part's glued trim, left out of the check: which (#272)."""
+    if row.get("trim"):
+        names = row["trim"]
+        many = len(names) > 1 or names[0].rstrip().endswith("s")
+        return (f"the {' and the '.join(names)} {'are' if many else 'is'}n't checked: {'they' if many else 'it'}'re glued trim"
+                if many else f"the {names[0]} isn't checked: it's glued trim")
     return (f"the {row['piece']} is held square at its top by its joint to the {row['braced_by']}, which isn't checked; if that "
             f"joint gives, it racks (leans over with the walls beside it) and folds at {_times(row['sway_safety'], need=need)}"
             if row.get("sway_safety") is not None else
@@ -321,7 +327,8 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     rough, need = L.rough(run, c), run.get("min_safety")
     if v["kind"] == "holds":
         text = f"Holds {c['name'].lower()}, {over(c, need, rough)}." + (
-            f" Its joints aren't checked: {joint_said(v['brace'], need)}." if v.get("joints") else "")   # (#265, the cap lifted)
+            (f" {joint_said(v['brace'], need)[:1].upper()}{joint_said(v['brace'], need)[1:]}." if (v.get("brace") or {}).get("trim")
+             else f" Its joints aren't checked: {joint_said(v['brace'], need)}.") if v.get("joints") else "")   # (#265, #272)
     elif v["kind"] == "close" and v.get("joints"):   # amber: it holds if a joint does (#265)
         text = f"Holds {c['name'].lower()}, {over(c, need, rough)}, if its joints do: {joint_said(v['brace'], need)}."
     elif v["kind"] == "close":                       # amber: it holds, near the line (CALI-88, #64 item 2)

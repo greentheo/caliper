@@ -314,9 +314,10 @@ def test_an_older_run_says_which_version_and_what_to_do():
 const run = {part: 'step_stool', version: 3};
 out = [lightenChanged(run, {id: 'step_stool', version: 4}), lightenChanged(run, {id: 'step_stool', version: 3}),
        lightenChanged(run, {id: 'step_stool', version: 4, blocked: {lighten: 'it already fails'}})];""")
-    assert out[0] == ("Lightened v3; you've changed it since (v4): Lighten it again, or look at v3's steps below (they can't be "
-                      "cut into v4).")
-    assert out[1] == "" and out[2].startswith("Lightened v3; you've changed it since (v4): it already fails, or look"), out
+    assert " ".join(out[0].split()) == ("Lightened v3, and you've changed it since (v4). Lighten it again. Or look at v3's steps "
+                                        "below: they can't be cut into v4.")
+    assert out[1] == "" and " ".join(out[2].split()).startswith("Lightened v3, and you've changed it since (v4). it already fails. "
+                                                                "Or look"), out
 
 
 def test_a_running_lighten_says_when_its_part_changes_under_it():
@@ -347,26 +348,59 @@ def test_the_job_html_carries_the_change_and_the_record_carries_the_version():
 
 
 # --- #272 review ---------------------------------------------------------------------------------------------------------------
+#: A wall held on one side: a post along one of its upright edges. The reviewer's 330 × 492 mm, 3/4 in wall, 250 lb × 2 down it.
+HELD_ONE = '''import cadquery as cq
+
+PARAMS = {"t": 19.05, "w": 330.2, "h": 491.6}
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    t, w, h = p["t"], p["w"], p["h"]
+    wall = cq.Workplane().box(t, w, h, centered=False)
+    post = cq.Workplane().box(152.4, t, h, centered=False).translate((t, 0, 0))
+    return wall.union(post)
+
+
+def construction(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    t, w, h = p["t"], p["w"], p["h"]
+    return [{"name": "wall", "kind": "sheet", "material": "plywood", "thickness": t,
+             "outline": [(0, 0, 0), (0, w, 0), (0, w, h), (0, 0, h)]},
+            {"name": "post", "kind": "sheet", "material": "plywood", "thickness": t,
+             "outline": [(t, 0, 0), (t + 152.4, 0, 0), (t + 152.4, 0, h), (t, 0, h)]}]
+
+
+def loads(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    t, w, h = p["t"], p["w"], p["h"]
+    return [{"name": "down the wall", "lb": 125, "factor": 2.0, "lo": (0, 0, h - 2), "hi": (t, w, h)}]
+'''
+
+
 @pytest.mark.parametrize("hole,want", [(60.0, 4.57), (250.0, 1.35)])
-def test_a_wall_held_on_one_side_is_read_at_the_column_by_its_free_edge(hole, want):
-    """The reviewer's wall: 330 × 492 mm, 3/4 in, held on one side and braced at its top, at 1,112 N. Held on one side alone, a
-    narrower strip reads stronger (11.92× whatever the hole), so the row never fell. The strip between the hole and the free
-    edge is a column: 4.57× with a 60 mm hole and 1.35× (a fail) with a 250 mm one."""
+def test_a_wall_held_on_one_side_is_read_at_the_column_by_its_free_edge(hole, want, tmp_path):
+    """The reviewer's wall, its row from buckling.check (held on one side, 11.93x solid). Held on one side alone, a narrower
+    strip reads stronger, so the row never fell. The strip between the hole and the free edge is a column joined to the solid
+    wall above and below, so pinned top and bottom: 4.57x with a 60 mm hole and 1.35x (a fail) with a 250 mm one."""
+    import tempfile
+
     from shapely.geometry import box
 
     from caliper import buckling as B
 
-    w, a, t, E, n = 330.2, 491.6, 19.05, 800.0, 1112.0
-    p = {"name": "side", "o": np.zeros(3), "u": np.array([0.0, 1.0, 0.0]), "v": np.array([0.0, 0.0, 1.0]),
+    s = DesignStore.create("a wall", base=tempfile.mkdtemp(dir=str(tmp_path)))
+    s.write_part("p", HELD_ONE, intent="a wall")
+    ctx = L.prepare(s, "p")
+    load = ctx["loads"][0]
+    (row,) = [r for r in B.check(ctx["pieces"], load, ctx.get("plate_mat") or ctx["mat"], ctx["tol"]) if r["piece"] == "wall"]
+    assert row["edges_held"] == 1 and row["braced_by"] is None and round(row["safety"], 2) == 11.93
+    w, a = row["width_mm"], row["height_mm"]
+    p = {"name": "wall", "o": np.zeros(3), "u": np.array([0.0, 1.0, 0.0]), "v": np.array([0.0, 0.0, 1.0]),
          "flat": np.array([[0.0, 0.0], [w, 0.0], [w, a], [0.0, a]])}
-    sigma = B.critical_stress(E, t, a, w, 1)
-    row = {"piece": "side", "done": True, "down": True, "load_n": n, "edges_held": 1, "braced_by": "step", "E_mpa": E,
-           "height_mm": a, "width_mm": w, "thickness_mm": t, "sigma_cr_mpa": sigma, "safety": sigma * w * t / n}
-    assert round(row["safety"], 2) == 11.93
-    load = {"name": "standing", "force": np.array([0.0, 0.0, -n]), "factor": 1.0}
-    got = lighten.holed_buckling({**_case(row), "governs": "fea"}, [p], {"side": [box((w - hole) / 2, 100.0, (w + hole) / 2, 300.0)]},
+    got = lighten.holed_buckling({**_case(row), "governs": "fea"}, [p], {"wall": [box((w - hole) / 2, 100.0, (w + hole) / 2, 300.0)]},
                                  load, 2.0)
     r = got["buckling"][0]
     assert r["safety"] == pytest.approx(want, abs=0.01), r
-    assert r["model"] == "the strip between the hole and its free edge, a column, braced at its top"
+    assert r["model"] == "the strip between the hole and its free edge, a column pinned top and bottom"
     assert got["holds"] is (want >= 2.0)

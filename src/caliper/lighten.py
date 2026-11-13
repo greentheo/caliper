@@ -373,16 +373,42 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
 
 
 def printed_untouched(store: DesignStore, part_id: str) -> Optional[str]:
-    """A sheet part's printed pieces, which a Lighten leaves alone, said (#272 review): "The printed fillet strip isn't
-    touched: Lighten cuts holes in the sheets only." None where it has none."""
+    """A sheet part's printed pieces, which a Lighten leaves out of its study and never cuts, said (#272): "The fillet strips
+    are left out of this study and aren't cut: they're glued trim." None where it has none."""
     from . import construction as C
 
     names = [it.get("name") or "piece" for it in C.declared(store, part_id).get("construction") or []
              if isinstance(it, dict) and it.get("kind") == "printed"]
     if not names:
         return None
-    return (f"The printed {', '.join(names)} {'isn' if len(names) == 1 else 'aren'}'t touched: Lighten cuts holes in the "
-            f"sheets only.")
+    many = len(names) > 1 or names[0].rstrip().endswith("s")          # "the fillet strips are", "the strip is"
+    return (f"The {' and the '.join(names)} {'are' if many else 'is'} left out of this study and {'are' if many else 'is'}n't "
+            f"cut: {'they' if many else 'it'}'re glued trim." if many else
+            f"The {names[0]} is left out of this study and isn't cut: it's glued trim.")
+
+
+def sheets_only(ctx: dict):
+    """``(solid, ctx)``: the voxels a Lighten works on, and its set-up as it sees them. A sheet part's printed trim (its
+    ``rest``) is left out of the FEA, the same pieces it leaves uncut, and what it can see is judged on its sheets (#272
+    re-check: 1.1% of PLA held step-stool-5's Lighten back). Anything else: the whole solid, as it was."""
+    solid = ctx["ls"].solid
+    rest = ctx.get("rest")
+    if rest is None:
+        return solid.copy(), ctx
+    from . import spatial
+
+    s = ctx["spacing"]
+    idx = np.argwhere(solid)
+    centres = np.asarray(ctx["ls"].grid.origin) + s * idx
+    trim = np.zeros(solid.shape, dtype=bool)
+    inside = spatial.contains(rest, centres)
+    trim[tuple(idx[inside].T)] = True
+    sheets = [pc for pc in ctx["pieces"] if pc["kind"] == "sheet"]
+    thin = min((pc["thickness"] for pc in sheets), default=None)
+    seen = {**ctx, "thinnest": thin, "thin_said": None, "found": [(pc["thickness"], {"piece": pc.get("name")}) for pc in sheets],
+            "thinnest_where": next(({"piece": pc.get("name")} for pc in sheets if pc["thickness"] == thin), {}),
+            "trimmed": int(trim.sum())}
+    return solid & ~trim, seen
 
 
 def step_case(c: dict) -> dict:
@@ -461,10 +487,13 @@ def holed_buckling(case: dict, plist: list[dict], holes: dict, load: dict, min_s
         model = f"a column of the strip beside the hole, {top}"
         if held:
             one = B.critical_stress(r["E_mpa"], r["thickness_mm"], r["height_mm"], left, 1)
-            if int(r.get("edges_held") or 0) >= 2 or one < column:   # held both sides: each strip held on its outer edge
+            # the strip between the hole and the free edge is joined to the solid wall above and below the hole: its ends
+            # don't sway against it, so it's pinned top and bottom, whatever braced_by says (#272 review)
+            pinned = B.critical_stress(r["E_mpa"], r["thickness_mm"], r["height_mm"], left, 0, braced=True)
+            if int(r.get("edges_held") or 0) >= 2 or one < pinned:   # held both sides: each strip held on its outer edge
                 sigma, model = one, "the strip beside the hole, held on one side"
             else:                                  # held on one side: the strip by its free edge is a column (#272 review)
-                model = f"the strip between the hole and its free edge, a column, {top}"
+                sigma, model = pinned, "the strip between the hole and its free edge, a column pinned top and bottom"
         p_cr = sigma * left * r["thickness_mm"]
         rows.append({**r, "holed": True, "narrowest_mm": round(left, 1), "edges_held": held, "model": model,
                      "sigma_cr_mpa": round(sigma, 3),
@@ -576,6 +605,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
         raise ValueError(f"Can't lighten it: {fails}, then lighten it.")
     ctx = L.prepare(store, part_id, emit)
     s, mat = ctx["spacing"], ctx["mat"]
+    base, ctx = sheets_only(ctx)                 # a sheet part's printed trim left out of its FEA (#272 re-check)
     seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)
     plist, tops = panels(ctx), panels(ctx, stood_on=True)
     untouched = printed_untouched(store, part_id)        # said in the run's notes (#272)
@@ -592,7 +622,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     out_dir = os.path.join(runs_dir(store), rid)
     os.makedirs(out_dir, exist_ok=True)
 
-    solid = ctx["ls"].solid.copy()
+    solid = base.copy()
     # holes it already has: free cells with no wood (opened, so a cell the grid happened to miss isn't one)
     removed = {p["name"]: ndimage.binary_opening(
         ~np.isfinite(_column_stress(p, np.zeros(solid.shape), solid)) & p["free"],
@@ -634,7 +664,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
         for p in tops:
             if chosen[p["name"]]:
                 holes[p["name"]] = [x["poly"] for x in chosen[p["name"]]]
-        cut = ctx["ls"].solid.copy()
+        cut = base.copy()
         for p in plist:
             if holes.get(p["name"]) and p["name"] in wall_cover:
                 cut = _cut_solid(cut, p, wall_cover[p["name"]])
@@ -662,7 +692,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
                         # and each hole's edge by KT_HOLE times the stress the solid panel had there; both
                         # scaled by how far the FEA read low against the plate check, solid
                         kk, allow = calib.get((i, p["name"]), 1.0), mat["strength"] * mat["across"]
-                        before = _column_stress(p, vm0.get(i, r.von_mises), ctx["ls"].solid)
+                        before = _column_stress(p, vm0.get(i, r.von_mises), base)
                         edge = max(float(np.max(np.where(x["cells"], before, 0.0))) for x in chosen[p["name"]])
                         mine = min(allow / (peak * kk), allow / (KT_HOLE * edge * kk) if edge > 0 else np.inf)
                         fea = (case.get("fea") or {}).get("safety")
