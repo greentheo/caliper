@@ -113,6 +113,7 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
             side = next(pc for pc in made["pieces"] if pc["key"] == key)["sides"][0]
             shown = float((-n * side) @ toward) > 0
         pts, back, bev = _faced(pts, on["bevels"], flat_of, shown)
+        cham = [{**c, "shown": (c["face"] == 0) == shown} for c in on.get("chamfers") or []]
         cut = [{**c, "poly": flat_of(c["corners"]), "shown": (c["face"] == 0) == shown} for c in on["cuts"]]
         screws = [{"at": flat_of(c["points"]), "into": c["into"], "comes_out": bool(c.get("comes_out")),
                    "from_here": bool(float(np.asarray(c.get("drive", toward)) @ toward) > 0)} for c in on["screws"]]
@@ -131,7 +132,7 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
         out.append({"name": it.get("name") or "piece", "material": it.get("material"), "thickness": t,
                     "label": f"{M.nominal(t)} {M.sheet(it['material'])['name']}" if it.get("material") in M.SHEETS
                     else f"{M.nominal(t)} sheet", "outline": pts, "holes": holes, "size": pts.max(axis=0),
-                    "bevels": bev, "back": back, "cuts": cut, "screws": screws, "to_page": to_page,
+                    "bevels": bev, "chamfers": cham, "back": back, "cuts": cut, "screws": screws, "to_page": to_page,
                     "face": face, "seen": (f"this is the {face} face" if face == "outside" else f"this is the face {face}")
                     + (f"; a mirror of {flip}: flip its template" if flip else ""), **({"mirror_of": flip} if flip else {})})
     return out
@@ -172,6 +173,8 @@ def marks_lines(pc: dict) -> list[str]:
     out = []
     if pc.get("bevels"):
         out.append(K.bevel_line([b["angle"] for b in pc["bevels"]]))
+    if pc.get("chamfers"):
+        out.append(K.chamfer_line(pc["chamfers"]))
     nm = {"mortise": 0, "notch": 0, "dado": 0, "rabbet": 0}
     for c in pc.get("cuts") or []:
         nm[c["kind"]] += 1
@@ -221,6 +224,12 @@ def _draw_marks(dr, pc: dict, X, Y, font=None, labels: bool = True):
             mx, my = X((ax + bx) / 2), Y((ay + by) / 2)
             k = math.hypot(cx - mx, cy - my) or 1.0
             dr.text((mx + (cx - mx) / k * 24 - 5, my + (cy - my) / k * 24 - 8), "B", fill="black", font=font)   # inside it
+        n_ = len(pc["outline"])
+        for ch in pc.get("chamfers") or []:
+            (ax, ay), (bx, by) = pc["outline"][ch["edge"]], pc["outline"][(ch["edge"] + 1) % n_]
+            mx, my = X((ax + bx) / 2), Y((ay + by) / 2)
+            k = math.hypot(cx - mx, cy - my) or 1.0
+            dr.text((mx + (cx - mx) / k * 24 - 5, my + (cy - my) / k * 24 - 8), "C", fill="black", font=font)
     nm, ng = 0, 0
     for c in pc.get("cuts") or []:
         poly = [(X(x), Y(y)) for x, y in c["poly"]]

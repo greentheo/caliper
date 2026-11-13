@@ -415,3 +415,73 @@ def test_a_ray_that_runs_on_through_another_piece_isn_t_a_bevel(tmp_path):
     """The edge face is looked for near where the edge is: past it, the ray's way out of the stick's slanted face is no bevel."""
     m = marks.of(_store(tmp_path, DIAMOND, "a rail"), "stool")
     assert "panel" not in m["bevels"], m["bevels"]
+
+
+# --- #283 review: a bevel is one plane across the whole thickness ---------------------------------------------------------
+#: A 3/4 in board standing on its back edge, its free front edge (y = 0) cut one way or another; the outline its x = 0 face.
+EDGED = '''import math
+
+import cadquery as cq
+
+PARAMS = {"t": 19.05, "d": 300.0, "h": 450.0}
+EDGE = "EDGE"
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    t, d, h = p["t"], p["d"], p["h"]
+    if EDGE.startswith("bevel"):                     # the whole edge one plane, leaning across the thickness
+        k = t * math.tan(math.radians(float(EDGE[5:])))
+        return cq.Workplane("XY").polyline([(0, 0), (t, k), (t, d), (0, d)]).close().extrude(h)
+    if EDGE == "taper":                              # the edge slopes in the board's own plane: square to its faces
+        return cq.Workplane("YZ").polyline([(0, 0), (d, 0), (d, h), (60, h)]).close().extrude(t)
+    board = cq.Workplane().box(t, d, h, centered=False)
+    edge = board.edges("|Z").edges(">X").edges("<Y")
+    if EDGE.startswith("chamfer"):
+        return edge.chamfer(float(EDGE[7:]))
+    if EDGE.startswith("round"):
+        return edge.fillet(float(EDGE[5:]))
+    return board
+
+
+def construction(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    t, d, h = p["t"], p["d"], p["h"]
+    out = [(0.0, 0.0, 0.0), (0.0, d, 0.0), (0.0, d, h), (0.0, 0.0, h)]
+    if EDGE == "taper":
+        out = [(0.0, 0.0, 0.0), (0.0, d, 0.0), (0.0, d, h), (0.0, 60.0, h)]
+    return [{"name": "side", "kind": "sheet", "material": "plywood", "thickness": t, "outline": out}]
+'''
+
+
+@pytest.mark.parametrize("edge", ["square", "chamfer3", "round10", "taper"])
+def test_a_small_chamfer_a_round_over_or_a_taper_marks_nothing(edge, tmp_path):
+    m = marks.of(_store(tmp_path, EDGED.replace('EDGE = "EDGE"', f'EDGE = "{edge}"'), "a board"), "stool")
+    assert m["bevels"] == {} and m["chamfers"] == {}, (m["bevels"], m["chamfers"])
+
+
+def test_a_chamfer_past_half_the_thickness_is_a_chamfer_never_a_saw_bevel(tmp_path):
+    """#283 review: a 12 mm chamfer on a 3/4 in edge read as a 45° bevel, and the book said to saw the whole edge at 45°."""
+    from caliper import patterns, release
+
+    s = _store(tmp_path, EDGED.replace('EDGE = "EDGE"', 'EDGE = "chamfer12"'), "a board")
+    m = marks.of(s, "stool")
+    assert m["bevels"] == {}, m["bevels"]
+    (c,) = m["chamfers"]["side"]
+    assert abs(c["depth_mm"] - 12.0) < 0.5 and abs(c["angle"] - 45.0) < 1.0 and c["face"] == 1, c   # on the face away from x = 0
+    book = " ".join(marks.book_lines(m))
+    assert "Set the saw" not in book and "Chamfer the 1 edge marked C on the side, 12 mm (1/2 in), with a router or a " \
+                                         "block plane" in book, book
+    assert "    side: chamfer 12 mm (1/2 in) at 45° along 17 11/16 in of edge" in marks.cutlist_lines(m)
+    (pc,) = patterns.pieces(s, "stool")
+    said = " ".join(patterns.marks_lines(pc))
+    assert "saw at" not in said and "Chamfer: 12 mm (1/2 in) along the edge marked C" in said, said
+    _, do, _ = release._say_stage("stool", "panels", [{"name": "side", "material": "plywood"}, {"name": "x", "material": "plywood"}],
+                                  {"sheets": []}, {"marks": {"stool": m}})
+    assert "Set the saw" not in " ".join(do)
+
+
+def test_a_true_bevel_is_still_one(tmp_path):
+    m = marks.of(_store(tmp_path, EDGED.replace('EDGE = "EDGE"', 'EDGE = "bevel20"'), "a board"), "stool")
+    (b,) = m["bevels"]["side"]
+    assert abs(b["angle"] - 20.0) < 0.5 and m["chamfers"] == {}, b
