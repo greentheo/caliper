@@ -881,10 +881,10 @@ def _safety_cell(c: dict) -> tuple[str, str]:
     if kind not in verdicts.SETTLED:                 # any other kind: its word, never a number to build on
         return _e((c.get("verdict") or {}).get("word") or "not checked"), "—"
     if (c.get("verdict") or {}).get("joints"):       # it holds if its joints do, and they aren't checked (#265)
-        from .answers import _times
+        from .answers import IF_JOINTS, _times
 
         return _e(_times(c["safety"], bool(c.get("rough")), c.get("min_safety")).replace(" times over", "x")
-                  + ", if its joints hold: not checked"), breaks
+                  + IF_JOINTS), breaks
     if (c.get("verdict") or {}).get("coarse"):       # a ✗ stays a ✗, not as a settled number (#191)
         from .answers import safety_num            # the one formatter (#208 review): 1.995 never reads 2
 
@@ -1156,10 +1156,14 @@ def joints_html(rec: dict, name=lambda pid: pid) -> list[str]:
         return []
     out = ["<h2>How it joins</h2><table><tr><th>part</th><th>pieces</th><th>joint</th><th>held by</th></tr>"]
     for pid, j in rows:
-        kind = j["kind"] + (" (assumed: none was said)" if j.get("assumed") else "")
+        kind = j["kind"] + ((" (assumed: its JOINTS couldn't be read)" if j.get("unread") else " (assumed: none was said)")
+                            if j.get("assumed") else "")
         out.append(f"<tr><td>{_e(name(pid))}</td><td>{_e(' and '.join(j['pieces']))}</td><td>{_e(kind)}</td>"
                    f"<td>{_e(' and '.join(j.get('fix') or []))}</td></tr>")
     out.append("</table><p class='note'>The strength check takes these joints as solid wood: they aren't checked.</p>")
+    unread = next((j["unread"] for _, j in rows if isinstance(j.get("unread"), str)), None)
+    if unread:                                       # said, never "none was said" of a joint that was (#275 review)
+        out.append(f"<p class='note'>The joints couldn't be read: {_e(unread)}.</p>")
     return out
 
 

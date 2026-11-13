@@ -16,6 +16,8 @@ and says, with no capacity numbers yet (slice B):
   a piece runs through or is set into another, which edge probes never see (#272's review: the through-mortised stringer
   had no glue or screws on the shopping list). A contact with no entry is listed as an assumed butt (or through tenon),
   glue and screws (:func:`listed`).
+- A piece run in from one edge of another is a notch, and the outline needs it cut there (#275 review: a stringer on the
+  floor, through the sides' bottom edge); one run from edge to edge cuts it in two, so that one is the tenon.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ import numpy as np
 NAME = "JOINTS"
 #: The kinds a joint can be (#222's proposal, and the through tenon from step-stool-5).
 KINDS = ("butt", "bevel", "mitre", "rabbet", "dado", "pocket screw", "dowel", "glue block", "printed connector",
-         "through tenon")
+         "through tenon", "notch")
 #: What can hold one.
 FIXES = ("glue", "screws", "dowels")
 #: What an unlisted contact is taken as held by.
@@ -78,12 +80,27 @@ def _said(name: str) -> str:
     return "the " + name
 
 
+def _ends_at_edges(pts: np.ndarray, flat: np.ndarray, near: float) -> int:
+    """How many of a crossing's two ends, along its length, come within ``near`` of the host's edge: 2, it runs edge to edge
+    and would cut the host in two; 1, it runs in from one edge (a notch); 0, it's inside (a mortise)."""
+    from .consistency import _edge_dist2d
+
+    if len(pts) < 2:
+        return 0
+    c = pts - pts.mean(axis=0)
+    along = c @ np.linalg.svd(c, full_matrices=False)[2][0]
+    lo, hi = float(along.min()), float(along.max())
+    band = max(near, 0.02 * (hi - lo))
+    return sum(bool(float(_edge_dist2d(pts[end], flat).min()) <= near) for end in (along <= lo + band, along >= hi - band))
+
+
 def _through(host: dict, piece: dict, tol: float) -> Optional[dict]:
     """Where sheet ``piece`` runs through or into sheet ``host``: its mid-plane sampled finely, kept inside the host's outline
     and within its thickness, reaching into the host (some of it more than the piece's thickness in from the host's edge: a
     stringer's end flush in a side runs into the side, not the side into the stringer; a dado running out at the side's
-    edges is still in the side). ``{"through": runs the whole thickness, "points": those (u, v) in the host's frame, "frame"}``,
-    or None where it doesn't."""
+    edges is still in the side). ``{"through": runs the whole thickness, "notch": it runs in from one of the host's edges,
+    "points": those (u, v) in the host's frame, "frame"}``, or None where it doesn't, or where it runs through from one edge
+    to the opposite one: then the host is the tenon (a side through a proud stringer), not the mortise."""
     from .consistency import _edge_dist2d, _frame, _inside2d, polygon_samples
 
     if len(host["polys"]) != 1 or len(piece["polys"]) != 1:
@@ -106,9 +123,10 @@ def _through(host: dict, piece: dict, tol: float) -> Optional[dict]:
     near = _inside2d(q, flat) & (w > -tol) & (w < t + tol)
     span = (float(w[near].min()), float(w[near].max()))
     through = span[0] <= tol and span[1] >= t - tol
-    if through and float(_edge_dist2d(q[inside], flat).min()) <= 2.0 * tol:
-        return None                                  # it reaches the host's edge: the host is the tenon, not the mortise (#275)
-    return {"through": through, "points": q[inside], "frame": (o, u, v, n)}
+    ends = _ends_at_edges(q[inside], flat, 2.0 * tol) if through else 0
+    if ends == 2:
+        return None                                  # edge to edge: the host is the tenon, not the mortise (#275)
+    return {"through": through, "notch": ends == 1, "points": q[inside], "frame": (o, u, v, n)}
 
 
 def contacts(pieces: list[dict], tol: float, reach: Optional[float] = None) -> dict:
@@ -130,7 +148,8 @@ def contacts(pieces: list[dict], tol: float, reach: Optional[float] = None) -> d
                 continue
             key = tuple(sorted((host["key"], piece["key"])))
             across = float(np.ptp(got["points"], axis=0).max()) if len(got["points"]) > 1 else 0.0
-            out[key] = {"how": "through" if got["through"] else "into", "length_mm": 2.0 * across}
+            how = "notch" if got["notch"] else "through" if got["through"] else "into"
+            out[key] = {"how": how, "length_mm": 2.0 * across}
     for key, c in out.items():
         c["on"] = {}
     _footprints(wood, out, tol if reach is None else reach)
@@ -183,7 +202,11 @@ def _host_mortises(pieces: list[dict], tol: float) -> list[str]:
             covered = np.zeros(len(pts), dtype=bool)
             for h in holes:
                 covered |= _inside2d(pts, h)
-            if covered.mean() < 0.9:
+            if covered.mean() < 0.9 and got["notch"]:      # at the host's edge: its outline, not a hole (#275 review)
+                wrong.append(f"{_said(piece['name'])} passes through {_said(host['name'])} at its edge, but "
+                             f"{_said(host['name'])}'s outline has no notch there: cut a notch in {_said(host['name'])}'s "
+                             f"outline where {_said(piece['name'])} sits")
+            elif covered.mean() < 0.9:
                 wrong.append(f"{_said(piece['name'])} passes through {_said(host['name'])}, but {_said(host['name'])}'s "
                              f"outline has no hole where it goes: cut the mortise into {_said(host['name'])}'s outline")
     return wrong
@@ -287,6 +310,6 @@ def listed(store, pid: str) -> list[dict]:
             said.add(tuple(two))
     for key, c in sorted(found.items()):
         if key not in said:
-            out.append({"pieces": list(key), "kind": {"through": "through tenon", "into": "dado"}.get(c["how"], "butt"),
-                        "fix": list(ASSUMED_FIX), "assumed": True, **({} if ok else {"unread": True})})
+            out.append({"pieces": list(key), "kind": {"through": "through tenon", "into": "dado", "notch": "notch"}.get(c["how"], "butt"),
+                        "fix": list(ASSUMED_FIX), "assumed": True, **({} if ok else {"unread": UNREAD})})
     return out

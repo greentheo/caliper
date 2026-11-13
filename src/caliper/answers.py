@@ -28,6 +28,9 @@ ORDER = ("bad", "warn", "ok", "info")
 PROMISE = ("A prediction, not a certificate: it rests on the loads it was given and on textbook strengths for "
            "the material. Real wood varies and so do joints, so test it gently before you trust it with a person.")
 #: A chat reply that quotes a strength number points to the promise (CALI-88, #64 item 16).
+#: What a pass resting on joints nothing checks says after its number, on every reader (#265; #275 review: the kid's book and
+#: the trial panel too).
+IF_JOINTS = ", if its joints hold: not checked"
 PROMISE_POINTER = "That's a prediction, not a certificate: its card says what it rests on."
 
 
@@ -1102,7 +1105,7 @@ def held_to(state: dict, now: dict) -> list[dict]:
             # what it does, then what it needs: "2 times over (assumed): 3.11x" read as holding 2 times over (#64 item 15)
             need = f"; it needs {c['limit']:g}{', assumed' if assumed else ''}"
             said = (f"{mark} {_without_need(label)}, {num}" + against(now.get("strength.case") or {}, need)
-                    + (", if its joints hold: not checked" if verdict.get("joints") else ""))
+                    + (IF_JOINTS if verdict.get("joints") else ""))
         else:
             said = f"{mark} {label}{assumed}: {num}" + _against(c, failed, units.get(c['metric'], ''))
         out.append(_line(said + later,

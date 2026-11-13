@@ -135,8 +135,9 @@ def test_the_card_the_kids_book_the_trial_panel_and_the_build_book_say_the_same(
     card = [ln["text"] for ln in answers.answers(store, design_api.design_state(store), "step_stool")[1]["lines"]]
     assert f"Holds 200 lb adult stepping up, {said}. Its joints aren't checked: the check takes its joints as solid wood." in card, card  # #275
     strength = release._strength(store, {p.id: p.version for p in store.design.parts})
-    assert said in kidbook._strength_page(strength, ["step_stool"])["say"]
-    assert trials.predict(store, "step_stool")["over"] == said
+    jointed = said + ", if its joints hold: not checked"                 # #275: every reader, the kid's book too
+    assert jointed in kidbook._strength_page(strength, ["step_stool"])["say"]
+    assert trials.predict(store, "step_stool")["over"] == jointed
     (c,) = strength["step_stool"]
     assert release._safety_cell(c)[0] == "3.1x, if its joints hold: not checked" and (c["lb"], c["factor"]) == (200, 2)   # its row says "200 lb × 2"
 

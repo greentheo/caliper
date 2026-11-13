@@ -376,3 +376,67 @@ def test_contacts_say_where_on_each_piece_with_one_reach(tmp_path):
     assert step and min(p[1] for p in step) > 457.2 - 25.0                          # the step meets the side at its top
     wide = joints.contacts(pcs, tol, reach=tol + 10.0)[("bottom stringer", "left side")]["on"]["left side"]
     assert len(wide) > len(on)                                                     # a wider reach takes in more of the face
+
+
+# --- #275 review, round 3 ---------------------------------------------------------------------------------------------------
+def _lifted(lift):
+    """The stringer ``lift`` mm off the floor: at the sides' bottom edge (Theo's ranges allow 0), or just over it."""
+    return STOOL.replace("50.8", f"{lift:g}")
+
+
+@pytest.mark.parametrize("lift", [0.0, 3.0])
+def test_a_stringer_at_a_side_s_edge_wants_a_notch_never_a_butt(tmp_path, lift):
+    """#275 review: a crossing that reaches one edge of the host is a notch the host's outline needs, never a butt; only one
+    reaching two opposite edges (it would cut the host in two) is the host as the tenon."""
+    script = _lifted(lift)
+    assert script != STOOL
+    s, d, _, _, mesh = _built(tmp_path, script)
+    (r,) = [x for x in joints.check(script, d, mesh) if x.id == "mortises"]
+    assert r.status == "fail", r.detail
+    assert "cut a notch in the left side's outline where the bottom stringer sits" in r.detail, r.detail
+    assert "cut a notch in the right side's outline where the bottom stringer sits" in r.detail, r.detail
+    assert "cut the mortise" not in r.detail and "the bottom stringer's outline" not in r.detail, r.detail
+    got = {tuple(j["pieces"]): j for j in joints.listed(s, "stool")}
+    for side in ("left side", "right side"):
+        assert got[("bottom stringer", side)]["kind"] == "notch" and got[("bottom stringer", side)]["assumed"], got
+
+
+def test_a_notch_is_a_kind_a_joint_can_say():
+    assert "notch" in joints.KINDS
+
+
+def test_the_book_and_built_from_say_the_joints_couldn_t_be_read():
+    from caliper import release
+
+    from .test_carve_click import _page, _run
+
+    row = {"pieces": ["left side", "step"], "kind": "butt", "fix": ["glue", "screws"], "assumed": True, "unread": joints.UNREAD}
+    import html as H
+
+    html = H.unescape("".join(release.joints_html({"joints": {"stool": [row]}})))
+    assert "<td>butt (assumed: its JOINTS couldn't be read)</td>" in html, html
+    assert "The joints couldn't be read: JOINTS isn't plain data: write it as a list of dicts." in html, html
+    out = " ".join(_run(_page(["jointsHtml"], consts=["esc"], extra=f"""
+out = jointsHtml({{joints: [{{pieces: ['left side', 'step'], kind: 'butt', fix: ['glue'], assumed: true,
+                            unread: {joints.UNREAD!r}}}]}});""")).split())
+    assert "butt <span class=\"muted\">(assumed: its JOINTS couldn't be read)</span>" in out, out
+    assert "The joints couldn't be read: JOINTS isn't plain data: write it as a list of dicts." in out, out
+
+
+def test_a_listed_joint_carries_why_it_couldn_t_be_read(tmp_path):
+    script = STOOL.replace(STOOL[STOOL.index("JOINTS = ["):STOOL.index("]\n\n\ndef _boxes")] + "]",
+                           'JOINTS = [{"pieces": ["step", s], "kind": "bevel"} for s in ("left side", "right side")]')
+    s, *_ = _built(tmp_path, script)
+    assert {j.get("unread") for j in joints.listed(s, "stool")} == {joints.UNREAD}
+
+
+def test_the_kid_s_book_says_the_joints_aren_t_checked():
+    from caliper import kidbook
+
+    c = {"name": "Adult stepping up", "safety": 3.1, "lb": 200, "factor": 2, "min_safety": 2.0,
+         "verdict": {"kind": "holds", "joints": True}}
+    say = kidbook._strength_page({"stool": [c]}, ["stool"])["say"]
+    assert "It should hold adult stepping up, 3.1 times over 400 lb (200 lb, twice over), if its joints hold: not checked." \
+        in say, say
+    plain = kidbook._strength_page({"stool": [{**c, "verdict": {"kind": "holds"}}]}, ["stool"])["say"]
+    assert "if its joints hold" not in plain, plain

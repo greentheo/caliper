@@ -2347,9 +2347,11 @@ function triedFor() {      // every part's what-ifs, so the balance shows them t
 function jointsHtml(r) {
   const js = (r && r.joints) || [];
   if (!js.length) return '';
+  const unread = (js.find((j) => typeof j.unread === 'string') || {}).unread;   // said, never "none was said" (#275 review)
   return `<h5 style="margin:12px 0 4px">How it joins</h5><ul class="list small">${js.map((j) => `<li>${esc(j.pieces.join(' and '))}:
-    ${esc(j.kind)}${j.assumed ? ' <span class="muted">(assumed: none was said)</span>' : ''}, ${esc((j.fix || []).join(' and '))}</li>`).join('')}</ul>
-    <div class="muted small">The strength check takes these joints as solid wood: they aren't checked.</div>`;
+    ${esc(j.kind)}${j.assumed ? ` <span class="muted">(assumed: ${j.unread ? "its JOINTS couldn't be read" : 'none was said'})</span>` : ''}, ${esc((j.fix || []).join(' and '))}</li>`).join('')}</ul>
+    <div class="muted small">The strength check takes these joints as solid wood: they aren't checked.</div>
+    ${unread ? `<div class="muted small">The joints couldn't be read: ${esc(unread)}.</div>` : ''}`;
 }
 
 function buildView(p) {
