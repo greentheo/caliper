@@ -850,6 +850,10 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
             if joint:
                 joint_pick = (joint, kind)
                 focus = f"{focus}\n\n{J.focus(joint, kind, edge['local'])}" if focus else J.focus(joint, kind, edge["local"])
+            else:                                   # beside a flush seam: say where the joint is, and ask (#285 review)
+                ask = J.beside(store, part_id, edge["local"], edge.get("corner"))
+                if ask:
+                    return TurnResult(action="refine", ok=False, part=part_id, events=events, error="not a joint", reply=ask)
     before, _ = _measure_design(store)
     spec = _working_spec(store, part_id, entry.intent)
     script = store.read_script(part_id)
@@ -919,6 +923,8 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
             from . import joints as J
 
             check = J.landed(prior, script, store, part_id, *joint_pick, inches=store.design.display_units == "in")
+            if check["landed"] is True:             # a rabbet is the same solid: its step was measured, not its volume
+                reply = re.sub(r"Its shape didn't change \(the same volume[^\n]*\n?", "", reply)
         else:
             check = features.landed(picked_from, _features_of(store, part_id), pick, message,
                                     store.design.display_units == "in")

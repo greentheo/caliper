@@ -168,17 +168,22 @@ def test_the_designer_is_told_which_entry(tmp_path):
     assert "cut the step into the piece whose face the other's edge meets" in said
 
 
-@pytest.mark.parametrize("after, landed, words", [
-    (_script("rabbet", into=K), True, "Checked: the joint between the side and the top is now a rabbet, 1/4 in deep."),
-    (_script(), False, "The joint between the side and the top is still a butt (assumed): its JOINTS entry didn't change."),
-    (_script("rabbet"), None, "Its JOINTS entry says rabbet, but I can't see the step in the pieces"),
-    (_script("dowel"), None, joints.NOT_MEASURED),
-], ids=["landed", "missed", "no step", "another kind"])
-def test_did_it_land(after, landed, words, tmp_path):
+@pytest.mark.parametrize("after, asked, landed, words", [
+    (_script("rabbet", into=K), "rabbet", True, "Checked: the joint between the side and the top is now a rabbet, 1/4 in deep."),
+    (_script(), "rabbet", False, "The joint between the side and the top is still a butt (assumed): its JOINTS entry didn't change."),
+    # #285 review: the pieces show no step, or the entry is another kind: a miss, never "couldn't tell"
+    (_script("rabbet"), "rabbet", False, "Its JOINTS entry says rabbet, but the pieces show no step: neither runs "
+                                                  "into the other."),
+    (_script("dowel"), "rabbet", False, "Its JOINTS entry now says dowel, not rabbet."),
+    # a kind the pieces can't show here: said as the entry only, never "Checked"
+    (_script("bevel"), "bevel", None, "Its JOINTS entry now says bevel: the shape isn't checked here."),
+], ids=["landed", "missed", "no step", "another kind", "unmeasured"])
+def test_did_it_land(after, asked, landed, words, tmp_path):
     s = _store(tmp_path, after)
     pick_joint = {"pieces": ["side", "top"], "said": "the joint between the side and the top", "kind": "butt"}
-    got = joints.landed(_script(), after, s, "stool", pick_joint, "rabbet", inches=True)
-    assert got["landed"] is landed and words in got["said"], got
+    got = joints.landed(_script(), after, s, "stool", pick_joint, asked, inches=True)
+    assert got["landed"] == landed and words in got["said"], got
+    assert ("Checked" in got["said"]) == (landed is True)
 
 
 def test_the_turn_tells_the_designer_and_checks_it(tmp_path, tools):
@@ -198,6 +203,7 @@ def test_the_turn_tells_the_designer_and_checks_it(tmp_path, tools):
     assert any("Make that joint a rabbet: set its JOINTS entry" in f for f in seen), seen
     # the design's own units: this one is in millimetres
     assert got.ok and "Checked: the joint between the side and the top is now a rabbet, 6 mm deep." in got.reply, got.reply
+    assert "Its shape didn't change" not in got.reply, got.reply                     # the same solid: a rabbet lands in it
 
 
 def test_a_missed_joint_fails_the_turn(tmp_path, tools):
@@ -242,3 +248,61 @@ def test_a_corner_where_three_pieces_meet_is_no_one_joint(tmp_path):
     name = joints.namer(_store(tmp_path, RAILED), "stool")
     assert name((T, T, H - T)) is None                                               # side, top and rail all meet here
     assert name((T, D / 2, H - T))["pieces"] == ["side", "top"]                       # along the seam, away from the rail
+
+
+
+def _turn(s, edge, words, script):
+    from caliper import chat
+
+    seen = []
+
+    def author(spec, feedback, prior):
+        seen.append(feedback)
+        return script
+    got = chat.refine_part(s, "stool", f"About this {words}", author=author, use_llm=False, max_rounds=1,
+                           promote_feedback=False, pick={"kind": "edge", "id": edge["id"], "text": words})
+    return got, seen
+
+
+def _edge_at(s, at):
+    from caliper import features
+
+    return next(e for e in features.for_part(s, "stool")["edges"] if np.allclose(e["local"], at, atol=0.6))
+
+
+def test_no_step_is_a_miss_and_the_turn_says_so(tmp_path, tools):
+    tools("jigsaw", "drill", "circular saw", "table saw")
+    s = _store(tmp_path, _script())
+    got, _ = _turn(s, _edge_at(s, (T, D / 2, H - T)), "make that a rabbet", _script("rabbet"))
+    assert not got.ok and got.reply.startswith("✗ Its JOINTS entry says rabbet, but the pieces show no step"), got.reply
+
+
+def test_an_unmeasured_kind_is_said_as_the_entry_never_checked(tmp_path, tools):
+    tools("jigsaw", "drill", "circular saw")
+    s = _store(tmp_path, _script())
+    got, _ = _turn(s, _edge_at(s, (T, D / 2, H - T)), "make that a bevel", _script("bevel"))
+    assert "Its JOINTS entry now says bevel: the shape isn't checked here." in got.reply and "Checked:" not in got.reply
+
+
+def test_an_outside_corner_on_a_flush_seam_asks_for_the_inside_corner(tmp_path, tools):
+    """#285 review: the top's end and the side's face are one face, so the flush seam has no edge; the outside corner next to
+    it named nothing, and the turn read ✓ "couldn't tell". It says where the joint is, and asks."""
+    tools("jigsaw", "drill", "circular saw", "table saw")
+    s = _store(tmp_path, _script())
+    got, seen = _turn(s, _edge_at(s, (0.0, D / 2, H)), "make that a rabbet", _script("rabbet", into=K))
+    assert not seen, seen                                                            # the designer isn't asked: nothing changes
+    assert not got.ok and got.version is None
+    assert ("That edge is the top's outside corner, not where two pieces meet. The joint between the side and the top is "
+            "where they meet inside: pick that inside corner, or name the pieces (\"the joint between the side and the "
+            "top\").") in got.reply, got.reply
+    assert "couldn't tell" not in got.reply
+
+
+def test_an_edge_with_no_joint_near_it_goes_the_ordinary_way(tmp_path, tools):
+    from caliper import features
+
+    tools("jigsaw", "drill", "circular saw", "table saw")
+    s = _store(tmp_path, _script())
+    far = _edge_at(s, (W, D / 2, H))                                                 # the top's far end: no piece near it
+    got, seen = _turn(s, far, "make that a rabbet", _script())
+    assert seen and features.NOT_MEASURED in got.reply
