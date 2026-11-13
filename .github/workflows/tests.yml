@@ -15,7 +15,9 @@ concurrency:
 jobs:
   pytest:
     runs-on: ubuntu-latest
-    timeout-minutes: 90             # a margin over the parallel run (CALI-114): #106 hit the 60-min cap at 84%
+    # a margin over the parallel run: #106 hit the 60-min cap at 84% (CALI-114); at ~3,250 tests main's ran 84 min and
+    # #275's hit the 90-min cap twice (CALI-175)
+    timeout-minutes: 120
     defaults:
       run:
         shell: bash -el {0}
