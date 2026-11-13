@@ -314,15 +314,15 @@ def menu(p: dict, air: Optional[dict] = None) -> list[dict]:
              "a frame's strength is its frame sizing" if p.get("framed") else
              "say what it must carry (“it has to hold me, 200 lb, standing on top”) and the designer adds "
              "its loads()" if not p.get("loads") else "it doesn't say what it's built from (construction())"),
-        item("lighten", p.get("loads") and p.get("built") and not p.get("framed") and p.get("sheets", True)
-             and not p.get("printed") and not (p.get("blocked") or {}).get("lighten"),
+        # Lighten or Carve, never both, by where its volume is (#272): made_of, as the card and blocked() read it
+        item("lighten", p.get("loads") and p.get("built") and not p.get("framed") and p.get("study") == "lighten"
+             and not (p.get("blocked") or {}).get("lighten"),
              roll if mesh else "a frame is lightened by sizing its tubes" if p.get("framed")
              else "check what it must hold first (its loads())" if not p.get("loads")
              else "it has no sheet pieces: printed parts get carved instead" if not p.get("sheets", True)
-             else "printed parts get carved instead, not lightened with holes" if p.get("printed")
              else (p.get("blocked") or {}).get("lighten") or "it doesn't say what it's built from (construction())"),
         # a printed part is carved free-form where it isn't working (#92); the Carve button's own test (#144)
-        item("carve", p.get("loads") and p.get("built") and p.get("printed") and not p.get("carved")
+        item("carve", p.get("loads") and p.get("built") and p.get("study") == "carve" and not p.get("carved")
              and not (p.get("blocked") or {}).get("carve"),
              roll if mesh else "it has no printed piece: sheet walls are lightened with holes" if not p.get("printed")
              else "check what it must hold first (its loads())" if not p.get("loads")
@@ -342,3 +342,58 @@ def menu(p: dict, air: Optional[dict] = None) -> list[dict]:
         item("cutplan", p.get("built"), roll if mesh else "it doesn't say what it's built from (construction())"),
     ]
     return out
+
+
+# ---------------------------------------------------------------------------
+# Lighten or Carve: one rule, by where a part's volume is (#272 review, the foreman's call)
+# ---------------------------------------------------------------------------
+_MADE_OF: dict = {}
+#: A stick's wood, from its weight, to set against a printed volume (500 kg/m³): a half-or-not share needs no better.
+WOOD_KG_MM3 = 5e-7
+
+
+def made_of(store, pid: str) -> dict:
+    """``{"study": "lighten" | "carve" | None, "printed_share": float | None}``: what takes material out of a part, read by
+    its panel, Make it better's offer and ``load_study.blocked`` alike, so they can't disagree. A part whose printed
+    pieces are under half its volume is a sheet part, lightened with holes (step-stool-5 v4, its PLA fillet strips a
+    sliver of it); one mostly printed is carved (the bar stool's cone under a plywood seat); never both. The printed
+    volume is the printed "rest" as the weights measure it (``construction.printed_solid``), else the whole less the
+    wood; None where the part says nothing of what it's made of."""
+    import re as _re
+
+    try:
+        entry = store.design.part(pid)
+        scripted = entry is not None and store.is_scripted(pid)
+    except AttributeError:                          # a store it can't read (a test's stand-in): no rule, as before
+        return {"study": None, "printed_share": None}
+    if not scripted:
+        return {"study": None, "printed_share": None}
+    key = (store.root, pid, entry.version)
+    if key in _MADE_OF:
+        return _MADE_OF[key]
+    script = store.read_script(pid)
+    printed = bool(_re.search(r"""["']kind["']\s*:\s*["']printed["']""", script))
+    sheets = bool(_re.search(r"""["']kind["']\s*:\s*["'](?:sheet|stick)["']""", script))
+    if not printed or not sheets:
+        got = {"study": "carve" if printed else "lighten" if sheets else None, "printed_share": 1.0 if printed else
+               0.0 if sheets else None}
+    else:
+        from . import construction as C
+
+        try:
+            d = C.declared(store, pid)
+            rows = C.takeoff([it for it in C._items(d) if it.get("kind") in ("sheet", "stick")])
+            wood = sum(float(r.get("area_mm2") or 0) * float(r.get("thickness") or 0) if r["kind"] == "sheet"
+                       else float(r.get("mass_kg") or 0) / WOOD_KG_MM3            # a stick by its weight: near enough
+                       for r in rows if r["kind"] in ("sheet", "stick"))
+            try:
+                rest = abs(float(C.printed_solid(store, pid, d).volume))
+            except Exception:  # noqa: BLE001 — the whole less the wood, then
+                rest = max(0.0, abs(float(store.part_geometry(pid).require_mesh().volume)) - wood)
+            share = rest / (rest + wood) if rest + wood > 0 else None
+        except Exception:  # noqa: BLE001 — what it's made of can't be weighed: carved, as a printed part always was
+            share = None
+        got = {"study": "carve" if share is None or share >= 0.5 else "lighten",
+               "printed_share": round(share, 4) if share is not None else None}
+    _MADE_OF[key] = got
+    return got

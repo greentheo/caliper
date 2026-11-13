@@ -164,14 +164,15 @@ def _carve_offer(store: DesignStore, state: dict, p: dict, mk: dict) -> Optional
     it (#144 review: ``load_study.blocked``, the one test both read: it already fails, or its walls are too thin)."""
     from . import load_study as L
 
-    if not mk.get("printed") or not p.get("loads") or p.get("carved"):
+    if not mk.get("printed") or not p.get("loads") or p.get("carved") or p.get("study", "carve") != "carve":   # (#272)
         return None
     aims = [o.get("metric") or "" for o in (state.get("goals") or {}).get("objectives") or []]
     if not any(m.startswith(("print.", "weight.")) for m in aims):
         return None
     stop = L.blocked(store, p["id"])
-    if stop and stop["why"] != "unchecked":
+    if stop and stop.get("carve") and stop["why"] != "unchecked":
         return None
+    stop = stop if stop and stop["why"] == "unchecked" else None
     try:
         name = next((it.get("name") for it in C.declared(store, p["id"]).get("construction") or []
                      if isinstance(it, dict) and it.get("kind") == "printed"), None)
@@ -224,12 +225,21 @@ RACKING = "Racking (the frame leaning over at its joints) isn't checked: the FEA
 
 
 def joint_said(row: dict, need) -> str:
-    """What a wall held square by an unchecked joint stands on (#265): which joint, and what it reads if that gives. A part's
-    joints taken as solid wood, with no wall resting on one: how many (#222 slice A)."""
+    """What a wall held square by an unchecked joint stands on (#265): which joint, and what it reads if that gives. A sheet
+    part's glued trim, left out of the check: which (#272). A part's joints taken as solid wood, with no wall resting on one:
+    how many (#222 slice A); with its trim, both said."""
+    said = []
+    if row.get("trim"):
+        names = row["trim"]
+        many = len(names) > 1 or names[0].rstrip().endswith("s")
+        said.append(f"the {' and the '.join(names)} {'are' if many else 'is'}n't checked: {'they' if many else 'it'}'re glued trim"
+                    if many else f"the {names[0]} isn't checked: it's glued trim")
     if row.get("wood") or (row.get("joints_n") is not None and not row.get("piece")):
         n = row.get("joints_n")
-        return (f"the check takes its {n} joint{'s' if n != 1 else ''} as solid wood" if n is not None
-                else "the check takes its joints as solid wood")
+        said.append(f"the check takes its {n} joint{'s' if n != 1 else ''} as solid wood" if n is not None
+                    else "the check takes its joints as solid wood")
+    if said:
+        return "; ".join(said)
     return (f"the {row['piece']} is held square at its top by its joint to the {row['braced_by']}, which isn't checked; if that "
             f"joint gives, it racks (leans over with the walls beside it) and folds at {_times(row['sway_safety'], need=need)}"
             if row.get("sway_safety") is not None else
@@ -328,7 +338,8 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     rough, need = L.rough(run, c), run.get("min_safety")
     if v["kind"] == "holds":
         text = f"Holds {c['name'].lower()}, {over(c, need, rough)}." + (
-            f" Its joints aren't checked: {joint_said(v['brace'], need)}." if v.get("joints") else "")   # (#265, the cap lifted)
+            (f" {joint_said(v['brace'], need)[:1].upper()}{joint_said(v['brace'], need)[1:]}." if (v.get("brace") or {}).get("trim")
+             else f" Its joints aren't checked: {joint_said(v['brace'], need)}.") if v.get("joints") else "")   # (#265, #272)
     elif v["kind"] == "close" and v.get("joints"):   # amber: it holds if a joint does (#265)
         text = f"Holds {c['name'].lower()}, {over(c, need, rough)}, if its joints do: {joint_said(v['brace'], need)}."
     elif v["kind"] == "close":                       # amber: it holds, near the line (CALI-88, #64 item 2)

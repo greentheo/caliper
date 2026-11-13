@@ -440,3 +440,20 @@ def test_the_kid_s_book_says_the_joints_aren_t_checked():
         in say, say
     plain = kidbook._strength_page({"stool": [{**c, "verdict": {"kind": "holds"}}]}, ["stool"])["say"]
     assert "if its joints hold" not in plain, plain
+
+
+def test_glued_trim_and_wood_joints_are_both_said():
+    """#272's glued trim and this slice's wood joints meet on main: a sheet part with both says both, on the card and the page."""
+    from caliper import answers, verdicts
+
+    from .test_carve_click import _page, _run
+
+    run = {"min_safety": 2.0, "trim": ["fillet strip"], "wood_joints": 4}
+    v = verdicts.case(run, _case())
+    assert v["joints"] is True and v["brace"] == {"trim": ["fillet strip"], "joints_n": 4, "wood": True}, v
+    said = answers.joint_said(v["brace"], 2.0)
+    assert said == "the fillet strip isn't checked: it's glued trim; the check takes its 4 joints as solid wood", said
+    line = " ".join(_run(_page(["jointsLine", "safetyNum"], consts=["esc"], extra="""
+out = jointsLine({verdict: {joints: true, brace: {trim: ['fillet strip'], joints_n: 4, wood: true}}}, {min_safety: 2});""")).split())
+    assert "the fillet strip is glued trim, left out of the check." in line, line
+    assert "<b>Joints not checked:</b> the check takes its 4 joints as solid wood." in line, line

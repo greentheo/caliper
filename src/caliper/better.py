@@ -202,7 +202,7 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
         # on a filled-in shape, or with the front edge not checked, "it holds then" isn't known
         known = run and not p.get("untrusted") and not consistency.bare_edge(store, pid)
         got = _sheet_offers(run, fails=True) if known else []
-        if run and run.get("too_thin") and p.get("printed"):    # a fail it was too coarse to judge: Theo's stool (#159)
+        if run and run.get("too_thin") and p.get("study") == "carve":    # a fail it was too coarse to judge: Theo's stool (#159)
             got += _carved_sliver(store, run) if p.get("carved") else _thin_line(store, run) + [_waiting_carve(name, takes, f"{blocked['carve'][:1].upper()}{blocked['carve'][1:]}." if blocked.get("carve") else None)]
         return [{**ln, "part": pid} for ln in got]
     if blocked and blocked.get("why") == "unchecked":           # everything else comes from the check
@@ -212,12 +212,12 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
     results, invites = [], []
     if settled:
         results += _sheet_offers(run, fails=False)
-    if (blocked or {}).get("why") == "too_thin" and p.get("printed"):
+    if (blocked or {}).get("why") == "too_thin" and p.get("study") == "carve":
         results += _carved_sliver(store, run) if p.get("carved") else _thin_line(store, run)
-    if p.get("printed") and not p.get("carved") and (blocked or {}).get("carve"):
+    if p.get("study") == "carve" and not p.get("carved") and (blocked or {}).get("carve"):
         invites.append(_waiting_carve(name, "" if blocked["why"] == "no_stress" else takes, None if blocked["why"] == "too_thin"
                                       else f"{blocked['carve'][:1].upper()}{blocked['carve'][1:]}."))
-    if p.get("printed") and not p.get("carved") and not (blocked or {}).get("carve"):
+    if p.get("study") == "carve" and not p.get("carved") and not (blocked or {}).get("carve"):
         mine = [r for r in state.get("carve_runs") or [] if r["part"] == pid and r.get("version") == p["version"]]
         done = next((r for r in mine if r.get("status") == "done"), None)
         if done is not None:
@@ -236,8 +236,8 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
         elif not any(r.get("status") in (None, "running") for r in mine):
             invites.append(_line(f"Carve the {name} where it isn't working, to use less filament",
                                  f"It takes {takes or 'a while'}.", "Carve it", "carve"))
-    # a printed part is carved: it has no Lighten panel, and the study refuses walls the carve can't see either
-    if p.get("sheets") and not p.get("printed") and not (blocked or {}).get("lighten") and not p.get("framed"):
+    # Lighten or Carve, never both, by where its volume is (#272): the panel and blocked() read the same rule
+    if p.get("study") == "lighten" and not (blocked or {}).get("lighten") and not p.get("framed"):
         mine = [r for r in state.get("lighten_runs") or [] if r["part"] == pid and r.get("version") == p["version"]]
         done = mine[0] if mine else None
         if done is not None:
