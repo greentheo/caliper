@@ -123,8 +123,9 @@ def test_every_contact_without_an_entry_is_listed_as_an_assumed_butt(tmp_path):
     got = {tuple(j["pieces"]): j for j in joints.listed(s, "stool")}
     assert got[("left side", "step")] == {"pieces": ["left side", "step"], "kind": "bevel", "fix": ["glue", "screws"],
                                          "assumed": False}
+    # glued in its mortise, as the patterns and the book say: no screws (#283 review)
     assert got[("bottom stringer", "left side")] == {"pieces": ["bottom stringer", "left side"], "kind": "through tenon",
-                                                     "fix": ["glue", "screws"], "assumed": True}
+                                                     "fix": ["glue"], "assumed": True}
     assert len(got) == 4
 
 

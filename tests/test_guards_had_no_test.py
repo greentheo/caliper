@@ -193,7 +193,9 @@ def test_an_all_wood_build_lists_its_kids_book(tmp_path):
     assert made["kids"] == "kids.html" and os.path.exists(os.path.join(root, "kids.html"))
     book = open(os.path.join(root, "index.html")).read()
     assert "<code>kids.html</code>" in book
-    assert "Glue and screw them together where they meet" in book and "floor's edge" not in book
+    # glued and screwed at the holes the patterns mark (CALI-177: the step says the marks, not a screw every 6 in)
+    assert "screw holes marked + on the patterns" in book and "glue each joint" in book, book
+    assert "floor's edge" not in book and "foam-safe" not in book
 
 
 # --- the hash seed: a page's wording mustn't change with it (#75's rework) -------------------------------------------------------

@@ -473,9 +473,18 @@ def _say_stage(pid: str, layer: str, pcs: list[dict], plan: dict, ctx: dict) -> 
         if len(pcs) == 1 and not ctx.get("hitched"):
             do.append("Sand and ease its edges; it goes on with what it's fastened to, in a later step.")
         elif all(p.get("material") in ("plywood", "lumber") for p in pcs):
-            # wood: glued and screwed where they meet (CALI-79: the stool was told to use foam-safe adhesive)
-            do.append("Glue and screw them together where they meet, a screw every 6 in along each joint (pilot "
-                      "holes first); they're cut to the outside surface, so check each corner square as it goes on.")
+            # wood: glued and screwed where they meet (CALI-79: the stool was told to use foam-safe adhesive), at the
+            # holes the patterns mark (CALI-177)
+            from . import marks as K
+
+            said = K.book_lines(ctx["marks"][pid], names) if (ctx.get("marks") or {}).get(pid) else []
+            if said:
+                do += said
+                do.append("They're cut to the outside surface, so check each corner square as it goes on.")
+            else:
+                do.append("Glue and screw them together where they meet, 1 1/2 in from each end of a joint and then no "
+                          "more than 6 in apart (pilot holes first); they're cut to the outside surface, so check each "
+                          "corner square as it goes on.")
         else:
             do.append(fasten_panels(pcs))
     elif layer == "shell":
@@ -703,7 +712,8 @@ def shopping(store: DesignStore, plans: dict, bom: dict, lumps: dict, ctx: dict)
         kinds = sorted({b["fasteners"]["screw"] for b in bom.values() if b.get("fasteners")})
         add("hardware", " / ".join(kinds), f"{screws} (a box of {100 if screws > 50 else 50})",
             max(screws, 50) * P["screw_each"],
-            f"the joints, a screw every 6 in; drill a {PILOT_BIT} pilot hole for each")    # (#64 item 8)
+            f"the joints: 1 1/2 in from each end of a joint, then no more than 6 in apart (at each + on the patterns); "
+            f"drill a {PILOT_BIT} pilot hole for each")    # (#64 item 8; #283 review: the rule the marks use)
         ml = sum((b.get("fasteners") or {}).get("glue_ml", 0) for b in bom.values())
         add("hardware", "wood glue", "an 8 oz bottle" if ml <= 236 else f"{math.ceil(ml / 236)} × 8 oz bottles",
             P["wood_glue_8oz"] * max(1, math.ceil(ml / 236)), "every joint, before the screws")
@@ -1063,6 +1073,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
                     out.append(f"<tr><td>{_e(b['a'])} / {_e(b['b'])}</td><td class='n'>{inches(b['length_mm'], False)}</td>"
                                f"<td class='n'>{rng}</td></tr>")
                 out.append("</table>")
+    out += marks_html(rec, name)                     # bevels, mortises and screw holes, as the patterns mark them (CALI-177)
     # the assembly order
     out.append("<h2 class='page'>Assembly</h2>")
     for s in steps_:
@@ -1169,6 +1180,18 @@ def joints_html(rec: dict, name=lambda pid: pid) -> list[str]:
     return out
 
 
+def marks_html(rec: dict, name=lambda pid: pid) -> list[str]:
+    """The cut lists' marks (CALI-177, #222 slice C): each piece's bevels, mortises, dados and screw holes, and the glue
+    blocks, as the hand patterns mark them."""
+    out = []
+    for pid, lines in (rec.get("marks") or {}).items():
+        rows = [ln.strip() for ln in lines[1:]]
+        if rows:
+            out.append(f"<h3>Marked on the hand patterns <span class='muted small'>· {_e(name(pid))}</span></h3><ul>"
+                       + "".join(f"<li>{_e(r)}</li>" for r in rows) + "</ul>")
+    return out
+
+
 def _next_id(store: DesignStore) -> str:
     root = releases_dir(store)
     have = [int(n) for n in os.listdir(root) if n.isdigit()] if os.path.isdir(root) else []
@@ -1267,6 +1290,14 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
         if pid in bom:
             bom[pid] = making.filament({"bom": bom[pid]}, mk)["bom"]
     ctx.update(hitched=_hitched(m), made=made)
+    from . import marks as K
+
+    ctx["marks"] = {}                          # bevels, mortises, screw holes: as the hand patterns mark them (CALI-177)
+    for p in built:
+        try:
+            ctx["marks"][p.id] = K.of(store, p.id)
+        except Exception:  # noqa: BLE001 — the book goes without them, and says the joints its old way
+            pass
     emit("drawing", "the assembly order")
     st, every = steps(store, plans, bom, ctx)
     ctx["jacks"] = sum(1 for p in every if p["layer"] == "jacks")
@@ -1318,7 +1349,13 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
         cl = os.path.join(src, "cutlist.txt")
         if os.path.exists(cl):
             with open(cl) as f:
-                cut_texts.append(tree.relabelled(store, pid, f.read()))     # what the person calls it (#185)
+                text = tree.relabelled(store, pid, f.read())     # what the person calls it (#185)
+            if "marks" not in plan and (ctx.get("marks") or {}).get(pid):    # a plan made before the marks (CALI-177)
+                from . import marks as K
+
+                text = (text.rstrip("\n") + "\n"
+                        + tree.relabelled(store, pid, "\n".join(K.cutlist_lines(ctx["marks"][pid]))) + "\n")
+            cut_texts.append(text)
     with open(os.path.join(root, "cutlist.txt"), "w") as f:
         f.write("\n".join(cut_texts))
     os.makedirs(os.path.join(root, "source"))
@@ -1376,6 +1413,8 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
            "names": {p.id: p.label for p in store.design.parts if p.label},
            "grain": {pid: n for pid, n in said.items() if n},       # which way to cut each panel (CALI-126)
            "joints": {pid: j for pid, j in ((p.id, _joints_of(store, p.id)) for p in built) if j},   # (CALI-156, #222)
+           "marks": {pid: [tree.relabelled(store, pid, ln) for ln in K.cutlist_lines(mk)]          # (CALI-177), named
+                     for pid, mk in ctx["marks"].items() if K.cutlist_lines(mk)},                   # as the person calls them
            "slug": os.path.basename(store.root), "versions": versions,
            "promise": _promise(store, [p.id for p in built], strength),        # worded for what it's made of (#64 item 14)
            "card": {"created": card["created"], "summary": card["summary"]},

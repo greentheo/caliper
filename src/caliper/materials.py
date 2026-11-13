@@ -50,7 +50,7 @@ STICKS = {
                # construction-grade sticks with knots: break at ~2,900 psi in bending, E ~1.3 Msi
                "mech": {"E": 9000.0, "strength": 20.0,
                         "basis": "SPF #2-ish: modulus of rupture ~20 MPa with knots (clear wood ~35), E ~9 GPa"},
-               "sizes": {"2x2": (1.5 * IN, 1.5 * IN), "1x2": (0.75 * IN, 1.5 * IN),
+               "sizes": {"2x2": (1.5 * IN, 1.5 * IN), "1x2": (0.75 * IN, 1.5 * IN), "1x1": (0.75 * IN, 0.75 * IN),
                          "2x3": (1.5 * IN, 2.5 * IN), "2x4": (1.5 * IN, 3.5 * IN)}},
     # square tube is sized by its outside and wall, not by name (construction.tube_area)
     "steel": {"name": "steel tube", "density": 7850.0, "stock_len": 20 * 12 * IN,
@@ -164,7 +164,8 @@ PRICES = {
     "sheet_per_m2": {"plywood": 13.0, "xps": 14.0, "eps": 7.5},     # any other thickness, per 25.4 mm
     "steel_plate_per_kg": 3.3,                                        # ~$1.50/lb, small pieces
     # a whole stick of lumber; steel tube by weight
-    "lumber": {"2x2": 4.5, "1x2": 3.0, "2x3": 5.0, "2x4": 6.0},
+    "lumber": {"2x2": 4.5, "1x2": 3.0, "2x3": 5.0, "2x4": 6.0,
+               "1x1": 3.0},                                           # glue blocks (CALI-177): priced as a 1x2, the safe side
     "steel_tube_per_kg": 4.2,                                         # ~$1.90/lb
     # coverings, by what goes into them
     "canvas_per_yd": 7.0, "glass_cloth_per_yd": 9.0, "epoxy_per_gal": 110.0, "glue_per_gal": 30.0,

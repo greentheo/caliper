@@ -30,6 +30,7 @@ import uuid
 from typing import Callable, Optional
 
 from . import construction as C
+from . import marks
 from . import materials as M
 from .design import DesignStore
 from .runs import newest_first
@@ -309,7 +310,8 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
               "created": time.time(), "build": d.get("build") or {},
               "unfolder": unfold_dir(), "sheets": [],
               "sticks": stick_cuts(C.takeoff([it for it in items if not (it.get("kind") == "stick"
-                                                                          and it.get("material") == "steel")])),
+                                                                          and it.get("material") == "steel")]
+                                             + marks.glue_block_items_of(store, part_id, d))),
               "tubes": [], "notes": []}
     if groups:
         record["notes"].append("Panels are cut to the outside surface; joints are butt joints, as "
@@ -372,6 +374,10 @@ def run(store: DesignStore, part_id: str, *, emit: Optional[Callable] = None,
         if summary.get("missing"):
             record["notes"].append(f"{mat['name']}: {len(summary['missing'])} piece(s) didn't fit a sheet — "
                                    + "; ".join(f"{m['label']}: {m['why']}" for m in summary["missing"]))
+    try:                                   # what the hand patterns mark: bevels, mortises, screw holes (CALI-177)
+        record["marks"] = marks.cutlist_lines(marks.of(store, part_id))
+    except Exception:  # noqa: BLE001 — the cut list goes without them, not without everything
+        record["marks"] = []
     os.makedirs(root, exist_ok=True)       # whatever it's made of: an all-printed part has no sheet folder (CALI-111)
     with open(os.path.join(root, "cutplan.json"), "w") as f:
         json.dump(record, f, indent=2)
@@ -427,6 +433,7 @@ def cutlist_text(record: dict) -> str:
                 rng = (f"{b['bevel_min']:.0f}–{b['bevel_max']:.0f}°" if b["bevel_max"] - b["bevel_min"] >= 1
                        else f"{b['bevel_max']:.0f}°")
                 lines.append(f"      {b['a']} / {b['b']}: {b['length_mm'] / M.IN:.0f} in of edge, bevel {rng}")
+    lines += record.get("marks") or []                 # the hand patterns' marks (CALI-177)
     return "\n".join(lines) + "\n"
 
 

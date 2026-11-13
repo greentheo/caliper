@@ -861,6 +861,9 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
 
     wrong = not_accounted(store, part_id)              # pieces that aren't the part: no weight from them (CALI-155)
     unweighed = wrong or unweighed
+    from . import marks as K
+
+    items = items + K.glue_block_items_of(store, part_id, d)      # weighed and bought (CALI-177, #222 slice C)
     rows = takeoff(items)
     mass, cog = totals(rows)
     saved = read_build(store.read_script(part_id)) or {}
@@ -885,7 +888,7 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
             mesh = store.part_geometry(part_id).require_mesh()
             pcs = shapes(d)
             _sides(mesh, pcs)
-            bom_["fasteners"] = fasteners.estimate(pcs, tolerance(mesh))
+            bom_["fasteners"] = fasteners.estimate(pcs, tolerance(mesh), J.read(store.read_script(part_id)))
         except Exception:  # noqa: BLE001 — the shopping list goes without them, not without everything
             pass
     for g in bom_["sheets"]:
