@@ -99,7 +99,8 @@ def _through(host: dict, piece: dict, tol: float) -> Optional[dict]:
     and within its thickness, reaching into the host (some of it more than the piece's thickness in from the host's edge: a
     stringer's end flush in a side runs into the side, not the side into the stringer; a dado running out at the side's
     edges is still in the side). ``{"through": runs the whole thickness, "notch": it runs in from one of the host's edges,
-    "points": those (u, v) in the host's frame, "frame"}``, or None where it doesn't, or where it runs through from one edge
+    "points": those (u, v) in the host's frame, "frame", "span": how deep into the host's thickness it reaches, from the face
+    its outline gives}``, or None where it doesn't, or where it runs through from one edge
     to the opposite one: then the host is the tenon (a side through a proud stringer), not the mortise."""
     from .consistency import _edge_dist2d, _frame, _inside2d, polygon_samples
 
@@ -126,7 +127,7 @@ def _through(host: dict, piece: dict, tol: float) -> Optional[dict]:
     ends = _ends_at_edges(q[inside], flat, 2.0 * tol) if through else 0
     if ends == 2:
         return None                                  # edge to edge: the host is the tenon, not the mortise (#275)
-    return {"through": through, "notch": ends == 1, "points": q[inside], "frame": (o, u, v, n)}
+    return {"through": through, "notch": ends == 1, "points": q[inside], "frame": (o, u, v, n), "span": span}
 
 
 def contacts(pieces: list[dict], tol: float, reach: Optional[float] = None) -> dict:

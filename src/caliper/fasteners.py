@@ -5,8 +5,8 @@ back to the store. Joints come from the pieces themselves: wherever one wood pan
 another's face or edge (the same probes the strength check uses to see what holds a panel), each pair of
 pieces counted once, along the longer of the two contacts. Then:
 
-- **screws** one every 6 in along each joint, at least two a joint, #8, about 1.6× the panel thickness long,
-  to the next 1/4 in;
+- **screws** along each joint, 1 1/2 in from each end and then no more than 6 in apart, as the patterns mark them
+  (:mod:`caliper.marks`: none in a glued through tenon), #8, about 1.6× the panel thickness long, to the next 1/4 in;
 - **wood glue** about 1/2 ml an inch of joint (an 8 oz bottle does about 40 ft).
 
 It's an estimate for buying, said as one; the build book says where they go.
@@ -15,6 +15,7 @@ It's an estimate for buying, said as one; the build book says where they go.
 from __future__ import annotations
 
 import math
+from typing import Optional
 
 import numpy as np
 
@@ -85,21 +86,29 @@ def edge_joints(pieces: list[dict], tol: float) -> dict:
     return {key: max(by.values()) for key, by in contact.items()}
 
 
-def estimate(pieces: list[dict], tol: float) -> dict:
-    """What holds the wood together, for the shopping list: ``{}`` if nothing wooden touches."""
+def screw_length_mm(pieces: list[dict]) -> float:
+    """The screw for a part: about 1.6x its thickest wood sheet, to the next 1/4 in."""
+    thick = max((pc["thickness"] for pc in pieces if pc.get("kind") == "sheet" and pc.get("material") in WOOD),
+                default=19.05)
+    return math.ceil(thick / IN * 1.6 * 4) / 4 * IN
+
+
+def estimate(pieces: list[dict], tol: float, said: Optional[list] = None) -> dict:
+    """What holds the wood together, for the shopping list: ``{}`` if nothing wooden touches. The screws are the ones the
+    patterns mark, joint by joint (CALI-177): ``said``, the part's ``JOINTS``, says which are held without them."""
+    from . import marks
+
     found = joints(pieces, tol)
     if not found:
         return {}
     total_in = sum(found.values()) / IN
-    screws = sum(max(2, math.ceil(mm / IN / SCREW_EVERY_IN)) for mm in found.values())
-    thick = max((pc["thickness"] for pc in pieces if pc.get("kind") == "sheet" and pc.get("material") in WOOD),
-                default=19.05)
-    length_in = math.ceil(thick / IN * 1.6 * 4) / 4
+    screws = sum(c["n"] for c in marks.screws(pieces, tol, said).values())
+    length_in = screw_length_mm(pieces) / IN
     from .materials import nominal
 
     glue_ml = total_in * GLUE_ML_PER_IN
     return {"joints": len(found), "joint_in": round(total_in, 1), "screws": screws,
             "screw": f"#8 × {nominal(length_in * IN)} wood screws", "glue_ml": round(glue_ml),
             "glue": "an 8 oz bottle of wood glue" if glue_ml <= 236 else f"{math.ceil(glue_ml / 473)} × 16 oz wood glue",
-            "basis": f"a screw every {SCREW_EVERY_IN:g} in along {len(found)} joints ({total_in:.0f} in), glue "
-                     f"~{GLUE_ML_PER_IN} ml an inch"}
+            "basis": f"screws 1 1/2 in from each end of {len(found)} joints ({total_in:.0f} in), then no more than "
+                     f"{SCREW_EVERY_IN:g} in apart; glue ~{GLUE_ML_PER_IN} ml an inch"}

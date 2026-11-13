@@ -184,10 +184,11 @@ def step_view(every: list[dict], new: dict, view):
 
 
 def screws_for(mm: float) -> int:
-    """A joint's screws, as the shopping list counts them: one every 6 in, at least two."""
-    from .fasteners import SCREW_EVERY_IN
+    """A joint's screws, as the patterns mark them where nothing else is known: 1 1/2 in from each end, then no more than
+    6 in apart (CALI-177)."""
+    from .marks import count
 
-    return max(2, math.ceil(mm / IN / SCREW_EVERY_IN))
+    return count(mm)
 
 
 def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: dict) -> Optional[str]:
@@ -248,6 +249,10 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
         _sides(mesh, pcs)
         wood = [pc for pc in pcs if pc.get("material") in WOOD]
         joints = fasteners.joints(wood, tolerance(mesh))
+        from . import joints as J
+        from . import marks
+
+        counted = marks.screws(wood, tolerance(mesh), J.read(store.read_script(pid)))   # the patterns' count (CALI-177)
         # each drawing by the piece's own key, numbered as fasteners.keys numbers the wood (CALI-87)
         drawn_wood = [p for p in release.pieces(store, pid) if p.get("material") in WOOD and p["kind"] in ("sheet", "stick")]
         fasteners.keys(drawn_wood)
@@ -262,11 +267,16 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
                 say = f"Stand the {words[pc['key']]} up where the picture shows. This one is the start."
                 n_screws = 0
             else:
-                n_screws = sum(screws_for(joints[tuple(sorted((pc["key"], a)))]) for a in against)
-                say = (f"Put glue on the edges where the {words[pc['key']]} touches {_together(against, wood, words)}. "
-                       f"A grown-up clamps it and drills a {PILOT_BIT} pilot hole for each screw, so the wood won't "
-                       f"split. Then the grown-up drives in {n_screws} screws. You stand an arm's length behind, in "
-                       f"your safety glasses and ear defenders.")      # short sentences, read aloud (#209 review)
+                pairs = [tuple(sorted((pc["key"], a))) for a in against]
+                n_screws = sum(counted[k]["n"] if k in counted else screws_for(joints[k]) for k in pairs)
+                if n_screws:
+                    say = (f"Put glue on the edges where the {words[pc['key']]} touches {_together(against, wood, words)}. "
+                           f"A grown-up clamps it and drills a {PILOT_BIT} pilot hole for each screw, so the wood won't "
+                           f"split. Then the grown-up drives in {n_screws} screws. You stand an arm's length behind, in "
+                           f"your safety glasses and ear defenders.")      # short sentences, read aloud (#209 review)
+                else:                                                      # a tenon glued in its mortise: no screws
+                    say = (f"Put glue in the holes, then push the {words[pc['key']]} through "
+                           f"{_together(against, wood, words)}. No screws here: the glue holds it.")
             img = f"kids/step-{len(pages) + 1:02d}.png"
             with open(os.path.join(root, img), "wb") as f:
                 f.write(release.draw(step_view(every, new, view), [(done, "done"), ([new], "now")]))

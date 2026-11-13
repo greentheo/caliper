@@ -67,8 +67,11 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
 
     from . import mirror
 
+    from . import marks as K
+
     d = C.declared(store, part_id)
     flip = mirror.source_of(store, part_id)       # its pattern is the source's, flipped: said on every page (#239)
+    made = K.of(store, part_id)                   # what's marked on each piece to make it (CALI-177, #222 slice C)
     try:
         middle = store.part_geometry(part_id).require_mesh().bounds.mean(axis=0)
     except Exception:  # noqa: BLE001 — no solid to say which way is out: each piece from the face its outline gives
@@ -94,17 +97,148 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
         a = -math.atan2(edges[k][1], edges[k][0])
         R = np.array([[math.cos(a), -math.sin(a)], [math.sin(a), math.cos(a)]])
         pts, holes = flat @ R.T, [h @ R.T for h in holes]
-        if pts[:, 1].mean() < pts[k, 1]:          # the long edge at the bottom, the piece above it: turned, not flipped
-            pts, holes = pts * [-1, -1], [h * [-1, -1] for h in holes]
+        turn = -1.0 if pts[:, 1].mean() < pts[k, 1] else 1.0   # the long edge at the bottom, the piece above it: turned, not flipped
+        pts, holes = pts * turn, [h * turn for h in holes]
         lo = pts.min(axis=0)
         pts, holes = pts - lo, [h - lo for h in holes]
+
+        def flat_of(P, o=o, u=u, v=v, R=R, turn=turn, lo=lo):
+            P = np.atleast_2d(np.asarray(P, float))
+            return (np.stack([(P - o) @ u, (P - o) @ v], axis=1) @ R.T) * turn - lo
+
+        key = K.key_of(made, it["outline"])
+        on = K.on_piece(made, key) if key else {"bevels": [], "cuts": [], "screws": [], "n_screws": 0}
+        shown = True                              # its outline is on the face the page shows
+        if key:
+            side = next(pc for pc in made["pieces"] if pc["key"] == key)["sides"][0]
+            shown = float((-n * side) @ toward) > 0
+        pts, back, bev = _faced(pts, on["bevels"], flat_of, shown)
+        cut = [{**c, "poly": flat_of(c["corners"]), "shown": (c["face"] == 0) == shown} for c in on["cuts"]]
+        screws = [{"at": flat_of(c["points"]), "into": c["into"], "comes_out": bool(c.get("comes_out")),
+                   "from_here": bool(float(np.asarray(c.get("drive", toward)) @ toward) > 0)} for c in on["screws"]]
+        z = pts.min(axis=0)                       # the shown face's outline may sit off (0, 0): everything with it
+
+        def to_page(P, flat_of=flat_of, z=z):
+            return flat_of(P) - z
+
+        if np.abs(z).max() > 1e-9:
+            pts, holes = pts - z, [h - z for h in holes]
+            back = [(a_ - z, b_ - z) for a_, b_ in back]
+            bev = [{**b_, "line": (b_["line"][0] - z, b_["line"][1] - z)} for b_ in bev]
+            cut = [{**c, "poly": c["poly"] - z} for c in cut]
+            screws = [{**c, "at": c["at"] - z} for c in screws]
         t = float(it["thickness"])
         out.append({"name": it.get("name") or "piece", "material": it.get("material"), "thickness": t,
                     "label": f"{M.nominal(t)} {M.sheet(it['material'])['name']}" if it.get("material") in M.SHEETS
                     else f"{M.nominal(t)} sheet", "outline": pts, "holes": holes, "size": pts.max(axis=0),
+                    "bevels": bev, "back": back, "cuts": cut, "screws": screws, "to_page": to_page,
                     "face": face, "seen": (f"this is the {face} face" if face == "outside" else f"this is the face {face}")
                     + (f"; a mirror of {flip}: flip its template" if flip else ""), **({"mirror_of": flip} if flip else {})})
     return out
+
+
+def _faced(pts: np.ndarray, bevels: list, flat_of, shown: bool):
+    """The outline on the face the page shows, and each bevelled edge's line on the other face (dashed), in the page's
+    frame (CALI-177): the declared outline where that face is shown; else its bevelled edges moved to the shown face's
+    lines, each corner where its two edges' lines meet. ``(outline, [(a, b) other face], [{"edge", "angle", "line"}])``."""
+    if not bevels:
+        return pts, [], []
+    lines = {}
+    for b in bevels:
+        near, far = (b["lines"][0], b["lines"][1]) if shown else (b["lines"][1], b["lines"][0])
+        lines[b["edge"]] = (flat_of(near[0])[0], flat_of(near[1])[0], flat_of(far[0])[0], flat_of(far[1])[0], b["angle"])
+    k = len(pts)
+    edge = [(lines[e][0], lines[e][1]) if e in lines else (pts[e], pts[(e + 1) % k]) for e in range(k)]
+    out = []
+    for e in range(k):
+        (p1, q1), (p2, q2) = edge[e - 1], edge[e]
+        d1, d2 = q1 - p1, q2 - p2
+        den = d1[0] * d2[1] - d1[1] * d2[0]
+        if abs(den) < 1e-9:
+            out.append(p2)
+            continue
+        s_ = ((p2[0] - p1[0]) * d2[1] - (p2[1] - p1[1]) * d2[0]) / den
+        out.append(p1 + d1 * s_)
+    out = np.asarray(out)
+    back = [(lines[e][2], lines[e][3]) for e in sorted(lines)]
+    bev = [{"edge": e, "angle": lines[e][4], "line": (out[e], out[(e + 1) % k])} for e in sorted(lines)]
+    return out, back, bev
+
+
+def marks_lines(pc: dict) -> list[str]:
+    """What a piece's page says about its marks: bevels, mortises and dados, screws (CALI-177)."""
+    from . import marks as K
+
+    out = []
+    if pc.get("bevels"):
+        out.append(K.bevel_line([b["angle"] for b in pc["bevels"]]))
+    nm = {"mortise": 0, "notch": 0, "dado": 0, "rabbet": 0}
+    for c in pc.get("cuts") or []:
+        nm[c["kind"]] += 1
+        k = nm["mortise"] + nm["notch"] if c["kind"] in ("mortise", "notch") else nm["dado"] + nm["rabbet"]
+        lo, hi = c["poly"].min(axis=0), c["poly"].max(axis=0)
+        out.append(K.cut_line(k, c, lo, hi - lo))
+    n = sum(len(s["at"]) for s in pc.get("screws") or [])
+    if n:
+        here = all(s["from_here"] for s in pc["screws"])
+        out.append(K.screw_line(n, [s["into"] for s in pc["screws"]]).rstrip(".")
+                   + (": drive them from this face." if here else ": drive them from the other face (drill through from here)."))
+    for sc in pc.get("screws") or []:
+        if sc.get("comes_out"):
+            out.append(f"The screws into the {sc['into']} would come out of its face at its angle: use shorter ones there.")
+    return out
+
+
+def _dashes(dr, a, b, fill="black", width: int = 2, on: float = 10.0, off: float = 7.0):
+    """A dashed line from a to b (px)."""
+    (x0, y0), (x1, y1) = a, b
+    L = math.hypot(x1 - x0, y1 - y0)
+    if L < 1e-6:
+        return
+    ux, uy = (x1 - x0) / L, (y1 - y0) / L
+    s = 0.0
+    while s < L:
+        e = min(L, s + on)
+        dr.line([(x0 + ux * s, y0 + uy * s), (x0 + ux * e, y0 + uy * e)], fill=fill, width=width)
+        s = e + off
+
+
+def _crosshair(dr, x: float, y: float, r: float = 9.0, fill="black"):
+    dr.line([(x - r, y), (x + r, y)], fill=fill, width=2)
+    dr.line([(x, y - r), (x, y + r)], fill=fill, width=2)
+    dr.ellipse([x - r / 2, y - r / 2, x + r / 2, y + r / 2], outline=fill, width=1)
+
+
+def _draw_marks(dr, pc: dict, X, Y, font=None, labels: bool = True):
+    """A piece's marks on a page whose mm-to-px is ``X``/``Y``: the other face's bevel lines dashed, mortises and notches
+    outlined and shaded, rabbets and dados dashed, screws as crosshairs (CALI-177)."""
+    for a, b in pc.get("back") or []:
+        _dashes(dr, (X(a[0]), Y(a[1])), (X(b[0]), Y(b[1])))
+    if labels:
+        cx, cy = (float(np.mean([X(x) for x, _ in pc["outline"]])), float(np.mean([Y(y) for _, y in pc["outline"]])))
+        for bv in pc.get("bevels") or []:
+            (ax, ay), (bx, by) = bv["line"]
+            mx, my = X((ax + bx) / 2), Y((ay + by) / 2)
+            k = math.hypot(cx - mx, cy - my) or 1.0
+            dr.text((mx + (cx - mx) / k * 24 - 5, my + (cy - my) / k * 24 - 8), "B", fill="black", font=font)   # inside it
+    nm, ng = 0, 0
+    for c in pc.get("cuts") or []:
+        poly = [(X(x), Y(y)) for x, y in c["poly"]]
+        if c["kind"] in ("mortise", "notch"):
+            nm += 1
+            dr.polygon(poly, fill=(225, 225, 225), outline="black", width=3)
+            tag = f"{'M' if c['kind'] == 'mortise' else 'N'}{nm}"
+        else:
+            ng += 1
+            for i in range(len(poly)):
+                _dashes(dr, poly[i], poly[(i + 1) % len(poly)])
+            tag = f"D{ng}"
+        if labels:
+            cx, cy = np.mean([q[0] for q in poly]), np.mean([q[1] for q in poly])
+            dr.text((cx + 6, cy - 8), tag, fill="black", font=font)
+    for sc in pc.get("screws") or []:
+        for x, y in sc["at"]:
+            _crosshair(dr, X(x), Y(y))
 
 
 def titles(pc: dict, cols: int = 1, rows: int = 1, r: int = 0, c: int = 0) -> dict:
@@ -160,7 +294,8 @@ def measure_page(pc: dict):
     edges."""
     img, dr = _page(landscape=True)
     W, H = img.size
-    left, top, right, bottom = 1.0 * DPI, 1.35 * DPI, W - 0.6 * DPI, H - 1.0 * DPI
+    lines = _measure_lines(pc)
+    left, top, right, bottom = 1.0 * DPI, max(1.35 * DPI, 0.72 * DPI + (len(lines) + 1) * 16), W - 0.6 * DPI, H - 1.0 * DPI
     sx, sy = pc["size"]
     k = min((right - left) / sx, (bottom - top) / sy)          # px per mm
     X = lambda x: left + x * k                                  # noqa: E731
@@ -178,11 +313,19 @@ def measure_page(pc: dict):
         dr.polygon([(X(x), Y(y)) for x, y in h], fill=(235, 235, 235), outline="black", width=3)
         cx, cy = h.mean(axis=0)
         dr.text((X(cx) - 10, Y(cy) - 14), f"H{n}", fill="black", font=big)
+    _draw_marks(dr, pc, X, Y, font=f)
     # overall size: dimension lines along the bottom and up the left
     _dimension(dr, (X(0), Y(0) + 40), (X(sx), Y(0) + 40), inches(sx), f)
     _dimension(dr, (X(0) - 60, Y(0)), (X(0) - 60, Y(sy)), inches(sy), f)
     # the title and how to read it
     dr.text((0.6 * DPI, 0.35 * DPI), titles(pc)["measure"], fill="black", font=big)
+    for i, ln in enumerate(lines):
+        dr.text((0.6 * DPI, 0.72 * DPI + i * 16), ln, fill=(60, 60, 60), font=small)
+    return img
+
+
+def _measure_lines(pc: dict) -> list[str]:
+    """The measure page's words, wrapped: how to read it, the corners, each hole, and its marks (CALI-177)."""
     lines = ["Measure everything from the bottom-left corner: the bottom edge and the left edge are straight "
              "and square. Grid lines are 1 in."]
     if not _rectangle(pc["outline"], pc["size"]):
@@ -198,12 +341,10 @@ def measure_page(pc: dict):
         lines.append(f"H{n}: {inches(lo[0])} from the left, {inches(lo[1])} up; {inches(hi[0] - lo[0])} wide, "
                      f"{inches(hi[1] - lo[1])} tall. Draw the grid there and copy its curve square by square, or "
                      f"trace it from the full-size pages. Drill a 3/8 in hole inside the line to start the jigsaw.")
+    lines += marks_lines(pc)
     import textwrap
 
-    wrapped = [w for ln in lines for w in textwrap.wrap(ln, 175)]
-    for i, ln in enumerate(wrapped[:7]):
-        dr.text((0.6 * DPI, 0.72 * DPI + i * 16), ln, fill=(60, 60, 60), font=small)
-    return img
+    return [w for ln in lines for w in textwrap.wrap(ln, 175)][:24]
 
 
 def _dimension(dr, a, b, text: str, font):
@@ -262,6 +403,7 @@ def tiles(pc: dict) -> tuple[list, tuple[int, int], bool]:
             dr.polygon([(X(x), Y(y)) for x, y in pc["outline"]], outline="black", width=3)
             for h in pc["holes"]:
                 dr.polygon([(X(x), Y(y)) for x, y in h], outline="black", width=3)
+            _draw_marks(dr, pc, X, Y, font=_font(13))
             # the margins: printers don't print there, so it's blank again
             for box in ([0, 0, W, MARGIN * DPI], [0, H - MARGIN * DPI, W, H], [0, 0, MARGIN * DPI, H],
                         [W - MARGIN * DPI, 0, W, H]):
@@ -325,6 +467,7 @@ def project_svg(pc: dict) -> str:
             f'<g stroke="#3a3a3a" stroke-width="0.5">{grid}</g>'
             f'<polygon points="{fmt(pc["outline"])}" fill="none" stroke="white" stroke-width="1.2"/>'
             + "".join(f'<polygon points="{fmt(hp)}" fill="none" stroke="white" stroke-width="1.2"/>' for hp in pc["holes"])
+            + _svg_marks(pc, fmt)
             + f'<rect x="{cx:.2f}" y="{h - pad - cal:.2f}" width="{cal:.2f}" height="{cal:.2f}" fill="none" '
               f'stroke="#ffd166" stroke-width="1.2"/>'
             f'<text x="{cx:.2f}" y="{h - pad - cal - 4:.2f}" fill="#ffd166" font-size="7" font-family="sans-serif">'
@@ -332,6 +475,20 @@ def project_svg(pc: dict) -> str:
             f'<text x="{pad:.2f}" y="{0.5 * IN:.2f}" fill="white" font-size="9" font-family="sans-serif">'
             f'{html.escape(pc["name"])}: {html.escape(pc["label"])}, {html.escape(pc["seen"])}. Line the board\'s corner up with the bottom-left '
             f'corner, then trace.</text></svg>')
+
+
+def _svg_marks(pc: dict, fmt) -> str:
+    """The marks, for the projector: dashed bevel and dado lines, mortise outlines, screw crosshairs (CALI-177)."""
+    out = "".join(f'<polyline points="{fmt([a, b])}" fill="none" stroke="white" stroke-width="0.8" stroke-dasharray="4 3"/>'
+                  for a, b in pc.get("back") or [])
+    for c in pc.get("cuts") or []:
+        dash = "" if c["kind"] in ("mortise", "notch") else ' stroke-dasharray="4 3"'
+        out += f'<polygon points="{fmt(c["poly"])}" fill="none" stroke="white" stroke-width="1.2"{dash}/>'
+    for sc in pc.get("screws") or []:
+        for x, y in sc["at"]:
+            out += (f'<polyline points="{fmt([(x - 5, y), (x + 5, y)])}" stroke="white" stroke-width="0.8"/>'
+                    f'<polyline points="{fmt([(x, y - 5), (x, y + 5)])}" stroke="white" stroke-width="0.8"/>')
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -365,7 +522,10 @@ def make(store: DesignStore, part_id: str, out_dir: Optional[str] = None) -> dic
         with open(os.path.join(root, svg), "w") as f:
             f.write(project_svg(pc))
         listed.append({"name": pc["name"], "label": pc["label"], "size_in": [round(v / IN, 3) for v in pc["size"]],
-                       "holes": len(pc["holes"]), "pages": cols * rows, "project": svg, "thumb": thumb})
+                       "holes": len(pc["holes"]), "pages": cols * rows, "project": svg, "thumb": thumb,
+                       "bevels": [b["angle"] for b in pc.get("bevels") or []],
+                       "cuts": [c["kind"] for c in pc.get("cuts") or []],
+                       "screws": sum(len(s["at"]) for s in pc.get("screws") or [])})
         files += [thumb, svg]
     measure[0].save(os.path.join(root, "measure-and-mark.pdf"), save_all=True, append_images=measure[1:],
                     resolution=DPI)
@@ -387,7 +547,8 @@ def index_html(design: str, part_id: str, listed: list[dict], pages: int) -> str
     e = html.escape
     rows = "".join(f"<tr><td><img src='{e(p['thumb'])}' width='220'></td><td><b>{e(p['name'])}</b><br>{e(p['label'])}"
                    f"<br>{p['size_in'][0]:g} × {p['size_in'][1]:g} in · {p['holes']} hole(s) · {p['pages']} page(s) full size"
-                   f"<br><a href='{e(p['project'])}'>project and trace</a></td></tr>" for p in listed)
+                   + "".join(f" · {e(x)}" for x in _marks_said(p))
+                   + f"<br><a href='{e(p['project'])}'>project and trace</a></td></tr>" for p in listed)
     return (f"<!doctype html><meta charset='utf-8'><title>Patterns: {e(part_id)}</title>"
             f"<style>body{{font-family:system-ui,sans-serif;max-width:860px;margin:24px auto;color:#222}}"
             f"td{{padding:8px;vertical-align:top;border-bottom:1px solid #ddd}}</style>"
@@ -397,6 +558,21 @@ def index_html(design: str, part_id: str, listed: list[dict], pages: int) -> str
             f"{pages} letter pages; print at 100% and check the ruler.<br><b>Project and trace</b>: open a piece's "
             f"pattern full screen on a projector, zoom until the yellow square is 4 in, and trace.</p>"
             f"<table>{rows}</table>")
+
+
+def _marks_said(p: dict) -> list[str]:
+    """A piece's marks, counted for the index (CALI-177)."""
+    out = []
+    for a in sorted(set(p.get("bevels") or [])):
+        n = (p.get("bevels") or []).count(a)
+        out.append(f"{n} edge{'s' if n != 1 else ''} bevelled {a:g}°")
+    for kind in ("mortise", "notch", "dado", "rabbet"):
+        n = (p.get("cuts") or []).count(kind)
+        if n:
+            out.append(f"{n} {kind}{'s' if n != 1 else ''}")
+    if p.get("screws"):
+        out.append(f"{p['screws']} screw hole{'s' if p['screws'] != 1 else ''}")
+    return out
 
 
 def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
