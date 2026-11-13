@@ -3043,6 +3043,11 @@ function lightenChanged(run, p) {
   return `Lightened v${run.version}, and you've changed it since (v${p.version}). ${lightenBlocked(p) ? `${esc(lightenBlocked(p))}.`
     : 'Lighten it again.'} Or look at v${run.version}'s steps below: they can't be cut into v${p.version}.`;   // (#272 re-check)
 }
+// what the Lighten panel leads with where the check couldn't see (or size) only the printed pieces Lighten leaves out (#276)
+function lightenLeadLine(p) {
+  const lead = p && p.blocked && p.blocked.lead;
+  return lead ? `<div class="small" style="color:var(--amber);margin:2px 0 4px">${esc(lead)}</div>` : '';
+}
 function lightenView(p) {
   const run = lightenRuns(p.id)[0];
   const on = S.station && run && S.station.run === run.id ? S.station.index : -1;
@@ -3054,6 +3059,7 @@ function lightenView(p) {
     : x.phase === 'top' ? `${pct(x.removed)} of the walls + ${x.top_holes} hole${x.top_holes === 1 ? '' : 's'} in the top`
     : x.index ? `${pct(x.removed)} of the walls` : 'as it is';
   return `<h5 style="margin:14px 0 4px">Make it lighter</h5>
+    ${lightenLeadLine(p)}
     <div class="muted small">Down until the safety runs out: holes in the walls where the wood isn't working (a jigsaw cuts
       them, a solid rim where it's glued and screwed), then hole-saw holes in the panel you stand on, one at a time,
       then thinner sheet. Every step is checked again.</div>
