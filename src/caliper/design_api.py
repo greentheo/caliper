@@ -773,7 +773,8 @@ def router():
                     else params.set_value(store, pid, req.name, req.value, req.unit)
             except (ValueError, KeyError) as e:
                 raise HTTPException(422, str(e).strip("'\""))
-            return {"version": got["version"], "said": got["said"], "warning": got["warning"], "notes": got["notes"],
+            return {"version": got["version"], "said": got["said"], "followed": got.get("followed") or "",   # (#271 review)
+                    "warning": got["warning"], "notes": got["notes"],
                     "design": design_state(store)}
 
     @r.post("/api/designs/{slug}/parts/{pid}/unmirror")

@@ -893,6 +893,11 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     reply = _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb="revised",
                      asked=message, prior=prior, new=script,
                      volumes=(was, _volume(store, part_id)))
+    from . import follows
+
+    followed = follows.said(store)                  # the parts that read its numbers moved with them, said (#266)
+    if followed:
+        reply += "\n\n" + followed[:1].upper() + followed[1:] + "."
     if uncarved:
         reply += "\n\n" + carve.DROPPED
     on_pick = None
@@ -1037,9 +1042,11 @@ def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = 
 def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, client=None,
                 max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
                 use_llm: bool = True, drafter=None, promote_feedback: bool = True,
-                interfaces=None, repair_only=None, pick: Optional[dict] = None, on: Optional[str] = None) -> TurnResult:
+                interfaces=None, repair_only=None, pick: Optional[dict] = None, on: Optional[str] = None,
+                asked: str = "") -> TurnResult:
     """Author a brand-new part into the design, then measure the design with it in place. ``pick``, an edge picked on the
-    part ``on``: the new part must touch it, measured each round (CALI-171, #266)."""
+    part ``on``: the new part must touch it, measured each round (CALI-171, #266); "and the opposite edge" in what was
+    ``asked`` makes a mirror of it on the twin edge."""
     from . import authoring
 
     events = events if events is not None else []
@@ -1047,7 +1054,15 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     seat, unusable = _picked_edge(store, on, pick)
     if seat is not None:                         # the pick is a requirement, told and measured (#266)
         interfaces = _also(interfaces, lambda g, script: _on_the_pick(g, seat, store))
-    spec = _working_spec(store, part_id, intent + (_seat_words(seat) if seat else ""))
+    both = seat is not None and bool(_BOTH_EDGES.search(f"{asked} {intent}"))
+    from . import follows
+
+    if on and on != part_id and store.design.part(on):   # what it's added on: its numbers, read live, never copied (#266)
+        interfaces = _also(interfaces, lambda g, script: [follows.check(script, follows.sources_of(store, script, on),
+                                                                        part_id, on)])
+    spec = _working_spec(store, part_id, intent + (follows.told(store, on) if on and on != part_id else "")
+                         + (_seat_words(seat) if seat else "")
+                         + ("\n\nMake it for the picked edge only: the opposite one is made as its mirror." if both else ""))
 
     _emit(events, on_event, "authoring", f"authoring {part_id}…", part=part_id)
 
@@ -1093,11 +1108,57 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     miss = (_seat_miss(res.geometry, seat, part_id, store) if seat is not None
             else f"Built {part_id}, but I couldn't place it against your pick: {unusable}" if unusable   # said first (#269)
             else _drafted_miss(proposal, part_id))
+    twin, other = None, None
+    if seat is not None and miss is None and _TWO_EDGES.search(f"{asked} {intent}") and not both:   # (#270 review)
+        miss = (f"Built {part_id} on the edge you picked, but I have one edge picked: pick the other one too, or say "
+                f"\"the opposite edge\".")
+    if both and miss is None:                    # "and the opposite edge": its mirror, on the twin edge (#266)
+        twins = _opposite_edges(store, seat)
+        if not twins:
+            miss = (f"Built {part_id} on the edge you picked, but I found no edge on {seat['part']} opposite it, so there's "
+                    f"one strip.")
+        elif len(twins) > 1:                     # twins on two axes: asked, never guessed (#270 review)
+            ways = [f"across {'xyz'[t['axis']]}, the line from {_pt(t['points'][0])} to {_pt(t['points'][-1])}" for t in twins]
+            miss = (f"Built {part_id} on the edge you picked, but it has an opposite edge {ways[0]}, and one "
+                    + ", and one ".join(w.replace("an opposite edge ", "") for w in ways[1:]) + ": say which.")
+        else:
+            from . import mirror
+
+            twin = twins[0]
+            other = f"{part_id}_opposite"
+            mirror.make(store, other, part_id, twin["plane"], twin["at"], feedback=f"the opposite edge's {part_id}")
+            gap = _seat_gap(store.part_geometry(other), twin)
+            depth = _into(store.part_geometry(other), store, seat["part"])   # from outside, as the first (#269)
+            if depth is None:
+                miss = (f"Built {part_id} and its mirror {other}, but I couldn't measure whether {other} goes into "
+                        f"{seat['part']}, so it isn't known to sit on it.")
+            elif depth > INTO_MM:
+                miss = f"Built {part_id} and its mirror {other}, but {other} goes {round(depth, 1):g} mm into {seat['part']}."
+            elif gap > SEAT_MM:
+                miss = f"Built {part_id} and its mirror {other}, but {other} sits {round(gap, 2):g} mm off the opposite edge."
+            after, part_errors = _measure_design(store)
+            broke, fixed = _delta(before, after)            # with the mirror in: what it breaks counts too (#270 review)
+            if broke and after is not None:
+                reply += "\n\nWith " + other + " in, the design's checks: " + after.said() + "."
+    from . import review
+
+    try:                                         # #238's findings after any added part, not only a plan's build (#266)
+        found = review.findings(store, after)
+    except Exception as e:  # noqa: BLE001 — the part stands; only the look at it is lost, and said
+        found = {"findings": [], "checks": 0, "unmeasured": [f"the design's findings ({scrubbed(e)})"], "notes": []}
+    reply += "\n\n" + review.said(found)
+    mine = [f for f in found["findings"] if part_id in (f.get("parts") or [])]
+    if miss is None and mine:                    # measured wrong with it: no ✓ over that (rule 6)
+        miss = (f"Built {part_id}, but the checks after it found {len(mine)} thing{'s' if len(mine) != 1 else ''} to fix "
+                f"with it: " + "; ".join(f["said"] for f in mine) + ".")
     if seat is not None and miss is None:
-        reply = reply.replace("\n", f"\nIt sits on the edge you picked on {seat['part']}.\n", 1)
+        reply = reply.replace("\n", f"\nIt sits on the edge you picked on {seat['part']}"
+                              + (f", and its mirror {other} sits on the opposite edge, {_edge_said(store, seat, twin)}"
+                                 if other else "") + ".\n", 1)
     if miss is not None:
-        mark = "!" if "couldn't place it" in miss else "\u2717"      # not known to be wrong: not a cross
-        reply = f"{mark} {miss}\n\n" + reply.replace("\u2713 ", "", 1).replace("Every check on this part passes.\n", "")
+        # half of what was asked, a pick it couldn't use, or what couldn't be measured: not known to be wrong, so not a cross
+        mark = "!" if any(w in miss for w in _NOT_WRONG) else "\u2717"
+        reply = f"{mark} {miss}\n\n" + re.sub(r"(?m)^Every check on this part passes\.\n?", "", reply.replace("\u2713 ", "", 1))
         return TurnResult(action="author", ok=False, part=part_id, version=version,
                           part_report=res.report, report=after, broke=broke, fixed=fixed,
                           part_errors=part_errors, proposal=proposal, events=events, reply=reply)
@@ -1134,16 +1195,34 @@ def _picked_edge(store: DesignStore, on: Optional[str], pick: Optional[dict]) ->
     return {"part": on, "points": [[float(c) for c in p] for p in edge["points"]], "said": pick.get("said") or "the edge"}, None
 
 
-def _into(geometry, store: DesignStore, on: str) -> float:
-    """How deep the new part goes into ``on`` as it's placed, in mm (0 where it's outside it)."""
-    from . import measure
+#: What leads a reply with "!", not a cross: half of what was asked, a pick it couldn't use, what couldn't be measured.
+_NOT_WRONG = (" found no edge ", "couldn't place it", "couldn't measure", "I have one edge picked", ": say which.",
+              "the checks after it")
 
-    placed = next((p for p in store.assembly.parts if p.id == on), None)
-    mesh = store.part_geometry(on).require_mesh()
-    if placed is not None and (any(placed.position or ()) or any(placed.rotation or ())):
-        mesh = mesh.copy()
-        mesh.apply_transform(measure.pose_matrix(placed.position, placed.rotation))
-    return float(measure._penetration_depth(geometry.require_mesh(), mesh))
+
+def _into(geometry, store: DesignStore, on: str) -> Optional[float]:
+    """How deep the new part goes into ``on`` as it's placed, in mm (0 where it's outside it); None where it couldn't be
+    measured (#270 review: ``measure._penetration_depth`` takes an error as 0, which would read as outside, a pass)."""
+    import numpy as np
+
+    from . import measure, spatial
+
+    try:
+        placed = next((p for p in store.assembly.parts if p.id == on), None)
+        mesh = store.part_geometry(on).require_mesh()
+        if placed is not None and (any(placed.position or ()) or any(placed.rotation or ())):
+            mesh = mesh.copy()
+            mesh.apply_transform(measure.pose_matrix(placed.position, placed.rotation))
+        mine, depth = geometry.require_mesh(), 0.0
+        for first, second, seed in ((mine, mesh, 1), (mesh, mine, 2)):
+            pts = measure._sample(first, measure._FIT_SAMPLES, seed=seed)
+            inside = spatial.contains(second, pts)
+            if inside.any():
+                _, dist, _ = spatial.on_surface(second, pts[inside])
+                depth = max(depth, float(np.max(dist)))
+        return depth
+    except Exception:  # noqa: BLE001 — said as not measured, never as outside
+        return None
 
 
 def _pt(p) -> str:
@@ -1186,6 +1265,10 @@ def _on_the_pick(geometry, seat: dict, store: Optional[DesignStore] = None) -> l
                                                  f"that edge"))]
     if store is not None:
         depth = _into(geometry, store, seat["part"])
+        if depth is None:                         # not measured: waits, never a pass (#270 review)
+            out.append(AssertionResult(id="outside_the_pick", expr=f"doesn't go into {seat['part']}", status="deferred",
+                                       passed=None, detail=f"couldn't measure whether it goes into {seat['part']}"))
+            return out
         clear = depth <= INTO_MM
         out.append(AssertionResult(id="outside_the_pick", expr=f"doesn't go into {seat['part']}",
                                    status="pass" if clear else "fail", passed=clear, actual=round(depth, 2),
@@ -1193,6 +1276,70 @@ def _on_the_pick(geometry, seat: dict, store: Optional[DesignStore] = None) -> l
                                    detail="" if clear else f"it goes {round(depth, 1):g} mm into {seat['part']}: it should sit "
                                                            f"on it, against its faces, not in them"))
     return out
+
+
+#: "this edge and the opposite edge", "the other side's edge", "both corners", "its twin" (#266): edge or corner wording only,
+#: never words about the strip itself ("rounded on both sides", "sand the other side", #270 review).
+_BOTH_EDGES = re.compile(r"\b(?:the |its )?(?:opposite|other)(?: side's)? (?:edge|corner)s?\b|\bboth (?:edges|corners)\b|"
+                         r"\bits (?:twin|mirrored? edge)\b", re.I)
+#: Two edges asked for by pointing ("this edge and this edge", "these two edges"), where one pick is all a turn carries.
+_TWO_EDGES = re.compile(r"\bthis (?:edge|corner) and (?:this|that)\b|\bthese (?:two|2) (?:edges|corners)\b|\bboth of these\b", re.I)
+
+
+def _edge_said(store: DesignStore, seat: dict, twin: dict) -> str:
+    """Which edge the mirror went to, as a person finds it: the piece of the host it's on that the picked one isn't ("the right
+    side's inside corner"), else its line (#270 review)."""
+    import numpy as np
+
+    line = f"the line from {_pt(twin['points'][0])} to {_pt(twin['points'][-1])}"
+    try:
+        from . import construction as C
+        from .consistency import _sides, shapes, slab_distance
+
+        pieces = [pc for pc in shapes(C.declared(store, seat["part"])) if pc["kind"] == "sheet"]
+        _sides(store.part_geometry(seat["part"]).require_mesh(), pieces)      # which way each sheet's thickness goes
+
+        def on(points):
+            mid = np.asarray(points, float).mean(axis=0)[None, :]
+            return {pc["name"] for pc in pieces
+                    if min(float(slab_distance(mid, op, pc["thickness"], sd)[0]) for op, sd in zip(pc["polys"], pc["sides"]))
+                    <= SEAT_MM}
+        only = on(twin["points"]) - on(seat["points"])
+    except Exception:  # noqa: BLE001 — a host without pieces: its line
+        return line
+    if len(only) != 1:
+        return line
+    corner = twin.get("corner")
+    return f"the {next(iter(only))}'s {f'{corner} corner' if corner else 'edge'}"
+
+
+def _opposite_edges(store: DesignStore, seat: dict) -> list[dict]:
+    """The edges opposite the picked one on its part: the picked edge flipped across the part's middle on each axis, where
+    that lands on an edge of the part (within ``SEAT_MM``). More than one is asked about, never guessed (#270 review).
+    Each ``{"part", "points", "said", "plane", "at", "axis", "corner"}``."""
+    import numpy as np
+
+    feats = _features_of(store, seat["part"])
+    if not feats:
+        return []
+    lo, hi = store.part_geometry(seat["part"]).require_mesh().bounds
+    pts = np.asarray(seat["points"], float)
+    mid, half = (lo + hi) / 2.0, np.maximum((hi - lo) / 2.0, 1e-9)
+    found = []
+    for k in sorted(range(3), key=lambda i: -abs(pts.mean(axis=0)[i] - mid[i]) / half[i]):
+        flipped = pts.copy()
+        flipped[:, k] = 2 * mid[k] - flipped[:, k]
+        if np.allclose(flipped, pts, atol=SEAT_MM) or np.allclose(flipped, pts[::-1], atol=SEAT_MM):
+            continue                                       # in the middle on this axis: its own mirror
+        for e in feats.get("edges") or []:
+            q = np.asarray(e.get("points") or [], float)
+            if q.shape == flipped.shape and (np.allclose(q, flipped, atol=SEAT_MM) or np.allclose(q[::-1], flipped, atol=SEAT_MM)):
+                at = [0.0, 0.0, 0.0]
+                at[k] = float(mid[k])
+                found.append({"part": seat["part"], "points": flipped.tolist(), "said": "the opposite edge", "axis": k,
+                              "plane": {0: "YZ", 1: "XZ", 2: "XY"}[k], "at": tuple(at), "corner": e.get("corner")})
+                break
+    return found
 
 
 def _also(interfaces, more):
@@ -1207,6 +1354,8 @@ def _seat_miss(geometry, seat: dict, part_id: str, store: Optional[DesignStore] 
     if geometry is None:
         return None
     depth = _into(geometry, store, seat["part"]) if store is not None else 0.0
+    if depth is None:
+        return f"Built {part_id}, but I couldn't measure whether it goes into {seat['part']}, so it isn't known to sit on it."
     if depth > INTO_MM:
         return f"Built {part_id}, but it goes {round(depth, 1):g} mm into {seat['part']}: it should sit on it."
     gap = _seat_gap(geometry, seat)
@@ -2223,7 +2372,8 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         result = author_part(store, intent.part, intent.intent or message, author=author,
                              client=client, max_rounds=max_rounds, events=events, on_event=on_event,
                              use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback,
-                             pick=pick, on=(pick or {}).get("part") or scope)   # the pick is a requirement (#266)
+                             pick=pick, on=(pick or {}).get("part") or scope,   # the pick is a requirement (#266)
+                             asked=message)
     else:
         result = answer(store, message, scope=scope or intent.part, note=intent.note, events=events,
                         use_llm=use_llm, client=client)
