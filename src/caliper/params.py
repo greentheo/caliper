@@ -247,6 +247,11 @@ def set_values(store: DesignStore, pid: str, changes: list[dict]) -> dict:
     version = store.write_part(pid, new, action="params", feedback=said,
                                extra={"params": {n: [entries[n]["value"], round(mm, 3)] for n, mm in values.items()}},
                                built=(new, {}, built.geometry))      # its trial build is this version's (#97)
+    from . import follows
+
+    followed = follows.said(store)                   # the parts that read these numbers moved with them (#266)
+    if followed:
+        said = f"{said}; {followed}"
     after = _shape(store.part_geometry(pid))
     report, errors = store.evaluate(tolerant=True)
     moved = before is None or after != before
@@ -259,7 +264,7 @@ def set_values(store: DesignStore, pid: str, changes: list[dict]) -> dict:
     if load_study.list_runs(store, pid):           # its strength check is of the older shape now (#147 review)
         label = getattr(store.design.part(pid), "label", None)
         notes.append(f"strength: check {'the ' + label if label else 'this part'} again")
-    return {"version": version, "said": said, "value": round(got[-1][1], 3), "notes": notes, "moved": moved,
+    return {"version": version, "said": said, "followed": followed, "value": round(got[-1][1], 3), "notes": notes, "moved": moved,
             "read": all(entries[n]["read"] for n in values), "report": report, "failed": errors or {},
             "warning": _ignored(entries, values, got, moved)}
 

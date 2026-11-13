@@ -893,6 +893,11 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     reply = _compose(store, part_id, version, res, after, broke, fixed, part_errors, verb="revised",
                      asked=message, prior=prior, new=script,
                      volumes=(was, _volume(store, part_id)))
+    from . import follows
+
+    followed = follows.said(store)                  # the parts that read its numbers moved with them, said (#266)
+    if followed:
+        reply += "\n\n" + followed[:1].upper() + followed[1:] + "."
     if uncarved:
         reply += "\n\n" + carve.DROPPED
     on_pick = None
@@ -1050,7 +1055,13 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     if seat is not None:                         # the pick is a requirement, told and measured (#266)
         interfaces = _also(interfaces, lambda g, script: _on_the_pick(g, seat, store))
     both = seat is not None and bool(_BOTH_EDGES.search(f"{asked} {intent}"))
-    spec = _working_spec(store, part_id, intent + (_seat_words(seat) if seat else "")
+    from . import follows
+
+    if on and on != part_id and store.design.part(on):   # what it's added on: its numbers, read live, never copied (#266)
+        interfaces = _also(interfaces, lambda g, script: [follows.check(script, follows.sources_of(store, script, on),
+                                                                        part_id, on)])
+    spec = _working_spec(store, part_id, intent + (follows.told(store, on) if on and on != part_id else "")
+                         + (_seat_words(seat) if seat else "")
                          + ("\n\nMake it for the picked edge only: the opposite one is made as its mirror." if both else ""))
 
     _emit(events, on_event, "authoring", f"authoring {part_id}…", part=part_id)
@@ -1129,6 +1140,17 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
             broke, fixed = _delta(before, after)            # with the mirror in: what it breaks counts too (#270 review)
             if broke and after is not None:
                 reply += "\n\nWith " + other + " in, the design's checks: " + after.said() + "."
+    from . import review
+
+    try:                                         # #238's findings after any added part, not only a plan's build (#266)
+        found = review.findings(store, after)
+    except Exception as e:  # noqa: BLE001 — the part stands; only the look at it is lost, and said
+        found = {"findings": [], "checks": 0, "unmeasured": [f"the design's findings ({scrubbed(e)})"], "notes": []}
+    reply += "\n\n" + review.said(found)
+    mine = [f for f in found["findings"] if part_id in (f.get("parts") or [])]
+    if miss is None and mine:                    # measured wrong with it: no ✓ over that (rule 6)
+        miss = (f"Built {part_id}, but the checks after it found {len(mine)} thing{'s' if len(mine) != 1 else ''} to fix "
+                f"with it: " + "; ".join(f["said"] for f in mine) + ".")
     if seat is not None and miss is None:
         reply = reply.replace("\n", f"\nIt sits on the edge you picked on {seat['part']}"
                               + (f", and its mirror {other} sits on the opposite edge, {_edge_said(store, seat, twin)}"
@@ -1174,7 +1196,8 @@ def _picked_edge(store: DesignStore, on: Optional[str], pick: Optional[dict]) ->
 
 
 #: What leads a reply with "!", not a cross: half of what was asked, a pick it couldn't use, what couldn't be measured.
-_NOT_WRONG = (" found no edge ", "couldn't place it", "couldn't measure", "I have one edge picked", ": say which.")
+_NOT_WRONG = (" found no edge ", "couldn't place it", "couldn't measure", "I have one edge picked", ": say which.",
+              "the checks after it")
 
 
 def _into(geometry, store: DesignStore, on: str) -> Optional[float]:
