@@ -94,6 +94,17 @@ def panels(ctx: dict, stood_on: bool = False) -> list[dict]:
             rel = np.asarray(pic, float) - o
             ring = np.stack([rel @ u, rel @ v], axis=1)
             rim |= (_inside2d(g, ring) | (_edge_dist2d(g, ring) < MIN_WEB_MM)).reshape(shape)
+        joints = _contacts(pc, ctx["pieces"], o, u, v, n * side, t, g, s, ctx["tol"]).reshape(shape) & inside
+        keep_out = None
+        if joints.any():                          # a piece meeting it inside its outline: a rim round that too (#268)
+            from scipy.spatial import cKDTree
+            from shapely.geometry import box
+            from shapely.ops import unary_union
+
+            near, _ = cKDTree(g[joints.reshape(-1)]).query(g, distance_upper_bound=RIM_MM)
+            rim |= (near < RIM_MM).reshape(shape)
+            keep_out = unary_union([box(x - s / 2, y - s / 2, x + s / 2, y + s / 2)
+                                    for x, y in g[joints.reshape(-1)]]).buffer(RIM_MM, join_style=2)
         rel = centres - o
         w = (rel @ n) * side
         uv = np.stack([rel @ u, rel @ v], axis=1)
@@ -103,8 +114,34 @@ def panels(ctx: dict, stood_on: bool = False) -> list[dict]:
         if not mine.any():
             continue
         out.append({"name": pc["name"], "o": o, "u": u, "v": v, "n": n * side, "t": t, "lo": lo,
-                    "flat": flat, "shape": tuple(shape), "inside": inside, "free": inside & ~rim,
+                    "flat": flat, "shape": tuple(shape), "inside": inside, "free": inside & ~rim, "keep_out": keep_out,
+                    "joints": joints,
                     "voxels": idx[mine], "cells": cell[mine], "material": pc.get("material")})
+    return out
+
+
+def _contacts(pc: dict, pieces: list, o, u, v, n, t: float, g: np.ndarray, s: float, tol: float) -> np.ndarray:
+    """Which of a panel's cells another piece meets (#268): a piece passing through it (a stringer's mortise), set into it,
+    or touching a face (a cleat, a rail): each crosses or touches a face, so each cell is probed just past each face. One
+    within a tolerance and most of a cell of another piece is a joint, so the cells cover the whole zone (the safe side)."""
+    from .consistency import segment_distance, slab_distance
+
+    flat_pts = o + g[:, :1] * u + g[:, 1:] * v
+    probes = [flat_pts + n * w for w in (-tol, t + tol)]
+    reach = tol + 0.75 * s
+    out = np.zeros(len(g), dtype=bool)
+    for other in pieces:
+        if other is pc:
+            continue
+        for pr in probes:
+            if other["kind"] == "sheet":
+                d = np.min([slab_distance(pr, op, other["thickness"], sd) for op, sd in zip(other["polys"], other["sides"])],
+                           axis=0)
+            elif other.get("a") is not None:
+                d = segment_distance(pr, other["a"], other["b"]) - other.get("half", 0.0)
+            else:
+                continue
+            out |= d <= reach
     return out
 
 
@@ -142,8 +179,11 @@ def clean(p: dict, want: np.ndarray, s: float):
     rem &= ~ndimage.binary_dilation(thin, structure=_disk(MIN_WEB_MM / 2 / s))
     rem = ndimage.binary_opening(rem, structure=_disk(MIN_HOLE_MM / 2 / s))
     polys = []
-    # inside the rim, always: a hole that crept into it would cut into a glued joint
+    # inside the rim, always: a hole that crept into it would cut into a glued joint, round its edge or where another piece
+    # meets it (#268)
     room = Polygon(p["flat"]).buffer(-RIM_MM, join_style=2)
+    if p.get("keep_out") is not None:
+        room = room.difference(p["keep_out"])
     R = ROUND_MM
     for c in measure.find_contours(np.pad(rem.astype(float), 1), 0.5):
         pts = (c - 1 + 0.5) * s + p["lo"]                 # back to the panel's (u, v), in mm
@@ -179,6 +219,8 @@ def sites(p: dict, s: float) -> list[dict]:
 
     r = HOLE_SAW_MM / 2
     room = Polygon(p["flat"]).buffer(-(RIM_MM + r), join_style=2)
+    if p.get("keep_out") is not None:                     # nor over a joint (#268)
+        room = room.difference(p["keep_out"].buffer(r))
     if room.is_empty:
         return []
     pitch = HOLE_SAW_MM + MIN_WEB_MM
@@ -340,6 +382,87 @@ def step_case(c: dict) -> dict:
             "in": (c.get("fea") or {}).get("in"), **({"buckling": walls} if walls else {})}
 
 
+def narrowest(p: dict, polys: list, down: np.ndarray, step: float = 2.0) -> Optional[float]:
+    """The narrowest strip of wood left across a panel, square to the load, in mm (#268): every line across it, the panel's
+    width there less the holes on it. None where the load runs square to the panel, so there's no line across it."""
+    from shapely.geometry import LineString, Polygon
+    from shapely.ops import unary_union
+
+    d = np.array([float(down @ p["u"]), float(down @ p["v"])])
+    if np.linalg.norm(d) < 1e-9:                     # square to it: a buckling row is only made for a load in its plane
+        return None
+    d /= np.linalg.norm(d)
+    e = np.array([-d[1], d[0]])
+    panel, cut = Polygon(p["flat"]), unary_union(polys)
+    along, across = p["flat"] @ d, p["flat"] @ e
+    reach = float(across.max() - across.min()) + 1.0
+    best = None
+    for at in np.arange(along.min() + step / 2, along.max(), step):
+        mid = d * at + e * (across.min() + across.max()) / 2
+        line = LineString([mid - e * reach, mid + e * reach])
+        left = line.intersection(panel).difference(cut).length
+        best = left if best is None else min(best, left)
+    return best
+
+
+def holed_buckling(case: dict, plist: list[dict], holes: dict, load: dict, min_safety: float) -> dict:
+    """A step's buckling rows with its holes in (#268: each step said it "doesn't check buckling", and a wall with its middle
+    cut out is where buckling matters most). A holed wall is taken at its narrowest strip of wood, square to the load, over
+    that whole width (the safe side of splitting it into the strips either side of a hole):
+
+    - where the solid wall had a held side, the strip is held on that side and free at the hole: Timoshenko's
+      one-held-one-free plate, ``k = 0.425 + (b/a)²`` (the foreman's call on #268: on test_lighten's box stool, each side
+      wall taking half the load, that's 32.53× where a free column would read 3.07× and the solid wall 89.47×);
+    - with no held side, a column, braced or swaying as its row says.
+
+    The row says which (``model``). One whose strip can't be found isn't checked, and says so. The case's safety and what
+    governs follow. NEEDS ENGINEER CHECK (#42): the held side round a hole, the strip over the whole remaining width, and the
+    edge conditions the solid check takes."""
+    from . import buckling as B
+
+    rows, changed = [], False
+    by = {p["name"]: p for p in plist}
+    down = np.asarray(load["force"], float)
+    for r in case.get("buckling") or []:
+        p, cut = by.get(r["piece"]), holes.get(r["piece"]) or []
+        if not r.get("done") or p is None or not cut:
+            rows.append(r)
+            continue
+        changed = True
+        left = narrowest(p, cut, down)
+        if left is None or left <= 0:
+            rows.append({k: r[k] for k in ("piece", "load_n", "down") if k in r} | {
+                "done": False, "holed": True, "why": "not checked: it has holes, and its narrowest strip across the load "
+                                                     "can't be found"})
+            continue
+        held = min(int(r.get("edges_held") or 0), 1)          # a held side stays held; the hole's side is free
+        braced = {"braced": True} if r.get("braced_by") and not held else {}
+        sigma = B.critical_stress(r["E_mpa"], r["thickness_mm"], r["height_mm"], left, held, **braced)
+        p_cr = sigma * left * r["thickness_mm"]
+        model = ("the strip beside the hole, held on one side" if held else
+                 f"a column of the strip beside the hole, {'braced at its top' if braced else 'its top free to sway'}")
+        rows.append({**r, "holed": True, "narrowest_mm": round(left, 1), "edges_held": held, "model": model,
+                     "sigma_cr_mpa": round(sigma, 3),
+                     "p_cr_n": round(p_cr, 1), "safety": V.cut(min(r["safety"], p_cr / r["load_n"]))})
+    if not changed:
+        return case
+    case = {**case, "buckling": rows}
+    weakest = min((r for r in rows if r.get("done")), key=lambda r: r["safety"], default=None)
+    governs, safety = case.get("governs"), case.get("safety")
+    if governs == "buckling":                  # a holed row only reads lower: the weakest wall still governs, if one's checked
+        if weakest is not None:
+            safety = weakest["safety"]
+        else:                                  # none checked now: what it took over from, by its own number
+            governs = case.get("over") or "fea"
+            safety = ((case.get("plate") or {}).get("safety_across") if governs == "plate"
+                      else (case.get("fea") or {}).get("safety"))
+    elif weakest is not None and (safety is None or weakest["safety"] < safety):
+        case["over"], governs, safety = governs, "buckling", weakest["safety"]
+    case.update({"safety": safety, "governs": governs, "holds": bool(safety is not None and safety >= min_safety),  # producer
+                 "breaks_lb": V.cut_lb(case["lb"] * case["factor"] * safety) if safety and case.get("lb") else case.get("breaks_lb")})
+    return case
+
+
 def estimate_numbers(raw: float, min_safety: float) -> dict:
     """A thinner sheet's estimate: kept cut toward safe and judged as kept (CALI-152, #214 review)."""
     safety = V.cut(raw)
@@ -495,6 +618,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
         cases, results = [], []
         for i in range(len(ctx["loads"])):
             case, r = L.check_load(ctx, i, min_safety, cut)
+            case = holed_buckling(case, plist + tops, holes, ctx["loads"][i], min_safety)   # its walls' holes in (#268)
             if r.supported:
                 if phase == "walls":                     # the part the top's holes go into: the latest walls
                     vm0[i] = r.von_mises
@@ -573,8 +697,10 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
             "Then thinner sheet, as an estimate from the lightest step that holds with the panel stood on still "
             "solid: that panel by the plate check at that thickness, the walls by their FEA scaled with the "
             "thickness. Use it to rebuild it in that sheet, and the strength check runs on the real thing.",
-            "Every step is the FEA of the part with its holes in, on the voxel grid. It takes the joints as solid "
-            "wood and doesn't check buckling, which these short, thick strips are far from. Once you cut a step "
+            "Every step is the FEA of the part with its holes in, on the voxel grid, taking the joints as solid wood, "
+            "and the hand buckling check of each wall the load runs down: a wall with holes as a column of its "
+            "narrowest strip of wood across the load, the safe side, or \"not checked\" where that can't be found. "
+            "No hole comes within 1.5 in of where another piece meets a panel. Once you cut a step "
             "in, the strength check runs again on the part as rebuilt, and that's the number to go by: a hole's "
             "edge is sensitive to where the grid falls, so it can read lower than its step did.",
         ],

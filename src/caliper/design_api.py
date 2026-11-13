@@ -325,7 +325,8 @@ def _running(slug: str) -> list[dict]:
             continue
         said = j.since(0)
         words = [ev["text"] for ev in said if ev.get("text") and ev.get("kind") != "started"]
-        out.append({"job": j.id, "kind": j.kind, "part": j.meta.get("part"), "text": words[-1] if words else "",
+        out.append({"job": j.id, "kind": j.kind, "part": j.meta.get("part"), "version": j.meta.get("version"),
+                    "text": words[-1] if words else "",
                     "waiting": bool(said and said[-1].get("kind") == "waiting"), "stopping": j.stopping,
                     "elapsed_s": round(time.time() - j.started) if j.started else 0})
     return out
@@ -931,7 +932,8 @@ def router():
 
         try:
             job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}",
-                                meta={"slug": slug, "part": req.part}, only=f"load:{slug}:{req.part}")
+                                meta={"slug": slug, "part": req.part, "version": store.design.part(req.part).version},
+                                only=f"load:{slug}:{req.part}")
         except Busy:
             raise HTTPException(status_code=409, detail="A strength check of this part is already running.")
         return {"job_id": job.id}
@@ -1180,7 +1182,8 @@ def router():
 
         try:
             job = RUNNER.submit("lighten", work, label=f"lighten · {req.part}", lock=f"load:{slug}",
-                                meta={"slug": slug, "part": req.part}, only=f"lighten:{slug}:{req.part}")
+                                meta={"slug": slug, "part": req.part, "version": store.design.part(req.part).version},
+                                only=f"lighten:{slug}:{req.part}")   # the version it's of: a change under it is said (#268)
         except Busy:
             raise HTTPException(status_code=409, detail="A Lighten of this part is already running.")
         return {"job_id": job.id}
