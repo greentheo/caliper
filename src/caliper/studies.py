@@ -130,6 +130,11 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
             elif any(x.get("coarse") for x in v["cases"]):
                 what += ", and the fail may be the model's: the voxels can't see its walls"
             return f"doesn't hold — weakest {what} (needs {r.get('min_safety', 2):g}x)", False
+        if v.get("joints"):                     # its joints said, not "close to the line"; green only as JOINT_CAP lets it (#265)
+            from .answers import joint_said
+
+            return (f"holds, joints not checked — weakest {what}; {joint_said(v['brace'], r.get('min_safety'))}"
+                    f" (needs {r.get('min_safety', 2):g}x)"), (True if v["kind"] == "holds" else None)
         if v["kind"] == "holds":
             return f"holds — weakest {what}", True
         if v["kind"] == "close":                # a pass near its limit: amber, and says so (CALI-88, #64 item 2)

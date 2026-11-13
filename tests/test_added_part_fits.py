@@ -236,7 +236,7 @@ def test_this_edge_and_the_opposite_one_is_a_strip_and_its_mirror_each_seated(tw
     other = s.part_geometry("fillet_strip_opposite").require_mesh().bounds
     assert other[0][0] == pytest.approx(300.0 - 19.05 - 5.0, abs=1e-6) and other[1][0] == pytest.approx(300.0 - 19.05, abs=1e-6)
     assert res.ok and "It sits on the edge you picked on stool, and its mirror fillet_strip_opposite sits on the opposite " \
-        "edge." in res.reply, res.reply
+        "edge, the line from (280.95, 0, 300) to (280.95, 200, 300)." in res.reply, res.reply      # which, said (#270 review)
 
 
 def test_one_edge_asked_is_one_strip(two_sides):
@@ -325,3 +325,121 @@ def test_a_finding_about_the_new_part_leads_the_reply(stool, monkeypatch):
     res = chat.author_part(s, "fillet_strip_2", "a 5 mm printed fillet strip on this edge", author=_author(0.0)[0],
                            use_llm=False, promote_feedback=False, pick=pick, on="stool")
     assert res.ok and res.reply.startswith("✓ built") and "(stool). Move it out." in res.reply, res.reply
+
+
+# --- #270 review ---------------------------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("asked", ["a 5 mm fillet strip rounded on both sides, on this edge",
+                                   "a 5 mm fillet strip on this edge; I'll sand the other side smooth",
+                                   "a fillet strip on this edge, mirror the profile so it's symmetric"])
+def test_words_about_the_strip_itself_make_one_strip(two_sides, asked):
+    s, pick = two_sides
+    res = chat.author_part(s, "fillet_strip", asked, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
+                           on="stool", asked=asked)
+    assert s.design.part("fillet_strip_opposite") is None and res.ok, res.reply
+
+
+@pytest.mark.parametrize("asked", ["a fillet strip on this edge and the opposite edge", "fillet strips in both corners",
+                                   "a fillet strip here and on the other side's edge", "strips on this edge and its twin"])
+def test_edge_or_corner_wording_makes_the_mirror(two_sides, asked):
+    s, pick = two_sides
+    chat.author_part(s, "fillet_strip", asked, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
+                     on="stool", asked=asked)
+    assert s.design.part("fillet_strip_opposite") is not None, asked
+
+
+def test_the_reply_says_which_edge_it_mirrored_to(two_sides):
+    s, pick = two_sides
+    res = chat.author_part(s, "fillet_strip", ASKED, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
+                           on="stool", asked=ASKED)
+    assert ("its mirror fillet_strip_opposite sits on the opposite edge, the line from (280.95, 0, 300) to (280.95, 200, 300)"
+            in res.reply), res.reply
+
+
+#: The two sides with their construction: the opposite edge is named by the piece it's on.
+NAMED = TWO_SIDES + '''
+
+def construction(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    t, d, h, w = p["t"], p["d"], p["h"], p["w"]
+    return [{"name": "left side", "kind": "sheet", "material": "plywood", "thickness": t,
+             "outline": [(0, 0, 0), (0, d, 0), (0, d, h), (0, 0, h)]},
+            {"name": "right side", "kind": "sheet", "material": "plywood", "thickness": t,
+             "outline": [(w, 0, 0), (w, d, 0), (w, d, h), (w, 0, h)]},
+            {"name": "step", "kind": "sheet", "material": "plywood", "thickness": t,
+             "outline": [(0, 0, h + t), (w, 0, h + t), (w, d, h + t), (0, d, h + t)]}]
+'''
+
+
+def test_a_host_with_pieces_names_the_piece_the_mirror_is_on(two_sides):
+    s, pick = two_sides
+    s.write_part("stool", NAMED, intent="two sides and a step")
+    feats = features.for_part(s, "stool")
+    pick = {**pick, "version": feats["version"]}
+    res = chat.author_part(s, "fillet_strip", ASKED, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
+                           on="stool", asked=ASKED)
+    assert "its mirror fillet_strip_opposite sits on the opposite edge, the right side's inside corner" in res.reply, res.reply
+
+
+#: Four walls round a step: the left-front inside corner has a twin across x (right-front) and across y (left-back).
+BOX4 = STOOL.replace('''    side = cq.Workplane().box(t, d, h, centered=False)
+    step = cq.Workplane().box(w, d, t, centered=False).translate((0, 0, h))
+    return side.union(step)''', '''    side = lambda x0: cq.Workplane().box(t, w, h, centered=False).translate((x0, 0, 0))
+    rail = lambda y0: cq.Workplane().box(w - 2 * t, t, h, centered=False).translate((t, y0, 0))
+    return side(0).union(side(w - t)).union(rail(0)).union(rail(w - t))''')
+
+
+def test_twins_on_two_axes_are_asked_about_not_guessed(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    s = DesignStore.create("a box", base=str(tmp_path / "designs"))
+    s.write_part("stool", BOX4, intent="four walls")
+    feats = features.for_part(s, "stool")
+    edge = next(e for e in feats["edges"] if e.get("corner") == "inside" and abs(e["centre"][0] - 19.05) < 1e-6
+                and abs(e["centre"][1] - 19.05) < 1e-6)
+    pick = {"part": "stool", "kind": "edge", "id": edge["id"], "said": "an inside corner", "version": feats["version"]}
+    strip = '''import cadquery as cq
+
+PARAMS = {"r": 5.0}
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    return cq.Workplane().box(p["r"], p["r"], 300.0, centered=False).translate((19.05, 19.05, 0))
+'''
+    res = chat.author_part(s, "fillet_strip", ASKED, author=lambda *a: strip, use_llm=False, promote_feedback=False, pick=pick,
+                           on="stool", asked=ASKED)
+    assert s.design.part("fillet_strip_opposite") is None and not res.ok
+    assert res.reply.startswith("! Built fillet_strip on the edge you picked, but it has an opposite edge across x, the line "
+                                "from (280.95, 19.05, 0) to (280.95, 19.05, 300), and one across y, the line from (19.05, "
+                                "280.95, 0) to (19.05, 280.95, 300): say which."), res.reply
+
+
+@pytest.mark.parametrize("asked", ["a fillet strip on this edge and this edge", "fillet strips on these two edges",
+                                   "a strip on this edge and that one"])
+def test_two_edges_asked_with_one_picked_is_said(two_sides, asked):
+    s, pick = two_sides
+    res = chat.author_part(s, "fillet_strip", asked, author=_author(0.0)[0], use_llm=False, promote_feedback=False, pick=pick,
+                           on="stool", asked=asked)
+    assert not res.ok and s.design.part("fillet_strip_opposite") is None
+    assert res.reply.startswith("! Built fillet_strip on the edge you picked, but I have one edge picked: pick the other "
+                                "one too, or say \"the opposite edge\"."), res.reply
+
+
+def test_a_depth_that_can_t_be_measured_is_said_never_taken_as_outside(stool, monkeypatch):
+    """#269's note: the depth measure swallowed an error as 0, which read as outside, a pass."""
+    from caliper import spatial
+
+    s, pick = stool
+    monkeypatch.setattr(spatial, "contains", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no kernel")))
+    res = chat.author_part(s, "fillet_strip", "a 5 mm printed fillet strip on this edge", author=_author(0.0)[0], use_llm=False,
+                           promote_feedback=False, pick=pick, on="stool", max_rounds=1)
+    assert not res.ok and res.reply.startswith("! Built fillet_strip, but I couldn't measure whether it goes into stool, so "
+                                               "it isn't known to sit on it."), res.reply
+    assert [r.status for r in res.part_report.results if r.id == "outside_the_pick"] == ["deferred"]   # waits, never a pass
+
+
+def test_every_check_passes_never_sits_under_a_bang(two_sides):
+    s, pick = two_sides
+    res = chat.author_part(s, "fillet_strip", "a fillet strip on this edge and this edge", author=_author(0.0)[0],
+                           use_llm=False, promote_feedback=False, pick=pick, on="stool",
+                           asked="a fillet strip on this edge and this edge")
+    assert res.reply.startswith("!") and "Every check on this part passes" not in res.reply, res.reply
