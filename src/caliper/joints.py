@@ -519,7 +519,8 @@ def _marked(store, pid: str, key: tuple, by: dict, kind: str, said: str, inches:
     a, b = key
     if kind == "bevel":
         m = K.of(store, pid)                              # an edge of one cut at an angle to sit on the other
-        cut = [(float(x["angle"]), k) for k, o in ((a, b), (b, a)) for x in (m["bevels"].get(k) or []) if x.get("meets") == o]
+        cut = [(float(x["angle"]), k) for k, o in ((a, b), (b, a))      # a slant past 45° too (#292)
+               for x in (m["bevels"].get(k) or []) + (m["slants"].get(k) or []) if x.get("meets") == o]
         if not cut:
             return {"said": f"Its JOINTS entry says bevel, but neither edge is cut at an angle where the {a} and the {b} "
                             f"meet." + UNDO, "landed": False}

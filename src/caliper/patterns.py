@@ -113,7 +113,12 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
         if key:
             side = next(pc for pc in made["pieces"] if pc["key"] == key)["sides"][0]
             shown = float((-n * side) @ toward) > 0
-        pts, back, bev = _faced(pts, on["bevels"], flat_of, shown)
+        steep = {b["edge"] for b in on.get("slants") or []}
+        pts, back, faced = _faced(pts, list(on["bevels"]) + list(on.get("slants") or []), flat_of, shown)
+        bev = [b for b in faced if b["edge"] not in steep]
+        sl = [b for b in faced if b["edge"] in steep]       # past a saw's 45°: drawn as a bevel is, said apart (#292)
+        reb = [{**r, "line": (flat_of(r["line"][0])[0], flat_of(r["line"][1])[0]), "shown": (r["face"] == 0) == shown}
+               for r in on.get("rebates") or []]
         cham = [{**c, "shown": (c["face"] == 0) == shown} for c in on.get("chamfers") or []]
         cut = [{**c, "poly": flat_of(c["corners"]), "shown": (c["face"] == 0) == shown} for c in on["cuts"]]
         screws = [{"at": flat_of(c["points"]), "into": c["into"], "comes_out": bool(c.get("comes_out")),
@@ -126,14 +131,18 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
         if np.abs(z).max() > 1e-9:
             pts, holes = pts - z, [h - z for h in holes]
             back = [(a_ - z, b_ - z) for a_, b_ in back]
-            bev = [{**b_, "line": (b_["line"][0] - z, b_["line"][1] - z)} for b_ in bev]
+            bev = [{**b_, "line": (b_["line"][0] - z, b_["line"][1] - z), "back": (b_["back"][0] - z, b_["back"][1] - z)}
+                   for b_ in bev]
+            sl = [{**b_, "line": (b_["line"][0] - z, b_["line"][1] - z), "back": (b_["back"][0] - z, b_["back"][1] - z)}
+                  for b_ in sl]
+            reb = [{**r, "line": (r["line"][0] - z, r["line"][1] - z)} for r in reb]
             cut = [{**c, "poly": c["poly"] - z} for c in cut]
             screws = [{**c, "at": c["at"] - z} for c in screws]
         t = float(it["thickness"])
         out.append({"name": it.get("name") or "piece", "material": it.get("material"), "thickness": t,
                     "label": f"{M.nominal(t)} {M.sheet(it['material'])['name']}" if it.get("material") in M.SHEETS
                     else f"{M.nominal(t)} sheet", "outline": pts, "holes": holes, "size": pts.max(axis=0),
-                    "bevels": bev, "chamfers": cham, "back": back, "cuts": cut, "screws": screws, "to_page": to_page,
+                    "bevels": bev, "slants": sl, "rebates": reb, "chamfers": cham, "back": back, "cuts": cut, "screws": screws, "to_page": to_page,
                     "face": face, "seen": (f"this is the {face} face" if face == "outside" else f"this is the face {face}")
                     + (f"; a mirror of {flip}: flip its template" if flip else ""), **({"mirror_of": flip} if flip else {})})
     return out
@@ -163,7 +172,8 @@ def _faced(pts: np.ndarray, bevels: list, flat_of, shown: bool):
         out.append(p1 + d1 * s_)
     out = np.asarray(out)
     back = [(lines[e][2], lines[e][3]) for e in sorted(lines)]
-    bev = [{"edge": e, "angle": lines[e][4], "line": (out[e], out[(e + 1) % k])} for e in sorted(lines)]
+    bev = [{"edge": e, "angle": lines[e][4], "line": (out[e], out[(e + 1) % k]), "back": (lines[e][2], lines[e][3])}
+           for e in sorted(lines)]
     return out, back, bev
 
 
@@ -204,8 +214,12 @@ def marks_lines(pc: dict) -> list[str]:
             n = len(proud)
             out.append(f"Leave {inches(max(proud))} past the solid line along the {n} edge{'s' if n != 1 else ''} whose "
                        f"dashed line is outside it: the other face is bigger there, so cut the blank big enough first.")
+    if pc.get("slants"):
+        out.append(K.slant_line([b["angle"] for b in pc["slants"]]))
     if pc.get("chamfers"):
         out.append(K.chamfer_line(pc["chamfers"]))
+    if pc.get("rebates"):
+        out.append(K.rebate_line(pc["rebates"]))
     nm = {"mortise": 0, "notch": 0, "dado": 0, "rabbet": 0}
     for c in pc.get("cuts") or []:
         nm[c["kind"]] += 1
@@ -250,17 +264,23 @@ def _draw_marks(dr, pc: dict, X, Y, font=None, labels: bool = True):
         _dashes(dr, (X(a[0]), Y(a[1])), (X(b[0]), Y(b[1])))
     if labels:
         cx, cy = (float(np.mean([X(x) for x, _ in pc["outline"]])), float(np.mean([Y(y) for _, y in pc["outline"]])))
-        backs = pc.get("back") or []
-        for i, bv in enumerate(pc.get("bevels") or []):
-            (ax, ay), (bx, by) = bv["line"]
+        for tag, edges in (("B", pc.get("bevels") or []), ("S", pc.get("slants") or [])):
+            for bv in edges:
+                (ax, ay), (bx, by) = bv["line"]
+                mx, my = X((ax + bx) / 2), Y((ay + by) / 2)
+                k = math.hypot(cx - mx, cy - my) or 1.0
+                gap = 0.0
+                if bv.get("back"):                       # clear of its own dashed line, whichever side it's on
+                    (qx, qy), (rx, ry) = bv["back"]
+                    gap = math.hypot(X((qx + rx) / 2) - mx, Y((qy + ry) / 2) - my)
+                off = 24 + gap
+                dr.text((mx + (cx - mx) / k * off - 5, my + (cy - my) / k * off - 8), tag, fill="black", font=font)
+        for r in pc.get("rebates") or []:                # its wall, dashed, and R inside it (#292)
+            (ax, ay), (bx, by) = r["line"]
+            _dashes(dr, (X(ax), Y(ay)), (X(bx), Y(by)))
             mx, my = X((ax + bx) / 2), Y((ay + by) / 2)
             k = math.hypot(cx - mx, cy - my) or 1.0
-            gap = 0.0
-            if i < len(backs):                           # clear of its own dashed line, whichever side it's on
-                (qx, qy), (rx, ry) = backs[i]
-                gap = math.hypot(X((qx + rx) / 2) - mx, Y((qy + ry) / 2) - my)
-            off = 24 + gap
-            dr.text((mx + (cx - mx) / k * off - 5, my + (cy - my) / k * off - 8), "B", fill="black", font=font)   # inside it
+            dr.text((mx + (cx - mx) / k * 24 - 5, my + (cy - my) / k * 24 - 8), "R", fill="black", font=font)
         n_ = len(pc["outline"])
         for ch in pc.get("chamfers") or []:
             (ax, ay), (bx, by) = pc["outline"][ch["edge"]], pc["outline"][(ch["edge"] + 1) % n_]
@@ -544,7 +564,7 @@ def project_svg(pc: dict) -> str:
 def _svg_marks(pc: dict, fmt) -> str:
     """The marks, for the projector: dashed bevel and dado lines, mortise outlines, screw crosshairs (CALI-177)."""
     out = "".join(f'<polyline points="{fmt([a, b])}" fill="none" stroke="white" stroke-width="0.8" stroke-dasharray="4 3"/>'
-                  for a, b in pc.get("back") or [])
+                  for a, b in list(pc.get("back") or []) + [r["line"] for r in pc.get("rebates") or []])
     for c in pc.get("cuts") or []:
         dash = "" if c["kind"] in ("mortise", "notch") else ' stroke-dasharray="4 3"'
         out += f'<polygon points="{fmt(c["poly"])}" fill="none" stroke="white" stroke-width="1.2"{dash}/>'
@@ -559,6 +579,8 @@ def _svg_marks(pc: dict, fmt) -> str:
 
     c0 = np.asarray(pc["outline"], float).mean(axis=0)
     for tag, edges in (("B", [b["line"] for b in pc.get("bevels") or []]),
+                       ("S", [b["line"] for b in pc.get("slants") or []]),
+                       ("R", [r["line"] for r in pc.get("rebates") or []]),
                        ("C", [(pc["outline"][ch["edge"]], pc["outline"][(ch["edge"] + 1) % len(pc["outline"])])
                               for ch in pc.get("chamfers") or []])):
         for a, b in edges:

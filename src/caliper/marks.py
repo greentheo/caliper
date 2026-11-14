@@ -31,8 +31,10 @@ SCREW_END_IN = 1.5
 CLEARANCE_BIT = "3/16 in"
 #: Below this a cut edge is square: a builder's saw is set to 0.
 BEVEL_MIN_DEG = 2.0
-#: Beyond this an edge isn't a bevel a circular saw cuts (it tilts to 45°): a mitre or something else, not marked.
+#: Beyond this an edge lying on another piece isn't taken as cut to sit on it: a mitre or something else.
 BEVEL_MAX_DEG = 50.0
+#: What a builder's saw tilts to: a slant past it is said as one, for the plane or the router (#292).
+SAW_MAX_DEG = 45.0
 GLUE_BLOCK = {"size": "1x1", "label": "a 3/4 x 3/4 in strip"}
 #: The default depth of a declared rabbet or dado the solid doesn't show, as a share of the host's thickness (#222 §1).
 DEPTH = {"rabbet": 0.5, "dado": 1.0 / 3.0}
@@ -230,7 +232,7 @@ def _corner_chamfers(mesh, p, q, out, N, t: float, fs) -> list[dict]:
             hits.append((starts[r] - b * near[0][0], np.asarray(mesh.face_normals[near[0][1]], float)))
         if len(hits) != len(starts):
             continue
-        sizes = []
+        sizes, full = [], []
         for i, c in enumerate(corners):
             (H0, m0), (H1, m1), (H2, m2) = hits[3 * i:3 * i + 3]
             if not (_same_plane(m1, H1, m0, H0) and _same_plane(m1, H1, m2, H2)):
@@ -240,9 +242,15 @@ def _corner_chamfers(mesh, p, q, out, N, t: float, fs) -> list[dict]:
                 break                                # the edge face or the board's face itself: a square corner
             depth = float(m1 @ (H1 - c)) / float(m1 @ -Nf)           # where the slant meets the edge face
             setback = -float(m1 @ (H1 - c)) / float(m1 @ out)        # and where it meets the board's face
+            if depth >= t - 0.5 and setback > 0.0:   # the whole thickness: a slant, not a chamfer (#292)
+                full.append((m1, H1, angle))
+                continue
             if not (0.0 < depth < t - 0.5 and setback > 0.0):
                 break
             sizes.append((depth, setback, angle))
+        if len(full) == len(corners) and np.ptp([x[2] for x in full]) <= 1.0:
+            out_.append({"slant": True, "normal": full[1][0], "at": full[1][1], "face": face})
+            continue
         if len(sizes) != len(corners):
             continue
         d_, s_, a_ = (np.array(x) for x in zip(*sizes))
@@ -253,15 +261,74 @@ def _corner_chamfers(mesh, p, q, out, N, t: float, fs) -> list[dict]:
     return out_
 
 
-def bevels(pieces: list[dict], mesh, tol: float, chamfers: Optional[dict] = None) -> dict:
+def _rebate(mesh, p, q, out, N, t: float, fs) -> Optional[dict]:
+    """A rebate along a free edge (#292): rays in from outside the edge face, across the thickness, meet it square for part
+    of the thickness and at a wall set back for the rest, the same at each point along the edge. ``{"depth_mm": down the
+    edge, "width_mm": in across the face, "face", "line": the wall's line on the declared face}``, or None: a square edge,
+    a slant, or another piece in front of it."""
+    from . import spatial                            # every mesh query under the one lock (CALI-103)
+
+    n = 24
+    ws = (np.arange(n) + 0.5) / n * t
+    starts = np.array([p + f_ * (q - p) + N * w + out * t for f_ in fs for w in ws])
+    try:
+        locs, ray, _ = spatial.intersects_location(mesh, starts, np.repeat(-out[None], len(starts), axis=0),
+                                                   multiple_hits=True)
+    except Exception:  # noqa: BLE001 — not read: nothing marked
+        return None
+    got = []
+    for i, f_ in enumerate(fs):
+        a = []
+        for r in range(i * n, (i + 1) * n):
+            near = [float(np.linalg.norm(locs[k] - starts[r])) for k in np.flatnonzero(ray == r)]
+            if not near:
+                return None
+            a.append(t - min(near))                      # where it's met, along out: 0 at the edge's line
+        a = np.array(a)
+        if (a > 0.3).any():
+            return None                                  # something in front of the edge: not its own
+        square, wall = np.abs(a) <= 0.3, a < -1.0
+        if not wall.any() or not square.any() or not (square | wall).all():
+            return None                                  # all square, all set back, or sloped: not a rebate
+        idx = np.flatnonzero(wall)
+        if idx[-1] - idx[0] + 1 != len(idx) or (idx[0] != 0 and idx[-1] != n - 1) or np.ptp(a[wall]) > 0.3:
+            return None                                  # not one step at one face
+        face = 1 if idx[-1] == n - 1 else 0
+        width = -float(a[wall].mean())
+        Nf = N if face else -N                           # its floor: straight down onto it, halfway across
+        top = p + f_ * (q - p) + (N * t if face else 0.0) - out * (width / 2.0) + Nf * t
+        try:
+            fl, fr, _ = spatial.intersects_location(mesh, top[None], -Nf[None], multiple_hits=True)
+        except Exception:  # noqa: BLE001 — not read
+            return None
+        if not len(fl):
+            return None
+        depth = min(float(np.linalg.norm(x - top)) for x in fl) - t
+        if not (0.3 < depth < t - 0.3):
+            return None
+        got.append((depth, width, face))
+    d_, w_, f_s = zip(*got)
+    if np.ptp(d_) > 0.5 or np.ptp(w_) > 0.5 or len(set(f_s)) != 1:
+        return None                                      # it changes along the edge: one cut can't make it
+    width = float(np.mean(w_))
+    return {"depth_mm": float(np.mean(d_)), "width_mm": width, "face": f_s[0],
+            "line": (p - out * width, q - out * width)}
+
+
+def bevels(pieces: list[dict], mesh, tol: float, chamfers: Optional[dict] = None, slants: Optional[dict] = None,
+           rebates: Optional[dict] = None) -> dict:
     """``{key: [{"edge", "angle", "length_mm", "meets", "lines": [(p, q) on the declared face, (p, q) on the other]}]}``:
     each sheet edge cut at an angle to its faces, from what it lies against or the solid's edge face, one plane across its
-    thickness; a chamfer past the middle of the thickness goes into ``chamfers`` (#283 review), never a saw bevel."""
+    thickness; a chamfer past the middle of the thickness goes into ``chamfers`` (#283 review), never a saw bevel. One
+    past what a saw tilts to (45°) goes into ``slants``, and a rebate along a free edge into ``rebates`` (#292): said,
+    never drawn as a square edge."""
     from .consistency import slab_distance
 
     sheets = [pc for pc in pieces if _sheet(pc)]
     out: dict = {}
     chamfers = {} if chamfers is None else chamfers
+    slants = {} if slants is None else slants
+    rebates = {} if rebates is None else rebates
     for a in sheets:
         o, u, v, N, t, poly, flat = _geom(a)
         for e, p, q, d, ed_out in _edges(a):
@@ -284,10 +351,20 @@ def bevels(pieces: list[dict], mesh, tol: float, chamfers: Optional[dict] = None
             if m is None and mesh is not None:          # its own edge face, in the solid: one plane across its thickness
                 got = _edge_face(mesh, p, q, d, ed_out, N, t, fs)
                 if got is None:                         # square through the middle: a chamfer wider than deep? (#290)
-                    for c in _corner_chamfers(mesh, p, q, ed_out, N, t, fs):
-                        chamfers.setdefault(a.get("key") or a["name"], []).append({**c, "edge": e, "length_mm": L})
-                    continue
-                if got["kind"] == "chamfer":
+                    found = _corner_chamfers(mesh, p, q, ed_out, N, t, fs)
+                    whole = [c for c in found if c.get("slant")]
+                    for c in found:
+                        if not c.get("slant"):
+                            chamfers.setdefault(a.get("key") or a["name"], []).append({**c, "edge": e, "length_mm": L})
+                    if whole:                           # a slant the whole thickness: said by its angle below (#292)
+                        got = {"normal": whole[0]["normal"], "at": whole[0]["at"]}
+                    else:
+                        if not found:                   # a step along it: a rebate (#292)
+                            r = _rebate(mesh, p, q, ed_out, N, t, fs)
+                            if r is not None:
+                                rebates.setdefault(a.get("key") or a["name"], []).append({**r, "edge": e, "length_mm": L})
+                        continue
+                if got.get("kind") == "chamfer":
                     chamfers.setdefault(a.get("key") or a["name"], []).append({**got["chamfer"], "edge": e, "length_mm": L})
                     continue
                 m, at = got["normal"], got["at"]
@@ -297,11 +374,11 @@ def bevels(pieces: list[dict], mesh, tol: float, chamfers: Optional[dict] = None
                 continue
             cos = float(np.clip(m @ ed_out, -1.0, 1.0))
             angle = math.degrees(math.acos(cos))
-            if not (BEVEL_MIN_DEG <= angle <= BEVEL_MAX_DEG):
+            if not (BEVEL_MIN_DEG <= angle <= 90.0 - BEVEL_MIN_DEG):
                 continue
             # the cut's plane through ``at`` with normal m: where it crosses each face, along ``out``
             s = [float((at - p - N * w) @ m) / float(ed_out @ m) for w in (0.0, t)]
-            out.setdefault(a.get("key") or a["name"], []).append({
+            (out if round(angle, 1) <= SAW_MAX_DEG else slants).setdefault(a.get("key") or a["name"], []).append({
                 "edge": e, "angle": round(angle, 1), "length_mm": L, "meets": meets,
                 "lines": [(p + ed_out * s[0], q + ed_out * s[0]), (p + N * t + ed_out * s[1], q + N * t + ed_out * s[1])],
                 "offsets": s})
@@ -534,7 +611,8 @@ def of(store, pid: str) -> dict:
     from . import joints as J
     from .consistency import _sides, shapes, tolerance
 
-    empty = {"bevels": {}, "chamfers": {}, "cuts": {}, "screws": {}, "glue_blocks": [], "pieces": []}
+    empty = {"bevels": {}, "chamfers": {}, "slants": {}, "rebates": {}, "cuts": {}, "screws": {}, "glue_blocks": [],
+             "pieces": []}
     try:
         mesh = store.part_geometry(pid).require_mesh()
         pieces = shapes(C.declared(store, pid))
@@ -546,7 +624,10 @@ def of(store, pid: str) -> dict:
     said = J.read(store.read_script(pid))
     wood = [pc for pc in pieces if pc.get("material") in WOOD]
     chamfers: dict = {}
-    return {"bevels": bevels(pieces, mesh, tol, chamfers), "chamfers": chamfers, "cuts": cuts(pieces, tol, said),
+    slants: dict = {}
+    rebates: dict = {}
+    return {"bevels": bevels(pieces, mesh, tol, chamfers, slants, rebates), "chamfers": chamfers, "slants": slants,
+            "rebates": rebates, "cuts": cuts(pieces, tol, said),
             "screws": screws(wood, tol, said),
             "glue_blocks": glue_blocks(wood, tol, said), "pieces": pieces}
 
@@ -565,6 +646,7 @@ def on_piece(m: dict, key: str) -> dict:
     """What's marked on one piece: ``{"bevels", "cuts", "screws": [{"points", "into", "drive"}], "n_screws"}``."""
     s = [dict(c, pair=k) for k, c in sorted((m.get("screws") or {}).items()) if c.get("on") == key and c["n"]]
     return {"bevels": (m.get("bevels") or {}).get(key, []), "chamfers": (m.get("chamfers") or {}).get(key, []),
+            "slants": (m.get("slants") or {}).get(key, []), "rebates": (m.get("rebates") or {}).get(key, []),
             "cuts": (m.get("cuts") or {}).get(key, []), "screws": s,
             "n_screws": sum(c["n"] for c in s)}
 
@@ -606,6 +688,36 @@ def chamfer_size(mm: float, setback: Optional[float] = None) -> str:
     return f"{mm:.0f} mm ({_in(mm)})"
 
 
+def two_sizes(a: float, b: float) -> str:
+    """Two distances, millimetres first, inches after: "10 × 40 mm (3/8 × 1 9/16 in)"."""
+    return f"{a:.0f} × {b:.0f} mm ({_in(a).removesuffix(' in')} × {_in(b)})"
+
+
+def _steep(a: float, n: int) -> str:
+    it = "it" if n == 1 else "them"
+    return (f"cut at {a:g}°, past what a saw tilts to ({SAW_MAX_DEG:g}°): plane or router {it}, or cut {it} at "
+            f"{90 - a:g}° from the other face")
+
+
+def slant_line(angles: list[float]) -> str:
+    """The slants on one piece, past what a saw tilts to (#292): never a saw setting, never a square edge."""
+    by: dict = {}
+    for a in angles:
+        by[round(a)] = by.get(round(a), 0) + 1
+    parts = [f"the edge marked S is {_steep(a, 1)}" if n == 1 else f"the {n} edges marked S are {_steep(a, n)}"
+             for a, n in sorted(by.items())]
+    return ("Slant: " if len(angles) == 1 else "Slants: ") + "; ".join(parts) + "."
+
+
+def rebate_line(rebates: list) -> str:
+    """The rebates along a piece's free edges (#292), as #283 says a joint's rabbet: a router or a table saw."""
+    parts = [f"{two_sizes(r['depth_mm'], r['width_mm'])} along the edge marked R, on "
+             f"{'this face' if r.get('shown', True) else 'the other face'}, with a router or table saw: "
+             f"{r['depth_mm']:.0f} mm down the edge and {r['width_mm']:.0f} mm in across the face; the dashed line is its "
+             f"wall" for r in rebates]
+    return "Rebate: " + "; ".join(parts) + "."
+
+
 def chamfer_line(chamfers: list) -> str:
     """The chamfers on one piece: shaped after cutting, never a saw setting (#283 review)."""
     def one(c):
@@ -639,8 +751,11 @@ def summary(m: dict) -> dict:
     cham = [(k, c["depth_mm"], c["angle"], c["length_mm"], c.get("setback_mm")) for k, cs in
             sorted((m.get("chamfers") or {}).items()) for c in cs]
     cut = [(k, c["kind"], c["for"], c.get("depth_mm")) for k, cs in sorted((m.get("cuts") or {}).items()) for c in cs]
+    sl = [(k, b["angle"], b["length_mm"]) for k, bs in sorted((m.get("slants") or {}).items()) for b in bs]
+    reb = [(k, r["depth_mm"], r["width_mm"], r["length_mm"]) for k, rs in sorted((m.get("rebates") or {}).items())
+           for r in rs]
     sc = m.get("screws") or {}
-    return {"bevels": bev, "chamfers": cham, "cuts": cut, "screws": sum(c["n"] for c in sc.values()),
+    return {"bevels": bev, "chamfers": cham, "slants": sl, "rebates": reb, "cuts": cut, "screws": sum(c["n"] for c in sc.values()),
             "on": {k: on_piece(m, k)["n_screws"] for k in {c["on"] for c in sc.values() if c.get("on") and c["n"]}},
             "elsewhere": sum(c["n"] for c in sc.values() if not c.get("on")),
             "glued": [k for k, c in sorted(sc.items()) if not c["n"]],
@@ -656,6 +771,10 @@ def cutlist_lines(m: dict) -> list[str]:
     for k, depth, a, mm, setback in s["chamfers"]:
         at = "" if _two(depth, setback) else f" at {a:.0f}°"     # two distances say the angle themselves
         lines.append(f"    {k}: chamfer {chamfer_size(depth, setback)}{at} along {_in(mm)} of edge")
+    for k, a, mm in s["slants"]:
+        lines.append(f"    {k}: slant {a:.0f}° along {_in(mm)} of edge, past what a saw tilts to ({SAW_MAX_DEG:g}°)")
+    for k, depth, width, mm in s["rebates"]:
+        lines.append(f"    {k}: rebate {two_sizes(depth, width)} along {_in(mm)} of edge")
     for k, kind, what, depth in s["cuts"]:
         lines.append(f"    {k}: a {kind} for the {what}" + (f", {_in(depth)} deep" if depth else ", right through"))
     for k, n in sorted(s["on"].items()):
@@ -688,6 +807,22 @@ def book_lines(m: dict, names: Optional[list] = None) -> list[str]:
     for size, ks in sorted(ch.items()):
         out.append(f"Chamfer the {len(ks)} edge{'s' if len(ks) != 1 else ''} marked C on the "
                    f"{' and the '.join(dict.fromkeys(ks))}, {size}, with a router or a block plane: not the saw.")
+    st: dict = {}
+    for k, a, _ in s["slants"]:
+        if keep(k):
+            st.setdefault(round(a), []).append(k)
+    for a, ks in sorted(st.items()):
+        n = len(ks)
+        out.append(f"The {n} edge{'s' if n != 1 else ''} marked S on the {' and the '.join(dict.fromkeys(ks))} "
+                   f"{'is' if n == 1 else 'are'} {_steep(a, n)}.")
+    rb: dict = {}
+    for k, depth, width, _ in s["rebates"]:
+        if keep(k):
+            rb.setdefault(two_sizes(depth, width), []).append(k)
+    for size, ks in sorted(rb.items()):
+        n = len(ks)
+        out.append(f"Cut the rebate{'s' if n != 1 else ''} along the {n} edge{'s' if n != 1 else ''} marked R on the "
+                   f"{' and the '.join(dict.fromkeys(ks))}, {size}, with a router or table saw.")
     kinds: dict = {}
     for k, kind, what, depth in s["cuts"]:
         if keep(k):
