@@ -796,8 +796,9 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
 
     ``focus`` is said to the designer only, after the request (#241: which of the parts it names this revision is
     for). ``keep_same=False``: a revision whose code is the same (comments and layout don't count) writes no version,
-    and says so; any other is written, and ``moved`` says whether a number, the volume, the size or the centre of mass
-    moved (#242 re-check: a move written as literals keeps the numbers and the volume). ``of`` follows the part's name
+    and says so; any other is written. Either way ``moved`` says whether a number, the volume, the size or the centre of
+    mass moved (#242 re-check: a move written as literals keeps the numbers and the volume), and a revision where none did
+    is said with "!" and isn't a success (#287). ``of`` follows the part's name
     as it's said ("2 of 2").
 
     The gap CALI-29 exists to close. Everything here is plumbing around one existing call —
@@ -859,7 +860,7 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     script = store.read_script(part_id)
     prior = script                                 # what the request changes, as it was (CALI-107)
     was = _volume(store, part_id)
-    before_shape = None if keep_same else _shape(store, part_id)
+    before_shape = _shape(store, part_id)          # what moved is measured on every path (#242, #287)
 
     _emit(events, on_event, "authoring", f"revising {part_id}{f' ({of})' if of else ''}…", part=part_id)
     # ``measured`` is true of this version: to the designer's first round only, never into the part's record (#158)
@@ -893,7 +894,7 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     if not keep_same and _same_code(prior, script):   # the same code: nothing to write, said (#241)
         return TurnResult(action="refine", ok=False, part=part_id, events=events, error="unchanged",
                           reply=f"The revision left **{part_id}**'s code as it was.")
-    moved = None if keep_same else _moved(prior, script, before_shape, res.geometry)
+    moved = _moved(prior, script, before_shape, res.geometry)
     from .authoring import params_from_spec
 
     version = store.write_part(part_id, script, feedback=message, action="refine",
@@ -935,13 +936,18 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
         # a miss comes first and the turn isn't a success: never a tick above "it isn't on what you picked" (rule 6)
         reply = (f"{'!' if on_pick == features.PARTIAL else chr(0x2717)} {check['said']}\n\n{reply.replace(chr(0x2713) + ' ', '', 1)}"
                  if short else f"{reply}\n\n{check['said']}")
+    still = moved is False and on_pick is not True      # written, but nothing measured moved: no ✓, not a success (#242, #287)
+    if still:
+        reply = re.sub(r"\A✓ (revised \*\*[^\n]*)", r"! \1: the code changed, but no number, size or position I measure "
+                       r"moved", reply, count=1)
     proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
                                        drafter=drafter, enabled=promote_feedback,
                                        events=events, on_event=on_event)
     if offer:
         reply += "\n\n" + offer
 
-    return TurnResult(action="refine", ok=bool(res.ok) and not broke and on_pick not in (False, "partial"), part=part_id, version=version, moved=moved,
+    return TurnResult(action="refine", ok=bool(res.ok) and not broke and on_pick not in (False, "partial") and not still,
+                      part=part_id, version=version, moved=moved,
                       part_report=res.report, report=after, broke=broke, fixed=fixed,
                       part_errors=part_errors, proposal=proposal, events=events, reply=reply)
 
@@ -980,14 +986,39 @@ def _moved(prior: str, new: str, before, geometry, tol: float = 0.01) -> bool:
         return True
     try:
         after = _measures(geometry)
-    except Exception:  # noqa: BLE001 — nothing measured can't show a move; the code changed, said as that
+    except Exception:  # noqa: BLE001 — nothing measured can't show a move: what it declares still can
+        after = None
+    if after is not None:
+        if before is None:
+            return True
+        (v0, b0, c0), (v1, b1, c1) = before, after
+        if (abs(v1 - v0) > 1e-6 * max(v0, 1.0)
+                or any(abs(a - b) > tol for r0, r1 in zip(b0, b1) for a, b in zip(r0, r1))
+                or any(abs(a - b) > tol for a, b in zip(c0, c1))):
+            return True
+    return _declares_moved(prior, new)
+
+
+def _declares_moved(prior: str, new: str) -> bool:
+    """Whether a revision changed what the part declares, not its solid (#288 review): its pieces (outline, holes,
+    mortises, covers), ``loads()``, ``BUILD`` and ``HOLES`` as the declaration probe reads them, and its ``JOINTS``. A
+    mortise cut in ``construction()`` alone is a change; code that declares the same pieces isn't. Unread: not moved,
+    never a ✓ it can't stand behind."""
+    from . import carve
+    from . import construction as C
+    from . import joints as J
+
+    old = carve.uncarve(prior or "")[0]
+    new = new or ""
+    try:
+        if J.read(old) != J.read(new):
+            return True
+    except Exception:  # noqa: BLE001 — a JOINTS that isn't data: the round says so
+        pass
+    try:
+        return C.declared_by(old) != C.declared_by(new)
+    except Exception:  # noqa: BLE001 — not read: said as nothing measured moving
         return False
-    if before is None:
-        return True
-    (v0, b0, c0), (v1, b1, c1) = before, after
-    return (abs(v1 - v0) > 1e-6 * max(v0, 1.0)
-            or any(abs(a - b) > tol for r0, r1 in zip(b0, b1) for a, b in zip(r0, r1))
-            or any(abs(a - b) > tol for a, b in zip(c0, c1)))
 
 
 def _offer_promotion(store: DesignStore, part_id: str, feedback: str, *, use_llm: bool,
@@ -2095,6 +2126,26 @@ _RESTORE = re.compile(r"^\s*(?:please\s+)?(?:put\s+back|restore|bring\s+back|und
                       r"|^\s*(?:please\s+)?put\s+(?:the\s+)?(.+?)\s+back\s*[.!]*\s*$", re.I)
 
 
+#: The page's context ahead of what was typed, when something is selected (design.js ``aboutPiece``/``aboutPick``):
+#: "About the seat disk: …", "About this edge (at x …, y …, z … mm in the script's coordinates): …". A name's own
+#: brackets may hold a colon: "About the strip (superseded: … delete this part …): remove it" (#287).
+_ABOUT = re.compile(r"\A\s*About (?:the|this) (?:[^():]|\((?:[^()]|\([^()]*\))*\))*?:\s+")
+
+
+def bare(message: str, scope: Optional[str], pick: Optional[dict] = None) -> str:
+    """What the person typed (#287), for a client that doesn't send it as its own field: a pick's own words, or the
+    message after the page's one "About the …:" context when a part is selected. Unselected, a message is as typed:
+    "about the top: …" typed by hand names the top."""
+    text = message or ""
+    own = (pick or {}).get("text") if isinstance(pick, dict) else None
+    if isinstance(own, str) and own.strip() and text.rstrip().endswith(own.strip()):
+        return own.strip()
+    if not scope:
+        return text
+    m = _ABOUT.match(text)                             # once: the page sends what was typed itself now (#288 review)
+    return text if m is None or not text[m.end():].strip() else text[m.end():]
+
+
 def _named_part(store: DesignStore, words: str, scope: Optional[str], ids: Optional[list] = None) -> Optional[str]:
     """The part a short phrase names: its id, or its id with spaces ("conical skirt"); "it"/"this" is the clicked one."""
     w = re.sub(r"\s+(part|piece)$", "", words.strip().lower())
@@ -2104,6 +2155,71 @@ def _named_part(store: DesignStore, words: str, scope: Optional[str], ids: Optio
         if w in (pid.lower(), pid.lower().replace("_", " ")):
             return pid
     return None
+
+
+#: "… superseded: remove this part": a remove mid-sentence, of the selected part (#287).
+_REMOVE_THIS = re.compile(r"\b(?:remove|delete|get\s+rid\s+of|take\s+out)\s+(?:this|that)\s+(?:part|piece)\b", re.I)
+#: Said not to, just before the verb: "don't remove this part, just …" isn't a remove (#288 review).
+_SAID_NOT = re.compile(r"(?:\bdon['’]?t|\bdo\s+not|\bnot|\bnever|\bno\s+need\s+to|\bwithout)\s*$", re.I)
+
+
+def _words_of(text: str) -> list[str]:
+    """A phrase's words for matching a part's id: lower case, underscores as spaces, no "the" or trailing "part"."""
+    w = re.sub(r"[_\s]+", " ", (text or "").lower()).strip(" .!?")
+    w = re.sub(r"^the\s+", "", w)
+    return re.sub(r"\s+(?:part|piece)$", "", w).split()
+
+
+def _one_edit(a: str, b: str) -> bool:
+    """Whether two strings are at most one letter added, dropped or changed apart."""
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) <= 1
+    short, long_ = sorted((a, b), key=len)
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+
+
+def _remove_target(store: DesignStore, words: str, scope: Optional[str]):
+    """The part a remove names (#287): exactly (:func:`_named_part`); or closely, its words in any order, one letter
+    astray or an underscore stray, the selected one where several are close. A list of the parts to ask between where
+    it can't tell: the parts the words share ("side": side_left and side_right, #288 review), or every part where the
+    words look like a part's name (an underscore, or "… part") but name none. None where they name a feature ("the
+    fillet on the top"), which goes to the designer as ever."""
+    pid = _named_part(store, words, scope)
+    if pid is not None:
+        return pid
+    ids = [p.id for p in store.design.parts]
+    w = _words_of(words)
+    if not w:
+        return None
+
+    def close(i):
+        p = _words_of(i)
+        return w == p or sorted(set(w)) == sorted(set(p)) or (len(i) >= 8 and _one_edit(" ".join(w), " ".join(p)))
+    near = [i for i in ids if close(i)]
+    if len(near) == 1 or (scope in near and len(near) > 1):
+        return near[0] if len(near) == 1 else scope
+    named = "_" in words or re.search(r"\b(?:part|piece)\s*[.!?]*\s*$", words, re.I)
+    some = [i for i in ids if set(w) <= set(_words_of(i))]        # the words a part's name has, all of them
+    if len(some) > 1:                                # "side" of side_left and side_right: the selected one, or ask
+        return scope if scope in some else some
+    if not named:
+        return None
+    return some[0] if some else ids
+
+
+def _ask_remove(store: DesignStore, pid: str, events) -> "TurnResult":
+    """Ask once before a part's files go to the trash (#98); "which part?" where the words named none (#287)."""
+    from . import awaiting
+
+    if isinstance(pid, list):                          # it can't tell which: the ones it could be
+        awaiting.park(store, "remove_which")
+        return TurnResult(action="ask", ok=False, events=events, error="which part",
+                          reply="Remove which part? " + ", ".join(pid))
+    awaiting.park(store, "remove", part=pid)
+    return TurnResult(action="ask", ok=True, part=pid, events=events,
+                      reply=f"Remove {pid}? Its files go to the design's trash, so it can be put back.")
 
 
 def _remove_or_restore(store: DesignStore, message: str, scope: Optional[str], *, events, on_event):
@@ -2126,13 +2242,12 @@ def _remove_or_restore(store: DesignStore, message: str, scope: Optional[str], *
                                    if got["waiting"] else "")
                                 + (f"\n\nThe design checks: {report.said()}." if report is not None else ""))
     m = _REMOVE.match(message or "")
-    if m:
-        pid = _named_part(store, m.group(1), scope)
-        if pid is None:
-            return None
-        awaiting.park(store, "remove", part=pid)
-        return TurnResult(action="ask", ok=True, part=pid, events=events,
-                          reply=f"Remove {pid}? Its files go to the design's trash, so it can be put back.")
+    if m:                                            # a remove never goes to the designer (#287)
+        pid = _remove_target(store, m.group(1), scope)
+        return None if pid is None else _ask_remove(store, pid, events)
+    m = _REMOVE_THIS.search(message or "")
+    if m and scope and store.design.part(scope) and not _SAID_NOT.search(message[:m.start()]):   # (#287)
+        return _ask_remove(store, scope, events)
     return None
 
 
@@ -2146,6 +2261,10 @@ def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Op
         return None
     if aw["kind"] == "mirror_edge":                    # "its mirror too?" or "across the width or the depth?" (#273)
         return _mirror_answer(store, aw, message, **kw)
+    if aw["kind"] == "remove_which":                   # "remove which part?": a part's name answers it (#287)
+        awaiting.clear(store)
+        pid = _remove_target(store, message, scope)
+        return _ask_remove(store, pid, kw["events"]) if isinstance(pid, str) else None
     if aw["kind"] == "grain_way":                      # "which way?": a bare direction answers it, for that piece
         from . import grain
 
@@ -2157,6 +2276,10 @@ def _awaited(store: DesignStore, message: str, scope: Optional[str], **kw) -> Op
                               reply=f"I couldn't keep that grain: {scrubbed(e)}.")
         return None if got is None else _grain_reply(got)
     yes = awaiting.reads(message)
+    if yes is None and aw["kind"] == "remove":         # "remove it", that part selected, answers "Remove it?" (#287)
+        m = _REMOVE.match(message or "")
+        if m and aw.get("part") and _remove_target(store, m.group(1), scope) == aw["part"]:    # never by fallback
+            yes = True
     awaiting.clear(store)
     if yes is None:
         return None
@@ -2382,7 +2505,7 @@ def _grain_reply(got: dict) -> TurnResult:
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
          use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
          on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False,
-         pick: Optional[dict] = None) -> TurnResult:
+         pick: Optional[dict] = None, typed: Optional[str] = None) -> TurnResult:
     """One conversational turn: route the message, make the move, measure the whole design, reply.
 
     ``scope`` is the part the user clicked (``None`` = the design). ``author``/``classifier``/
@@ -2396,12 +2519,15 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
     from . import promote
 
     events: list[Event] = []
+    # what the person typed, without the page's "About the …:" context (#287): every intent match reads this; the
+    # designer and the answers still get the whole message, which says which piece or edge it's about
+    typed = typed.strip() if isinstance(typed, str) and typed.strip() else bare(message, scope, pick)
 
     # A parked proposal owns the next turn if the message answers it — deterministic, no LLM round
     # trip, and it keeps "yes" from being read as a request to change geometry.
     parked = promote.pending(store)
     if parked is not None:
-        verdict = promote.reads_as_yes(message)
+        verdict = promote.reads_as_yes(typed)
         if verdict is not None:
             result = (_accept(store, parked, events, on_event) if verdict
                       else _decline(store, parked, events, on_event))
@@ -2414,10 +2540,10 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
             return result
 
     # what Caliper's own last question waits for (#98): a short go-ahead or no answers it, with no LLM
-    said = _awaited(store, message, scope, author=author, client=client, max_rounds=max_rounds, events=events,
+    said = _awaited(store, typed, scope, author=author, client=client, max_rounds=max_rounds, events=events,
                     on_event=on_event, use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
     if said is None:
-        said = _remove_or_restore(store, message, scope, events=events, on_event=on_event)
+        said = _remove_or_restore(store, typed, scope, events=events, on_event=on_event)
     if said is not None:
         if not logged:
             store.append_log({"kind": "message", "text": message, "scope": scope, "action": said.action,
@@ -2427,7 +2553,7 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         _emit(events, on_event, "done", said.action, ok=said.ok, part=said.part)
         return said
 
-    said = _mirror_said(store, message, scope) if not message.strip().endswith("?") else None   # (#239)
+    said = _mirror_said(store, typed, scope) if not typed.strip().endswith("?") else None   # (#239)
     if said is not None:
         if not logged:
             store.append_log({"kind": "message", "text": message, "scope": scope, "action": "mirror",
@@ -2467,7 +2593,7 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         _emit(events, on_event, "done", "grain", ok=said.ok, part=said.part)
         return said
 
-    intent = classify(store, message, scope, use_llm=use_llm, client=client, classifier=classifier)
+    intent = classify(store, typed, scope, use_llm=use_llm, client=client, classifier=classifier)
     _emit(events, on_event, "classified", f"{intent.action}"
           + (f" → {intent.part}" if intent.part else ""),
           action=intent.action, part=intent.part, source=intent.source, note=intent.note)
@@ -2509,8 +2635,8 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
                         use_llm=use_llm, client=client)
 
     # what it's held to (CALI-55): a turn that says what the design must do updates its scorecard's checks
-    if result.ok is not False and (_OBLIGATION.search(message.lower()) or _CARRIES.search(message.lower())
-                                   or _MEASURE.search(message)):
+    if result.ok is not False and (_OBLIGATION.search(typed.lower()) or _CARRIES.search(typed.lower())
+                                   or _MEASURE.search(typed)):
         from . import goals
 
         try:
