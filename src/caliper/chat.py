@@ -915,7 +915,7 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
         reply += "\n\n" + followed[:1].upper() + followed[1:] + "."
     if uncarved:
         reply += "\n\n" + carve.DROPPED
-    on_pick = None
+    on_pick, placed = None, 0
     if pick:                                        # did it land on what was picked? Only what can be measured is said
         from . import features
 
@@ -925,6 +925,9 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
             check = J.landed(prior, script, store, part_id, *joint_pick, inches=store.design.display_units == "in")
             if check["landed"] is True:             # a rabbet is the same solid: its step was measured, not its volume
                 reply = re.sub(r"Its shape didn't change \(the same volume[^\n]*\n?", "", reply)
+                # what was measured stands where "not measured" stood, never under the part's own checks (#289 review)
+                reply, placed = re.subn(r"Not measured: whether that's what you meant\.[^\n]*", lambda _: check["said"],
+                                        reply, count=1)
         else:
             check = features.landed(picked_from, _features_of(store, part_id), pick, message,
                                     store.design.display_units == "in")
@@ -934,7 +937,7 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
             store.append_history(part_id, {"kind": "pick_missed", "version": version})
         # a miss comes first and the turn isn't a success: never a tick above "it isn't on what you picked" (rule 6)
         reply = (f"{'!' if on_pick == features.PARTIAL else chr(0x2717)} {check['said']}\n\n{reply.replace(chr(0x2713) + ' ', '', 1)}"
-                 if short else f"{reply}\n\n{check['said']}")
+                 if short else reply if placed else f"{reply}\n\n{check['said']}")
     proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
                                        drafter=drafter, enabled=promote_feedback,
                                        events=events, on_event=on_event)

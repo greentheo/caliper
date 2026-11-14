@@ -208,6 +208,7 @@ def test_the_turn_tells_the_designer_and_checks_it(tmp_path, tools):
     assert any("Make that joint a rabbet: set its JOINTS entry" in f for f in seen), seen
     # the design's own units: this one is in millimetres
     assert got.ok and "Checked: the joint between the side and the top is now a rabbet, 6 mm deep." in got.reply, got.reply
+    assert "Not measured: whether that's what you meant" not in got.reply, got.reply                 # (#289 review)
     assert "Its shape didn't change" not in got.reply, got.reply                     # the same solid: a rabbet lands in it
 
 
@@ -333,29 +334,72 @@ def test_a_splayed_side_s_top_edge_is_checked_as_a_ten_degree_bevel(tmp_path):
                            "edge.", "landed": True}, got
 
 
-def test_a_stringer_through_the_side_is_checked_as_a_through_tenon(tmp_path):
+#: #289 review: the stool with its sides cut for the stringer, as the router's files need them. A mortise is a hole in
+#: the side's outline; at the foot, a notch is the outline itself, stepped round the stringer.
+_SIDE = "    side = lambda x: [(x, 0, 0), (x, d, 0), (x, d, h - t), (x, 0, h - t)]\n"
+_HOLE = ("    hole = lambda x: [(x, ym - t / 2, z0), (x, ym + t / 2, z0), (x, ym + t / 2, z1), (x, ym - t / 2, z1)]\n")
+_NOTCHED = ("    side = lambda x: [(x, 0, 0), (x, ym - t / 2, 0), (x, ym - t / 2, z1), (x, ym + t / 2, z1), (x, ym + t / 2, 0),"
+            " (x, d, 0), (x, d, h - t), (x, 0, h - t)]\n")
+
+
+def _cut(kind):
+    from tests.test_make_marks import TENONED
+
+    if kind == "mortise":
+        out = TENONED.replace(_SIDE, _SIDE + _HOLE)
+        for x in ("0.0", "w"):
+            out = out.replace(f'"outline": side({x})}}', f'"outline": side({x}), "holes": [hole({x})]}}')
+        return out
+    return TENONED.replace('"str_z": 63.5', '"str_z": 0.0').replace(_SIDE, _NOTCHED)
+
+
+def test_the_fixtures_cut_the_sides():
+    from tests.test_make_marks import TENONED
+
+    assert _cut("mortise").count('"holes": [hole(') == 2 and _cut("notch") != TENONED.replace('"str_z": 63.5', '"str_z": 0.0')
+
+
+def test_a_stringer_through_the_side_s_mortise_is_checked_as_a_through_tenon(tmp_path):
+    pair, holed = ("left side", "stringer"), _cut("mortise")
+    got = _land(tmp_path, _with(holed, pair, "through tenon"), pair, "through tenon", before=holed)
+    assert got == {"said": "Checked: the joint between the left side and the stringer is now a through tenon: a 3/4 in x "
+                           "5 in mortise in the left side.", "landed": True}, got
+    got = _land(tmp_path / "mm", _with(holed, pair, "through tenon"), pair, "through tenon", before=holed, inches=False)
+    assert "a 19 x 127 mm mortise in the left side." in got["said"], got
+
+
+def test_a_stringer_through_the_solid_with_no_hole_in_the_outline_isn_t_checked(tmp_path):
+    """#289 review: on Theo's stool the reply said both "the outline has no hole" and "Checked … mortise". The router cuts
+    the outline: the solid alone is partial, and says what's missing."""
+    from caliper import features
     from tests.test_make_marks import TENONED
 
     pair = ("left side", "stringer")
     got = _land(tmp_path, _with(TENONED, pair, "through tenon"), pair, "through tenon", before=TENONED)
-    assert got == {"said": "Checked: the joint between the left side and the stringer is now a through tenon: a 3/4 in x "
-                           "5 in mortise in the left side.", "landed": True}, got
-    got = _land(tmp_path / "mm", _with(TENONED, pair, "through tenon"), pair, "through tenon", before=TENONED, inches=False)
-    assert "a 19 x 127 mm mortise in the left side." in got["said"], got
+    assert got["landed"] == features.PARTIAL and "Checked" not in got["said"], got
+    assert got["said"].startswith("The solid has the stringer through the left side, but the left side's outline has no "
+                                  "hole there yet: cut the mortise into the left side's outline."), got
 
 
 def test_a_stringer_at_the_foot_is_checked_as_a_notch_and_isn_t_a_mortise(tmp_path):
+    from caliper import features
     from tests.test_make_marks import TENONED
 
-    footed, pair = TENONED.replace('"str_z": 63.5', '"str_z": 0.0'), ("left side", "stringer")
-    got = _land(tmp_path, _with(footed, pair, "notch"), pair, "notch", before=footed)
+    pair, notched = ("left side", "stringer"), _cut("notch")
+    got = _land(tmp_path, _with(notched, pair, "notch"), pair, "notch", before=notched)
     assert got == {"said": "Checked: the joint between the left side and the stringer is now a notch: a 3/4 in x 5 in "
                            "notch in the left side.", "landed": True}, got
-    got = _land(tmp_path / "t", _with(footed, pair, "through tenon"), pair, "through tenon", before=footed)
+    footed = TENONED.replace('"str_z": 63.5', '"str_z": 0.0')                        # the solid only: partial
+    got = _land(tmp_path / "f", _with(footed, pair, "notch"), pair, "notch", before=footed)
+    assert got["landed"] == features.PARTIAL and got["said"].startswith(
+        "The solid has the stringer in the left side's edge, but the left side's outline has no notch there yet: cut the "
+        "notch into the left side's outline."), got
+    got = _land(tmp_path / "t", _with(notched, pair, "through tenon"), pair, "through tenon", before=notched)
     assert got["landed"] is False and got["said"].startswith(
         "Its JOINTS entry says through tenon, but the left side has a notch for the stringer, open at its edge, not a "
         "mortise."), got
-    got = _land(tmp_path / "n", _with(TENONED, pair, "notch"), pair, "notch", before=TENONED)
+    holed = _cut("mortise")
+    got = _land(tmp_path / "n", _with(holed, pair, "notch"), pair, "notch", before=holed)
     assert got["landed"] is False and got["said"].startswith(
         "Its JOINTS entry says notch, but the left side has a mortise for the stringer, closed all round, not a notch."), got
 
@@ -381,6 +425,12 @@ def test_a_bevel_picked_on_the_splayed_seam_is_checked_in_the_turn(tmp_path, too
     assert any('pieces ["back side", "top"], to "kind": "bevel"' in f for f in seen), seen
     assert got.ok and "Checked: the joint between the back side and the top is now a bevel, 10° on the back side's edge." \
         in got.reply, got.reply
+    # #289 review: what was measured stands where "Not measured: whether that's what you meant" stood, not under the checks
+    assert "Not measured: whether that's what you meant" not in got.reply, got.reply
+    lines = got.reply.splitlines()
+    assert got.reply.count("Checked: the joint") == 1, got.reply
+    at = next(i for i, ln in enumerate(lines) if ln.startswith("Checked: the joint"))
+    assert lines[at - 1].startswith(("Changed:", "Measured:", "Its shape")) and at < len(lines) - 1, got.reply
 
 
 #: A board with its free front edge bevelled 20°, and a top laid square on its upper edge: the bevel isn't at that joint.
@@ -427,3 +477,18 @@ def test_a_mortise_for_another_piece_isn_t_the_joint_s(tmp_path):
     got = _land(tmp_path, _with(TENONED, pair, "through tenon"), pair, "through tenon", before=TENONED)
     assert got["landed"] is False and got["said"].startswith(
         "Its JOINTS entry says through tenon, but neither piece runs through the other: there's no mortise."), got
+
+
+def test_a_mortise_in_the_solid_only_reads_partial_in_the_turn(tmp_path, tools):
+    """#289 review, Theo's step-stool-5 v3: "make that a mortise" on the stringer seam, the outline uncut: "!", what's
+    missing first, and no "Checked" anywhere in the reply."""
+    from tests.test_make_marks import TENONED
+
+    tools("jigsaw", "drill", "router")
+    s = _store(tmp_path, TENONED)
+    seam = _edge_at(s, (T, 300.0 / 2 - T / 2, 63.5 + 127.0 / 2))                  # the stringer's face on the left side's
+    got, seen = _turn(s, seam, "make that a mortise", _with(TENONED, ("left side", "stringer"), "through tenon"))
+    assert any('to "kind": "through tenon"' in f for f in seen), seen
+    assert not got.ok and got.reply.startswith("! The solid has the stringer through the left side, but the left side's "
+                                               "outline has no hole there yet"), got.reply
+    assert "Checked" not in got.reply

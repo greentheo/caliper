@@ -488,7 +488,7 @@ def landed(before_script: str, after_script: str, store, pid: str, joint: dict, 
                     "landed": False}
         by = {pc["key"]: pc for pc in pieces}
         if kind not in ("rabbet", "dado"):
-            return _marked(store, pid, key, by, kind, said, inches)
+            return _marked(store, pid, key, by, kind, said, inches, tol)
         depth = sunk(by[key[0]], by[key[1]])
         if depth <= tol:                             # the step asked for isn't in the pieces: a miss (#285 review)
             return {"said": f"Its JOINTS entry says {kind}, but the pieces show no step: neither runs into the other."
@@ -506,15 +506,16 @@ def landed(before_script: str, after_script: str, store, pid: str, joint: dict, 
     return {"said": f"Its JOINTS entry now says {now}, not {kind}." + UNDO, "landed": False}   # another kind: a miss
 
 
-def _marked(store, pid: str, key: tuple, by: dict, kind: str, said: str, inches: bool) -> dict:
-    """A bevel, through tenon or notch, checked against the make side's marks (CALI-180): the same bevels and cuts the
-    patterns, the cut list and the book are drawn from."""
+def _marked(store, pid: str, key: tuple, by: dict, kind: str, said: str, inches: bool, tol: float) -> dict:
+    """A bevel, checked against the make side's marks (CALI-180): the same bevels the patterns, the cut list and the book
+    are drawn from. A through tenon or notch, from the declared pieces: landed only where the host's outline has it, as
+    the router cuts it; the solid alone is partial, and says what's missing (#289 review)."""
     from . import marks as K
     from .release import inches as _in
 
-    m = K.of(store, pid)
     a, b = key
-    if kind == "bevel":                              # an edge of one cut at an angle to sit on the other
+    if kind == "bevel":
+        m = K.of(store, pid)                              # an edge of one cut at an angle to sit on the other
         cut = [(float(x["angle"]), k) for k, o in ((a, b), (b, a)) for x in (m["bevels"].get(k) or []) if x.get("meets") == o]
         if not cut:
             return {"said": f"Its JOINTS entry says bevel, but neither edge is cut at an angle where the {a} and the {b} "
@@ -522,8 +523,8 @@ def _marked(store, pid: str, key: tuple, by: dict, kind: str, said: str, inches:
         angle, k = max(cut)
         return {"said": f"Checked: {said} is now a bevel, {angle:.0f}° on the {k}'s edge.", "landed": True}
     want = _CUT[kind]
-    found = [(c["kind"], host, other, c) for host, other in ((a, b), (b, a)) for c in (m["cuts"].get(host) or [])
-             if c["kind"] in _CUT_IS and c["for"] == by[other]["name"]]
+    found = [(cut[0], host, other, cut) for host, other in ((a, b), (b, a)) for cut in [_cut_in(by[host], by[other], tol)]
+             if cut is not None]
     hit = next((f for f in found if f[0] == want), None)
     if hit is None:
         if found:
@@ -532,11 +533,63 @@ def _marked(store, pid: str, key: tuple, by: dict, kind: str, said: str, inches:
                             f"not a {want}." + UNDO, "landed": False}
         return {"said": f"Its JOINTS entry says {kind}, but neither piece runs through the other: there's no {want}."
                         + UNDO, "landed": False}
-    _, host, _, c = hit
-    C = np.asarray(c["corners"], float)
+    _, host, other, (_, got, cut) = hit
+    if not cut:                                      # the solid has it; the outline the router cuts doesn't (#289 review)
+        from .features import PARTIAL
+
+        where, what = (f"through the {host}", "hole") if want == "mortise" else (f"in the {host}'s edge", "notch")
+        return {"said": f"The solid has the {other} {where}, but the {host}'s outline has no {what} there yet: cut the "
+                        f"{want} into the {host}'s outline." + UNDO, "landed": PARTIAL}
+    C = np.asarray(K._footprint(by[host], by[other], got), float)
     lo, hi = sorted((float(np.linalg.norm(C[1] - C[0])), float(np.linalg.norm(C[3] - C[0]))))
     size = f"{_in(lo)} x {_in(hi)}" if inches else f"{lo:.0f} x {hi:.0f} mm"
     return {"said": f"Checked: {said} is now a {kind}: a {size} {want} in the {host}.", "landed": True}
+
+
+def _hull(host: dict) -> Optional[dict]:
+    """The host with its outline's convex hull for an outline: where a notch cut into the outline was (#289 review). None
+    where the outline is already convex."""
+    from .consistency import _frame
+
+    o, u, v, _, flat = _frame(host["polys"][0])
+    pts = sorted({(round(float(x), 6), round(float(y), 6)) for x, y in flat})
+    if len(pts) < 3:
+        return None
+
+    def half(seq):
+        out = []
+        for p in seq:
+            while len(out) >= 2 and ((out[-1][0] - out[-2][0]) * (p[1] - out[-2][1])
+                                     - (out[-1][1] - out[-2][1]) * (p[0] - out[-2][0])) <= 0:
+                out.pop()
+            out.append(p)
+        return out
+    hull = half(pts)[:-1] + half(pts[::-1])[:-1]          # counter-clockwise, as an outline is in its own frame
+    if len(hull) == len(pts):
+        return None
+    return {**host, "polys": [np.array([o + x * u + y * v for x, y in hull])]}
+
+
+def _cut_in(host: dict, piece: dict, tol: float) -> Optional[tuple]:
+    """``(kind, crossing, in the outline)``: a mortise or notch ``piece`` makes in ``host``, from the declared pieces, and
+    whether the host's outline has it, as #275's rule reads it: a mortise as a hole, a notch cut into the outline
+    itself. None where the piece doesn't run right through the host (#289 review)."""
+    from .consistency import _inside2d
+
+    got = _through(host, piece, tol)
+    if got is not None and got["through"]:
+        o, u, v, _ = got["frame"]
+        covered = np.zeros(len(got["points"]), dtype=bool)
+        for h in host.get("holes") or []:
+            h = np.asarray(h, float)
+            covered |= _inside2d(got["points"], np.stack([(h - o) @ u, (h - o) @ v], axis=1))
+        return ("notch" if got["notch"] else "mortise"), got, bool(covered.mean() >= 0.9)
+    if got is None and len(host["polys"]) == 1:      # outside the outline: cut into it, if it's inside its hull
+        hull = _hull(host)
+        got = _through(hull, piece, tol) if hull is not None else None
+        if got is not None and got["through"]:
+            return ("notch" if got["notch"] else "mortise"), got, True
+    return None
 
 
 def beside(store, pid: str, point, corner: Optional[str] = None) -> Optional[str]:
