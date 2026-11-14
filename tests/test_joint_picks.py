@@ -156,6 +156,8 @@ def test_the_kind_a_request_asks_for():
     assert joints.asked_kind("pocket holes please") == "pocket screw"
     assert joints.asked_kind("make it a miter") == "mitre"
     assert joints.asked_kind("glue block it") == "glue block"
+    assert joints.asked_kind("make that a mortise") == "through tenon"                 # CALI-180: the cut's own name
+    assert joints.asked_kind("a mortise and tenon here") == "through tenon"
     assert joints.asked_kind("fillet this 3 mm") is None
 
 
@@ -175,9 +177,12 @@ def test_the_designer_is_told_which_entry(tmp_path):
     (_script("rabbet"), "rabbet", False, "Its JOINTS entry says rabbet, but the pieces show no step: neither runs "
                                                   "into the other."),
     (_script("dowel"), "rabbet", False, "Its JOINTS entry now says dowel, not rabbet."),
+    # CALI-180: a bevel is measured now, so a square edge under a bevel entry is a miss
+    (_script("bevel"), "bevel", False, "Its JOINTS entry says bevel, but neither edge is cut at an angle where the side "
+                                       "and the top meet."),
     # a kind the pieces can't show here: said as the entry only, never "Checked"
-    (_script("bevel"), "bevel", None, "Its JOINTS entry now says bevel: the shape isn't checked here."),
-], ids=["landed", "missed", "no step", "another kind", "unmeasured"])
+    (_script("dowel"), "dowel", None, "Its JOINTS entry now says dowel: the shape isn't checked here."),
+], ids=["landed", "missed", "no step", "another kind", "square bevel", "unmeasured"])
 def test_did_it_land(after, asked, landed, words, tmp_path):
     s = _store(tmp_path, after)
     pick_joint = {"pieces": ["side", "top"], "said": "the joint between the side and the top", "kind": "butt"}
@@ -278,10 +283,10 @@ def test_no_step_is_a_miss_and_the_turn_says_so(tmp_path, tools):
 
 
 def test_an_unmeasured_kind_is_said_as_the_entry_never_checked(tmp_path, tools):
-    tools("jigsaw", "drill", "circular saw")
+    tools("jigsaw", "drill", "doweling jig")
     s = _store(tmp_path, _script())
-    got, _ = _turn(s, _edge_at(s, (T, D / 2, H - T)), "make that a bevel", _script("bevel"))
-    assert "Its JOINTS entry now says bevel: the shape isn't checked here." in got.reply and "Checked:" not in got.reply
+    got, _ = _turn(s, _edge_at(s, (T, D / 2, H - T)), "make that a dowel joint", _script("dowel"))
+    assert "Its JOINTS entry now says dowel: the shape isn't checked here." in got.reply and "Checked:" not in got.reply
 
 
 def test_an_outside_corner_on_a_flush_seam_asks_for_the_inside_corner(tmp_path, tools):
@@ -306,3 +311,119 @@ def test_an_edge_with_no_joint_near_it_goes_the_ordinary_way(tmp_path, tools):
     far = _edge_at(s, (W, D / 2, H))                                                 # the top's far end: no piece near it
     got, seen = _turn(s, far, "make that a rabbet", _script())
     assert seen and features.NOT_MEASURED in got.reply
+
+
+# --- CALI-180: a bevel's angle and a mortise or notch are measured from the make side's marks (#283) -----------------------
+def _with(script, pair, kind):
+    return script + f"\n\nJOINTS = [{{'pieces': {list(pair)!r}, 'kind': '{kind}', 'fix': ['glue']}}]\n"
+
+
+def _land(tmp_path, script, pair, kind, before=None, inches=True):
+    s = _store(tmp_path, script)
+    a, b = pair
+    pick_joint = {"pieces": [a, b], "said": f"the joint between the {a} and the {b}", "kind": "butt"}
+    return joints.landed(before or script, script, s, "stool", pick_joint, kind, inches=inches)
+
+
+def test_a_splayed_side_s_top_edge_is_checked_as_a_ten_degree_bevel(tmp_path):
+    from tests.test_make_marks import SPLAYED
+
+    got = _land(tmp_path, _with(SPLAYED, ("back side", "top"), "bevel"), ("back side", "top"), "bevel", before=SPLAYED)
+    assert got == {"said": "Checked: the joint between the back side and the top is now a bevel, 10° on the back side's "
+                           "edge.", "landed": True}, got
+
+
+def test_a_stringer_through_the_side_is_checked_as_a_through_tenon(tmp_path):
+    from tests.test_make_marks import TENONED
+
+    pair = ("left side", "stringer")
+    got = _land(tmp_path, _with(TENONED, pair, "through tenon"), pair, "through tenon", before=TENONED)
+    assert got == {"said": "Checked: the joint between the left side and the stringer is now a through tenon: a 3/4 in x "
+                           "5 in mortise in the left side.", "landed": True}, got
+    got = _land(tmp_path / "mm", _with(TENONED, pair, "through tenon"), pair, "through tenon", before=TENONED, inches=False)
+    assert "a 19 x 127 mm mortise in the left side." in got["said"], got
+
+
+def test_a_stringer_at_the_foot_is_checked_as_a_notch_and_isn_t_a_mortise(tmp_path):
+    from tests.test_make_marks import TENONED
+
+    footed, pair = TENONED.replace('"str_z": 63.5', '"str_z": 0.0'), ("left side", "stringer")
+    got = _land(tmp_path, _with(footed, pair, "notch"), pair, "notch", before=footed)
+    assert got == {"said": "Checked: the joint between the left side and the stringer is now a notch: a 3/4 in x 5 in "
+                           "notch in the left side.", "landed": True}, got
+    got = _land(tmp_path / "t", _with(footed, pair, "through tenon"), pair, "through tenon", before=footed)
+    assert got["landed"] is False and got["said"].startswith(
+        "Its JOINTS entry says through tenon, but the left side has a notch for the stringer, open at its edge, not a "
+        "mortise."), got
+    got = _land(tmp_path / "n", _with(TENONED, pair, "notch"), pair, "notch", before=TENONED)
+    assert got["landed"] is False and got["said"].startswith(
+        "Its JOINTS entry says notch, but the left side has a mortise for the stringer, closed all round, not a notch."), got
+
+
+def test_a_through_tenon_on_a_plain_butt_is_a_miss(tmp_path):
+    got = joints.landed(_script(), _script("through tenon"), _store(tmp_path, _script("through tenon")), "stool",
+                        {"pieces": ["side", "top"], "said": "the joint between the side and the top", "kind": "butt"},
+                        "through tenon", inches=True)
+    assert got["landed"] is False and got["said"].startswith(
+        "Its JOINTS entry says through tenon, but neither piece runs through the other: there's no mortise."), got
+    assert "Checked" not in got["said"]
+
+
+def test_a_bevel_picked_on_the_splayed_seam_is_checked_in_the_turn(tmp_path, tools):
+    """The done-when: "make that a bevel" on the inside seam under a splayed stool's top reaches the designer as that
+    pair's entry, and the turn comes back ✓ "Checked …, 10°"."""
+    from tests.test_make_marks import SPLAYED
+
+    tools("jigsaw", "drill", "circular saw")
+    s = _store(tmp_path, SPLAYED)
+    seam = _edge_at(s, (0.0, 280.0 / 2 - T, 400.0 - T))
+    got, seen = _turn(s, seam, "make that a bevel", _with(SPLAYED, ("back side", "top"), "bevel"))
+    assert any('pieces ["back side", "top"], to "kind": "bevel"' in f for f in seen), seen
+    assert got.ok and "Checked: the joint between the back side and the top is now a bevel, 10° on the back side's edge." \
+        in got.reply, got.reply
+
+
+#: A board with its free front edge bevelled 20°, and a top laid square on its upper edge: the bevel isn't at that joint.
+BEVELLED_ELSEWHERE = '''import math
+
+import cadquery as cq
+
+PARAMS = {"t": 19.05, "d": 300.0, "h": 450.0}
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    t, d, h = p["t"], p["d"], p["h"]
+    k = t * math.tan(math.radians(20.0))
+    board = cq.Workplane("XY").polyline([(0, 0), (t, k), (t, d), (0, d)]).close().extrude(h)
+    return board.union(cq.Workplane().box(200.0, d, t, centered=False).translate((0, 0, h)))
+
+
+def construction(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    t, d, h = p["t"], p["d"], p["h"]
+    return [{"name": "side", "kind": "sheet", "material": "plywood", "thickness": t,
+             "outline": [(0.0, 0.0, 0.0), (0.0, d, 0.0), (0.0, d, h), (0.0, 0.0, h)]},
+            {"name": "top", "kind": "sheet", "material": "plywood", "thickness": t,
+             "outline": [(0.0, 0.0, h + t), (200.0, 0.0, h + t), (200.0, d, h + t), (0.0, d, h + t)]}]
+'''
+
+
+def test_a_bevel_elsewhere_on_the_piece_isn_t_the_joint_s(tmp_path):
+    from caliper import marks
+
+    s = _store(tmp_path, BEVELLED_ELSEWHERE)
+    assert any(b["meets"] != "top" for b in marks.of(s, "stool")["bevels"].get("side", [])), "the fixture's bevel"
+    got = _land(tmp_path / "b", _with(BEVELLED_ELSEWHERE, ("side", "top"), "bevel"), ("side", "top"), "bevel",
+                before=BEVELLED_ELSEWHERE)
+    assert got["landed"] is False and got["said"].startswith(
+        "Its JOINTS entry says bevel, but neither edge is cut at an angle where the side and the top meet."), got
+
+
+def test_a_mortise_for_another_piece_isn_t_the_joint_s(tmp_path):
+    from tests.test_make_marks import TENONED
+
+    pair = ("left side", "step")                                                     # the side's mortise is the stringer's
+    got = _land(tmp_path, _with(TENONED, pair, "through tenon"), pair, "through tenon", before=TENONED)
+    assert got["landed"] is False and got["said"].startswith(
+        "Its JOINTS entry says through tenon, but neither piece runs through the other: there's no mortise."), got

@@ -481,6 +481,27 @@ def test_a_chamfer_past_half_the_thickness_is_a_chamfer_never_a_saw_bevel(tmp_pa
     assert "Set the saw" not in " ".join(do)
 
 
+def test_a_two_distance_chamfer_says_both(tmp_path):
+    """#283 review, the small ask: a 15 x 6 mm chamfer read "15 mm (9/16 in) at 22°". A router bit or a block plane wants
+    both distances: 15 down the edge, across the board's thickness, and 6 in across its face."""
+    from caliper import patterns
+
+    sc = EDGED.replace('EDGE = "EDGE"', 'EDGE = "chamfer6,15"').replace(
+        "edge.chamfer(float(EDGE[7:]))", "edge.chamfer(*[float(x) for x in EDGE[7:].split(',')])")
+    s = _store(tmp_path, sc, "a board")
+    m = marks.of(s, "stool")
+    (c,) = m["chamfers"]["side"]
+    assert abs(c["depth_mm"] - 15.0) < 0.5 and abs(c["setback_mm"] - 6.0) < 0.5, c
+    assert "    side: chamfer 15 × 6 mm (9/16 × 1/4 in) along 17 11/16 in of edge" in marks.cutlist_lines(m)
+    assert not any("22°" in ln for ln in marks.cutlist_lines(m))
+    book = " ".join(marks.book_lines(m))
+    assert "Chamfer the 1 edge marked C on the side, 15 × 6 mm (9/16 × 1/4 in), with a router" in book, book
+    (pc,) = patterns.pieces(s, "stool")
+    said = " ".join(patterns.marks_lines(pc))
+    assert ("Chamfer: 15 × 6 mm (9/16 × 1/4 in) along the edge marked C, on the other face: 15 mm down the edge and 6 mm "
+            "in across the face.") in said, said
+
+
 def test_a_true_bevel_is_still_one(tmp_path):
     m = marks.of(_store(tmp_path, EDGED.replace('EDGE = "EDGE"', 'EDGE = "bevel20"'), "a board"), "stool")
     (b,) = m["bevels"]["side"]

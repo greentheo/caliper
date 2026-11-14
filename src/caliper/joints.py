@@ -353,15 +353,19 @@ def listed(store, pid: str) -> list[dict]:
 # ---------------------------------------------------------------------------------------------------------------------------
 # A pick names a joint (CALI-178, #222 slice D)
 # ---------------------------------------------------------------------------------------------------------------------------
-#: The kinds a joint check can measure in the pieces here: a rabbet's or a dado's step (#285 review). A bevel's angle and a
-#: mortise come with the make side's marks (#283); until then they're said as the entry only, never "Checked".
-MEASURED = ("rabbet", "dado")
+#: The kinds a joint check can measure in the pieces: a rabbet's or a dado's step (#285 review); a bevel's angle, and a
+#: through tenon's mortise or a notch, from the make side's marks (#283, CALI-180). Any other is said as the entry only,
+#: never "Checked".
+MEASURED = ("rabbet", "dado", "bevel", "through tenon", "notch")
+#: The cut a joint kind makes in its host, as :func:`marks.cuts` says it, and how that cut is told from the other.
+_CUT = {"through tenon": "mortise", "notch": "notch"}
+_CUT_IS = {"mortise": "closed all round", "notch": "open at its edge"}
 #: What a joint check says when it can't tell: landed and missed each need positive evidence, as for an edge (#177).
 NOT_MEASURED = "I couldn't tell whether that joint changed the way you asked."
 UNDO = ' Say "roll it back" to undo it.'
 #: The kinds a request can ask for, and the words it might use: the longer phrases first.
 _ASK = (("pocket screw", r"pocket[- ]?(?:screw|hole)s?"), ("glue block", r"glue[- ]?blocks?"),
-        ("printed connector", r"printed connectors?"), ("through tenon", r"(?:through[- ])?tenons?"),
+        ("printed connector", r"printed connectors?"), ("through tenon", r"(?:through[- ])?tenons?|mortise(?:s|d)?(?:[- ]and[- ]tenons?)?"),
         ("mitre", r"mit(?:re|er)(?:ed|s)?"), ("rabbet", r"rabbet(?:ed|s)?|rebate(?:d|s)?"), ("dado", r"dado(?:e?s)?"),
         ("dowel", r"dowel(?:s|led|ed)?"), ("bevel", r"bevel(?:led|ed|s)?"), ("notch", r"notch(?:ed|es)?"),
         ("butt", r"butt(?:[- ]joint)?s?"))
@@ -462,8 +466,9 @@ def sunk(a: dict, b: dict) -> float:
 
 def landed(before_script: str, after_script: str, store, pid: str, joint: dict, kind: str, inches: bool) -> dict:
     """Did "make that a rabbet" land on the picked joint? ``{"said", "landed": True, False or None}``, as
-    :func:`features.landed` says it (#177): landed, its entry now has that kind, the pieces still touch, and a rabbet or dado
-    shows as the step; missed, its entry is unchanged; couldn't tell, anything else."""
+    :func:`features.landed` says it (#177): landed, its entry now has that kind, the pieces still touch, and the pieces show
+    it (a rabbet's or dado's step, a bevel's angle on an edge that meets the other piece, a through tenon's mortise or a
+    notch); missed, they don't, or its entry is unchanged, gone or another kind; couldn't tell, a kind not measured here."""
     key = tuple(joint["pieces"])
 
     def entry(script):
@@ -482,6 +487,8 @@ def landed(before_script: str, after_script: str, store, pid: str, joint: dict, 
             return {"said": f"Its JOINTS entry says {kind}, but the {key[0]} and the {key[1]} don't touch now." + UNDO,
                     "landed": False}
         by = {pc["key"]: pc for pc in pieces}
+        if kind not in ("rabbet", "dado"):
+            return _marked(store, pid, key, by, kind, said, inches)
         depth = sunk(by[key[0]], by[key[1]])
         if depth <= tol:                             # the step asked for isn't in the pieces: a miss (#285 review)
             return {"said": f"Its JOINTS entry says {kind}, but the pieces show no step: neither runs into the other."
@@ -497,6 +504,39 @@ def landed(before_script: str, after_script: str, store, pid: str, joint: dict, 
     if now is None:
         return {"said": f"Its JOINTS entry is gone, not a {kind}." + UNDO, "landed": False}
     return {"said": f"Its JOINTS entry now says {now}, not {kind}." + UNDO, "landed": False}   # another kind: a miss
+
+
+def _marked(store, pid: str, key: tuple, by: dict, kind: str, said: str, inches: bool) -> dict:
+    """A bevel, through tenon or notch, checked against the make side's marks (CALI-180): the same bevels and cuts the
+    patterns, the cut list and the book are drawn from."""
+    from . import marks as K
+    from .release import inches as _in
+
+    m = K.of(store, pid)
+    a, b = key
+    if kind == "bevel":                              # an edge of one cut at an angle to sit on the other
+        cut = [(float(x["angle"]), k) for k, o in ((a, b), (b, a)) for x in (m["bevels"].get(k) or []) if x.get("meets") == o]
+        if not cut:
+            return {"said": f"Its JOINTS entry says bevel, but neither edge is cut at an angle where the {a} and the {b} "
+                            f"meet." + UNDO, "landed": False}
+        angle, k = max(cut)
+        return {"said": f"Checked: {said} is now a bevel, {angle:.0f}° on the {k}'s edge.", "landed": True}
+    want = _CUT[kind]
+    found = [(c["kind"], host, other, c) for host, other in ((a, b), (b, a)) for c in (m["cuts"].get(host) or [])
+             if c["kind"] in _CUT_IS and c["for"] == by[other]["name"]]
+    hit = next((f for f in found if f[0] == want), None)
+    if hit is None:
+        if found:
+            got, host, other, _ = found[0]
+            return {"said": f"Its JOINTS entry says {kind}, but the {host} has a {got} for the {other}, {_CUT_IS[got]}, "
+                            f"not a {want}." + UNDO, "landed": False}
+        return {"said": f"Its JOINTS entry says {kind}, but neither piece runs through the other: there's no {want}."
+                        + UNDO, "landed": False}
+    _, host, _, c = hit
+    C = np.asarray(c["corners"], float)
+    lo, hi = sorted((float(np.linalg.norm(C[1] - C[0])), float(np.linalg.norm(C[3] - C[0]))))
+    size = f"{_in(lo)} x {_in(hi)}" if inches else f"{lo:.0f} x {hi:.0f} mm"
+    return {"said": f"Checked: {said} is now a {kind}: a {size} {want} in the {host}.", "landed": True}
 
 
 def beside(store, pid: str, point, corner: Optional[str] = None) -> Optional[str]:

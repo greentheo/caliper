@@ -198,7 +198,9 @@ def _edge_face(mesh, p, q, d, out, N, t: float, fs) -> Optional[dict]:
     face = 1 if j == 2 else 0
     depth = (t - w) if face == 1 else w
     angle = math.degrees(math.acos(float(np.clip(m @ ms, -1, 1))))
-    return {"kind": "chamfer", "chamfer": {"depth_mm": float(depth), "angle": round(angle, 1), "face": face}}
+    setback = float(depth) * math.tan(math.radians(angle))      # how far in across the face it starts (#283 review)
+    return {"kind": "chamfer", "chamfer": {"depth_mm": float(depth), "setback_mm": setback, "angle": round(angle, 1),
+                                           "face": face}}
 
 
 def bevels(pieces: list[dict], mesh, tol: float, chamfers: Optional[dict] = None) -> dict:
@@ -540,15 +542,27 @@ def bevel_line(angles: list[float]) -> str:
     return "Bevels: " + "; ".join(parts) + ". The dashed line is where the blade comes out on the other face."
 
 
-def chamfer_size(mm: float) -> str:
-    """A chamfer's size across the edge, millimetres first (a router bit's or a plane's), inches after."""
+def _two(depth: float, setback: Optional[float]) -> bool:
+    return setback is not None and abs(float(setback) - float(depth)) >= 0.5
+
+
+def chamfer_size(mm: float, setback: Optional[float] = None) -> str:
+    """A chamfer's size, millimetres first (a router bit's or a plane's), inches after: one distance where it's 45°, both
+    where they differ, down the edge first and then in across the face ("15 × 6 mm", #283 review)."""
+    if _two(mm, setback):
+        return f"{mm:.0f} × {setback:.0f} mm ({_in(mm).removesuffix(' in')} × {_in(setback)})"
     return f"{mm:.0f} mm ({_in(mm)})"
 
 
 def chamfer_line(chamfers: list) -> str:
     """The chamfers on one piece: shaped after cutting, never a saw setting (#283 review)."""
-    parts = [f"{chamfer_size(c['depth_mm'])} along the edge marked C, on {'this face' if c.get('shown', True) else 'the other face'}"
-             for c in chamfers]
+    def one(c):
+        face = "this face" if c.get("shown", True) else "the other face"
+        said = f"{chamfer_size(c['depth_mm'], c.get('setback_mm'))} along the edge marked C, on {face}"
+        if _two(c["depth_mm"], c.get("setback_mm")):
+            said += f": {c['depth_mm']:.0f} mm down the edge and {c['setback_mm']:.0f} mm in across the face"
+        return said
+    parts = [one(c) for c in chamfers]
     return "Chamfer: " + "; ".join(parts) + ". A router or a block plane, after it's cut out: not the saw."
 
 
@@ -570,7 +584,8 @@ def summary(m: dict) -> dict:
     """Counts for the cut list and the book: ``{"bevels": [(piece, angle, mm)], "cuts": [(piece, kind, for)], "screws",
     "glued": [pair], "glue_blocks"}``."""
     bev = [(k, b["angle"], b["length_mm"]) for k, bs in sorted((m.get("bevels") or {}).items()) for b in bs]
-    cham = [(k, c["depth_mm"], c["angle"], c["length_mm"]) for k, cs in sorted((m.get("chamfers") or {}).items()) for c in cs]
+    cham = [(k, c["depth_mm"], c["angle"], c["length_mm"], c.get("setback_mm")) for k, cs in
+            sorted((m.get("chamfers") or {}).items()) for c in cs]
     cut = [(k, c["kind"], c["for"], c.get("depth_mm")) for k, cs in sorted((m.get("cuts") or {}).items()) for c in cs]
     sc = m.get("screws") or {}
     return {"bevels": bev, "chamfers": cham, "cuts": cut, "screws": sum(c["n"] for c in sc.values()),
@@ -586,8 +601,9 @@ def cutlist_lines(m: dict) -> list[str]:
     lines = []
     for k, a, mm in s["bevels"]:
         lines.append(f"    {k}: bevel {a:.0f}° along {_in(mm)} of edge")
-    for k, depth, a, mm in s["chamfers"]:
-        lines.append(f"    {k}: chamfer {chamfer_size(depth)} at {a:.0f}° along {_in(mm)} of edge")
+    for k, depth, a, mm, setback in s["chamfers"]:
+        at = "" if _two(depth, setback) else f" at {a:.0f}°"     # two distances say the angle themselves
+        lines.append(f"    {k}: chamfer {chamfer_size(depth, setback)}{at} along {_in(mm)} of edge")
     for k, kind, what, depth in s["cuts"]:
         lines.append(f"    {k}: a {kind} for the {what}" + (f", {_in(depth)} deep" if depth else ", right through"))
     for k, n in sorted(s["on"].items()):
@@ -614,9 +630,9 @@ def book_lines(m: dict, names: Optional[list] = None) -> list[str]:
         out.append(f"Set the saw to {a:g}° for the {len(ks)} edge{'s' if len(ks) != 1 else ''} marked B on the "
                    f"{' and the '.join(dict.fromkeys(ks))}: each pattern says which face goes up.")
     ch: dict = {}
-    for k, depth, _, _ in s["chamfers"]:
+    for k, depth, _, _, setback in s["chamfers"]:
         if keep(k):
-            ch.setdefault(chamfer_size(depth), []).append(k)
+            ch.setdefault(chamfer_size(depth, setback), []).append(k)
     for size, ks in sorted(ch.items()):
         out.append(f"Chamfer the {len(ks)} edge{'s' if len(ks) != 1 else ''} marked C on the "
                    f"{' and the '.join(dict.fromkeys(ks))}, {size}, with a router or a block plane: not the saw.")
