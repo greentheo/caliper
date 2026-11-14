@@ -203,6 +203,56 @@ def _edge_face(mesh, p, q, d, out, N, t: float, fs) -> Optional[dict]:
                                            "face": face}}
 
 
+def _corner_chamfers(mesh, p, q, out, N, t: float, fs) -> list[dict]:
+    """The chamfers on a free edge's two corners, read with rays in along each corner's bisector (CALI-181, #290): one
+    flat slant, the same at each point along the edge, ``{"depth_mm": down the edge, "setback_mm": in across the face,
+    "angle", "face"}``. Either way round, one is marked where it reaches past half the board's thickness: a 6 x 15 mm
+    one as much as a 15 x 6; a 3 x 3 or 3 x 8 is left to the drawing, and so is a round-over (its slant isn't flat) or a
+    square corner (no slant)."""
+    from . import spatial                            # every mesh query under the one lock (CALI-103)
+
+    out_ = []
+    for face, Nf in ((0, -N), (1, N)):
+        b = (out + Nf) / math.sqrt(2.0)              # out of the corner, between the edge face and the board's face
+        k = (out - Nf) / math.sqrt(2.0)
+        corners = [p + f_ * (q - p) + (N * t if face else 0.0) for f_ in fs]
+        starts = np.array([c + b * (2.0 * t) + k * s_ for c in corners for s_ in (-0.5, 0.0, 0.5)])
+        try:
+            locs, ray, tri = spatial.intersects_location(mesh, starts, np.repeat(-b[None], len(starts), axis=0),
+                                                         multiple_hits=True)
+        except Exception:  # noqa: BLE001 — not read: nothing marked
+            return []
+        hits = []
+        for r in range(len(starts)):
+            near = sorted((float(np.linalg.norm(locs[i] - starts[r])), int(tri[i])) for i in np.flatnonzero(ray == r))
+            if not near or near[0][0] > 3.5 * t:
+                break
+            hits.append((starts[r] - b * near[0][0], np.asarray(mesh.face_normals[near[0][1]], float)))
+        if len(hits) != len(starts):
+            continue
+        sizes = []
+        for i, c in enumerate(corners):
+            (H0, m0), (H1, m1), (H2, m2) = hits[3 * i:3 * i + 3]
+            if not (_same_plane(m1, H1, m0, H0) and _same_plane(m1, H1, m2, H2)):
+                break                                # curved (a round-over), or it changes: not one flat chamfer
+            angle = math.degrees(math.acos(float(np.clip(m1 @ out, -1.0, 1.0))))
+            if not (BEVEL_MIN_DEG <= angle <= 90.0 - BEVEL_MIN_DEG):
+                break                                # the edge face or the board's face itself: a square corner
+            depth = float(m1 @ (H1 - c)) / float(m1 @ -Nf)           # where the slant meets the edge face
+            setback = -float(m1 @ (H1 - c)) / float(m1 @ out)        # and where it meets the board's face
+            if not (0.0 < depth < t - 0.5 and setback > 0.0):
+                break
+            sizes.append((depth, setback, angle))
+        if len(sizes) != len(corners):
+            continue
+        d_, s_, a_ = (np.array(x) for x in zip(*sizes))
+        if np.ptp(d_) > 0.5 or np.ptp(s_) > 0.5 or max(float(d_.mean()), float(s_.mean())) <= t / 2.0:
+            continue                                 # a taper along the edge, or small: left to the drawing
+        out_.append({"depth_mm": float(d_.mean()), "setback_mm": float(s_.mean()), "angle": round(float(a_.mean()), 1),
+                     "face": face})
+    return out_
+
+
 def bevels(pieces: list[dict], mesh, tol: float, chamfers: Optional[dict] = None) -> dict:
     """``{key: [{"edge", "angle", "length_mm", "meets", "lines": [(p, q) on the declared face, (p, q) on the other]}]}``:
     each sheet edge cut at an angle to its faces, from what it lies against or the solid's edge face, one plane across its
@@ -233,7 +283,9 @@ def bevels(pieces: list[dict], mesh, tol: float, chamfers: Optional[dict] = None
                         break
             if m is None and mesh is not None:          # its own edge face, in the solid: one plane across its thickness
                 got = _edge_face(mesh, p, q, d, ed_out, N, t, fs)
-                if got is None:
+                if got is None:                         # square through the middle: a chamfer wider than deep? (#290)
+                    for c in _corner_chamfers(mesh, p, q, ed_out, N, t, fs):
+                        chamfers.setdefault(a.get("key") or a["name"], []).append({**c, "edge": e, "length_mm": L})
                     continue
                 if got["kind"] == "chamfer":
                     chamfers.setdefault(a.get("key") or a["name"], []).append({**got["chamfer"], "edge": e, "length_mm": L})
