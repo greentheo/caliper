@@ -492,3 +492,76 @@ def test_a_mortise_in_the_solid_only_reads_partial_in_the_turn(tmp_path, tools):
     assert not got.ok and got.reply.startswith("! The solid has the stringer through the left side, but the left side's "
                                                "outline has no hole there yet"), got.reply
     assert "Checked" not in got.reply
+
+
+# --- #289 review, the last round: a notch is a pocket; a stick never takes a turn down -----------------------------------
+#: A side cut as two stairs, and a tread resting in its concave corner: on the lower stair, against the upper one's riser.
+STAIRS = '''import cadquery as cq
+
+PARAMS = {"t": 19.05}
+
+
+def build(params):
+    t = 19.05
+    side = cq.Workplane("YZ").polyline([(0, 0), (300, 0), (300, 200), (150, 200), (150, 400), (0, 400)]).close().extrude(t)
+    return side.union(cq.Workplane().box(400, 150, t, centered=False).translate((0, 150, 200)))
+
+
+def construction(params, build=None):
+    t = 19.05
+    return [{"name": "side", "kind": "sheet", "material": "plywood", "thickness": t,
+             "outline": [(0, 0, 0), (0, 300, 0), (0, 300, 200), (0, 150, 200), (0, 150, 400), (0, 0, 400)]},
+            {"name": "tread", "kind": "sheet", "material": "plywood", "thickness": t,
+             "outline": [(0, 150, 200 + t), (400, 150, 200 + t), (400, 300, 200 + t), (0, 300, 200 + t)]}]
+'''
+
+
+@pytest.mark.parametrize("kind,want", [("notch", "notch"), ("through tenon", "mortise")])
+def test_a_tread_resting_in_a_stair_s_corner_is_no_notch(kind, want, tmp_path):
+    """A notch is a pocket the outline flanks on both sides across the piece's thickness: an open corner isn't one."""
+    pair = ("side", "tread")
+    got = _land(tmp_path, _with(STAIRS, pair, kind), pair, kind, before=STAIRS)
+    assert got["landed"] is False and "Checked" not in got["said"], got
+    assert got["said"].startswith(f"Its JOINTS entry says {kind}, but the tread rests in a corner of the side's outline: "
+                                  f"it isn't cut round on both sides, so there's no {want}."), got
+
+
+#: A floor with a 2x2 rail lying along its back edge (the cargo box's floor-and-rail seam).
+RAILED_FLOOR = '''import cadquery as cq
+
+PARAMS = {"t": 19.05}
+
+
+def build(params):
+    t = 19.05
+    floor = cq.Workplane().box(600, 400, t, centered=False)
+    return floor.union(cq.Workplane().box(600, 38.1, 38.1, centered=False).translate((0, 400 - 38.1, t)))
+
+
+def construction(params, build=None):
+    t = 19.05
+    return [{"name": "floor", "kind": "sheet", "material": "plywood", "thickness": t,
+             "outline": [(0, 0, t), (600, 0, t), (600, 400, t), (0, 400, t)]},
+            {"name": "rail", "kind": "stick", "material": "lumber", "size": "2x2",
+             "a": (0, 400 - 19.05, t + 19.05), "b": (600, 400 - 19.05, t + 19.05)}]
+'''
+
+
+@pytest.mark.parametrize("kind", ["through tenon", "notch"])
+def test_a_stick_s_cut_is_couldn_t_tell_never_an_error(kind, tmp_path):
+    pair = ("floor", "rail")
+    got = _land(tmp_path, _with(RAILED_FLOOR, pair, kind), pair, kind, before=RAILED_FLOOR)
+    assert got["landed"] is None and "Checked" not in got["said"], got
+    assert got["said"] == f"Its JOINTS entry now says {kind}: a stick's cut isn't checked here.", got
+
+
+def test_a_joint_check_that_breaks_never_takes_the_turn_down(tmp_path, tools, monkeypatch):
+    """The part is written by then: a check that raises is said as couldn't tell, and the turn goes on."""
+    tools("jigsaw", "drill", "circular saw", "table saw")
+    s = _store(tmp_path, _script())
+
+    def broke(*a, **k):
+        raise KeyError("polys")
+    monkeypatch.setattr(joints, "landed", broke)
+    got, _ = _turn(s, _edge_at(s, (T, D / 2, H - T)), "make that a rabbet", _script("rabbet", into=K))
+    assert got.version == 2 and joints.NOT_MEASURED in got.reply, got.reply

@@ -922,7 +922,10 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
         if joint_pick:                              # the joint's entry, checked: landed, missed or couldn't tell (#222 §3)
             from . import joints as J
 
-            check = J.landed(prior, script, store, part_id, *joint_pick, inches=store.design.display_units == "in")
+            try:
+                check = J.landed(prior, script, store, part_id, *joint_pick, inches=store.design.display_units == "in")
+            except Exception:  # noqa: BLE001 — the part is written by now: a check that breaks is couldn't tell (#289)
+                check = {"said": J.NOT_MEASURED, "landed": None}
             if check["landed"] is True:             # a rabbet is the same solid: its step was measured, not its volume
                 reply = re.sub(r"Its shape didn't change \(the same volume[^\n]*\n?", "", reply)
                 # what was measured stands where "not measured" stood, never under the part's own checks (#289 review)

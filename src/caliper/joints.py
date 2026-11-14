@@ -487,6 +487,9 @@ def landed(before_script: str, after_script: str, store, pid: str, joint: dict, 
             return {"said": f"Its JOINTS entry says {kind}, but the {key[0]} and the {key[1]} don't touch now." + UNDO,
                     "landed": False}
         by = {pc["key"]: pc for pc in pieces}
+        if any(by[k]["kind"] != "sheet" or len(by[k].get("polys") or []) != 1 for k in key):
+            # a stick's ends and cuts aren't read here: couldn't tell, never an error (#289 review)
+            return {"said": f"Its JOINTS entry now says {kind}: a stick's cut isn't checked here.", "landed": None}
         if kind not in ("rabbet", "dado"):
             return _marked(store, pid, key, by, kind, said, inches, tol)
         depth = sunk(by[key[0]], by[key[1]])
@@ -526,6 +529,11 @@ def _marked(store, pid: str, key: tuple, by: dict, kind: str, said: str, inches:
     found = [(cut[0], host, other, cut) for host, other in ((a, b), (b, a)) for cut in [_cut_in(by[host], by[other], tol)]
              if cut is not None]
     hit = next((f for f in found if f[0] == want), None)
+    corner = next((f for f in found if f[0] == "corner"), None)
+    if hit is None and corner is not None:
+        _, host, other, _ = corner
+        return {"said": f"Its JOINTS entry says {kind}, but the {other} rests in a corner of the {host}'s outline: it "
+                        f"isn't cut round on both sides, so there's no {want}." + UNDO, "landed": False}
     if hit is None:
         if found:
             got, host, other, _ = found[0]
@@ -588,8 +596,31 @@ def _cut_in(host: dict, piece: dict, tol: float) -> Optional[tuple]:
         hull = _hull(host)
         got = _through(hull, piece, tol) if hull is not None else None
         if got is not None and got["through"]:
+            if not _flanked(host, piece, got):       # an open corner it rests in: no pocket (#289 review)
+                return "corner", got, False
             return ("notch" if got["notch"] else "mortise"), got, True
     return None
+
+
+def _flanked(host: dict, piece: dict, got: dict) -> bool:
+    """Whether the host's outline flanks a crossing on both sides, just past the piece's own thickness: a pocket cut round
+    it (a notch), not a concave corner it rests in, as a tread on a stair-cut side does (#289 review)."""
+    from .consistency import _frame, _inside2d
+
+    o, u, v, _ = got["frame"]
+    poly = np.asarray(host["polys"][0], float)
+    flat = np.stack([(poly - o) @ u, (poly - o) @ v], axis=1)
+    pts = got["points"]
+    if len(pts) < 2:
+        return False
+    c = pts - pts.mean(axis=0)
+    ax = np.linalg.svd(c, full_matrices=False)[2][0]
+    e2 = np.array([-ax[1], ax[0]])                   # across the piece, in the host's face
+    across = abs(float((e2[0] * u + e2[1] * v) @ _frame(piece["polys"][0])[3])) or 1e-3
+    t = float(piece["thickness"])
+    reach = t / across / 2.0 + max(2.0, 0.25 * t)
+    both = _inside2d(pts + e2 * reach, flat) & _inside2d(pts - e2 * reach, flat)
+    return bool(both.mean() >= 0.5)
 
 
 def beside(store, pid: str, point, corner: Optional[str] = None) -> Optional[str]:
