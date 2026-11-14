@@ -661,7 +661,7 @@ def test_a_parked_repeat_keeps_the_pick_and_yes_runs_the_same_check(store):
 
 def test_the_page_sends_the_pick_with_the_message():
     src = open(JS).read()
-    assert "send(said, S.scope, pick, shown);" in src and "...(pick ? { pick } : {})" in src and "version: S.pick.version" in src
+    assert "send(said, S.scope, pick, shown, text);" in src and "...(pick ? { pick } : {})" in src   # and what was typed (#288) and "version: S.pick.version" in src
 
 
 # --- #177 review, the last round ---------------------------------------------------------------------------------------

@@ -140,8 +140,9 @@ STRIP = ("About the inside corner fillet strip (superseded: step_stool now print
 @pytest.mark.parametrize("message,scope,pick,typed", [
     (f"{STRIP}: remove it", "inside_corner_fillets", None, "remove it"),
     ("About the seat disk: make it thicker", "seat", None, "make it thicker"),
+    # once, never in a loop (#288 review): the page sends a pick's own words, so two contexts are an old client's
     ("About this edge (at x 0, y 1.5, z 2 mm in the script's coordinates): About the seat disk: round it", "seat", None,
-     "round it"),
+     "About the seat disk: round it"),
     # a joint's chip has a colon of its own: the pick's own words are what was typed
     ("About this joint between the side and the top: the line 300 mm long (at x 19.05, y 150, z 381 mm in the script's "
      "coordinates): make that a rabbet", "stool", {"kind": "edge", "id": "e1", "text": "make that a rabbet"},
@@ -192,3 +193,126 @@ def test_the_restore_reads_what_was_typed_too(stool):
     back = chat.turn(stool, "About the top step: put back inside_corner_fillets", scope="step_stool", use_llm=False,
                      classifier=_never, author=_never)
     assert back.action == "restore" and back.ok, back.reply
+
+
+# --- #288 review 1: "moved" covers what a part declares, not only its solid --------------------------------------------
+#: A top on its own, declared: its pieces, what it carries, its BUILD. Each case changes one declaration and not the solid.
+DECLARED = '''import cadquery as cq
+
+PARAMS = {"w": 400.0, "d": 300.0}
+BUILD = {"ply_t": 19.05}
+JOINTS_LINE
+
+
+def build(params):
+    return cq.Workplane().box(400.0, 300.0, 19.05, centered=False)
+
+
+def construction(params, build=None):
+    t = 19.05
+    return [{"name": "top", "kind": "sheet", "material": "plywood", "thickness": t,
+             "outline": [(0, 0, t), (400.0, 0, t), (400.0, 300.0, t), (0, 300.0, t)]MORTISE}]
+
+
+def loads(params, build=None):
+    return [{"name": "sit on it", "lb": FORCE, "factor": 1.0, "lo": (150.0, 100.0, 17.05), "hi": (250.0, 200.0, 19.05)}]
+'''
+_MORTISE = ', "holes": [[(100.0, 140.0, 19.05), (300.0, 140.0, 19.05), (300.0, 159.05, 19.05), (100.0, 159.05, 19.05)]]'
+
+
+def _declared(joints="", mortise="", force="200", ply="19.05", holes=""):
+    out = (DECLARED.replace("JOINTS_LINE", joints).replace("MORTISE", mortise).replace("FORCE", force)
+           .replace('"ply_t": 19.05', f'"ply_t": {ply}'))
+    return out + (f"\n\nHOLES = {holes}\n" if holes else "")
+
+
+@pytest.mark.parametrize("after", [
+    _declared(mortise=_MORTISE),                                                     # #275's mortise, construction only
+    _declared(force="300"),
+    _declared(joints="JOINTS = [{'pieces': ['top', 'leg'], 'kind': 'dado', 'fix': ['glue']}]"),
+    _declared(ply="18.0"),
+    _declared(holes='[{"piece": "top", "normal": [0, 0, -1], "depth": 19.05, "polygons": [[[180, 130, 19.05], '
+                    '[220, 130, 19.05], [220, 170, 19.05], [180, 170, 19.05]]]}]'),
+], ids=["a mortise in construction", "loads", "JOINTS", "BUILD", "HOLES"])
+def test_a_change_to_what_the_part_declares_is_a_change(after, tmp_path):
+    s = DesignStore.create("a top", base=str(tmp_path / "designs"))
+    s.write_part("top", _declared(), intent="a top")
+    got = chat.refine_part(s, "top", "cut the mortise for the leg", author=lambda *a: after, use_llm=False,
+                           max_rounds=1, promote_feedback=False)
+    assert got.moved is True and got.reply.startswith("✓ revised **top** → v2"), got.reply.splitlines()[0]
+
+
+def test_construction_code_that_declares_the_same_pieces_isn_t_a_change(tmp_path):
+    s = DesignStore.create("a top", base=str(tmp_path / "designs"))
+    s.write_part("top", _declared(), intent="a top")
+    same = _declared().replace("    t = 19.05\n", "    t = 19.05 + 0.0\n")
+    got = chat.refine_part(s, "top", "tidy it", author=lambda *a: same, use_llm=False, max_rounds=1,
+                           promote_feedback=False)
+    assert got.moved is False and got.reply.startswith("! revised **top** → v2"), got.reply.splitlines()[0]
+
+
+# --- #288 review 2: the page sends what was typed; old clients' context strips once ------------------------------------
+def test_what_was_typed_comes_as_its_own_field(stool):
+    """The page sends the chip as the message's context and what was typed as its own field: a colon anywhere in the
+    piece's name is the name's."""
+    got = chat.turn(stool, "About the strip: left: superseded: remove it", scope="inside_corner_fillets",
+                    typed="remove it", use_llm=False, classifier=_never, author=_never)
+    assert got.action == "ask" and got.reply == ASK, got.reply
+
+
+def test_an_old_client_s_context_strips_once():
+    assert chat.bare("About the seat: About the legs: make them longer", "stool") == "About the legs: make them longer"
+    assert chat.bare(f"{STRIP}: remove it", "inside_corner_fillets") == "remove it"     # a colon in its brackets
+
+
+def test_the_page_sends_what_was_typed():
+    import os
+
+    js = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    assert "send(said, S.scope, pick, shown, text)" in js
+    assert "...(typed ? { typed } : {})" in js
+
+
+def test_the_api_passes_what_was_typed(stool, tmp_path, monkeypatch):
+    import os
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from caliper import design_api
+    from caliper.server import create_app
+
+    assert "typed" in design_api.ChatMessage.model_fields
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    seen = {}
+
+    def turn(store, message, **kw):
+        seen.update(kw, message=message)
+        return chat.TurnResult(action="answer", reply="ok")
+    monkeypatch.setattr(chat, "turn", turn)
+    c = TestClient(create_app())
+    slug = os.path.basename(str(stool.root))
+    job = c.post(f"/api/designs/{slug}/chat", json={"message": f"{STRIP}: remove it", "scope": "inside_corner_fillets",
+                                                    "typed": "remove it"}).json()
+    end = time.time() + 30
+    while time.time() < end and c.get(f"/api/jobs/{job['job_id']}").json()["status"] not in ("done", "error"):
+        time.sleep(0.05)
+    assert seen.get("typed") == "remove it" and seen["message"] == f"{STRIP}: remove it", seen
+
+
+# --- #288 review 3: a name two parts share asks; "don't remove" isn't a remove -----------------------------------------
+def test_a_name_two_parts_share_asks_which_of_them(tmp_path):
+    s = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    for pid, x in (("side_left", 0), ("side_right", 300), ("top", 0)):
+        s.write_part(pid, _box(dx=19, x=x), intent=pid)
+    got = chat.turn(s, "remove side", use_llm=False, classifier=_never, author=_never)
+    assert got.action == "ask" and got.reply == "Remove which part? side_left, side_right", got.reply
+    got = chat.turn(s, "remove the side", scope="side_right", use_llm=False, classifier=_never, author=_never)
+    assert got.reply.startswith("Remove side_right?"), got.reply
+
+
+@pytest.mark.parametrize("words", ["Don't remove this part, just make it 10 mm longer",
+                                   "please do not delete this part: make it thinner",
+                                   "no need to get rid of this part, round its edges"])
+def test_a_remove_said_not_to_isn_t_one(stool, words):
+    assert chat._remove_or_restore(stool, words, "inside_corner_fillets", events=[], on_event=None) is None
