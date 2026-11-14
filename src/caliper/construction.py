@@ -112,7 +112,11 @@ def declared(store: DesignStore, part_id: str, build: Optional[dict] = None,
     """
     if not store.is_scripted(part_id):
         return {}
-    script = store.read_script(part_id)
+    return declared_by(store.read_script(part_id), build, timeout, part_id)
+
+
+def declared_by(script: str, build: Optional[dict] = None, timeout: float = 60.0, part_id: str = "the part") -> dict:
+    """:func:`declared`, from a script's text: what a revision's script declares, before it's written (#288 review)."""
     if not declares(script) and "def keeps(" not in script and "def loads(" not in script:
         return {}
     probe = script + _PROBE.format(build=json.dumps(build or {}))

@@ -44,6 +44,7 @@ class ChatMessage(BaseModel):
     scope: Optional[str] = None
     pick: Optional[dict] = None           # the face or edge picked: {kind, id} (#109)
     shown: Optional[str] = None           # what their own bubble says, where ``message`` has coordinates for the designer (#181)
+    typed: Optional[str] = None           # what was typed, without the chip's "About the …:" context (#288 review)
 
 
 class ParamSet(BaseModel):
@@ -701,7 +702,7 @@ def router():
             store = DesignStore.load(slug)
             before = len(store.log())
             try:
-                res = chat.turn(store, message, scope=req.scope or None, logged=True, pick=req.pick,
+                res = chat.turn(store, message, scope=req.scope or None, logged=True, pick=req.pick, typed=req.typed,
                                 on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
             except Exception as e:
                 # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87): the

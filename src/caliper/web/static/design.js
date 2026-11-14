@@ -1324,14 +1324,14 @@ function aboutPiece(text) {
   const piece = pieceInScope();
   return piece ? `About the ${piece.name}: ${text}` : text;
 }
-async function send(text, scope, pick, shown) {
+async function send(text, scope, pick, shown, typed) {
   if (S.busy || S.opening || !text.trim()) return;      // never to a design that isn't on screen yet (#173)
   if (!S.slug) return createDesign(text);
   S.busy = true; $('send').disabled = true;
   const sent = S.pick;                          // the pick this message is about: one made while it's answered isn't it
   const live = liveTurn(shown || text, scope);
   try {
-    const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}), ...(shown ? { shown } : {}) });
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}), ...(shown ? { shown } : {}), ...(typed ? { typed } : {}) });
     await follow(job_id, (ev) => live.step(ev));
     S.busy = false;
     if (shown && S.pick === sent) clearPick();                     // it's been used; after an error it stays, so asking again doesn't mean picking again
@@ -1349,7 +1349,7 @@ $('composer').onsubmit = (e) => {
   $('msg').value = '';
   const shown = S.pick ? `About this ${S.pick.said}: ${text}` : null;     // their own bubble: no coordinates (#181)
   const said = aboutPick(S.pick, aboutPiece(text)), pick = pickPosted(text);
-  send(said, S.scope, pick, shown);
+  send(said, S.scope, pick, shown, text);     // what was typed, apart from the chip's context (#288 review)
 };
 $('msg').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('composer').requestSubmit(); }
