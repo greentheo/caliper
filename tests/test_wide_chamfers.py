@@ -97,6 +97,8 @@ def build(params):
         low = [(0, 0), (t - 4, 0), (t, 10), (t, d), (0, d)]
         high = [(0, 0), (t - 8, 0), (t, 20), (t, d), (0, d)]
         return cq.Workplane("XY").polyline(low).close().workplane(offset=h).polyline(high).close().loft(ruled=True)
+    if SHAPE == "rebate":                            # a step 10 down and 40 across: square corners, no slant
+        return cq.Workplane("XY").polyline([(0, 0), (t - 10, 0), (t - 10, 40), (t, 40), (t, d), (0, d)]).close().extrude(h)
     k = t * math.tan(math.radians(70.0))             # the whole thickness at 70°: no saw setting, no chamfer
     return cq.Workplane("XY").polyline([(0, 0), (t, k), (t, d), (0, d)]).close().extrude(h)
 
@@ -107,7 +109,9 @@ def construction(params, build=None):
 '''
 
 
-@pytest.mark.parametrize("shape", ["round17", "widening", "slant70"])
+@pytest.mark.parametrize("shape", ["round17", "widening", "slant70", "rebate"])
 def test_a_deep_round_over_a_widening_chamfer_or_a_steep_slant_isn_t_a_chamfer(shape, tmp_path):
+    """And a free-edge rebate (#291 review): its rays meet a face square on, which the square-corner check stops before
+    any division by its slope; read as nothing, never an error."""
     m = marks.of(_store(tmp_path, OTHER.replace('SHAPE = "SHAPE"', f'SHAPE = "{shape}"'), "a board"), "stool")
     assert m["chamfers"] == {}, m["chamfers"]
