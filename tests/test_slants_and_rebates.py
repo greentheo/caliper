@@ -65,12 +65,14 @@ def test_a_slant_past_what_a_saw_tilts_to_is_said(angle, tmp_path):
     a, other = f"{angle:.0f}", f"{90 - angle:.0f}"
     assert f"    side: slant {a}° along 17 11/16 in of edge, past what a saw tilts to (45°)" in marks.cutlist_lines(m)
     book = " ".join(marks.book_lines(m))
+    rip = f"stand it on its face against the fence and rip it with the blade at {other}°"      # (#293 review)
     assert "Set the saw" not in book and (f"The 1 edge marked S on the side is cut at {a}°, past what a saw tilts to "
-                                          f"(45°): plane or router it, or cut it at {other}° from the other face.") in book, book
+                                          f"(45°): plane or router it, or {rip}.") in book, book
     (pc,) = patterns.pieces(s, "stool")
     said = " ".join(patterns.marks_lines(pc))
     assert "saw at" not in said and (f"Slant: the edge marked S is cut at {a}°, past what a saw tilts to (45°): plane or "
-                                     f"router it, or cut it at {other}° from the other face.") in said, said
+                                     f"router it, or {rip}.") in said, said
+    assert "from the other face" not in said                                         # that cut an 11 mm slant, not 33
     assert len(pc["back"]) == 1                                                      # its other face's line, dashed
     assert ">S<" in patterns.project_svg(pc) and ">B<" not in patterns.project_svg(pc)
     patterns.measure_page(pc), patterns.tiles(pc)                                    # they draw
@@ -145,3 +147,76 @@ def test_an_edge_in_two_slants_isn_t_said_as_one(tmp_path):
     if SHAPE == "slant":''').replace('SHAPE, A, B = "SHAPE", 0.0, 0.0', 'SHAPE, A, B = "two", 0.0, 0.0')
     m = marks.of(_store(tmp_path, script, "a board"), "stool")
     assert m["slants"] == {} and m["bevels"] == {}, (m["slants"], m["bevels"])
+
+
+# --- #293 review: what the PIL pages draw has a glyph in their font ------------------------------------------------------
+def _drawn(monkeypatch, *pieces):
+    """Every string the pages draw, with its font: the measure page and the full-size tiles of each piece."""
+    from PIL import ImageDraw
+
+    from caliper import patterns
+
+    seen = []
+    real = ImageDraw.ImageDraw.text
+
+    def text(self, xy, text, *a, **k):
+        seen.append((text, k.get("font")))
+        return real(self, xy, text, *a, **k)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", text)
+    for pc in pieces:
+        patterns.measure_page(pc), patterns.tiles(pc)
+    return seen
+
+
+def _missing(text, font):
+    if font is None:
+        return [ch for ch in text if ord(ch) > 126]
+    box = bytes(font.getmask("\ue000"))
+    return [ch for ch in set(text) if not ch.isspace() and bytes(font.getmask(ch)) == box]
+
+
+def test_the_pages_draw_no_missing_glyph(tmp_path, monkeypatch):
+    """"×" drew as a box on the PIL pages (#293 review): the chamfer's and the rebate's two sizes, and a slant's line."""
+    from caliper import patterns
+
+    from .test_wide_chamfers import BOARD as CHAMFERED
+
+    pcs = []
+    for i, script in enumerate([CHAMFERED.replace("SIZES", "6.0, 15.0"),
+                                BOARD.replace('SHAPE, A, B = "SHAPE", 0.0, 0.0', 'SHAPE, A, B = "rebate", 10.0, 40.0'),
+                                BOARD.replace('SHAPE, A, B = "SHAPE", 0.0, 0.0', 'SHAPE, A, B = "slant", 60.0, 0.0')]):
+        pcs += patterns.pieces(_store(tmp_path / str(i), script, "a board"), "stool")
+    seen = _drawn(monkeypatch, *pcs)
+    assert any("6 x 15 mm" in t for t, _ in seen) and any("10 x 40 mm" in t for t, _ in seen), [t for t, _ in seen]
+    bad = {t: _missing(t, f) for t, f in seen if _missing(t, f)}
+    assert not bad, bad
+
+
+def test_the_html_and_svg_keep_the_times_sign(tmp_path):
+    s = _board(tmp_path, "rebate", 10.0, 40.0)
+    m = marks.of(s, "stool")
+    assert "10 × 40 mm" in " ".join(marks.book_lines(m)) and any("10 × 40 mm" in ln for ln in marks.cutlist_lines(m))
+    from caliper import patterns
+
+    (pc,) = patterns.pieces(s, "stool")
+    assert "10 × 40 mm" in " ".join(patterns.marks_lines(pc))                         # what the HTML and SVG read
+
+
+@pytest.mark.parametrize("said,drawn", [("15 × 6 mm", "15 x 6 mm"), ("1–2 in — ½ in", "1-2 in - 1/2 in"),
+                                        ("✓ ok ✗ no → next", "ok ok x no -> next"), ("10°, “a”", "10°, “a”")])
+def test_a_page_says_what_its_font_lacks_plainly(said, drawn):
+    from caliper import patterns
+
+    assert patterns._drawable(said, patterns._font(18)) == drawn
+
+
+def test_a_character_the_font_has_is_kept():
+    """Only what the page's font lacks is said plainly: a font with "×" draws it."""
+    from caliper import patterns
+
+    class Font:                                      # has "×", not "½"; anything it lacks comes out as its one box
+        path, size = "a font with a times sign", 18
+
+        def getmask(self, ch):
+            return ("glyph " + ch).encode() if ch.isascii() or ch == "×" else b"box"
+    assert patterns._drawable("15 × 6 mm, ½ in", Font()) == "15 × 6 mm, 1/2 in"

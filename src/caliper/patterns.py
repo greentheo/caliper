@@ -335,12 +335,41 @@ def _font(px: int):
     return ImageFont.load_default(size=px)
 
 
+#: What a page says in place of a character its font draws as a box (#293 review): the HTML and SVG keep the character.
+PLAIN = {"×": "x", "–": "-", "—": "-", "′": "'", "″": '"', "½": "1/2", "¼": "1/4", "¾": "3/4", "✓": "ok", "✗": "x",
+         "→": "->"}
+_LACKS: dict = {}
+
+
+def _drawable(text: str, font) -> str:
+    """``text`` as a page's font can draw it: each character it has no glyph for said plainly, never a box."""
+    if not text or font is None:
+        return "".join(PLAIN.get(ch, ch) for ch in text or "")
+    path = getattr(font, "path", None)
+    key = (path if isinstance(path, str) else type(font).__name__, getattr(font, "size", None))   # its face and size
+    if key not in _LACKS:
+        _LACKS[key] = (bytes(font.getmask("\ue000")), {})             # the box it draws for a glyph it hasn't got
+    box, known = _LACKS[key]
+
+    def lacks(ch):
+        if ch not in known:
+            known[ch] = ord(ch) > 126 and not ch.isspace() and bytes(font.getmask(ch)) == box
+        return known[ch]
+    return "".join(PLAIN.get(ch, ch) if lacks(ch) else ch for ch in text)
+
+
 def _page(landscape: bool = False):
     from PIL import Image, ImageDraw
 
     w, h = (PAGE[1], PAGE[0]) if landscape else PAGE
     img = Image.new("RGB", (round(w * DPI), round(h * DPI)), "white")
-    return img, ImageDraw.Draw(img)
+    class Page(ImageDraw.ImageDraw):                 # what it writes, in characters its font has (#293 review)
+        def text(self, xy, text, *a, **k):
+            return super().text(xy, _drawable(text, k.get("font")), *a, **k)
+
+        def textlength(self, text, *a, **k):
+            return super().textlength(_drawable(text, k.get("font")), *a, **k)
+    return img, Page(img)
 
 
 def _ruler(dr, x0: float, y0: float):

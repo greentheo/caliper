@@ -694,9 +694,11 @@ def two_sizes(a: float, b: float) -> str:
 
 
 def _steep(a: float, n: int) -> str:
-    it = "it" if n == 1 else "them"
-    return (f"cut at {a:g}°, past what a saw tilts to ({SAW_MAX_DEG:g}°): plane or router {it}, or cut {it} at "
-            f"{90 - a:g}° from the other face")
+    """How a slant past a saw's tilt is made (#293 review): stood on its face against the fence, the blade tilted to the
+    angle's complement cuts the whole slant, where "from the other face" cut a third of it."""
+    it, its, face = ("it", "its", "face") if n == 1 else ("them", "their", "faces")
+    return (f"cut at {a:g}°, past what a saw tilts to ({SAW_MAX_DEG:g}°): plane or router {it}, or stand {it} on {its} "
+            f"{face} against the fence and rip {it} with the blade at {90 - a:g}°")
 
 
 def slant_line(angles: list[float]) -> str:
