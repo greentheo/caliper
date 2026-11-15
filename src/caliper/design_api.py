@@ -24,7 +24,8 @@ from pydantic import BaseModel, field_validator
 
 from . import (aero, mirror, better, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
                lighten,
-               load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, tree, verdicts)
+               load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, trash, tree,
+               verdicts)
 from . import llm
 from . import whittle_bridge as wb
 from .assembly import carved_file
@@ -60,6 +61,50 @@ class ParamsSet(BaseModel):
 class TreeLayout(BaseModel):
     order: list[str]                      # every part, once, in the order the tree shows them
     parent: dict[str, str] = {}           # part -> the part it sits under, in the tree only (#94)
+
+
+class RemovePart(BaseModel):
+    also: list[str] = []                  # the parts that mirror it, deleted with it (CALI-183)
+
+
+class RestorePart(BaseModel):
+    part: Optional[str] = None            # its newest removal
+    id: Optional[str] = None              # or one removal, by its trash id
+
+
+def _listed(xs: list) -> str:
+    return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
+
+
+def _on_part(slug: str, pid: Optional[str], **more) -> dict:
+    """What a job that works on a part says it works on (#302 review): every such job is submitted with it, so a delete
+    refuses while any of them runs on that part, by kind, never just the two that happened to say."""
+    return {"slug": slug, "part": pid, **more}
+
+
+#: What a design-wide job holding the design's lock is, said when a delete or a put back would wait behind it (#302 review).
+WHOLE = {"chat": "a chat turn", "firstrun": "the first build", "cutplan": "a cut plan", "release": "the build package",
+         "picture": "a picture"}
+
+
+def _refuse_while_busy(slug: str, parts: list) -> None:
+    """Refuse in words, at once, while a job works on one of ``parts`` or a design-wide job holds the design's lock: never
+    a silent wait behind a turn that may be writing the very part (#302 review)."""
+    from fastapi import HTTPException
+
+    for j in RUNNER.active():
+        if j.meta.get("slug") == slug and j.meta.get("part") in parts:
+            raise HTTPException(409, f"{j.meta['part']} is being {DOING.get(j.kind, 'worked on')}: wait for it, or stop "
+                                     f"that first.")
+    j = RUNNER.running(_lock(slug))
+    if j is not None:
+        raise HTTPException(409, f"{WHOLE.get(j.kind, 'a job')} is working on the design: wait for it, or stop it first.")
+
+
+#: What a job is doing to a part, said when a delete has to wait for it (CALI-183).
+DOING = {"load": "checked", "lighten": "lightened", "carve": "carved", "release": "packaged", "firstrun": "built",
+         "chat": "revised", "whittle": "whittled", "aero": "shaped for drag", "frame": "sized", "gussets": "given gussets",
+         "picture": "given a picture", "cutplan": "planned for cutting"}
 
 
 class LabelSet(BaseModel):
@@ -791,6 +836,64 @@ def router():
                 raise HTTPException(409, str(e))
             return design_state(store)
 
+    @r.post("/api/designs/{slug}/parts/{pid}/remove")
+    def remove_part(slug: str, pid: str, req: RemovePart):
+        """Delete a part from its menu (CALI-183): to the design's trash, as "remove …" in the chat does (#98), so Put back
+        restores it. Never while a job works on it, and a mirror's source only with what mirrors it."""
+        if load(slug).design.part(pid) is None:
+            raise HTTPException(404, f"no part {pid!r}")
+        _refuse_while_busy(slug, [pid, *req.also])     # in words, before waiting on any lock
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None:
+                raise HTTPException(404, f"no part {pid!r}")
+            mirrored = mirror.mirrors_of(store, pid)
+            extra = [x for x in req.also if x not in mirrored]
+            if extra:
+                raise HTTPException(422, f"{', '.join(extra)} doesn't mirror {pid}: delete it on its own")
+            left = [x for x in mirrored if x not in req.also]
+            if left:
+                raise HTTPException(409, {"said": f"{pid} is mirrored by {', '.join(left)}: delete both, or break the "
+                                                  f"mirror first?", "mirrored_by": left})
+            from . import follows
+
+            led = [f for f in follows.followers_of(store, pid) if f not in req.also]
+            gone = [trash.remove(store, x) for x in [*req.also, pid]]
+            said = (f"Deleted {pid}: it's in the design's trash, so it can be put back." if not req.also else
+                    f"Deleted {pid} and {', '.join(req.also)}, its mirror: they're in the design's trash, so they can be "
+                    f"put back.")
+            went = ([f"rule {r}" for g in gone for r in g["rules"]] + [f"mate {m}" for g in gone for m in g["mates"]])
+            if went:                                   # what went with it, as the chat says it (#98, #302 review)
+                said += f" Its {_listed(went)} went with it."
+            if led:                                    # who reads its numbers keeps them (#271)
+                said += (f" {_listed(led)} {'follows' if len(led) == 1 else 'follow'} it: "
+                         f"{'it keeps its' if len(led) == 1 else 'they keep their'} numbers.")
+            store.append_log({"kind": "message", "text": f"Delete {pid} (from its menu)", "action": "remove", "part": pid,
+                              "routed_by": "menu"})
+            store.append_log({"kind": "reply", "action": "remove", "part": pid, "ok": True, "reply": said})
+            return {"state": design_state(store), "said": said, "removed": {"part": pid, "id": gone[-1]["id"]},
+                    "also": [{"part": g["part"], "id": g["id"]} for g in gone[:-1]]}
+
+    @r.post("/api/designs/{slug}/trash/restore")
+    def restore_part(slug: str, req: RestorePart):
+        """Put back a part deleted from its menu, or the chat (CALI-183): as it was, its mates and rules with it."""
+        _refuse_while_busy(slug, [])
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                got = trash.restore(store, tid=req.id, pid=req.part)
+            except FileNotFoundError:
+                raise HTTPException(404, f"there's nothing in the design's trash called {req.id!r}")
+            except ValueError as e:
+                raise HTTPException(404 if "trash" in str(e) else 409, str(e))
+            pid = got.get("part") or req.part
+            said = f"Put back {pid}, as it was." + (f" {'; '.join(got['waiting'])[:1].upper()}{'; '.join(got['waiting'])[1:]}."
+                                                    if got.get("waiting") else "")
+            store.append_log({"kind": "message", "text": f"Put back {pid} (from its menu)", "action": "restore", "part": pid,
+                              "routed_by": "menu"})
+            store.append_log({"kind": "reply", "action": "restore", "part": pid, "ok": True, "reply": said})
+            return {"state": design_state(store), "said": said}
+
     @r.post("/api/designs/{slug}/tree")
     def set_tree(slug: str, req: TreeLayout):
         """Move a part in the tree (#94): display only, so no part's id, file, version or check changes."""
@@ -890,7 +993,7 @@ def router():
             return wb.run(s, part, emit=lambda k, t="", **d: j.emit(k, t, **d), **kw)
 
         job = RUNNER.submit("whittle", work, label=f"whittle {req.kind} · {req.part}",
-                            lock=f"whittle:{slug}")
+                            lock=f"whittle:{slug}", meta=_on_part(slug, req.part))
         return {"job_id": job.id}
 
     @r.get("/api/designs/{slug}/whittle")
@@ -942,7 +1045,7 @@ def router():
 
         try:
             job = RUNNER.submit("load", work, label=f"strength · {req.part}", lock=f"load:{slug}",
-                                meta={"slug": slug, "part": req.part, "version": store.design.part(req.part).version},
+                                meta=_on_part(slug, req.part, version=store.design.part(req.part).version),
                                 only=f"load:{slug}:{req.part}")
         except Busy:
             raise HTTPException(status_code=409, detail="A strength check of this part is already running.")
@@ -1014,7 +1117,7 @@ def router():
                           "reply": res.reply})
             return turn_result(res)
 
-        job = RUNNER.submit("picture", work, label=f"picture · {pid}", lock=_lock(slug))
+        job = RUNNER.submit("picture", work, label=f"picture · {pid}", lock=_lock(slug), meta=_on_part(slug, pid))
         return {"job_id": job.id}
 
     # -- the four questions (spec step 1): each answered in a line anyone can read --------------------------
@@ -1138,7 +1241,8 @@ def router():
                                emit=lambda k, t="", **d: j.emit(k, t, **d), stop=j.check)
 
         try:                                  # one carve of a design at a time, checked as it's queued (CALI-101)
-            job = RUNNER.submit("carve", work, label=f"carve · {req.part}", lock=f"carve:{slug}", exclusive=True)
+            job = RUNNER.submit("carve", work, label=f"carve · {req.part}", lock=f"carve:{slug}", exclusive=True,
+                                meta=_on_part(slug, req.part))
         except Busy as e:
             raise HTTPException(status_code=409, detail=f"a carve is already running: {_where(e.job)}")
         return {"job_id": job.id}
@@ -1192,7 +1296,7 @@ def router():
 
         try:
             job = RUNNER.submit("lighten", work, label=f"lighten · {req.part}", lock=f"load:{slug}",
-                                meta={"slug": slug, "part": req.part, "version": store.design.part(req.part).version},
+                                meta=_on_part(slug, req.part, version=store.design.part(req.part).version),
                                 only=f"lighten:{slug}:{req.part}")   # the version it's of: a change under it is said (#268)
         except Busy:
             raise HTTPException(status_code=409, detail="A Lighten of this part is already running.")
@@ -1256,7 +1360,7 @@ def router():
                                      build=req.build or None,
                                      emit=lambda k, t="", **d: j.emit(k, t, **d))
 
-        job = RUNNER.submit("frame", work, label=f"size {req.part}", lock=f"frame:{slug}")
+        job = RUNNER.submit("frame", work, label=f"size {req.part}", lock=f"frame:{slug}", meta=_on_part(slug, req.part))
         return {"job_id": job.id}
 
     # -- how it's built, in 3D (CALI-52) -----------------------------------------------------------
@@ -1280,7 +1384,7 @@ def router():
         def work(j):
             return cutplan.run(DesignStore.load(slug), pid, emit=lambda k, t="", **d: j.emit(k, t, **d))
 
-        job = RUNNER.submit("cutplan", work, label=f"cut plan for {pid}", lock=_lock(slug))
+        job = RUNNER.submit("cutplan", work, label=f"cut plan for {pid}", lock=_lock(slug), meta=_on_part(slug, pid))
         return {"job_id": job.id}
 
     @r.get("/api/designs/{slug}/cutplans/{rid}/files/{path:path}")
@@ -1368,7 +1472,8 @@ def router():
                                        plates=req.plates, min_safety=req.min_safety, payload_lb=req.payload_lb,
                                        walls=req.walls, emit=lambda k, t="", **d: j.emit(k, t, **d))
 
-        job = RUNNER.submit("gussets", work, label=f"gussets for {req.part}", lock=f"frame:{slug}")
+        job = RUNNER.submit("gussets", work, label=f"gussets for {req.part}", lock=f"frame:{slug}",
+                            meta=_on_part(slug, req.part))
         return {"job_id": job.id}
 
     @r.get("/api/designs/{slug}/gussets/{rid}/{joint}/{name}")
@@ -1490,7 +1595,8 @@ def router():
                               resolution=req.resolution,
                               emit=lambda k, t="", **d: j.emit(k, t, **d))
 
-        job = RUNNER.submit("aero", work, label=f"shape {req.part} for drag", lock=f"aero:{slug}")
+        job = RUNNER.submit("aero", work, label=f"shape {req.part} for drag", lock=f"aero:{slug}",
+                            meta=_on_part(slug, req.part))
         return {"job_id": job.id}
 
     @r.get("/api/designs/{slug}/aero/{rid}/stations/{index}.stl")

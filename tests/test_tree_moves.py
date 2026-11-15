@@ -149,7 +149,11 @@ def test_where_on_the_row_says_what_a_drop_does(y, zone):
 
 def test_a_part_s_eye_hides_what_sits_under_it():
     assert _page("return underPart(D, 'a');", {"parent": {"b": "a", "c": "b"}}) == ["b", "c"]
-    assert "[id, ...underPart(S.design, d.eye)]" in open(JS).read()
+    from .test_carve_click import _fn
+
+    src = open(JS).read()                       # the eye's code is toggleHidden now, the part menu's Hide too (CALI-183)
+    assert "[id, ...underPart(S.design, pid)]" in _fn(src, "toggleHidden")
+    assert "if (d.eye) { toggleHidden(d.eye, d.key != null ? d.key : null); return 'eye'; }" in _fn(src, "treeClick")
 
 
 # --- the review of #204 ---------------------------------------------------------------------------------------------------
