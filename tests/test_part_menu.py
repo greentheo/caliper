@@ -274,7 +274,7 @@ def test_each_item_does_what_its_panel_or_chat_route_does():
       const run = async (id, pid, piece) => { calls.length = 0; S.menu = { pid, piece: piece ?? null }; await menuDo(id); did[id] = calls.slice(); };
       await run('ask', 'step_stool', 'top');
       await run('check', 'step_stool'); await run('carve', 'inside_corner_fillets');
-      await run('unmirror', 'side_left'); await run('versions', 'step_stool');
+      await run('unmirror', 'side_left'); await run('history', 'step_stool');
       await run('mirror', 'step_stool'); did.msg = MSG.value;
       await run('copyName', 'inside_corner_fillets');
       await run('rename', 'step_stool', 'top'); did.renaming = TREE.rename;
@@ -285,7 +285,7 @@ def test_each_item_does_what_its_panel_or_chat_route_does():
     assert ["scope", "step_stool", "top"] in got["ask"]
     assert ["better", "step_stool", "load"] in got["check"] and ["better", "inside_corner_fillets", "carve"] in got["carve"]
     assert ["unmirror", "side_left"] in got["unmirror"]
-    assert ["scope", "step_stool", None] in got["versions"] and ["goTo", "partHistory"] in got["versions"]
+    assert ["scope", "step_stool", None] in got["history"] and ["goTo", "partHistory"] in got["history"]
     assert got["msg"] == "Make step_stool a mirror of " and "focus" in got["mirror"]
     assert ["copied", "inside_corner_fillets"] in got["copyName"]
     assert got["renaming"] == {"part": "step_stool", "key": "top", "draft": "top"} and "tree" in got["rename"]

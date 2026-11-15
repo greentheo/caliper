@@ -389,8 +389,16 @@ function menuItems(design, pid, piece) {
   if (p.study === 'carve') studied('carve', 'carve', 'Carve it');         // whichever made_of says; neither where it says none
   else if (p.study === 'lighten') studied('lighten', 'lighten', 'Lighten it');
   items.push(p.mirror_of ? { id: 'unmirror', label: `Break the mirror (of ${p.mirror_of})` } : { id: 'mirror', label: 'Mirror it…' });
-  items.push({ id: 'versions', label: 'Versions…' }, { id: 'copyName', label: 'Copy its name' });
+  items.push({ id: 'versions', label: 'Versions ▸' }, { id: 'copyName', label: 'Copy its name' });
   return items;
+}
+function versionsHtml(p) {                     // Versions ▸: each other version, newest first, with what was asked of it (#299)
+  const said = {};
+  (p.history || []).forEach((h) => { if (h.kind === 'revision' && h.version != null) said[h.version] = h.feedback || h.action || ''; });
+  const vs = (p.versions || []).filter((v) => v !== p.version).slice().reverse();
+  return `<div class="pmenu-title">${esc(p.label || p.name || p.id)} · versions</div>` + vs.map((v) => {
+    const w = String(said[v] || ''); return `<button role="menuitem" data-menu="ver:${v}">v${v}${w ? ` <span class="why">${esc(w.length > 48 ? `${w.slice(0, 47)}…` : w)}</span>` : ''}</button>`;
+  }).join('') + '<button role="menuitem" data-menu="history">Its history…</button>';
 }
 function menuHtml(title, items) {
   return `<div class="pmenu-title">${esc(title)}</div>` + items.map((m) => `<button role="menuitem" data-menu="${m.id}"${
@@ -468,6 +476,7 @@ async function menuDo(id) {
   if (!m) return;
   const { pid, piece } = m, t = seen();
   if (id === 'delete') return menuConfirm(confirmHtml(pid));
+  if (id === 'versions') return menuConfirm(versionsHtml(S.design.parts.find((x) => x.id === pid)));   // ▸ (#299)
   if (id === 'keep') return closeMenu();
   if (id === 'deleteYes' || id === 'deleteBoth') return deletePart(pid, id === 'deleteBoth' ? m.mirroredBy || [] : []);
   if (id === 'unmirrorThem') {                 // its mirrors become parts of their own; then it's asked again
@@ -490,7 +499,8 @@ async function menuDo(id) {
   if (id === 'check' || id === 'lighten' || id === 'carve') return useBetter({ part: pid, action: id === 'check' ? 'load' : id });
   if (id === 'mirror') { setScope(pid); $('msg').value = `Make ${pid} a mirror of `; $('msg').focus(); return; }   // the chat's route (#239)
   if (id === 'unmirror') return unmirror(pid);
-  if (id === 'versions') { setScope(pid); return goTo('partHistory'); }
+  if (id === 'history') { setScope(pid); return goTo('partHistory'); }
+  if (id.startsWith('ver:')) { setScope(pid); return showVersion(pid, Number(id.slice(4))); }   // its preview, Go back in its bar
   if (id === 'copyName') {
     try { await navigator.clipboard.writeText(pid); say(`Copied ${pid}.`); } catch (e) { say(`Its name is ${pid}.`); }
   }

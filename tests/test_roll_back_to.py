@@ -163,3 +163,29 @@ console.log(JSON.stringify({
     assert "historyItem(h, p.version)" in src
     assert "`/api/designs/${S.slug}/parts/${pid}/versions/${v}.stl`" in src and "(preview)" in _fn(src, "showVersion")
     assert "/parts/${pid}/restore`, { version: v }" in _fn(src, "goBackTo")
+
+
+
+def test_the_part_menu_s_versions_lists_each_other_version_and_previews_it():
+    """#294's menu: Versions ▸ v6 … v1, each with what was asked of it; choosing one previews it, Go back in its bar."""
+    import json
+    import subprocess
+
+    from .test_carve_click import _fn, _node
+
+    src = open(JS).read()
+    script = _fn(src, "versionsHtml") + """
+const esc = (s) => String(s);
+const p = { id: 'step_stool', label: 'Step stool', version: 7, versions: [1, 2, 3, 4, 5, 6, 7],
+            history: [{ kind: 'revision', version: 3, feedback: 'set width to 16 in, height to 16 in by hand' },
+                      { kind: 'revision', version: 6, action: 'restore', restored_from: 4 }] };
+console.log(JSON.stringify(versionsHtml(p)));
+"""
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    html = json.loads(got.stdout)
+    assert [int(x) for x in __import__("re").findall(r'data-menu="ver:(\d+)"', html)] == [6, 5, 4, 3, 2, 1]
+    assert "set width to 16 in" in html and 'data-menu="history"' in html and 'ver:7' not in html
+    menu = _fn(src, "menuDo")
+    assert "if (id === 'versions') return menuConfirm(versionsHtml(" in menu
+    assert "if (id.startsWith('ver:')) { setScope(pid); return showVersion(pid, Number(id.slice(4))); }" in menu
