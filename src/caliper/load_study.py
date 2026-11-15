@@ -1149,7 +1149,8 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     tol = tolerance(mesh)
     from .studies import made_of
 
-    trim = bool(printed and wood and rest is not None and made_of(store, part_id)["study"] == "lighten")
+    study = made_of(store, part_id)["study"]
+    trim = bool(printed and wood and rest is not None and study == "lighten")
     thins, walls, where, found = _thin(declared, mesh, pieces, rest if trim else None)   # (#272 re-check)
     volume, longest = float(abs(mesh.volume)), float(max(mesh.extents))
     least = finest(volume, longest, FINER_BUDGET)       # as fine as any run of it may go (CALI-97)
@@ -1200,6 +1201,7 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
            "thinnest": min(thins) if thins else None, "finest": least, "thinnest_where": where, "found": found,
            "thin_said": thin_words(store, part_id, min(thins), where, least, bool(printed)) if thins else None,
            "attach": attach, "plate_mat": sheet_mat or mat, "grow": grow, "rest": rest if trim else None,
+           "headline": headline(sheet_mat, printed, "printed" if study == "carve" else "sheet"),     # (#295)
            # a sheet part's printed pieces: trim left out with a note, one of no declared size not checked (#272)
            "trim": [p["name"] for p in printed_pieces(declared) if p["trim"]] if trim else [],
            "unsized": [p["name"] for p in printed_pieces(declared) if not p["trim"] and not p["section"]] if trim else []}
@@ -1207,6 +1209,48 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     if printed and wood:
         _two_materials(ctx, wood, sheet_mat, rest)
     return ctx
+
+
+def headline(sheet: Optional[dict], printed: Optional[dict], mostly: str = "sheet") -> str:
+    """What a part is made of, as its check says it (#295): a mixed part names both, the way made_of reads it ("softwood
+    plywood, with PLA trim"; "PETG (printed), with softwood plywood pieces"), never the trim alone."""
+    if sheet and printed:
+        if mostly == "printed":
+            return f"{printed['name']}, with {sheet['name']} pieces"
+        return f"{sheet['name']}, with {printed['name'].replace(' (printed)', '')} trim"
+    return (sheet or printed or {}).get("name", "")
+
+
+def sheet_of(ctx: dict) -> dict:
+    """What a sheet study (a Lighten, the plate check's thicknesses) is of: the sheets' material, never a sheet part's
+    printed trim (#295: PLA's density and strength for plywood holes). A part with no sheets: its own material."""
+    return ctx.get("plate_mat") or ctx["mat"]
+
+
+def sheet_param(store: DesignStore, part_id: str, thickness_mm: float) -> Optional[str]:
+    """The ``PARAMS`` number that is the sheets' thickness, where there's one (#295): read by the script and equal to it.
+    An estimate's Use sets it, with no designer and no material in words. None where there's none, or more than one."""
+    from . import params
+
+    try:
+        rows = params.listing(store, part_id)
+    except ValueError:
+        return None
+    hits = [e["name"] for e in rows if e["read"] and isinstance(e["value"], (int, float))
+            and not isinstance(e["value"], bool) and abs(float(e["value"]) - thickness_mm) < 0.01]
+    return hits[0] if len(hits) == 1 else None
+
+
+def sheet_said(store: DesignStore, part_id: str, ctx: dict) -> Optional[dict]:
+    """``{"name", "param", "now"}``: the sheets' material, the number that sets their thickness, and that thickness as
+    sold, for a thinner sheet's Use (#295). None for a part with no sheets."""
+    from . import materials as M
+
+    sheets = [pc for pc in ctx["pieces"] if pc["kind"] == "sheet"]
+    if not sheets:
+        return None
+    t = max(float(pc["thickness"]) for pc in sheets)
+    return {"name": sheet_of(ctx)["name"], "param": sheet_param(store, part_id, t), "now": M.nominal(t)}
 
 
 def per_voxel(ls) -> bool:
@@ -1433,6 +1477,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "id": rid, "part": part_id, "kind": "load", "created": time.time(),
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
         "material": mat, "spacing_mm": round(ctx["spacing"], 2), "voxels": int(ctx["ls"].solid.sum()),
+        # what it's made of in words, and the plate check's sheet: never a sheet part's trim (#295)
+        "headline": ctx.get("headline") or mat["name"], "plate_material": sheet_of(ctx),
+        "sheet": sheet_said(store, part_id, ctx),
         "min_safety": min_safety, "held": held, "cases": cases, "notes": notes,
         "cut": True,                  # its numbers are kept cut toward safe (CALI-152): one on its limit is settled
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer

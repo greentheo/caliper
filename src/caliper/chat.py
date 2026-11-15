@@ -946,13 +946,18 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
     if still:
         reply = re.sub(r"\A✓ (revised \*\*[^\n]*)", r"! \1: the code changed, but no number, size or position I measure "
                        r"moved", reply, count=1)
+    made = _made_otherwise(prior, script, message)    # how it's made changed and nobody asked: said, never ✓ (#295)
+    if made:
+        reply = re.sub(r"\A[✓!] (revised \*\*[^\n]*)", lambda m: f"⚠ {m.group(1)}: it also changed how it's made: {made}. "
+                       f"Say \"roll it back\" to undo it.", reply, count=1)
     proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
                                        drafter=drafter, enabled=promote_feedback,
                                        events=events, on_event=on_event)
     if offer:
         reply += "\n\n" + offer
 
-    return TurnResult(action="refine", ok=bool(res.ok) and not broke and on_pick not in (False, "partial") and not still,
+    return TurnResult(action="refine", ok=bool(res.ok) and not broke and on_pick not in (False, "partial") and not still
+                      and not made,
                       part=part_id, version=version, moved=moved,
                       part_report=res.report, report=after, broke=broke, fixed=fixed,
                       part_errors=part_errors, proposal=proposal, events=events, reply=reply)
@@ -1003,6 +1008,51 @@ def _moved(prior: str, new: str, before, geometry, tol: float = 0.01) -> bool:
                 or any(abs(a - b) > tol for a, b in zip(c0, c1))):
             return True
     return _declares_moved(prior, new)
+
+
+#: Words that ask for how a part is made to change: a material, printing, sheet goods (#295).
+_ASKS_MADE = re.compile(r"\b(?:print(?:ed|ing|s)?|3d|pla|petg|abs|tpu|nylon|plywood|ply|mdf|osb|lumber|wood(?:en)?|steel|"
+                        r"alumin(?:i?um)|metal|material|made (?:of|from|out of)|make it (?:from|out of|in))\b", re.I)
+
+
+def _how_made(script: str):
+    """What a script's pieces are, by kind and material: ``Counter`` of ``(kind, material)``; None where it can't be read."""
+    from collections import Counter
+
+    from . import construction as C
+
+    try:
+        items = C.declared_by(script).get("construction") or []
+    except Exception:  # noqa: BLE001 — not read: nothing said about it
+        return None
+    return Counter((it.get("kind"), it.get("material")) for it in items
+                   if isinstance(it, dict) and it.get("kind") in ("sheet", "printed", "stick"))
+
+
+def _made_otherwise(prior: str, new: str, asked: str) -> str:
+    """How a revision changed what the part is made of when the request didn't ask (#295: "Make it from 5/8 in pla
+    (printed)" rebuilt a plywood stool as one printed part, and the reply read ✓): "1 softwood plywood sheet became 1 PLA
+    (printed) printed piece", or "" where it didn't change, was asked for, or can't be read."""
+    from . import carve
+    from . import materials as M
+
+    if _ASKS_MADE.search(asked or ""):
+        return ""
+    was, now = _how_made(carve.uncarve(prior or "")[0]), _how_made(new or "")
+    if was is None or now is None or was == now:
+        return ""
+
+    def said(counts) -> str:
+        out = []
+        for (kind, mat), n in sorted(counts.items(), key=lambda kv: str(kv[0])):
+            try:
+                name = (M.printed(mat) if kind == "printed" else M.sheet(mat) if kind == "sheet" else M.stick(mat))["name"]
+            except Exception:  # noqa: BLE001 — a material the table doesn't know: its own word
+                name = str(mat)
+            what = {"sheet": "sheet", "printed": "printed piece", "stick": "stick"}[kind]
+            out.append(f"{n} {name} {what}{'s' if n != 1 else ''}")
+        return " and ".join(out) or "nothing"
+    return f"{said(was - now)} became {said(now - was)}"
 
 
 def _declares_moved(prior: str, new: str) -> bool:

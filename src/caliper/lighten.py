@@ -30,6 +30,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from . import load_study as L
+from .load_study import sheet_of, sheet_param, sheet_said  # noqa: F401 — what a Lighten is of (#295)
 from . import verdicts as V
 from .consistency import _frame
 from .design import DesignStore
@@ -328,7 +329,7 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
     pictured = [pc for pc in sheets if pc.get("pictures") and pc not in holed]
     if not (holed or pictured) or not r.supported:
         return case
-    ls, s, mat = ctx["ls"], ctx["spacing"], ctx["mat"]
+    ls, s, mat = ctx["ls"], ctx["spacing"], sheet_of(ctx)      # the panel's plywood, never trim's PLA (#295)
     cache = ctx.setdefault("_filled", {})                  # the filled solve, once per load
     if i not in cache:
         filled = ls.solid.copy()
@@ -619,7 +620,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     if fails:
         raise ValueError(f"Can't lighten it: {fails}, then lighten it.")
     ctx = L.prepare(store, part_id, emit)
-    s, mat = ctx["spacing"], ctx["mat"]
+    s, mat = ctx["spacing"], sheet_of(ctx)       # its holes' weight and allowables: the sheets', never trim's (#295)
     base, ctx = sheets_only(ctx)                 # a sheet part's printed trim left out of its FEA (#272 re-check)
     seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)
     plist, tops = panels(ctx), panels(ctx, stood_on=True)
@@ -750,7 +751,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
         "part_lb": part_lb,
         "id": rid, "part": part_id, "kind": "lighten", "created": time.time(), **seen, "cut": True,   # (CALI-152)
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
-        "min_safety": min_safety, "material": mat["name"], "spacing_mm": round(s, 2),
+        "min_safety": min_safety, "material": mat["name"], "sheet": sheet_said(store, part_id, ctx), "spacing_mm": round(s, 2),
         "panels": [{"name": p["name"], "thickness_mm": p["t"], "normal": [round(float(c), 6) for c in p["n"]],
                     "stood_on": p in tops} for p in plist + tops],
         "rules": {"rim_mm": RIM_MM, "min_hole_mm": MIN_HOLE_MM, "min_web_mm": MIN_WEB_MM, "round_mm": ROUND_MM,
@@ -837,7 +838,7 @@ def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
 def _plate_at(ctx, case_name: str, t: float) -> Optional[float]:
     """The plate check's safety (grain the wrong way) for a load at another sheet thickness, if it has one."""
     i = next((k for k, ld in enumerate(ctx["loads"]) if ld["name"] == case_name), None)
-    pl = L.plate_check(ctx["pieces"], ctx["loads"][i], ctx["mat"], ctx["tol"]) if i is not None else None
+    pl = L.plate_check(ctx["pieces"], ctx["loads"][i], sheet_of(ctx), ctx["tol"]) if i is not None else None
     if not pl or not pl.get("done"):
         return None
     return min(pl["by_thickness"], key=lambda b: abs(b["thickness_mm"] - t))["safety_across"]
