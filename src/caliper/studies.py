@@ -310,6 +310,9 @@ def menu(p: dict, air: Optional[dict] = None) -> list[dict]:
         label, what = KINDS[kind]
         return {"kind": kind, "label": label, "what": what, "ready": bool(ready), "why": "" if ready else why}
 
+    src = p.get("mirror_of")                         # the server refuses these on a mirror: said here too (CALI-183)
+    mirrored = (f"it mirrors {src}: change {src} and it follows, or break the mirror first" if src else "")
+
     out = [
         item("load", p.get("loads") and p.get("built"),
              roll if mesh else
@@ -318,15 +321,15 @@ def menu(p: dict, air: Optional[dict] = None) -> list[dict]:
              "its loads()" if not p.get("loads") else "it doesn't say what it's built from (construction())"),
         # Lighten or Carve, never both, by where its volume is (#272): made_of, as the card and blocked() read it
         item("lighten", p.get("loads") and p.get("built") and not p.get("framed") and p.get("study") == "lighten"
-             and not (p.get("blocked") or {}).get("lighten"),
-             roll if mesh else "a frame is lightened by sizing its tubes" if p.get("framed")
+             and not (p.get("blocked") or {}).get("lighten") and not src,
+             roll if mesh else mirrored if src else "a frame is lightened by sizing its tubes" if p.get("framed")
              else "check what it must hold first (its loads())" if not p.get("loads")
              else "it has no sheet pieces: printed parts get carved instead" if not p.get("sheets", True)
              else (p.get("blocked") or {}).get("lighten") or "it doesn't say what it's built from (construction())"),
         # a printed part is carved free-form where it isn't working (#92); the Carve button's own test (#144)
         item("carve", p.get("loads") and p.get("built") and p.get("study") == "carve" and not p.get("carved")
-             and not (p.get("blocked") or {}).get("carve"),
-             roll if mesh else "it has no printed piece: sheet walls are lightened with holes" if not p.get("printed")
+             and not (p.get("blocked") or {}).get("carve") and not src,
+             roll if mesh else mirrored if src else "it has no printed piece: sheet walls are lightened with holes" if not p.get("printed")
              else "check what it must hold first (its loads())" if not p.get("loads")
              else "it's carved already: roll it back to carve it again" if p.get("carved")
              else (p.get("blocked") or {}).get("carve") or "it doesn't say what it's built from (construction())"),

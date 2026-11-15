@@ -317,13 +317,7 @@ function treeClick(el, now) {
   if (d.fold) { t.open = !t.open; keepTree(); renderTree(); return 'fold'; }
   if (d.unmirror) { unmirror(d.unmirror); return 'unmirror'; }
   if (d.renameSave) { saveTreeName(d.part, d.key != null ? d.key : null); return 'save'; }
-  if (d.eye) {
-    const set = d.key != null ? t.pieces : t.parts, id = d.key != null ? pieceId(d.eye, d.key) : d.eye;
-    const hide = !set.has(id);
-    (d.key != null ? [id] : [id, ...underPart(S.design, d.eye)]).forEach((x) => (hide ? set.add(x) : set.delete(x)));   // and what sits under it
-    keepTree(); renderTree(); paint();
-    return 'eye';
-  }
+  if (d.eye) { toggleHidden(d.eye, d.key != null ? d.key : null); return 'eye'; }
   if (d.sel) {
     const id = pieceId(d.sel, d.key != null ? d.key : ''), again = t.last && t.last.id === id && now - t.last.at < 400;
     t.last = again ? null : { id, at: now };
@@ -340,8 +334,235 @@ function treeClick(el, now) {
   return null;
 }
 $('tree').addEventListener('click', (e) => {
+  if ($('tree').dataset.pressed) { delete $('tree').dataset.pressed; return; }   // a long-press opened its menu (CALI-183)
   const el = e.target.closest('button');
   if (el) treeClick(el, Date.now());
+});
+function toggleHidden(pid, key) {            // the eye, and the menu's Hide / Show: a part takes what sits under it along
+  const t = seen(), set = key != null ? t.pieces : t.parts, id = key != null ? pieceId(pid, key) : pid;
+  const hide = !set.has(id);
+  (key != null ? [id] : [id, ...underPart(S.design, pid)]).forEach((x) => (hide ? set.add(x) : set.delete(x)));
+  keepTree(); renderTree(); paint();
+}
+function showOnly(pid, key) {                // the menu's Show only this: every other part hidden (a piece: its part's others too)
+  const t = seen(), keep = new Set([pid, ...underPart(S.design, pid)]);
+  t.parts = new Set(S.design.parts.map((p) => p.id).filter((x) => !keep.has(x)));
+  t.pieces = new Set();
+  if (key != null) {
+    const p = S.design.parts.find((x) => x.id === pid);
+    (p.pieces || []).forEach((pc) => { if (pc.key !== key) t.pieces.add(pieceId(pid, pc.key)); });
+  }
+  keepTree(); renderTree(); paint();
+}
+
+// ------------------------------------------------------------- a part's menu (CALI-183)
+// Right-click a part in the view or its row in the tree (long-press on a phone; Shift+F10 or the menu key for the selected
+// one): what can be done to it, each item what its panel or the chat already does. A piece gets what applies to a piece.
+const LONG_PRESS_MS = 550;
+function menuItems(design, pid, piece) {
+  const p = (design.parts || []).find((x) => x.id === pid);
+  if (!p) return [];
+  if (piece != null) return [{ id: 'rename', label: 'Rename…' }, { id: 'only', label: 'Show only this' }, { id: 'ask', label: 'Ask about this' }];
+  const t = seen(), study = {};
+  (((design.studies || {}).menu || {})[pid] || []).forEach((m) => { study[m.kind] = m; });
+  const items = [{ id: 'delete', label: 'Delete…' }];
+  if (p.role !== 'fixed') items.push({ id: 'rename', label: 'Rename…' });
+  items.push({ id: 'hide', label: t.parts.has(pid) ? 'Show' : 'Hide' }, { id: 'only', label: 'Show only this' });
+  if (t.parts.size || t.pieces.size) items.push({ id: 'all', label: 'Show everything' });
+  items.push({ id: 'ask', label: 'Ask about this' });
+  const studied = (kind, id, label) => {      // the panels' own rule: greyed, with why, when it can't run here
+    const m = study[kind];
+    if (m) items.push({ id, label, off: !m.ready, why: m.ready ? '' : m.why });
+  };
+  studied('load', 'check', 'Check it holds');
+  if (p.study === 'carve') studied('carve', 'carve', 'Carve it');         // whichever made_of says; neither where it says none
+  else if (p.study === 'lighten') studied('lighten', 'lighten', 'Lighten it');
+  items.push(p.mirror_of ? { id: 'unmirror', label: `Break the mirror (of ${p.mirror_of})` } : { id: 'mirror', label: 'Mirror it…' });
+  items.push({ id: 'versions', label: 'Versions…' }, { id: 'copyName', label: 'Copy its name' });
+  return items;
+}
+function menuHtml(title, items) {
+  return `<div class="pmenu-title">${esc(title)}</div>` + items.map((m) => `<button role="menuitem" data-menu="${m.id}"${
+    m.off ? ` aria-disabled="true" class="off" title="${esc('Not yet: ' + m.why)}"` : ''}>${esc(m.label)}${
+    m.off ? `<span class="why">${esc(m.why)}</span>` : ''}</button>`).join('');
+}
+function confirmHtml(pid, said, mirroredBy) {    // the page's own confirm, never the browser's
+  if (mirroredBy && mirroredBy.length) {
+    return `<div class="pmenu-said">${esc(said)}</div><div class="pmenu-row">
+      <button role="menuitem" class="danger" data-menu="deleteBoth">Delete both</button>
+      <button role="menuitem" data-menu="unmirrorThem">Break the mirror</button>
+      <button role="menuitem" data-menu="keep">Keep it</button></div>`;
+  }
+  return `<div class="pmenu-said">${esc(said || `Delete ${pid}? It goes to the design's trash; you can put it back.`)}</div>
+    <div class="pmenu-row"><button role="menuitem" class="danger" data-menu="deleteYes">Delete</button>
+      <button role="menuitem" data-menu="keep">Keep it</button></div>`;
+}
+function openMenu(pid, piece, x, y) {
+  closeMenu();
+  const p = S.design && S.design.parts.find((q) => q.id === pid);
+  if (!p) return;
+  const pc = piece != null ? (p.pieces || []).find((q) => q.key === piece) : null;
+  const name = p.label || p.name || p.id;
+  S.menu = { pid, piece: piece != null ? piece : null };
+  const box = document.createElement('div');
+  box.id = 'partMenu'; box.className = 'pmenu'; box.setAttribute('role', 'menu');
+  box.setAttribute('aria-label', `${pc ? pc.name : name}: what to do`);
+  box.innerHTML = menuHtml(pc ? `${name} · ${pc.name}` : name, menuItems(S.design, pid, piece));
+  box.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-menu]');
+    if (b && b.getAttribute('aria-disabled') !== 'true') menuDo(b.dataset.menu);
+  });
+  document.body.appendChild(box);
+  placeMenu(box, x, y);
+  menuFocus(0);
+}
+function placeMenu(box, x, y) {               // where it was asked for, kept on the screen
+  const r = box.getBoundingClientRect();
+  box.style.left = `${Math.max(8, Math.min(x, innerWidth - r.width - 8))}px`;
+  box.style.top = `${Math.max(8, Math.min(y, innerHeight - r.height - 8))}px`;
+}
+function menuConfirm(html) {
+  const box = $('partMenu');
+  if (!box) return;
+  box.innerHTML = html;
+  placeMenu(box, parseFloat(box.style.left) || 8, parseFloat(box.style.top) || 8);
+  menuFocus(0);
+}
+function closeMenu() {
+  const box = $('partMenu');
+  if (box) box.remove();
+  S.menu = null;
+}
+function menuFocus(step) {                     // the arrow keys move through its items
+  const items = [...document.querySelectorAll('#partMenu [data-menu]')];
+  if (!items.length) return;
+  const at = items.indexOf(document.activeElement);
+  items[step === 0 || at < 0 ? 0 : (at + step + items.length) % items.length].focus();
+}
+function menuAnchor() {                        // where the keyboard's menu opens: the selected row, or the view's middle
+  const row = document.querySelector(`#tree [data-sel="${CSS.escape(S.scope)}"]`);
+  const r = (row || viewer).getBoundingClientRect();
+  return row ? [r.left + 24, r.bottom] : [r.left + r.width / 2, r.top + r.height / 2];
+}
+async function menuDo(id) {
+  const m = S.menu;
+  if (!m) return;
+  const { pid, piece } = m, t = seen();
+  if (id === 'delete') return menuConfirm(confirmHtml(pid));
+  if (id === 'keep') return closeMenu();
+  if (id === 'deleteYes' || id === 'deleteBoth') return deletePart(pid, id === 'deleteBoth' ? m.mirroredBy || [] : []);
+  if (id === 'unmirrorThem') {                 // its mirrors become parts of their own; then it's asked again
+    for (const f of m.mirroredBy || []) await unmirror(f);
+    m.mirroredBy = null;
+    return menuConfirm(confirmHtml(pid));
+  }
+  closeMenu();
+  const p = S.design.parts.find((x) => x.id === pid);
+  if (id === 'rename') {                       // the tree's own rename, inline
+    const pc = piece != null ? (p.pieces || []).find((x) => x.key === piece) : null;
+    t.open = true;
+    t.rename = { part: pid, key: piece, draft: pc ? pc.name : (p.label || p.name || p.id) };
+    return renderTree();
+  }
+  if (id === 'hide') return toggleHidden(pid, null);
+  if (id === 'only') return showOnly(pid, piece);
+  if (id === 'all') { t.parts = new Set(); t.pieces = new Set(); keepTree(); renderTree(); paint(); return; }
+  if (id === 'ask') return setScope(pid, piece);
+  if (id === 'check' || id === 'lighten' || id === 'carve') return useBetter({ part: pid, action: id === 'check' ? 'load' : id });
+  if (id === 'mirror') { setScope(pid); $('msg').value = `Make ${pid} a mirror of `; $('msg').focus(); return; }   // the chat's route (#239)
+  if (id === 'unmirror') return unmirror(pid);
+  if (id === 'versions') { setScope(pid); return goTo('partHistory'); }
+  if (id === 'copyName') {
+    try { await navigator.clipboard.writeText(pid); say(`Copied ${pid}.`); } catch (e) { say(`Its name is ${pid}.`); }
+  }
+}
+async function deletePart(pid, also) {
+  try {
+    const got = await api('POST', `/api/designs/${S.slug}/parts/${pid}/remove`, { also });
+    closeMenu();
+    S.design = got.state;
+    if (S.scope === pid || also.includes(S.scope)) setScope(null); else render();
+    putBack(got.said, [got.removed, ...(got.also || [])]);
+    await syncParts(S.design, false);            // and out of the view, as a refresh takes it out
+  } catch (e) {
+    let said = e.message, by = null;
+    try { const j = JSON.parse(e.message); said = j.said; by = j.mirrored_by; } catch (x) { /* words */ }
+    if (S.menu) S.menu.mirroredBy = by;
+    if (by) return menuConfirm(confirmHtml(pid, said, by));
+    menuConfirm(`<div class="pmenu-said">${esc(plainly(said))}</div><div class="pmenu-row"><button role="menuitem" data-menu="keep">OK</button></div>`);
+  }
+}
+function say(text, act) {                      // a line at the foot of the page: what the menu did, and Put back
+  let bar = $('putBack');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'putBack'; bar.className = 'putback'; bar.setAttribute('role', 'status');
+    document.body.appendChild(bar);
+  }
+  bar.innerHTML = `<span>${esc(text)}</span>${act ? ' <button class="primary" data-putback="1">Put back</button>' : ''}
+    <button class="ghost" data-putback-close="1" aria-label="Close">x</button>`;
+  bar.hidden = false;
+  bar.onclick = (e) => {
+    if (e.target.closest('[data-putback-close]')) bar.hidden = true;
+    else if (act && e.target.closest('[data-putback]')) act();
+  };
+  clearTimeout(say.t);
+  if (!act) say.t = setTimeout(() => { bar.hidden = true; }, 4000);
+}
+function putBack(said, gone) {
+  say(said, async () => {
+    try {
+      let got = null;
+      for (const g of gone) got = await api('POST', `/api/designs/${S.slug}/trash/restore`, { id: g.id });   // its source first
+      S.design = got.state;
+      render();
+      say(got.said);
+      await syncParts(S.design, false);          // back in the view
+    } catch (e) { showErr(plainly(e.message)); }
+  });
+}
+function longPress(el, open) {                 // a phone's right-click: held still, then the menu
+  let t = null, at = null;
+  el.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'touch') return;
+    at = [e.clientX, e.clientY];
+    clearTimeout(t);
+    t = setTimeout(() => { t = null; el.dataset.pressed = '1'; open(e); }, LONG_PRESS_MS);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (t && at && Math.hypot(e.clientX - at[0], e.clientY - at[1]) > 8) { clearTimeout(t); t = null; }
+  });
+  ['pointerup', 'pointercancel'].forEach((k) => el.addEventListener(k, () => { clearTimeout(t); t = null; }));
+}
+$('tree').addEventListener('contextmenu', (e) => {
+  const b = e.target.closest('[data-sel]');
+  if (!b) return;
+  e.preventDefault();
+  openMenu(b.dataset.sel, b.dataset.key != null ? b.dataset.key : null, e.clientX, e.clientY);
+});
+longPress($('tree'), (e) => {
+  const b = e.target.closest('[data-sel]');
+  if (b) openMenu(b.dataset.sel, b.dataset.key != null ? b.dataset.key : null, e.clientX, e.clientY);
+});
+addEventListener('pointerdown', (e) => { if ($('partMenu') && !e.target.closest('#partMenu')) closeMenu(); }, true);
+addEventListener('keydown', (e) => {
+  if ($('partMenu')) {
+    if (e.key === 'Escape') { e.preventDefault(); closeMenu(); return; }
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); menuFocus(e.key === 'ArrowDown' ? 1 : -1); }
+    return;
+  }
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || document.activeElement.isContentEditable;
+  if (typing || !S.scope || !S.design) return;
+  if ((e.key === 'F10' && e.shiftKey) || e.key === 'ContextMenu') {
+    e.preventDefault();
+    const [x, y] = menuAnchor();
+    openMenu(S.scope, S.piece, x, y);
+  } else if (e.key === 'Delete' && S.piece == null) {   // the same confirm, straight away
+    e.preventDefault();
+    const [x, y] = menuAnchor();
+    openMenu(S.scope, null, x, y);
+    menuDo('delete');
+  }
 });
 // drag a part to move it: above or below another, or onto it to sit under it. The tree only (#94, slice b)
 const PHONE = window.matchMedia('(max-width: 700px)');   // the drawer (#200): moving a part needs a mouse
@@ -769,6 +990,12 @@ let down = null;
 renderer.domElement.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY, e.button]; });
 renderer.domElement.addEventListener('pointerup', (e) => {
   const d = down; down = null;
+  if (renderer.domElement.dataset.pressed) { delete renderer.domElement.dataset.pressed; return; }   // a long-press's menu
+  if (d && (e.button === 2 || (e.button === 0 && e.ctrlKey)) && Math.hypot(e.clientX - d[0], e.clientY - d[1]) <= 5) {
+    const hit = pick(e);                       // right-click, not a right-drag pan: its menu (CALI-183)
+    if (hit) openMenu(hit.object.userData.partId, null, e.clientX, e.clientY);
+    return;
+  }
   if (!d || d[2] !== 0 || e.button !== 0) return;
   if (Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 5) return;    // an orbit drag, not a click
   const hit = pick(e);
@@ -786,6 +1013,11 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   tip.style.left = `${e.clientX - rect.left + 14}px`;
   tip.style.top = `${e.clientY - rect.top + 10}px`;
   tip.hidden = !p;
+});
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());   // the menu opens on the button's release
+longPress(renderer.domElement, (e) => {
+  const hit = pick(e);
+  if (hit) openMenu(hit.object.userData.partId, null, e.clientX, e.clientY);
 });
 function pick(e) {
   const rect = renderer.domElement.getBoundingClientRect();
@@ -2256,7 +2488,7 @@ function partView(p) {
     ${p.rules.length || designRules.length ? '<ul class="list">' +
       [...p.rules, ...designRules].map(ruleItem).join('') + '</ul>'
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
-    <h4>History</h4>
+    <h4 id="partHistory">History</h4>
     <ul class="list">${p.history.slice().reverse().map(historyItem).join('')}</ul>
     <details id="adv"><summary>Advanced — script &amp; spec <span class="muted">${esc(p.id)}</span> ${origin}</summary><div id="advBody" class="small muted">loading…</div></details>`;
   const work = `${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>

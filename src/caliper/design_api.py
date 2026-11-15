@@ -24,7 +24,8 @@ from pydantic import BaseModel, field_validator
 
 from . import (aero, mirror, better, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
                lighten,
-               load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, tree, verdicts)
+               load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, trash, tree,
+               verdicts)
 from . import llm
 from . import whittle_bridge as wb
 from .assembly import carved_file
@@ -60,6 +61,20 @@ class ParamsSet(BaseModel):
 class TreeLayout(BaseModel):
     order: list[str]                      # every part, once, in the order the tree shows them
     parent: dict[str, str] = {}           # part -> the part it sits under, in the tree only (#94)
+
+
+class RemovePart(BaseModel):
+    also: list[str] = []                  # the parts that mirror it, deleted with it (CALI-183)
+
+
+class RestorePart(BaseModel):
+    part: Optional[str] = None            # its newest removal
+    id: Optional[str] = None              # or one removal, by its trash id
+
+
+#: What a job is doing to a part, said when a delete has to wait for it (CALI-183).
+DOING = {"load": "checked", "lighten": "lightened", "carve": "carved", "release": "packaged", "firstrun": "built",
+         "chat": "revised", "whittle": "studied", "aero": "studied"}
 
 
 class LabelSet(BaseModel):
@@ -790,6 +805,55 @@ def router():
             except ValueError as e:
                 raise HTTPException(409, str(e))
             return design_state(store)
+
+    @r.post("/api/designs/{slug}/parts/{pid}/remove")
+    def remove_part(slug: str, pid: str, req: RemovePart):
+        """Delete a part from its menu (CALI-183): to the design's trash, as "remove …" in the chat does (#98), so Put back
+        restores it. Never while a job works on it, and a mirror's source only with what mirrors it."""
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None:
+                raise HTTPException(404, f"no part {pid!r}")
+            mirrored = mirror.mirrors_of(store, pid)
+            extra = [x for x in req.also if x not in mirrored]
+            if extra:
+                raise HTTPException(422, f"{', '.join(extra)} doesn't mirror {pid}: delete it on its own")
+            for j in RUNNER.active():
+                if j.meta.get("slug") == slug and j.meta.get("part") in [pid, *req.also]:
+                    raise HTTPException(409, f"{j.meta['part']} is being {DOING.get(j.kind, 'worked on')}: wait for it, "
+                                             f"or stop that first.")
+            left = [x for x in mirrored if x not in req.also]
+            if left:
+                raise HTTPException(409, {"said": f"{pid} is mirrored by {', '.join(left)}: delete both, or break the "
+                                                  f"mirror first?", "mirrored_by": left})
+            gone = [trash.remove(store, x) for x in [*req.also, pid]]
+            said = (f"Deleted {pid}: it's in the design's trash, so it can be put back." if not req.also else
+                    f"Deleted {pid} and {', '.join(req.also)}, its mirror: they're in the design's trash, so they can be "
+                    f"put back.")
+            store.append_log({"kind": "message", "text": f"Delete {pid} (from its menu)", "action": "remove", "part": pid,
+                              "routed_by": "menu"})
+            store.append_log({"kind": "reply", "action": "remove", "part": pid, "ok": True, "reply": said})
+            return {"state": design_state(store), "said": said, "removed": {"part": pid, "id": gone[-1]["id"]},
+                    "also": [{"part": g["part"], "id": g["id"]} for g in gone[:-1]]}
+
+    @r.post("/api/designs/{slug}/trash/restore")
+    def restore_part(slug: str, req: RestorePart):
+        """Put back a part deleted from its menu, or the chat (CALI-183): as it was, its mates and rules with it."""
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            try:
+                got = trash.restore(store, tid=req.id, pid=req.part)
+            except FileNotFoundError:
+                raise HTTPException(404, f"there's nothing in the design's trash called {req.id!r}")
+            except ValueError as e:
+                raise HTTPException(404 if "trash" in str(e) else 409, str(e))
+            pid = got.get("part") or req.part
+            said = f"Put back {pid}, as it was." + (f" {'; '.join(got['waiting'])[:1].upper()}{'; '.join(got['waiting'])[1:]}."
+                                                    if got.get("waiting") else "")
+            store.append_log({"kind": "message", "text": f"Put back {pid} (from its menu)", "action": "restore", "part": pid,
+                              "routed_by": "menu"})
+            store.append_log({"kind": "reply", "action": "restore", "part": pid, "ok": True, "reply": said})
+            return {"state": design_state(store), "said": said}
 
     @r.post("/api/designs/{slug}/tree")
     def set_tree(slug: str, req: TreeLayout):
