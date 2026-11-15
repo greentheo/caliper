@@ -1871,15 +1871,43 @@ function paramsSaid(rows) {
 }
 // a thinner sheet's Use (#295): the sheets' thickness number set, as the Parameters panel sets it, with no designer and
 // no material in words; where there's no such number, the sheet named, never what's printed on it
-function sheetUse(run, label, mm, now, piece) {   // a plate row is one piece's: its own number, never another sheet's (#303)
+function sheetUse(run, label, mm, now, piece, opts = {}) {   // a plate row is one piece's: its own number, never another sheet's (#303)
   const sheet = run.sheet || {};
   const param = piece ? (sheet.pieces || {})[piece] : sheet.param;
-  if (param) return `<button class="ghost" data-use-param="${esc(param)}" data-use-mm="${mm}">Use</button>`;
+  // what it does, in its own words, and waiting while a step is picked, so it can't be read as that step's (#297)
+  const word = esc(opts.text || 'Use'), off = opts.off ? ` disabled title="${esc(opts.off)}"` : '';
+  if (param) return `<button class="ghost" data-use-param="${esc(param)}" data-use-mm="${mm}"${off}>${word}</button>`;
   const name = sheet.name || (typeof run.material === 'string' ? run.material : (run.plate_material || {}).name) || 'plywood';
   const plain = /printed|\bpla\b|petg/i.test(name) ? 'plywood' : name;          // an older run's headline: never the print
   const said = piece ? `Make the ${piece} ${label} ${plain}, not ${now || sheet.now || 'what it is'}`
     : `Make the ${sheet.now || now || 'sheet'} ${plain} ${label}`;
-  return `<button class="ghost" data-use-t="${esc(said)}">Use</button>`;
+  return `<button class="ghost" data-use-t="${esc(said)}"${off}>${word}</button>`;
+}
+// a picked step's own action, by the table it was picked in: the same adopt as the bar's Cut these holes (#297)
+function stepAction(p, run, on) {
+  const st = run.stations.find((x) => x.index === on);
+  if (!st || st.estimate || !on) return '';
+  if (run.version != null && run.version !== p.version) {
+    return `<div class="small" style="margin-top:6px">This lightening is of v${run.version}, and the part has changed since
+      (it's v${p.version}): lighten it again.</div>`;
+  }
+  const no = run.not_trusted || (!holdsHere(st) ? `It can't be used: ${st.verdict ? st.verdict.word : 'not checked'}` : '');
+  return `<div class="actions"><button class="primary" data-step-adopt="${on}"${no ? ` disabled title="${esc(no)}"` : ''}>Cut step ${on}'s holes into ${esc(p.id)} (makes v${p.version + 1})</button></div>`;
+}
+// a case the check can't call: its own why, and the check that made the number named, never "the FEA" where another
+// check governs (#297, Theo's v6: "the FEA read 2.2x, too coarse to see its walls" was the top's plate check)
+function caseWhy(c, run) {
+  const v = c.verdict || {};
+  if (v.why) return `${coarseWord(c)}: ${esc(v.why)}`;
+  const by = c.governs === 'plate' ? 'the plate check' : c.governs === 'buckling' ? 'the buckling check' : '';
+  return by ? `${coarseWord(c)}: ${by} read ${sx(c.safety, run.min_safety)}; what it couldn't see isn't checked`
+    : `${coarseWord(c)}: the FEA read ${sx(c.safety, run.min_safety)}, too coarse to see its walls`;
+}
+// a run the check can't call: why, first, in one line, before the scenarios (#297)
+function runReason(run) {
+  const v = run.verdict || {};
+  if (!['unchecked', 'unresolved'].includes(v.kind) || !v.why) return '';
+  return `<div class="small" data-reason="1" style="margin-top:6px;color:var(--amber)"><b>${esc(v.word || 'not checked')}:</b> ${esc(v.why)}</div>`;
 }
 async function useParam(p, name, mm) {
   try {
@@ -3369,9 +3397,12 @@ function lightenView(p) {
       ${run.stations.map((x) => `<tr class="${x.estimate ? '' : 'pick'} ${x.index === on ? 'on' : ''}" ${x.estimate ? '' : `data-lst="${x.index}"`}>
         <td>${x.index}</td><td style="text-align:left">${what(x)}</td><td>${lbs(x.saved_lb)}</td>
         <td style="color:var(--${verdictTone(x.verdict)})">${sx(x.safety, run.min_safety)}</td>
-        <td>${x.verdict && x.verdict.kind === 'estimate' ? sheetUse(run, x.label, x.thickness_mm) : ''}</td></tr>`).join('')}</table></div>
-    <div class="muted small" style="margin-top:4px">Click a step to see it; <b>Cut these holes</b> makes it the part. An estimate's
-      <b>Use</b> asks for that sheet, and the strength check runs on the real thing.</div>
+        <td>${x.verdict && x.verdict.kind === 'estimate' ? sheetUse(run, x.label, x.thickness_mm, undefined, undefined,
+          { text: `Ask for ${x.label} sheet (redesigns it; checked again after)`,
+            off: on > 0 ? `Step ${on} is picked: this asks for another sheet, not step ${on}'s holes` : '' }) : ''}</td></tr>`).join('')}</table></div>
+    ${stepAction(p, run, on)}
+    <div class="muted small" style="margin-top:4px">Click a step to see it, then cut its holes in with the button under the table.
+      An estimate's <b>Ask for</b> redesigns it in that sheet, and it's checked again after.</div>
     ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}` : ''}`;
 }
 
@@ -3465,6 +3496,8 @@ function loadCase(p, run, c, i) {
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
       ${c.blind ? `<div class="small" style="margin-top:2px">The check couldn't see any stress here: the piece under the load may be too thin for its voxels, the load's patch may be smaller than the voxels, or the load may go straight into what holds it.</div>`
+      : c.unresolved && c.verdict && c.verdict.kind !== 'fails' && (c.verdict.why || (c.governs && c.governs !== 'fea'))
+        ? `<div class="small" style="margin-top:2px">${caseWhy(c, run)} <span class="muted">(it needs ${run.min_safety}x)</span></div>`
       : c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety, run.min_safety)}
         <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
         ${c.verdict && c.verdict.kind === 'fails' ? 'the fail may be the model\'s' : 'no verdict'} (it needs ${run.min_safety}x)</span></div>`
@@ -3522,6 +3555,7 @@ function loadResults(p, run, runs) {
       : `<b>Last check</b> · v${run.version} · ${new Date(run.created * 1000).toLocaleString()}`}
       ${p.untrusted ? untrustedBadge(p) : runBadge(run)}
       ${stale ? '<span class="badge bad">the part has changed since</span>' : ''}</div>
+    ${runReason(run)}
     ${run.cases.map((c, i) => loadCase(p, run, c, i)).join('')}
     <div class="muted small" style="margin-top:6px">In ${esc(run.headline || run.material.name)}, voxels of ${len(run.spacing_mm, 1)}
       (${run.voxels.toLocaleString()} of them), held at ${run.held.map((h) => esc(h.name)).join(', ')} · ${run.seconds}s</div>
@@ -3542,6 +3576,9 @@ function wireLoad(p) {
   wireCarve(p);
   document.querySelectorAll('#loadBox tr[data-lst]').forEach((tr) => {
     tr.onclick = () => showStation(p.id, lightenRuns(p.id)[0], +tr.dataset.lst);
+  });
+  document.querySelectorAll('#loadBox [data-step-adopt]').forEach((b) => {   // a picked step, by its table (#297)
+    b.onclick = () => adoptStation(p.id, lightenRuns(p.id)[0].id, +b.dataset.stepAdopt, 'lighten');
   });
   document.querySelectorAll('#loadBox [data-use-param]').forEach((b) => {   // a thinner sheet: its number set (#295)
     b.onclick = () => useParam(p, b.dataset.useParam, Number(b.dataset.useMm));
@@ -3802,7 +3839,7 @@ async function showHeat(pid, run, index) {
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →
         ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>`
           : c.verdict && (c.verdict.kind === 'unresolved' || c.verdict.kind === 'unchecked')   // no "holds" (CALI-110)
-            ? `<b style="color:var(--amber)">${c.blind ? 'not resolved: the check couldn\'t see any stress here' : `${coarseWord(c)}: the FEA read ${sx(c.safety, run.min_safety)}, too coarse to see its walls`}</b>`
+            ? `<b style="color:var(--amber)">${c.blind ? 'not resolved: the check couldn\'t see any stress here' : `${caseWhy(c, run)}`}</b>`
             : c.verdict && c.verdict.kind === 'edge'     // the middle only (CALI-94): no "holds" where people stand
               ? `<b style="color:var(--amber)">middle only: the middle read ${sx(c.safety, run.min_safety)}; the front edge, where people stand, isn't checked</b>`
             : settled(c.verdict)           // the verdict's word and colour (CALI-112): never green unless it holds
