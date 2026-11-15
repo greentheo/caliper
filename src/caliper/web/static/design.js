@@ -2211,7 +2211,7 @@ function wireRelease() {
   };
 }
 
-function historyItem(h) {
+function historyItem(h, now) {
   if (h.kind === 'revision') {
     const what = h.action === 'frame' ? `tubes sized — design ${h.station} (${h.mass_lb} lb, ${h.safety}x)`
       : h.action === 'aero' ? `shaped for drag — station ${h.station}`
@@ -2219,7 +2219,10 @@ function historyItem(h) {
       : h.action === 'build' ? 'construction changed'
       : h.action === 'lighten' ? `lightened — step ${h.station}`
       : h.action === 'restore' ? `rolled back to v${h.restored_from}` : h.action;
+    const older = now != null && h.version != null && h.version !== now;   // an older version: see it, or go back to it (#299)
     return `<li class="hist"><span class="v">v${h.version}</span>${esc(what)}
+      ${older ? `<span class="hist-acts"><button class="ghost small" data-preview-v="${h.version}">Preview</button>
+        <button class="ghost small" data-goback-v="${h.version}">Go back to this</button></span>` : ''}
       ${h.feedback && h.action !== 'author' ? `<div>“${esc(h.feedback)}”</div>` : ''}
       ${h.verdict ? `<span class="badge ${verdictTone(h.verdict)}">${esc(h.verdict.kind === 'holds' ? 'passed' : h.verdict.kind === 'fails' ? 'failing' : h.verdict.word)}</span>` : ''}</li>`;
   }
@@ -2257,7 +2260,7 @@ function partView(p) {
       [...p.rules, ...designRules].map(ruleItem).join('') + '</ul>'
     : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
     <h4>History</h4>
-    <ul class="list">${p.history.slice().reverse().map(historyItem).join('')}</ul>
+    <ul class="list">${p.history.slice().reverse().map((h) => historyItem(h, p.version)).join('')}</ul>
     <details id="adv"><summary>Advanced — script &amp; spec <span class="muted">${esc(p.id)}</span> ${origin}</summary><div id="advBody" class="small muted">loading…</div></details>`;
   const work = `${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
     <div id="loadBox">${loadView(p)}</div>` : ''}
@@ -3974,6 +3977,47 @@ function stationAction(pid, run, index, st) {
   return `<button class="primary" id="adoptBtn" ${(lightened || carved) && !holdsHere(st) ? `disabled title="${esc(st.verdict ? `It can't be used: ${st.verdict.word}` : '')}"` : ''}>${lightened ? 'Cut these holes in '
     : carved ? 'Carve it like this: ' : run.kind === 'frame' ? 'Use these sizes for ' : run.kind === 'parametric' ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`;
 }
+// a version of a part, shown in the view where the part is: "v3 (preview)", what was asked of it, and Go back to this (#299)
+async function showVersion(pid, v) {
+  const h = (partOf(pid).history || []).find((x) => x.kind === 'revision' && x.version === v) || {};
+  try {
+    const r = await fetch(`/api/designs/${S.slug}/parts/${pid}/versions/${v}.stl`);
+    if (!r.ok) throw new Error(`v${v}: HTTP ${r.status}`);
+    const geom = loader.parse(await r.arrayBuffer());
+    geom.computeVertexNormals();
+    clearStation(true);
+    stationMesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0xffb454, roughness: 0.55, metalness: 0.05 }));
+    scene.add(stationMesh);
+    S.station = { part: pid, version: v };
+    let vol = 0;                                   // its volume, from the shape shown
+    const a = geom.attributes.position;
+    for (let i = 0; i < a.count; i += 3) {
+      const [x1, y1, z1, x2, y2, z2, x3, y3, z3] = [0, 1, 2].flatMap((k) => [a.getX(i + k), a.getY(i + k), a.getZ(i + k)]);
+      vol += (x1 * (y2 * z3 - y3 * z2) - x2 * (y1 * z3 - y3 * z1) + x3 * (y1 * z2 - y2 * z1)) / 6;
+    }
+    const bar = $('stationBar');
+    bar.hidden = false;
+    bar.innerHTML = `<span><b>v${v} (preview)</b>${h.feedback ? ` · “${esc(h.feedback)}”` : h.action ? ` · ${esc(h.action)}` : ''}
+      · ${fixed(Math.abs(vol) / 1000, 0)} cm³</span>
+      <button class="primary" data-goback-v="${v}">Go back to this</button> <button id="stationClose" class="ghost">×</button>`;
+    $('stationClose').onclick = () => { clearStation(); renderInspector(); };
+    paint();
+  } catch (e) { showErr(plainly(e.message)); }
+}
+async function goBackTo(pid, v) {
+  try {
+    const got = await api('POST', `/api/designs/${S.slug}/parts/${pid}/restore`, { version: v });
+    clearStation();
+    S.design = got.design;
+    render();
+    await syncParts(S.design, false);
+  } catch (e) { showErr(plainly(e.message)); }
+}
+document.addEventListener('click', (e) => {     // the history's buttons, and the preview bar's
+  const pv = e.target.closest('[data-preview-v]'), gb = e.target.closest('[data-goback-v]');
+  if (pv && S.scope) showVersion(S.scope, Number(pv.dataset.previewV));
+  else if (gb && (S.scope || (S.station && S.station.part))) goBackTo(S.scope || S.station.part, Number(gb.dataset.gobackV));
+});
 function clearStation(keepBar) {
   if (stationMesh) { scene.remove(stationMesh); stationMesh.geometry.dispose(); stationMesh = null; }
   S.station = null;
