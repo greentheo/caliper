@@ -30,6 +30,7 @@ from typing import Callable, Optional
 import numpy as np
 
 from . import load_study as L
+from .load_study import sheet_of, sheet_param, sheet_said  # noqa: F401 — what a Lighten is of (#295)
 from . import verdicts as V
 from .consistency import _frame
 from .design import DesignStore
@@ -328,7 +329,7 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
     pictured = [pc for pc in sheets if pc.get("pictures") and pc not in holed]
     if not (holed or pictured) or not r.supported:
         return case
-    ls, s, mat = ctx["ls"], ctx["spacing"], ctx["mat"]
+    ls, s, mat = ctx["ls"], ctx["spacing"], sheet_of(ctx)      # the panel's plywood, never trim's PLA (#295)
     cache = ctx.setdefault("_filled", {})                  # the filled solve, once per load
     if i not in cache:
         filled = ls.solid.copy()
@@ -619,7 +620,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     if fails:
         raise ValueError(f"Can't lighten it: {fails}, then lighten it.")
     ctx = L.prepare(store, part_id, emit)
-    s, mat = ctx["spacing"], ctx["mat"]
+    s, mat = ctx["spacing"], sheet_of(ctx)       # its holes' weight and allowables: the sheets', never trim's (#295)
     base, ctx = sheets_only(ctx)                 # a sheet part's printed trim left out of its FEA (#272 re-check)
     seen = L.resolution(ctx)                     # can its voxels see the walls? (CALI-106, #101)
     plist, tops = panels(ctx), panels(ctx, stood_on=True)
@@ -750,7 +751,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
         "part_lb": part_lb,
         "id": rid, "part": part_id, "kind": "lighten", "created": time.time(), **seen, "cut": True,   # (CALI-152)
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
-        "min_safety": min_safety, "material": mat["name"], "spacing_mm": round(s, 2),
+        "min_safety": min_safety, "material": mat["name"], "sheet": sheet_said(store, part_id, ctx), "spacing_mm": round(s, 2),
         "panels": [{"name": p["name"], "thickness_mm": p["t"], "normal": [round(float(c), 6) for c in p["n"]],
                     "stood_on": p in tops} for p in plist + tops],
         "rules": {"rim_mm": RIM_MM, "min_hole_mm": MIN_HOLE_MM, "min_web_mm": MIN_WEB_MM, "round_mm": ROUND_MM,
@@ -837,20 +838,52 @@ def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
 def _plate_at(ctx, case_name: str, t: float) -> Optional[float]:
     """The plate check's safety (grain the wrong way) for a load at another sheet thickness, if it has one."""
     i = next((k for k, ld in enumerate(ctx["loads"]) if ld["name"] == case_name), None)
-    pl = L.plate_check(ctx["pieces"], ctx["loads"][i], ctx["mat"], ctx["tol"]) if i is not None else None
+    pl = L.plate_check(ctx["pieces"], ctx["loads"][i], sheet_of(ctx), ctx["tol"]) if i is not None else None
     if not pl or not pl.get("done"):
         return None
     return min(pl["by_thickness"], key=lambda b: abs(b["thickness_mm"] - t))["safety_across"]
+
+
+def wrong_material(store: DesignStore, part_id: str, run: dict) -> Optional[str]:
+    """Why a Lighten run isn't trusted, judged by the run itself (#303 review): a Lighten is of sheets, so one whose
+    material is a print ran as a sheet part's printed trim (before #295: its weights and allowables the print's). Its
+    steps aren't the part's, whatever the part is now: never adopted, never an offer. The sheet's name from the run's own
+    ``sheet``, else from what its panels are; "its sheets" where neither says."""
+    mat = str(run.get("material") or "")
+    if run.get("kind", "lighten") != "lighten" or "(printed)" not in mat:
+        return None
+    sheet = (run.get("sheet") or {}).get("name") or _panels_sheet(store, part_id, run) or "sheets"
+    return f"Not trusted: it ran as {mat}, not as its {sheet}. Lighten it again."
+
+
+def _panels_sheet(store: DesignStore, part_id: str, run: dict) -> Optional[str]:
+    """The sheet material of the pieces a run's panels name, where the part still has them as sheets."""
+    from . import construction as C
+    from . import materials as M
+
+    names = {p.get("name") for p in run.get("panels") or [] if isinstance(p, dict)}
+    try:
+        items = C.declared(store, part_id).get("construction") or []
+        return next((M.sheet(it["material"])["name"] for it in items
+                     if isinstance(it, dict) and it.get("kind") == "sheet" and it.get("name") in names), None)
+    except Exception:  # noqa: BLE001 — a part it can't read now: the run's own words only
+        return None
 
 
 def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
     root = runs_dir(store)
     if not os.path.isdir(root):
         return []
-    out = []
+    out, why = [], {}
     for rid in sorted(os.listdir(root), reverse=True):
         rec = load_run(store, rid)
         if rec and (part_id is None or rec.get("part") == part_id):
+            if "(printed)" in str(rec.get("material") or ""):         # a run of before #295, as the print (#303 review)
+                key = (rec.get("part"), rec.get("material"))
+                if key not in why:
+                    why[key] = wrong_material(store, rec.get("part"), rec)
+                if why[key]:
+                    rec["not_trusted"] = why[key]
             out.append(rec)
     return newest_first(out)          # made last first, not by id (CALI-97)
 
@@ -905,6 +938,9 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     rec = load_run(store, rid)
     if rec is None:
         raise FileNotFoundError(f"no lightening study {rid!r}")
+    wrong = wrong_material(store, rec.get("part"), rec)
+    if wrong:
+        raise ValueError(wrong)                  # its steps were weighed and judged as the print (#303 review)
     st = next((x for x in rec["stations"] if x["index"] == int(index)), None)
     if st is None:
         raise FileNotFoundError(f"study {rid} has no station {index}")

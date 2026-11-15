@@ -1869,6 +1869,26 @@ function drawParams(p) {
 function paramsSaid(rows) {
   return rows.map((r) => { const u = paramUnit(r.e); return `${paramName(r.e)} ${r.text.trim()}${u && !/[a-z"″]$/i.test(r.text.trim()) ? ` ${u}` : ''}`; }).join(', ');
 }
+// a thinner sheet's Use (#295): the sheets' thickness number set, as the Parameters panel sets it, with no designer and
+// no material in words; where there's no such number, the sheet named, never what's printed on it
+function sheetUse(run, label, mm, now, piece) {   // a plate row is one piece's: its own number, never another sheet's (#303)
+  const sheet = run.sheet || {};
+  const param = piece ? (sheet.pieces || {})[piece] : sheet.param;
+  if (param) return `<button class="ghost" data-use-param="${esc(param)}" data-use-mm="${mm}">Use</button>`;
+  const name = sheet.name || (typeof run.material === 'string' ? run.material : (run.plate_material || {}).name) || 'plywood';
+  const plain = /printed|\bpla\b|petg/i.test(name) ? 'plywood' : name;          // an older run's headline: never the print
+  const said = piece ? `Make the ${piece} ${label} ${plain}, not ${now || sheet.now || 'what it is'}`
+    : `Make the ${sheet.now || now || 'sheet'} ${plain} ${label}`;
+  return `<button class="ghost" data-use-t="${esc(said)}">Use</button>`;
+}
+async function useParam(p, name, mm) {
+  try {
+    const got = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/params`, { name, value: mm, unit: 'mm' });
+    S.design = got.design;
+    render();
+    await syncParts(S.design, false);
+  } catch (e) { showErr(plainly(e.message)); }
+}
 async function rebuildParams(p) {
   const st = S.params, rows = paramRows(st).filter((r) => r.changed);
   if (!rows.length || st.saving || rows.some((r) => r.problem)) return;
@@ -3341,7 +3361,7 @@ function lightenView(p) {
       ${lightenBlocked(p) ? `<span class="muted small">${esc(lightenBlocked(p))}</span>` : ''}</div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
-      ? (p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
+      ? (run.not_trusted ? esc(run.not_trusted) : p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
         : `${run.version != null && run.version !== p.version ? `v${run.version}'s lightest step that holds` : lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer && (run.version == null || run.version === p.version) ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
       : lightenNone(run)}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
       ${lightenChanged(run, p) ? `<div class="small" style="color:var(--amber);margin-top:4px">${lightenChanged(run, p)}</div>` : ''}</div>
@@ -3349,7 +3369,7 @@ function lightenView(p) {
       ${run.stations.map((x) => `<tr class="${x.estimate ? '' : 'pick'} ${x.index === on ? 'on' : ''}" ${x.estimate ? '' : `data-lst="${x.index}"`}>
         <td>${x.index}</td><td style="text-align:left">${what(x)}</td><td>${lbs(x.saved_lb)}</td>
         <td style="color:var(--${verdictTone(x.verdict)})">${sx(x.safety, run.min_safety)}</td>
-        <td>${x.verdict && x.verdict.kind === 'estimate' ? `<button class="ghost" data-use-t="Make it from ${esc(x.label)} ${esc((run.material || 'plywood').toLowerCase())}">Use</button>` : ''}</td></tr>`).join('')}</table></div>
+        <td>${x.verdict && x.verdict.kind === 'estimate' ? sheetUse(run, x.label, x.thickness_mm) : ''}</td></tr>`).join('')}</table></div>
     <div class="muted small" style="margin-top:4px">Click a step to see it; <b>Cut these holes</b> makes it the part. An estimate's
       <b>Use</b> asks for that sheet, and the strength check runs on the real thing.</div>
     ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}` : ''}`;
@@ -3432,7 +3452,7 @@ function loadCase(p, run, c, i) {
     const thin = ok.length ? ok[0] : null;
     return `<details class="small" style="margin-top:4px"><summary>Other thicknesses (plate check)${thin
       ? ` — the thinnest the plate check passes: <b>${esc(thin.label)}</b>` : ''}</summary>
-      <table class="st"><tr><th style="text-align:left">${esc(run.material.name)}</th><th>grain wrong way</th><th>grain right</th><th>sags</th><th></th></tr>
+      <table class="st"><tr><th style="text-align:left">${esc((run.plate_material || run.material).name)}</th><th>grain wrong way</th><th>grain right</th><th>sags</th><th></th></tr>
       ${pl.by_thickness.map((b) => { const now = Math.abs(b.thickness_mm - pl.thickness_mm) < 0.01;
         const nowLabel = (pl.by_thickness.find((x) => Math.abs(x.thickness_mm - pl.thickness_mm) < 0.01) || {}).label;
         return `<tr${now ? ' class="on"' : ''}>
@@ -3440,7 +3460,7 @@ function loadCase(p, run, c, i) {
         <td style="color:var(--${verdictTone(b.verdict)})">${sx(b.safety_across, run.min_safety)}</td>
         <td>${sx(b.safety, run.min_safety)}</td><td>${len(b.deflection_mm, 3)}</td>
         <td>${now ? '<span class="muted">now</span>' : holdsHere(b)
-          ? `<button class="ghost" data-use-t="Make it from ${esc(b.label)} ${esc(run.material.name)} instead of ${esc(nowLabel || 'what it is now')}">Use</button>` : ''}</td></tr>`; }).join('')}</table></details>`;
+          ? sheetUse(run, b.label, b.thickness_mm, nowLabel, pl.piece) : ''}</td></tr>`; }).join('')}</table></details>`;
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
@@ -3503,7 +3523,7 @@ function loadResults(p, run, runs) {
       ${p.untrusted ? untrustedBadge(p) : runBadge(run)}
       ${stale ? '<span class="badge bad">the part has changed since</span>' : ''}</div>
     ${run.cases.map((c, i) => loadCase(p, run, c, i)).join('')}
-    <div class="muted small" style="margin-top:6px">In ${esc(run.material.name)}, voxels of ${len(run.spacing_mm, 1)}
+    <div class="muted small" style="margin-top:6px">In ${esc(run.headline || run.material.name)}, voxels of ${len(run.spacing_mm, 1)}
       (${run.voxels.toLocaleString()} of them), held at ${run.held.map((h) => esc(h.name)).join(', ')} · ${run.seconds}s</div>
     ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`;
 }
@@ -3522,6 +3542,9 @@ function wireLoad(p) {
   wireCarve(p);
   document.querySelectorAll('#loadBox tr[data-lst]').forEach((tr) => {
     tr.onclick = () => showStation(p.id, lightenRuns(p.id)[0], +tr.dataset.lst);
+  });
+  document.querySelectorAll('#loadBox [data-use-param]').forEach((b) => {   // a thinner sheet: its number set (#295)
+    b.onclick = () => useParam(p, b.dataset.useParam, Number(b.dataset.useMm));
   });
   document.querySelectorAll('#loadBox [data-use-t]').forEach((b) => {
     b.onclick = () => send(b.dataset.useT, p.id);

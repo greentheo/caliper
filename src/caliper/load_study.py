@@ -1149,7 +1149,8 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     tol = tolerance(mesh)
     from .studies import made_of
 
-    trim = bool(printed and wood and rest is not None and made_of(store, part_id)["study"] == "lighten")
+    study = made_of(store, part_id)["study"]
+    trim = bool(printed and wood and rest is not None and study == "lighten")
     thins, walls, where, found = _thin(declared, mesh, pieces, rest if trim else None)   # (#272 re-check)
     volume, longest = float(abs(mesh.volume)), float(max(mesh.extents))
     least = finest(volume, longest, FINER_BUDGET)       # as fine as any run of it may go (CALI-97)
@@ -1200,6 +1201,7 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
            "thinnest": min(thins) if thins else None, "finest": least, "thinnest_where": where, "found": found,
            "thin_said": thin_words(store, part_id, min(thins), where, least, bool(printed)) if thins else None,
            "attach": attach, "plate_mat": sheet_mat or mat, "grow": grow, "rest": rest if trim else None,
+           "headline": headline(sheet_mat, printed, "printed" if study == "carve" else "sheet"),     # (#295)
            # a sheet part's printed pieces: trim left out with a note, one of no declared size not checked (#272)
            "trim": [p["name"] for p in printed_pieces(declared) if p["trim"]] if trim else [],
            "unsized": [p["name"] for p in printed_pieces(declared) if not p["trim"] and not p["section"]] if trim else []}
@@ -1207,6 +1209,92 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     if printed and wood:
         _two_materials(ctx, wood, sheet_mat, rest)
     return ctx
+
+
+def headline(sheet: Optional[dict], printed: Optional[dict], mostly: str = "sheet") -> str:
+    """What a part is made of, as its check says it (#295): a mixed part names both, the way made_of reads it ("softwood
+    plywood, with PLA trim"; "PETG (printed), with softwood plywood pieces"), never the trim alone."""
+    if sheet and printed:
+        if mostly == "printed":
+            return f"{printed['name']}, with {sheet['name']} pieces"
+        return f"{sheet['name']}, with {printed['name'].replace(' (printed)', '')} trim"
+    return (sheet or printed or {}).get("name", "")
+
+
+def sheet_of(ctx: dict) -> dict:
+    """What a sheet study (a Lighten, the plate check's thicknesses) is of: the sheets' material, never a sheet part's
+    printed trim (#295: PLA's density and strength for plywood holes). A part with no sheets: its own material."""
+    return ctx.get("plate_mat") or ctx["mat"]
+
+
+def sheet_param(store: DesignStore, part_id: str, thickness_mm: float) -> Optional[str]:
+    """The one ``PARAMS`` number that sets every sheet of this thickness (#295, #303 review): read by the script, and the
+    pieces that follow it when it changes are exactly those sheets. None where there's none, or it can't be told."""
+    said = _thickness_names(store, part_id, None)
+    names = {n for pc, n in said.items() if abs(_thick(store, part_id).get(pc, -1) - thickness_mm) < 0.01}
+    pieces = [pc for pc, t in _thick(store, part_id).items() if abs(t - thickness_mm) < 0.01]
+    return names.pop() if len(names) == 1 and pieces and all(pc in said for pc in pieces) else None
+
+
+def _thick(store: DesignStore, part_id: str) -> dict:
+    from . import construction as C
+
+    try:
+        items = C.declared(store, part_id).get("construction") or []
+    except Exception:  # noqa: BLE001 — not read
+        return {}
+    return {str(it["name"]): float(it["thickness"]) for it in items
+            if isinstance(it, dict) and it.get("kind") == "sheet" and isinstance(it.get("thickness"), (int, float))}
+
+
+def _thickness_names(store: DesignStore, part_id: str, pieces: Optional[dict]) -> dict:
+    """``{sheet piece: PARAMS name}``: which number each sheet's thickness comes from, told for certain (#303 review): each
+    read number equal to a thickness is moved by 1 mm in a copy of the script, and it names the pieces that follow it, and
+    only those. A coincidence (a lip that happens to be 12.7) moves no piece; two numbers moving one piece name neither."""
+    from . import aero, params
+    from . import construction as C
+
+    try:
+        rows = params.listing(store, part_id)
+        script = store.read_script(part_id)
+    except ValueError:
+        return {}
+    thick = pieces if pieces is not None else _thick(store, part_id)
+    out, twice = {}, set()
+    for e in rows:
+        v = e["value"]
+        if not e["read"] or isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        same = {pc for pc, t in thick.items() if abs(t - float(v)) < 0.01}
+        if not same:
+            continue
+        try:
+            moved = C.declared_by(aero.write_params(script, {e["name"]: float(v) + 1.0}, keep_float=True))
+        except Exception:  # noqa: BLE001 — a number it can't move: not told
+            continue
+        now = {str(it.get("name")): it.get("thickness") for it in moved.get("construction") or []
+               if isinstance(it, dict) and it.get("kind") == "sheet"}
+        follow = {pc for pc in same if isinstance(now.get(pc), (int, float)) and abs(float(now[pc]) - float(v) - 1.0) < 0.01}
+        for pc in follow:
+            (twice.add(pc) if pc in out else out.__setitem__(pc, e["name"]))
+    return {pc: n for pc, n in out.items() if pc not in twice}
+
+
+def sheet_said(store: DesignStore, part_id: str, ctx: dict) -> Optional[dict]:
+    """``{"name", "param", "now", "pieces"}``: the sheets' material, the one number that sets every sheet's thickness
+    (a Lighten's estimate scales them all: only where they're all one thickness from one name), that thickness as sold,
+    and each sheet's own number (a plate check's row is one piece's) (#295, #303 review). None for a part with no sheets."""
+    from . import materials as M
+
+    sheets = [pc for pc in ctx["pieces"] if pc["kind"] == "sheet"]
+    if not sheets:
+        return None
+    thick = {str(pc["name"]): float(pc["thickness"]) for pc in sheets}
+    names = _thickness_names(store, part_id, thick)
+    one = set(names.values())
+    t = max(thick.values())
+    param = one.pop() if len(set(thick.values())) == 1 and len(one) == 1 and set(names) == set(thick) else None
+    return {"name": sheet_of(ctx)["name"], "param": param, "now": M.nominal(t), "pieces": names}
 
 
 def per_voxel(ls) -> bool:
@@ -1433,6 +1521,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "id": rid, "part": part_id, "kind": "load", "created": time.time(),
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
         "material": mat, "spacing_mm": round(ctx["spacing"], 2), "voxels": int(ctx["ls"].solid.sum()),
+        # what it's made of in words, and the plate check's sheet: never a sheet part's trim (#295)
+        "headline": ctx.get("headline") or mat["name"], "plate_material": sheet_of(ctx),
+        "sheet": sheet_said(store, part_id, ctx),
         "min_safety": min_safety, "held": held, "cases": cases, "notes": notes,
         "cut": True,                  # its numbers are kept cut toward safe (CALI-152): one on its limit is settled
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer

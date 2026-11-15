@@ -169,7 +169,8 @@ def predict(store: DesignStore, part_id: str) -> Optional[dict]:
     if sag is None and plate.get("done") and plate.get("as") != "beam":
         # a plate held all round writes its sag at the material's E, along the face grain, while its strength is
         # taken across it: its sag across the grain, the weaker way, as its strength is (#209 review)
-        mat = _plate_material(store, part_id, plate.get("piece")) or run.get("material") or {}
+        mat = (_plate_material(store, part_id, plate.get("piece")) or run.get("plate_material")    # the sheet's (#295)
+               or run.get("material") or {})
         ratio = (mat["E_across"] / mat["E"]) if mat.get("E_across") and mat.get("E") else mat.get("across", 1.0)
         sag = plate.get("deflection_across_mm") or plate["deflection_mm"] / min(max(float(ratio), 1e-6), 1.0)
         weaker = ratio < 1.0
