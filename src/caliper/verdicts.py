@@ -104,7 +104,10 @@ def brace_why(brace: Optional[dict]) -> str:
     b = brace or {}
     if b.get("trim") and not (b.get("wood") or b.get("piece")):
         return TRIM_WHY
-    return f"{JOINTS_WHY}: {'; '.join(b['names'])}" if b.get("names") else JOINTS_WHY   # those the hand check couldn't (#301)
+    if b.get("names"):                          # those the hand check couldn't (#301): how many here, named where it's said
+        n = len(b["names"])
+        return f"{n} joint{'s' if n != 1 else ''} not checked by hand"
+    return JOINTS_WHY
 
 
 def wood_brace(run: Optional[dict]) -> Optional[dict]:

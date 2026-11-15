@@ -285,8 +285,8 @@ def test_when_every_joint_is_checked_the_note_goes_and_one_it_can_t_keeps_it_nam
     _, said = studied(dado)
     assert said["joints_unchecked"] == ["the joint between the front and the left (a dado)"]
     assert not [r for r in said["cases"][0]["joints"]["rows"] if sorted(r["pieces"]) == ["front", "left"]]   # no number for it
-    why = verdicts.brace_why(verdicts.wood_brace(said))
-    assert why == "joints not checked: the joint between the front and the left (a dado)", why
+    assert verdicts.brace_why(verdicts.wood_brace(said)) == "1 joint not checked by hand"   # the badge: short
+    assert verdicts.wood_brace(said)["names"] == ["the joint between the front and the left (a dado)"]   # the line names it
 
 
 def test_a_path_it_can_t_follow_keeps_the_note_and_never_a_tick_or_a_cross_from_it(studied, monkeypatch):
