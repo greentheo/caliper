@@ -379,6 +379,7 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
 
 /* --- a part's menu (CALI-183): right-click, long-press, Shift+F10 --------------------------------------------- */
 .pmenu { position: fixed; z-index: 60; min-width: 210px; max-width: min(330px, calc(100vw - 16px)); padding: 4px;
+  max-height: calc(100vh - 16px); overflow-y: auto;   /* a long Versions ▸ scrolls (#305 review) */
   background: rgba(23,28,34,.98); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
 .pmenu-title { font-size: 12px; color: var(--muted); padding: 4px 10px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pmenu [data-menu] { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 6px;

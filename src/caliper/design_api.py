@@ -63,6 +63,10 @@ class TreeLayout(BaseModel):
     parent: dict[str, str] = {}           # part -> the part it sits under, in the tree only (#94)
 
 
+class RestoreVersion(BaseModel):
+    version: int                          # Go back to this: that version, as a new one (#299)
+
+
 class RemovePart(BaseModel):
     also: list[str] = []                  # the parts that mirror it, deleted with it (CALI-183)
 
@@ -772,6 +776,34 @@ def router():
             raise HTTPException(status_code=500, detail=f"{pid} won't build: {e}")
         return Response(data, media_type="model/stl",
                         headers={"Content-Disposition": f'attachment; filename="{slug}_{pid}.stl"'})
+
+    @r.get("/api/designs/{slug}/parts/{pid}/versions/{version}.stl")
+    def part_version_stl(slug: str, pid: str, version: int):
+        """One version's shape, for its preview in the view (#299)."""
+        store = load(slug)
+        if store.design.part(pid) is None or version not in store.versions(pid):
+            raise HTTPException(404, f"no v{version} of {pid!r}")
+        try:
+            data = store.version_stl(pid, version)
+        except FileNotFoundError as e:
+            raise HTTPException(404, str(e))
+        except Exception as e:  # noqa: BLE001 — name the real failure (CALI-27)
+            raise HTTPException(500, f"v{version} of {pid} won't build: {e}")
+        return Response(data, media_type="model/stl")
+
+    @r.post("/api/designs/{slug}/parts/{pid}/restore")
+    def restore_version(slug: str, pid: str, req: RestoreVersion):
+        """Go back to this (#299): that version as a new one, re-measured, as "roll it back to vN" in the chat does."""
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None or req.version not in store.versions(pid):
+                raise HTTPException(404, f"no v{req.version} of {pid!r}")
+            store.append_log({"kind": "message", "text": f"Go back to v{req.version} of {pid} (from its history)",
+                              "action": "revert", "part": pid, "routed_by": "history"})
+            got = chat.revert_part(store, pid, to=req.version)
+            store.append_log({"kind": "reply", "action": "revert", "part": pid, "version": got.version, "ok": got.ok,
+                              "reply": got.reply})
+            return {"reply": got.reply, "ok": got.ok, "version": got.version, "design": design_state(store)}
 
     @r.patch("/api/designs/{slug}/parts/{pid}")
     def part_settings(slug: str, pid: str, req: PartSettings):

@@ -1732,8 +1732,100 @@ def picture_part(store: DesignStore, part_id: str, subject: str, where: str = ""
                       version=got.get("version"), events=events, reply=got["reply"])
 
 
-def revert_part(store: DesignStore, part_id: str, *, events=None, on_event=None) -> TurnResult:
-    """Roll a part back one revision and re-measure — so the rollback the reply offers is real.
+#: "roll it back to v3", "go back to version 3", "restore v3", "back to 3", "go back to v3 of the fillets" (#299): read by
+#: its words, no model, only as the whole message (#305 review: "don't go back to v3, make it taller" mustn't restore v3).
+_REVERT_TO = re.compile(r"(?:please\s+)?(?:(?:roll|take|put|bring)\s+(?P<a>.+?)\s+back|roll\s+back|revert|go\s+back|"
+                        r"back|restore)(?:\s+(?P<b>.+?))??\s+(?:to\s+)?(?:(?P<v>v\s*|version\s*)(?P<n>\d+)|(?P<bare>\d+))"
+                        r"(?:\s+(?:of|for)\s+(?P<c>.+?))?(?:\s+please)?", re.I)
+#: Words for the part a roll-back is of that name none: it, this, the selected one.
+_SAME_PART = {"it", "this", "that", "this part", "that part", "the part", "back", "to"}
+#: A plain "roll it back", the whole message: the last change undone, no model (#299).
+_REVERT_PLAIN = re.compile(r"^\s*(?:please\s+)?(?:roll\s+(?:it|this|that|\w+)\s+back|undo(?:\s+(?:it|that))?|"
+                           r"revert(?:\s+it)?)(?:\s+please)?\s*[.!]*\s*$", re.I)
+
+
+def _rolled_back(store: DesignStore, words: str, scope: Optional[str], events, on_event) -> Optional["TurnResult"]:
+    """A roll-back the person said, read by its words (#299), only as the whole message (#305 review): "roll it back to
+    v3" restores v3, a plain "roll it back" steps back. Of the part the words name, else the selected part, else the one
+    last changed. A bare number ("back to 3") only where that version is there. None: not one; it goes the ordinary way."""
+    w = (words or "").strip().rstrip(".!").strip()
+    if not w:
+        return None
+    m = _REVERT_TO.fullmatch(w)                      # whole: a question ("… to v3?") isn't one either
+    if m is None and not _REVERT_PLAIN.match(w):
+        return None
+    ids = [p.id for p in store.design.parts]
+    labels = {p.id: p.label for p in store.design.parts if p.label}
+    said = [x.strip() for x in ((m.group("a"), m.group("b"), m.group("c")) if m else ())
+            if x and x.strip().lower() not in _SAME_PART]
+    if said:                                         # a part named in the words beats the selected one
+        named = [named_part(x, ids, labels) for x in said]
+        if not all(named) or len(set(named)) != 1:
+            return None                              # words that aren't a part's name: not a roll-back of one
+        pid = named[0]
+    else:
+        pid = scope or last_touched(store) or (ids[0] if len(ids) == 1 else None)
+    if not pid or store.design.part(pid) is None:
+        return None
+    to = None
+    if m:
+        to = int(m.group("n") or m.group("bare"))
+        if m.group("bare") and to not in store.versions(pid):
+            return None                              # "back to 3" with no v3: not read as a version
+    return revert_part(store, pid, to=to, events=events, on_event=on_event)
+
+
+def _restores(store: DesignStore, part_id: str, versions: list) -> dict:
+    """``{version: the version it restored}``: from the history, and where a version's line is missing, a version whose
+    script is an earlier one's (#305 review: with v6's line gone, the walk landed on v5, the printed stool). A refine that
+    wrote the same script again is a refine: its line says so."""
+    lines = [h for h in store.history(part_id) if h.get("kind") == "revision" and h.get("version")]
+    back = {h["version"]: h["restored_from"] for h in lines if h.get("restored_from")}
+    said = {h["version"] for h in lines}            # a version its history speaks for is what its line says it is
+
+    def script(v):
+        try:
+            with open(os.path.join(store.version_dir(part_id, v), "part.py")) as f:
+                return f.read()
+        except OSError:
+            return None
+    texts = {v: script(v) for v in versions}
+    for v in versions:
+        if v not in back and v not in said and texts[v] is not None:      # only where its line is missing
+            same = [u for u in versions if u < v and texts[u] == texts[v]]
+            if same:
+                back[v] = same[-1]
+    return back
+
+
+def _restored_root(store: DesignStore, part_id: str, versions: list) -> int:
+    """The version the last one is, through every restore: what a plain roll-back steps back from."""
+    back, v, seen = _restores(store, part_id, versions), versions[-1], set()
+    while v in back and v not in seen:
+        seen.add(v)
+        v = back[v]
+    return v
+
+
+def undo_target(store: DesignStore, part_id: str) -> Optional[int]:
+    """The version a plain "roll it back" goes to (#299): the one before the last change, walking back along each
+    restore's ``restored_from``, so a roll-back never redoes what it undid (step_stool v6 = v4: back to v3, never v5).
+    None where there's nothing before it."""
+    versions = store.versions(part_id)
+    if not versions:
+        return None
+    back = _restores(store, part_id, versions)
+    v, seen = versions[-1], set()
+    while v in back and v not in seen:          # a restore is the version it restored: undo that one
+        seen.add(v)
+        v = back[v]
+    before = [x for x in versions if x < v]
+    return before[-1] if before else None
+
+
+def revert_part(store: DesignStore, part_id: str, *, to: Optional[int] = None, events=None, on_event=None) -> TurnResult:
+    """Roll a part back and re-measure — so the rollback the reply offers is real. ``to``: that version (#299); else
+    the last change undone (:func:`undo_target`), never redoing one undone already.
 
     :meth:`DesignStore.restore` writes it as a *new* revision, so undoing is itself part of the
     history rather than a hole in it.
@@ -1749,12 +1841,30 @@ def revert_part(store: DesignStore, part_id: str, *, events=None, on_event=None)
         return TurnResult(action="error", ok=False, part=part_id, events=events,
                           error=f"{part_id} has only one version",
                           reply=f"'{part_id}' has only one version — there's nothing to roll back to.")
+    if to is not None and to not in versions:
+        return TurnResult(action="revert", ok=False, part=part_id, events=events, error=f"no v{to}",
+                          reply=f"There's no v{to} of {part_id}: it has v{versions[0]} to v{versions[-1]}.")
+    target = to if to is not None else undo_target(store, part_id)
+    restored = _restores(store, part_id, versions).get(versions[-1])
+    # where the last version is a restore of r: this steps back from r, and where they were is the one before that restore
+    stepped = None
+    if restored and to is None:                # where they were: the version before this run of restores
+        back = _restores(store, part_id, versions)
+        k = len(versions) - 1
+        while k > 0 and versions[k] in back:
+            k -= 1
+        stepped = (_restored_root(store, part_id, versions), versions[k])
+    if target is None:
+        first = versions[0]
+        return TurnResult(action="revert", ok=False, part=part_id, events=events, error="nothing before it",
+                          reply=f"{part_id} is back at its first version (v{first}): there's nothing before it to roll "
+                                f"back to.")
 
     from . import promote
 
+    _emit(events, on_event, "reverting", f"{part_id} back to v{target}", part=part_id, target=target)   # named first
     promote.clear(store)                      # the change the offer referred to is being undone
     before, _ = _measure_design(store)
-    target = versions[-2]
     version = store.restore(part_id, target)
     _emit(events, on_event, "wrote", f"{part_id} rolled back to v{target} (saved as v{version})",
           part=part_id, version=version, restored_from=target)
@@ -1764,6 +1874,9 @@ def revert_part(store: DesignStore, part_id: str, *, events=None, on_event=None)
     broke, fixed = _delta(before, after)
 
     lines = [f"\u21a9 rolled **{part_id}** back to v{target} (saved as v{version})"]
+    if to is None and stepped:                 # the lineage, not the last action: said, and the way back (#305, foreman)
+        lines[0] = (f"\u21a9 rolled **{part_id}** back to v{target}, the one before v{stepped[0]} (saved as v{version}). "
+                    f"To go back to where you were, say \"go back to v{stepped[1]}\".")
     if fixed:
         lines.append(f"\u2713 That fixed: {', '.join(fixed)}")
     if broke:
@@ -2645,6 +2758,16 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
         store.append_log({"kind": "reply", "action": "mirror", "part": said.part, "version": said.version,
                           "ok": said.ok, "reply": said.reply})
         _emit(events, on_event, "done", "mirror", ok=said.ok, part=said.part)
+        return said
+
+    said = _rolled_back(store, typed, scope, events, on_event)      # "roll it back (to v3)": no model (#299)
+    if said is not None:
+        if not logged:
+            store.append_log({"kind": "message", "text": message, "scope": scope, "action": "revert",
+                              "part": said.part, "routed_by": "revert"})
+        store.append_log({"kind": "reply", "action": "revert", "part": said.part, "version": said.version,
+                          "ok": said.ok, "reply": said.reply})
+        _emit(events, on_event, "done", "revert", ok=said.ok, part=said.part)
         return said
 
     if scope is None and _reviewing(store) and not message.strip().endswith("?"):

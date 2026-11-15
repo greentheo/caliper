@@ -618,6 +618,29 @@ class DesignStore:
                 return _build_py_part(path, part.position, part.rotation)
             return Geometry.from_stl_posed(path, part.position, part.rotation)
 
+    def version_stl(self, part_id: str, version: int) -> bytes:
+        """One version of a part as a binary STL, posed as the part is now: what Go back to this would bring (#299)."""
+        import io
+
+        from .assembly import _build_py_part
+        from .measure import Geometry
+
+        part = next((p for p in self.assembly.parts if p.id == part_id), None)
+        if part is None:
+            raise KeyError(f"unknown part {part_id!r}")
+        vdir = self.version_dir(part_id, version)
+        script, stl = os.path.join(vdir, "part.py"), os.path.join(vdir, "part.stl")
+        with OCCT:
+            if os.path.exists(script):
+                geom = _build_py_part(script, part.position, part.rotation)
+            elif os.path.exists(stl):
+                geom = Geometry.from_stl_posed(stl, part.position, part.rotation)
+            else:
+                raise FileNotFoundError(f"{part_id} has no version v{version}")
+        buf = io.BytesIO()
+        geom.require_mesh().export(buf, file_type="stl")
+        return buf.getvalue()
+
     def part_stl(self, part_id: str) -> bytes:
         """The part as a binary STL, in design (world) coordinates."""
         import io
