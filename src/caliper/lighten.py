@@ -845,25 +845,29 @@ def _plate_at(ctx, case_name: str, t: float) -> Optional[float]:
 
 
 def wrong_material(store: DesignStore, part_id: str, run: dict) -> Optional[str]:
-    """Why a Lighten run isn't trusted, where it ran a sheet part as its printed trim (#303 review): before #295 its
-    material was the print's, so its weights were PLA's and its allowables too. Its steps aren't the part's: never adopted,
-    never an offer. None for a run in the part's sheet, or a printed part's (made_of carves it)."""
-    from . import materials as M
-    from .studies import made_of
-
+    """Why a Lighten run isn't trusted, judged by the run itself (#303 review): a Lighten is of sheets, so one whose
+    material is a print ran as a sheet part's printed trim (before #295: its weights and allowables the print's). Its
+    steps aren't the part's, whatever the part is now: never adopted, never an offer. The sheet's name from the run's own
+    ``sheet``, else from what its panels are; "its sheets" where neither says."""
     mat = str(run.get("material") or "")
     if run.get("kind", "lighten") != "lighten" or "(printed)" not in mat:
         return None
-    try:
-        if made_of(store, part_id)["study"] != "lighten":
-            return None
-        from . import construction as C
-
-        sheet = next((M.sheet(it["material"])["name"] for it in C.declared(store, part_id).get("construction") or []
-                      if isinstance(it, dict) and it.get("kind") == "sheet"), "sheet")
-    except Exception:  # noqa: BLE001 — a part it can't read now: not judged here
-        return None
+    sheet = (run.get("sheet") or {}).get("name") or _panels_sheet(store, part_id, run) or "sheets"
     return f"Not trusted: it ran as {mat}, not as its {sheet}. Lighten it again."
+
+
+def _panels_sheet(store: DesignStore, part_id: str, run: dict) -> Optional[str]:
+    """The sheet material of the pieces a run's panels name, where the part still has them as sheets."""
+    from . import construction as C
+    from . import materials as M
+
+    names = {p.get("name") for p in run.get("panels") or [] if isinstance(p, dict)}
+    try:
+        items = C.declared(store, part_id).get("construction") or []
+        return next((M.sheet(it["material"])["name"] for it in items
+                     if isinstance(it, dict) and it.get("kind") == "sheet" and it.get("name") in names), None)
+    except Exception:  # noqa: BLE001 — a part it can't read now: the run's own words only
+        return None
 
 
 def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:

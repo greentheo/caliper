@@ -333,7 +333,9 @@ console.log(JSON.stringify({ top: sheetUse(run, '3/8 in', 9.525, '1/2 in', 'top'
 
 #: Theo's Lighten of step-stool-5 v4 before the fix (20261113-172306): its material the trim's print, its weights at PLA's.
 PRE_FIX = {"id": "20261113-172306-9204", "part": "p", "kind": "lighten", "version": 1, "material": "PLA (printed)",
-           "min_safety": 1.3, "spacing_mm": 4.76, "panels": [], "notes": [], "created": 1794618883.27,
+           "min_safety": 1.3, "spacing_mm": 4.76, "notes": [], "created": 1794618883.27,
+           "panels": [{"name": "left", "thickness_mm": 19.05, "stood_on": False},
+                      {"name": "top", "thickness_mm": 19.05, "stood_on": True}],
            "stations": [{"index": 0, "phase": "walls", "saved_lb": 0.0, "holes": 0, "top_holes": 0, "safety": 2.1,
                          "holds": True, "cases": [], "panels": {}},
                         {"index": 1, "phase": "top", "saved_lb": 11.39, "holes": 17, "top_holes": 12, "safety": 1.4,
@@ -373,9 +375,8 @@ def test_a_plywood_run_or_a_printed_part_s_run_is_trusted(tmp_path):
 
     ply = dict(PRE_FIX, material=PLY["name"], id="20261114-170224-d0b2")
     assert lighten.list_runs(_with_run(tmp_path / "a", WITH_STRIPS, ply))[0].get("not_trusted") is None
-    from .test_lighten_or_carve import PRINTED_BASE
-
-    assert lighten.wrong_material(_store(tmp_path / "b", PRINTED_BASE), "p", PRE_FIX) is None   # made_of carves it
+    carve = dict(PRE_FIX, kind="carve", id="20261114-170224-c4rv")
+    assert lighten.wrong_material(_store(tmp_path / "b", WITH_STRIPS), "p", carve) is None        # a carve's own material
 
 
 def test_the_panel_leads_with_why_a_run_isn_t_trusted():
@@ -410,3 +411,20 @@ const run = { sheet: { name: 'softwood plywood', param: 'side_t', now: '3/4 in',
 console.log(JSON.stringify({ top: sheetUse(run, '3/8 in', 9.525, '1/2 in', 'top') }));
 """)
     assert 'data-use-param="top_t"' in out["top"]
+
+
+
+def test_a_run_as_the_print_stays_untrusted_after_the_part_is_made_all_printed(tmp_path):
+    """#303 re-check: judged by the run, never by what the part is now: made all printed after the run, the run's steps
+    are still a print's weights for sheets that were there."""
+    from caliper import lighten
+
+    from .test_lighten_or_carve import ALL_PRINTED
+
+    s = _with_run(tmp_path, ALL_PRINTED, PRE_FIX)
+    (run,) = lighten.list_runs(s)
+    assert run["not_trusted"] == "Not trusted: it ran as PLA (printed), not as its sheets. Lighten it again."
+    with pytest.raises(ValueError, match="Not trusted"):
+        lighten.adopt(s, PRE_FIX["id"], 1)
+    own = dict(PRE_FIX, sheet={"name": "softwood plywood"}, id="20261113-172306-0wn5")
+    assert lighten.wrong_material(s, "p", own) == NOT_TRUSTED                       # the run's own sheet, where it says
