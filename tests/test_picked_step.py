@@ -210,7 +210,7 @@ def test_the_strength_panel_s_other_thicknesses_ask_for_a_sheet_and_wait_while_a
     picked = _plate_rows({"part": "step_stool", "run": "l1", "index": 16})
     assert re.search(r'data-use-mm="12.7" disabled title="Step 16 is picked', picked), picked
     assert picked.count("data-off-why") == 1
-    load = _plate_rows({"part": "step_stool", "run": "ld1", "index": 0})                # a strength case picked: not a step
+    load = _plate_rows({"part": "step_stool", "run": "ld1", "index": 2})                # a strength case picked: not a step
     assert "disabled" not in load
 
 

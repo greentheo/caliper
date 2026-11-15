@@ -137,7 +137,7 @@ console.log(JSON.stringify({ param: sheetUse(param, '5/8 in', 15.875), words: sh
     for b in out.values():
         assert not re.search(r"pla\b|printed", b, re.I), b
     assert "sheetUse(run, x.label, x.thickness_mm, undefined, undefined," in _fn(src, "lightenView")   # its words (#297)
-    assert "sheetUse(run, b.label, b.thickness_mm, nowLabel, pl.piece)" in src
+    assert "sheetUse(run, b.label, b.thickness_mm, nowLabel, pl.piece," in src            # its piece, then the words (#306 review)
     assert "data-use-t=\"Make it from" not in src
 
 
@@ -328,7 +328,7 @@ console.log(JSON.stringify({ top: sheetUse(run, '3/8 in', 9.525, '1/2 in', 'top'
     assert 'data-use-param="top_t"' in out["top"] and "side_t" not in out["top"]
     assert 'data-use-t="Make the shelf 3/8 in softwood plywood, not 1/2 in"' in out["shelf"]
     assert "data-use-param" not in out["lighten"] and 'data-use-t="Make the 3/4 in softwood plywood 5/8 in"' in out["lighten"]
-    assert "sheetUse(run, b.label, b.thickness_mm, nowLabel, pl.piece)" in src
+    assert "sheetUse(run, b.label, b.thickness_mm, nowLabel, pl.piece," in src            # its piece, then the words (#306 review)
 
 
 #: Theo's Lighten of step-stool-5 v4 before the fix (20261113-172306): its material the trim's print, its weights at PLA's.
