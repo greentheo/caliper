@@ -677,9 +677,11 @@ def make(store: DesignStore, part_id: str, out_dir: Optional[str] = None, stamp:
                        "cuts": [c["kind"] for c in pc.get("cuts") or []],
                        "screws": sum(len(s["at"]) for s in pc.get("screws") or [])})
         files += [thumb, svg]
+    said = {"title": f"{PREVIEW}: {stamp}"} if stamp else {}       # every page says it; the file's title too (#307)
     measure[0].save(os.path.join(root, f"{pre}measure-and-mark.pdf"), save_all=True, append_images=measure[1:],
-                    resolution=DPI)
-    full[0].save(os.path.join(root, f"{pre}print-full-size.pdf"), save_all=True, append_images=full[1:], resolution=DPI)
+                    resolution=DPI, **said)
+    full[0].save(os.path.join(root, f"{pre}print-full-size.pdf"), save_all=True, append_images=full[1:], resolution=DPI,
+                 **said)
     index = f"{pre}index.html"
     files += [f"{pre}measure-and-mark.pdf", f"{pre}print-full-size.pdf", index]
     rec = {"id": rid, "part": part_id, "version": store.design.part(part_id).version, "created": time.time(),

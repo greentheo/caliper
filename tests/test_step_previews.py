@@ -138,6 +138,14 @@ def test_a_kept_preview_is_made_again_when_the_design_under_it_changed(stool, mo
     assert len(made) == 2 and not again.get("cached")
 
 
+def test_a_preview_kept_in_an_older_format_is_made_again(stool, monkeypatch):
+    """A preview kept before its files said PREVIEW inside them (#307 review) is rebuilt, not served."""
+    first = previews.make(stool, "r1", 2, "patterns")
+    monkeypatch.setattr(previews, "FORMAT", previews.FORMAT + 1)
+    again = previews.make(stool, "r1", 2, "patterns")
+    assert not again.get("cached") and again["made_from"] != first["made_from"]
+
+
 def test_a_preview_that_fails_leaves_nothing_behind(stool, tmp_path, monkeypatch):
     def broken(*a, **k):
         os.makedirs(k["out_dir"], exist_ok=True)
@@ -312,3 +320,100 @@ def test_the_preview_buttons_are_wired_to_the_route_and_open_what_it_made():
     assert "`/api/designs/${S.slug}/lighten/${st.run}/stations/${st.index}/preview`" in body
     assert "await follow(job_id" in body and 'target="_blank"' in body and "got.url" in body
     assert "document.querySelectorAll('[data-preview]')" in src
+
+
+# --- #307 review: the stamp inside every file; a cancel keeps nothing; a lock of its own -------------------------------
+def _says_preview(path):
+    with open(path, "rb") as f:
+        b = f.read()
+    return b"PREVIEW" in b or "PREVIEW".encode("utf-16-be") in b                  # a PDF's title is UTF-16
+
+
+def test_every_file_a_preview_makes_says_preview_inside_it(stool):
+    from caliper import cutplan
+
+    whats = ["patterns"] + ([] if cutplan.available() else ["cutplan"])
+    for what in whats:
+        previews.make(stool, "r1", 2, what)
+        out = previews.folder(stool, "r1", 2, what)
+        names = _files(out)
+        silent = [n for n in names if not _says_preview(os.path.join(out, n))]
+        assert names and not silent, (what, silent)                               # renamed isn't enough (#307 review)
+    if "cutplan" not in whats:
+        pytest.skip(cutplan.available())
+    out = previews.folder(stool, "r1", 2, "cutplan")
+    names = _files(out)
+    assert not [n for n in names if n.lower().endswith(".pdf")]                   # its pages can't be stamped: left out
+    assert "PDF is left out of a preview" in open(os.path.join(out, "preview.html")).read()
+    dxf = next(n for n in names if n.endswith(".dxf"))
+    lines = open(os.path.join(out, dxf)).read().split("\n")
+    assert lines[0].strip() == "999" and lines[1].startswith("PREVIEW, not the part yet: step 2 of lightening r1")
+    pairs = list(zip(lines[::2], lines[1::2]))[1:]                                  # after the comment, (code, value)
+    i = next(k for k, (c, v) in enumerate(pairs) if c.strip() == "0" and v.strip() == "TEXT"
+             and "PREVIEW" in dict((c2.strip(), v2) for c2, v2 in pairs[k + 1:k + 8]).get("1", ""))
+    text = dict((c.strip(), v.strip()) for c, v in pairs[i + 1:i + 8])
+    ys = [float(v) for c, v in pairs if c.strip() in ("20", "21")]
+    assert text["8"] == "LABEL" and float(text["20"]) > max(y for y in ys if y != float(text["20"]))   # above every part
+    svg = open(os.path.join(out, next(n for n in names if n.endswith(".svg") and "/sheets/" in n))).read()
+    assert re.search(r"<title>PREVIEW, not the part yet: step 2 of lightening r1\. ", svg), svg[:300]
+    assert re.search(r'<text [^>]*fill="#c00000"[^>]*>PREVIEW, not the part yet: step 2 of lightening r1</text>', svg)
+    for n in names:
+        if n.endswith(".obj"):
+            assert open(os.path.join(out, n)).readline().startswith("# PREVIEW, not the part yet")
+        if n.endswith(".txt"):
+            assert open(os.path.join(out, n)).readline().startswith("PREVIEW, not the part yet")
+
+
+@pytest.mark.parametrize("at", [1, 2, 3])
+def test_a_cancelled_preview_keeps_nothing(stool, tmp_path, at):
+    from caliper.jobs import Cancelled
+
+    calls = []
+
+    def stop():
+        calls.append(1)
+        if len(calls) == at:
+            raise Cancelled()
+
+    with pytest.raises(Cancelled):
+        previews.make(stool, "r1", 2, "patterns", stop=stop)
+    assert not os.path.exists(previews.folder(stool, "r1", 2, "patterns")) and _ours(tmp_path) == []
+    assert not [n for n in os.listdir(os.path.dirname(os.path.dirname(previews.folder(stool, "r1", 2, "patterns"))))
+                if n.startswith(".")] if os.path.exists(os.path.join(stool.root, "previews")) else True
+
+
+def test_a_part_changed_while_it_was_previewed_keeps_nothing(stool, monkeypatch):
+    from caliper.carve import Stale
+
+    real = patterns.make
+
+    def meanwhile(*a, **k):
+        DesignStore.load(stool.root).write_part("stool", BOX_STOOL + "\n# changed\n", intent="a chat turn, meanwhile")
+        return real(*a, **k)
+
+    monkeypatch.setattr(patterns, "make", meanwhile)
+    with pytest.raises(Stale, match="changed while step 2 was previewed"):
+        previews.make(stool, "r1", 2, "patterns")
+    assert not os.path.exists(previews.folder(stool, "r1", 2, "patterns"))
+
+
+def test_the_preview_job_has_its_own_lock_and_its_cancel(api, monkeypatch):
+    from caliper import design_api, jobs
+
+    from .test_carve_click import _wait
+
+    c, slug = api
+    seen = {}
+
+    def fake(store, rid, index, what, *, emit=None, stop=None, timeout=180.0):
+        seen["stop"] = stop
+        return {"index": "preview-index.html", "preview": {"run": rid}}
+
+    monkeypatch.setattr(previews, "make", fake)
+    got = c.post(f"/api/designs/{slug}/lighten/r1/stations/2/preview", json={"what": "patterns"})
+    job = jobs.RUNNER.get(got.json()["job_id"])
+    _wait(job, 30)
+    assert job.lock == f"preview:{slug}" != design_api._lock(slug)                 # a chat turn doesn't queue behind it
+    assert job.meta == {"slug": slug, "part": "stool"}
+    assert seen["stop"] == job.check                                               # Cancel reaches it
+    assert design_api.WHOLE["preview"] and design_api.DOING["preview"] == "previewed"

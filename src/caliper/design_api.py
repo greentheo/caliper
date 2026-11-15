@@ -88,7 +88,7 @@ def _on_part(slug: str, pid: Optional[str], **more) -> dict:
 
 #: What a design-wide job holding the design's lock is, said when a delete or a put back would wait behind it (#302 review).
 WHOLE = {"chat": "a chat turn", "firstrun": "the first build", "cutplan": "a cut plan", "release": "the build package",
-         "picture": "a picture"}
+         "picture": "a picture", "preview": "a step's preview"}
 
 
 def _refuse_while_busy(slug: str, parts: list) -> None:
@@ -1386,11 +1386,14 @@ def router():
             raise HTTPException(status_code=503, detail=cutplan.available())
 
         def work(j):
-            rec = previews.make(DesignStore.load(slug), rid, index, req.what, emit=lambda k, t="", **d: j.emit(k, t, **d))
+            rec = previews.make(DesignStore.load(slug), rid, index, req.what, emit=lambda k, t="", **d: j.emit(k, t, **d),
+                                stop=j.check)
             return {"url": previews.url(slug, rid, index, req.what, rec["index"]), "cached": bool(rec.get("cached")),
                     "preview": rec["preview"]}
 
-        job = RUNNER.submit("preview", work, label=f"preview · step {index} of {pid}", lock=_lock(slug),
+        # a lock of its own (#307 review): it writes only previews/, so a chat turn doesn't queue behind it; deleting
+        # its part waits for it by the meta
+        job = RUNNER.submit("preview", work, label=f"preview · step {index} of {pid}", lock=f"preview:{slug}",
                             meta=_on_part(slug, pid))
         return {"job_id": job.id}
 
