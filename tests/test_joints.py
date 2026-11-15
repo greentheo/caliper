@@ -224,7 +224,9 @@ def test_a_strength_run_records_how_many_joints_it_took_as_solid(tmp_path):
     s = DesignStore.create("a stool", base=str(tmp_path / "designs"))
     s.write_part("stool", LOADED, intent="a stool")
     rec = load_study.study(s, "stool")
-    assert rec["wood_joints"] == 4, rec.get("wood_joints")
+    # checked by hand now (#301): the count is of those it couldn't, each named
+    assert rec["joints_checked"] and rec["wood_joints"] == len(rec["joints_unchecked"]) >= 1, rec.get("joints_unchecked")
+    assert all(n.startswith("the joint between ") for n in rec["joints_unchecked"])
 
 
 # --- what the first tests didn't reach ------------------------------------------------------------------------------------

@@ -234,6 +234,17 @@ def _small_len(mm: float, inches: bool) -> str:
 RACKING = "Racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid."
 
 
+def joints_said(c: dict, need) -> str:
+    """A passing case's joints, checked by hand (#301): the joint that governs it named, or the weakest joint's own number
+    beside the wood's. "" where none was checked."""
+    g = (c.get("joints") or {}).get("governing")
+    if not g or g.get("safety") is None:
+        return ""
+    if c.get("governs") == "joint":
+        return f" That's the joint between {g['between']}: {g['said']}."
+    return f" Its joints, by hand: the weakest, between {g['between']}, {_times(g['safety'], need=need)} ({g['said']})."
+
+
 def joint_said(row: dict, need) -> str:
     """What a wall held square by an unchecked joint stands on (#265): which joint, and what it reads if that gives. A sheet
     part's glued trim, left out of the check: which (#272). A part's joints taken as solid wood, with no wall resting on one:
@@ -244,7 +255,9 @@ def joint_said(row: dict, need) -> str:
         many = len(names) > 1 or names[0].rstrip().endswith("s")
         said.append(f"the {' and the '.join(names)} {'are' if many else 'is'}n't checked: {'they' if many else 'it'}'re glued trim"
                     if many else f"the {names[0]} isn't checked: it's glued trim")
-    if row.get("wood") or (row.get("joints_n") is not None and not row.get("piece")):
+    if row.get("names"):                             # the hand check couldn't place these (#301): named
+        said.append(f"{' and '.join(row['names'])} {'aren' if len(row['names']) > 1 else 'isn'}'t checked by hand")
+    elif row.get("wood") or (row.get("joints_n") is not None and not row.get("piece")):
         n = row.get("joints_n")
         said.append(f"the check takes its {n} joint{'s' if n != 1 else ''} as solid wood" if n is not None
                     else "the check takes its joints as solid wood")
@@ -260,6 +273,12 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     """What a ✗ adds about where it fails and how sure (#137 item 2), the same words on the part card and the design
     card (#139 review: the design card named the 0.25 mm webs, the part card the 5.2 mm wall at the peak). "" when
     there's nothing to add. Where the hand buckling check decides it, the wall that folds, never the FEA's peak (#235 review)."""
+    if c.get("governs") == "joint":                   # a joint by hand gives first: named, and what gives (#301)
+        g = (c.get("joints") or {}).get("governing") or {}
+        if g.get("between"):
+            need = run.get("min_safety") or 2.0
+            return (f" The joint between {g['between']} gives first: {g['said']}, {g['safety'] / need:.1f}x of what it "
+                    f"needs (a hand check of its joints).")
     if c.get("governs") == "buckling":
         rows = [r for r in c.get("buckling") or [] if r.get("done")]
         if rows:
@@ -349,14 +368,17 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     brace = ""
     if v.get("joints"):                              # what it rests on that isn't checked (#265, #272)
         said = joint_said(v["brace"], need)
-        brace = said if (v.get("brace") or {}).get("trim") else f"its joints aren't checked: {said}"
+        brace = said if (v.get("brace") or {}).get("trim") or (v.get("brace") or {}).get("names") \
+            else f"its joints aren't checked: {said}"
+    by_hand = joints_said(c, need)                  # its joints, checked by hand (#301)
     if v["kind"] == "holds":
-        text = f"Holds {lowered(c['name'])}, {over(c, need, rough)}." + (f" {brace[:1].upper()}{brace[1:]}." if brace else "")
+        text = (f"Holds {lowered(c['name'])}, {over(c, need, rough)}." + by_hand
+                + (f" {brace[:1].upper()}{brace[1:]}." if brace else ""))
     elif v["kind"] == "close" and brace and not v.get("near"):   # amber by the cap, not its number: it holds if a joint does (#265)
-        text = f"Holds {lowered(c['name'])}, {over(c, need, rough)}, if its joints do: {joint_said(v['brace'], need)}."
+        text = f"Holds {lowered(c['name'])}, {over(c, need, rough)}, if its joints do: {joint_said(v['brace'], need)}." + by_hand
     elif v["kind"] == "close":                       # amber: it holds, near the line (CALI-88, #64 item 2), and both said (#276)
         text = (f"Holds {lowered(c['name'])}, {over(c, need, rough)}: close to the {need:g} it needs"
-                + (f", and {brace}." if brace else "."))
+                + (f", and {brace}." if brace else ".") + by_hand)
     elif v["kind"] == "fails":
         said = over(c, need, rough)
         text = (f"Doesn't hold {lowered(c['name'])}: {'' if said.startswith(UNDER) else 'only '}{said}, and it needs "

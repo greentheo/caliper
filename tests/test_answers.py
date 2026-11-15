@@ -31,7 +31,7 @@ def test_a_box_of_five_panels_has_eight_joints_and_the_screws_and_glue_for_them(
     _sides(mesh, pcs)
     got = fasteners.estimate(pcs, tolerance(mesh))
     assert got["joints"] == 8                      # four corners, and the top to each wall
-    assert got["screws"] >= 16 and got["screw"] == "#8 × 1 1/4 in wood screws"
+    assert got["screws"] >= 16 and got["screw"] == "#8 × 2 in wood screws"   # 1 1/4 in into the edge (#301)
     assert got["glue"] == "an 8 oz bottle of wood glue"
     assert C.report(store, "stool")["bom"]["fasteners"]["screws"] == got["screws"]
 

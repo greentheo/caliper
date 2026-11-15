@@ -102,7 +102,9 @@ TRIM_WHY = "glued trim not checked"
 def brace_why(brace: Optional[dict]) -> str:
     """What isn't checked under a pass, in a few words: the glued trim where that's all its brace is, else its joints."""
     b = brace or {}
-    return TRIM_WHY if b.get("trim") and not (b.get("wood") or b.get("piece")) else JOINTS_WHY
+    if b.get("trim") and not (b.get("wood") or b.get("piece")):
+        return TRIM_WHY
+    return f"{JOINTS_WHY}: {'; '.join(b['names'])}" if b.get("names") else JOINTS_WHY   # those the hand check couldn't (#301)
 
 
 def wood_brace(run: Optional[dict]) -> Optional[dict]:
@@ -111,7 +113,8 @@ def wood_brace(run: Optional[dict]) -> Optional[dict]:
     n = (run or {}).get("wood_joints")
     if not n:
         return None
-    return {"joints_n": n if isinstance(n, int) and not isinstance(n, bool) else None, "wood": True}
+    return {"joints_n": n if isinstance(n, int) and not isinstance(n, bool) else None, "wood": True,
+            **({"names": list(run["joints_unchecked"])} if run.get("joints_unchecked") else {})}
 
 
 def rests_on_brace(run: dict, c: dict) -> Optional[dict]:

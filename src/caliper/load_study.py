@@ -391,10 +391,10 @@ def judged_by(run: dict, case: dict) -> Optional[str]:
     buckling check where it fails (a fail is certain), and where it holds, the check it took over from: a pass from it never
     settles an FEA too coarse to see the wall, blind, or spanning between its holds."""
     governs = case.get("governs", "fea")
-    if governs != "buckling":
+    if governs not in ("buckling", "joint"):           # a hand check: buckling (#229) or a joint (#301)
         return governs
     need = run.get("min_safety") or MIN_SAFETY
-    return "buckling" if case.get("safety") is not None and case["safety"] < need else case.get("over", "fea")
+    return governs if case.get("safety") is not None and case["safety"] < need else case.get("over", "fea")
 
 
 def blind(run: dict, case: dict) -> bool:
@@ -478,6 +478,9 @@ def governing_words(case: dict) -> str:
     governs = case.get("governs", "fea")
     if governs == "plate":
         piece = (case.get("plate") or {}).get("piece")
+    elif governs == "joint":                           # (#301)
+        g = (case.get("joints") or {}).get("governing") or {}
+        return f"the joint between {g['between']}" if g.get("between") else "a joint"
     elif governs == "buckling":
         done = [r for r in case.get("buckling") or [] if r.get("done")]
         piece = min(done, key=lambda r: r["safety"])["piece"] if done else None
@@ -1206,6 +1209,13 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
            "trim": [p["name"] for p in printed_pieces(declared) if p["trim"]] if trim else [],
            "unsized": [p["name"] for p in printed_pieces(declared) if not p["trim"] and not p["section"]] if trim else []}
     ctx["patches"] = _held_patches(ctx)
+    if len([pc for pc in pieces if pc.get("material") in ("plywood", "lumber")]) > 1:    # its joints, by hand (#301)
+        from . import joint_check as JC
+
+        try:
+            ctx["joints"] = JC.setup(store, part_id)
+        except Exception:  # noqa: BLE001 — not read: not checked, and said (the note stays)
+            ctx["joints"] = None
     if printed and wood:
         _two_materials(ctx, wood, sheet_mat, rest)
     return ctx
@@ -1419,6 +1429,11 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
         governs, safety = "buckling", weakest["safety"]
     if folds:
         case["buckling"] = folds
+    if ctx.get("joints"):                          # each joint by hand, needing what the wood needs (#301)
+        from . import joint_check as JC
+
+        case["joints"] = JC.check(ctx["joints"], load, ctx.get("held") or [], min_safety)
+        governs, safety = JC.lower(case, governs, safety)
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
                  "holds": bool(safety is not None and safety >= min_safety),  # producer
                  # where it's predicted to break, placed the same way: linear to failure, as wood is
@@ -1529,7 +1544,13 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
     }
     wooden = [pc for pc in ctx["pieces"] if pc.get("material") in ("plywood", "lumber")]
-    if len(wooden) > 1:                               # its joints, taken as solid wood: said on every verdict (#222 slice A)
+    if ctx.get("joints") is not None:                 # checked by hand (#301): the note stays only for those it couldn't
+        unchecked = sorted({u for c in cases for u in (c.get("joints") or {}).get("unchecked") or []})
+        record["joints_checked"] = True
+        record["joints_unchecked"] = unchecked
+        if unchecked:
+            record["wood_joints"] = len(unchecked)
+    elif len(wooden) > 1:                             # its joints, taken as solid wood: said on every verdict (#222 slice A)
         from . import joints as J
 
         try:
