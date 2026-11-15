@@ -844,14 +844,42 @@ def _plate_at(ctx, case_name: str, t: float) -> Optional[float]:
     return min(pl["by_thickness"], key=lambda b: abs(b["thickness_mm"] - t))["safety_across"]
 
 
+def wrong_material(store: DesignStore, part_id: str, run: dict) -> Optional[str]:
+    """Why a Lighten run isn't trusted, where it ran a sheet part as its printed trim (#303 review): before #295 its
+    material was the print's, so its weights were PLA's and its allowables too. Its steps aren't the part's: never adopted,
+    never an offer. None for a run in the part's sheet, or a printed part's (made_of carves it)."""
+    from . import materials as M
+    from .studies import made_of
+
+    mat = str(run.get("material") or "")
+    if run.get("kind", "lighten") != "lighten" or "(printed)" not in mat:
+        return None
+    try:
+        if made_of(store, part_id)["study"] != "lighten":
+            return None
+        from . import construction as C
+
+        sheet = next((M.sheet(it["material"])["name"] for it in C.declared(store, part_id).get("construction") or []
+                      if isinstance(it, dict) and it.get("kind") == "sheet"), "sheet")
+    except Exception:  # noqa: BLE001 — a part it can't read now: not judged here
+        return None
+    return f"Not trusted: it ran as {mat}, not as its {sheet}. Lighten it again."
+
+
 def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
     root = runs_dir(store)
     if not os.path.isdir(root):
         return []
-    out = []
+    out, why = [], {}
     for rid in sorted(os.listdir(root), reverse=True):
         rec = load_run(store, rid)
         if rec and (part_id is None or rec.get("part") == part_id):
+            if "(printed)" in str(rec.get("material") or ""):         # a run of before #295, as the print (#303 review)
+                key = (rec.get("part"), rec.get("material"))
+                if key not in why:
+                    why[key] = wrong_material(store, rec.get("part"), rec)
+                if why[key]:
+                    rec["not_trusted"] = why[key]
             out.append(rec)
     return newest_first(out)          # made last first, not by id (CALI-97)
 
@@ -906,6 +934,9 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     rec = load_run(store, rid)
     if rec is None:
         raise FileNotFoundError(f"no lightening study {rid!r}")
+    wrong = wrong_material(store, rec.get("part"), rec)
+    if wrong:
+        raise ValueError(wrong)                  # its steps were weighed and judged as the print (#303 review)
     st = next((x for x in rec["stations"] if x["index"] == int(index)), None)
     if st is None:
         raise FileNotFoundError(f"study {rid} has no station {index}")

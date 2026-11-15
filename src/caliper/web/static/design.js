@@ -1609,12 +1609,15 @@ function paramsSaid(rows) {
 }
 // a thinner sheet's Use (#295): the sheets' thickness number set, as the Parameters panel sets it, with no designer and
 // no material in words; where there's no such number, the sheet named, never what's printed on it
-function sheetUse(run, label, mm, now) {
+function sheetUse(run, label, mm, now, piece) {   // a plate row is one piece's: its own number, never another sheet's (#303)
   const sheet = run.sheet || {};
-  if (sheet.param) return `<button class="ghost" data-use-param="${esc(sheet.param)}" data-use-mm="${mm}">Use</button>`;
+  const param = piece ? (sheet.pieces || {})[piece] : sheet.param;
+  if (param) return `<button class="ghost" data-use-param="${esc(param)}" data-use-mm="${mm}">Use</button>`;
   const name = sheet.name || (typeof run.material === 'string' ? run.material : (run.plate_material || {}).name) || 'plywood';
   const plain = /printed|\bpla\b|petg/i.test(name) ? 'plywood' : name;          // an older run's headline: never the print
-  return `<button class="ghost" data-use-t="Make the ${esc(sheet.now || now || 'sheet')} ${esc(plain)} ${esc(label)}">Use</button>`;
+  const said = piece ? `Make the ${piece} ${label} ${plain}, not ${now || sheet.now || 'what it is'}`
+    : `Make the ${sheet.now || now || 'sheet'} ${plain} ${label}`;
+  return `<button class="ghost" data-use-t="${esc(said)}">Use</button>`;
 }
 async function useParam(p, name, mm) {
   try {
@@ -3096,7 +3099,7 @@ function lightenView(p) {
       ${lightenBlocked(p) ? `<span class="muted small">${esc(lightenBlocked(p))}</span>` : ''}</div>
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
-      ? (p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
+      ? (run.not_trusted ? esc(run.not_trusted) : p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
         : `${run.version != null && run.version !== p.version ? `v${run.version}'s lightest step that holds` : lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer && (run.version == null || run.version === p.version) ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
       : lightenNone(run)}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
       ${lightenChanged(run, p) ? `<div class="small" style="color:var(--amber);margin-top:4px">${lightenChanged(run, p)}</div>` : ''}</div>
@@ -3195,7 +3198,7 @@ function loadCase(p, run, c, i) {
         <td style="color:var(--${verdictTone(b.verdict)})">${sx(b.safety_across, run.min_safety)}</td>
         <td>${sx(b.safety, run.min_safety)}</td><td>${len(b.deflection_mm, 3)}</td>
         <td>${now ? '<span class="muted">now</span>' : holdsHere(b)
-          ? sheetUse(run, b.label, b.thickness_mm, nowLabel) : ''}</td></tr>`; }).join('')}</table></details>`;
+          ? sheetUse(run, b.label, b.thickness_mm, nowLabel, pl.piece) : ''}</td></tr>`; }).join('')}</table></details>`;
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>

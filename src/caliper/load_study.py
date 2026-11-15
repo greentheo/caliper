@@ -1228,29 +1228,73 @@ def sheet_of(ctx: dict) -> dict:
 
 
 def sheet_param(store: DesignStore, part_id: str, thickness_mm: float) -> Optional[str]:
-    """The ``PARAMS`` number that is the sheets' thickness, where there's one (#295): read by the script and equal to it.
-    An estimate's Use sets it, with no designer and no material in words. None where there's none, or more than one."""
-    from . import params
+    """The one ``PARAMS`` number that sets every sheet of this thickness (#295, #303 review): read by the script, and the
+    pieces that follow it when it changes are exactly those sheets. None where there's none, or it can't be told."""
+    said = _thickness_names(store, part_id, None)
+    names = {n for pc, n in said.items() if abs(_thick(store, part_id).get(pc, -1) - thickness_mm) < 0.01}
+    pieces = [pc for pc, t in _thick(store, part_id).items() if abs(t - thickness_mm) < 0.01]
+    return names.pop() if len(names) == 1 and pieces and all(pc in said for pc in pieces) else None
+
+
+def _thick(store: DesignStore, part_id: str) -> dict:
+    from . import construction as C
+
+    try:
+        items = C.declared(store, part_id).get("construction") or []
+    except Exception:  # noqa: BLE001 — not read
+        return {}
+    return {str(it["name"]): float(it["thickness"]) for it in items
+            if isinstance(it, dict) and it.get("kind") == "sheet" and isinstance(it.get("thickness"), (int, float))}
+
+
+def _thickness_names(store: DesignStore, part_id: str, pieces: Optional[dict]) -> dict:
+    """``{sheet piece: PARAMS name}``: which number each sheet's thickness comes from, told for certain (#303 review): each
+    read number equal to a thickness is moved by 1 mm in a copy of the script, and it names the pieces that follow it, and
+    only those. A coincidence (a lip that happens to be 12.7) moves no piece; two numbers moving one piece name neither."""
+    from . import aero, params
+    from . import construction as C
 
     try:
         rows = params.listing(store, part_id)
+        script = store.read_script(part_id)
     except ValueError:
-        return None
-    hits = [e["name"] for e in rows if e["read"] and isinstance(e["value"], (int, float))
-            and not isinstance(e["value"], bool) and abs(float(e["value"]) - thickness_mm) < 0.01]
-    return hits[0] if len(hits) == 1 else None
+        return {}
+    thick = pieces if pieces is not None else _thick(store, part_id)
+    out, twice = {}, set()
+    for e in rows:
+        v = e["value"]
+        if not e["read"] or isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        same = {pc for pc, t in thick.items() if abs(t - float(v)) < 0.01}
+        if not same:
+            continue
+        try:
+            moved = C.declared_by(aero.write_params(script, {e["name"]: float(v) + 1.0}, keep_float=True))
+        except Exception:  # noqa: BLE001 — a number it can't move: not told
+            continue
+        now = {str(it.get("name")): it.get("thickness") for it in moved.get("construction") or []
+               if isinstance(it, dict) and it.get("kind") == "sheet"}
+        follow = {pc for pc in same if isinstance(now.get(pc), (int, float)) and abs(float(now[pc]) - float(v) - 1.0) < 0.01}
+        for pc in follow:
+            (twice.add(pc) if pc in out else out.__setitem__(pc, e["name"]))
+    return {pc: n for pc, n in out.items() if pc not in twice}
 
 
 def sheet_said(store: DesignStore, part_id: str, ctx: dict) -> Optional[dict]:
-    """``{"name", "param", "now"}``: the sheets' material, the number that sets their thickness, and that thickness as
-    sold, for a thinner sheet's Use (#295). None for a part with no sheets."""
+    """``{"name", "param", "now", "pieces"}``: the sheets' material, the one number that sets every sheet's thickness
+    (a Lighten's estimate scales them all: only where they're all one thickness from one name), that thickness as sold,
+    and each sheet's own number (a plate check's row is one piece's) (#295, #303 review). None for a part with no sheets."""
     from . import materials as M
 
     sheets = [pc for pc in ctx["pieces"] if pc["kind"] == "sheet"]
     if not sheets:
         return None
-    t = max(float(pc["thickness"]) for pc in sheets)
-    return {"name": sheet_of(ctx)["name"], "param": sheet_param(store, part_id, t), "now": M.nominal(t)}
+    thick = {str(pc["name"]): float(pc["thickness"]) for pc in sheets}
+    names = _thickness_names(store, part_id, thick)
+    one = set(names.values())
+    t = max(thick.values())
+    param = one.pop() if len(set(thick.values())) == 1 and len(one) == 1 and set(names) == set(thick) else None
+    return {"name": sheet_of(ctx)["name"], "param": param, "now": M.nominal(t), "pieces": names}
 
 
 def per_voxel(ls) -> bool:

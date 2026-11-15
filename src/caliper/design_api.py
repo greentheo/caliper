@@ -458,8 +458,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         for st in r.get("stations") or []:
             st["verdict"] = verdicts.carve_step(st, untrusted.get(r["part"]), r)        # #101: coarse voxels too
     for r in runs["lighten"]:
-        for st in r.get("stations") or []:
-            st["verdict"] = verdicts.lighten_step(st, untrusted.get(r["part"]), r)
+        for st in r.get("stations") or []:            # a run as the print isn't trusted, step by step (#303 review)
+            st["verdict"] = verdicts.lighten_step(st, r.get("not_trusted") or untrusted.get(r["part"]), r)
     loads_by_id = {r["id"]: r for r in runs["load"]}
     for p in parts:                           # the history line of a strength check says the verdict it was given
         for h in p["history"]:

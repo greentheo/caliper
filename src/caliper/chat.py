@@ -948,8 +948,7 @@ def refine_part(store: DesignStore, part_id: str, message: str, *, author=None, 
                        r"moved", reply, count=1)
     made = _made_otherwise(prior, script, message)    # how it's made changed and nobody asked: said, never ✓ (#295)
     if made:
-        reply = re.sub(r"\A[✓!] (revised \*\*[^\n]*)", lambda m: f"⚠ {m.group(1)}: it also changed how it's made: {made}. "
-                       f"Say \"roll it back\" to undo it.", reply, count=1)
+        reply = _say_made(reply, made)
     proposal, offer = _offer_promotion(store, part_id, message, use_llm=use_llm, client=client,
                                        drafter=drafter, enabled=promote_feedback,
                                        events=events, on_event=on_event)
@@ -1010,49 +1009,78 @@ def _moved(prior: str, new: str, before, geometry, tol: float = 0.01) -> bool:
     return _declares_moved(prior, new)
 
 
-#: Words that ask for how a part is made to change: a material, printing, sheet goods (#295).
-_ASKS_MADE = re.compile(r"\b(?:print(?:ed|ing|s)?|3d|pla|petg|abs|tpu|nylon|plywood|ply|mdf|osb|lumber|wood(?:en)?|steel|"
-                        r"alumin(?:i?um)|metal|material|made (?:of|from|out of)|make it (?:from|out of|in))\b", re.I)
-
-
-def _how_made(script: str):
-    """What a script's pieces are, by kind and material: ``Counter`` of ``(kind, material)``; None where it can't be read."""
-    from collections import Counter
-
+def _made_of(script: str) -> Optional[dict]:
+    """What each piece is: ``{name: (kind, material)}``; None where the script's pieces can't be read."""
     from . import construction as C
 
     try:
         items = C.declared_by(script).get("construction") or []
     except Exception:  # noqa: BLE001 — not read: nothing said about it
         return None
-    return Counter((it.get("kind"), it.get("material")) for it in items
-                   if isinstance(it, dict) and it.get("kind") in ("sheet", "printed", "stick"))
+    return {str(it.get("name")): (it.get("kind"), it.get("material")) for it in items
+            if isinstance(it, dict) and it.get("kind") in ("sheet", "printed", "stick")}
+
+
+def _material_name(state: tuple) -> str:
+    from . import materials as M
+
+    kind, mat = state
+    try:
+        return (M.printed(mat) if kind == "printed" else M.sheet(mat) if kind == "sheet" else M.stick(mat))["name"]
+    except Exception:  # noqa: BLE001 — a material the table doesn't know: its own word
+        return str(mat)
+
+
+def _a(state: tuple) -> str:
+    return f"a {_material_name(state)} {({'sheet': 'sheet', 'printed': 'print', 'stick': 'stick'})[state[0]]}"
+
+
+def _asks_for(state: tuple, asked: str) -> bool:
+    """Whether a request names what a piece became (#303 review): printing for a print, its material for a sheet. Any
+    material word isn't enough: "from 5/8 in plywood" doesn't ask for a print."""
+    kind, mat = state
+    words = {w for w in re.split(r"[^a-z0-9]+", _material_name(state).lower()) if len(w) > 2} | {str(mat).lower()}
+    words -= {"printed", "sheet", "softwood", "hardwood"} if kind != "printed" else set()
+    if kind == "printed":
+        words |= {"print", "printed", "printing", "3d"}
+    elif kind == "stick":
+        words |= {"stick", "sticks", "lumber"}
+    said = set(re.split(r"[^a-z0-9]+", (asked or "").lower()))
+    return bool(words & said)
 
 
 def _made_otherwise(prior: str, new: str, asked: str) -> str:
-    """How a revision changed what the part is made of when the request didn't ask (#295: "Make it from 5/8 in pla
-    (printed)" rebuilt a plywood stool as one printed part, and the reply read ✓): "1 softwood plywood sheet became 1 PLA
-    (printed) printed piece", or "" where it didn't change, was asked for, or can't be read."""
+    """How a revision changed what the part's pieces are made of, piece by piece, where the request didn't ask for what
+    they became (#295; #303 review): a piece whose kind or material changed, by name, or sheets that went while prints came.
+    A piece added or taken away in its own material isn't. "" where nothing is."""
     from . import carve
-    from . import materials as M
 
-    if _ASKS_MADE.search(asked or ""):
+    was, now = _made_of(carve.uncarve(prior or "")[0]), _made_of(new or "")
+    if was is None or now is None:
         return ""
-    was, now = _how_made(carve.uncarve(prior or "")[0]), _how_made(new or "")
-    if was is None or now is None or was == now:
+    said, became = [], []
+    for n in [n for n in was if n in now and was[n] != now[n]]:
+        said.append(f"the {n} was {_a(was[n])} and is now {_a(now[n])}")
+        became.append(now[n])
+    went = [n for n in was if n not in now and was[n][0] == "sheet"]
+    came = [n for n in now if n not in was and now[n][0] == "printed"]
+    if went and came:                              # renamed as it went: the sheets gone, the prints new
+        sheet, prints = _material_name(was[went[0]] ), _material_name(now[came[0]])
+        said.append(f"{len(went)} {sheet} sheet{'s' if len(went) != 1 else ''} became {len(came)} {prints} "
+                    f"print{'s' if len(came) != 1 else ''}")
+        became += [now[n] for n in came]
+    if not said or all(_asks_for(st, asked) for st in became):
         return ""
+    return "; ".join(said)
 
-    def said(counts) -> str:
-        out = []
-        for (kind, mat), n in sorted(counts.items(), key=lambda kv: str(kv[0])):
-            try:
-                name = (M.printed(mat) if kind == "printed" else M.sheet(mat) if kind == "sheet" else M.stick(mat))["name"]
-            except Exception:  # noqa: BLE001 — a material the table doesn't know: its own word
-                name = str(mat)
-            what = {"sheet": "sheet", "printed": "printed piece", "stick": "stick"}[kind]
-            out.append(f"{n} {name} {what}{'s' if n != 1 else ''}")
-        return " and ".join(out) or "nothing"
-    return f"{said(was - now)} became {said(now - was)}"
+
+def _say_made(reply: str, made: str) -> str:
+    """The reply's first line, with how it's made said: "⚠" over a ✓ or "!", never a ✓; a ✗ keeps its ✗ and the words."""
+    m = re.match(r"\A([✓!✗]) (revised \*\*[^\n]*)", reply)
+    if not m:
+        return reply
+    return (f"{'✗' if m.group(1) == '✗' else '⚠'} {m.group(2)}: it also changed how it's made: {made}. Say \"roll it back\" "
+            f"to undo it." + reply[m.end():])
 
 
 def _declares_moved(prior: str, new: str) -> bool:
