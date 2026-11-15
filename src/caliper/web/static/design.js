@@ -334,10 +334,21 @@ function treeClick(el, now) {
   return null;
 }
 $('tree').addEventListener('click', (e) => {
-  if ($('tree').dataset.pressed) { delete $('tree').dataset.pressed; return; }   // a long-press opened its menu (CALI-183)
+  if (swallowed($('tree').dataset)) return;    // a long-press opened its menu: its lift isn't also a tap (CALI-183)
   const el = e.target.closest('button');
   if (el) treeClick(el, Date.now());
 });
+function swallowed(data) {                     // the tap a long-press's lift makes: taken once, then gone
+  if (!data.pressed) return false;
+  delete data.pressed;
+  return true;
+}
+function viewUp(down, e, data) {               // a release in the view: the menu, a long-press's lift, or a click
+  if (swallowed(data)) return 'swallow';
+  const still = down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) <= 5;   // past 5 px it's a pan or an orbit
+  if (still && (e.button === 2 || (e.button === 0 && e.ctrlKey))) return 'menu';
+  return 'click';
+}
 function toggleHidden(pid, key) {            // the eye, and the menu's Hide / Show: a part takes what sits under it along
   const t = seen(), set = key != null ? t.pieces : t.parts, id = key != null ? pieceId(pid, key) : pid;
   const hide = !set.has(id);
@@ -397,13 +408,13 @@ function confirmHtml(pid, said, mirroredBy) {    // the page's own confirm, neve
     <div class="pmenu-row"><button role="menuitem" class="danger" data-menu="deleteYes">Delete</button>
       <button role="menuitem" data-menu="keep">Keep it</button></div>`;
 }
-function openMenu(pid, piece, x, y) {
-  closeMenu();
+function openMenu(pid, piece, x, y, from) {
+  closeMenu(false);
   const p = S.design && S.design.parts.find((q) => q.id === pid);
   if (!p) return;
   const pc = piece != null ? (p.pieces || []).find((q) => q.key === piece) : null;
   const name = p.label || p.name || p.id;
-  S.menu = { pid, piece: piece != null ? piece : null };
+  S.menu = { pid, piece: piece != null ? piece : null, from: from || document.activeElement };
   const box = document.createElement('div');
   box.id = 'partMenu'; box.className = 'pmenu'; box.setAttribute('role', 'menu');
   box.setAttribute('aria-label', `${pc ? pc.name : name}: what to do`);
@@ -428,10 +439,18 @@ function menuConfirm(html) {
   placeMenu(box, parseFloat(box.style.left) || 8, parseFloat(box.style.top) || 8);
   menuFocus(0);
 }
-function closeMenu() {
-  const box = $('partMenu');
+function closeMenu(back = true) {
+  const box = $('partMenu'), m = S.menu;
   if (box) box.remove();
   S.menu = null;
+  if (back && box && m) menuBack(m);
+}
+function menuBack(m) {                         // focus where the menu was asked for: its row, or the view; never <body>
+  const row = document.querySelector(`#tree button.tname[data-sel="${CSS.escape(m.pid)}"]`);
+  const to = m.from && document.contains(m.from) && m.from !== document.body ? m.from
+    : row || document.querySelector('#tree button.tname') || renderer.domElement;
+  if (to === renderer.domElement && !to.hasAttribute('tabindex')) to.setAttribute('tabindex', '-1');
+  to.focus();
 }
 function menuFocus(step) {                     // the arrow keys move through its items
   const items = [...document.querySelectorAll('#partMenu [data-menu]')];
@@ -479,9 +498,11 @@ async function menuDo(id) {
 async function deletePart(pid, also) {
   try {
     const got = await api('POST', `/api/designs/${S.slug}/parts/${pid}/remove`, { also });
-    closeMenu();
+    const m = S.menu;
+    closeMenu(false);
     S.design = got.state;
     if (S.scope === pid || also.includes(S.scope)) setScope(null); else render();
+    if (m) menuBack({ ...m, from: null });      // its row is gone with it: the tree's first, never <body>
     putBack(got.said, [got.removed, ...(got.also || [])]);
     await syncParts(S.design, false);            // and out of the view, as a refresh takes it out
   } catch (e) {
@@ -513,10 +534,14 @@ function putBack(said, gone) {
   say(said, async () => {
     try {
       let got = null;
-      for (const g of gone) got = await api('POST', `/api/designs/${S.slug}/trash/restore`, { id: g.id });   // its source first
+      const said = [];
+      for (const g of gone) {                  // its source first, then what mirrors it
+        got = await api('POST', `/api/designs/${S.slug}/trash/restore`, { id: g.id });
+        said.push(got.said);
+      }
       S.design = got.state;
       render();
-      say(got.said);
+      say(said.join(' '));
       await syncParts(S.design, false);          // back in the view
     } catch (e) { showErr(plainly(e.message)); }
   });
@@ -524,6 +549,7 @@ function putBack(said, gone) {
 function longPress(el, open) {                 // a phone's right-click: held still, then the menu
   let t = null, at = null;
   el.addEventListener('pointerdown', (e) => {
+    delete el.dataset.pressed;                 // a press that ended without its tap: never the next one's (#302 review)
     if (e.pointerType !== 'touch') return;
     at = [e.clientX, e.clientY];
     clearTimeout(t);
@@ -532,32 +558,35 @@ function longPress(el, open) {                 // a phone's right-click: held st
   el.addEventListener('pointermove', (e) => {
     if (t && at && Math.hypot(e.clientX - at[0], e.clientY - at[1]) > 8) { clearTimeout(t); t = null; }
   });
-  ['pointerup', 'pointercancel'].forEach((k) => el.addEventListener(k, () => { clearTimeout(t); t = null; }));
+  el.addEventListener('pointerup', () => { clearTimeout(t); t = null; });
+  el.addEventListener('pointercancel', () => { clearTimeout(t); t = null; delete el.dataset.pressed; });   // no tap follows
 }
 $('tree').addEventListener('contextmenu', (e) => {
   const b = e.target.closest('[data-sel]');
   if (!b) return;
   e.preventDefault();
-  openMenu(b.dataset.sel, b.dataset.key != null ? b.dataset.key : null, e.clientX, e.clientY);
+  openMenu(b.dataset.sel, b.dataset.key != null ? b.dataset.key : null, e.clientX, e.clientY, b);
 });
 longPress($('tree'), (e) => {
   const b = e.target.closest('[data-sel]');
-  if (b) openMenu(b.dataset.sel, b.dataset.key != null ? b.dataset.key : null, e.clientX, e.clientY);
+  if (b) openMenu(b.dataset.sel, b.dataset.key != null ? b.dataset.key : null, e.clientX, e.clientY, b);
 });
-addEventListener('pointerdown', (e) => { if ($('partMenu') && !e.target.closest('#partMenu')) closeMenu(); }, true);
+addEventListener('pointerdown', (e) => { if ($('partMenu') && !e.target.closest('#partMenu')) closeMenu(false); }, true);   // focus goes where that click goes
 addEventListener('keydown', (e) => {
   if ($('partMenu')) {
     if (e.key === 'Escape') { e.preventDefault(); closeMenu(); return; }
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); menuFocus(e.key === 'ArrowDown' ? 1 : -1); }
     return;
   }
-  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || document.activeElement.isContentEditable;
+  const a = document.activeElement;
+  const empty = a && a.id === 'msg' && !a.value.trim();          // selecting puts the cursor here: an empty box isn't typing
+  const typing = !empty && (/INPUT|TEXTAREA|SELECT/.test(a.tagName) || a.isContentEditable);
   if (typing || !S.scope || !S.design) return;
   if ((e.key === 'F10' && e.shiftKey) || e.key === 'ContextMenu') {
     e.preventDefault();
     const [x, y] = menuAnchor();
     openMenu(S.scope, S.piece, x, y);
-  } else if (e.key === 'Delete' && S.piece == null) {   // the same confirm, straight away
+  } else if (e.key === 'Delete' && S.piece == null && !empty) {   // the same confirm, straight away (never from the box)
     e.preventDefault();
     const [x, y] = menuAnchor();
     openMenu(S.scope, null, x, y);
@@ -990,10 +1019,11 @@ let down = null;
 renderer.domElement.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY, e.button]; });
 renderer.domElement.addEventListener('pointerup', (e) => {
   const d = down; down = null;
-  if (renderer.domElement.dataset.pressed) { delete renderer.domElement.dataset.pressed; return; }   // a long-press's menu
-  if (d && (e.button === 2 || (e.button === 0 && e.ctrlKey)) && Math.hypot(e.clientX - d[0], e.clientY - d[1]) <= 5) {
+  const act = viewUp(d, e, renderer.domElement.dataset);
+  if (act === 'swallow') return;
+  if (act === 'menu') {
     const hit = pick(e);                       // right-click, not a right-drag pan: its menu (CALI-183)
-    if (hit) openMenu(hit.object.userData.partId, null, e.clientX, e.clientY);
+    if (hit) openMenu(hit.object.userData.partId, null, e.clientX, e.clientY, renderer.domElement);
     return;
   }
   if (!d || d[2] !== 0 || e.button !== 0) return;
@@ -1017,7 +1047,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());   // the menu opens on the button's release
 longPress(renderer.domElement, (e) => {
   const hit = pick(e);
-  if (hit) openMenu(hit.object.userData.partId, null, e.clientX, e.clientY);
+  if (hit) openMenu(hit.object.userData.partId, null, e.clientX, e.clientY, renderer.domElement);
 });
 function pick(e) {
   const rect = renderer.domElement.getBoundingClientRect();

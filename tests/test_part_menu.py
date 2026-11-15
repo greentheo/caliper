@@ -169,6 +169,7 @@ const api = async (method, url, body) => { posted.push([method, url, body]); if 
 Object.defineProperty(globalThis, 'navigator', { value: { clipboard: { writeText: async (t) => calls.push(['copied', t]) } } });
 const say = (t) => calls.push(['say', t]);
 const syncParts = async () => calls.push('sync');
+const menuBack = () => calls.push('back');
 """
 
 
@@ -338,8 +339,197 @@ def test_lighten_and_carve_aren_t_offered_on_a_mirror():
     """studies.menu, which the menu and the Studies page read, says so: the server refuses them on a mirror (#246)."""
     from caliper import studies
 
+    said = "It mirrors side_right: change side_right and it follows, or break the mirror first"
     p = {"id": "side_left", "scripted": True, "built": True, "loads": True, "study": "lighten", "sheets": True,
-         "printed": True, "mirror_of": "side_right"}
-    got = {m["kind"]: m for m in studies.menu(p)}
-    assert not got["lighten"]["ready"] and got["lighten"]["why"].startswith("it mirrors side_right: ")
+         "printed": True, "mirror_of": "side_right", "blocked": {"why": "mirror", "lighten": said, "carve": said}}
+    got = {m["kind"]: m for m in studies.menu(p)}                     # from blocked(), the one rule (#302 review)
+    assert not got["lighten"]["ready"] and got["lighten"]["why"] == said
     assert got["load"]["ready"]
+
+
+# --- #302 review: every part job says its part; a design-wide job refuses in words; one rule for a mirror ---------------
+PART_JOBS = {"load": "checked", "lighten": "lightened", "carve": "carved", "whittle": "whittled", "frame": "sized",
+             "gussets": "given gussets", "aero": "shaped for drag", "picture": "given a picture",
+             "cutplan": "planned for cutting"}
+
+
+def test_every_part_job_is_submitted_saying_its_part():
+    """One helper, so a new route can't forget it: each RUNNER.submit of a part's job passes meta=_on_part(...)."""
+    import ast
+
+    src = open(os.path.join(os.path.dirname(JS), "..", "..", "design_api.py")).read()
+    kinds = {}
+    for node in ast.walk(ast.parse(src)):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "submit"
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == "RUNNER"):
+            meta = next((k.value for k in node.keywords if k.arg == "meta"), None)
+            kinds[node.args[0].value] = (isinstance(meta, ast.Call) and getattr(meta.func, "id", "") == "_on_part")
+    assert {k for k, on in kinds.items() if on} == set(PART_JOBS), kinds
+    assert set(kinds) - set(PART_JOBS) == {"chat", "firstrun", "release", "clarify", "goals", "scorecard"}
+
+
+def _hold(kind, lock, meta, gate):
+    from caliper.jobs import RUNNER
+
+    return RUNNER.submit(kind, lambda j: gate.wait(20), label=f"a stand-in {kind}", lock=lock, meta=meta)
+
+
+@pytest.mark.parametrize("kind", sorted(PART_JOBS))
+def test_a_delete_while_each_kind_of_part_job_runs_is_refused_in_words(site, kind):
+    import threading
+
+    from caliper import design_api
+
+    c, slug, _ = site
+    gate = threading.Event()
+    job = _hold(kind, f"{kind}:{slug}:stand-in", design_api._on_part(slug, "inside_corner_fillets"), gate)
+    try:
+        for _ in range(100):
+            if job.status == "running":
+                break
+            time.sleep(0.02)
+        r = c.post(f"/api/designs/{slug}/parts/inside_corner_fillets/remove", json={})
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"] == f"inside_corner_fillets is being {PART_JOBS[kind]}: wait for it, or stop that first."
+    finally:
+        gate.set()
+    assert "inside_corner_fillets" in _parts(c, slug)
+
+
+@pytest.mark.parametrize("kind,who", [("chat", "a chat turn"), ("firstrun", "the first build"),
+                                      ("release", "the build package")])
+def test_a_design_wide_job_refuses_at_once_in_words_never_a_silent_wait(site, kind, who):
+    import threading
+
+    from caliper import design_api
+
+    c, slug, _ = site
+    gate = threading.Event()
+    job = _hold(kind, design_api._lock(slug), {"slug": slug}, gate)
+    try:
+        for _ in range(100):
+            if job.status == "running":
+                break
+            time.sleep(0.02)
+        t0 = time.time()
+        r = c.post(f"/api/designs/{slug}/parts/inside_corner_fillets/remove", json={})
+        assert time.time() - t0 < 2.0                                                 # it never waited behind the lock
+        assert r.status_code == 409 and r.json()["detail"] == f"{who} is working on the design: wait for it, or stop it first."
+        r = c.post(f"/api/designs/{slug}/trash/restore", json={"part": "inside_corner_fillets"})
+        assert r.status_code == 409 and "is working on the design" in r.json()["detail"]
+    finally:
+        gate.set()
+
+
+def test_the_delete_says_what_went_with_it_and_who_follows_it(site):
+    from caliper.assembly import Mate
+
+    c, slug, s = site
+    s.write_part("cap", "FOLLOWS = {'w': ('inside_corner_fillets', 'w')}\n" + _box(dx=20, x=500), intent="a cap")
+    s = DesignStore.load(s.root)
+    s.assembly.mates.append(Mate(id="strips_clear_stool", between=["inside_corner_fillets", "step_stool"],
+                                 kind="no_interference"))
+    s.save()
+    r = c.post(f"/api/designs/{slug}/parts/inside_corner_fillets/remove", json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["said"] == ("Deleted inside_corner_fillets: it's in the design's trash, so it can be put back. Its mate "
+                                "strips_clear_stool went with it. cap follows it: it keeps its numbers.")
+
+
+def test_a_mirror_s_lighten_and_carve_are_refused_in_one_place_for_menu_card_and_panel(site):
+    """#144's one rule: blocked() says it, and the menu (studies.menu), the card (better) and the panel (p.blocked) read it."""
+    from caliper import design_api, load_study, mirror
+
+    _, slug, s = site
+    s.write_part("side_right", _box(dx=19, x=300), intent="the right side")
+    s.write_part("side_left", _box(dx=19, x=-300), intent="the left side")
+    mirror.make(s, "side_left", "side_right")
+    said = "It mirrors side_right: change side_right and it follows, or break the mirror first"
+    b = load_study.blocked(s, "side_left")
+    assert b["why"] == "mirror" and b["lighten"] == said and b["carve"] == said
+    st = design_api.design_state(DesignStore.load(s.root))
+    p = next(x for x in st["parts"] if x["id"] == "side_left")
+    assert p["blocked"]["lighten"] == said                                             # what the panel's button reads
+    menu = {m["kind"]: m for m in st["studies"]["menu"]["side_left"]}
+    assert not menu["lighten"]["ready"] and not menu["carve"]["ready"]
+    assert menu["lighten"]["why"] == said and menu["carve"]["why"] == said            # the same words, before the rest
+    from caliper import better
+
+    offers = better.offers(DesignStore.load(s.root), st, "side_left")
+    assert not [o for o in offers if (o.get("action") if isinstance(o, dict) else None) in ("lighten", "carve")], offers
+
+
+# --- #302 review: the three page mutants reviewer-2 found survived ------------------------------------------------------
+def _js(names, body):
+    import json
+    import subprocess
+
+    from .test_carve_click import _fn, _node
+
+    src = open(JS).read()
+    script = "\n".join(_fn(src, n) for n in names) + "\n" + body
+    got = subprocess.run([_node(), "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    return json.loads(got.stdout)
+
+
+def test_a_right_click_opens_the_menu_and_a_right_drag_past_5_px_pans():
+    out = _js(["swallowed", "viewUp"], """
+const at = (x, y, button, ctrl) => ({ clientX: x, clientY: y, button, ctrlKey: !!ctrl });
+const d = [100, 100, 2];
+console.log(JSON.stringify({
+  still: viewUp(d, at(103, 104, 2), {}), five: viewUp(d, at(105, 100, 2), {}), six: viewUp(d, at(106, 100, 2), {}),
+  ctrl: viewUp([100, 100, 0], at(100, 100, 0, true), {}), left: viewUp([100, 100, 0], at(100, 100, 0), {}),
+  none: viewUp(null, at(100, 100, 2), {}) }));""")
+    assert out == {"still": "menu", "five": "menu", "six": "click", "ctrl": "menu", "left": "click", "none": "click"}
+
+
+def test_a_long_press_s_lift_is_swallowed_once():
+    out = _js(["swallowed", "viewUp"], """
+const data = { pressed: '1' };
+const first = viewUp([1, 1, 0], { clientX: 1, clientY: 1, button: 0 }, data);
+const second = viewUp([1, 1, 0], { clientX: 1, clientY: 1, button: 0 }, data);
+const tree = { pressed: '1' };
+console.log(JSON.stringify({ first, second, tree: [swallowed(tree), swallowed(tree)] }));""")
+    assert out == {"first": "swallow", "second": "click", "tree": [True, False]}
+    src = open(JS).read()
+    assert "if (swallowed($('tree').dataset)) return;" in src and "const act = viewUp(d, e, renderer.domElement.dataset);" in src
+
+
+def test_a_cancelled_long_press_never_swallows_the_next_tap():
+    out = _js(["longPress"], """
+const LONG_PRESS_MS = 550;
+let timers = [];
+globalThis.setTimeout = (f) => { timers.push(f); return timers.length; };
+globalThis.clearTimeout = (id) => { if (id) timers[id - 1] = null; };
+const on = {}, el = { dataset: {}, addEventListener: (k, f) => { on[k] = f; } };
+longPress(el, () => {});
+on.pointerdown({ pointerType: 'touch', clientX: 1, clientY: 1 }); timers.forEach((f) => f && f());
+const held = !!el.dataset.pressed;
+on.pointercancel({});
+const cancelled = !!el.dataset.pressed;
+el.dataset.pressed = '1'; on.pointerdown({ pointerType: 'mouse', clientX: 1, clientY: 1 });
+console.log(JSON.stringify({ held, cancelled, stale: !!el.dataset.pressed }));""")
+    assert out == {"held": True, "cancelled": False, "stale": False}
+
+
+def test_put_back_restores_the_source_first_and_names_both():
+    out = _js(["putBack"], """
+const S = { slug: 's', design: null }, posted = [], said = [];
+const say = (t, act) => { said.push(t); if (act) globalThis.act = act; };
+const api = async (m, u, b) => { posted.push(b.id); return { state: { parts: [] }, said: `Put back ${b.id}, as it was.` }; };
+const render = () => {}, syncParts = async () => {}, showErr = () => {}, plainly = (m) => m;
+putBack('Deleted both.', [{ part: 'side_right', id: 'r1' }, { part: 'side_left', id: 'l1' }]);
+await globalThis.act();
+console.log(JSON.stringify({ posted, said }));""")
+    assert out["posted"] == ["r1", "l1"]                                              # its source first, then its mirror
+    assert out["said"][-1] == "Put back r1, as it was. Put back l1, as it was."
+
+
+def test_the_menu_key_works_from_an_empty_chat_box_and_focus_goes_back():
+    src = open(JS).read()
+    assert "const empty = a && a.id === 'msg' && !a.value.trim();" in src
+    from .test_carve_click import _fn
+
+    assert "menuBack(m)" in _fn(src, "closeMenu") and "menuBack({ ...m, from: null })" in _fn(src, "deletePart")
+    assert "closeMenu(false); }, true);" in src                                        # a click elsewhere keeps its own focus
