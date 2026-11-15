@@ -492,6 +492,10 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
                          stale=part is None or r.get("version") != part["version"])   # never green on an older run
         for c, cv in zip(r.get("cases") or [], v.pop("cases", [])):
             c["verdict"] = cv
+            try:                                               # whose check it is, in one place's words (#306 review)
+                c["governing"] = load_study.governing_words(c)
+            except (KeyError, TypeError, ValueError):          # an older run's odd case: the page names the check alone
+                pass
             if c.get("plate") and not c["plate"].get("done"):      # never an older run's "16 of its 16" (#139)
                 c["plate"]["why"] = load_study.plate_why(c["plate"])
             # each thickness the plate check tried: its number against what it needs, and only where the case is

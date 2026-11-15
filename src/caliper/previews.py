@@ -179,7 +179,7 @@ def _cutplan_page(stage: str, rec: dict, words: str, text: str) -> str:
                    for dp, _, fs in os.walk(stage) for f in fs if f != "preview.html")
     sheets = [f for f in files if "/sheets/" in f and f.endswith(".svg")]
     return (f"<!doctype html><meta charset='utf-8'><title>PREVIEW: cut plan of {e(rec.get('name') or rec['part'])}</title>"
-            f"<style>body{{font-family:system-ui,sans-serif;max-width:960px;margin:24px auto;color:#222}}"
+            f"<style>body{{font-family:system-ui,sans-serif;max-width:960px;margin:24px auto;color:#222;background:#fff}}"
             f"img{{width:100%;background:#fff;border:1px solid #ddd}}</style>"
             f"<p style='background:#fff3cd;border:2px solid #b8860b;padding:8px 12px'><b>PREVIEW, not the part yet: "
             f"{e(words)}.</b> This is its cut plan as it would be once its holes are cut into the part; cut them in to "

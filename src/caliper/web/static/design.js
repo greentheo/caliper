@@ -1902,16 +1902,33 @@ function stepAction(p, run, on) {
       (it's v${p.version}): lighten it again.</div>`;
   }
   const no = run.not_trusted || (!holdsHere(st) ? `It can't be used: ${st.verdict ? st.verdict.word : 'not checked'}` : '');
-  return `<div class="actions"><button class="primary" data-step-adopt="${on}"${no ? ` disabled title="${esc(no)}"` : ''}>Cut step ${on}'s holes into ${esc(p.id)} (makes v${p.version + 1})</button></div>`;
+  return `<div class="actions"><button class="primary" data-step-adopt="${on}"${no ? ` disabled title="${esc(no)}"` : ''}>Cut step ${on}'s holes into ${esc(p.id)} (makes v${p.version + 1})</button></div>${offWhy(no)}`;
+}
+// why a button is greyed, as a line beside it, not only its title: a phone has no hover (#306 review)
+function offWhy(why) {
+  return why ? `<div class="small muted" data-off-why="1">${esc(why)}</div>` : '';
+}
+// a Lighten step picked on this part: its number, else 0. While one is, a sheet row's Ask for waits, so it can't be
+// read as that step's (#297, and the strength panel's rows too: #306 review)
+function pickedStep(p) {
+  return S.station && S.station.part === p.id && (S.design.lighten_runs || []).some((r) => r.id === S.station.run)
+    ? S.station.index : 0;
+}
+function askWait(n) {
+  return n > 0 ? `Step ${n} is picked: this asks for another sheet, not step ${n}'s holes` : '';
 }
 // a case the check can't call: its own why, and the check that made the number named, never "the FEA" where another
 // check governs (#297, Theo's v6: "the FEA read 2.2x, too coarse to see its walls" was the top's plate check)
-function caseWhy(c, run) {
+// ``lead``: its word first ("not checked: …"), where no badge beside it says it already (#306 review: "not checked not checked")
+function caseWhy(c, run, lead = true) {
   const v = c.verdict || {};
-  if (v.why) return `${coarseWord(c)}: ${esc(v.why)}`;
-  const by = c.governs === 'plate' ? 'the plate check' : c.governs === 'buckling' ? 'the buckling check' : '';
-  return by ? `${coarseWord(c)}: ${by} read ${sx(c.safety, run.min_safety)}; what it couldn't see isn't checked`
-    : `${coarseWord(c)}: the FEA read ${sx(c.safety, run.min_safety)}, too coarse to see its walls`;
+  const said = (t) => (lead ? `${coarseWord(c)}: ${t}` : t.charAt(0).toUpperCase() + t.slice(1));
+  if (v.why) return said(esc(v.why));
+  // the server's own words for whose check it is ("the step's plate check", load_study.governing_words: #306 review)
+  const by = c.governs === 'plate' || c.governs === 'buckling'
+    ? c.governing || (c.governs === 'plate' ? 'the plate check' : 'the buckling check') : '';
+  return by ? said(`${esc(by)} read ${sx(c.safety, run.min_safety)}; what it couldn't see isn't checked`)
+    : said(`the FEA read ${sx(c.safety, run.min_safety)}, too coarse to see its walls`);
 }
 // a run the check can't call: why, first, in one line, before the scenarios (#297)
 function runReason(run) {
@@ -3436,7 +3453,8 @@ function lightenView(p) {
         <td style="color:var(--${verdictTone(x.verdict)})">${sx(x.safety, run.min_safety)}</td>
         <td>${x.verdict && x.verdict.kind === 'estimate' ? sheetUse(run, x.label, x.thickness_mm, undefined, undefined,
           { text: `Ask for ${x.label} sheet (redesigns it; checked again after)`,
-            off: on > 0 ? `Step ${on} is picked: this asks for another sheet, not step ${on}'s holes` : '' }) : ''}</td></tr>`).join('')}</table></div>
+            off: askWait(on) }) : ''}</td></tr>`).join('')}</table></div>
+    ${offWhy(run.stations.some((x) => x.verdict && x.verdict.kind === 'estimate') ? askWait(on) : '')}
     ${stepAction(p, run, on)}
     <div class="muted small" style="margin-top:4px">Click a step to see it, then cut its holes in with the button under the table.
       An estimate's <b>Ask for</b> redesigns it in that sheet, and it's checked again after.</div>
@@ -3528,13 +3546,15 @@ function loadCase(p, run, c, i) {
         <td style="color:var(--${verdictTone(b.verdict)})">${sx(b.safety_across, run.min_safety)}</td>
         <td>${sx(b.safety, run.min_safety)}</td><td>${len(b.deflection_mm, 3)}</td>
         <td>${now ? '<span class="muted">now</span>' : holdsHere(b)
-          ? sheetUse(run, b.label, b.thickness_mm, nowLabel, pl.piece) : ''}</td></tr>`; }).join('')}</table></details>`;
+          ? sheetUse(run, b.label, b.thickness_mm, nowLabel, pl.piece,
+            { text: `Ask for ${b.label} sheet (redesigns it; checked again after)`, off: askWait(pickedStep(p)) }) : ''}</td></tr>`; }).join('')}</table>
+      ${offWhy(pl.by_thickness.some((b) => holdsHere(b) && Math.abs(b.thickness_mm - pl.thickness_mm) >= 0.01) ? askWait(pickedStep(p)) : '')}</details>`;
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
       ${c.blind ? `<div class="small" style="margin-top:2px">The check couldn't see any stress here: the piece under the load may be too thin for its voxels, the load's patch may be smaller than the voxels, or the load may go straight into what holds it.</div>`
       : c.unresolved && c.verdict && c.verdict.kind !== 'fails' && (c.verdict.why || (c.governs && c.governs !== 'fea'))
-        ? `<div class="small" style="margin-top:2px">${caseWhy(c, run)} <span class="muted">(it needs ${run.min_safety}x)</span></div>`
+        ? `<div class="small" style="margin-top:2px">${caseWhy(c, run, false)} <span class="muted">(it needs ${run.min_safety}x)</span></div>`
       : c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety, run.min_safety)}
         <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
         ${c.verdict && c.verdict.kind === 'fails' ? 'the fail may be the model\'s' : 'no verdict'} (it needs ${run.min_safety}x)</span></div>`
@@ -4330,8 +4350,10 @@ function stationAction(pid, run, index, st) {
     return `<span class="small" id="staleRun">${lightened ? 'This lightening' : 'This carve'} is of v${run.version}, and the part
       has changed since (it's v${now}): ${lightened ? 'lighten' : 'carve'} it again.</span>`;
   }
-  return `<button class="primary" id="adoptBtn" ${(lightened || carved) && !holdsHere(st) ? `disabled title="${esc(st.verdict ? `It can't be used: ${st.verdict.word}` : '')}"` : ''}>${lightened ? 'Cut these holes in '
-    : carved ? 'Carve it like this: ' : run.kind === 'frame' ? 'Use these sizes for ' : run.kind === 'parametric' ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`;
+  const no = (lightened || carved) && !holdsHere(st) ? `It can't be used: ${st.verdict ? st.verdict.word : 'not checked'}` : '';
+  return `<button class="primary" id="adoptBtn" ${no ? `disabled title="${esc(no)}"` : ''}>${lightened ? 'Cut these holes in '
+    : carved ? 'Carve it like this: ' : run.kind === 'frame' ? 'Use these sizes for ' : run.kind === 'parametric' ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>${no
+    ? `<span class="small muted" id="adoptWhy" data-off-why="1">${esc(no)}</span>` : ''}`;   // said, not only hovered (#306 review)
 }
 // a version of a part, shown in the view where the part is: "v3 (preview)", what was asked of it, and Go back to this (#299)
 async function showVersion(pid, v) {
