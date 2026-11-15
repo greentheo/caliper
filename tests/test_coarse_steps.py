@@ -266,7 +266,7 @@ def test_lighten_on_a_coarse_run_says_not_resolved_not_nothing_holds():
         run = {"id": "r", "part": "a", "notes": [], "stations": [
             {"index": 0, "saved_lb": 0, "safety": 3.0, "verdict": {"kind": kind, "counts_as_pass": False}},
             {"index": 1, "saved_lb": 1.0, "safety": 2.5, "verdict": {"kind": kind, "counts_as_pass": False}}]}
-        return _run(_page(["lightenView", "lightenBlocked", "lightenNone", "lightenChanged", "lightenLeadLine", "stepAction"],
+        return _run(_page(["lightenView", "lightenBlocked", "lightenNone", "lightenChanged", "lightenLeadLine", "stepAction", "offWhy", "askWait"],
                           consts=["esc", "holdsHere"], extra=(                     # the picked step's action, by the table (#297)
             f"const S = {{design: {{lighten_runs: [{_json.dumps(run)}]}}, station: null}};\n"
             "function lightenRuns() { return S.design.lighten_runs; } function defaultCheck() { return null; }\n"

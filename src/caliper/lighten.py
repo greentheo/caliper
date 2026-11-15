@@ -933,6 +933,22 @@ def station_path(store: DesignStore, rid: str, index: int) -> str:
 
 def adopt(store: DesignStore, rid: str, index: int) -> dict:
     """Write a station's holes into the part's script as ``HOLES``: a new revision that cuts them."""
+    pid, script, st = _station_script(store, rid, index)
+    version = store.write_part(pid, script, action="lighten",
+                               feedback=f"lightened: {st['removed']:.0%} out of the walls, {st['holes']} holes, "
+                                        f"{st['saved_lb']} lb lighter, {st['safety']}x",
+                               extra={"lighten_run": rid, "station": int(index)})
+    return {"version": version, "removed": st["removed"], "holes": st["holes"], "saved_lb": st["saved_lb"]}
+
+
+def station_script(store: DesignStore, rid: str, index: int) -> tuple[str, str]:
+    """The part and the script that cutting a station's holes in would write, refusing what :func:`adopt` refuses. A
+    preview of the step's patterns or cut plan is built from it (#297), so what's previewed is what gets cut."""
+    pid, script, _ = _station_script(store, rid, index)
+    return pid, script
+
+
+def _station_script(store: DesignStore, rid: str, index: int) -> tuple[str, str, dict]:
     from . import holes as H
 
     rec = load_run(store, rid)
@@ -967,9 +983,4 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     from . import construction as C
 
     consistency.refuse_holes_outside(C.declared(store, pid).get("construction") or [], holes)   # (#66 item 4)
-    script = H.write(script, keep + holes)
-    version = store.write_part(pid, script, action="lighten",
-                               feedback=f"lightened: {st['removed']:.0%} out of the walls, {st['holes']} holes, "
-                                        f"{st['saved_lb']} lb lighter, {st['safety']}x",
-                               extra={"lighten_run": rid, "station": int(index)})
-    return {"version": version, "removed": st["removed"], "holes": st["holes"], "saved_lb": st["saved_lb"]}
+    return pid, H.write(script, keep + holes), st

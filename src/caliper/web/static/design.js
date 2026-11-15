@@ -1902,16 +1902,33 @@ function stepAction(p, run, on) {
       (it's v${p.version}): lighten it again.</div>`;
   }
   const no = run.not_trusted || (!holdsHere(st) ? `It can't be used: ${st.verdict ? st.verdict.word : 'not checked'}` : '');
-  return `<div class="actions"><button class="primary" data-step-adopt="${on}"${no ? ` disabled title="${esc(no)}"` : ''}>Cut step ${on}'s holes into ${esc(p.id)} (makes v${p.version + 1})</button></div>`;
+  return `<div class="actions"><button class="primary" data-step-adopt="${on}"${no ? ` disabled title="${esc(no)}"` : ''}>Cut step ${on}'s holes into ${esc(p.id)} (makes v${p.version + 1})</button></div>${offWhy(no)}`;
+}
+// why a button is greyed, as a line beside it, not only its title: a phone has no hover (#306 review)
+function offWhy(why) {
+  return why ? `<div class="small muted" data-off-why="1">${esc(why)}</div>` : '';
+}
+// a Lighten step picked on this part: its number, else 0. While one is, a sheet row's Ask for waits, so it can't be
+// read as that step's (#297, and the strength panel's rows too: #306 review)
+function pickedStep(p) {
+  return S.station && S.station.part === p.id && (S.design.lighten_runs || []).some((r) => r.id === S.station.run)
+    ? S.station.index : 0;
+}
+function askWait(n) {
+  return n > 0 ? `Step ${n} is picked: this asks for another sheet, not step ${n}'s holes` : '';
 }
 // a case the check can't call: its own why, and the check that made the number named, never "the FEA" where another
 // check governs (#297, Theo's v6: "the FEA read 2.2x, too coarse to see its walls" was the top's plate check)
-function caseWhy(c, run) {
+// ``lead``: its word first ("not checked: …"), where no badge beside it says it already (#306 review: "not checked not checked")
+function caseWhy(c, run, lead = true) {
   const v = c.verdict || {};
-  if (v.why) return `${coarseWord(c)}: ${esc(v.why)}`;
-  const by = c.governs === 'plate' ? 'the plate check' : c.governs === 'buckling' ? 'the buckling check' : '';
-  return by ? `${coarseWord(c)}: ${by} read ${sx(c.safety, run.min_safety)}; what it couldn't see isn't checked`
-    : `${coarseWord(c)}: the FEA read ${sx(c.safety, run.min_safety)}, too coarse to see its walls`;
+  const said = (t) => (lead ? `${coarseWord(c)}: ${t}` : t.charAt(0).toUpperCase() + t.slice(1));
+  if (v.why) return said(esc(v.why));
+  // the server's own words for whose check it is ("the step's plate check", load_study.governing_words: #306 review)
+  const by = c.governs === 'plate' || c.governs === 'buckling'
+    ? c.governing || (c.governs === 'plate' ? 'the plate check' : 'the buckling check') : '';
+  return by ? said(`${esc(by)} read ${sx(c.safety, run.min_safety)}; what it couldn't see isn't checked`)
+    : said(`the FEA read ${sx(c.safety, run.min_safety)}, too coarse to see its walls`);
 }
 // a run the check can't call: why, first, in one line, before the scenarios (#297)
 function runReason(run) {
@@ -2866,17 +2883,40 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.shopOpen) { S.s
 // all, to measure and mark, to print full size and tape, or to project and trace
 // a lightening step on screen isn't the part until it's cut in (CALI-83: patterns made while previewing one had no
 // holes, and that read as a bug)
-function previewNote(p) {
-  return S.station && S.station.part === p.id && (S.design.lighten_runs || []).some((r) => r.id === S.station.run)
-    ? `<div class="note-warn small">These are of the ${esc(p.name || p.id)} as it is, without the step you're previewing.
-        <b>Cut these holes</b> (in the bar under the 3D view) to make it part of it, then make them again.</div>` : '';
+// a picked Lighten step: these are the part's as it is, and the step's own can be previewed without cutting it in (#297)
+function previewNote(p, what) {
+  const run = S.station && S.station.part === p.id ? (S.design.lighten_runs || []).find((r) => r.id === S.station.run) : null;
+  if (!run) return '';
+  const st = (run.stations || []).find((x) => x.index === S.station.index);
+  const can = what && st && st.index > 0 && !st.estimate && !run.not_trusted;
+  return `<div class="note-warn small">These are of the ${esc(p.name || p.id)} as it is, without the step you're previewing.
+      <b>Cut these holes</b> (in the bar under the 3D view) to make it part of it, then make them again.
+      ${can ? `<div class="actions" style="margin-top:6px"><button data-preview="${what}">Preview step ${st.index}'s ${what === 'cutplan' ? 'cut plan' : 'patterns'}</button></div>
+        <div data-preview-out="${what}"></div>` : ''}</div>`;
+}
+// the step's patterns or cut plan, made in a scratch copy of the design: no version, every file named preview (#297)
+async function previewStep(b) {
+  const st = S.station, what = b.dataset.preview;
+  const out = document.querySelector(`[data-preview-out="${what}"]`);
+  const said = what === 'cutplan' ? 'cut plan' : 'patterns';
+  b.disabled = true;
+  if (out) out.innerHTML = `<div class="small muted">making step ${st.index}'s ${said} in a scratch copy…</div>`;
+  try {
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/lighten/${st.run}/stations/${st.index}/preview`, { what });
+    const got = await follow(job_id, (ev) => { if (out && ev.text && ev.kind !== 'started') out.innerHTML = `<div class="small muted">${esc(ev.text)}</div>`; });
+    if (out) out.innerHTML = `<div class="small" style="margin-top:4px"><a href="${esc(got.url)}" target="_blank" rel="noopener"><b>Open step ${st.index}'s ${said} ↗</b></a>
+      <span class="muted">a preview: not the part's until its holes are cut in</span></div>`;
+  } catch (e) {
+    if (out) out.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`;
+  }
+  b.disabled = false;
 }
 function patternView(p) {
   if (p.not_accounted) return `<div class="small muted">No patterns yet: its pieces don't account for its solid.</div>`;
   const run = (S.design.pattern_runs || []).find((r) => r.part === p.id);
   const url = (name) => `/api/designs/${S.slug}/patterns/${run.id}/${name}`;
   const stale = run && run.version !== p.version;
-  return `<h5 style="margin:14px 0 4px">Patterns for hand tools <span class="badge">jigsaw, saw, drill</span></h5>${previewNote(p)}
+  return `<h5 style="margin:14px 0 4px">Patterns for hand tools <span class="badge">jigsaw, saw, drill</span></h5>${previewNote(p, 'patterns')}
     ${run ? `<div class="small">${stale ? '<span class="badge bad">the part has changed since</span> ' : ''}
         <a href="${url('measure-and-mark.pdf')}" target="_blank" rel="noopener"><b>Measure and mark</b></a>: each piece
         dimensioned from its square edges, on a 1 in grid ·
@@ -2929,7 +2969,7 @@ function cutplanView(p) {
     <div class="muted small">Not here: ${esc(S.design.cutplan_unavailable)}.</div>`;
   const run = (S.design.cutplans || []).find((r) => r.part === p.id);
   const url = (path) => `/api/designs/${S.slug}/cutplans/${run.id}/files/${path}`;
-  const note = previewNote(p);
+  const note = previewNote(p, 'cutplan');
   const sheets = run ? run.sheets.map((g) => {
     const svgs = g.files.filter((f) => f.name.startsWith('sheets/') && f.name.endsWith('.svg')).map((f) => f.name);
     return `<div style="margin-top:10px"><b>${g.sheets} × ${esc(g.stock)}</b>
@@ -2977,6 +3017,7 @@ function cutplanView(p) {
 function wireCutplan(p) {
   wirePatterns(p);
   wireMaking();
+  document.querySelectorAll('[data-preview]').forEach((b) => { b.onclick = () => previewStep(b); });
   const go = $('cpGo');
   if (!go) return;
   go.onclick = async () => {
@@ -3412,7 +3453,8 @@ function lightenView(p) {
         <td style="color:var(--${verdictTone(x.verdict)})">${sx(x.safety, run.min_safety)}</td>
         <td>${x.verdict && x.verdict.kind === 'estimate' ? sheetUse(run, x.label, x.thickness_mm, undefined, undefined,
           { text: `Ask for ${x.label} sheet (redesigns it; checked again after)`,
-            off: on > 0 ? `Step ${on} is picked: this asks for another sheet, not step ${on}'s holes` : '' }) : ''}</td></tr>`).join('')}</table></div>
+            off: askWait(on) }) : ''}</td></tr>`).join('')}</table></div>
+    ${offWhy(run.stations.some((x) => x.verdict && x.verdict.kind === 'estimate') ? askWait(on) : '')}
     ${stepAction(p, run, on)}
     <div class="muted small" style="margin-top:4px">Click a step to see it, then cut its holes in with the button under the table.
       An estimate's <b>Ask for</b> redesigns it in that sheet, and it's checked again after.</div>
@@ -3504,13 +3546,15 @@ function loadCase(p, run, c, i) {
         <td style="color:var(--${verdictTone(b.verdict)})">${sx(b.safety_across, run.min_safety)}</td>
         <td>${sx(b.safety, run.min_safety)}</td><td>${len(b.deflection_mm, 3)}</td>
         <td>${now ? '<span class="muted">now</span>' : holdsHere(b)
-          ? sheetUse(run, b.label, b.thickness_mm, nowLabel, pl.piece) : ''}</td></tr>`; }).join('')}</table></details>`;
+          ? sheetUse(run, b.label, b.thickness_mm, nowLabel, pl.piece,
+            { text: `Ask for ${b.label} sheet (redesigns it; checked again after)`, off: askWait(pickedStep(p)) }) : ''}</td></tr>`; }).join('')}</table>
+      ${offWhy(pl.by_thickness.some((b) => holdsHere(b) && Math.abs(b.thickness_mm - pl.thickness_mm) >= 0.01) ? askWait(pickedStep(p)) : '')}</details>`;
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
       ${c.blind ? `<div class="small" style="margin-top:2px">The check couldn't see any stress here: the piece under the load may be too thin for its voxels, the load's patch may be smaller than the voxels, or the load may go straight into what holds it.</div>`
       : c.unresolved && c.verdict && c.verdict.kind !== 'fails' && (c.verdict.why || (c.governs && c.governs !== 'fea'))
-        ? `<div class="small" style="margin-top:2px">${caseWhy(c, run)} <span class="muted">(it needs ${run.min_safety}x)</span></div>`
+        ? `<div class="small" style="margin-top:2px">${caseWhy(c, run, false)} <span class="muted">(it needs ${run.min_safety}x)</span></div>`
       : c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety, run.min_safety)}
         <span class="muted">at voxels of ${wallLen(run.spacing_mm)}, too coarse to see its ${wallLen(run.thinnest_mm)} walls:
         ${c.verdict && c.verdict.kind === 'fails' ? 'the fail may be the model\'s' : 'no verdict'} (it needs ${run.min_safety}x)</span></div>`
@@ -4306,8 +4350,10 @@ function stationAction(pid, run, index, st) {
     return `<span class="small" id="staleRun">${lightened ? 'This lightening' : 'This carve'} is of v${run.version}, and the part
       has changed since (it's v${now}): ${lightened ? 'lighten' : 'carve'} it again.</span>`;
   }
-  return `<button class="primary" id="adoptBtn" ${(lightened || carved) && !holdsHere(st) ? `disabled title="${esc(st.verdict ? `It can't be used: ${st.verdict.word}` : '')}"` : ''}>${lightened ? 'Cut these holes in '
-    : carved ? 'Carve it like this: ' : run.kind === 'frame' ? 'Use these sizes for ' : run.kind === 'parametric' ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>`;
+  const no = (lightened || carved) && !holdsHere(st) ? `It can't be used: ${st.verdict ? st.verdict.word : 'not checked'}` : '';
+  return `<button class="primary" id="adoptBtn" ${no ? `disabled title="${esc(no)}"` : ''}>${lightened ? 'Cut these holes in '
+    : carved ? 'Carve it like this: ' : run.kind === 'frame' ? 'Use these sizes for ' : run.kind === 'parametric' ? 'Use these numbers for ' : 'Bring this back as '}${esc(pid)}</button>${no
+    ? `<span class="small muted" id="adoptWhy" data-off-why="1">${esc(no)}</span>` : ''}`;   // said, not only hovered (#306 review)
 }
 // a version of a part, shown in the view where the part is: "v3 (preview)", what was asked of it, and Go back to this (#299)
 async function showVersion(pid, v) {
