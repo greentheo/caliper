@@ -22,7 +22,7 @@ from typing import Optional, Union
 
 from pydantic import BaseModel, field_validator
 
-from . import (aero, mirror, better, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
+from . import (aero, mirror, better, previews, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
                lighten,
                load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, trash, tree,
                verdicts)
@@ -104,7 +104,7 @@ def _refuse_while_busy(slug: str, parts: list) -> None:
 #: What a job is doing to a part, said when a delete has to wait for it (CALI-183).
 DOING = {"load": "checked", "lighten": "lightened", "carve": "carved", "release": "packaged", "firstrun": "built",
          "chat": "revised", "whittle": "whittled", "aero": "shaped for drag", "frame": "sized", "gussets": "given gussets",
-         "picture": "given a picture", "cutplan": "planned for cutting"}
+         "picture": "given a picture", "cutplan": "planned for cutting", "preview": "previewed"}
 
 
 class LabelSet(BaseModel):
@@ -170,6 +170,10 @@ class WhittleRequest(BaseModel):
 
 class Adopt(BaseModel):
     station: int
+
+
+class PreviewStep(BaseModel):
+    what: str                                  # "patterns" or "cutplan" (#297)
 
 
 class AeroRequest(BaseModel):
@@ -1329,6 +1333,43 @@ def router():
             store.append_log({"kind": "lighten", "action": "adopted", "run": rid, "station": req.station,
                               "version": got["version"]})
             return {**got, "design": design_state(store)}
+
+    # -- a Lighten step's patterns or cut plan, before its holes are cut in (#297 part 2) -----------------------
+    @r.post("/api/designs/{slug}/lighten/{rid}/stations/{index}/preview")
+    def lighten_preview(slug: str, rid: str, index: int, req: PreviewStep):
+        store = load(slug)
+        try:                                     # what cutting it in would refuse, said now, before any job
+            pid, _ = previews.station(store, rid, index, req.what)
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except carve.Stale as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        if req.what == "cutplan" and cutplan.available():
+            raise HTTPException(status_code=503, detail=cutplan.available())
+
+        def work(j):
+            rec = previews.make(DesignStore.load(slug), rid, index, req.what, emit=lambda k, t="", **d: j.emit(k, t, **d))
+            return {"url": previews.url(slug, rid, index, req.what, rec["index"]), "cached": bool(rec.get("cached")),
+                    "preview": rec["preview"]}
+
+        job = RUNNER.submit("preview", work, label=f"preview · step {index} of {pid}", lock=_lock(slug),
+                            meta=_on_part(slug, pid))
+        return {"job_id": job.id}
+
+    @r.get("/api/designs/{slug}/previews/{rid}/{index}/{what}/{path:path}")
+    def preview_file(slug: str, rid: str, index: int, what: str, path: str):
+        store = load(slug)
+        try:
+            full = previews.file_path(store, rid, index, what, path)
+        except (ValueError, FileNotFoundError):
+            raise HTTPException(status_code=404, detail="no such file")
+        types = {".html": "text/html", ".svg": "image/svg+xml", ".png": "image/png", ".pdf": "application/pdf",
+                 ".dxf": "application/dxf", ".txt": "text/plain; charset=utf-8", ".obj": "text/plain",
+                 ".json": "application/json"}
+        with open(full, "rb") as f:
+            return Response(f.read(), media_type=types.get(os.path.splitext(full)[1], "application/octet-stream"))
 
     @r.get("/api/designs/{slug}/load-study/{rid}/cases/{index}.json")
     def load_heat(slug: str, rid: str, index: int):

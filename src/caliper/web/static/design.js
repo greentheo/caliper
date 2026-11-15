@@ -2825,17 +2825,40 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.shopOpen) { S.s
 // all, to measure and mark, to print full size and tape, or to project and trace
 // a lightening step on screen isn't the part until it's cut in (CALI-83: patterns made while previewing one had no
 // holes, and that read as a bug)
-function previewNote(p) {
-  return S.station && S.station.part === p.id && (S.design.lighten_runs || []).some((r) => r.id === S.station.run)
-    ? `<div class="note-warn small">These are of the ${esc(p.name || p.id)} as it is, without the step you're previewing.
-        <b>Cut these holes</b> (in the bar under the 3D view) to make it part of it, then make them again.</div>` : '';
+// a picked Lighten step: these are the part's as it is, and the step's own can be previewed without cutting it in (#297)
+function previewNote(p, what) {
+  const run = S.station && S.station.part === p.id ? (S.design.lighten_runs || []).find((r) => r.id === S.station.run) : null;
+  if (!run) return '';
+  const st = (run.stations || []).find((x) => x.index === S.station.index);
+  const can = what && st && st.index > 0 && !st.estimate && !run.not_trusted;
+  return `<div class="note-warn small">These are of the ${esc(p.name || p.id)} as it is, without the step you're previewing.
+      <b>Cut these holes</b> (in the bar under the 3D view) to make it part of it, then make them again.
+      ${can ? `<div class="actions" style="margin-top:6px"><button data-preview="${what}">Preview step ${st.index}'s ${what === 'cutplan' ? 'cut plan' : 'patterns'}</button></div>
+        <div data-preview-out="${what}"></div>` : ''}</div>`;
+}
+// the step's patterns or cut plan, made in a scratch copy of the design: no version, every file named preview (#297)
+async function previewStep(b) {
+  const st = S.station, what = b.dataset.preview;
+  const out = document.querySelector(`[data-preview-out="${what}"]`);
+  const said = what === 'cutplan' ? 'cut plan' : 'patterns';
+  b.disabled = true;
+  if (out) out.innerHTML = `<div class="small muted">making step ${st.index}'s ${said} in a scratch copy…</div>`;
+  try {
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/lighten/${st.run}/stations/${st.index}/preview`, { what });
+    const got = await follow(job_id, (ev) => { if (out && ev.text && ev.kind !== 'started') out.innerHTML = `<div class="small muted">${esc(ev.text)}</div>`; });
+    if (out) out.innerHTML = `<div class="small" style="margin-top:4px"><a href="${esc(got.url)}" target="_blank" rel="noopener"><b>Open step ${st.index}'s ${said} ↗</b></a>
+      <span class="muted">a preview: not the part's until its holes are cut in</span></div>`;
+  } catch (e) {
+    if (out) out.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`;
+  }
+  b.disabled = false;
 }
 function patternView(p) {
   if (p.not_accounted) return `<div class="small muted">No patterns yet: its pieces don't account for its solid.</div>`;
   const run = (S.design.pattern_runs || []).find((r) => r.part === p.id);
   const url = (name) => `/api/designs/${S.slug}/patterns/${run.id}/${name}`;
   const stale = run && run.version !== p.version;
-  return `<h5 style="margin:14px 0 4px">Patterns for hand tools <span class="badge">jigsaw, saw, drill</span></h5>${previewNote(p)}
+  return `<h5 style="margin:14px 0 4px">Patterns for hand tools <span class="badge">jigsaw, saw, drill</span></h5>${previewNote(p, 'patterns')}
     ${run ? `<div class="small">${stale ? '<span class="badge bad">the part has changed since</span> ' : ''}
         <a href="${url('measure-and-mark.pdf')}" target="_blank" rel="noopener"><b>Measure and mark</b></a>: each piece
         dimensioned from its square edges, on a 1 in grid ·
@@ -2888,7 +2911,7 @@ function cutplanView(p) {
     <div class="muted small">Not here: ${esc(S.design.cutplan_unavailable)}.</div>`;
   const run = (S.design.cutplans || []).find((r) => r.part === p.id);
   const url = (path) => `/api/designs/${S.slug}/cutplans/${run.id}/files/${path}`;
-  const note = previewNote(p);
+  const note = previewNote(p, 'cutplan');
   const sheets = run ? run.sheets.map((g) => {
     const svgs = g.files.filter((f) => f.name.startsWith('sheets/') && f.name.endsWith('.svg')).map((f) => f.name);
     return `<div style="margin-top:10px"><b>${g.sheets} × ${esc(g.stock)}</b>
@@ -2936,6 +2959,7 @@ function cutplanView(p) {
 function wireCutplan(p) {
   wirePatterns(p);
   wireMaking();
+  document.querySelectorAll('[data-preview]').forEach((b) => { b.onclick = () => previewStep(b); });
   const go = $('cpGo');
   if (!go) return;
   go.onclick = async () => {

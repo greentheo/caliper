@@ -306,12 +306,17 @@ def _draw_marks(dr, pc: dict, X, Y, font=None, labels: bool = True):
             _crosshair(dr, X(x), Y(y))
 
 
+#: What a preview's every page says first (#297): a step's patterns or cut plan, before its holes are cut in.
+PREVIEW = "PREVIEW, not the part yet"
+
+
 def titles(pc: dict, cols: int = 1, rows: int = 1, r: int = 0, c: int = 0) -> dict:
     """The words across the top of a piece's pages, in characters the pages' font has: no dashes beyond ASCII
     (CALI-86: an em dash printed as a box)."""
-    return {"measure": f"{pc['name']}: {pc['label']} ({pc['seen']})",
-            "full": f"{pc['name']}: {pc['label']}, full size on {cols * rows} page(s) ({pc['seen']})",
-            "tile": f"{pc['name']} ({pc['seen']}), page {chr(65 + r)}{c + 1} ({r * cols + c + 1} of {rows * cols})"}
+    said = f"{PREVIEW}: {pc['preview']}. " if pc.get("preview") else ""   # a step's, not the part's yet (#297)
+    return {"measure": f"{said}{pc['name']}: {pc['label']} ({pc['seen']})",
+            "full": f"{said}{pc['name']}: {pc['label']}, full size on {cols * rows} page(s) ({pc['seen']})",
+            "tile": f"{said}{pc['name']} ({pc['seen']}), page {chr(65 + r)}{c + 1} ({r * cols + c + 1} of {rows * cols})"}
 
 
 def _facing(m) -> str:
@@ -586,6 +591,7 @@ def project_svg(pc: dict) -> str:
             f'<text x="{cx:.2f}" y="{h - pad - cal - 4:.2f}" fill="#ffd166" font-size="7" font-family="sans-serif">'
             f'zoom until this is {CALIBRATE_IN:g} in square</text>'
             f'<text x="{pad:.2f}" y="{0.5 * IN:.2f}" fill="white" font-size="9" font-family="sans-serif">'
+            + (f'{PREVIEW}: {html.escape(pc["preview"])}. ' if pc.get("preview") else "") +
             f'{html.escape(pc["name"])}: {html.escape(pc["label"])}, {html.escape(pc["seen"])}. Line the board\'s corner up with the bottom-left '
             f'corner, then trace: the solid lines. Dashed lines are the other face\'s, or a groove.</text>' + lines + '</svg>')
 
@@ -636,8 +642,11 @@ def runs_dir(store: DesignStore) -> str:
     return os.path.join(store.root, "patterns")
 
 
-def make(store: DesignStore, part_id: str, out_dir: Optional[str] = None) -> dict:
-    """Every flat sheet piece of a part, three ways. Returns the record (its files relative to its folder)."""
+def make(store: DesignStore, part_id: str, out_dir: Optional[str] = None, stamp: Optional[str] = None) -> dict:
+    """Every flat sheet piece of a part, three ways. Returns the record (its files relative to its folder).
+
+    ``stamp``: a preview's (#297), e.g. "step 16 of lightening r1": every page says it isn't the part yet, and every
+    file is named ``preview-…``."""
     from . import consistency
 
     if consistency.not_accounted(store, part_id):      # (CALI-155)
@@ -648,15 +657,18 @@ def make(store: DesignStore, part_id: str, out_dir: Optional[str] = None) -> dic
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     root = out_dir or os.path.join(runs_dir(store), rid)
     os.makedirs(root, exist_ok=True)
+    pre = "preview-" if stamp else ""
     measure, full, files, listed = [], [], [], []
     for pc in pcs:
+        if stamp:
+            pc["preview"] = stamp
         page = measure_page(pc)
         measure.append(page)
-        thumb = f"{_slug(pc['name'])}.png"
+        thumb = f"{pre}{_slug(pc['name'])}.png"
         page.resize((page.width // 3, page.height // 3)).save(os.path.join(root, thumb))
         pages, (cols, rows), _ = tiles(pc)
         full += pages
-        svg = f"project-{_slug(pc['name'])}.svg"
+        svg = f"{pre}project-{_slug(pc['name'])}.svg"
         with open(os.path.join(root, svg), "w") as f:
             f.write(project_svg(pc))
         listed.append({"name": pc["name"], "label": pc["label"], "size_in": [round(v / IN, 3) for v in pc["size"]],
@@ -665,15 +677,16 @@ def make(store: DesignStore, part_id: str, out_dir: Optional[str] = None) -> dic
                        "cuts": [c["kind"] for c in pc.get("cuts") or []],
                        "screws": sum(len(s["at"]) for s in pc.get("screws") or [])})
         files += [thumb, svg]
-    measure[0].save(os.path.join(root, "measure-and-mark.pdf"), save_all=True, append_images=measure[1:],
+    measure[0].save(os.path.join(root, f"{pre}measure-and-mark.pdf"), save_all=True, append_images=measure[1:],
                     resolution=DPI)
-    full[0].save(os.path.join(root, "print-full-size.pdf"), save_all=True, append_images=full[1:], resolution=DPI)
-    files += ["measure-and-mark.pdf", "print-full-size.pdf", "index.html"]
+    full[0].save(os.path.join(root, f"{pre}print-full-size.pdf"), save_all=True, append_images=full[1:], resolution=DPI)
+    index = f"{pre}index.html"
+    files += [f"{pre}measure-and-mark.pdf", f"{pre}print-full-size.pdf", index]
     rec = {"id": rid, "part": part_id, "version": store.design.part(part_id).version, "created": time.time(),
-           "pieces": listed, "pages": len(full), "files": files}
-    with open(os.path.join(root, "index.html"), "w") as f:
-        f.write(index_html(store.design.name, store.design.part(part_id).label or part_id, listed, len(full)))
-    with open(os.path.join(root, "run.json"), "w") as f:
+           "pieces": listed, "pages": len(full), "files": files, "index": index}
+    with open(os.path.join(root, index), "w") as f:
+        f.write(index_html(store.design.name, store.design.part(part_id).label or part_id, listed, len(full), stamp))
+    with open(os.path.join(root, f"{pre}run.json"), "w") as f:
         json.dump(rec, f, indent=2)
     if out_dir is None:
         store.append_history(part_id, {"kind": "patterns", "action": "made", "run": rid, "pieces": len(listed)})
@@ -681,18 +694,22 @@ def make(store: DesignStore, part_id: str, out_dir: Optional[str] = None) -> dic
     return rec
 
 
-def index_html(design: str, part_id: str, listed: list[dict], pages: int) -> str:
+def index_html(design: str, part_id: str, listed: list[dict], pages: int, stamp: Optional[str] = None) -> str:
     e = html.escape
+    pre = "preview-" if stamp else ""
     rows = "".join(f"<tr><td><img src='{e(p['thumb'])}' width='220'></td><td><b>{e(p['name'])}</b><br>{e(p['label'])}"
                    f"<br>{p['size_in'][0]:g} × {p['size_in'][1]:g} in · {p['holes']} hole(s) · {p['pages']} page(s) full size"
                    + "".join(f" · {e(x)}" for x in _marks_said(p))
                    + f"<br><a href='{e(p['project'])}'>project and trace</a></td></tr>" for p in listed)
-    return (f"<!doctype html><meta charset='utf-8'><title>Patterns: {e(part_id)}</title>"
+    return (f"<!doctype html><meta charset='utf-8'><title>{'PREVIEW: ' if stamp else ''}Patterns: {e(part_id)}</title>"
             f"<style>body{{font-family:system-ui,sans-serif;max-width:860px;margin:24px auto;color:#222}}"
             f"td{{padding:8px;vertical-align:top;border-bottom:1px solid #ddd}}</style>"
+            + (f"<p style='background:#fff3cd;border:2px solid #b8860b;padding:8px 12px'><b>{PREVIEW}: {e(stamp)}.</b> "
+               f"These are its patterns as they'd be once its holes are cut into the part; cut them in to make them the "
+               f"part's.</p>" if stamp else "") +
             f"<h1>{e(design)}: {e(part_id)}, for hand tools</h1>"
-            f"<p><a href='measure-and-mark.pdf'><b>Measure and mark</b></a>: one page a piece, dimensioned from "
-            f"its square edges, on a 1 in grid.<br><a href='print-full-size.pdf'><b>Print and tape</b></a>: full size, "
+            f"<p><a href='{pre}measure-and-mark.pdf'><b>Measure and mark</b></a>: one page a piece, dimensioned from "
+            f"its square edges, on a 1 in grid.<br><a href='{pre}print-full-size.pdf'><b>Print and tape</b></a>: full size, "
             f"{pages} letter pages; print at 100% and check the ruler.<br><b>Project and trace</b>: open a piece's "
             f"pattern full screen on a projector, zoom until the yellow square is 4 in, and trace.</p>"
             f"<table>{rows}</table>")

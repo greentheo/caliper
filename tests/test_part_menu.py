@@ -351,7 +351,7 @@ def test_lighten_and_carve_aren_t_offered_on_a_mirror():
 # --- #302 review: every part job says its part; a design-wide job refuses in words; one rule for a mirror ---------------
 PART_JOBS = {"load": "checked", "lighten": "lightened", "carve": "carved", "whittle": "whittled", "frame": "sized",
              "gussets": "given gussets", "aero": "shaped for drag", "picture": "given a picture",
-             "cutplan": "planned for cutting"}
+             "cutplan": "planned for cutting", "preview": "previewed"}         # a step's preview copies the part (#297)
 
 
 def test_every_part_job_is_submitted_saying_its_part():
