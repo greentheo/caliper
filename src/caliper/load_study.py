@@ -1634,8 +1634,17 @@ def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
     ``{"why": "already_fails" | "too_thin" | "unsupported" | "unchecked", "carve": words, "lighten": words or ""}``, or
     None. ``unchecked``: no strength check of this version (#144, on Theo's own stool, whose v7 has none): the card
     offered Carve and the button was live until the carve's own resolution check refused the click."""
+    from . import mirror
     from .studies import made_of
 
+    try:
+        src = mirror.source_of(store, part_id)
+    except Exception:  # noqa: BLE001 — a store it can't read a script from: not a mirror it can name
+        src = None
+    if src:                                      # a mirror: its source's to change, in one place for all (#302 review)
+        said = f"It mirrors {src}: change {src} and it follows, or break the mirror first"
+        # its check's own why kept: unchecked still offers Check it holds, a fail still says why (#302 re-check)
+        return {**(_blocked(store, part_id) or {"why": "mirror"}), "mirror": src, "lighten": said, "carve": said}
     got = _blocked(store, part_id)
     study = made_of(store, part_id)["study"]     # Lighten or Carve, never both, by where its volume is (#272)
     if study == "lighten":
