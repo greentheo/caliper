@@ -56,9 +56,11 @@ def test_plain_roll_backs_walk_back_and_never_redo_what_was_undone(stool):
     first = chat.revert_part(stool, "step_stool")                 # undo v7: back to v6, which is v4's
     assert first.reply.startswith("↩ rolled **step_stool** back to v6 (saved as v8)") and _dx(stool) == 400
     second = chat.revert_part(stool, "step_stool")                # undo v8 = v6 = v4: what was before v4, never v5
-    assert second.reply.startswith("↩ rolled **step_stool** back to v3 (saved as v9)") and _dx(stool) == 300
-    third = chat.revert_part(stool, "step_stool")
-    assert third.reply.startswith("↩ rolled **step_stool** back to v2") and _dx(stool) == 200
+    assert second.reply.startswith("↩ rolled **step_stool** back to v3, the one before v4 (saved as v9). To go back to "
+                                   "where you were, say \"go back to v7\".") and _dx(stool) == 300
+    third_said = chat.revert_part(stool, "step_stool").reply        # two restores in a row: still where they were, v7
+    assert "back to v2, the one before v3 (saved as v10). To go back to where you were, say \"go back to v7\"." in third_said
+    assert _dx(stool) == 200
 
 
 def test_after_v6_a_plain_roll_back_goes_to_v3(tmp_path):
@@ -68,7 +70,7 @@ def test_after_v6_a_plain_roll_back_goes_to_v3(tmp_path):
         s.write_part("step_stool", _box(dx=dx), intent="the stool")
     s.restore("step_stool", 4)
     got = chat.revert_part(s, "step_stool")
-    assert "back to v3 (saved as v7)" in got.reply and _dx(s) == 300
+    assert "back to v3, the one before v4 (saved as v7)" in got.reply and _dx(s) == 300
 
 
 def test_the_first_version_has_nothing_before_it(tmp_path):
@@ -189,3 +191,84 @@ console.log(JSON.stringify(versionsHtml(p)));
     menu = _fn(src, "menuDo")
     assert "if (id === 'versions') return menuConfirm(versionsHtml(" in menu
     assert "if (id.startsWith('ver:')) { setScope(pid); return showVersion(pid, Number(id.slice(4))); }" in menu
+
+
+
+# --- #305 review -----------------------------------------------------------------------------------------------------------
+def _ordinary(seen):
+    def classify(store, message, scope):
+        seen.append(message)
+        return chat.Intent(action="answer", part=scope, note="went the ordinary way")
+    return classify
+
+
+@pytest.mark.parametrize("words", ["don't go back to v3, make it 2 in taller", "I don't want to roll it back to v3",
+                                   "restore v3's width but keep the new height",
+                                   "make it taller, and if that fails, go back to v3",
+                                   "remove v3", "roll it back to v3?", "restore the 2 rails", "go back to 12"])
+def test_a_version_restore_is_read_by_its_words_only_as_the_whole_message(stool, words):
+    seen = []
+    got = chat.turn(stool, words, scope="step_stool", use_llm=False, classifier=_ordinary(seen))
+    assert got.action != "revert" and seen == [words], (got.action, got.reply)
+    assert stool.versions("step_stool")[-1] == 7 and _dx(stool) == 700                 # nothing restored
+
+
+@pytest.mark.parametrize("words", ["back to 3", "go back to 3", "go back to v3 please"])
+def test_a_bare_number_is_a_version_only_as_the_whole_message_and_where_it_is(stool, words):
+    got = chat.turn(stool, words, scope="step_stool", use_llm=True, client=_NoModel(), classifier=_never)
+    assert got.action == "revert" and _dx(stool) == 300, got.reply
+
+
+def test_a_part_named_in_the_words_beats_the_selected_one(stool):
+    stool.write_part("inside_corner_fillets", _box(dx=11, y=50), intent="strips")
+    stool.write_part("inside_corner_fillets", _box(dx=22, y=50), intent="strips")
+    stool.write_part("inside_corner_fillets", _box(dx=33, y=50), intent="strips")
+    got = chat.turn(stool, "go back to v1 of the inside corner fillets", scope="step_stool", use_llm=True,
+                    client=_NoModel(), classifier=_never)
+    assert got.part == "inside_corner_fillets" and "box(11," in stool.read_script("inside_corner_fillets"), got.reply
+    assert _dx(stool) == 700                                                             # the stool untouched
+
+
+def test_a_restore_whose_line_is_missing_is_still_one(stool):
+    """Its script is an earlier version's: read as its restore, so the walk still never lands on v5."""
+    path = stool.history_path("step_stool")
+    lines = [ln for ln in open(path) if '"restored_from"' not in ln]
+    open(path, "w").writelines(lines)
+    chat.revert_part(stool, "step_stool")                         # v7 -> v6 (v8)
+    chat.revert_part(stool, "step_stool")                         # v8 = v6 = v4 -> v3, never v5
+    assert _dx(stool) == 300
+
+
+def test_a_plain_roll_back_after_going_back_says_where_it_went_and_how_to_return(stool):
+    """The foreman's call: it steps back along the lineage, not "undo my last action"; the reply says so."""
+    chat.revert_part(stool, "step_stool", to=3)                   # v8 = v3
+    got = chat.revert_part(stool, "step_stool")
+    assert got.reply.startswith("↩ rolled **step_stool** back to v2, the one before v3 (saved as v9). To go back to where "
+                                "you were, say \"go back to v7\".") and _dx(stool) == 200
+
+
+def test_versions_scrolls_in_a_short_window():
+    css = open(JS.replace("design.js", "design.css")).read()
+    rule = css[css.index(".pmenu {"):css.index("}", css.index(".pmenu {"))]
+    assert "max-height: calc(100vh - 16px)" in rule and "overflow-y: auto" in rule
+
+
+
+def test_words_that_name_a_part_and_words_that_don_t_go_the_ordinary_way(stool):
+    stool.write_part("inside_corner_fillets", _box(dx=11, y=50), intent="strips")
+    stool.write_part("inside_corner_fillets", _box(dx=22, y=50), intent="strips")
+    seen = []
+    words = "roll the inside corner fillets back to v1 for the shelf"
+    got = chat.turn(stool, words, scope="step_stool", use_llm=False, classifier=_ordinary(seen))
+    assert got.action != "revert" and seen == [words] and "box(22," in stool.read_script("inside_corner_fillets")
+
+
+
+def test_a_refine_that_wrote_an_earlier_script_again_is_still_a_refine(tmp_path):
+    """Its history line says what it is: the same script written by a revise isn't read as a restore (test_promote's)."""
+    s = DesignStore.create("s", base=str(tmp_path / "designs"))
+    s.write_part("p", _box(dx=100), intent="a box")
+    s.write_part("p", _box(dx=200), intent="a box")
+    s.write_part("p", _box(dx=100), intent="a box")                 # v3: v1's script, written by a revise
+    got = chat.revert_part(s, "p")
+    assert got.ok and "back to v2 (saved as v4)" in got.reply, got.reply
