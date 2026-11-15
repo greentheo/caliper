@@ -24,8 +24,10 @@ from typing import Optional
 
 from .design import DesignStore
 
-#: a carve takes at least this many of its default check's time (#102)
-CARVE_PER_CHECK = 45
+#: a carve takes at least this many of its default check's time (#102). Measured under whittle's multigrid (#298 slice 0):
+#: 51x on the printed box (197 s against 3.9 s), 75x on the v5 printed stool (1,005 s against 13.4 s); its sweep is
+#: 90-98% of it, so the ratio rose as the check got faster
+CARVE_PER_CHECK = 50
 
 
 def _minutes(m: float) -> str:
