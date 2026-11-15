@@ -341,7 +341,8 @@ def test_lighten_and_carve_aren_t_offered_on_a_mirror():
 
     said = "It mirrors side_right: change side_right and it follows, or break the mirror first"
     p = {"id": "side_left", "scripted": True, "built": True, "loads": True, "study": "lighten", "sheets": True,
-         "printed": True, "mirror_of": "side_right", "blocked": {"why": "mirror", "lighten": said, "carve": said}}
+         "printed": True, "mirror_of": "side_right",
+         "blocked": {"why": "unchecked", "mirror": "side_right", "lighten": said, "carve": said}}
     got = {m["kind"]: m for m in studies.menu(p)}                     # from blocked(), the one rule (#302 review)
     assert not got["lighten"]["ready"] and got["lighten"]["why"] == said
     assert got["load"]["ready"]
@@ -446,7 +447,7 @@ def test_a_mirror_s_lighten_and_carve_are_refused_in_one_place_for_menu_card_and
     mirror.make(s, "side_left", "side_right")
     said = "It mirrors side_right: change side_right and it follows, or break the mirror first"
     b = load_study.blocked(s, "side_left")
-    assert b["why"] == "mirror" and b["lighten"] == said and b["carve"] == said
+    assert b["mirror"] == "side_right" and b["lighten"] == said and b["carve"] == said
     st = design_api.design_state(DesignStore.load(s.root))
     p = next(x for x in st["parts"] if x["id"] == "side_left")
     assert p["blocked"]["lighten"] == said                                             # what the panel's button reads
@@ -533,3 +534,24 @@ def test_the_menu_key_works_from_an_empty_chat_box_and_focus_goes_back():
 
     assert "menuBack(m)" in _fn(src, "closeMenu") and "menuBack({ ...m, from: null })" in _fn(src, "deletePart")
     assert "closeMenu(false); }, true);" in src                                        # a click elsewhere keeps its own focus
+
+
+
+# --- #302 re-check: a mirror keeps its check's own why -------------------------------------------------------------------
+@pytest.mark.parametrize("why", ["unchecked", "already_fails"])
+def test_a_mirror_keeps_its_check_s_why(site, monkeypatch, why):
+    """An unchecked mirror's card still offers Check it holds, as its menu does; a failing one still says why."""
+    from caliper import better, load_study, mirror
+
+    _, slug, s = site
+    monkeypatch.setattr(mirror, "source_of", lambda store, pid: "side_right" if pid == "side_left" else None)
+    monkeypatch.setattr(load_study, "_blocked", lambda store, pid: {"why": why, "carve": "it fails as it is",
+                                                                     "lighten": "it fails as it is"})
+    b = load_study.blocked(s, "side_left")
+    assert b["why"] == why and b["mirror"] == "side_right"
+    assert b["lighten"] == "It mirrors side_right: change side_right and it follows, or break the mirror first"
+    if why == "unchecked":
+        p = {"id": "side_left", "loads": True, "built": True, "role": "part", "blocked": b}
+        monkeypatch.setattr(load_study, "default_check", lambda store, pid: None)
+        got = better.offers(s, {"parts": [p]}, "side_left")
+        assert [ln.get("action") for ln in got] == ["load"], got                      # Check it holds, as the menu has it

@@ -1552,7 +1552,8 @@ def blocked(store: DesignStore, part_id: str) -> Optional[dict]:
         src = None
     if src:                                      # a mirror: its source's to change, in one place for all (#302 review)
         said = f"It mirrors {src}: change {src} and it follows, or break the mirror first"
-        return {**(_blocked(store, part_id) or {}), "why": "mirror", "lighten": said, "carve": said}
+        # its check's own why kept: unchecked still offers Check it holds, a fail still says why (#302 re-check)
+        return {**(_blocked(store, part_id) or {"why": "mirror"}), "mirror": src, "lighten": said, "carve": said}
     got = _blocked(store, part_id)
     study = made_of(store, part_id)["study"]     # Lighten or Carve, never both, by where its volume is (#272)
     if study == "lighten":
