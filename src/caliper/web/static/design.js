@@ -3208,7 +3208,17 @@ function pickFromDir(d) {
   const heading = ((Math.atan2(u[0], -u[1]) * 180 / Math.PI) + 360) % 360;
   return { kind: 'angle', deg: Math.round(deg * 10) / 10, heading: Math.round(heading * 10) / 10 };
 }
-const xyz = (v) => (v || []).map((x) => Math.round(Number(x) * 10) / 10).join(', ');
+const xyz = (v) => (v || []).map((x) => Math.round(Number(x) * 1000) / 1000).join(', ');
+// a field left as it was shown keeps its exact value, never the shown rounding (a standard's case put back read edited)
+function keptXyz(was, text) {
+  if (was && text.trim() === xyz(was)) return was;
+  return String(text).split(',').map((v) => Number(v.trim()));
+}
+function keptDir(was, kind, deg, heading) {
+  const shown = pickFromDir(was || [0, 0, -1]);
+  if (was && kind === shown.kind && (kind !== 'angle' || (Number(deg) === shown.deg && Number(heading) === shown.heading))) return was;
+  return dirFromPick(kind, deg, heading);
+}
 function scenarioRow(sc, i) {
   const d = pickFromDir(sc.direction || [0, 0, -1]);
   const std = sc.standard ? `<div class="small muted">a standard's case: ${esc(sc.standard.name)}
@@ -3256,17 +3266,19 @@ function scenariosBox(p) {
 }
 // the rows as they stand in the page, back into scenarios and supports
 function readScenarios(got) {
-  const num3 = (s) => String(s).split(',').map((v) => Number(v.trim()));
   const scen = [...document.querySelectorAll('#scenBody .scen')].map((el) => {
     const f = (k) => el.querySelector(`[data-f="${k}"]`);
     const i = +el.dataset.scen, was = got.scenarios[i] || {};
     return { ...was, name: was.standard ? was.name : f('name').value.trim(), amount: Number(f('amount').value), unit: f('unit').value,
-      direction: dirFromPick(f('dir').value, f('deg').value, f('heading').value), factor: Number(f('factor').value),
-      lo: num3(f('lo').value), hi: num3(f('hi').value), on: f('on').checked };
+      direction: keptDir(was.direction, f('dir').value, f('deg').value, f('heading').value), factor: Number(f('factor').value),
+      lo: keptXyz(was.lo, f('lo').value), hi: keptXyz(was.hi, f('hi').value), on: f('on').checked };
   });
-  const sup = [...document.querySelectorAll('#scenBody [data-sup]')].map((el) => (el.dataset.floor ? { name: 'the floor', floor: true }
-    : { name: el.querySelector('[data-f="name"]').value.trim(), lo: num3(el.querySelector('[data-f="lo"]').value),
-        hi: num3(el.querySelector('[data-f="hi"]').value) }));
+  const sup = [...document.querySelectorAll('#scenBody [data-sup]')].map((el) => {
+    const was = got.supports[+el.dataset.sup] || {};
+    return el.dataset.floor ? { name: 'the floor', floor: true }
+      : { name: el.querySelector('[data-f="name"]').value.trim(), lo: keptXyz(was.lo, el.querySelector('[data-f="lo"]').value),
+          hi: keptXyz(was.hi, el.querySelector('[data-f="hi"]').value) };
+  });
   return { scenarios: scen, supports: sup };
 }
 function wireScenarios(p) {

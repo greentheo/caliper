@@ -217,7 +217,7 @@ def test_a_check_s_record_says_its_loads_were_edited_and_which_are_off(store, mo
 def _page(extra):
     from .test_carve_click import _page as page, _run
 
-    return _run(page(["dirFromPick", "pickFromDir", "scenarioRow", "supportRow", "scenariosView"],
+    return _run(page(["dirFromPick", "pickFromDir", "scenarioRow", "supportRow", "scenariosView", "keptXyz", "keptDir"],
                      consts=["esc", "SCEN_DIRS", "SCEN_SAID", "xyz"], extra=extra))
 
 
@@ -269,3 +269,17 @@ def test_every_scenario_turned_off_is_refused(store):
     got = S.get(store, "stool")
     with pytest.raises(ValueError, match="turn at least one scenario on"):
         S.put(store, "stool", [{**sc, "on": False} for sc in got["scenarios"]], got["supports"])
+
+
+def test_a_field_left_as_it_was_keeps_its_exact_value():
+    """Saving rounded the corners to 0.1 mm (19.05 to 19.1), so a standard's case put back read as edited."""
+    out = _page("""out = [xyz([19.05, 387.35, 152.39999999999998]),
+      keptXyz([19.05, 387.35, 152.39999999999998], '19.05, 387.35, 152.4'),
+      keptXyz([19.05, 387.35, 152.4], '19.05, 390, 152.4'),
+      keptDir([0.287, 0, -0.958], 'angle', pickFromDir([0.287, 0, -0.958]).deg, pickFromDir([0.287, 0, -0.958]).heading),
+      keptDir([0.287, 0, -0.958], 'down', 0, 0)];""".replace("_page", "_page"))
+    assert out[0] == "19.05, 387.35, 152.4"
+    assert out[1] == [19.05, 387.35, 152.39999999999998]                              # untouched: exactly as it was
+    assert out[2] == [19.05, 390, 152.4]                                              # touched: what was typed
+    assert out[3] == [0.287, 0, -0.958]                                               # the angle shown, left alone
+    assert out[4] == [0, 0, -1]
