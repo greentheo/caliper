@@ -632,4 +632,7 @@ def keyed_page(name: str):
 def serve(host: str = "127.0.0.1", port: int = 8000) -> None:
     import uvicorn
 
+    from . import sandbox
+
+    sandbox.start_sweep()          # old run folders left in the temp dir, once, here and never in create_app (#304)
     uvicorn.run(create_app(), host=host, port=port)
