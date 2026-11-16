@@ -181,7 +181,7 @@ def test_the_route_lists_them(tmp_path, monkeypatch):
 def _page(extra):
     from .test_carve_click import _page as page, _run
 
-    return _run(page(["fixesView", "fixRow"], consts=["esc", "fixRowKey"], extra=extra))
+    return _run(page(["fixesView", "fixRow", "fixGo"], consts=["esc", "fixRowKey"], extra=extra))
 
 
 ROWS = {"part": "stool", "rows": [

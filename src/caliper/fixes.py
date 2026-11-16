@@ -341,11 +341,12 @@ def _finding_rows(store: DesignStore, pid: str, name: str) -> list[dict]:
     except Exception:  # noqa: BLE001 — the list goes without them, and says nothing it didn't measure
         return []
     out = []
-    for i, f in enumerate(found.get("findings") or []):
+    for f in found.get("findings") or []:
         if pid not in (f.get("parts") or []) or not f.get("measured"):
             continue
         said = f["said"][:1].upper() + f["said"][1:]
-        out.append(_row(f"finding:{f.get('kind')}:{f.get('id') or i}", said,
+        # by what it is, never its place in the list: one fixed moves the rest up (#300 slice B: it read "fixed")
+        out.append(_row(f"finding:{f.get('kind')}:{f.get('id') or f['said']}", said,
                         [_choice(f["fix"].rstrip("."), DESIGNER, _designer_cost(name))], pid))
     return out
 
