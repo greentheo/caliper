@@ -3215,7 +3215,7 @@ function scenarioRow(sc, i) {
       ${sc.standard.amount !== sc.amount || sc.standard.unit !== sc.unit ? `; the standard is ${sc.standard.amount} ${esc(sc.standard.unit)}` : ''}
       <button class="ghost" data-scen-std="${i}">Back to the standard</button></div>` : '';
   return `<div class="card scen" data-scen="${i}" style="margin-top:6px">
-      <div class="form"><span>what</span><span><input data-f="name" value="${esc(sc.name)}" style="width:100%"></span>
+      <div class="form"><span>what</span><span><input data-f="name" value="${esc(sc.said || sc.name)}"${sc.standard ? ' readonly title="a standard\'s case is named for what it is: edit its numbers"' : ''} style="width:100%"></span>
       <span>how much</span><span><input data-f="amount" type="number" step="any" min="0" value="${sc.amount}" style="width:7em">
         <select data-f="unit">${['lb', 'kg', 'N'].map((u) => `<option${u === sc.unit ? ' selected' : ''}>${u}</option>`).join('')}</select></span>
       <span>which way</span><span><select data-f="dir">${Object.entries(SCEN_SAID).map(([k, w]) =>
@@ -3260,7 +3260,7 @@ function readScenarios(got) {
   const scen = [...document.querySelectorAll('#scenBody .scen')].map((el) => {
     const f = (k) => el.querySelector(`[data-f="${k}"]`);
     const i = +el.dataset.scen, was = got.scenarios[i] || {};
-    return { ...was, name: f('name').value.trim(), amount: Number(f('amount').value), unit: f('unit').value,
+    return { ...was, name: was.standard ? was.name : f('name').value.trim(), amount: Number(f('amount').value), unit: f('unit').value,
       direction: dirFromPick(f('dir').value, f('deg').value, f('heading').value), factor: Number(f('factor').value),
       lo: num3(f('lo').value), hi: num3(f('hi').value), on: f('on').checked };
   });
@@ -3314,7 +3314,7 @@ function wireScenarioRows(p) {
     save.disabled = true;
     try {
       const got2 = await api('PUT', `/api/designs/${S.slug}/parts/${p.id}/scenarios`, readScenarios(got));
-      S.scen[p.id] = got2.scenarios; S.design = got2.design; renderInspector();
+      S.scen[p.id] = got2.scenarios; S.design = got2.design; render();       // the tree's version too
       said(`Saved as v${got2.version}. Its checks are of the loads before: check it again.`);
     } catch (e) { save.disabled = false; said(plainly(e.message), true); }
   };
@@ -3323,7 +3323,7 @@ function wireScenarioRows(p) {
     back.disabled = true;
     try {
       const got2 = await api('DELETE', `/api/designs/${S.slug}/parts/${p.id}/scenarios`);
-      S.scen[p.id] = got2.scenarios; S.design = got2.design; renderInspector();
+      S.scen[p.id] = got2.scenarios; S.design = got2.design; render();
       said(`Back to its script's, as v${got2.version}: check it again.`);
     } catch (e) { back.disabled = false; said(plainly(e.message), true); }
   };

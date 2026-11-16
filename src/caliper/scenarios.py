@@ -61,7 +61,15 @@ def _said(store, pid: str) -> Optional[dict]:
 
 
 def get(store, pid: str) -> dict:
-    """A part's scenarios and supports, as they're edited: ``{"scenarios", "supports", "overridden"}``."""
+    """A part's scenarios and supports, as they're edited: ``{"scenarios", "supports", "overridden"}``. Each scenario
+    also says ``said``, the name its checks use (an edited standard's is what it is now)."""
+    got = _get(store, pid)
+    for sc in got["scenarios"]:
+        sc["said"] = name(sc)
+    return got
+
+
+def _get(store, pid: str) -> dict:
     said = _said(store, pid)
     if said:
         return {"scenarios": copy.deepcopy(said["scenarios"]), "supports": copy.deepcopy(said["supports"]),

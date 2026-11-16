@@ -199,11 +199,18 @@ def test_a_check_s_record_says_its_loads_were_edited_and_which_are_off(store, mo
 
     monkeypatch.setattr(L, "VOXELS_THROUGH", 2)
     got = S.get(store, "stool")
-    S.put(store, "stool", [got["scenarios"][0], {**got["scenarios"][1], "on": False}], got["supports"])
+    wall = {"name": "screwed to the wall", "lo": [0, 345, 200], "hi": [406.4, 356, 400]}
+    S.put(store, "stool", [got["scenarios"][0], {**got["scenarios"][1], "on": False}], got["supports"] + [wall])
     rec = L.study(store, "stool")
     assert rec["loads_edited"] and rec["loads_off"] == ["its rating (EN 14183, 150 kg)"]
     assert [c["name"] for c in rec["cases"]] == ["stepping on the front edge"]
     assert rec["version"] == store.design.part("stool").version
+    assert "screwed to the wall" in [h["name"] for h in rec["held"]]                 # its supports, as edited
+    from caliper import answers, design_api
+
+    work = next(c for c in answers.part(store, design_api.design_state(store), "stool") if c["key"] == "work")
+    texts = [ln["text"] for ln in work["lines"]]                                   # "Will it work?"
+    assert "Not checked: its rating (EN 14183, 150 kg) is turned off." in texts, texts     # on the card
 
 
 # --- the page ----------------------------------------------------------------------------------------------------------
@@ -244,3 +251,21 @@ def test_the_editor_is_wired_to_the_routes():
     assert "api('DELETE', `/api/designs/${S.slug}/parts/${p.id}/scenarios`)" in src
     assert "api('GET', `/api/designs/${S.slug}/parts/${p.id}/scenarios`)" in src
     assert "${scenariosBox(p)}" in src and "wireScenarios(p);" in src
+
+
+def test_each_row_says_the_name_its_checks_use_and_a_standard_s_can_t_be_retyped(store):
+    got = S.get(store, "stool")
+    S.put(store, "stool", [got["scenarios"][0], {**got["scenarios"][1], "amount": 100}], got["supports"])
+    rows = S.get(store, "stool")["scenarios"]
+    assert rows[1]["said"] == "EN 14183, edited: 100 kg (the standard is 150 kg)" and rows[0]["said"] == rows[0]["name"]
+    html = _page(f"""out = scenarioRow({json.dumps(rows[1])}, 1);""")
+    assert 'data-f="name" value="EN 14183, edited: 100 kg (the standard is 150 kg)" readonly' in html, html
+    src = open(__import__("os").path.join(__import__("os").path.dirname(__file__), "..", "src", "caliper", "web", "static",
+                                         "design.js")).read()
+    assert "name: was.standard ? was.name : f('name').value.trim()" in src                 # its own name, kept
+
+
+def test_every_scenario_turned_off_is_refused(store):
+    got = S.get(store, "stool")
+    with pytest.raises(ValueError, match="turn at least one scenario on"):
+        S.put(store, "stool", [{**sc, "on": False} for sc in got["scenarios"]], got["supports"])
