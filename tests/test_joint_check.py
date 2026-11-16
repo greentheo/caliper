@@ -706,10 +706,21 @@ def test_a_splayed_side_s_top_is_read_against_the_face_it_bears_on():
     assert top["demand_lb"]["shear"] == pytest.approx(250.0 * np.tan(np.radians(20.0)), rel=0.02), top
 
 
+#: Its stringer set 6 mm into each side, a dado, not through: a tie the hand check can't place yet.
+DADOED = SPLAYED.replace('''        tie = cq.Workplane("XZ", origin=(0, y0, 0)).polyline(
+            [(t + z0 * k, z0), (w - t - z0 * k, z0), (w - t - z1 * k, z1), (t + z1 * k, z1)]).close().extrude(-t)''',
+                         '''        tie = cq.Workplane("XZ", origin=(0, y0, 0)).polyline(
+            [(t - 6 + z0 * k, z0), (w - t + 6 - z0 * k, z0), (w - t + 6 - z1 * k, z1), (t - 6 + z1 * k, z1)]).close().extrude(-t)''').replace(
+    '''        face["stringer"] = [(t + z0 * k, y0, z0), (w - t - z0 * k, y0, z0), (w - t - z1 * k, y0, z1), (t + z1 * k, y0, z1)]''',
+    '''        face["stringer"] = [(t - 6 + z0 * k, y0, z0), (w - t + 6 - z0 * k, y0, z0), (w - t + 6 - z1 * k, y0, z1),
+                            (t - 6 + z1 * k, y0, z1)]''')
+
+
 def test_a_tie_it_can_t_place_is_named_never_read_as_no_tie():
-    got = _check(NOTCHED)
+    """#311 re-check C, now that a notch is checked (CALI-192): a tie set into a dado still can't be placed, and is named."""
+    got = _check(DADOED)
     assert got["chain"] is False
-    assert got["unchecked"] == ["its tie, the stringer, isn't checked by hand: its joints are notches (CALI-192)"], got
+    assert got["unchecked"] == ["its tie, the stringer, isn't checked by hand: set into the other (a dado or rabbet)"], got
 
 
 def test_the_tie_nearest_the_foot_takes_the_thrust():
@@ -851,3 +862,125 @@ def test_two_short_posts_with_the_load_off_their_line_aren_t_checked_by_hand(len
         assert JC._lever(posts, np.array([50.0, 20.0, 0.0]), "pairs", spans=spans) == pytest.approx(shares)
     on_line = JC._lever(posts, np.array([50.0, 0.0, 0.0]), "pairs", spans=spans)     # on their line: the lever rule
     assert on_line == pytest.approx([0.5, 0.5])
+
+
+# --- CALI-192 (#310): a notch joint by hand -----------------------------------------------------------------------------------
+#: A step on two sides, with a stringer through a notch cut up from each side's bottom edge, out to their outer faces: v7's.
+NOTCH_STOOL = """import cadquery as cq
+
+PARAMS = {"w": 406.4, "d": 355.6, "h": 406.4, "r": 152.4}
+BUILD = {"t": 19.05}
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    t, w, d, h, r = BUILD["t"], p["w"], p["d"], p["h"], p["r"]
+    y0 = d / 2 - t / 2
+    notch = lambda x: cq.Workplane().box(t, t, r, centered=False).translate((x, y0, 0))
+    left = cq.Workplane().box(t, d, h - t, centered=False).cut(notch(0))
+    right = cq.Workplane().box(t, d, h - t, centered=False).translate((w - t, 0, 0)).cut(notch(w - t))
+    step = cq.Workplane().box(w, d, t, centered=False).translate((0, 0, h - t))
+    stringer = cq.Workplane().box(w, t, r, centered=False).translate((0, y0, 0))
+    return left.union(right).union(step).union(stringer)
+
+
+def construction(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    t, w, d, h, r = BUILD["t"], p["w"], p["d"], p["h"], p["r"]
+    y0, y1 = d / 2 - t / 2, d / 2 + t / 2
+    side = lambda x: [(x, 0, 0), (x, y0, 0), (x, y0, r), (x, y1, r), (x, y1, 0), (x, d, 0), (x, d, h - t), (x, 0, h - t)]
+    face = {"left side": side(0), "right side": side(w),
+            "step": [(0, 0, h), (w, 0, h), (w, d, h), (0, d, h)],
+            "stringer": [(0, y0, 0), (w, y0, 0), (w, y0, r), (0, y0, r)]}
+    return [{"name": k, "kind": "sheet", "material": "plywood", "thickness": t, "outline": v} for k, v in face.items()]
+
+
+def loads(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    w, d, h = p["w"], p["d"], p["h"]
+    return [{"name": "standing on the step", "lb": 250, "factor": 2.0,
+             "lo": (w / 2 - 50, d / 2 - 50, h - 2), "hi": (w / 2 + 50, d / 2 + 50, h)}]
+"""
+PLY = {"strength": 30.0, "across": 0.5}
+
+
+@pytest.fixture(scope="module")
+def notched(tmp_path_factory):
+    store = _store(tmp_path_factory.mktemp("notch"), NOTCH_STOOL, "stool")
+    return store, JC.setup(store, "stool")
+
+
+def test_a_stringer_through_notches_is_a_notch_joint_with_its_faces(notched):
+    _, su = notched
+    j = next(x for x in su["joints"] if sorted(x["pieces"]) == ["left side", "stringer"])
+    assert "unplaced" not in j and j["host"] == "left side" and j["piece"] == "stringer", j
+    faces = sorted(((tuple(np.round(f["normal"], 3)), round(f["area_mm2"]), f["open"]) for f in j["faces"]))
+    t, r = 19.05, 152.4
+    assert ((0.0, -1.0, 0.0), round(r * t), False) in faces and ((0.0, 1.0, 0.0), round(r * t), False) in faces
+    assert ((0.0, 0.0, 1.0), round(t * t), False) in faces                           # its top: closed
+    assert ((0.0, 0.0, -1.0), round(t * t), True) in faces                           # its bottom: open, from the edge
+    assert np.allclose(np.abs(j["axis"]), (1.0, 0.0, 0.0))                           # along the stringer
+
+
+@pytest.mark.parametrize("force,mode,said,face_mm2", [
+    ((0.0, 1000.0, 0.0), "bearing", "the stringer bearing on the left side's notch", 152.4 * 19.05),   # its side face
+    ((0.0, 0.0, 1000.0), "bearing", "the stringer bearing on the left side's notch", 19.05 * 19.05),   # its top: 0.9x
+    ((0.0, 0.0, -1000.0), "withdrawal", "the stringer lifts out of the left side's notch: nothing holds it", 0),
+    ((1000.0, 0.0, 0.0), "withdrawal",
+     "the stringer's notch can't hold a pull along it: glue to the left side's edge grain, no credit", 0),
+])
+def test_a_notch_bears_on_its_closed_faces_and_nothing_else_holds(notched, force, mode, said, face_mm2):
+    _, su = notched
+    j = next(x for x in su["joints"] if sorted(x["pieces"]) == ["left side", "stringer"])
+    row = JC.notch_row(j, np.array(force), "stringer", 2.0)
+    assert row["mode"] == mode and row["said"] == said, row
+    if mode == "withdrawal":
+        assert row["safety"] == 0 and not row["holds"]
+    else:                                                                            # 360 psi on that face
+        assert row["safety"] == pytest.approx(JC.BEARING_PSI * face_mm2 / 25.4 ** 2 * JC.LBF / 1000.0, abs=0.011)
+
+
+def test_the_stool_s_notched_stringer_is_placed_and_its_sides_net_section_is_checked(notched):
+    store, su = notched
+    pieces, tol, held = _pieces(store)
+    got = JC.check(su, _load(store), held, 2.0, mat=PLY)
+    assert got["chain"] and not [u for u in got["unchecked"] if "stringer" in u], got["unchecked"]
+    rows = {r["between"]: r for r in got["rows"]}
+    assert rows["the stringer and the left side"]["said"] == "carries none of this load"
+    net = rows["the left side past its notch"]
+    assert net["mode"] == "net section" and net["said"] == "net section, no allowance for the stress at the notch's corner"
+    t, d = 19.05, 355.6
+    stress = 250 * 2 / 2 * JC.LBF / ((d - t) * t)                                    # its half of 500 lb over what's left
+    assert net["safety"] == pytest.approx(15.0 / stress, rel=0.02)
+
+
+def test_a_notch_leaving_too_little_of_the_side_fails_named():
+    side = {"key": "left side", "kind": "sheet", "thickness": 19.05,
+            "polys": [np.array([(0, 0, 0), (0, 2, 0), (0, 2, 152.4), (0, 21.05, 152.4), (0, 21.05, 0), (0, 23.05, 0),
+                                (0, 23.05, 387.35), (0, 0, 387.35)], float)]}
+    row = JC.net_row(side, 152.4, 1112.0, PLY, 2.0)                                  # 250 lb on 4 mm of it
+    assert row["mode"] == "net section" and not row["holds"] and row["safety"] < 2.0
+    assert row["between"] == "the left side past its notch"
+
+
+def test_a_splayed_part_tied_through_notches_reads_the_pull_it_can_t_hold():
+    got = _check(NOTCHED)
+    ends = [r for r in got["rows"] if "stringer" in r["pieces"]]
+    assert ends and all(r["mode"] == "withdrawal" and r["safety"] == 0 for r in ends), ends
+    assert all("can't hold a pull along it" in r["said"] for r in ends)
+
+
+def test_a_notch_bears_a_push_toward_its_closed_face_and_lets_one_toward_its_open_face_go_elsewhere():
+    """Routing reads a notch's own faces: a push up bears on its closed top; a push down goes to the joint that bears it."""
+    notch = {"pieces": ["P", "side"], "notch": True, "piece": "P", "host": "side", "mid": np.array([0.0, 0.0, 0.0]),
+             "axis": np.array([1.0, 0.0, 0.0]), "length_mm": 100.0, "along": np.array([0.0, 0.0, 1.0]),
+             "faces": [{"normal": np.array([0.0, 0.0, 1.0]), "area_mm2": 400.0, "open": False},
+                       {"normal": np.array([0.0, 0.0, -1.0]), "area_mm2": 400.0, "open": True}]}
+    shelf = {"pieces": ["P", "shelf"], "edge": "P", "face": "shelf", "out": np.array([0.0, 0.0, -1.0]),
+             "mid": np.array([0.0, 50.0, -60.0])}
+    at = np.array([0.0, 25.0, 0.0])                           # between them: each would take half if both did
+    up = dict((tuple(j["pieces"]), f) for j, f in JC._route([notch, shelf], "P", np.array([0.0, 0.0, 100.0]), at, "pairs"))
+    down = dict((tuple(j["pieces"]), f) for j, f in JC._route([notch, shelf], "P", np.array([0.0, 0.0, -100.0]), at,
+                                                              "pairs"))
+    assert np.allclose(up[("P", "side")], (0, 0, 100)) and np.allclose(up[("P", "shelf")], 0)
+    assert np.allclose(down[("P", "shelf")], (0, 0, -100)) and np.allclose(down[("P", "side")], 0)

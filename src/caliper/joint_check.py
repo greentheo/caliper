@@ -53,6 +53,11 @@ def setup(store, pid: str) -> dict:
         j = listed.get(key) or {"kind": "butt", "fix": list(J.ASSUMED_FIX), "assumed": True}
         base = {"pieces": list(key), "kind": j.get("kind"), "fix": list(j.get("fix") or []), "assumed": bool(j.get("assumed"))}
         s = screws.get(key) or {}
+        if c["how"] in ("through", "notch") or c["how"] == "edge" and not _edged(key, by, s, tol):
+            got = _notch(by[key[0]], by[key[1]], tol) or _notch(by[key[1]], by[key[0]], tol)
+            if got is not None:                   # one run through or into the other's notch (CALI-192)
+                out.append({**base, **got})
+                continue
         if c["how"] != "edge":
             out.append({**base, "unplaced": UNPLACED.get(c["how"], "not an edge on a face")})
             continue
@@ -77,6 +82,69 @@ def setup(store, pid: str) -> dict:
                     "area_mm2": float(g["length"]) * t, "mid": (np.asarray(g["a"]) + np.asarray(g["b"])) / 2.0,
                     "screws": int(s.get("n") or 0), "face_t": float(face["thickness"])})
     return {"joints": out, "pieces": pieces, "tol": tol, "screw_mm": fasteners.screw_length_mm(pieces)}
+
+
+def _edged(key: tuple, by: dict, s: dict, tol: float) -> bool:
+    """Whether a contact reads as an edge on a face, the way the patterns' screw marks read it."""
+    from . import marks
+
+    if s.get("on") and s.get("into"):
+        return marks._edge_on(by[s["into"]], by[s["on"]], tol) is not None
+    a, b = by[key[0]], by[key[1]]
+    return marks._edge_on(a, b, tol) is not None or marks._edge_on(b, a, tol) is not None
+
+
+def _notch(host: dict, piece: dict, tol: float) -> Optional[dict]:
+    """``piece`` run through a notch or mortise in ``host`` (CALI-192, v7's stringer through its sides): where it crosses
+    the host's plane, a rectangle (its line there, by its thickness), each face of it closed where the host has wood just
+    past it and open where it doesn't (a notch cut from an edge). None where it doesn't cross the host."""
+    from .consistency import _frame, _inside2d
+
+    if host.get("kind") != "sheet" or piece.get("kind") != "sheet" or not host.get("sides") or not piece.get("sides"):
+        return None
+    o, u, v, n, flat = _frame(host["polys"][0])
+    ht, pt = float(host["thickness"]), float(piece["thickness"])
+    hn = n * host["sides"][0]
+    centre = o + hn * ht / 2.0                                # the host's middle plane
+    P = np.asarray(piece["polys"][0], float)
+    pn = _frame(P)[3] * piece["sides"][0]
+    Pm = P + pn * pt / 2.0                                    # the piece's middle plane
+    d = (Pm - centre) @ hn
+    if d.min() > -ht / 2.0 + tol or d.max() < ht / 2.0 - tol:
+        return None                                           # it doesn't run through the host's thickness
+    pts = []
+    for i in range(len(Pm)):
+        a, b = Pm[i], Pm[(i + 1) % len(Pm)]
+        da, db = d[i], d[(i + 1) % len(Pm)]
+        if abs(da) < 1e-9:
+            pts.append(a)
+        elif da * db < 0:
+            pts.append(a + (b - a) * (da / (da - db)))
+    if len(pts) < 2:
+        return None
+    pts = np.asarray(pts)
+    g = pts[-1] - pts[0]
+    if np.linalg.norm(g) < 1e-6:
+        return None
+    g /= np.linalg.norm(g)
+    along = pts @ g
+    a, b = pts[int(np.argmin(along))], pts[int(np.argmax(along))]
+    length = float(np.linalg.norm(b - a))
+    if length <= tol:
+        return None
+    mid = (a + b) / 2.0
+    across = pn - float(pn @ hn) * hn
+    across /= np.linalg.norm(across) or 1.0
+    to2d = lambda q: np.array([[(q - o) @ u, (q - o) @ v]])
+    if not (flat.min(axis=0) - tol <= to2d(mid)[0]).all() or not (to2d(mid)[0] <= flat.max(axis=0) + tol).all():
+        return None                                           # it isn't in the host's outline: the other way round
+    faces = []
+    for normal, half, face_len in ((across, pt / 2.0, length), (-across, pt / 2.0, length), (g, length / 2.0, pt),
+                                   (-g, length / 2.0, pt)):
+        past = mid + normal * (half + 2.0)
+        faces.append({"normal": normal.copy(), "area_mm2": face_len * ht, "open": not bool(_inside2d(to2d(past), flat)[0])})
+    return {"notch": True, "host": host["key"], "piece": piece["key"], "faces": faces, "axis": hn.copy(), "mid": mid,
+            "along": g.copy(), "length_mm": length, "top_z": float(max(a[2], b[2]) if abs(g[2]) > 0.5 else mid[2])}
 
 
 def split(joint: dict, force: np.ndarray, loaded: str) -> dict:
@@ -226,6 +294,12 @@ def _face(joint: dict) -> np.ndarray:
     return np.asarray(joint.get("normal", joint["out"]), float)
 
 
+def _bears(joint: dict, piece: str) -> list:
+    """The ways ``piece`` pushes that a notch joint bears: on its closed faces (CALI-192)."""
+    sign = 1.0 if piece == joint["piece"] else -1.0
+    return [sign * np.asarray(f["normal"], float) for f in joint["faces"] if not f["open"]]
+
+
 def _into(joint: dict, piece: str) -> np.ndarray:
     """The way ``piece`` pushes into the joint's other piece."""
     out = _face(joint)
@@ -253,9 +327,10 @@ def _route(mine: list[dict], piece: str, f: np.ndarray, at: np.ndarray, share: s
             continue
         e = np.zeros(3)
         e[axis] = 1.0 if c > 0 else -1.0
-        dots = [float(_into(j, piece) @ e) for j in mine]
-        bear = [i for i, d in enumerate(dots) if d > 0.7]
-        slide = [i for i, d in enumerate(dots) if abs(d) <= 0.7]
+        dots = [None if j.get("notch") else float(_into(j, piece) @ e) for j in mine]
+        bear = [i for i, (j, d) in enumerate(zip(mine, dots))
+                if (d is None and any(float(n @ e) > 0.7 for n in _bears(j, piece))) or (d is not None and d > 0.7)]
+        slide = [i for i, d in enumerate(dots) if d is not None and abs(d) <= 0.7]
         take = bear or slide or list(range(len(mine)))
         for i, frac in zip(take, _lever([mine[i]["mid"] for i in take], at, share,
                                         [(float(mine[i]["length_mm"]), _across(pieces, piece, mine[i]["along"]),
@@ -283,7 +358,7 @@ def _splay(pc: dict) -> Optional[tuple]:
 
 
 def demands(joints: list[dict], pieces: list[dict], load: dict, held: list[dict], tol: float,
-            share: str = SHARE) -> dict:
+            share: str = SHARE, arrivals: Optional[dict] = None) -> dict:
     """What each joint carries under one load: ``{(a, b): {"from": the piece pushing, "force": N (3,)}}``. The load,
     × its factor, from the piece it lands on to the pieces holding it up, down to what holds the part; a splayed side's
     foot thrust into the tie between the feet. Raises :class:`NotChain` where that path can't be followed."""
@@ -342,6 +417,8 @@ def demands(joints: list[dict], pieces: list[dict], load: dict, held: list[dict]
             down(to, fj, j["mid"], piece, depth + 1)
 
     down(start, force, at, None, 0)
+    if arrivals is not None:
+        arrivals.update(arrived)
     pulls: dict = {}                                          # each tie's ends, and the thrust at each
     for side, f in arrived.items():                           # each splayed foot's thrust, into the tie nearest it
         if side not in splayed:
@@ -374,7 +451,7 @@ def _untied(joints: list[dict], side: str, splayed: dict, came: set) -> str:
         if "unplaced" not in j or t is None or t in came:
             continue
         if any(other(k, t) in splayed and other(k, t) != side for k in joints):
-            return f"its tie, the {t}, isn't checked by hand: its joints are notches (CALI-192)"
+            return f"its tie, the {t}, isn't checked by hand: {j['unplaced']}"
     return NO_TIE
 
 
@@ -448,7 +525,8 @@ def _count(n: int) -> str:
     return ["no", "one", "two", "three", "four", "five", "six"][n] if 0 <= n <= 6 else str(n)
 
 
-def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: str = SHARE) -> dict:
+def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: str = SHARE,
+          mat: Optional[dict] = None) -> dict:
     """One load case's joints: ``{"rows": [...], "governing": the lowest row or None, "unchecked": [why, ...]}``. A row:
     ``{"pieces", "between": "the step and the left side", "mode", "safety", "need", "holds", "said": what gives first}``;
     ``safety`` is the joint's capacity over its share of the load × factor, against the run's ``min_safety`` as the wood's
@@ -457,13 +535,22 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
     unchecked = [f"the joint between the {j['pieces'][0]} and the {j['pieces'][1]} ({j['unplaced']})"
                  for j in joints if "unplaced" in j]
     unchecked += [f"the joint between the {j['pieces'][0]} and the {j['pieces'][1]} (a {j['kind']})"
-                  for j in joints if "unplaced" not in j and j.get("kind") not in EDGE_KINDS]
+                  for j in joints if "unplaced" not in j and not j.get("notch") and j.get("kind") not in EDGE_KINDS]
+    arrived: dict = {}
     try:
-        got = demands(joints, setup_["pieces"], load, held, setup_["tol"], share)
+        got = demands(joints, setup_["pieces"], load, held, setup_["tol"], share, arrivals=arrived)
     except NotChain as e:
         return {"rows": [], "governing": None, "unchecked": [e.why], "chain": False, "n": len(joints)}
     rows = []
+    hosts = {}
     for j in joints:
+        if j.get("notch"):                                    # a notch joint by its own rule (CALI-192)
+            d = got.get(tuple(j["pieces"]))
+            rows.append(notch_row(j, d["force"], d["from"], min_safety) if d else
+                        {"pieces": j["pieces"], "between": f"the {j['piece']} and the {j['host']}", "mode": None,
+                         "safety": None, "holds": True, "said": "carries none of this load"})
+            hosts.setdefault(j["host"], j)
+            continue
         if "unplaced" in j or j.get("kind") not in EDGE_KINDS:
             continue
         d = got.get(tuple(j["pieces"]))
@@ -486,9 +573,93 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
                      "demand_lb": {m: round(v / LBF, 1) for m, v in parts.items() if v > 1e-6},
                      "capacity_lb": {m: round(cap[m] / LBF, 1) for m in by},
                      "said": cap["why"][mode] if mode else "carries none of this load", "assumed": j["assumed"]})
+    by = {pc["key"]: pc for pc in setup_["pieces"]}
+    for host, j in hosts.items():                             # each notched side, past its notch: net section by hand
+        f = arrived.get(host)
+        down = max(0.0, -float(f[2])) if f is not None else 0.0
+        if host in by and down > 1e-9:
+            if mat is None:
+                unchecked.append(f"the {host} past its notch (its material isn't known here)")
+            else:
+                rows.append(net_row(by[host], j["top_z"], down, mat, min_safety))
     rated = [r for r in rows if r["safety"] is not None]
     return {"rows": rows, "governing": min(rated, key=lambda r: r["safety"]) if rated else None,
             "unchecked": unchecked, "chain": True, "n": len(joints)}
+
+
+def notch_row(joint: dict, force: np.ndarray, frm: str, min_safety: float) -> dict:
+    """A notch joint under a force ``frm`` puts through it (CALI-192). The piece bears on the notch's closed faces (at
+    :data:`BEARING_PSI`); pushed toward an open face it lifts out, and along its own length nothing in a notch holds a
+    pull, glue to the host's edge grain no credit (#301). The lowest of these governs."""
+    from . import verdicts as V
+
+    piece, host = joint["piece"], joint["host"]
+    f = np.asarray(force, float) if frm == piece else -np.asarray(force, float)      # what the piece puts into the host
+    parts = []
+    pull = abs(float(f @ np.asarray(joint["axis"], float)))
+    if pull > 1e-6:
+        how = ("glue to the {h}'s edge grain" if "glue" in joint["fix"] else
+               "screws into its end grain" if "screws" in joint["fix"] else "nothing holds it")
+        parts.append(("withdrawal", pull, 0.0,
+                      f"the {piece}'s notch can't hold a pull along it: {how.format(h=host)}, no credit"))
+    for face in joint["faces"]:
+        c = float(f @ np.asarray(face["normal"], float))
+        if c <= 1e-6:
+            continue
+        if face["open"]:
+            parts.append(("withdrawal", c, 0.0, f"the {piece} lifts out of the {host}'s notch: nothing holds it"))
+        else:
+            parts.append(("bearing", c, BEARING_PSI * face["area_mm2"] / IN ** 2 * LBF,
+                          f"the {piece} bearing on the {host}'s notch"))
+    between = f"the {frm} and the {host if frm == piece else piece}"
+    if not parts:
+        return {"pieces": joint["pieces"], "between": between, "mode": None, "safety": None, "holds": True,
+                "said": "carries none of this load"}
+    mode, demand, cap, said = min(parts, key=lambda p: p[2] / p[1])
+    safety = V.cut(cap / demand)
+    return {"pieces": joint["pieces"], "between": between, "mode": mode, "safety": safety, "need": min_safety,
+            "verdict": V.meets(safety, min_safety), "holds": safety >= min_safety,  # producer
+            "demand_lb": {mode: round(demand / LBF, 1)}, "capacity_lb": {mode: round(cap / LBF, 1)}, "said": said,
+            "assumed": joint.get("assumed", False)}
+
+
+#: What a side's net section past its notch is said as (CALI-192): by hand, the stress at the corner not allowed for.
+NET_SAID = "net section, no allowance for the stress at the notch's corner"
+
+
+def _width_at(pc: dict, z: float) -> float:
+    """How much of a sheet's outline is left across it at height ``z``: the even-odd lengths of its outline cut there."""
+    P = np.asarray(pc["polys"][0], float)
+    pts = []
+    for i in range(len(P)):
+        a, b = P[i], P[(i + 1) % len(P)]
+        if (a[2] - z) * (b[2] - z) < 0:
+            pts.append(a + (b - a) * ((z - a[2]) / (b[2] - a[2])))
+    if len(pts) < 2:
+        return 0.0
+    pts = np.asarray(pts)
+    g = pts[-1] - pts[0]
+    g /= np.linalg.norm(g) or 1.0
+    xs = sorted(float(p @ g) for p in pts)
+    return float(sum(xs[i + 1] - xs[i] for i in range(0, len(xs) - 1, 2)))
+
+
+def net_row(host: dict, top_z: float, down_n: float, mat: dict, min_safety: float) -> dict:
+    """A side's net section past its notch (CALI-192, the foreman's call): the vertical load it carries over the width
+    left just under the notch's top × its thickness, against the strength the FEA judges it by, taken the weaker way for
+    plywood (``across``), as the plate check does."""
+    from . import verdicts as V
+
+    width = _width_at(host, top_z - 1.0)
+    area = width * float(host["thickness"])
+    strength = float(mat["strength"]) * float(mat.get("across", 1.0))
+    cap = strength * area
+    safety = V.cut(cap / down_n) if down_n > 0 else None
+    return {"pieces": [host["key"]], "between": f"the {host['key']} past its notch", "mode": "net section",
+            "safety": safety, "need": min_safety, "verdict": V.meets(safety, min_safety),
+            "holds": safety is None or safety >= min_safety,  # producer
+            "demand_lb": {"net section": round(down_n / LBF, 1)}, "capacity_lb": {"net section": round(cap / LBF, 1)},
+            "said": NET_SAID, "assumed": False}
 
 
 #: The hand checks: a case they govern keeps, as ``over``, the check they took over from (``load_study.judged_by``).
