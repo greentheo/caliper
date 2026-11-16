@@ -791,3 +791,47 @@ def test_a_step_on_two_sides_and_two_rails_is_two_pairs_wherever_it_s_loaded(y):
     assert got["chain"], got["unchecked"]
     sides = sum(sum(r["demand_lb"].values()) for r in got["rows"] if sorted(r["pieces"]) in (["left side", "step"], ["right side", "step"]))
     assert sides == pytest.approx(250.0, rel=0.02)                                   # half each way: the sides' half
+
+
+# --- #311: "pairs" only where each support runs most of the way across ------------------------------------------------------
+RING = [np.array([100.0, 0.0, 0.0]), np.array([-100.0, 0.0, 0.0]), np.array([0.0, 100.0, 0.0]), np.array([0.0, -100.0, 0.0])]
+
+
+def test_a_ring_of_short_supports_isn_t_split_half_each_way():
+    """Four posts at ±100, the load at (90, 0): half each way reads the near one at 0.475, where statics needs 0.9 or more."""
+    with pytest.raises(JC.NotChain) as e:
+        JC._lever(RING, np.array([90.0, 0.0, 0.0]), "pairs", spans=[(20.0, 200.0)] * 4)
+    assert e.value.why == "its supports are short, so how the load splits isn't simple"
+
+
+def test_supports_running_most_of_the_way_across_still_pair():
+    got = JC._lever(RING, np.array([90.0, 0.0, 0.0]), "pairs", spans=[(190.0, 200.0)] * 4)
+    assert got == pytest.approx([0.475, 0.025, 0.25, 0.25])
+
+
+def test_uneven_supports_and_ones_in_a_row_have_their_own_words():
+    five = RING + [np.array([0.0, 30.0, 0.0])]                                       # a middle rail beside the sides
+    with pytest.raises(JC.NotChain) as e:
+        JC._lever(five, np.array([10.0, 10.0, 0.0]), "pairs", spans=[(190.0, 200.0)] * 5)
+    assert e.value.why == "it rests on more supports one way than the other"
+    row = [np.array([0.0, 0.0, 0.0]), np.array([100.0, 0.0, 0.0]), np.array([200.0, 0.0, 0.0])]
+    with pytest.raises(JC.NotChain) as e:
+        JC._lever(row, np.array([190.0, 0.0, 0.0]), "pairs")
+    assert e.value.why == "it rests on three or more supports in a row"
+
+
+def test_a_narrow_deep_top_on_two_sides_and_two_rails_is_two_pairs():
+    """Sides at ±100 running front to back (600 mm), rails at ±300 running side to side: each pairs across its own line."""
+    mids = [np.array([100.0, 0.0, 0.0]), np.array([-100.0, 0.0, 0.0]), np.array([0.0, 300.0, 0.0]), np.array([0.0, -300.0, 0.0])]
+    y, x = (0.0, 1.0, 0.0), (1.0, 0.0, 0.0)
+    got = JC._lever(mids, np.array([10.0, 20.0, 0.0]), "pairs",
+                    spans=[(600.0, 600.0, y), (600.0, 600.0, y), (200.0, 200.0, x), (200.0, 200.0, x)])
+    assert got[0] + got[1] == pytest.approx(0.5) and got[2] + got[3] == pytest.approx(0.5)
+    assert got[0] > got[1] and got[2] > got[3]
+
+
+def test_three_supports_not_in_a_line_aren_t_called_a_row():
+    tri = [np.array([0.0, 0.0, 0.0]), np.array([100.0, 60.0, 0.0]), np.array([200.0, 0.0, 0.0])]
+    with pytest.raises(JC.NotChain) as e:
+        JC._lever(tri, np.array([90.0, 10.0, 0.0]), "pairs")
+    assert e.value.why == "it rests on more supports one way than the other"
