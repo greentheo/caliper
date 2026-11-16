@@ -245,6 +245,8 @@ Choose each joint by these rules, in this order:
 2. **Sideways load through face glue:** a rabbet, a dado, a lap or a glue block, so glue joins face to face. Never edge glue
    (glue to an edge or end grain holds next to nothing).
 3. **Never pull a screw out of an edge.** No load is carried by screws in withdrawal from a plywood edge or end grain.
+   A screw into an edge goes 1 1/4 in into it: #8 × 2 in through 3/4 in plywood (the shopping list buys that length, and
+   the joint check credits a screw in shear by the thread it has in the edge).
 4. **A splay or a rack needs a tie:** a stretcher whose joints carry the thrust in face glue or screws in shear.
 5. **The shop decides what's possible.** The joints this shop can make are under "Your shop", below; the round fails a
    joint it can't make, and names what it needs. When the strong joint needs a tool the shop hasn't got, say so in your

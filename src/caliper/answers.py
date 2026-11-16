@@ -234,6 +234,26 @@ def _small_len(mm: float, inches: bool) -> str:
 RACKING = "Racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid."
 
 
+def off_lines(run: dict) -> list[dict]:
+    """The scenarios the person turned off, said where its strength is (#296: a standard's case "off" said on the card):
+    a standard's in amber, since the part isn't checked to it; one of the person's own, as information."""
+    from .scenarios import STANDARD
+
+    return [_line(f"Not checked: {n} is turned off.", "warn" if STANDARD.search(n) else "info", study="load")
+            for n in run.get("loads_off") or []]
+
+
+def joints_said(c: dict, need) -> str:
+    """A passing case's joints, checked by hand (#301): the joint that governs it named, or the weakest joint's own number
+    beside the wood's. "" where none was checked."""
+    g = (c.get("joints") or {}).get("governing")
+    if not g or g.get("safety") is None:
+        return ""
+    if c.get("governs") == "joint":
+        return f" That's the joint between {g['between']}: {g['said']}."
+    return f" Its joints, by hand: the weakest, between {g['between']}, {_times(g['safety'], need=need)} ({g['said']})."
+
+
 def joint_said(row: dict, need) -> str:
     """What a wall held square by an unchecked joint stands on (#265): which joint, and what it reads if that gives. A sheet
     part's glued trim, left out of the check: which (#272). A part's joints taken as solid wood, with no wall resting on one:
@@ -244,7 +264,11 @@ def joint_said(row: dict, need) -> str:
         many = len(names) > 1 or names[0].rstrip().endswith("s")
         said.append(f"the {' and the '.join(names)} {'are' if many else 'is'}n't checked: {'they' if many else 'it'}'re glued trim"
                     if many else f"the {names[0]} isn't checked: it's glued trim")
-    if row.get("wood") or (row.get("joints_n") is not None and not row.get("piece")):
+    if row.get("unchained"):                         # a path the hand check couldn't follow (#311 review): why, once
+        said.append(f"not checked by hand: {row['unchained']}")
+    elif row.get("names"):                           # the hand check couldn't place these (#301): named
+        said.append(f"{' and '.join(row['names'])} {'aren' if len(row['names']) > 1 else 'isn'}'t checked by hand")
+    elif row.get("wood") or (row.get("joints_n") is not None and not row.get("piece")):
         n = row.get("joints_n")
         said.append(f"the check takes its {n} joint{'s' if n != 1 else ''} as solid wood" if n is not None
                     else "the check takes its joints as solid wood")
@@ -260,6 +284,12 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     """What a ✗ adds about where it fails and how sure (#137 item 2), the same words on the part card and the design
     card (#139 review: the design card named the 0.25 mm webs, the part card the 5.2 mm wall at the peak). "" when
     there's nothing to add. Where the hand buckling check decides it, the wall that folds, never the FEA's peak (#235 review)."""
+    if c.get("governs") == "joint":                   # a joint by hand gives first: named, and what gives (#301)
+        g = (c.get("joints") or {}).get("governing") or {}
+        if g.get("between"):
+            need = run.get("min_safety") or 2.0
+            return (f" The joint between {g['between']} gives first: {g['said']}, {g['safety'] / need:.1f}x of what it "
+                    f"needs (a hand check of its joints).")
     if c.get("governs") == "buckling":
         rows = [r for r in c.get("buckling") or [] if r.get("done")]
         if rows:
@@ -349,14 +379,18 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     brace = ""
     if v.get("joints"):                              # what it rests on that isn't checked (#265, #272)
         said = joint_said(v["brace"], need)
-        brace = said if (v.get("brace") or {}).get("trim") else f"its joints aren't checked: {said}"
+        b_ = v.get("brace") or {}
+        brace = said if b_.get("trim") or b_.get("names") or b_.get("unchained") \
+            else f"its joints aren't checked: {said}"
+    by_hand = joints_said(c, need)                  # its joints, checked by hand (#301)
     if v["kind"] == "holds":
-        text = f"Holds {lowered(c['name'])}, {over(c, need, rough)}." + (f" {brace[:1].upper()}{brace[1:]}." if brace else "")
+        text = (f"Holds {lowered(c['name'])}, {over(c, need, rough)}." + by_hand
+                + (f" {brace[:1].upper()}{brace[1:]}." if brace else ""))
     elif v["kind"] == "close" and brace and not v.get("near"):   # amber by the cap, not its number: it holds if a joint does (#265)
-        text = f"Holds {lowered(c['name'])}, {over(c, need, rough)}, if its joints do: {joint_said(v['brace'], need)}."
+        text = f"Holds {lowered(c['name'])}, {over(c, need, rough)}, if its joints do: {joint_said(v['brace'], need)}." + by_hand
     elif v["kind"] == "close":                       # amber: it holds, near the line (CALI-88, #64 item 2), and both said (#276)
         text = (f"Holds {lowered(c['name'])}, {over(c, need, rough)}: close to the {need:g} it needs"
-                + (f", and {brace}." if brace else "."))
+                + (f", and {brace}." if brace else ".") + by_hand)
     elif v["kind"] == "fails":
         said = over(c, need, rough)
         text = (f"Doesn't hold {lowered(c['name'])}: {'' if said.startswith(UNDER) else 'only '}{said}, and it needs "
@@ -576,7 +610,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             said = consistency.checked(store, pid)
             smaller = consistency.plan_differs(C.declared(store, pid), geom)
             off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
-            edge = next((r.detail for r in said if r.id == "loads_edge" and r.detail), "")   # (CALI-94)
+            edge = consistency.bare_edge(store, pid) or ""    # (CALI-94) of the loads it checks, edited too (#312)
             meta = geom.require_mesh().metadata
             strays = _strays(meta, inches) if meta.get("strays") else None
         except Exception:  # noqa: BLE001 — the card says what it can
@@ -611,6 +645,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             elif c.get("safety") is not None:
                 work.append(_case_line(part_name(p), run, c, filled, stale, inches, edge=bool(edge)))
         work += _grain_lines(store, pid, run, stale, filled, bool(edge))
+        work += off_lines(run)
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
                        and h.get("action") == "failed" and h.get("version") == p["version"]), None)
@@ -619,6 +654,11 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     elif p.get("built") and p.get("role") != "fixed" and not p.get("framed"):
         work.append(_line("Not checked yet: say what it has to hold (\"it has to hold me, 200 lb\").", "warn",
                           study="load"))
+    from .scenarios import drift
+
+    left = drift(store, pid) if p.get("scripted", True) else ""      # its edited loads left behind by its shape (#312)
+    if left:
+        work.append(_line(left, "warn", study="load"))
     if p.get("loads") and p.get("role") != "fixed":
         from . import trials
 
@@ -641,7 +681,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             if ways:
                 work.append(_line(f"Not checked yet: {' or '.join(ways)} (no push is declared that way, and its base "
                                   f"is no wider that way).", "warn", study="tip"))
-            missing = tipping.unchecked(C.declared(store, pid), p.get("intent") or "")
+            from . import scenarios as SC
+
+            missing = tipping.unchecked(SC.declared(store, pid), p.get("intent") or "")   # edited too (#312 re-check)
         except Exception as e:  # noqa: BLE001 — said, never a crash of the card
             work.append(_line(f"Tipping: not checked ({scrubbed(e)}).", "warn", study="tip"))
             missing = []

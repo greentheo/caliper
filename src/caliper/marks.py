@@ -54,13 +54,18 @@ def count(mm: float) -> int:
     return len(spots(mm))
 
 
+def thread_in(face_t: float, edge_t: float, sin: float, screw_mm: float) -> float:
+    """How much of a screw driven square through a face piece stays in the other piece's wood, mm: past the face piece it
+    runs at an angle to the edge piece's plane (``sin`` of it), so it reaches that piece's face after half its thickness
+    over that sine. The one rule for the book's "comes out" and the joint check's credit (#311 review)."""
+    past = max(0.0, screw_mm - face_t)
+    return past if sin < 1e-3 else min(past, (edge_t / 2.0) / sin)        # square: it runs down the middle of the edge
+
+
 def comes_out(face_t: float, edge_t: float, sin: float, screw_mm: float) -> bool:
-    """Whether a screw driven square through a face piece into another's edge comes out of that piece's face: past the
-    face piece, it runs at an angle to the edge piece's plane (``sin`` of it), so it reaches a face after half the edge
-    piece's thickness over that sine (#222 §4: the 1.6 x t rule checked at a bevel)."""
-    if sin < 1e-3:
-        return False                                   # square: it runs down the middle of the edge
-    return screw_mm - face_t > (edge_t / 2.0) / sin
+    """Whether a screw driven square through a face piece into another's edge comes out of that piece's face (#222 §4:
+    the screw length rule checked at a bevel): :func:`thread_in` is less than what's past the face piece."""
+    return thread_in(face_t, edge_t, sin, screw_mm) < screw_mm - face_t - 1e-9
 
 
 # ---------------------------------------------------------------------------

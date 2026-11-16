@@ -224,7 +224,11 @@ def test_a_strength_run_records_how_many_joints_it_took_as_solid(tmp_path):
     s = DesignStore.create("a stool", base=str(tmp_path / "designs"))
     s.write_part("stool", LOADED, intent="a stool")
     rec = load_study.study(s, "stool")
-    assert rec["wood_joints"] == 4, rec.get("wood_joints")
+    # checked by hand now (#301), and its stringer's mortises too (#310): none taken as solid, so no count; the count of
+    # those it couldn't, each named, is test_joint_check's
+    assert rec["joints_checked"] and rec["joints_unchecked"] == [] and "wood_joints" not in rec, rec.get("joints_unchecked")
+    rows = {r["between"]: r for r in rec["cases"][0]["joints"]["rows"]}
+    assert rows["the bottom stringer and the left side"]["said"] == "carries none of this load"
 
 
 # --- what the first tests didn't reach ------------------------------------------------------------------------------------
