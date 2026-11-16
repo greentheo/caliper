@@ -260,7 +260,8 @@ def test_a_plate_no_stock_sheet_clears_is_a_row_that_says_so_with_the_designer_s
                                                                 (25.4, "1 in", 1.91))), "safety_across": 1.07},
            sheet={"pieces": {"top": "t"}})
     (row,) = _list(store)["rows"]
-    assert row["problem"] == (f"The top fails by the plate check: 1.07× where it needs {NEED}×; no stock sheet clears it: "
+    # the card's numbers: 1.07 well under 2 is "1", 1.91 near it is "1.91" (answers.safety_num)
+    assert row["problem"] == (f"The top fails by the plate check: 1× where it needs {NEED}×; no stock sheet clears it: "
                               "the thickest, 1 in, is 1.91×")
     assert [c["kind"] for c in row["choices"]] == ["designer"] * 3
     assert [c["fix"] for c in row["choices"]] == ["Hold the top up underneath: another support or a rail under it",
@@ -286,7 +287,9 @@ def test_a_number_that_moves_several_panels_names_them_all_and_offers_the_one_al
            sheet={"pieces": {"top": "ply_t", "left side": "ply_t", "right side": "ply_t"}})
     (row,) = _list(store)["rows"]
     number, alone = row["choices"]
-    assert number["fix"] == "Make every panel 5/8 in (ply_t sets the top and the other two)" and number["kind"] == "number"
+    # the box has more panels than these three: they're named, never "every panel" (#318 re-check)
+    assert number["fix"] == "Make the top, left side and right side 5/8 in (ply_t sets the top and the other two)"
+    assert number["kind"] == "number"
     assert number["cost"] == "a number change, at once: it moves the top, left side and right side"
     assert number["moves"] == ["top", "left side", "right side"] and number["param"] == "ply_t"
     assert alone == {"fix": "Make the top alone from 5/8 in", "kind": "designer",
@@ -314,7 +317,8 @@ def test_a_wall_no_stock_sheet_clears_says_so_from_the_plate_check_s_stock(tmp_p
     store = _store(tmp_path, BOX_STOOL, "stool")
     _buckles(store, 0.69)
     (row,) = _list(store)["rows"]
-    assert row["problem"].endswith("; no stock sheet clears it: the thickest, 1 in, is 1.63×"), row["problem"]
+    assert row["problem"] == (f"The left side buckles under a foot: 0.6× where it needs {NEED}×; no stock sheet clears it: "
+                              "the thickest, 1 in, is 1.6×"), row["problem"]              # the card's: cut to one place
     assert "1 1/2 in" not in json.dumps(row) and [c["fix"] for c in row["choices"]][0] == "Brace the left side"
 
 
@@ -346,3 +350,138 @@ def test_the_page_says_the_problem_is_measured_and_the_fix_proposed():
     row = html[html.index('data-fix-row="plate:top"'):html.index("Known limits")]
     assert row.index("The top fails by the plate check") < row.index("measured") < row.index("Make the top from 5/8 in")
     assert "proposed" in row
+
+
+# --- after #311, #313 and #312: joint rows and the edited loads' rows ------------------------------------------------------
+
+def test_a_joint_that_gives_first_is_its_own_row_and_covers_its_case(tmp_path):
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 1.4)
+    run = _run(store)
+    weakest = {"pieces": ["front rail", "left side"], "between": "the front rail and the left side", "mode": "withdrawal",
+               "safety": 1.4, "need": 2.0, "holds": False, "said": "two #8 screws pulled out of the front rail's edge"}
+    run["cases"][0].update(governs="joint", joints={"chain": True, "n": 4, "unchecked": [], "governing": weakest, "rows": [
+        weakest,
+        {"pieces": ["left side", "top"], "between": "the top and the left side", "mode": "bearing", "safety": 9.0,
+         "need": 2.0, "holds": True, "said": "the left side's edge bearing on the top"}]})
+    _resave(store, run)
+    (row,) = _list(store)["rows"]                                   # the joint's row, and no "doesn't hold" beside it
+    assert row["id"] == "joint:front rail|left side"
+    assert row["problem"] == ("The joint between the front rail and the left side gives first under a foot: two #8 screws "
+                              f"pulled out of the front rail's edge; 1.4× where it needs {NEED}×")          # as the card
+    assert [c["fix"] for c in row["choices"]] == [
+        "Hold the front rail and the left side together another way: screws through a face, a pin or a wedge "
+        "(nothing in an edge holds a pull)",
+        "A glue block where the front rail and the left side meet",
+        "A different joint where the front rail and the left side meet: a dado or a rabbet"]
+    assert {c["kind"] for c in row["choices"]} == {"designer"}
+
+
+def test_a_joint_the_hand_check_couldn_t_place_is_a_known_limit(tmp_path):
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 3.1)
+    run = _run(store)
+    run["cases"][0]["joints"] = {"chain": True, "n": 4, "unchecked": ["the joint between the stretcher and the left side (a dowel)"],
+                                 "rows": [{"pieces": ["left side", "top"], "between": "the top and the left side",
+                                           "mode": "bearing", "safety": 9.0, "need": 2.0, "holds": True, "said": "x"}]}
+    _resave(store, run)
+    got = _list(store)
+    # the card's words for a joint #311 couldn't place (answers.joint_said), and only that: the rest are checked
+    assert got["rows"] == [] and got["limits"] == [
+        "The joint between the stretcher and the left side (a dowel) isn't checked by hand"], got["limits"]
+
+
+def test_joints_all_checked_by_hand_are_no_limit(tmp_path):
+    """reviewer-2's v7 and step-stool-3 on main: "Its joints aren't checked" where #311 checks them all, false."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 3.1, joints_checked=True)
+    run = _run(store)
+    run["cases"][0]["joints"] = {"chain": True, "n": 4, "unchecked": [], "rows": [
+        {"pieces": ["left side", "top"], "between": "the top and the left side", "mode": "bearing", "safety": 9.0,
+         "need": 2.0, "holds": True, "said": "x"}]}
+    _resave(store, run)
+    assert _list(store)["limits"] == []
+
+
+def test_a_number_that_sets_every_panel_says_every_panel(tmp_path):
+    from caliper import construction as C
+
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    names = [it["name"] for it in C.declared(store, "stool")["construction"] if it.get("kind") == "sheet"]
+    _check(store, "stool", 1.4, plate={**_plate(t=12.7), "safety_across": 1.4}, sheet={"pieces": {n: "ply_t" for n in names}})
+    (row,) = _list(store)["rows"]
+    assert row["choices"][0]["fix"].startswith("Make every panel 5/8 in (ply_t sets the top and the other "), row["choices"][0]
+
+
+def test_an_open_question_on_its_loads_and_a_case_turned_off_are_rows_of_their_own(tmp_path):
+    from caliper import scenarios as S
+
+    from .test_scenarios import RAISED, RATED
+
+    store = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", RATED, intent="a step stool")
+    got = S.get(store, "stool")
+    S.put(store, "stool", [{**got["scenarios"][0], "amount": 260}, {**got["scenarios"][1], "on": False}], got["supports"])
+    store.write_part("stool", RAISED, intent="heavier")
+    rows = _by_id(_list(store))
+    q = rows["asked:stepping on the front edge"]
+    assert q["problem"].startswith("You'd edited 'stepping on the front edge' to 260 lb; the design now asks 300 lb: "
+                                   "checked at the design's 300 lb until you choose")
+    assert [(c["fix"], c["kind"], c["take"]) for c in q["choices"]] == [("Take the design's", "loads", "design"),
+                                                                       ("Keep mine", "loads", "mine")]
+    off = rows["off:its rating (EN 14183, 150 kg)"]
+    assert off["problem"] == "'its rating (EN 14183, 150 kg)' is turned off, so nothing checks it"
+    assert off["choices"] == [{"fix": "Turn it back on", "kind": "loads", "cost": "a change to its loads, at once",
+                               "scenario": "its rating (EN 14183, 150 kg)", "take": "on"}]
+
+
+def test_a_case_failing_that_the_fea_doesn_t_judge_never_says_where_it_works_hardest(tmp_path):
+    """reviewer-2's step-stool-3: a joint governs, and the catch-all named a panel the card doesn't."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 1.3)
+    run = _run(store)
+    run["cases"][0].update(governs="joint", joints={"chain": False, "n": 4, "rows": [],
+                                                    "unchecked": ["its load path isn't a simple chain"]})
+    run["cases"][0]["fea"]["in"] = "side front"
+    _resave(store, run)
+    (row,) = _list(store)["rows"]
+    assert "works hardest" not in row["problem"] and "side front" not in json.dumps(row), row
+
+
+def test_a_row_under_an_open_question_says_which_value_it_s_of(tmp_path):
+    """The plate row of the design's 300 lb, while the person's 260 lb waits (#318 re-check)."""
+    from caliper import load_study as L
+    from caliper import scenarios as S
+
+    from .test_scenarios import RAISED, RATED
+
+    store = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", RATED, intent="a step stool")
+    got = S.get(store, "stool")
+    S.put(store, "stool", [{**got["scenarios"][0], "amount": 260}, got["scenarios"][1]], got["supports"])
+    store.write_part("stool", RAISED, intent="heavier")
+    _check(store, "stool", 1.4, plate={**_plate(t=12.7), "safety_across": 1.4})
+    run = _run(store)
+    run["cases"][0]["name"] = "stepping on the front edge"
+    _resave(store, run)
+    (row,) = [r for r in _list(store)["rows"] if r["id"] == "plate:top"]
+    assert row["problem"].endswith("; of the design's 300 lb, pending your choice"), row["problem"]
+
+
+def test_only_the_joint_that_gives_first_says_so(tmp_path):
+    """step-stool-3: the top's joint to the side front fails at 1.3x too, but the stretcher's gives first."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 0.05)
+    run = _run(store)
+    first = {"pieces": ["side back", "stretcher"], "between": "the side back and the stretcher", "mode": "withdrawal",
+             "safety": 0.05, "need": 2.0, "holds": False, "said": "three #8 screws pulled out of the stretcher's edge"}
+    too = {"pieces": ["side front", "top"], "between": "the top and the side front", "mode": "shear", "safety": 1.3,
+           "need": 2.0, "holds": False, "said": "three #8 screws in shear into the top's edge"}
+    run["cases"][0].update(governs="joint", joints={"chain": True, "n": 4, "unchecked": [], "governing": first,
+                                                    "rows": [first, too]})
+    _resave(store, run)
+    rows = _by_id(_list(store))
+    assert rows["joint:side back|stretcher"]["problem"] == (
+        "The joint between the side back and the stretcher gives first under a foot: three #8 screws pulled out of the "
+        f"stretcher's edge; under 0.1× where it needs {NEED}×")                     # the card's "under 0.1"
+    assert rows["joint:side front|top"]["problem"].startswith("The joint between the top and the side front gives too under")

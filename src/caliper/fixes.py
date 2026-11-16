@@ -25,9 +25,11 @@ from typing import Optional
 
 from .design import DesignStore
 
-NUMBER, DESIGNER, CHECK = "number", "designer", "check"
+NUMBER, DESIGNER, CHECK, LOADS = "number", "designer", "check", "loads"
 #: What each kind of change costs, before any time is known.
 NUMBER_COST = "a number change, at once"
+#: A change to the part's edited loads (#312): no designer, no rebuild; its checks are then of the loads before.
+LOADS_COST = "a change to its loads, at once"
 
 
 def _designer_cost(name: str) -> str:
@@ -68,11 +70,12 @@ def _thicker(t: float, safety: float, need: float, power: float) -> Optional[flo
     return next((x for x in _stock() if x > t + 0.01 and x >= want - 1e-6), None)
 
 
-def _x(safety: float) -> str:
-    """A safety as the list says it, cut toward safe, never rounded up to what it needs (#318 review: 1.96 read 2.0)."""
-    from .verdicts import cut
+def _x(safety: float, need: Optional[float]) -> str:
+    """A safety as the card says it (``answers.safety_num``): cut toward safe, never up to what it needs (#318 review:
+    1.96 read 2.0), and "under 0.1" for a tiny one, never "0×"."""
+    from .answers import safety_num
 
-    return f"{cut(safety):g}×"
+    return f"{safety_num(safety, need)}×"
 
 
 _COUNT = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
@@ -131,6 +134,15 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
         rows.append(_row("edge", edge[:1].upper() + edge[1:],
                          [_choice("Add a case standing at its free edge", DESIGNER, _designer_cost(name))], pid))
     sheet = (run.get("sheet") or {}).get("pieces") or {}
+    from . import construction as C
+
+    panels_all = {it.get("name") for it in C.declared(store, pid).get("construction") or []   # every sheet, numbered or not
+                  if isinstance(it, dict) and it.get("kind") == "sheet"}
+    pending = _pending(store, pid)               # a case checked at one side of an open question, and which (#312)
+
+    def note(names) -> str:
+        said = [pending[n] for n in names if n in pending]
+        return f"; {said[0]}" if said else ""
 
     def thicker(piece: str, t_mm: float, label: str, now: str) -> list[dict]:
         """A thicker sheet: a number where the run names its PARAMS entry, saying every piece it moves, with this piece
@@ -143,7 +155,7 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
             return [_choice(f"Make the {piece} from {label} instead of {now}", NUMBER, NUMBER_COST, param=param,
                             value=t_mm, unit="mm", moves=moved)]
         others = len(moved) - 1
-        what = "every panel" if len(moved) == len(sheet) else f"the {_these(moved)}"
+        what = "every panel" if set(moved) >= panels_all else f"the {_these(moved)}"
         return [_choice(f"Make {what} {label} ({param} sets the {piece} and the other "
                         f"{_COUNT[others] if others < len(_COUNT) else others})", NUMBER,
                         f"a number change, at once: it moves the {_these(moved)}", param=param, value=t_mm, unit="mm",
@@ -162,7 +174,8 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
         on = [c for c, _ in failing if (c.get("plate") or {}).get("piece") == pick["piece"]]
         covered |= {c["name"] for c in on}
         rows.append(_row(f"plate:{pick['piece']}", f"The {pick['piece']} fails by the plate check: "
-                                                  f"{_x(pick['now_safety'])} where it needs {need:g}×",
+                                                  f"{_x(pick['now_safety'], need)} where it needs {need:g}×"
+                                                  + note(c["name"] for c in on),
                          thicker(pick["piece"], pick["t_mm"], pick["label"], pick["label_now"]), pid))
     panels: dict = {}
     for c, _ in failing:                        # a panel the plate check fails that no stock sheet clears
@@ -175,9 +188,10 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
                    if b.get("safety_across") is not None} for c in on]
         common = sorted(set.intersection(*(set(t) for t in tables))) if tables else []
         thickest = (f": the thickest, {tables[0][common[-1]]['label']}, is "
-                    f"{_x(min(tb[common[-1]]['safety_across'] for tb in tables))}") if common else ""
-        rows.append(_row(f"plate:{piece}", f"The {piece} fails by the plate check: {_x(min(c['safety'] for c in on))} "
-                                           f"where it needs {need:g}×; no stock sheet clears it{thickest}", otherwise(piece), pid))
+                    f"{_x(min(tb[common[-1]]['safety_across'] for tb in tables), need)}") if common else ""
+        rows.append(_row(f"plate:{piece}", f"The {piece} fails by the plate check: {_x(min(c['safety'] for c in on), need)} "
+                                           f"where it needs {need:g}×; no stock sheet clears it{thickest}"
+                                           + note(c["name"] for c in on), otherwise(piece), pid))
     for c, v in failing:
         if c["name"] in covered or c.get("governs") != "buckling":
             continue
@@ -194,37 +208,128 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
         if any(r["id"] == rid for r in rows):
             continue
         t = _thicker(b["thickness_mm"], b["safety"], need, 3.0)       # its buckling load goes as t³
-        problem = f"The {b['piece']} buckles under {c['name']}: {_x(b['safety'])} where it needs {need:g}×"
+        problem = f"The {b['piece']} buckles under {c['name']}: {_x(b['safety'], need)} where it needs {need:g}×"
         if t is not None:
             choices = thicker(b["piece"], t, nominal(t), nominal(b["thickness_mm"]))
             choices.append(_choice(f"Brace the {b['piece']}", DESIGNER, _designer_cost(name)))
         else:
             top = _stock()[-1]
             problem += (f"; no stock sheet clears it: the thickest, {nominal(top)}, is "
-                        f"{_x(b['safety'] * (top / b['thickness_mm']) ** 3)}")
+                        f"{_x(b['safety'] * (top / b['thickness_mm']) ** 3, need)}")
             choices = [_choice(f"Brace the {b['piece']}", DESIGNER, _designer_cost(name)),
                        _choice("Ask it to hold less: a lighter load in its loads()", DESIGNER, _designer_cost(name))]
-        rows.append(_row(rid, problem, choices, pid))
+        rows.append(_row(rid, problem + note([c["name"]]), choices, pid))
+    for c, v in said:                           # a joint that gives first (#301): its own row, its fix by how it gives
+        J = c.get("joints") or {}
+        for jr in J.get("rows") or []:
+            if jr.get("safety") is None or verdicts.meets(jr["safety"], need)["counts_as_pass"]:   # verdicts' own
+                continue
+            if v["kind"] == "fails" and c.get("governs") == "joint":
+                covered.add(c["name"])
+            rid = f"joint:{'|'.join(jr['pieces'])}"
+            if any(r["id"] == rid for r in rows):
+                continue
+            first = (J.get("governing") or {}).get("pieces") == jr["pieces"]     # "gives first" is the governing one's
+            rows.append(_row(rid, f"The joint between {jr['between']} {'gives first' if first else 'gives too'} under "
+                                  f"{c['name']}: {jr['said']}; "
+                                  f"{_x(jr['safety'], need)} where it needs {need:g}×" + note([c["name"]]),
+                             _joint_choices(jr, name), pid))
+        if any(jr.get("said") == _racking() for jr in J.get("rows") or []):
+            from .answers import RACKING
+
+            limits.append(RACKING)
     for c, v in failing:                        # any other: the FEA's, or a check with no thickness to offer
         if c["name"] in covered:
             continue
-        where = (c.get("fea") or {}).get("in") or (c.get("plate") or {}).get("piece")
-        rows.append(_row(f"fails:{c['name']}", f"It doesn't hold {c['name']}: {_x(c['safety'])} where it needs {need:g}×"
-                                              + (f"; it works hardest in the {where}" if where else ""),
+        fea = L.judged_by(run, c) == "fea"          # "works hardest in" is the FEA's to say (#318 re-check)
+        where = (c.get("fea") or {}).get("in") if fea else None
+        rows.append(_row(f"fails:{c['name']}", f"It doesn't hold {c['name']}: {_x(c['safety'], need)} where it needs {need:g}×"
+                                              + (f"; it works hardest in the {where}" if where else "") + note([c["name"]]),
                          [_choice(f"Make the {where} stronger: thicker, or with a rib or a brace" if where
                                   else "Make it stronger where it fails", DESIGNER, _designer_cost(name)),
                           _choice("Ask it to hold less: a lighter load in its loads()", DESIGNER, _designer_cost(name))], pid))
-    brace = verdicts.wood_brace(run)            # what Caliper can't fix by itself: said apart, never ticked
-    if brace:                                   # its joints taken as solid wood, whatever each case reads
-        limits.append("Its joints aren't checked: " + joint_said(brace, need).strip().rstrip("."))
-    for c, v in said:
-        if v.get("joints") and v.get("brace") and not brace:     # a pass resting on a joint nothing checks (#265)
-            limits.append("Its joints aren't checked: " + joint_said(v["brace"], need).strip().rstrip("."))
+    for c, v in said:                           # what Caliper can't fix by itself: said apart, never ticked
+        b = verdicts.wood_brace(run, c)          # joints #311 didn't reach, as the card reads them (#318 re-check)
+        if b:
+            words = joint_said(b, need).strip().rstrip(".")
+            limits.append(words[:1].upper() + words[1:] if b.get("names") or b.get("unchained")
+                          else "Its joints aren't checked: " + words)
         if v["kind"] == "span":
             limits.append(verdicts.SPAN_WHY[:1].upper() + verdicts.SPAN_WHY[1:])
         if L.rough(run, c):
             limits.append(L.ROUGH)
     return rows, limits
+
+
+def _pending(store: DesignStore, pid: str) -> dict:
+    """``{case name: words}`` for each case checked at one side of an open question on the part's loads (#312): a row
+    of it says it's of that value, pending the person's choice (#318 re-check)."""
+    from . import construction as C
+    from . import scenarios as SC
+
+    said = SC._said(store, pid)
+    if not said:
+        return {}
+    out = {}
+    for e in SC._effective(said, C.declared(store, pid)):
+        if not e.get("conflict"):
+            continue
+        d = e.get("design") or {}
+        for r in e.get("checks") or [e["row"]]:
+            design = bool(d) and r["amount"] == d.get("amount") and r["unit"] == d.get("unit") \
+                and not str(r["name"]).endswith("(yours)")
+            amount = f"{SC._num(r['amount'])} {r['unit']}"
+            out[SC.name(r)] = (f"of the design's {amount}, pending your choice" if design
+                               else f"of yours, {amount}, pending your choice")
+    return out
+
+
+def _racking() -> Optional[str]:
+    try:
+        from .joint_check import RACKING_SAID
+    except ImportError:  # pragma: no cover — before #313
+        return None
+    return RACKING_SAID
+
+
+def _joint_choices(jr: dict, name: str) -> list[dict]:
+    """A joint's fix by how it gives (#301's modes): what holds it that way, the designer's to make."""
+    between = jr["between"]
+    piece = (jr.get("pieces") or [""])[0]
+    by = {"withdrawal": f"Hold {between} together another way: screws through a face, a pin or a wedge "
+                        "(nothing in an edge holds a pull)",
+          "shear": f"More screws where {between} meet",
+          "bearing": f"More bearing where {between} meet: a thicker piece, or a cleat under it",
+          "net section": f"Leave more of the {piece} past its notch: a shallower notch, or a wider piece"}
+    fix = by.get(jr.get("mode")) or f"More fasteners where {between} meet"
+    # the joint's fixes, the designer's each (#318 re-check): what holds it that way, a glue block, a different joint
+    return [_choice(fix, DESIGNER, _designer_cost(name)),
+            _choice(f"A glue block where {between} meet", DESIGNER, _designer_cost(name)),
+            _choice(f"A different joint where {between} meet: a dado or a rabbet", DESIGNER, _designer_cost(name))]
+
+
+def _scenario_rows(store: DesignStore, pid: str) -> list[dict]:
+    """The part's edited loads (#312): an open question (the design changed a case under an edit) to settle, and a case
+    turned off, so nothing checks it. Each a change to its loads, no designer."""
+    from . import construction as C
+    from . import scenarios as SC
+
+    said = SC._said(store, pid)
+    if not said:
+        return []
+    out = []
+    for e in SC._effective(said, C.declared(store, pid)):
+        if e.get("conflict"):
+            q = SC._asked(e)
+            choices = ([_choice("Take the design's", LOADS, LOADS_COST, scenario=e["of"], take="design")]
+                       if e.get("design") else [])
+            choices.append(_choice("Keep mine", LOADS, LOADS_COST, scenario=e["of"], take="mine"))
+            out.append(_row(f"asked:{e['of']}", q[:1].upper() + q[1:], choices, pid))
+        elif not e["row"].get("on", True):
+            nm = SC.name(e["row"])
+            out.append(_row(f"off:{e.get('of') or nm}", f"'{nm}' is turned off, so nothing checks it",
+                            [_choice("Turn it back on", LOADS, LOADS_COST, scenario=e.get("of") or nm, take="on")], pid))
+    return out
 
 
 def _finding_rows(store: DesignStore, pid: str, name: str) -> list[dict]:
@@ -264,6 +369,7 @@ def listed(store: DesignStore, state: dict, pid: str, *, findings: bool = True) 
         got, lim = _run_rows(store, p, runs[0], name)
         rows += got
         limits += lim
+    rows += _scenario_rows(store, pid)           # its edited loads' questions, and cases turned off (#312)
     if findings:
         rows += _finding_rows(store, pid, name)
     return {"part": pid, "rows": rows, "limits": list(dict.fromkeys(limits))}
