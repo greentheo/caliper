@@ -3587,7 +3587,7 @@ function jointsTable(c, run) {
       <td style="color:var(--${r.safety == null ? 'muted' : verdictTone(r.verdict)})">${r.safety == null ? '—' : sx(r.safety, run.min_safety)}</td></tr>`).join('')}</table>
     ${(J.unchecked || []).length ? `<div class="muted">Not checked by hand: ${J.unchecked.map(esc).join('; ')}.</div>` : ''}
     <div class="muted">Mean breaking loads, by hand, against what the wood needs (${run.min_safety}x): screws by the thread in the edge
-      (APA E830), glue to an edge none, bearing at 360 psi. The values are pending Theo's answer on #301.</div></details>`;
+      (APA E830), glue to an edge none, bearing at 360 psi: Theo's values (#301). How a long joint's load is shared is interim (#316).</div></details>`;
 }
 function jointsLine(c, run) {
   const b = c.verdict && c.verdict.joints ? c.verdict.brace : null;
