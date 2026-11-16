@@ -174,6 +174,25 @@ def test_keep_mine_settles_an_open_question_with_no_designer(tmp_path, monkeypat
     assert r["status"] == "fixed", r
 
 
+def test_an_open_question_left_unticked_is_named_and_left_as_it_is(tmp_path, monkeypatch):
+    """#318: an untouched question never settles itself: Fix these says it's left open, by name, and leaves it."""
+    from caliper import scenarios as S
+
+    from .test_scenarios import RAISED, RATED
+
+    store = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", RATED, intent="a step stool")
+    got = S.get(store, "stool")
+    S.put(store, "stool", [{**got["scenarios"][0], "amount": 260}, got["scenarios"][1]], got["supports"])
+    store.write_part("stool", RAISED, intent="heavier")
+    p = fixing.plan(store, design_api.design_state(store), "stool", [], own=[])
+    assert p["left"] == ["You'd edited 'stepping on the front edge' to 260 lb; " + p["left"][0].split("; ", 1)[1]]
+    assert p["said"].startswith("nothing to do; left open: you'd edited 'stepping on the front edge' to 260 lb")
+    fixing.apply(store, "stool", [], check=False)
+    (still,) = S.asked(store, "stool")
+    assert still.startswith("you'd edited 'stepping on the front edge' to 260 lb")             # still asked
+
+
 def test_the_route_plans_then_runs_a_fix_job_and_needs_claude_for_the_designer(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
@@ -197,7 +216,7 @@ def test_the_route_plans_then_runs_a_fix_job_and_needs_claude_for_the_designer(t
 def _page(extra):
     from .test_carve_click import _page as page, _run
 
-    return _run(page(["fixesView", "fixRow", "fixGo"], consts=["esc", "fixRowKey"], extra=extra))
+    return _run(page(["fixesView", "fixRow", "fixGo", "fixTicked"], consts=["esc", "fixRowKey"], extra=extra))
 
 
 LIST = {"part": "stool", "rows": [{"id": "plate:top", "problem": "The top fails", "part": "stool", "measured": True,
@@ -225,3 +244,17 @@ def test_the_page_sends_rows_by_id_and_choice_through_the_plan_then_the_job():
     assert "api('POST', `/api/designs/${S.slug}/parts/${part}/fixes`, fixPicked(part))" in src
     assert "trackJob(job_id, { kind: 'fix', part, text: 'fixing…' }).done" in src
     assert "id: r.id, choice: mine.pick[fixRowKey(r)] || 0," in src            # never a value, but the person's words
+
+
+def test_the_page_badges_your_loads_and_leaves_an_open_question_unticked_until_you_tick_it():
+    rows = {"part": "stool", "limits": [], "rows": [
+        {"id": "asked:x", "problem": "You'd edited x", "part": "stool", "measured": False, "badge": "your loads",
+         "ticked": False, "choices": [{"fix": "Keep mine", "kind": "loads", "cost": "c"}]}]}
+    html = _page(f"out = fixesView({json.dumps(rows)}, {{}});")
+    assert "your loads" in html and ">measured<" not in html
+    tick = html.split('data-fix-tick="', 1)[1].split(">", 1)[0]
+    assert " checked" not in tick                                                  # unticked until you tick it
+    html = _page(f"out = fixesView({json.dumps(rows)}, {{tick: ['asked:x|You\\'d edited x']}});")
+    assert " checked" in html.split('data-fix-tick="', 1)[1].split(">", 1)[0]         # ticked once you tick it
+    src = open(__file__.replace("tests/test_fix_these.py", "src/caliper/web/static/design.js")).read()
+    assert "picked: (got.rows || []).filter((r) => fixTicked(r, mine))" in src

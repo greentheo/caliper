@@ -84,8 +84,13 @@ def plan(store: DesignStore, state: dict, pid: str, picked: list[dict], own: Opt
         parts.append(f"1 designer edit on the {_part_name(p)} (one Claude call)")
     if check:
         parts.append(("then " if parts else "") + _check_cost(check["minutes"], finer=bool(check["spacing_mm"])))
-    return {"numbers": numbers, "loads": loads, "designer": designer, "check": check, "gone": gone,
-            "designer_call": bool(designer), "said": "; ".join(parts) or "nothing to do"}
+    picked_ids = {pk.get("id") for pk in picked or []}
+    left = [r["problem"] for r in got["rows"] if r["id"].startswith("asked:") and r["id"] not in picked_ids]
+    said = "; ".join(parts) or "nothing to do"
+    if left:                                      # an untouched question never settles itself: asked by name (#318)
+        said += "; left open: " + "; ".join(q[:1].lower() + q[1:] for q in left)
+    return {"numbers": numbers, "loads": loads, "designer": designer, "check": check, "gone": gone, "left": left,
+            "designer_call": bool(designer), "said": said}
 
 
 def _message(name: str, designer: list[dict]) -> str:

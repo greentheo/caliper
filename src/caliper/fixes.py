@@ -229,8 +229,11 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
             rid = f"joint:{'|'.join(jr['pieces'])}"
             if any(r["id"] == rid for r in rows):
                 continue
-            first = (J.get("governing") or {}).get("pieces") == jr["pieces"]     # "gives first" is the governing one's
-            rows.append(_row(rid, f"The joint between {jr['between']} {'gives first' if first else 'gives too'} under "
+            first = (J.get("governing") or {}).get("pieces") == jr["pieces"]
+            # "gives first" only where a joint governs the case; where a panel or the FEA does, the weakest joint (#318)
+            verb = ("gives first under" if first and c.get("governs") == "joint" else
+                    "is the weakest joint under" if first else "gives too under")
+            rows.append(_row(rid, f"The joint between {jr['between']} {verb} "
                                   f"{c['name']}: {jr['said']}; "
                                   f"{_x(jr['safety'], need)} where it needs {need:g}×" + note([c["name"]]),
                              _joint_choices(jr, name), pid))
@@ -324,11 +327,13 @@ def _scenario_rows(store: DesignStore, pid: str) -> list[dict]:
             choices = ([_choice("Take the design's", LOADS, LOADS_COST, scenario=e["of"], take="design")]
                        if e.get("design") else [])
             choices.append(_choice("Keep mine", LOADS, LOADS_COST, scenario=e["of"], take="mine"))
-            out.append(_row(f"asked:{e['of']}", q[:1].upper() + q[1:], choices, pid))
+            out.append({**_row(f"asked:{e['of']}", q[:1].upper() + q[1:], choices, pid), "measured": False,
+                        "badge": "your loads", "ticked": False})        # never settles itself untouched (#318)
         elif not e["row"].get("on", True):
             nm = SC.name(e["row"])
-            out.append(_row(f"off:{e.get('of') or nm}", f"'{nm}' is turned off, so nothing checks it",
-                            [_choice("Turn it back on", LOADS, LOADS_COST, scenario=e.get("of") or nm, take="on")], pid))
+            out.append({**_row(f"off:{e.get('of') or nm}", f"'{nm}' is turned off, so nothing checks it",
+                               [_choice("Turn it back on", LOADS, LOADS_COST, scenario=e.get("of") or nm, take="on")], pid),
+                        "measured": False, "badge": "your loads"})       # the person's own edit, not a measurement
     return out
 
 

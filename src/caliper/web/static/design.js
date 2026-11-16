@@ -1247,7 +1247,7 @@ $('newBtn').onclick = startNew;
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
-  if (first) { S.fixes = {}; S.fixMine = {}; S.fixOpen = null; }    // Things to fix are this design's only (#318 review)
+  if (first) { S.fixes = {}; S.fixOpen = null; }      // the list is this design's; your own rows are kept per design (#318)
   if (first) { dropBuildFollow(); clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
   location.hash = encodeURIComponent(slug);
   if (first) showLoading(slug);
@@ -2121,11 +2121,17 @@ const fixRowKey = (r) => `${r.id}|${r.problem}`;
 function fixMine(part) {
   S.fixMine = S.fixMine || {};
   const k = fixKey(part);
-  return (S.fixMine[k] = S.fixMine[k] || { untick: [], words: {}, own: [], pick: {}, editing: null });
+  return (S.fixMine[k] = S.fixMine[k] || { untick: [], tick: [], words: {}, own: [], pick: {}, editing: null });
+}
+// ticked: by default, or, where the row says it starts unticked (an open question: it never settles itself, #318), only
+// once the person ticks it
+function fixTicked(r, mine) {
+  const k = fixRowKey(r);
+  return r.ticked === false ? (mine.tick || []).includes(k) : !(mine.untick || []).includes(k);
 }
 function fixRow(r, mine) {
   const k = fixRowKey(r);
-  const ticked = !(mine.untick || []).includes(k);
+  const ticked = fixTicked(r, mine);
   const pick = (mine.pick || {})[k] || 0;
   const words = (mine.words || {})[k];
   const c = r.choices[pick] || r.choices[0];
@@ -2137,7 +2143,7 @@ function fixRow(r, mine) {
         value="${j}"${j === pick ? ' checked' : ''}> ${esc(x.fix)}</label>`).join(' <span class="muted">or</span> ') : esc(c.fix))
       + ' <span class="muted small">proposed</span>';
   return `<div class="fixrow" data-fix-row="${esc(r.id)}"><label><input type="checkbox" data-fix-tick="${esc(k)}"${ticked ? ' checked' : ''}>
-      ${esc(r.problem)}${words != null ? '' : ' <span class="badge ok">measured</span>'}</label>
+      ${esc(r.problem)}${words != null ? '' : r.badge ? ` <span class="badge">${esc(r.badge)}</span>` : ' <span class="badge ok">measured</span>'}</label>
     <div class="small">${fix} ${mine.editing === k ? '' : `<button class="ghost" data-fix-word="${esc(k)}">Reword</button>`}</div>
     <div class="small muted">${esc(words != null ? 'a designer edit, in your words' : c.cost)}</div></div>`;
 }
@@ -2172,7 +2178,7 @@ function fixGo(mine, n) {
 function fixPicked(part) {
   const got = S.fixes[fixKey(part)], mine = fixMine(part);
   return {
-    picked: (got.rows || []).filter((r) => !mine.untick.includes(fixRowKey(r))).map((r) => ({
+    picked: (got.rows || []).filter((r) => fixTicked(r, mine)).map((r) => ({
       id: r.id, choice: mine.pick[fixRowKey(r)] || 0,
       ...(mine.words[fixRowKey(r)] != null ? { words: mine.words[fixRowKey(r)] } : {}) })),
     own: (mine.own || []).filter((o) => !o.off).map((o) => ({ fix: o.fix })),
@@ -2217,6 +2223,7 @@ function wireFixRows(part) {
   body.querySelectorAll('[data-fix-tick]').forEach((t) => { t.onchange = () => {
     const id = t.dataset.fixTick;
     mine.untick = mine.untick.filter((x) => x !== id).concat(t.checked ? [] : [id]);
+    mine.tick = (mine.tick || []).filter((x) => x !== id).concat(t.checked ? [id] : []);
   }; });
   body.querySelectorAll('[data-fix-pick]').forEach((t) => { t.onchange = () => { mine.pick[t.dataset.fixPick] = +t.value; paintFixes(part); }; });
   body.querySelectorAll('[data-fix-word]').forEach((b) => { b.onclick = () => { mine.editing = b.dataset.fixWord; paintFixes(part); }; });
