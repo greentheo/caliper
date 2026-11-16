@@ -86,7 +86,7 @@ def edge_joints(pieces: list[dict], tol: float) -> dict:
     return {key: max(by.values()) for key, by in contact.items()}
 
 
-#: Thread a screw puts into the edge it's driven into (#301 decision 1, pending Theo): APA Technical Note E830 Table 6
+#: Thread a screw puts into the edge it's driven into (#301 decision 1, Theo, 2026-11-16): APA Technical Note E830 Table 6
 #: tested a #8 into a 3/4 in plywood edge at 1 in of thread, and the joint check credits only the thread the bought screw
 #: has there. Through 3/4 in plywood that's #8 × 2 in.
 EDGE_THREAD_IN = 1.25
