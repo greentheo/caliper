@@ -528,6 +528,10 @@ def holed_buckling(case: dict, plist: list[dict], holes: dict, load: dict, min_s
                       else (case.get("fea") or {}).get("safety"))
     elif weakest is not None and (safety is None or weakest["safety"] < safety):
         case["over"], governs, safety = governs, "buckling", weakest["safety"]
+    if governs != "joint":                     # a joint by hand, where it's the lowest (#301)
+        from . import joint_check as JC
+
+        governs, safety = JC.lower(case, governs, safety)
     case.update({"safety": safety, "governs": governs, "holds": bool(safety is not None and safety >= min_safety),  # producer
                  "breaks_lb": V.cut_lb(case["lb"] * case["factor"] * safety) if safety and case.get("lb") else case.get("breaks_lb")})
     return case
@@ -549,6 +553,9 @@ def judged(case: dict, raw: float, min_safety: float, **extra) -> dict:
     case.pop("over", None)
     if folds is not None and folds < safety:
         case["over"], governs, safety = governs, "buckling", folds
+    from . import joint_check as JC
+
+    governs, safety = JC.lower(case, governs, safety)        # a joint by hand governs where it's the lowest (#301)
     case.update({"safety": safety, "governs": governs, "holds": safety >= min_safety, **extra,  # producer
                  "breaks_lb": V.cut_lb(case["lb"] * case["factor"] * safety)})
     return case

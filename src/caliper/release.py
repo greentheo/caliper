@@ -1094,6 +1094,7 @@ def book(rec: dict, card: dict, shop: dict, plans: dict, steps_: list[dict], not
         out.append("</table><p class='note'>The prediction is for the load placed the same way. To test it, load it "
                    "there a little at a time and write down where it gave. The glue and screws aren't modelled, "
                    "so if it's a joint that goes, that's worth knowing too.</p>")
+    out += asked_html(rec, name)                     # its loads' open questions, said (#312 third round)
     # the scorecard as released
     out.append("<h2 class='page'>Scorecard, as released</h2><table><tr><th></th><th>check</th><th class='n'>value</th>"
                "<th class='n'>margin</th><th>trust</th></tr>")
@@ -1150,6 +1151,19 @@ def _strength(store: DesignStore, versions: dict) -> dict:
                          "min_safety": run.get("min_safety"), "rough": load_study.rough(run, c), "verdict": verdicts.case(run, c, filled=why, edge=edge)}
                         for c in run["cases"]]
     return out
+
+
+def _loads_asked(store: DesignStore, pids) -> dict:
+    """Each part's open conflicts on its loads (#312 third round): the book says them under Will it hold?."""
+    from . import scenarios as SC
+
+    return {pid: a for pid in pids if (a := SC.asked(store, pid))}
+
+
+def asked_html(rec: dict, name=lambda pid: pid) -> list[str]:
+    """The book's word on a part whose loads have an open question: what's checked till it's answered."""
+    return [f"<p class='note'>{_e(name(pid))}: an open question about its loads: {_e('; '.join(a))}.</p>"
+            for pid, a in (rec.get("loads_asked") or {}).items()]
 
 
 def _joints_of(store: DesignStore, pid: str) -> list:
@@ -1410,6 +1424,7 @@ def _make(store: DesignStore, *, emit: Optional[Callable] = None, pdf: bool = Tr
 
     said = {p.id: grain.notes(store, p.id) for p in store.design.parts}
     rec = {"id": rid, "created": time.time(), "design": store.design.name, "strength": strength, "making": made, "cut_smaller": consistency.cut_smaller(store, [p.id for p in built]),
+           "loads_asked": _loads_asked(store, list(versions)),         # an open question on its loads (#312)
            "names": {p.id: p.label for p in store.design.parts if p.label},
            "grain": {pid: n for pid, n in said.items() if n},       # which way to cut each panel (CALI-126)
            "joints": {pid: j for pid, j in ((p.id, _joints_of(store, p.id)) for p in built) if j},   # (CALI-156, #222)
