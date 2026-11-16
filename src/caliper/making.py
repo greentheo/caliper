@@ -10,6 +10,7 @@ what "How do I make it?" reads, what the scorecard checks, and how the build pac
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from typing import Optional
 
@@ -159,6 +160,37 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
                        "holes": r.get("holes", 0), **how})
     printed = []
     printer = S.machine(shop, "printer")
+    scratch: list = []                            # its STLs' own folder where no caller gave one: removed (#315)
+    try:
+        _printed(store, part_id, pieces, printed, printer, out_dir, scratch, wait)
+    finally:
+        from . import sandbox
+
+        for d in scratch:
+            sandbox._ACTIVE.discard(d)
+            shutil.rmtree(d, ignore_errors=True)   # a background slice copies its STL first (printing.estimate)
+    from . import mirror
+
+    flip = mirror.source_of(store, part_id)        # a printed mirror: the source's file, flipped (CALI-161, #239)
+    for pr in printed if flip else []:
+        pr["mirror_of"] = flip
+        pr["mirror_said"] = f"a mirror of {flip}: these STLs are {flip}'s, mirrored (or flip {flip}'s files in the slicer)"
+    by_how: dict = {}
+    for p in pieces:
+        if p["ok"]:
+            by_how.setdefault(p["how"], []).append(p["name"])
+    missing = [p for p in pieces if not p["ok"]]
+    return {"part": part_id, "shop_default": bool(shop.get("default")), "pieces": pieces, "by_how": by_how,
+            "printed": printed, "missing": missing, "ok": not missing,
+            "pending": any(pr.get("pending") for pr in printed)}
+
+
+def _printed(store: DesignStore, part_id: str, pieces: list, printed: list, printer: dict, out_dir: Optional[str],
+             scratch: list, wait: bool) -> None:
+    """Each printed piece's STLs and estimate, into ``printed``. Written in ``out_dir``, else in one folder made here
+    and named in ``scratch``, which :func:`plan` removes however this ends (#315)."""
+    from . import printing
+
     for pc in (p for p in pieces if p["kind"] == "printed" and p["ok"]):
         mesh = C.printed_solid(store, part_id)            # the sides, for a plywood top on printed sides
         volume = printer.get("volume_mm") or (256, 256, 256)
@@ -167,7 +199,15 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
         if over:                                          # never ok on a piece that doesn't fit (#179, rule 6)
             pc["ok"], pc["too_big"], pc["why"] = False, True, _too_big_said(len(parts), over, volume, store.design.display_units == "in")
             continue
-        keep = out_dir or tempfile.mkdtemp(prefix="caliper-print-")
+        if out_dir:
+            keep = out_dir
+        else:
+            if not scratch:
+                from . import sandbox
+
+                scratch.append(tempfile.mkdtemp(prefix="caliper-print-"))
+                sandbox._ACTIVE.add(scratch[0])   # never swept while it's in use
+            keep = scratch[0]
         os.makedirs(keep, exist_ok=True)
         each = []
         for i, m in enumerate(parts):
@@ -195,17 +235,3 @@ def plan(store: DesignStore, part_id: str, shop: Optional[dict] = None, *, out_d
                         "from": (rough or each)[0]["from"], "rough": len(rough),
                         "rough_said": rough_said(len(rough), len(parts), rough[0]["from"] if rough else ""),
                         "slicer_failed": any(e.get("slicer_failed") for e in each)})
-    from . import mirror
-
-    flip = mirror.source_of(store, part_id)        # a printed mirror: the source's file, flipped (CALI-161, #239)
-    for pr in printed if flip else []:
-        pr["mirror_of"] = flip
-        pr["mirror_said"] = f"a mirror of {flip}: these STLs are {flip}'s, mirrored (or flip {flip}'s files in the slicer)"
-    by_how: dict = {}
-    for p in pieces:
-        if p["ok"]:
-            by_how.setdefault(p["how"], []).append(p["name"])
-    missing = [p for p in pieces if not p["ok"]]
-    return {"part": part_id, "shop_default": bool(shop.get("default")), "pieces": pieces, "by_how": by_how,
-            "printed": printed, "missing": missing, "ok": not missing,
-            "pending": any(pr.get("pending") for pr in printed)}

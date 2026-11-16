@@ -19,12 +19,29 @@ from __future__ import annotations
 from .errors import scrub, scrubbed
 
 import json
+import logging
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
+
+log = logging.getLogger(__name__)
+
+#: A run's own folder, in the temp dir (CALI-191, #304: each was left behind; 171,673 on one machine).
+PREFIX = "caliper_sandbox_"
+#: The temp folders the start sweep tidies: a build's, a print plan's STLs (making.plan), a served part's STL (#315).
+SWEPT = (PREFIX, "caliper-print-", "caliper_part_")
+#: Set to 1 to keep a failed run's folder, to look at what it was given and what it wrote.
+KEEP_ENV = "CALIPER_KEEP_SANDBOX"
+#: A folder this old, by its newest file, belongs to no run: the start sweep removes it.
+SWEEP_AGE_S = 24 * 3600.0
+#: The folders runs in this process are using now: never swept.
+_ACTIVE: set = set()
 
 
 @dataclass
@@ -56,7 +73,71 @@ def run_script(
     error + traceback on failure (build exception, bad contract, timeout, or a crash that left no STEP).
     """
     params = params or {}
-    tmp = workdir or tempfile.mkdtemp(prefix="caliper_sandbox_")
+    if workdir:                                   # the caller's: kept, as it is
+        return _run(script, params, timeout, workdir)
+    tmp = tempfile.mkdtemp(prefix=PREFIX)
+    _ACTIVE.add(tmp)
+    res = None
+    try:
+        res = _run(script, params, timeout, tmp)
+        if res.ok:
+            res.step_path = None                  # read in already, and it goes with its folder
+        return res
+    finally:                                      # however it ends: done, failed, timed out (#304)
+        _ACTIVE.discard(tmp)
+        failed = res is None or not res.ok
+        why = (res.error if res is not None else "it stopped before it said") if failed else ""
+        if failed and os.environ.get(KEEP_ENV) == "1":
+            log.info("sandbox run failed (%s): its folder is kept at %s", why, tmp)
+        else:
+            shutil.rmtree(tmp, ignore_errors=True)
+            if failed:
+                log.info("sandbox run failed (%s): the error is in its result; its folder was removed "
+                         "(set %s=1 to keep a failed run's)", why, KEEP_ENV)
+
+
+def sweep(root: Optional[str] = None, max_age_s: float = SWEEP_AGE_S) -> int:
+    """Remove the run folders (any of :data:`SWEPT`) older than ``max_age_s`` by their newest file, in ``root`` (the temp dir): those runs have
+    ended, here or in another process, and left them (#304). One a run in this process uses is never touched, nor a
+    fresh one, which may be another process's run. Returns how many it removed."""
+    root = root or tempfile.gettempdir()
+    now, gone = time.time(), 0
+    try:
+        entries = list(os.scandir(root))
+    except OSError:
+        return 0
+    for e in entries:
+        if not e.name.startswith(SWEPT) or e.path in _ACTIVE:
+            continue
+        try:
+            if not e.is_dir(follow_symlinks=False):
+                continue
+            newest = max([e.stat(follow_symlinks=False).st_mtime]
+                         + [f.stat(follow_symlinks=False).st_mtime for f in os.scandir(e.path)])
+        except OSError:
+            continue                                  # gone already, or not ours to read
+        if now - newest > max_age_s:
+            shutil.rmtree(e.path, ignore_errors=True)
+            gone += not os.path.exists(e.path)
+    return gone
+
+
+def start_sweep() -> threading.Thread:
+    """The server's one sweep at start, in the background: a machine with a great many old folders mustn't wait on it."""
+    def go():
+        try:
+            n = sweep()
+            if n:
+                log.info("removed %d old sandbox folder%s from the temp dir", n, "" if n == 1 else "s")
+        except Exception:  # noqa: BLE001 — tidying never stops the server
+            log.exception("sandbox sweep failed")
+
+    t = threading.Thread(target=go, name="sandbox-sweep", daemon=True)
+    t.start()
+    return t
+
+
+def _run(script: str, params: dict, timeout: float, tmp: str) -> RunResult:
     in_path = os.path.join(tmp, "in.json")
     step_path = os.path.join(tmp, "part.step")
     status_path = os.path.join(tmp, "status.json")
