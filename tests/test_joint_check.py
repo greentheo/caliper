@@ -752,3 +752,42 @@ def test_a_load_past_a_splayed_top_lifts_the_far_side():
     rows = {tuple(sorted(r["pieces"])): r for r in got["rows"]}
     assert rows[("right side", "step")]["demand_lb"]["bearing"] > 500.0
     assert rows[("left side", "step")]["mode"] == "withdrawal" and "bearing" not in rows[("left side", "step")]["demand_lb"]
+
+
+# --- #311: supports grouped by how they lie from each other, not from the load ----------------------------------------------
+@pytest.mark.parametrize("x,shares", [(99.0, [0.01, 0.99]), (101.0, [-0.01, 1.01]), (110.0, [-0.1, 1.1])])
+def test_a_load_off_the_line_between_two_supports_is_shared_along_it(x, shares):
+    """20 mm off the line from 0 to 100: grouped by the load's own offset, each read as its own pair, half and half."""
+    got = JC._lever([np.array([0.0, 0.0, 0.0]), np.array([100.0, 0.0, 0.0])], np.array([x, 20.0, 0.0]), "pairs")
+    assert got == pytest.approx(shares, abs=1e-9)
+
+
+def test_a_splayed_stool_loaded_forward_still_shares_its_sides_evenly():
+    got = _check_at(SPLAYED, 0.0)
+    import tempfile
+    from pathlib import Path
+
+    store = _store(Path(tempfile.mkdtemp()), SPLAYED, "stool")
+    pieces, tol, held = _pieces(store)
+    load = _load(store)
+    load = {**load, "lo": tuple(np.add(load["lo"], (0, 60, 0))), "hi": tuple(np.add(load["hi"], (0, 60, 0)))}
+    rows = {tuple(sorted(r["pieces"])): r for r in JC.check(JC.setup(store, "stool"), load, held, 2.0)["rows"]}
+    left, right = rows[("left side", "step")]["demand_lb"]["bearing"], rows[("right side", "step")]["demand_lb"]["bearing"]
+    assert left == pytest.approx(250.0, rel=0.01) and right == pytest.approx(250.0, rel=0.01)
+
+
+@pytest.mark.parametrize("y", [10.0, 50.0, 150.0, 330.0])
+def test_a_step_on_two_sides_and_two_rails_is_two_pairs_wherever_it_s_loaded(y):
+    """v7's arrangement: never "three in a row", wherever the load lands front to back."""
+    import tempfile
+    from pathlib import Path
+
+    store = _store(Path(tempfile.mkdtemp()), STEP_ON_SIDES, "stool")
+    pieces, tol, held = _pieces(store)
+    load = _load(store)
+    c = (np.asarray(load["lo"]) + np.asarray(load["hi"])) / 2.0
+    load = {**load, "lo": tuple(np.add(load["lo"], (0, y - c[1], 0))), "hi": tuple(np.add(load["hi"], (0, y - c[1], 0)))}
+    got = JC.check(JC.setup(store, "stool"), load, held, 2.0)
+    assert got["chain"], got["unchecked"]
+    sides = sum(sum(r["demand_lb"].values()) for r in got["rows"] if sorted(r["pieces"]) in (["left side", "step"], ["right side", "step"]))
+    assert sides == pytest.approx(250.0, rel=0.02)                                   # half each way: the sides' half
