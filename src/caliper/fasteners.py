@@ -86,11 +86,18 @@ def edge_joints(pieces: list[dict], tol: float) -> dict:
     return {key: max(by.values()) for key, by in contact.items()}
 
 
+#: Thread a screw puts into the edge it's driven into (#301 decision 1, Theo, 2026-11-16): APA Technical Note E830 Table 6
+#: tested a #8 into a 3/4 in plywood edge at 1 in of thread, and the joint check credits only the thread the bought screw
+#: has there. Through 3/4 in plywood that's #8 × 2 in.
+EDGE_THREAD_IN = 1.25
+
+
 def screw_length_mm(pieces: list[dict]) -> float:
-    """The screw for a part: about 1.6x its thickest wood sheet, to the next 1/4 in."""
+    """The screw for a part: through its thickest wood sheet and :data:`EDGE_THREAD_IN` into the edge behind it, to the next
+    1/4 in (#301: it was 1.6x the sheet, #8 × 1 1/4 in, half an inch into an edge)."""
     thick = max((pc["thickness"] for pc in pieces if pc.get("kind") == "sheet" and pc.get("material") in WOOD),
                 default=19.05)
-    return math.ceil(thick / IN * 1.6 * 4) / 4 * IN
+    return math.ceil((thick / IN + EDGE_THREAD_IN) * 4 - 1e-9) / 4 * IN
 
 
 def estimate(pieces: list[dict], tol: float, said: Optional[list] = None) -> dict:

@@ -50,6 +50,7 @@ const sx = (n) => (n == null ? '—' : `${Number(n).toFixed(2)}x`);
 const lbs = (n) => `${n} lb`, pct = (x) => `${Math.round(x * 100)}%`, len = (x) => `${x} mm`, wallLen = len;
 const fixed = (v, d) => Number(v).toFixed(d);
 const verdictTone = () => 'ok', settled = (v) => v && (v.kind === 'holds' || v.kind === 'fails');
+const jointsTable = () => '';
 const caseBadge = (c) => (c.verdict && c.verdict.word ? `<span class="badge">${c.verdict.word}</span>` : ''), untrustedBadge = () => '', jointsLine = () => '', peakWhere = () => 'here';
 const foldedBy = () => 'the buckling check', beamGrain = () => '', grainKeep = () => '', holdsHere = (x) => !!x.holds;
 const coarseWord = (c) => (c.unresolved === 'unchecked' ? 'not checked' : 'not resolved');
