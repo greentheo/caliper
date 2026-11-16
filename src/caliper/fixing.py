@@ -38,6 +38,25 @@ def _plural(n: int, one: str, many: str) -> str:
     return f"{n} {one if n == 1 else many}"
 
 
+def _spoken(row: dict) -> dict:
+    return {k: row[k] for k in ("cases", "what") if k in row}
+
+
+def _moved(item: dict, run: Optional[dict], rows: list[dict]) -> Optional[dict]:
+    """Where a check-made row gone from the list is measured now (#322 review: a piece renamed is a new id, not a fix):
+    the new row that speaks for any of its cases, unless every one of them passes in the fresh check. None: fixed."""
+    from . import verdicts
+
+    spoke = item.get("cases") or []
+    if not spoke:
+        return None
+    by = {c.get("name"): c for c in (run or {}).get("cases") or []}
+    need = (run or {}).get("min_safety")
+    if all(n in by and verdicts.meets(by[n].get("safety"), need)["counts_as_pass"] for n in spoke):
+        return None
+    return next((r for r in rows if set(r.get("cases") or []) & set(spoke)), None)
+
+
 def plan(store: DesignStore, state: dict, pid: str, picked: list[dict], own: Optional[list[dict]] = None) -> dict:
     """What Fix these will do, read from the server's own list: ``{"numbers", "loads", "designer", "check", "said",
     "designer_call", "gone"}``. ``picked``: ``[{"id", "choice", "words"?}]``; ``own``: ``[{"fix"}]`` (the person's)."""
@@ -54,11 +73,11 @@ def plan(store: DesignStore, state: dict, pid: str, picked: list[dict], own: Opt
             continue
         words = str(pk.get("words") or "").strip()
         if words:                                         # reworded: the person's words, the designer's to do
-            designer.append({"id": r["id"], "fix": words, "own": True, "problem": r["problem"]})
+            designer.append({"id": r["id"], "fix": words, "own": True, "problem": r["problem"], **_spoken(r)})
             continue
         k = int(pk.get("choice") or 0)
         c = r["choices"][k if 0 <= k < len(r["choices"]) else 0]
-        item = {"id": r["id"], "fix": c["fix"], "problem": r["problem"], **c}
+        item = {"id": r["id"], "fix": c["fix"], "problem": r["problem"], **c, **_spoken(r)}
         {NUMBER: numbers, LOADS: loads, DESIGNER: designer, CHECK: checks}.get(c["kind"], designer).append(item)
     for o in own or []:
         words = str(o.get("fix") or "").strip()
@@ -168,7 +187,10 @@ def apply(store: DesignStore, pid: str, picked: list[dict], own: Optional[list[d
         except Exception as e:  # noqa: BLE001 — said in each row it leaves unmeasured, never a crash of the fix
             check_why = f"not checked again: {type(e).__name__}"
         store = DesignStore.load(store.root)
-    after = {r["id"] for r in listed(store, _state(store), pid)["rows"]}
+    now = _state(store)
+    rows_after = listed(store, now, pid)["rows"]
+    after = {r["id"] for r in rows_after}
+    run_after = next((r for r in now.get("load_runs") or [] if r["part"] == pid), None)
     results = []
     for item in p["numbers"] + p["loads"] + p["designer"] + [{"id": r, "fix": None, "gone": True} for r in p["gone"]]:
         rid = item.get("id")
@@ -188,6 +210,9 @@ def apply(store: DesignStore, pid: str, picked: list[dict], own: Optional[list[d
         elif from_check and not checked:
             results.append({"id": rid, "fix": item["fix"], "status": "still open",
                             "why": check_why or "not checked again, so not measured as fixed"})
+        elif from_check and (moved := _moved(item, run_after, rows_after)) is not None:
+            results.append({"id": rid, "fix": item["fix"], "status": "still open",
+                            "why": f"it's measured as '{moved.get('what') or moved['problem']}' now"})
         else:
             results.append({"id": rid, "fix": item["fix"], "status": "fixed", "why": "measured: it's off the list now"})
     n = {s: sum(1 for r in results if r["status"] == s) for s in ("fixed", "still open", "not done")}

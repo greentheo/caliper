@@ -522,3 +522,19 @@ def test_a_row_of_your_own_loads_is_badged_so_and_an_open_question_starts_untick
     q, off = rows["asked:stepping on the front edge"], rows["off:its rating (EN 14183, 150 kg)"]
     assert (q["measured"], q["badge"], q["ticked"]) == (False, "your loads", False)
     assert (off["measured"], off["badge"]) == (False, "your loads") and off.get("ticked", True) is True
+
+
+def test_a_joint_failing_in_two_cases_is_one_row_speaking_for_both(tmp_path):
+    """#322 review: Fix these reads a row's cases to say whether it's fixed, so a joint's row names each it gives in."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 1.4)
+    run = _run(store)
+    weak = {"pieces": ["front rail", "left side"], "between": "the front rail and the left side", "mode": "withdrawal",
+            "safety": 1.4, "need": 2.0, "holds": False, "said": "two #8 screws pulled out of the front rail's edge"}
+    run["cases"][0].update(governs="joint", joints={"chain": True, "n": 1, "unchecked": [], "governing": weak,
+                                                    "rows": [weak]})
+    run["cases"].append({**run["cases"][0], "name": "a hand"})
+    _resave(store, run)
+    (row,) = _list(store)["rows"]
+    assert (row["id"], row["cases"], row["what"]) == ("joint:front rail|left side", ["a foot", "a hand"],
+                                                      "the joint between the front rail and the left side")

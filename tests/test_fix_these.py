@@ -154,6 +154,73 @@ def test_a_row_the_check_couldn_t_measure_again_is_never_fixed(tmp_path, monkeyp
     assert r["status"] == "still open" and "not checked again" in r["why"], r          # gone only for want of a check
 
 
+@pytest.mark.parametrize("words", ["Make the top from 1 in", None])
+def test_a_row_whose_piece_was_renamed_is_still_open_not_fixed(tmp_path, monkeypatch, words):
+    """reviewer-2's must-fix 2: the designer renamed the step to the top and left it 3/4 in. Its row's id changed, so it
+    was "off the list": "fixed". Fixed is the cases it spoke for passing, or no new row covering them."""
+    from caliper import chat, load_study, params
+
+    store = _failing_plate(tmp_path)
+    (row,) = _rows(store)
+    assert row["id"] == "plate:top" and row["cases"] == ["a foot"]
+    monkeypatch.setattr(params, "set_values", lambda store, pid, ch: {"version": store.write_part(
+        pid, store.read_script(pid) + "\n# t\n", intent="t")})              # its own choice, the number, or yours
+    designer = Designer()
+    monkeypatch.setattr(chat, "refine_part", designer)
+
+    def study(store, pid, **kw):                                   # the same panel, renamed: still 1.4x
+        _check(store, pid, 1.4, rid=f"20261116-1{store.design.part(pid).version:05d}-check",
+               plate={**_plate(t=12.7), "piece": "seat", "safety_across": 1.4}, sheet={"pieces": {"seat": "t"}})
+
+    monkeypatch.setattr(load_study, "study", study)
+    got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0, "words": words}])
+    assert [r["id"] for r in _rows(store)] == ["plate:seat"]
+    (r,) = got["results"]
+    assert (r["status"], r["why"]) == ("still open", "it's measured as 'the seat' now"), r
+
+
+def test_a_row_whose_cases_now_pass_is_fixed_though_another_row_speaks_of_them(tmp_path, monkeypatch):
+    """The foreman's rule, its first half: the cases it spoke for pass in the fresh check, so it's fixed, though a joint
+    in the same case is a row of its own."""
+    from caliper import load_study, params
+
+    store = _failing_plate(tmp_path)
+    (row,) = _rows(store)
+    monkeypatch.setattr(params, "set_values", lambda store, pid, ch: {"version": store.write_part(
+        pid, store.read_script(pid) + "\n# t\n", intent="t")})
+    weak = {"pieces": ["leg", "top"], "between": "the top and the leg", "mode": "shear", "safety": 1.5, "need": 2.0,
+            "holds": False, "said": "two #8 screws in shear"}
+
+    def study(store, pid, **kw):
+        _check(store, pid, 3.1, rid=f"20261116-1{store.design.part(pid).version:05d}-check")
+        run = _run(store)
+        run["cases"][0]["joints"] = {"chain": True, "n": 1, "unchecked": [], "governing": weak, "rows": [weak]}
+        _resave(store, run)
+
+    monkeypatch.setattr(load_study, "study", study)
+    got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0}])
+    assert [(r["id"], r["cases"]) for r in _rows(store)] == [("joint:leg|top", ["a foot"])]
+    (r,) = got["results"]
+    assert r["status"] == "fixed", r
+
+
+def test_a_rule_is_known_by_its_own_id_so_fixing_another_never_credits_it(tmp_path, monkeypatch):
+    """reviewer-2's must-fix 3: rules A and B failing, B ticked, the designer's change fixed A. By position B became
+    rule:0 and rule:1 read "fixed"."""
+    from caliper import chat, part_rules
+
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    designer = Designer()
+    monkeypatch.setattr(chat, "refine_part", designer)
+    a, b = {"id": "wall", "said": "A: the wall is at least 3 mm"}, {"id": "width", "said": "B: it's 400 mm wide"}
+    monkeypatch.setattr(part_rules, "failing", lambda rules: [b] if designer.calls else [a, b])
+    rows = {r["problem"]: r for r in _rows(store)}
+    assert [r["id"] for r in rows.values()] == ["rule:wall", "rule:width"]
+    got = fixing.apply(store, "stool", [{"id": "rule:width", "choice": 0}], check=False)
+    (r,) = got["results"]
+    assert (r["id"], r["status"]) == ("rule:width", "still open"), r
+
+
 def test_keep_mine_settles_an_open_question_with_no_designer(tmp_path, monkeypatch):
     from caliper import chat
     from caliper import scenarios as S
