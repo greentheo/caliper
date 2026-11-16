@@ -86,19 +86,20 @@ def _aged(path, days):
 
 
 def test_the_start_sweep_removes_old_folders_and_keeps_fresh_ones(tmp_path):
-    old, fresh, busy, other = (tmp_path / n for n in (sandbox.PREFIX + "old", sandbox.PREFIX + "fresh",
-                                                      sandbox.PREFIX + "busy", "caliper-preview-old"))
-    for d in (old, fresh, busy, other):
+    olds = [tmp_path / (p + "old") for p in sandbox.SWEPT]                # a build's, a print plan's, a served STL's
+    fresh, busy, other = (tmp_path / n for n in (sandbox.PREFIX + "fresh", "caliper-print-busy", "caliper-preview-old"))
+    assert set(sandbox.SWEPT) == {"caliper_sandbox_", "caliper-print-", "caliper_part_"}
+    for d in (*olds, fresh, busy, other):
         d.mkdir()
         (d / "in.json").write_text("{}")
-    for d in (old, busy, other):
+    for d in (*olds, busy, other):
         _aged(d, 2)
     sandbox._ACTIVE.add(str(busy))                         # a run in this process uses it
     try:
-        assert sandbox.sweep(str(tmp_path)) == 1
+        assert sandbox.sweep(str(tmp_path)) == 3
     finally:
         sandbox._ACTIVE.discard(str(busy))
-    assert not old.exists() and fresh.exists() and busy.exists() and other.exists()
+    assert not any(d.exists() for d in olds) and fresh.exists() and busy.exists() and other.exists()
 
 
 def test_a_folder_with_a_fresh_file_in_it_is_in_use(tmp_path):
@@ -124,3 +125,83 @@ def test_the_server_sweeps_once_at_start_and_the_app_alone_never_does(monkeypatc
     assert not swept.wait(0.5)                             # a test's app touches no temp dir
     server.serve()
     assert swept.wait(10)
+
+
+
+# --- the same leak, elsewhere (#315, the foreman's call): a print plan's STLs, and a part's STL served from a script ----
+
+def test_a_print_plan_leaves_no_folder_behind_and_a_caller_s_folder_is_kept(tmpdir_, tmp_path, monkeypatch):
+    from caliper import making, printing, shop
+    from caliper.design import DesignStore
+
+    from .test_shop import PRINTED, PRINTER
+
+    monkeypatch.setattr(printing, "slicer", lambda: None)          # its rough estimate: no slicer run
+    shop.write({"hand": ["drill"], "machines": [PRINTER]})
+    store = DesignStore.create("a bar", base=str(tmp_path / "designs"))
+    store.write_part("bar", PRINTED, intent="a printed bar")
+    mk = making.plan(store, "bar")
+    assert mk["printed"] and mk["printed"][0]["hours"] is not None
+    assert [n for n in os.listdir(tmpdir_) if n.startswith("caliper-print-")] == []
+    mine = tmp_path / "book"
+    making.plan(store, "bar", out_dir=str(mine))                  # a release's own folder: its files are kept
+    assert any(n.endswith(".stl") for n in os.listdir(mine))
+
+
+def test_a_print_plan_that_fails_part_way_leaves_no_folder_either(tmpdir_, tmp_path, monkeypatch):
+    from caliper import making, printing, shop
+    from caliper.design import DesignStore
+
+    from .test_shop import PRINTED, PRINTER
+
+    shop.write({"hand": ["drill"], "machines": [PRINTER]})
+    store = DesignStore.create("a bar", base=str(tmp_path / "designs"))
+    store.write_part("bar", PRINTED, intent="a printed bar")
+
+    def broke(*a, **kw):
+        raise RuntimeError("the slicer fell over")
+
+    monkeypatch.setattr(printing, "estimate", broke)
+    with pytest.raises(RuntimeError, match="fell over"):
+        making.plan(store, "bar")
+    assert [n for n in os.listdir(tmpdir_) if n.startswith("caliper-print-")] == []
+
+
+def test_a_script_part_s_stl_is_served_with_no_folder_left(tmpdir_, tmp_path, monkeypatch):
+    import trimesh
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    d = tmp_path / "asm"
+    d.mkdir()
+    (d / "post.py").write_text(BOX)
+    (d / "one.yaml").write_text("name: one\nparts:\n  - id: post\n    source: post.py\n    role: fixed\n")
+    monkeypatch.setenv("CALIPER_ASSEMBLIES", str(d))
+    got = TestClient(create_app()).get("/api/assembly/one/part/post.stl")
+    assert got.status_code == 200 and got.headers["content-type"].startswith("model/stl")
+    import io
+
+    mesh = trimesh.load(io.BytesIO(got.content), file_type="stl")
+    assert mesh.bounds.flatten().tolist() == pytest.approx([-5, -5, -5, 5, 5, 5], abs=1e-6)   # the 10 mm box
+    assert [n for n in os.listdir(tmpdir_) if n.startswith("caliper_part_")] == []
+
+
+def test_a_print_plan_s_folder_is_never_swept_while_it_s_in_use(tmpdir_, tmp_path, monkeypatch):
+    from caliper import making, printing, shop
+    from caliper.design import DesignStore
+
+    from .test_shop import PRINTED, PRINTER
+
+    monkeypatch.setattr(printing, "slicer", lambda: None)
+    shop.write({"hand": ["drill"], "machines": [PRINTER]})
+    store = DesignStore.create("a bar", base=str(tmp_path / "designs"))
+    store.write_part("bar", PRINTED, intent="a printed bar")
+    real = printing.estimate
+
+    def sweep_then_estimate(path, *a, **kw):           # a sweep that calls every folder old, mid-plan
+        sandbox.sweep(str(tmpdir_), max_age_s=-1)
+        return real(path, *a, **kw)                    # its STL is still there to read
+
+    monkeypatch.setattr(printing, "estimate", sweep_then_estimate)
+    assert making.plan(store, "bar")["printed"][0]["hours"] is not None

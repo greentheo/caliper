@@ -414,8 +414,6 @@ def create_app():
 
     @app.get("/api/assembly/{aid}/part/{pid}.stl")
     def assembly_part_stl(aid: str, pid: str):
-        import tempfile
-
         from .assembly import Assembly, _build_py_local, _resolve_source
 
         try:
@@ -432,9 +430,10 @@ def create_app():
                 geom = _build_py_local(src)
             except Exception as e:  # noqa: BLE001
                 raise HTTPException(status_code=422, detail=f"could not build part {pid}: {e}")
-            out = os.path.join(tempfile.mkdtemp(prefix="caliper_part_"), f"{pid}.stl")
-            geom.require_mesh().export(out)
-            return FileResponse(out, media_type="model/stl")
+            from fastapi.responses import Response
+
+            # from memory: a temp file per STL served was never removed (#315)
+            return Response(geom.require_mesh().export(file_type="stl"), media_type="model/stl")
         if not os.path.isfile(src):
             raise HTTPException(status_code=404, detail=f"missing STL for {pid}: {part.source}")
         return FileResponse(src, media_type="model/stl")

@@ -34,6 +34,8 @@ log = logging.getLogger(__name__)
 
 #: A run's own folder, in the temp dir (CALI-191, #304: each was left behind; 171,673 on one machine).
 PREFIX = "caliper_sandbox_"
+#: The temp folders the start sweep tidies: a build's, a print plan's STLs (making.plan), a served part's STL (#315).
+SWEPT = (PREFIX, "caliper-print-", "caliper_part_")
 #: Set to 1 to keep a failed run's folder, to look at what it was given and what it wrote.
 KEEP_ENV = "CALIPER_KEEP_SANDBOX"
 #: A folder this old, by its newest file, belongs to no run: the start sweep removes it.
@@ -95,7 +97,7 @@ def run_script(
 
 
 def sweep(root: Optional[str] = None, max_age_s: float = SWEEP_AGE_S) -> int:
-    """Remove the run folders older than ``max_age_s`` by their newest file, in ``root`` (the temp dir): those runs have
+    """Remove the run folders (any of :data:`SWEPT`) older than ``max_age_s`` by their newest file, in ``root`` (the temp dir): those runs have
     ended, here or in another process, and left them (#304). One a run in this process uses is never touched, nor a
     fresh one, which may be another process's run. Returns how many it removed."""
     root = root or tempfile.gettempdir()
@@ -105,7 +107,7 @@ def sweep(root: Optional[str] = None, max_age_s: float = SWEEP_AGE_S) -> int:
     except OSError:
         return 0
     for e in entries:
-        if not e.name.startswith(PREFIX) or e.path in _ACTIVE:
+        if not e.name.startswith(SWEPT) or e.path in _ACTIVE:
             continue
         try:
             if not e.is_dir(follow_symlinks=False):
