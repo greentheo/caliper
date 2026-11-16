@@ -984,3 +984,31 @@ def test_a_notch_bears_a_push_toward_its_closed_face_and_lets_one_toward_its_ope
                                                               "pairs"))
     assert np.allclose(up[("P", "side")], (0, 0, 100)) and np.allclose(up[("P", "shelf")], 0)
     assert np.allclose(down[("P", "shelf")], (0, 0, -100)) and np.allclose(down[("P", "side")], 0)
+
+
+# --- #313 review: "carries none" under a sideways case rests on the sides held at the floor ---------------------------
+
+def _sideways(load, share=0.1):
+    """The same case with a push side to side of ``share`` of its weight (10%: a person shifting on the step)."""
+    f = np.asarray(load["force"], float)
+    return {**load, "name": load["name"] + ", 10% sideways", "force": (f + np.array([share * np.linalg.norm(f), 0, 0])).tolist()}
+
+
+def test_carries_none_under_a_sideways_case_says_racking_isn_t_checked_and_the_case_keeps_its_note(notched):
+    from caliper import verdicts as V
+
+    store, su = notched
+    pieces, tol, held = _pieces(store)
+    got = JC.check(su, _sideways(_load(store)), held, 2.0, mat=PLY)
+    rows = {r["between"]: r for r in got["rows"]}
+    row = rows["the stringer and the left side"]
+    assert row["mode"] is None and row["said"] == JC.RACKING_SAID, row
+    loaded = [r for r in got["rows"] if r["mode"] is not None]                   # a joint that carries it says how
+    assert loaded and all(r["said"] != JC.RACKING_SAID for r in loaded), loaded
+    assert JC.RACKING_SAID == "carries none with the sides held at the floor: racking isn't checked"
+    assert f"the joint between the stringer and the left side ({JC.RACKING_SAID})" in got["unchecked"], got["unchecked"]
+    brace = V.wood_brace(None, {"joints": got})                                 # never a plain "holds"
+    assert brace and any("racking" in n for n in brace["names"]) and "not checked by hand" in V.brace_why(brace)
+    down = JC.check(su, _load(store), held, 2.0, mat=PLY)                        # straight down: as it was
+    assert {r["between"]: r for r in down["rows"]}["the stringer and the left side"]["said"] == "carries none of this load"
+    assert not [u for u in down["unchecked"] if "stringer" in u] and V.wood_brace(None, {"joints": down}) is None

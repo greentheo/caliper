@@ -573,6 +573,14 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
                      "demand_lb": {m: round(v / LBF, 1) for m, v in parts.items() if v > 1e-6},
                      "capacity_lb": {m: round(cap[m] / LBF, 1) for m in by},
                      "said": cap["why"][mode] if mode else "carries none of this load", "assumed": j["assumed"]})
+    f = np.asarray(load["force"], float)
+    if float(np.linalg.norm(f[:2])) > 1e-6 * (float(np.linalg.norm(f)) or 1.0):
+        # pushed sideways at all: a joint carries none only because the statics hold each side at the floor; racked, a
+        # stringer or rail would take the push. So it's said, and named as not checked, never a plain pass (#313 review)
+        for r in rows:
+            if r["mode"] is None:
+                r["said"] = RACKING_SAID
+                unchecked.append(f"the joint between {r['between']} ({RACKING_SAID})")
     by = {pc["key"]: pc for pc in setup_["pieces"]}
     for host, j in hosts.items():                             # each notched side, past its notch: net section by hand
         f = arrived.get(host)
@@ -585,6 +593,11 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
     rated = [r for r in rows if r["safety"] is not None]
     return {"rows": rows, "governing": min(rated, key=lambda r: r["safety"]) if rated else None,
             "unchecked": unchecked, "chain": True, "n": len(joints)}
+
+
+#: What a joint said to carry none of a case with a sideways push says (#313 review): the statics hold each side at the
+#: floor, so nothing racks; whether a stringer or rail holds it square isn't checked.
+RACKING_SAID = "carries none with the sides held at the floor: racking isn't checked"
 
 
 def notch_row(joint: dict, force: np.ndarray, frm: str, min_safety: float) -> dict:
