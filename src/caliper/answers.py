@@ -654,6 +654,11 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     elif p.get("built") and p.get("role") != "fixed" and not p.get("framed"):
         work.append(_line("Not checked yet: say what it has to hold (\"it has to hold me, 200 lb\").", "warn",
                           study="load"))
+    from .scenarios import drift
+
+    left = drift(store, pid) if p.get("scripted", True) else ""      # its edited loads left behind by its shape (#312)
+    if left:
+        work.append(_line(left, "warn", study="load"))
     if p.get("loads") and p.get("role") != "fixed":
         from . import trials
 

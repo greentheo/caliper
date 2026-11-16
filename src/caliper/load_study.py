@@ -108,6 +108,9 @@ def parse_held(items, bounds, depth: float) -> list[dict]:
                  "default": True}]
     out = []
     for i, item in enumerate(items):
+        if item.get("floor"):                 # the floor beside other supports, kept (#312 review)
+            out += parse_held(None, bounds, depth)
+            continue
         name = str(item.get("name") or f"support {i + 1}")
         lo, hi = _box(item, f"'{name}'")
         out.append({"name": name, "lo": lo, "hi": hi})

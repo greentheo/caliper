@@ -1026,6 +1026,7 @@ def router():
     def set_part_scenarios(slug: str, pid: str, req: ScenariosSet):
         """Kept in design.yaml and read in place of the script's loads() and HELD; a new version of the part, so every
         check of it is out of date (Rule 6)."""
+        _refuse_while_busy(slug, [pid])                 # in words, before waiting on any lock (#312 review, as #302)
         with RUNNER.locked(_lock(slug)):
             store = load(slug)
             if store.design.part(pid) is None or not store.is_scripted(pid):
@@ -1039,6 +1040,7 @@ def router():
     @r.delete("/api/designs/{slug}/parts/{pid}/scenarios")
     def clear_part_scenarios(slug: str, pid: str):
         """Back to the script's own loads and supports."""
+        _refuse_while_busy(slug, [pid])
         with RUNNER.locked(_lock(slug)):
             store = load(slug)
             if store.design.part(pid) is None:

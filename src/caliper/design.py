@@ -419,6 +419,9 @@ class DesignStore:
             _write_atomic(os.path.join(vdir, "spec.yaml"), spec.to_yaml())
         if report is not None:
             _write_atomic(os.path.join(vdir, "report.json"), json.dumps(report, indent=2, default=str))
+        said = (self.design.scenarios or {}).get(part_id)
+        if said:                                  # its loads as edited, with the version: a restore puts them back (#312)
+            _write_atomic(os.path.join(vdir, "scenarios.yaml"), yaml.safe_dump(said, sort_keys=False))
 
         # the assembly's cache keys on (path, mtime); a same-tick rewrite could otherwise serve stale
         # geometry to the very re-measure that's meant to prove the change landed.
@@ -580,6 +583,16 @@ class DesignStore:
         if os.path.exists(script_src):
             with open(script_src) as f:
                 script = f.read()
+            # that version's loads too: as it had them edited, else its script's (#312 review: a roll-back after a load
+            # edit put back the same script and kept the edit)
+            said = os.path.join(vdir, "scenarios.yaml")
+            loads = dict(self.design.scenarios or {})
+            if os.path.exists(said):
+                with open(said) as f:
+                    loads[part_id] = yaml.safe_load(f)
+            else:
+                loads.pop(part_id, None)
+            self.design.scenarios = loads
             return self.write_part(part_id, script, action="restore",
                                    extra={"restored_from": version})
         if os.path.exists(mesh_src):

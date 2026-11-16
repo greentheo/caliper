@@ -21,6 +21,7 @@ right hand menu …"; and of a standard's case, "lowered, default to the standar
 from __future__ import annotations
 
 import copy
+import hashlib
 import math
 import re
 from typing import Optional
@@ -56,6 +57,21 @@ def _row(item: dict) -> dict:
     return row
 
 
+def _key(sc: dict) -> str:
+    """The name a row is matched to its script's load by: a standard's own, else its name."""
+    return (sc.get("standard") or {}).get("name") or sc.get("name") or ""
+
+
+def _script_rows(declared: dict) -> dict:
+    """The script's strength loads as rows, by name."""
+    return {r["name"]: r for r in (_row(ld) for ld in declared.get("loads") or []
+                                   if isinstance(ld, dict) and not ld.get("tip"))}
+
+
+def _sha(script: str) -> str:
+    return hashlib.sha1(script.encode()).hexdigest()
+
+
 def _said(store, pid: str) -> Optional[dict]:
     return (getattr(store.design, "scenarios", None) or {}).get(pid)
 
@@ -71,11 +87,16 @@ def get(store, pid: str) -> dict:
 
 def _get(store, pid: str) -> dict:
     said = _said(store, pid)
-    if said:
-        return {"scenarios": copy.deepcopy(said["scenarios"]), "supports": copy.deepcopy(said["supports"]),
-                "overridden": True}
     from . import construction as C
 
+    if said:
+        rows = copy.deepcopy(said["scenarios"])
+        script = _script_rows(C.declared(store, pid))
+        for r in rows:                          # one never moved sits where its script's does now (#312 review)
+            now = script.get(_key(r))
+            if not r.get("moved") and now:
+                r["lo"], r["hi"] = list(now["lo"]), list(now["hi"])
+        return {"scenarios": rows, "supports": copy.deepcopy(said["supports"]), "overridden": True}
     declared = C.declared(store, pid)
     rows = [_row(ld) for ld in declared.get("loads") or [] if isinstance(ld, dict) and not ld.get("tip")]
     held = declared.get("held")
@@ -115,10 +136,12 @@ def standard(sc: dict) -> dict:
     return {**copy.deepcopy(std), "standard": copy.deepcopy(std), "on": sc.get("on", True)}
 
 
-def _load(sc: dict) -> dict:
+def _load(sc: dict, script: Optional[dict] = None) -> dict:
     f = float(sc["amount"]) * _per(sc["unit"])
+    now = (script or {}).get(_key(sc)) if not sc.get("moved") else None
+    box = (now["lo"], now["hi"]) if now else (sc["lo"], sc["hi"])        # never moved: where its script's is now
     return {"name": name(sc), "force": [f * float(v) for v in sc["direction"]], "factor": float(sc["factor"]),
-            "lo": list(sc["lo"]), "hi": list(sc["hi"])}
+            "lo": list(box[0]), "hi": list(box[1])}
 
 
 def loads(store, pid: str, declared: dict) -> list:
@@ -127,7 +150,8 @@ def loads(store, pid: str, declared: dict) -> list:
     said = _said(store, pid)
     if not said:
         return [ld for ld in declared.get("loads") or [] if not (isinstance(ld, dict) and ld.get("tip"))]
-    return [_load(sc) for sc in said["scenarios"] if sc.get("on", True)]
+    script = _script_rows(declared)
+    return [_load(sc, script) for sc in said["scenarios"] if sc.get("on", True)]
 
 
 def held(store, pid: str, declared: dict):
@@ -136,7 +160,12 @@ def held(store, pid: str, declared: dict):
     if not said:
         return declared.get("held")
     rows = [s for s in said["supports"] if not s.get("floor")]
-    return [{"name": s["name"], "lo": list(s["lo"]), "hi": list(s["hi"])} for s in rows] or None
+    if not rows:
+        return None                             # the floor alone: as a part holds by default
+    out = [{"name": s["name"], "lo": list(s["lo"]), "hi": list(s["hi"])} for s in rows]
+    if any(s.get("floor") for s in said["supports"]):     # the floor beside them, kept (#312 review: it was dropped)
+        out.append({"name": "the floor", "floor": True})
+    return out
 
 
 def off(store, pid: str) -> list:
@@ -156,10 +185,17 @@ def _vec(v, what: str) -> list:
 
 
 def _clean(store, pid: str, scenarios: list, supports: list) -> tuple[list, list]:
+    from . import construction as C
     from . import load_study as L
     from .consistency import tolerance
 
     mesh = store.part_geometry(pid).require_mesh()
+    script = _script_rows(C.declared(store, pid))
+    # a standard's numbers are its script's, or kept with the edit: never the request's (#312 review)
+    standards = {r["standard"]["name"]: r["standard"] for r in script.values() if r.get("standard")}
+    for r in (_said(store, pid) or {}).get("scenarios") or []:
+        if r.get("standard"):
+            standards.setdefault(r["standard"]["name"], r["standard"])
     rch = L.reach(tolerance(mesh), 0.0)
     rows = []
     for i, sc in enumerate(scenarios or []):
@@ -186,8 +222,11 @@ def _clean(store, pid: str, scenarios: list, supports: list) -> tuple[list, list
             raise ValueError(f"'{nm}' doesn't touch the part: it pushes on thin air, {gap:.1f} mm from its nearest surface")
         row = {"name": nm, "amount": amount, "unit": unit, "direction": [v / n for v in d], "factor": factor,
                "lo": lo, "hi": hi, "on": bool(sc.get("on", True))}
-        if sc.get("standard"):
-            row["standard"] = copy.deepcopy(sc["standard"])
+        std = standards.get((sc.get("standard") or {}).get("name"))
+        if std:
+            row["standard"] = copy.deepcopy(std)
+        was = script.get(_key(row))                  # where its script puts it: unmoved follows the shape (#312 review)
+        row["moved"] = not (was and all(abs(a - b) < 1e-6 for a, b in zip(lo + hi, was["lo"] + was["hi"])))
         rows.append(row)
     if not any(r["on"] for r in rows):
         raise ValueError("turn at least one scenario on: with none, there's nothing to check it holds")
@@ -213,14 +252,50 @@ def _summary(rows: list) -> str:
             + (f" ({len(rows) - len(on)} off)" if len(rows) != len(on) else ""))
 
 
+def _mirror(store, pid: str) -> None:
+    from . import mirror
+
+    got = mirror.of(store.read_script(pid))
+    if got is not None:
+        raise ValueError(f"{pid} mirrors {got['source']}: edit {got['source']}'s loads, which its mirror is checked to")
+
+
+def _changes(old: list, new: list) -> str:
+    """What an edit changed, row by row, for its history line (#312 review: "loads: 3 scenarios" said too little)."""
+    was = {_key(r): r for r in old}
+    out = []
+    for r in new:
+        o = was.pop(_key(r), None)
+        nm = name(o) if o else r["name"]
+        if o is None:
+            out.append(f"added '{r['name']}'")
+            continue
+        if (o["amount"], o["unit"]) != (r["amount"], r["unit"]):
+            out.append(f"{nm}: {_num(o['amount'])} → {_num(r['amount'])} {r['unit']}"
+                       if o["unit"] == r["unit"] else f"{nm}: {_num(o['amount'])} {o['unit']} → {_num(r['amount'])} {r['unit']}")
+        if any(abs(a - b) > 1e-6 for a, b in zip(o["direction"], r["direction"])):
+            out.append(f"{nm}: pushes another way")
+        if abs(o["factor"] - r["factor"]) > 1e-9:
+            out.append(f"{nm}: margin {_num(o['factor'])} → {_num(r['factor'])}")
+        if any(abs(a - b) > 1e-6 for a, b in zip(o["lo"] + o["hi"], r["lo"] + r["hi"])):
+            out.append(f"{nm}: moved")
+        if o.get("on", True) != r["on"]:
+            out.append(f"{nm}: {'on' if r['on'] else 'off'}")
+    out += [f"removed '{name(o)}'" for o in was.values()]
+    return "loads: " + ("; ".join(out) if out else "saved as they were")
+
+
 def put(store, pid: str, scenarios: list, supports: list) -> int:
     """Keep a part's scenarios and supports in ``design.yaml`` and write a new version of it, the same script, so every
     check of it is out of date. Returns the version. Raises ValueError, in words, with nothing written."""
+    _mirror(store, pid)
+    old = get(store, pid)["scenarios"]
     rows, held_rows = _clean(store, pid, scenarios, supports)
     before = copy.deepcopy(getattr(store.design, "scenarios", None) or {})
-    store.design.scenarios = {**before, pid: {"scenarios": rows, "supports": held_rows}}
+    script = store.read_script(pid)
+    store.design.scenarios = {**before, pid: {"scenarios": rows, "supports": held_rows, "script_sha": _sha(script)}}
     try:
-        return store.write_part(pid, store.read_script(pid), action="loads", feedback=_summary(rows))
+        return store.write_part(pid, script, action="loads", feedback=_changes(old, rows))
     except Exception:
         store.design.scenarios = before
         store.save()
@@ -228,8 +303,11 @@ def put(store, pid: str, scenarios: list, supports: list) -> int:
 
 
 def clear(store, pid: str) -> int:
-    """Back to the script's own loads and supports: a new version too, so a check of the edited ones is out of date."""
+    """Back to the script's own loads and supports: a new version too, so a check of the edited ones is out of date.
+    With nothing edited, nothing is written (#312 review)."""
     before = copy.deepcopy(getattr(store.design, "scenarios", None) or {})
+    if pid not in before:
+        return store.design.part(pid).version
     store.design.scenarios = {k: v for k, v in before.items() if k != pid}
     try:
         return store.write_part(pid, store.read_script(pid), action="loads", feedback="loads: back to its script's")
@@ -237,3 +315,31 @@ def clear(store, pid: str) -> int:
         store.design.scenarios = before
         store.save()
         raise
+
+
+def drift(store, pid: str) -> str:
+    """What to tell the person when the part's shape changed since they edited its loads (#312 review): the rows they
+    moved stayed where they put them, named, and any that no longer touch it. Rows never moved follow the script's boxes,
+    so they're not said. "" when there's nothing to say."""
+    said = _said(store, pid)
+    if not said:
+        return ""
+    moved = [r for r in said["scenarios"] if r.get("moved") and r.get("on", True)]
+    if not moved or said.get("script_sha") == _sha(store.read_script(pid)):
+        return ""
+    from . import load_study as L
+    from .consistency import tolerance
+
+    try:
+        mesh = store.part_geometry(pid).require_mesh()
+    except Exception:  # noqa: BLE001 — no shape to say it against: said plainly
+        mesh = None
+    rch = L.reach(tolerance(mesh), 0.0) if mesh is not None else 0.0
+    said_rows = []
+    for r in moved:
+        on, gap = L.touches(mesh, (r["lo"], r["hi"]), rch) if mesh is not None else (True, 0.0)
+        said_rows.append(f"'{name(r)}' stayed where you put it" if on
+                         else f"'{name(r)}' doesn't touch it any more ({gap:.0f} mm off its nearest surface)")
+    it = "it" if len(moved) == 1 else "them"
+    return (f"Its shape changed since you edited its loads: {'; '.join(said_rows)}. Check {it}, and move {it} under "
+            f"Scenarios and supports, or put {it} back to its script's there.")

@@ -264,6 +264,11 @@ def set_values(store: DesignStore, pid: str, changes: list[dict]) -> dict:
     if load_study.list_runs(store, pid):           # its strength check is of the older shape now (#147 review)
         label = getattr(store.design.part(pid), "label", None)
         notes.append(f"strength: check {'the ' + label if label else 'this part'} again")
+    from .chat import drift_note
+
+    moved_loads = drift_note(store, pid)               # its edited loads left behind by the new shape (#312 review)
+    if moved_loads:
+        said = f"{said}. {moved_loads}"
     return {"version": version, "said": said, "followed": followed, "value": round(got[-1][1], 3), "notes": notes, "moved": moved,
             "read": all(entries[n]["read"] for n in values), "report": report, "failed": errors or {},
             "warning": _ignored(entries, values, got, moved)}

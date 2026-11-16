@@ -283,3 +283,170 @@ def test_a_field_left_as_it_was_keeps_its_exact_value():
     assert out[2] == [19.05, 390, 152.4]                                              # touched: what was typed
     assert out[3] == [0.287, 0, -0.958]                                               # the angle shown, left alone
     assert out[4] == [0, 0, -1]
+
+
+# --- #312 review -------------------------------------------------------------------------------------------------------------
+TALLER = RATED.replace('"h": 406.4', '"h": 450.0')
+
+
+def _lowered(store):
+    got = S.get(store, "stool")
+    S.put(store, "stool", [got["scenarios"][0], {**got["scenarios"][1], "amount": 100}], got["supports"])
+    return got
+
+
+def test_a_version_carries_its_loads_and_a_restore_puts_them_back(store):
+    import os
+
+    v0 = store.design.part("stool").version
+    _lowered(store)
+    v1 = store.design.part("stool").version
+    assert os.path.exists(os.path.join(store.version_dir("stool", v1), "scenarios.yaml"))
+    assert not os.path.exists(os.path.join(store.version_dir("stool", v0), "scenarios.yaml"))   # the script's
+    store.restore("stool", v0)
+    assert not S.get(DesignStore.load(store.root), "stool")["overridden"]               # its loads undone too
+    store.restore("stool", v1)
+    assert S.get(DesignStore.load(store.root), "stool")["scenarios"][1]["amount"] == 100
+
+
+def test_roll_it_back_says_its_loads_are_undone(store):
+    from caliper import chat
+
+    _lowered(store)
+    got = chat.revert_part(store, "stool")
+    assert "its loads are the script's again" in got.reply and "EN 14183, edited: 100 kg" in got.reply, got.reply
+    assert not S.get(DesignStore.load(store.root), "stool")["overridden"]
+    back = chat.revert_part(DesignStore.load(store.root), "stool", to=2)
+    assert "its loads are as they were at v2" in back.reply, back.reply
+
+
+def test_rows_never_moved_follow_the_script_s_box_by_name(store):
+    from caliper import construction as C
+
+    got = _lowered(store)                                                            # boxes untouched: amounts only
+    store.write_part("stool", TALLER, intent="taller")
+    loads = S.loads(store, "stool", C.declared(store, "stool"))
+    assert loads[0]["lo"][2] == pytest.approx(448.0) and loads[1]["lo"][2] == pytest.approx(448.0)   # on the new top
+    assert loads[1]["name"].startswith("EN 14183, edited: 100 kg")
+    assert S.drift(store, "stool") == ""                                             # nothing to say: they followed
+
+
+def test_a_moved_row_stays_where_it_was_put_and_the_reply_names_it(store):
+    from caliper import chat
+
+    got = S.get(store, "stool")
+    moved = {**got["scenarios"][0], "lo": [150, 150, 404.4], "hi": [250, 250, 406.4]}
+    S.put(store, "stool", [moved, got["scenarios"][1]], got["supports"])
+    store.write_part("stool", TALLER, intent="taller")
+    said = S.drift(store, "stool")
+    assert "'stepping on the front edge' doesn't touch it any more" in said and "move it" in said, said
+    assert "its rating" not in said                                                  # the unmoved one followed
+    assert chat.drift_note(store, "stool") == said
+
+
+def test_the_floor_beside_another_support_is_kept(store):
+    from caliper import construction as C
+    from caliper import load_study as L
+
+    got = S.get(store, "stool")
+    clamp = {"name": "a clamp at the back foot", "lo": [0, 345, 0], "hi": [40, 356, 40]}
+    S.put(store, "stool", got["scenarios"], [S.FLOOR, clamp])
+    held = L.parse_held(S.held(store, "stool", C.declared(store, "stool")), [[0, 0, 0], [406.4, 355.6, 406.4]], 1.0)
+    assert [h["name"] for h in held] == ["a clamp at the back foot", "the floor"]       # never dropped
+
+
+def test_the_scorecard_says_a_scenario_turned_off(store, monkeypatch):
+    pytest.importorskip("whittle")
+    from caliper import load_study as L
+    from caliper import scorecard
+
+    monkeypatch.setattr(L, "VOXELS_THROUGH", 2)
+    got = S.get(store, "stool")
+    S.put(store, "stool", [got["scenarios"][0], {**got["scenarios"][1], "on": False}], got["supports"])
+    L.study(store, "stool")
+    m = scorecard.compute(DesignStore.load(store.root))["metrics"]["strength.stool.safety"]
+    assert "its rating (EN 14183, 150 kg) is turned off" in (m.get("note") or ""), m
+
+
+def test_a_row_s_standard_is_never_taken_from_the_request(store):
+    from caliper import construction as C
+
+    got = S.get(store, "stool")
+    forged = {**got["scenarios"][1], "amount": 100, "standard": {**got["scenarios"][1]["standard"], "amount": 100}}
+    S.put(store, "stool", [got["scenarios"][0], forged], got["supports"])
+    assert S.loads(store, "stool", C.declared(store, "stool"))[1]["name"] == "EN 14183, edited: 100 kg (the standard is 150 kg)"
+
+
+def test_back_to_the_script_with_nothing_edited_writes_nothing(store):
+    v = store.design.part("stool").version
+    assert S.clear(store, "stool") == v and DesignStore.load(store.root).design.part("stool").version == v
+
+
+def test_history_says_what_changed(store):
+    got = S.get(store, "stool")
+    S.put(store, "stool", [{**got["scenarios"][0], "amount": 260}, {**got["scenarios"][1], "on": False}], got["supports"])
+    said = DesignStore.load(store.root).history("stool")[-1]["feedback"]
+    assert "stepping on the front edge: 250 → 260 lb" in said and "its rating (EN 14183, 150 kg): off" in said, said
+
+
+def test_a_mirror_s_loads_are_its_source_s(tmp_path):
+    from caliper import mirror
+
+    s = DesignStore.create("a pair", base=str(tmp_path / "designs"))
+    s.write_part("stool", RATED, intent="a step stool")
+    mirror.make(s, "stool_m", "stool")
+    with pytest.raises(ValueError, match="stool_m mirrors stool: edit stool's loads"):
+        S.put(s, "stool_m", S.get(s, "stool")["scenarios"], [S.FLOOR])
+
+
+def test_the_routes_refuse_while_a_job_works_on_the_part(api, monkeypatch):
+    from caliper import design_api
+    from fastapi import HTTPException
+
+    c, slug = api
+
+    def busy(slug_, parts):
+        raise HTTPException(409, "stool is being checked: wait for it, or stop that first.")
+
+    monkeypatch.setattr(design_api, "_refuse_while_busy", busy)
+    got = c.get(f"/api/designs/{slug}/parts/stool/scenarios").json()
+    r = c.put(f"/api/designs/{slug}/parts/stool/scenarios", json={"scenarios": got["scenarios"], "supports": got["supports"]})
+    assert r.status_code == 409 and "being checked" in r.json()["detail"]
+
+
+def test_setting_a_number_that_leaves_a_moved_load_behind_says_so(store):
+    from caliper import params
+
+    got = S.get(store, "stool")
+    moved = {**got["scenarios"][0], "lo": [150, 150, 404.4], "hi": [250, 250, 406.4]}
+    S.put(store, "stool", [moved, got["scenarios"][1]], got["supports"])
+    said = params.set_value(store, "stool", "h", 450, None)["said"]
+    assert "'stepping on the front edge' doesn't touch it any more" in said, said
+
+
+def test_the_card_says_a_moved_load_its_shape_left_behind_and_a_checked_part_isn_t_called_unchecked(store, monkeypatch):
+    pytest.importorskip("whittle")
+    from caliper import answers, design_api
+    from caliper import load_study as L
+
+    monkeypatch.setattr(L, "VOXELS_THROUGH", 2)
+    got = S.get(store, "stool")
+    S.put(store, "stool", [{**got["scenarios"][0], "lo": [150, 150, 404.4], "hi": [250, 250, 406.4]}, got["scenarios"][1]],
+          got["supports"])
+    L.study(store, "stool")
+    work = next(c for c in answers.part(store, design_api.design_state(store), "stool") if c["key"] == "work")
+    texts = [ln["text"] for ln in work["lines"]]
+    assert "Not checked yet: check it when it looks right." not in texts, texts       # checked: never called unchecked
+    store.write_part("stool", TALLER, intent="taller")
+    work = next(c for c in answers.part(store, design_api.design_state(store), "stool") if c["key"] == "work")
+    assert any("'stepping on the front edge' doesn't touch it any more" in ln["text"] for ln in work["lines"])
+
+
+def test_a_turn_that_writes_the_part_ends_with_what_its_loads_did(store, monkeypatch):
+    from caliper import chat
+
+    got = _lowered(store)                                                            # v2, edited
+    S.put(store, "stool", [{**got["scenarios"][0], "amount": 260}, got["scenarios"][1]], got["supports"])   # v3
+    monkeypatch.setattr(chat, "drift_note", lambda s, pid: "THE LOADS NOTE" if pid == "stool" else "")
+    got = chat.turn(store, "roll it back", scope="stool", use_llm=False)
+    assert got.reply.rstrip().endswith("THE LOADS NOTE"), got.reply

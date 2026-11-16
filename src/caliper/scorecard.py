@@ -500,8 +500,12 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
 
             open_said = (unsettled if hedged else _coarse(run, inches)
                          if any(v["kind"] in ("unresolved", "unchecked") for _, v in said) else None)      # this part's own (#191 review)
+            off = run.get("loads_off") or []           # of the loads left on, said (#312 review: never with no note)
+            off_said = (f"of the loads left on: {' and '.join(off)} {'is' if len(off) == 1 else 'are'} turned off"
+                        if off else None)
+            note = "; ".join(x for x in (open_said, off_said) if x)
             _metric(metrics, f"strength.{p.id}.safety", ran, "×", f"{p.id}, its weakest load",
-                    "not resolved" if open_said else "model", "strength check", **({"note": open_said} if open_said else {}))
+                    "not resolved" if open_said else "model", "strength check", **({"note": note} if note else {}))
             worst = ran if worst is None else min(worst, ran)
         if breaks:
             prev = metrics.get("strength.breaks_lb", {}).get("value")
