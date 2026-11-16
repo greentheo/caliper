@@ -386,6 +386,16 @@ def _nominal(c: dict) -> Optional[float]:
     return float(sum(f * f for f in force) ** 0.5) / (a * b) if a > 0 and b > 0 else None
 
 
+def _scenarios_said(store: DesignStore, part_id: str) -> dict:
+    """What a run says of its loads where the person edited them (#296): that they're edited, and those turned off."""
+    from . import scenarios as SC
+
+    if not SC._said(store, part_id):
+        return {}
+    off = SC.off(store, part_id)
+    return {"loads_edited": True, **({"loads_off": off} if off else {})}
+
+
 def judged_by(run: dict, case: dict) -> Optional[str]:
     """The check a case's verdict stands on: what governs it. Under a hand buckling check (CALI-159, #229) that's the
     buckling check where it fails (a fail is certain), and where it holds, the check it took over from: a pass from it never
@@ -1126,10 +1136,13 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
 
     emit = emit or (lambda *a, **k: None)
     declared = C.declared(store, part_id)
-    if not declared.get("loads"):
+    # a tipping case is the tip check's (statics), not a strength case (CALI-98); the person's edited scenarios in place
+    # of the script's, where they've edited them (#296)
+    from . import scenarios as SC
+
+    strength = SC.loads(store, part_id, declared)
+    if not declared.get("loads") and not strength:
         raise ValueError(f"'{part_id}' doesn't say what it must hold: its script has no loads()")
-    # a tipping case is the tip check's (statics), not a strength case (CALI-98)
-    strength = [ld for ld in declared["loads"] if not (isinstance(ld, dict) and ld.get("tip"))]
     if not strength:
         raise ValueError(f"'{part_id}' only says how it might tip, not what it must hold: add a load that isn't a tip")
     loads = parse_loads(strength)
@@ -1165,7 +1178,7 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
         spacing = least
     else:                                               # asked for: a finer run (CALI-97)
         coarse = None
-    held = parse_held(declared.get("held"), mesh.bounds.tolist(), max(spacing * 0.6, 1.0))
+    held = parse_held(SC.held(store, part_id, declared), mesh.bounds.tolist(), max(spacing * 0.6, 1.0))
     # the designer's check (loads_land) asks the same question, so the two never disagree (CALI-84)
     rch = reach(tol, spacing)
     for item, support in [(h, True) for h in held] + [(ld, False) for ld in loads]:
@@ -1540,6 +1553,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         "headline": ctx.get("headline") or mat["name"], "plate_material": sheet_of(ctx),
         "sheet": sheet_said(store, part_id, ctx),
         "min_safety": min_safety, "held": held, "cases": cases, "notes": notes,
+        **_scenarios_said(store, part_id),            # its loads as the person edited them, and any turned off (#296)
         "cut": True,                  # its numbers are kept cut toward safe (CALI-152): one on its limit is settled
         "safety": worst, "holds": bool(cases) and all(c.get("holds") for c in cases),  # producer
     }

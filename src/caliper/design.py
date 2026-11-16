@@ -200,6 +200,9 @@ class Design(_Base):
     #: CALI-126 (#150): the sheets' face grain as the person said it, ``{part: {piece: {grain, runs, said}}}``: only
     #: these move a strength verdict, and the cut list and build book tell the maker (see :mod:`caliper.grain`)
     grain: dict = Field(default_factory=dict)
+    #: CALI-185 (#296): a part's scenarios and supports as the person edited them, ``{part: {"scenarios", "supports"}}``,
+    #: read in place of its script's ``loads()`` and ``HELD`` (see :mod:`caliper.scenarios`)
+    scenarios: dict = Field(default_factory=dict)
     created: str = Field(default_factory=_now)
     updated: str = Field(default_factory=_now)
 

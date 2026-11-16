@@ -22,7 +22,7 @@ from typing import Optional, Union
 
 from pydantic import BaseModel, field_validator
 
-from . import (aero, mirror, better, previews, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
+from . import (aero, mirror, better, previews, scenarios, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
                lighten,
                load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, trash, tree,
                verdicts)
@@ -119,6 +119,11 @@ class LabelSet(BaseModel):
 class GrainSet(BaseModel):
     piece: str
     grain: str                            # "along" or "across" the gap the panel spans (CALI-126)
+
+
+class ScenariosSet(BaseModel):
+    scenarios: list[dict]                 # a part's strength loads as the person edited them (#296)
+    supports: list[dict] = []             # what holds it; the floor at its underside where empty
 
 
 class ShopOffer(BaseModel):
@@ -1005,6 +1010,41 @@ def router():
                 raise HTTPException(422, str(e))
             return {"grain": entry, "said": grain.line(req.piece, entry) + " Check it holds again to use it.",
                     "design": design_state(store)}
+
+    # -- a part's scenarios and supports, as data (CALI-185, #296 slice A) ---------------------------------------------
+    @r.get("/api/designs/{slug}/parts/{pid}/scenarios")
+    def part_scenarios(slug: str, pid: str):
+        store = load(slug)
+        if store.design.part(pid) is None or not store.is_scripted(pid):
+            raise HTTPException(status_code=404, detail=f"{pid} has no script to read its loads from")
+        try:
+            return scenarios.get(store, pid)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+
+    @r.put("/api/designs/{slug}/parts/{pid}/scenarios")
+    def set_part_scenarios(slug: str, pid: str, req: ScenariosSet):
+        """Kept in design.yaml and read in place of the script's loads() and HELD; a new version of the part, so every
+        check of it is out of date (Rule 6)."""
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None or not store.is_scripted(pid):
+                raise HTTPException(status_code=404, detail=f"{pid} has no script to read its loads from")
+            try:
+                version = scenarios.put(store, pid, req.scenarios, req.supports)
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            return {"version": version, "scenarios": scenarios.get(store, pid), "design": design_state(store)}
+
+    @r.delete("/api/designs/{slug}/parts/{pid}/scenarios")
+    def clear_part_scenarios(slug: str, pid: str):
+        """Back to the script's own loads and supports."""
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None:
+                raise HTTPException(status_code=404, detail=f"no part {pid!r}")
+            version = scenarios.clear(store, pid)
+            return {"version": version, "scenarios": scenarios.get(store, pid), "design": design_state(store)}
 
     @r.get("/api/designs/{slug}/parts/{pid}/script")
     def part_script(slug: str, pid: str):

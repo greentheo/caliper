@@ -234,6 +234,15 @@ def _small_len(mm: float, inches: bool) -> str:
 RACKING = "Racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid."
 
 
+def off_lines(run: dict) -> list[dict]:
+    """The scenarios the person turned off, said where its strength is (#296: a standard's case "off" said on the card):
+    a standard's in amber, since the part isn't checked to it; one of the person's own, as information."""
+    from .scenarios import STANDARD
+
+    return [_line(f"Not checked: {n} is turned off.", "warn" if STANDARD.search(n) else "info", study="load")
+            for n in run.get("loads_off") or []]
+
+
 def joints_said(c: dict, need) -> str:
     """A passing case's joints, checked by hand (#301): the joint that governs it named, or the weakest joint's own number
     beside the wood's. "" where none was checked."""
@@ -636,6 +645,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             elif c.get("safety") is not None:
                 work.append(_case_line(part_name(p), run, c, filled, stale, inches, edge=bool(edge)))
         work += _grain_lines(store, pid, run, stale, filled, bool(edge))
+        work += off_lines(run)
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
                        and h.get("action") == "failed" and h.get("version") == p["version"]), None)
