@@ -1247,6 +1247,7 @@ $('newBtn').onclick = startNew;
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
+  if (first) { S.fixes = {}; S.fixMine = {}; S.fixOpen = null; }    // Things to fix are this design's only (#318 review)
   if (first) { dropBuildFollow(); clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
   location.hash = encodeURIComponent(slug);
   if (first) showLoading(slug);
@@ -2113,24 +2114,31 @@ function betterLines(c, offers) {
 // Under Will it work?: what's measured wrong with this part, each a tick, its fix (a choice where there are two), what
 // kind of change it is and what it costs; then the known limits apart, never ticked. Asked when it's opened, of this
 // version. A row reworded, or one added, is the person's words: said so, never "measured".
+// keyed by design and part (#318 review: another design's list painted under this one's part of the same id)
+const fixKey = (part) => `${S.slug}/${part}`;
+// a row's ticks and words go with it while its measurement is the same: a new number is a new row
+const fixRowKey = (r) => `${r.id}|${r.problem}`;
 function fixMine(part) {
   S.fixMine = S.fixMine || {};
-  return (S.fixMine[part] = S.fixMine[part] || { untick: [], words: {}, own: [], pick: {}, editing: null });
+  const k = fixKey(part);
+  return (S.fixMine[k] = S.fixMine[k] || { untick: [], words: {}, own: [], pick: {}, editing: null });
 }
 function fixRow(r, mine) {
-  const ticked = !(mine.untick || []).includes(r.id);
-  const pick = (mine.pick || {})[r.id] || 0;
-  const words = (mine.words || {})[r.id];
+  const k = fixRowKey(r);
+  const ticked = !(mine.untick || []).includes(k);
+  const pick = (mine.pick || {})[k] || 0;
+  const words = (mine.words || {})[k];
   const c = r.choices[pick] || r.choices[0];
-  const fix = mine.editing === r.id
-    ? `<input data-fix-words="${esc(r.id)}" value="${esc(words != null ? words : c.fix)}" style="width:80%">`
+  // the problem is measured; a fix is proposed (#318 review); a row the person reworded is their words, never measured
+  const fix = mine.editing === k
+    ? `<input data-fix-words="${esc(k)}" value="${esc(words != null ? words : c.fix)}" style="width:80%">`
     : words != null ? `${esc(words)} <span class="badge">your words</span>`
-    : (r.choices.length > 1 ? r.choices.map((x, j) => `<label><input type="radio" name="fx-${esc(r.id)}" data-fix-pick="${esc(r.id)}"
+    : (r.choices.length > 1 ? r.choices.map((x, j) => `<label><input type="radio" name="fx-${esc(k)}" data-fix-pick="${esc(k)}"
         value="${j}"${j === pick ? ' checked' : ''}> ${esc(x.fix)}</label>`).join(' <span class="muted">or</span> ') : esc(c.fix))
-      + ' <span class="badge ok">measured</span>';
-  return `<div class="fixrow" data-fix-row="${esc(r.id)}"><label><input type="checkbox" data-fix-tick="${esc(r.id)}"${ticked ? ' checked' : ''}>
-      ${esc(r.problem)}</label>
-    <div class="small">${fix} ${mine.editing === r.id ? '' : `<button class="ghost" data-fix-word="${esc(r.id)}">Reword</button>`}</div>
+      + ' <span class="muted small">proposed</span>';
+  return `<div class="fixrow" data-fix-row="${esc(r.id)}"><label><input type="checkbox" data-fix-tick="${esc(k)}"${ticked ? ' checked' : ''}>
+      ${esc(r.problem)}</label>${words != null ? '' : ' <span class="badge ok">measured</span>'}
+    <div class="small">${fix} ${mine.editing === k ? '' : `<button class="ghost" data-fix-word="${esc(k)}">Reword</button>`}</div>
     <div class="small muted">${esc(words != null ? 'a designer edit, in your words' : c.cost)}</div></div>`;
 }
 function fixesView(got, mine) {
@@ -2149,8 +2157,8 @@ function fixesView(got, mine) {
       <ul class="small muted fixlimits">${got.limits.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`;
 }
 function fixesBox(part) {
-  const open = S.fixOpen === part;
-  const got = open && S.fixes && S.fixes[part];
+  const open = S.fixOpen === fixKey(part);
+  const got = open && S.fixes && S.fixes[fixKey(part)];
   return `<details class="qbetter qfix" id="fixBox" data-fix-part="${esc(part)}"${open ? ' open' : ''}><summary>Things to fix
       <span class="muted small">measured, with what each would take</span></summary>
     <div id="fixBody">${got ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div></details>`;
@@ -2158,23 +2166,27 @@ function fixesBox(part) {
 function fixVersion(part) { return ((S.design.parts.find((p) => p.id === part)) || {}).version; }
 async function loadFixes(part) {
   S.fixes = S.fixes || {};
-  const v = fixVersion(part);
-  try { S.fixes[part] = { ...(await api('GET', `/api/designs/${S.slug}/parts/${part}/fixes`)), v }; }
-  catch (e) { S.fixes[part] = { rows: [], limits: [], error: plainly(e.message), v }; }
+  const v = fixVersion(part), k = fixKey(part);
+  let got;
+  try { got = { ...(await api('GET', `/api/designs/${S.slug}/parts/${part}/fixes`)), v }; }
+  catch (e) { got = { rows: [], limits: [], error: plainly(e.message), v }; }
+  if (k !== fixKey(part)) return;                 // another design opened while it asked
+  S.fixes[k] = got;
   paintFixes(part);
 }
 function paintFixes(part) {
-  const b = $('fixBody');
-  if (!b || !S.fixes || !S.fixes[part]) return;
-  b.innerHTML = fixesView(S.fixes[part], fixMine(part));
+  const b = $('fixBody'), got = S.fixes && S.fixes[fixKey(part)];
+  if (!b || !got || (($('fixBox') || {}).dataset || {}).fixPart !== part) return;
+  b.innerHTML = fixesView(got, fixMine(part));
   wireFixRows(part);
 }
 function wireFixes() {
   const box = $('fixBox');
   if (!box) return;
   const part = box.dataset.fixPart;
-  const fresh = () => S.fixes && S.fixes[part] && S.fixes[part].v === fixVersion(part);     // of this version only
-  box.ontoggle = () => { S.fixOpen = box.open ? part : null; if (box.open) { if (fresh()) paintFixes(part); else loadFixes(part); } };
+  // of this design (its key) and this version only
+  const fresh = () => { const got = S.fixes && S.fixes[fixKey(part)]; return !!got && got.v === fixVersion(part); };
+  box.ontoggle = () => { S.fixOpen = box.open ? fixKey(part) : null; if (box.open) { if (fresh()) paintFixes(part); else loadFixes(part); } };
   if (box.open) { if (fresh()) wireFixRows(part); else loadFixes(part); }
 }
 function wireFixRows(part) {
@@ -2189,8 +2201,8 @@ function wireFixRows(part) {
   body.querySelectorAll('[data-fix-words]').forEach((i) => {
     i.focus(); i.select();                                  // typing replaces it
     const done = () => {
-      const r = (S.fixes[part].rows || []).find((x) => x.id === i.dataset.fixWords);
-      const was = r ? (r.choices[mine.pick[r.id] || 0] || r.choices[0]).fix : '';
+      const r = (S.fixes[fixKey(part)].rows || []).find((x) => fixRowKey(x) === i.dataset.fixWords);
+      const was = r ? (r.choices[mine.pick[i.dataset.fixWords] || 0] || r.choices[0]).fix : '';
       const v = i.value.trim();
       if (v && v !== was) mine.words[i.dataset.fixWords] = v; else delete mine.words[i.dataset.fixWords];   // as it was: measured again
       mine.editing = null; paintFixes(part);

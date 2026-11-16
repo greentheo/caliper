@@ -75,11 +75,11 @@ def test_a_failing_plate_proposes_the_smallest_stock_sheet_that_clears_it_as_a_n
     store = _store(tmp_path, BOX_STOOL, "stool")
     _check(store, "stool", 1.4, plate={**_plate(t=12.7), "safety_across": 1.4}, sheet={"pieces": {"top": "t"}})
     (row,) = _list(store)["rows"]
-    assert row["id"] == "plate:top" and row["problem"] == f"The top fails by the plate check: about 1.4× where it needs {NEED}×"
+    assert row["id"] == "plate:top" and row["problem"] == f"The top fails by the plate check: 1.4× where it needs {NEED}×"
     (c,) = row["choices"]
     # 5/8 in clears 2 at 2.3x; 1/2 in (1.4x) doesn't: the smallest stock sheet that does
     assert c == {"fix": "Make the top from 5/8 in instead of 1/2 in", "kind": "number", "cost": "a number change, at once",
-                 "param": "t", "value": 15.875, "unit": "mm"}
+                 "param": "t", "value": 15.875, "unit": "mm", "moves": ["top"]}
 
 
 def test_a_failing_plate_with_no_parameter_for_its_sheet_is_the_designer_s(tmp_path):
@@ -98,10 +98,10 @@ def test_a_wall_that_buckles_proposes_a_thicker_stock_sheet_or_a_brace(tmp_path)
     _resave(store, run)
     (row,) = _list(store)["rows"]
     assert row["id"] == "buckling:left side"
-    assert row["problem"] == f"The left side buckles under a foot: about 1.2× where it needs {NEED}×"
+    assert row["problem"] == f"The left side buckles under a foot: 1.2× where it needs {NEED}×"
     # its buckling load goes as t³: 19.05 × (2/1.2)^(1/3) = 22.6 mm, so 1 in, the next stock sheet
-    assert [(c["fix"], c["kind"]) for c in row["choices"]] == [("Make the left side 1 in instead of 3/4 in", "number"),
-                                                              ("Add a brace to the left side", "designer")]
+    assert [(c["fix"], c["kind"]) for c in row["choices"]] == [("Make the left side from 1 in instead of 3/4 in", "number"),
+                                                              ("Brace the left side", "designer")]
     assert row["choices"][0]["value"] == 25.4
 
 
@@ -181,7 +181,7 @@ def test_the_route_lists_them(tmp_path, monkeypatch):
 def _page(extra):
     from .test_carve_click import _page as page, _run
 
-    return _run(page(["fixesView", "fixRow"], consts=["esc"], extra=extra))
+    return _run(page(["fixesView", "fixRow"], consts=["esc", "fixRowKey"], extra=extra))
 
 
 ROWS = {"part": "stool", "rows": [
@@ -205,13 +205,15 @@ def test_the_page_draws_each_row_with_a_tick_its_choices_and_the_limits_apart():
 
 
 def test_a_reworded_or_added_row_is_the_person_s_words_never_measured():
-    mine = {"untick": ["plate:top"], "words": {"unsized": "Take the strips off"},
+    key = {r["id"]: f"{r['id']}|{r['problem']}" for r in ROWS["rows"]}           # a row by its id and its measurement
+    mine = {"untick": [key["plate:top"]], "words": {key["unsized"]: "Take the strips off"},
             "own": [{"fix": "round the top's corners"}]}
     html = _page(f"out = fixesView({json.dumps(ROWS)}, {json.dumps(mine)});")
     row = html[html.index('data-fix-row="unsized"'):html.index('data-fix-row="plate:top"')]
     assert "Take the strips off" in row and "your words" in row and "measured" not in row
     top = html[html.index('data-fix-row="plate:top"'):html.index("round the top")]
-    assert 'data-fix-tick="plate:top"' in top and "checked" not in top.split('data-fix-tick="plate:top"')[1].split(">")[0]
+    tick = f'data-fix-tick="{key["plate:top"]}"'
+    assert tick in top and "checked" not in top.split(tick)[1].split(">")[0]
     own = html[html.index('data-fix-own="0"'):html.index("Known limits")]
     assert "your words" in own and "measured" not in own
 
@@ -238,3 +240,109 @@ def _resave(store, run):
 
     with open(os.path.join(load_study.runs_dir(store), run["id"], "run.json"), "w") as f:
         json.dump(run, f)
+
+
+
+# --- #318 review ---------------------------------------------------------------------------------------------------------
+
+def _buckles(store, safety, down=True, sheet=None):
+    wall = {"done": True, "piece": "left side", "thickness_mm": 19.05, "safety": safety, "load_n": 900, "down": down}
+    _check(store, "stool", safety, sheet=sheet or {"pieces": {"left side": "t"}})
+    run = _run(store)
+    run["cases"][0].update(governs="buckling", buckling=[wall])
+    _resave(store, run)
+
+
+def test_a_plate_no_stock_sheet_clears_is_a_row_that_says_so_with_the_designer_s_choices(tmp_path):
+    """reviewer-2's v7 at 500 lb: the step at 1.07x, its table to 1 in at 1.91x. It read "Nothing measured wrong"."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 1.07, plate={**_plate(t=19.05, rows=((15.875, "5/8 in", 0.74), (19.05, "3/4 in", 1.07),
+                                                                (25.4, "1 in", 1.91))), "safety_across": 1.07},
+           sheet={"pieces": {"top": "t"}})
+    (row,) = _list(store)["rows"]
+    assert row["problem"] == (f"The top fails by the plate check: 1.07× where it needs {NEED}×; no stock sheet clears it: "
+                              "the thickest, 1 in, is 1.91×")
+    assert [c["kind"] for c in row["choices"]] == ["designer"] * 3
+    assert [c["fix"] for c in row["choices"]] == ["Hold the top up underneath: another support or a rail under it",
+                                                 "Brace the top", "Ask it to hold less: a lighter load in its loads()"]
+
+
+def test_a_failing_case_the_fea_governs_is_a_row(tmp_path):
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 1.3)
+    run = _run(store)
+    run["cases"][0]["fea"]["in"] = "front rail"
+    _resave(store, run)
+    (row,) = _list(store)["rows"]
+    assert row["id"] == "fails:a foot"
+    assert row["problem"] == f"It doesn't hold a foot: 1.3× where it needs {NEED}×; it works hardest in the front rail"
+    assert row["choices"][0]["fix"] == "Make the front rail stronger: thicker, or with a rib or a brace"
+
+
+def test_a_number_that_moves_several_panels_names_them_all_and_offers_the_one_alone(tmp_path):
+    """reviewer-2's v7 at 350 lb: ``ply_t`` sets all six panels, and the row said only the step."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 1.4, plate={**_plate(t=12.7), "safety_across": 1.4},
+           sheet={"pieces": {"top": "ply_t", "left side": "ply_t", "right side": "ply_t"}})
+    (row,) = _list(store)["rows"]
+    number, alone = row["choices"]
+    assert number["fix"] == "Make every panel 5/8 in (ply_t sets the top and the other two)" and number["kind"] == "number"
+    assert number["cost"] == "a number change, at once: it moves the top, left side and right side"
+    assert number["moves"] == ["top", "left side", "right side"] and number["param"] == "ply_t"
+    assert alone == {"fix": "Make the top alone from 5/8 in", "kind": "designer",
+                     "cost": "a designer edit on the stool (one Claude call)"}
+
+
+def test_a_failing_number_is_never_rounded_up_to_what_it_needs(tmp_path):
+    """reviewer-2's v2 doctored to 1.96x: it read "about 2.0× where it needs 2×"."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _buckles(store, 1.96)
+    (row,) = _list(store)["rows"]
+    assert row["problem"].startswith(f"The left side buckles under a foot: 1.96× where it needs {NEED}×"), row["problem"]
+
+
+def test_buckling_scales_as_t_cubed_not_t_squared(tmp_path):
+    """3/4 in at 0.9x: by t³ 1 in clears it (2.13x); by t² it needs 28 mm, which no stock sheet is."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _buckles(store, 0.9)
+    (row,) = _list(store)["rows"]
+    assert row["choices"][0]["fix"] == "Make the left side from 1 in instead of 3/4 in" and row["choices"][0]["value"] == 25.4
+
+
+def test_a_wall_no_stock_sheet_clears_says_so_from_the_plate_check_s_stock(tmp_path):
+    """Theo's v2 left side at 0.69x needs 27.2 mm: past the 1 in the plate check's stock goes to, so no 1 1/2 in."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _buckles(store, 0.69)
+    (row,) = _list(store)["rows"]
+    assert row["problem"].endswith("; no stock sheet clears it: the thickest, 1 in, is 1.63×"), row["problem"]
+    assert "1 1/2 in" not in json.dumps(row) and [c["fix"] for c in row["choices"]][0] == "Brace the left side"
+
+
+def test_a_wall_pushed_in_its_own_plane_says_racking_isn_t_checked(tmp_path):
+    from caliper.answers import RACKING
+
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _buckles(store, 1.5, down=False)
+    assert RACKING in _list(store)["limits"]
+
+
+def test_a_finding_that_wasn_t_measured_is_no_row(tmp_path, monkeypatch):
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    monkeypatch.setattr(review, "findings", lambda store, report=None: {"findings": [
+        {"kind": "read", "parts": ["stool"], "said": "it looks lopsided", "fix": "even it up", "measured": False}]})
+    assert _list(store)["rows"] == []
+
+
+def test_the_page_keys_the_list_by_design_and_part_and_clears_it_for_another_design():
+    src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    assert "const fixKey = (part) => `${S.slug}/${part}`;" in src
+    assert "if (first) { S.fixes = {}; S.fixMine = {}; S.fixOpen = null; }" in src
+    assert "S.fixes[part]" not in src and "S.fixMine[part]" not in src
+    assert "const fixRowKey = (r) => `${r.id}|${r.problem}`;" in src                 # a new number is a new row
+
+
+def test_the_page_says_the_problem_is_measured_and_the_fix_proposed():
+    html = _page(f"out = fixesView({json.dumps(ROWS)}, {{}});")
+    row = html[html.index('data-fix-row="plate:top"'):html.index("Known limits")]
+    assert row.index("The top fails by the plate check") < row.index("measured") < row.index("Make the top from 5/8 in")
+    assert "proposed" in row

@@ -53,13 +53,29 @@ def _these(names: list[str]) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" and {names[-1]}"
 
 
+def _stock() -> list[float]:
+    """The sheets a fix may name: the plate check's own stock table, to 1 in (#318 review: the buckling fix named
+    1 1/2 in plywood from a list the plate check never offers)."""
+    from .construction import THICKNESSES
+
+    return [t for t in THICKNESSES if t <= 26]
+
+
 def _thicker(t: float, safety: float, need: float, power: float) -> Optional[float]:
     """The thinnest stock sheet, thicker than ``t``, whose safety clears ``need`` where safety goes as thickness to
     ``power`` (a wall's buckling load, as t³). None when no stock sheet does."""
-    from .construction import THICKNESSES
-
     want = t * (need / safety) ** (1.0 / power) if safety > 0 else math.inf
-    return next((x for x in THICKNESSES if x > t + 0.01 and x >= want - 1e-6), None)
+    return next((x for x in _stock() if x > t + 0.01 and x >= want - 1e-6), None)
+
+
+def _x(safety: float) -> str:
+    """A safety as the list says it, cut toward safe, never rounded up to what it needs (#318 review: 1.96 read 2.0)."""
+    from .verdicts import cut
+
+    return f"{cut(safety):g}×"
+
+
+_COUNT = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
 
 
 def _part_name(p: dict) -> str:
@@ -115,32 +131,89 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
         rows.append(_row("edge", edge[:1].upper() + edge[1:],
                          [_choice("Add a case standing at its free edge", DESIGNER, _designer_cost(name))], pid))
     sheet = (run.get("sheet") or {}).get("pieces") or {}
+
+    def thicker(piece: str, t_mm: float, label: str, now: str) -> list[dict]:
+        """A thicker sheet: a number where the run names its PARAMS entry, saying every piece it moves, with this piece
+        alone as the designer's choice beside it (#318 review: ``ply_t`` sets all six panels); else the designer's."""
+        param = sheet.get(piece)
+        if not param:
+            return [_choice(f"Make the {piece} from {label} instead of {now}", DESIGNER, _designer_cost(name))]
+        moved = [k for k, v in sheet.items() if v == param]
+        if len(moved) == 1:
+            return [_choice(f"Make the {piece} from {label} instead of {now}", NUMBER, NUMBER_COST, param=param,
+                            value=t_mm, unit="mm", moves=moved)]
+        others = len(moved) - 1
+        what = "every panel" if len(moved) == len(sheet) else f"the {_these(moved)}"
+        return [_choice(f"Make {what} {label} ({param} sets the {piece} and the other "
+                        f"{_COUNT[others] if others < len(_COUNT) else others})", NUMBER,
+                        f"a number change, at once: it moves the {_these(moved)}", param=param, value=t_mm, unit="mm",
+                        moves=moved),
+                _choice(f"Make the {piece} alone from {label}", DESIGNER, _designer_cost(name))]
+
+    def otherwise(piece: str) -> list[dict]:
+        """What's left where no stock sheet clears it: the designer's, each said."""
+        return [_choice(f"Hold the {piece} up underneath: another support or a rail under it", DESIGNER, _designer_cost(name)),
+                _choice(f"Brace the {piece}", DESIGNER, _designer_cost(name)),
+                _choice("Ask it to hold less: a lighter load in its loads()", DESIGNER, _designer_cost(name))]
+
+    failing = [(c, v) for c, v in said if v["kind"] == "fails"]
+    covered: set = set()                        # the failing cases a row speaks for: every one gets a row (#318 review)
     for pick in better._sheet_picks(run, fails=True):     # a panel the plate check fails: the thinnest that holds
-        param = sheet.get(pick["piece"])
-        fix = f"Make the {pick['piece']} from {pick['label']} instead of {pick['label_now']}"
-        choice = (_choice(fix, NUMBER, NUMBER_COST, param=param, value=pick["t_mm"], unit="mm") if param
-                  else _choice(fix, DESIGNER, _designer_cost(name)))
-        rows.append(_row(f"plate:{pick['piece']}", f"The {pick['piece']} fails by the plate check: about "
-                                                  f"{pick['now_safety']:.1f}× where it needs {need:g}×", [choice], pid))
-    for c, v in said:
-        if v["kind"] != "fails" or c.get("governs") != "buckling":
+        on = [c for c, _ in failing if (c.get("plate") or {}).get("piece") == pick["piece"]]
+        covered |= {c["name"] for c in on}
+        rows.append(_row(f"plate:{pick['piece']}", f"The {pick['piece']} fails by the plate check: "
+                                                  f"{_x(pick['now_safety'])} where it needs {need:g}×",
+                         thicker(pick["piece"], pick["t_mm"], pick["label"], pick["label_now"]), pid))
+    panels: dict = {}
+    for c, _ in failing:                        # a panel the plate check fails that no stock sheet clears
+        pl = c.get("plate") or {}
+        if c["name"] not in covered and c.get("governs") == "plate" and pl.get("done") and pl.get("piece"):
+            panels.setdefault(pl["piece"], []).append(c)
+    for piece, on in panels.items():
+        covered |= {c["name"] for c in on}
+        tables = [{round(b["thickness_mm"], 2): b for b in c["plate"].get("by_thickness") or []
+                   if b.get("safety_across") is not None} for c in on]
+        common = sorted(set.intersection(*(set(t) for t in tables))) if tables else []
+        thickest = (f": the thickest, {tables[0][common[-1]]['label']}, is "
+                    f"{_x(min(tb[common[-1]]['safety_across'] for tb in tables))}") if common else ""
+        rows.append(_row(f"plate:{piece}", f"The {piece} fails by the plate check: {_x(min(c['safety'] for c in on))} "
+                                           f"where it needs {need:g}×; no stock sheet clears it{thickest}", otherwise(piece), pid))
+    for c, v in failing:
+        if c["name"] in covered or c.get("governs") != "buckling":
             continue
         rowsb = [b for b in c.get("buckling") or [] if b.get("done") and b.get("safety") is not None]
         if not rowsb:
             continue
+        covered.add(c["name"])
         b = min(rowsb, key=lambda r: r["safety"])
-        t = _thicker(b["thickness_mm"], b["safety"], need, 3.0)       # its buckling load goes as t³
-        choices = []
-        if t is not None:
-            fix = f"Make the {b['piece']} {nominal(t)} instead of {nominal(b['thickness_mm'])}"
-            param = sheet.get(b["piece"])
-            choices.append(_choice(fix, NUMBER, NUMBER_COST, param=param, value=t, unit="mm") if param
-                           else _choice(fix, DESIGNER, _designer_cost(name)))
-        choices.append(_choice(f"Add a brace to the {b['piece']}", DESIGNER, _designer_cost(name)))
+        if b.get("down") is False:              # pushed in the wall's own plane: the card says racking isn't checked
+            from .answers import RACKING
+
+            limits.append(RACKING)
         rid = f"buckling:{b['piece']}"
-        if not any(r["id"] == rid for r in rows):
-            rows.append(_row(rid, f"The {b['piece']} buckles under {c['name']}: about {b['safety']:.1f}× where it "
-                                  f"needs {need:g}×", choices, pid))
+        if any(r["id"] == rid for r in rows):
+            continue
+        t = _thicker(b["thickness_mm"], b["safety"], need, 3.0)       # its buckling load goes as t³
+        problem = f"The {b['piece']} buckles under {c['name']}: {_x(b['safety'])} where it needs {need:g}×"
+        if t is not None:
+            choices = thicker(b["piece"], t, nominal(t), nominal(b["thickness_mm"]))
+            choices.append(_choice(f"Brace the {b['piece']}", DESIGNER, _designer_cost(name)))
+        else:
+            top = _stock()[-1]
+            problem += (f"; no stock sheet clears it: the thickest, {nominal(top)}, is "
+                        f"{_x(b['safety'] * (top / b['thickness_mm']) ** 3)}")
+            choices = [_choice(f"Brace the {b['piece']}", DESIGNER, _designer_cost(name)),
+                       _choice("Ask it to hold less: a lighter load in its loads()", DESIGNER, _designer_cost(name))]
+        rows.append(_row(rid, problem, choices, pid))
+    for c, v in failing:                        # any other: the FEA's, or a check with no thickness to offer
+        if c["name"] in covered:
+            continue
+        where = (c.get("fea") or {}).get("in") or (c.get("plate") or {}).get("piece")
+        rows.append(_row(f"fails:{c['name']}", f"It doesn't hold {c['name']}: {_x(c['safety'])} where it needs {need:g}×"
+                                              + (f"; it works hardest in the {where}" if where else ""),
+                         [_choice(f"Make the {where} stronger: thicker, or with a rib or a brace" if where
+                                  else "Make it stronger where it fails", DESIGNER, _designer_cost(name)),
+                          _choice("Ask it to hold less: a lighter load in its loads()", DESIGNER, _designer_cost(name))], pid))
     brace = verdicts.wood_brace(run)            # what Caliper can't fix by itself: said apart, never ticked
     if brace:                                   # its joints taken as solid wood, whatever each case reads
         limits.append("Its joints aren't checked: " + joint_said(brace, need).strip().rstrip("."))
