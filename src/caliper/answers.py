@@ -610,7 +610,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             said = consistency.checked(store, pid)
             smaller = consistency.plan_differs(C.declared(store, pid), geom)
             off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
-            edge = next((r.detail for r in said if r.id == "loads_edge" and r.detail), "")   # (CALI-94)
+            edge = consistency.bare_edge(store, pid) or ""    # (CALI-94) of the loads it checks, edited too (#312)
             meta = geom.require_mesh().metadata
             strays = _strays(meta, inches) if meta.get("strays") else None
         except Exception:  # noqa: BLE001 — the card says what it can
@@ -681,7 +681,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             if ways:
                 work.append(_line(f"Not checked yet: {' or '.join(ways)} (no push is declared that way, and its base "
                                   f"is no wider that way).", "warn", study="tip"))
-            missing = tipping.unchecked(C.declared(store, pid), p.get("intent") or "")
+            from . import scenarios as SC
+
+            missing = tipping.unchecked(SC.declared(store, pid), p.get("intent") or "")   # edited too (#312 re-check)
         except Exception as e:  # noqa: BLE001 — said, never a crash of the card
             work.append(_line(f"Tipping: not checked ({scrubbed(e)}).", "warn", study="tip"))
             missing = []

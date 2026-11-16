@@ -1,4 +1,4 @@
-### 2026-11-16 · CALI-185 (#296) · #312 review: a version carries its loads; edited loads follow the shape or say so; the floor kept; the scorecard says one turned off
+### 2026-11-15 · CALI-185 (#296) · #312 review: a version carries its loads; edited loads follow the shape or say so; the floor kept; the scorecard says one turned off
 
 reviewer-2's review of #312 found four places where a check would run on loads other than the page or the reply said (Rule 6). The foreman made all four must-fix. Five of the small asks came cheap and are in too.
 

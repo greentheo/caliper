@@ -3224,7 +3224,13 @@ function scenarioRow(sc, i) {
   const std = sc.standard ? `<div class="small muted">a standard's case: ${esc(sc.standard.name)}
       ${sc.standard.amount !== sc.amount || sc.standard.unit !== sc.unit ? `; the standard is ${sc.standard.amount} ${esc(sc.standard.unit)}` : ''}
       <button class="ghost" data-scen-std="${i}">Back to the standard</button></div>` : '';
-  return `<div class="card scen" data-scen="${i}" style="margin-top:6px">
+  // the design changed a case under an edit of yours, or dropped it: asked, never settled for you (#312 re-check)
+  const asked = sc.conflict ? `<div class="small" style="color:var(--amber)">${esc(sc.conflict)}: ${sc.design
+      ? `<button class="ghost" data-scen-take="${i}">Take the design's</button> or save to keep yours.`
+      : 'remove it, or save to keep yours.'}</div>`
+    : sc.new ? '<div class="small muted">the design added this case since you edited them: it\'s checked as the script has it.</div>' : '';
+  const whose = sc.source === 'edited' ? 'yours' : sc.source === 'added' ? 'yours, added' : sc.source === 'script' ? 'its script\'s' : '';
+  return `<div class="card scen" data-scen="${i}" style="margin-top:6px">${asked}${whose ? `<div class="small muted">${whose}</div>` : ''}
       <div class="form"><span>what</span><span><input data-f="name" value="${esc(sc.said || sc.name)}"${sc.standard ? ' readonly title="a standard\'s case is named for what it is: edit its numbers"' : ''} style="width:100%"></span>
       <span>how much</span><span><input data-f="amount" type="number" step="any" min="0" value="${sc.amount}" style="width:7em">
         <select data-f="unit">${['lb', 'kg', 'N'].map((u) => `<option${u === sc.unit ? ' selected' : ''}>${u}</option>`).join('')}</select></span>
@@ -3247,7 +3253,7 @@ function supportRow(s, i) {
 }
 function scenariosView(p, got) {
   if (!got) return '<div class="small muted">reading them…</div>';
-  return `${got.overridden ? '<div class="small">As you edited them, in place of its script\'s.</div>'
+  return `${got.overridden ? '<div class="small">Yours where you edited them; the rest as its script says them, now and as it changes.</div>'
       : '<div class="small muted">As its script says them. Edit and save to keep yours instead.</div>'}
     ${got.scenarios.map(scenarioRow).join('')}
     <div class="actions"><button class="ghost" id="scenAdd">Add a scenario</button></div>
@@ -3308,6 +3314,10 @@ function wireScenarioRows(p) {
   document.querySelectorAll('#scenBody [data-scen-std]').forEach((b) => {
     b.onclick = () => { keep(); const sc = S.scen[p.id].scenarios[+b.dataset.scenStd];
       S.scen[p.id].scenarios[+b.dataset.scenStd] = { ...sc.standard, standard: sc.standard, on: sc.on !== false }; repaint(); };
+  });
+  document.querySelectorAll('#scenBody [data-scen-take]').forEach((b) => {
+    b.onclick = () => { keep(); const i = +b.dataset.scenTake, sc = S.scen[p.id].scenarios[i];
+      S.scen[p.id].scenarios[i] = { ...sc.design, of: sc.of, source: 'script' }; repaint(); };
   });
   document.querySelectorAll('#scenBody [data-sup-del]').forEach((b) => {
     b.onclick = () => { keep(); S.scen[p.id].supports.splice(+b.dataset.supDel, 1); repaint(); };

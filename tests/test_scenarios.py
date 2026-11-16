@@ -450,3 +450,199 @@ def test_a_turn_that_writes_the_part_ends_with_what_its_loads_did(store, monkeyp
     monkeypatch.setattr(chat, "drift_note", lambda s, pid: "THE LOADS NOTE" if pid == "stool" else "")
     got = chat.turn(store, "roll it back", scope="stool", use_llm=False)
     assert got.reply.rstrip().endswith("THE LOADS NOTE"), got.reply
+
+
+# --- #312 re-check: every reader of a part's loads reads the loads its check reads; the override is edits on the script
+
+MIDDLE = {"lo": [150, 150, 404.4], "hi": [250, 250, 406.4]}
+
+
+def _edge_taken(store, how):
+    got = S.get(store, "stool")
+    front, rating = got["scenarios"]
+    rows = {"removed": [rating], "off": [{**front, "on": False}, rating], "middle": [{**front, **MIDDLE}, rating]}[how]
+    S.put(store, "stool", rows, got["supports"])
+
+#: The same stool without its rails or its tipping case (which stands at the edge, and counts as a foot there): its
+#: step is held on its two sides only, so its front edge is where it's weakest.
+OPEN = RATED.replace('"front rail": ((t, 0, h - t - r), (w - t, t, h - t)), '
+                     '"back rail": ((t, d - t, h - t - r), (w - t, d, h - t)),\n            ', "") \
+    .replace('            "front rail": [(t, 0, h - t - r), (w - t, 0, h - t - r), (w - t, 0, h - t), (t, 0, h - t)],\n'
+             '            "back rail": [(t, d, h - t - r), (w - t, d, h - t - r), (w - t, d, h - t), (t, d, h - t)],\n', "") \
+    .replace('            {"name": "leaning off the edge", "tip": True, "force": (20, 0, -600), "factor": 1.0,\n'
+             '             "lo": (w / 2 - 10, 0, h - 2), "hi": (w / 2 + 10, 20, h)}]', ']')   # a tip case counts as a foot there
+
+
+@pytest.mark.parametrize("how", ["removed", "off", "middle"])
+def test_an_edge_case_an_edit_takes_away_is_warned_of_as_the_script_s_would_be(tmp_path, how):
+    """The reviewer's step-stool edits: the front edge removed, turned off, or moved to the middle. The warning read the
+    script's loads, which still stood there, so the card said nothing and a ✓ counted as one."""
+    from caliper import answers, consistency, design_api
+
+    assert "front rail" not in OPEN and "back rail" not in OPEN and "leaning" not in OPEN
+    store = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", OPEN, intent="a step stool")
+    assert consistency.bare_edge(store, "stool") is None
+    _edge_taken(store, how)
+    fresh = DesignStore.load(store.root)
+    edge = consistency.bare_edge(fresh, "stool")
+    assert edge and "no load stands on its free edge" in edge, edge
+    lines = [ln["text"] for c in answers.part(fresh, design_api.design_state(fresh), "stool") for ln in c["lines"]]
+    assert any("no load stands on its free edge" in t for t in lines), lines
+    S.clear(fresh, "stool")
+    assert consistency.bare_edge(DesignStore.load(store.root), "stool") is None       # the script's again: no warning
+
+
+def test_a_seat_s_unchecked_cases_read_the_edited_loads(tmp_path):
+    from caliper import answers, design_api, tipping
+
+    store = DesignStore.create("a stool to sit on", base=str(tmp_path / "designs"))
+    store.write_part("stool", RATED, intent="a stool to sit on")
+    assert "sitting on the front edge" not in tipping.unchecked(S.declared(store, "stool"), "a stool to sit on")
+    _edge_taken(store, "removed")
+    fresh = DesignStore.load(store.root)
+    assert "sitting on the front edge" in tipping.unchecked(S.declared(fresh, "stool"), "a stool to sit on")
+    work = next(c for c in answers.part(fresh, design_api.design_state(fresh), "stool") if c["key"] == "work")
+    seat = [ln["text"] for ln in work["lines"] if ln["text"].startswith("Not checked yet for a seat")]
+    assert seat and "sitting on the front edge" in seat[0], seat
+
+
+def test_the_edited_declarations_keep_the_script_s_tipping_cases_and_take_its_supports(store):
+    from caliper import construction as C
+
+    assert S.declared(store, "stool") == C.declared(store, "stool")                  # nothing edited: the script's
+    _edge_taken(store, "removed")
+    d = S.declared(store, "stool")
+    assert [ld["name"] for ld in d["loads"]] == ["its rating (EN 14183, 150 kg)", "leaning off the edge"]
+    assert d["loads"][-1]["tip"] and len(d["loads"]) == 2
+
+
+def test_nothing_reads_a_script_s_loads_but_the_check_and_the_marked_few():
+    """A guard: a reader of ``loads`` off a part's declarations reads the script's, not what its check reads (#312
+    re-check). Outside scenarios.py and load_study, each says on its line which it means, and why."""
+    import glob
+    import os
+    import re
+
+    src = os.path.join(os.path.dirname(__file__), "..", "src", "caliper")
+    reads = re.compile(r'\b(declared|d)(\.get\("loads"\)|\["loads"\])')
+    bad = []
+    for path in glob.glob(os.path.join(src, "**", "*.py"), recursive=True):
+        if os.path.basename(path) in ("scenarios.py", "load_study.py"):
+            continue
+        for i, line in enumerate(open(path), 1):
+            if reads.search(line) and "# script's loads" not in line and "# edited:" not in line:
+                bad.append(f"{os.path.basename(path)}:{i}: {line.strip()}")
+            if 'id == "loads_edge"' in line and not path.endswith("consistency.py"):
+                bad.append(f"{os.path.basename(path)}:{i}: the script's edge check, not bare_edge: {line.strip()}")
+            if "tipping.unchecked(C.declared" in line:
+                bad.append(f"{os.path.basename(path)}:{i}: a seat's cases off the script's loads: {line.strip()}")
+    assert not bad, "\n".join(bad)
+
+
+REFINED = RATED.replace('''{"name": "stepping on the front edge", "lb": 250,''', '''{"name": "standing on the front edge", "lb": 300,''') \
+    .replace('''            {"name": "leaning off the edge",''', '''            {"name": "kneeling on the step", "lb": 200, "factor": 2.0,
+             "lo": (150, 150, h - 2), "hi": (250, 250, h)},
+            {"name": "leaning off the edge",''')
+
+
+def test_the_reviewer_s_refine_checks_the_design_s_new_cases_and_keeps_the_edit_and_says_so(store):
+    """The rating edited to 100 kg; then the design is refined: 300 lb standing on the renamed front edge, a new
+    kneeling case. The override replaced the script's loads, so neither was checked and nothing was said."""
+    from caliper import chat
+    from caliper import construction as C
+
+    _lowered(store)
+    store.write_part("stool", REFINED, intent="refined")
+    loads = {ld["name"]: ld for ld in S.loads(store, "stool", C.declared(store, "stool"))}
+    assert set(loads) == {"standing on the front edge", "kneeling on the step",
+                          "EN 14183, edited: 100 kg (the standard is 150 kg)"}, set(loads)
+    assert np.linalg.norm(loads["standing on the front edge"]["force"]) == pytest.approx(300 * 4.4482216, rel=1e-3)
+    said = S.drift(store, "stool")
+    assert "the design added 'standing on the front edge': it's checked" in said, said
+    assert "the design added 'kneeling on the step': it's checked" in said, said
+    assert "yours kept: EN 14183, edited: 100 kg" in said, said
+    assert chat.drift_note(store, "stool") == said
+    got = S.get(store, "stool")
+    assert [r["source"] for r in got["scenarios"]] == ["script", "edited", "script"]
+
+
+def test_an_edit_the_design_changed_underneath_is_asked_about(store):
+    from caliper import construction as C
+
+    _lowered(store)
+    store.write_part("stool", RATED.replace('"kg": 150', '"kg": 200'), intent="a heavier rating")
+    said = S.drift(store, "stool")
+    assert ("you'd edited 'its rating (EN 14183, 150 kg)' to 100 kg; the design now asks 200 kg: keep yours, or take "
+            "the design's?") in said, said
+    row = S.get(store, "stool")["scenarios"][1]
+    assert row["conflict"] and row["design"]["amount"] == 200 and row["amount"] == 100
+    amounts = sorted(round(float(np.linalg.norm(ld["force"]))) for ld in S.loads(store, "stool", C.declared(store, "stool")))
+    assert round(100 * 9.80665) in amounts                                       # yours, still read till they say
+    got = S.get(store, "stool")                                                  # take the design's: the script's again
+    S.put(store, "stool", [got["scenarios"][0], {**got["scenarios"][1], **{k: row["design"][k] for k in
+                                                ("amount", "unit", "factor", "direction", "lo", "hi", "name")}}],
+          got["supports"])
+    assert not S.get(store, "stool")["scenarios"][1].get("conflict") and S.drift(store, "stool") == ""
+
+
+def test_an_edit_whose_case_the_design_dropped_is_still_read_and_named(store):
+    _lowered(store)
+    gone = RATED.replace('''            {"name": "its rating (EN 14183, 150 kg)", "kg": 150, "factor": 1.0,
+             "lo": (20, 20, h - 2), "hi": (w - 20, 335, h)},
+''', "")
+    store.write_part("stool", gone, intent="no rating")
+    said = S.drift(store, "stool")
+    assert "you'd edited 'its rating (EN 14183, 150 kg)'; the design no longer has it: keep yours" in said, said
+
+
+def test_after_a_refine_get_shows_the_followed_box_and_an_untouched_save_leaves_it_unmoved(store):
+    from caliper import construction as C
+
+    _lowered(store)
+    store.write_part("stool", TALLER, intent="taller")
+    got = S.get(store, "stool")
+    assert [r["lo"][2] for r in got["scenarios"]] == pytest.approx([448.0, 448.0])
+    S.put(store, "stool", got["scenarios"], got["supports"])                     # saved as shown
+    store.write_part("stool", RATED, intent="back down")
+    loads = S.loads(store, "stool", C.declared(store, "stool"))
+    assert [ld["lo"][2] for ld in loads] == pytest.approx([404.4, 404.4])         # still followed: never moved
+
+
+def test_a_standard_moved_only_is_said_as_moved(store):
+    got = S.get(store, "stool")
+    S.put(store, "stool", [got["scenarios"][0], {**got["scenarios"][1], **MIDDLE}], got["supports"])
+    assert S.get(store, "stool")["scenarios"][1]["said"].startswith("EN 14183, moved"), S.get(store, "stool")
+
+
+def test_a_restore_says_in_its_history_what_it_did_to_the_loads(store):
+    v0 = store.design.part("stool").version
+    _lowered(store)
+    v1 = store.design.part("stool").version
+    store.restore("stool", v0)
+    assert DesignStore.load(store.root).history("stool")[-1]["feedback"].startswith(
+        "its loads are the script's again (undone: EN 14183, edited: 100 kg")
+    store.restore("stool", v1)
+    assert DesignStore.load(store.root).history("stool")[-1]["feedback"] == f"its loads are as they were at v{v1}"
+
+
+def test_the_editor_asks_about_a_case_the_design_changed_and_takes_the_design_s():
+    mine = {"name": "its rating (EN 14183, 150 kg)", "said": "EN 14183, edited: 100 kg (the standard is 200 kg)",
+            "amount": 100, "unit": "kg", "direction": [0, 0, -1], "factor": 1, "lo": [20, 20, 404.4],
+            "hi": [386, 335, 406.4], "on": True, "of": "its rating (EN 14183, 150 kg)", "source": "edited",
+            "conflict": "you'd edited 'its rating (EN 14183, 150 kg)' to 100 kg; the design now asks 200 kg",
+            "design": {"name": "its rating (EN 14183, 150 kg)", "amount": 200, "unit": "kg", "direction": [0, 0, -1],
+                       "factor": 1, "lo": [20, 20, 404.4], "hi": [386, 335, 406.4], "on": True}}
+    added = {**mine, "name": "kneeling on the step", "said": "kneeling on the step", "amount": 200, "unit": "lb",
+             "source": "script", "new": True, "conflict": None, "design": None, "of": "kneeling on the step"}
+    gone = {**mine, "conflict": "you'd edited 'the old edge'; the design no longer has it", "design": None}
+    html = _page(f"""out = scenariosView({{id: 'stool'}}, {{overridden: true, scenarios: {json.dumps([mine, added, gone])},
+      supports: []}});""")
+    assert "the design now asks 200 kg: <button" in html and 'data-scen-take="0"' in html and "Take the design's" in html
+    assert "the design added this case since you edited them" in html and "its script's" in html
+    assert "the design no longer has it: remove it, or save to keep yours" in html and 'data-scen-take="2"' not in html
+    assert "Yours where you edited them" in html
+    import os
+
+    src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    assert "S.scen[p.id].scenarios[i] = { ...sc.design, of: sc.of, source: 'script' }; repaint();" in src

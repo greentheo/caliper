@@ -592,8 +592,11 @@ class DesignStore:
                     loads[part_id] = yaml.safe_load(f)
             else:
                 loads.pop(part_id, None)
+            from .scenarios import restored
+
+            said = restored((self.design.scenarios or {}).get(part_id), loads.get(part_id), version)
             self.design.scenarios = loads
-            return self.write_part(part_id, script, action="restore",
+            return self.write_part(part_id, script, action="restore", feedback=said or None,   # in its history (#312)
                                    extra={"restored_from": version})
         if os.path.exists(mesh_src):
             with open(mesh_src, "rb") as f:

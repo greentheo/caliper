@@ -1826,17 +1826,9 @@ def undo_target(store: DesignStore, part_id: str) -> Optional[int]:
 def _loads_back(store: DesignStore, part_id: str, had: Optional[dict], now: Optional[dict], target: int) -> str:
     """What a roll-back did to a part's loads (#312 review: it put back the same script and kept the edit, while saying it
     rolled back): back to the script's, naming the edits undone, or as they were at that version. "" where they're the same."""
-    if had == now:
-        return ""
-    if now is None:
-        from . import construction as C
-        from . import scenarios as SC
+    from . import scenarios as SC
 
-        script = SC._script_rows(C.declared(store, part_id))
-        undone = [SC.name(r) for r in (had or {}).get("scenarios") or []
-                  if not r.get("on", True) or r.get("moved") or SC._key(r) not in script or SC._differs(r, script[SC._key(r)])]
-        return "its loads are the script's again" + (f" (undone: {'; '.join(undone)})" if undone else "")
-    return f"its loads are as they were at v{target}"
+    return SC.restored(had, now, target)
 
 
 def drift_note(store: DesignStore, part_id: Optional[str]) -> str:

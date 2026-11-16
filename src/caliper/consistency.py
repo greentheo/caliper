@@ -554,7 +554,7 @@ def _loads(mesh, declared: dict, pieces: list[dict], tol: float) -> AssertionRes
     from . import load_study as L
 
     try:
-        loads = L.parse_loads(declared["loads"])
+        loads = L.parse_loads(declared["loads"])     # script's loads: the script's must land, edited or not
         held = L.parse_held(declared.get("held"), mesh.bounds.tolist(), 1.0) if declared.get("held") else []
     except (ValueError, TypeError) as e:
         return AssertionResult(id="loads_land", expr="every load in loads() says how much and where",
@@ -579,7 +579,7 @@ def _edge_foot(mesh, declared: dict, pieces: list[dict], tol: float, rest: bool 
     from . import load_study as L
 
     try:
-        loads = L.parse_loads(declared["loads"])
+        loads = L.parse_loads(declared["loads"])     # script's loads: or the edited ones, as bare_edge passes them
     except (ValueError, TypeError, KeyError):
         return None                                        # _loads says what's wrong with them
     from . import spatial
@@ -608,23 +608,30 @@ MIDDLE_ONLY = ("checked in the middle only; the front edge, where people stand, 
 
 def bare_edge(store, part_id: str) -> Optional[str]:
     """CALI-94 (#106 review): the loads_edge warning's detail while a part's two-sided top has no foot at its free
-    edge, else None. Its strength ✓ isn't one then: the case where people stand wasn't checked. Kept per version and
-    script, as filled() is."""
-    from . import construction as C
+    edge, else None. Its strength ✓ isn't one then: the case where people stand wasn't checked. Asked of the loads its check reads,
+    edited or the script's (#312 re-check: an edge case turned off still passed as checked). Kept per version, script
+    and edits, as filled() is."""
+    from . import scenarios as SC
 
     entry = store.design.part(part_id)
     try:
         script = store.read_script(part_id)
     except (OSError, KeyError, ValueError):
         return None
-    key = (store.root, part_id, entry.version if entry else None, hash(script))
+    key = (store.root, part_id, entry.version if entry else None, hash(script))     # an edit writes a version
     if key not in _EDGE:
         out = None
         try:
-            declared = C.declared(store, part_id)
-            if declared.get("loads"):
-                got = next((r for r in checked(store, part_id) if r.id == "loads_edge"), None)
-                out = (got.detail or None) if got is not None else None
+            declared = SC.declared(store, part_id)
+            if declared.get("loads"):   # edited: scenarios.declared
+                mesh = store.part_geometry(part_id).require_mesh()
+                pieces = shapes(declared)
+                rest = any(isinstance(it, dict) and it.get("kind") == "printed" and it.get("rest")
+                           for it in declared.get("construction") or [])
+                if pieces:
+                    _sides(mesh, pieces)
+                    got = _edge_foot(mesh, declared, pieces, tolerance(mesh), rest)
+                    out = (got.detail or None) if got is not None else None
         except Exception:  # noqa: BLE001 — this only ever takes a ✓ away; a part that won't check is said elsewhere
             out = None
         _EDGE[key] = out
@@ -649,7 +656,7 @@ def filled(store, part_id: str) -> Optional[str]:
         out = None
         try:
             declared = C.declared(store, part_id)
-            if declared.get("loads"):
+            if declared.get("loads"):                # script's loads: whether it has any, for a filled-in block
                 vol = next((r for r in checked(store, part_id) if r.id == "construction_volume"), None)
                 if vol is not None and not vol.passed and PANEL_SAID in (vol.detail or ""):
                     out = not_accounted(store, part_id) or vol.detail       # in words for a person, where it's the pieces that are short
@@ -767,11 +774,11 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
         out.append(_on_its_face(mesh, pieces, tol))
         if not rest:
             out.append(_covers(mesh, pieces, tol))
-            vol = _volume(mesh, pieces, strength=bool(declared.get("loads")), tol=tol)
+            vol = _volume(mesh, pieces, strength=bool(declared.get("loads")), tol=tol)   # script's loads: any at all
             out += [vol] if vol else []
     inside = _holes_inside(declared.get("construction") or [])     # (#66 item 4)
     out += [inside] if inside else []
-    if declared.get("loads") is not None:
+    if declared.get("loads") is not None:              # script's loads: they land; the edge is bare_edge's, edited too
         out.append(_loads(mesh, declared, pieces, tol))
         if pieces:
             edge = _edge_foot(mesh, declared, pieces, tol, rest)  # a warning, said in its detail (CALI-94)
