@@ -228,10 +228,13 @@ DECLARED = '"b": (x + L / 2, y + L / 2, h - t)}'
 
 
 #: A leg's top end, shaped (#321 re-check): a 10 mm hole 25 mm deep down its middle (a dowel's, a pilot's), a 24 mm bore
-#: (a hollow print: every ray starts in it), or a 15 mm or an 18 mm round on its edges (the 18's corner rays drop 1.2 mm).
+#: (a hollow print: every ray starts in it), a 15 mm or an 18 mm round on its edges, or a 10 mm dowel stub 3 mm long
+#: (with the leg built 3 mm short: the stub reaches the top, the shoulder doesn't), or one corner notched 15 mm, 3 deep.
 ENDS = {"hole": 'b = b.cut(cq.Workplane().circle(5).extrude(25).translate((lo[0] + L / 2, lo[1] + L / 2, hi[2] - 25)))',
         "bore": 'b = b.cut(cq.Workplane().circle(12).extrude(25).translate((lo[0] + L / 2, lo[1] + L / 2, hi[2] - 25)))',
-        "round": 'b = b.faces(">Z").edges().fillet(15)', "round18": 'b = b.faces(">Z").edges().fillet(18)'}
+        "round": 'b = b.faces(">Z").edges().fillet(15)', "round18": 'b = b.faces(">Z").edges().fillet(18)',
+        "notch": 'b = b.cut(cq.Workplane().box(15, 15, 3, centered=False).translate((lo[0], lo[1], hi[2] - 3)))',
+        "stub": 'b = b.union(cq.Workplane().circle(5).extrude(3).translate((lo[0] + L / 2, lo[1] + L / 2, hi[2])))'}
 
 
 def _gapped(tmp_path, built=0.0, declared=0.0, end=None):
@@ -288,19 +291,36 @@ def test_a_leg_declared_one_way_and_built_the_other_isn_t_checked_by_hand(tmp_pa
     assert not got["chain"] and got["rows"] == [] and got["unchecked"] == [said], got
 
 
-@pytest.mark.parametrize("end, built, bears", [("hole", 0, True), ("hole", 3, False), ("round", 0, True),
-                                                  ("round18", 0, True)])
-def test_a_leg_s_end_is_read_across_it_not_down_its_middle(tmp_path, end, built, bears):
+def _rays(store, h=450.0, t=19.05, d=400.0, L=38.1):
+    """The back left leg's five readings, mm short of the top: the centre, then the four toward its corners."""
+    mesh = store.part_geometry("stool").require_mesh()
+    return JC._built_gap(mesh, np.array([L / 2, d - L / 2, h - t]), np.array([0.0, 0.0, 1.0]), 0.0, L / 2,
+                         np.array([1.0, 0.0, 0.0]))
+
+
+@pytest.mark.parametrize("end, built, reads, rays", [
+    ("hole", 0, "bears", [0, 0, 0, 0]),                      # the centre starts in the hole: not kept
+    ("hole", 3, "short", [3, 3, 3, 3]),
+    ("round", 0, "bears", [0, 0.1, 0.1, 0.1, 0.1]),
+    ("round18", 0, "part", [0, 0.62, 0.62, 0.62, 0.62]),     # its corner rays drop down the round: only its middle
+    ("round18", 3, "short", [3, 3.62, 3.62, 3.62, 3.62]),   # said by its least: "built 3 mm short"
+    ("notch", 0, "bears", [0, 0, 0, 0, 3]),                  # all but one: it bears
+    ("stub", 3, "part", [0, 3, 3, 3, 3])])                   # the foreman's: the stub touches, the shoulder's 3 short
+def test_a_leg_s_end_is_read_across_it_not_down_its_middle(tmp_path, end, built, reads, rays):
     """The reviewer's re-check: a hole down the middle of a leg's end let the one ray up it and across a 3 mm gap, so a
-    leg built short read as bearing (a false green). Five rays across the end, kept where they start in the solid; it
-    bears where any touches (every would read a 15 mm round as short: its corner rays drop down the round)."""
-    _, su, _, got = _gapped(tmp_path, built=built, declared=0, end=end)
+    leg built short read as bearing (a false green). Five rays across the end, kept where they start in the solid. It
+    bears where all of them but at most one touch; where some do, it touches at only part of its end, not checked by
+    hand ("any" read a dowel stub with its shoulder 3 mm short as bearing, 2.93 where it's about 0.16)."""
+    store, su, _, got = _gapped(tmp_path, built=built, declared=0, end=end)
+    assert _rays(store) == pytest.approx(rays, abs=0.06)
     posts = [j for j in su["joints"] if j.get("post")]
-    if bears:
+    if reads == "bears":
         assert len(posts) == 4 and got["path"].startswith("the legs reach the top"), got["unchecked"]
-    else:
-        assert not posts and not got["chain"]
-        assert "the back left leg is declared flush with the top but built 3 mm short" in got["unchecked"], got
+        return
+    assert not posts and not got["chain"]
+    said = ("the back left leg is declared flush with the top but built 3 mm short" if reads == "short" else
+            "the back left leg touches the top at only part of its end")
+    assert said in got["unchecked"], got
 
 
 def test_a_leg_end_no_ray_starts_inside_isn_t_measured(tmp_path):
@@ -331,7 +351,7 @@ def test_each_leg_is_a_column(stool):
     for leg in LEGS:
         if leg in col:
             assert col[leg]["demand_lb"]["crushing"] == pytest.approx(-float(arr[leg][2]) / LBF, abs=0.1), leg
-    assert "pending Theo" in col["front right leg"]["said"]
+    assert col["front right leg"]["said"].endswith("crushing along its grain (9.7 MPa)")   # Theo's, 2026-11-16
 
 
 def test_a_sideways_case_says_the_columns_racking_isn_t_checked(stool):

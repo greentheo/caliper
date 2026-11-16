@@ -125,15 +125,18 @@ BEARS_MM = 0.5
 #: Where across a leg's end its rays start (#321 re-check): the centre, and four toward its corners at this share of its
 #: half-width along each side. It stays on the flat of an 8 mm chamfer, and within about 0.1 mm of a 15 mm round, on a 2x2.
 RAY_AT = 0.3
+#: A leg bears where all its counted rays but at most this many touch (#321, the foreman): "any" read a dowel stub with
+#: its shoulder 3 mm short ([0, 3, 3, 3, 3]) as bearing over its whole end, 2.93 where it's about 0.16.
+BEARS_ALL_BUT = 1
 
 
 def _built_gap(mesh, end: np.ndarray, into: np.ndarray, face_at: float, half: float,
-               across: np.ndarray) -> Optional[float]:
+               across: np.ndarray) -> Optional[list]:
     """How far short of a top's face the built solid's leg stops, mm, measured on the mesh's faces (#321): rays from
-    5 mm inside the leg, along it toward the top, at its centre and four toward its corners (:data:`RAY_AT`). Only the
-    rays that start inside the solid count: a hole down the leg's middle (a dowel's, a pilot's, a hollow print) would
-    let one run up it and across a gap. The leg touches where **any** counted ray does (every would read a rounded end
-    short): the least gap. Where the solid runs on past the face: 0. None where no ray starts inside it."""
+    5 mm inside the leg, along it toward the top, at its centre and four toward its corners (:data:`RAY_AT`), each
+    one's reading in that order. Only the rays that start inside the solid count: a hole down the leg's middle (a
+    dowel's, a pilot's, a hollow print) would let one run up it and across a gap. Where the solid runs on past the
+    face: 0. None where no ray starts inside it. :func:`_post` reads them (:data:`BEARS_ALL_BUT`)."""
     from . import spatial
 
     end, into = np.asarray(end, float), np.asarray(into, float)
@@ -152,7 +155,7 @@ def _built_gap(mesh, end: np.ndarray, into: np.ndarray, face_at: float, half: fl
                 gaps.append(max(0.0, 5.0 + face_at - ahead[0]))     # the top's face, from the ray's start
     except Exception:  # noqa: BLE001 — no ray test here: not measured, said by the caller
         return None
-    return min(gaps) if gaps else None
+    return gaps or None
 
 
 def _post(stick: dict, sheet: dict, tol: float, mesh=None) -> Optional[dict]:
@@ -179,13 +182,17 @@ def _post(stick: dict, sheet: dict, tol: float, mesh=None) -> Optional[dict]:
             continue
         into = -inward                                    # from the post into the sheet
         declared = abs(gap) <= BEARS_MM
-        built_gap = (_built_gap(mesh, end, into, max(gap, 0.0), float(stick["half"]), u) if mesh is not None else
-                     (0.0 if declared else gap))
+        rays = (_built_gap(mesh, end, into, max(gap, 0.0), float(stick["half"]), u) if mesh is not None else
+                [0.0 if declared else gap])
         name = stick["key"]
-        if built_gap is None:                            # no ray across its end starts in the solid: not measured
+        if rays is None:                                 # no ray across its end starts in the solid: not measured
             return {"mismatch": f"the {name}'s built end at the {sheet['key']} isn't measured: no ray across it starts "
                                 "inside the solid"}
-        built = built_gap <= BEARS_MM
+        touch = sum(1 for r in rays if r <= BEARS_MM)
+        if 0 < touch < len(rays) - BEARS_ALL_BUT:        # some of its end touches, not all: no bearing area to take
+            return {"mismatch": f"the {name} touches the {sheet['key']} at only part of its end"}
+        built = touch > 0
+        built_gap = min(rays)
         if declared != built:
             said = (f"the {name} is declared flush with the {sheet['key']} but built {built_gap:.1f} mm short"
                     if declared else
@@ -837,7 +844,7 @@ LIFTED = "the top lifts off it: the load is inside the other {n} legs"
 POST_K = 1.0                              # interim (racking, #317)
 #: A lumber post's crushing strength along its grain, MPa: the Wood Handbook (2021) Table 5-3a's weakest SPF species
 #: clear at 12% (Engelmann spruce, 30.9 MPa), scaled for knots as Caliper's lumber MOR is (20 of its 64 MPa clear).
-POST_CRUSH_MPA = 9.7                      # pending: Theo (#316)
+POST_CRUSH_MPA = 9.7                      # Theo, 2026-11-16 (#316, by the foreman)
 #: A screw's lateral value in a main member's end grain: NDS 2018 §12.5.2.2, Ceg = 0.67 (a post's screws from the top).
 CEG_END = 0.67
 #: What a post's column row adds under a sideways case.
@@ -862,7 +869,7 @@ def column_row(post: dict, down_n: float, min_safety: float) -> Optional[dict]:
     crush = POST_CRUSH_MPA * area
     mode, cap, said = (("column", euler, f"the {post['key']} buckling as a column (Euler, K = {POST_K:g})")
                        if euler <= crush else
-                       ("crushing", crush, f"the {post['key']} crushing along its grain ({POST_CRUSH_MPA:g} MPa, pending Theo)"))
+                       ("crushing", crush, f"the {post['key']} crushing along its grain ({POST_CRUSH_MPA:g} MPa)"))
     safety = V.cut(cap / down_n)
     return {"pieces": [post["key"]], "between": f"the {post['key']}, as a column", "mode": mode, "safety": safety,
             "need": min_safety, "verdict": V.meets(safety, min_safety), "holds": safety >= min_safety,  # producer
