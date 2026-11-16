@@ -157,6 +157,9 @@ def undeclared_ways(store: DesignStore, part_id: str) -> list[str]:
     return out
 
 
+#: A seat's legs buckling: unchecked, unless its strength check took its legs as columns (#316).
+LEGS_BUCKLING = "buckling of the legs"
+
 def unchecked(declared: dict, intent: str, cases: Optional[list] = None) -> list[str]:
     """For a seat (stool, chair, bench), the cases it doesn't declare, in words (#86 item 3): what nobody checked."""
     words = f"{intent} " + " ".join(str(ld.get("name", "")) for ld in declared.get("loads") or [] if isinstance(ld, dict))   # edited: callers pass scenarios.declared
@@ -175,5 +178,5 @@ def unchecked(declared: dict, intent: str, cases: Optional[list] = None) -> list
         out.append("sitting on the front edge")
     if not any(ld.get("tip") for ld in loads):
         out.append("tipping over")
-    out.append("buckling of the legs")            # nothing checks it yet (#70 #5)
+    out.append(LEGS_BUCKLING)                     # nothing checks it yet (#70 #5), but a post's column check (#316)
     return out

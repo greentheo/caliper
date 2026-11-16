@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+import math
+
 import numpy as np
 
 #: Where a joint can't be read as an edge on a face: what it's said as instead.
@@ -53,6 +55,14 @@ def setup(store, pid: str) -> dict:
         j = listed.get(key) or {"kind": "butt", "fix": list(J.ASSUMED_FIX), "assumed": True}
         base = {"pieces": list(key), "kind": j.get("kind"), "fix": list(j.get("fix") or []), "assumed": bool(j.get("assumed"))}
         s = screws.get(key) or {}
+        a_, b_ = by[key[0]], by[key[1]]
+        stick, sheet = ((a_, b_) if a_["kind"] == "stick" and b_["kind"] == "sheet" else
+                        (b_, a_) if b_["kind"] == "stick" and a_["kind"] == "sheet" else (None, None))
+        if stick is not None:                     # a post under a top, an apron's end on a leg (#316)
+            got = _post(stick, sheet, tol) or _apron(sheet, stick, tol)
+            if got is not None:
+                out.append({**base, **got, "screws": int(s.get("n") or 0)})
+                continue
         if c["how"] in ("through", "notch") or c["how"] == "edge" and not _edged(key, by, s, tol):
             got = _notch(by[key[0]], by[key[1]], tol) or _notch(by[key[1]], by[key[0]], tol)
             if got is not None:                   # one run through or into the other's notch (CALI-192)
@@ -81,7 +91,11 @@ def setup(store, pid: str) -> dict:
                     "along": np.asarray(g["along"], float), "length_mm": float(g["length"]),
                     "area_mm2": float(g["length"]) * t, "mid": (np.asarray(g["a"]) + np.asarray(g["b"])) / 2.0,
                     "screws": int(s.get("n") or 0), "face_t": float(face["thickness"])})
-    return {"joints": out, "pieces": pieces, "tol": tol, "screw_mm": fasteners.screw_length_mm(pieces)}
+    screw_mm = fasteners.screw_length_mm(pieces)
+    for j in out:                                 # a post a declared fixing holds in a pull keeps its pull share (#316)
+        if j.get("post"):
+            j["pull"] = capacity(j, screw_mm)["withdrawal"] > 0
+    return {"joints": out, "pieces": pieces, "tol": tol, "screw_mm": screw_mm}
 
 
 def _edged(key: tuple, by: dict, s: dict, tol: float) -> bool:
@@ -92,6 +106,62 @@ def _edged(key: tuple, by: dict, s: dict, tol: float) -> bool:
         return marks._edge_on(by[s["into"]], by[s["on"]], tol) is not None
     a, b = by[key[0]], by[key[1]]
     return marks._edge_on(a, b, tol) is not None or marks._edge_on(b, a, tol) is not None
+
+
+def _stick_axis(stick: dict) -> tuple:
+    a, b = np.asarray(stick["a"], float), np.asarray(stick["b"], float)
+    L = float(np.linalg.norm(b - a)) or 1.0
+    return a, b, (b - a) / L, L
+
+
+def _post(stick: dict, sheet: dict, tol: float) -> Optional[dict]:
+    """A stick standing square to a sheet with an end on its face, inside its outline: a post bearing into a top (#316).
+    ``normal`` from the post into the sheet; its area the post's end; its span the post's own width (a post is short
+    against any top), so a top on posts shares by the rigid-top rule."""
+    from . import marks
+    from .consistency import _inside2d
+
+    o, u, v, N, t, poly, flat = marks._geom(sheet)
+    a, b, ax, L = _stick_axis(stick)
+    if abs(float(ax @ N)) < 0.9:
+        return None
+    for end, inward in ((a, ax), (b, -ax)):             # inward: from that end along the post
+        d = float((end - o) @ N)                         # how far the end sits through the sheet's thickness
+        on = (abs(d) <= tol and float(inward @ N) < 0) or (abs(d - t) <= tol and float(inward @ N) > 0)
+        if not on or not _inside2d(np.array([[float((end - o) @ u), float((end - o) @ v)]]), flat)[0]:
+            continue
+        width = 2.0 * float(stick["half"])
+        area = float(stick["volume"]) / L               # its section, as consistency weighed it
+        return {"edge": stick["key"], "face": sheet["key"], "post": True, "out": -inward, "normal": -inward,
+                "sin": 0.0, "edge_t": width, "along": u, "length_mm": width, "area_mm2": area, "mid": end,
+                "face_t": t}
+    return None
+
+
+def _apron(sheet: dict, stick: dict, tol: float) -> Optional[dict]:
+    """A sheet's edge, along a stick, against its side: an apron's end on a leg (#316). ``normal`` from the apron into
+    the leg; its span the overlap along the leg."""
+    from . import marks
+
+    o, u, v, N, t, poly, flat = marks._geom(sheet)
+    a, b, ax, L = _stick_axis(stick)
+    half = float(stick["half"])
+    for _, p, q, d, out in marks._edges(sheet):
+        if abs(float(d @ ax)) < 0.95:
+            continue
+        rel = a - p
+        beyond, across = float(rel @ out), float(rel @ N)         # the leg's axis past the edge, and through the sheet
+        if abs(beyond - half) > 2 * tol or across + half < -tol or across - half > t + tol:
+            continue
+        s0, s1 = sorted((float((p - a) @ ax), float((q - a) @ ax)))
+        lo, hi = max(s0, 0.0), min(s1, L)
+        if hi - lo <= tol:
+            continue
+        mid = a + ax * (lo + hi) / 2.0 + (p - a - ax * float((p - a) @ ax))     # on the edge, halfway up the overlap
+        return {"edge": sheet["key"], "face": stick["key"], "apron": True, "out": out, "normal": out, "sin": 0.0,
+                "edge_t": t, "along": ax, "length_mm": hi - lo, "area_mm2": (hi - lo) * t, "mid": mid,
+                "face_t": 2.0 * half}
+    return None
 
 
 def _notch(host: dict, piece: dict, tol: float) -> Optional[dict]:
@@ -202,6 +272,14 @@ def grounded(pieces: list[dict], held: list[dict], tol: float) -> set:
     """The pieces that touch what holds the part: a corner or an edge's middle within ``tol`` of a ``held`` box."""
     out = set()
     for pc in pieces:
+        if pc["kind"] == "stick" and pc.get("a") is not None:     # a post on the floor: an end in a held box (#316)
+            ends = np.vstack([np.asarray(pc["a"], float), np.asarray(pc["b"], float)])
+            for h in held:
+                lo, hi = np.asarray(h["lo"], float) - tol, np.asarray(h["hi"], float) + tol
+                if np.any(np.all((ends >= lo) & (ends <= hi), axis=1)):
+                    out.add(pc["key"])
+                    break
+            continue
         if pc["kind"] != "sheet":
             continue
         pts = np.vstack([np.vstack([p, (p + np.roll(p, -1, axis=0)) / 2.0]) for p in pc["polys"]])
@@ -234,7 +312,8 @@ def loaded_piece(pieces: list[dict], load: dict) -> Optional[str]:
     return best[1] if best else None
 
 
-def _lever(mids: list[np.ndarray], at: np.ndarray, share: str, spans: Optional[list] = None) -> list[float]:
+def _lever(mids: list[np.ndarray], at: np.ndarray, share: str, spans: Optional[list] = None,
+           pulls: Optional[list] = None) -> list[float]:
     """Each supporting joint's share of a load at ``at``: grouped by the way across the piece they lie (its two horizontal
     axes, as they lie from each other), a group's share by statics. Two in a group share it by the lever rule, a load past
     them included: the near one
@@ -245,6 +324,8 @@ def _lever(mids: list[np.ndarray], at: np.ndarray, share: str, spans: Optional[l
     a ring of four posts read the near one at 0.475 where statics needs 0.9 or more), so short ones aren't checked."""
     if len(mids) == 1:
         return [1.0]
+    if spans and len(mids) >= 3 and all(sp[0] < MOST_OF_THE_WAY * sp[1] for sp in spans):
+        return _rigid(mids, at, pulls)           # posts under a top (#316): the rigid-top rule
     # grouped by how they lie from each other, never from the load (#311: a load near one edge read its pair as two):
     # each with the support farthest from it, along the horizontal axis the two differ in most
     groups: dict[int, list[int]] = {}
@@ -285,6 +366,43 @@ def _lever(mids: list[np.ndarray], at: np.ndarray, share: str, spans: Optional[l
             spread = [float(mids[i][axis]) for i in idx], [float(mids[i][other]) for i in idx]
             raise NotChain(IN_A_ROW if np.ptp(spread[1]) <= 0.1 * np.ptp(spread[0]) else UNEVEN)
     return out
+
+
+def _rigid(mids: list[np.ndarray], at: np.ndarray, pulls: Optional[list] = None) -> list[float]:
+    """Each post's share of a load at ``at`` by the rigid-top rule (#316, Theo's C): the top stiff and the posts alike,
+    so the shares lie on a plane over the posts, R_i/P = 1/N + b·x_i + c·y_i about their centroid, with b and c from
+    the load's lever (Σx² b + Σxy c = e_x, Σxy b + Σy² c = e_y; with the cross term zero, R_i = P/N + Mx·y_i/Σy² +
+    My·x_i/Σx²). Exact for three posts; for four or more, the stiff top's answer.
+
+    A post only pushes: its fixings are in its end grain, which holds no pull (#301 decision 2, NDS 12.2.2.3). So a post
+    the plane would lift is let go, and the rest share it again, until none is lifted (a stiff top on a ring of four
+    posts, the load at 90 of 100 toward one: 0.9 on it, the far one let go, as #311 said statics needs). Posts in a
+    line can't take a load off it: in a row; a load outside the posts that stay: it tips, not a joint's to hold.
+    ``pulls``: which posts a declared fixing holds in a pull (not into end grain): those keep a pull share, never let go
+    (#316, the foreman's condition)."""
+    idx = list(range(len(mids)))
+    holds = [bool(x) for x in (pulls or [False] * len(mids))]
+    while True:
+        P = np.array([[float(mids[i][0]), float(mids[i][1])] for i in idx])
+        c = P.mean(axis=0)
+        d = P - c
+        S = d.T @ d
+        if len(idx) < 3 or abs(float(np.linalg.det(S))) < 1e-6 * max(1.0, float(np.trace(S))) ** 2:
+            raise NotChain(IN_A_ROW if len(idx) == len(mids) else TIPS)
+        b, cc = np.linalg.solve(S, np.asarray(at[:2], float) - c)
+        got = [1.0 / len(idx) + float(b * x + cc * y) for x, y in d]
+        free = [k for k in range(len(idx)) if not holds[idx[k]]]       # those only pushing can be let go
+        lifted = min(free, key=lambda k: got[k]) if free else None
+        if lifted is None or got[lifted] >= -1e-9:
+            out = [0.0] * len(mids)
+            for k, i in enumerate(idx):
+                out[i] = got[k] if holds[i] else max(0.0, got[k])
+            return out
+        idx.pop(lifted)                            # the top lifts off it: let it go, the rest share again
+
+
+#: A load outside the posts a stiff top still pushes on: it would tip about them, which no joint holds (#316).
+TIPS = "it would tip on its posts, past the ones that hold it"
 
 
 def _face(joint: dict) -> np.ndarray:
@@ -334,7 +452,8 @@ def _route(mine: list[dict], piece: str, f: np.ndarray, at: np.ndarray, share: s
         take = bear or slide or list(range(len(mine)))
         for i, frac in zip(take, _lever([mine[i]["mid"] for i in take], at, share,
                                         [(float(mine[i]["length_mm"]), _across(pieces, piece, mine[i]["along"]),
-                                          mine[i]["along"]) for i in take] if pieces else None)):
+                                          mine[i]["along"]) for i in take] if pieces else None,
+                                        [bool(mine[i].get("pull")) for i in take])):
             out[i][axis] += frac * c
     return list(zip(mine, out))
 
@@ -358,7 +477,7 @@ def _splay(pc: dict) -> Optional[tuple]:
 
 
 def demands(joints: list[dict], pieces: list[dict], load: dict, held: list[dict], tol: float,
-            share: str = SHARE, arrivals: Optional[dict] = None) -> dict:
+            share: str = SHARE, arrivals: Optional[dict] = None, path: Optional[str] = None) -> dict:
     """What each joint carries under one load: ``{(a, b): {"from": the piece pushing, "force": N (3,)}}``. The load,
     × its factor, from the piece it lands on to the pieces holding it up, down to what holds the part; a splayed side's
     foot thrust into the tie between the feet. Raises :class:`NotChain` where that path can't be followed."""
@@ -404,6 +523,9 @@ def demands(joints: list[dict], pieces: list[dict], load: dict, held: list[dict]
                 and far.get(other(j, piece), DEEPEST + 9) <= far[piece]]
         if share == "ground" and any(other(j, piece) in ground for j in mine):
             mine = [j for j in mine if other(j, piece) in ground]
+        posts = [j for j in mine if j.get("post")]
+        if posts and len(posts) < len(mine):        # a top on posts and on aprons too (#316): one path at a time
+            mine = posts if path == "posts" else [j for j in mine if not j.get("post")]
         if not mine:
             raise NotChain(NOT_CHAIN)
         for j, fj in _route(mine, piece, f, at, share, by):
@@ -508,17 +630,20 @@ def capacity(joint: dict, screw_mm: float) -> dict:
     # the thread in the edge piece's wood: what's past the face piece, less what comes out of a bevel (#311 review)
     into_in = marks.thread_in(joint["face_t"], joint.get("edge_t", joint["face_t"]), joint.get("sin", 0.0), screw_mm) / IN
     per_shear = SHEAR_EDGE_LB * min(1.0, into_in / SHEAR_EDGE_TESTED_IN)
+    if joint.get("post"):                         # into the post's end grain: lateral at NDS's Ceg (#316); no pull
+        per_shear = SHEAR_FACE_LB * CEG_END
     glued = "glue" in joint["fix"]
     edge = joint["edge"]
     screws_said = f"{_count(n)} #8 screw{'s' if n != 1 else ''}"
+    side = "end" if joint.get("post") else "edge"                 # a post bears on its end, its screws in its end grain
     return {"bearing": BEARING_PSI * area_in2 * LBF,
             "withdrawal": (n * WITHDRAW_EDGE_LB + (GLUE_EDGE_PSI * area_in2 if glued else 0.0)) * LBF,
             "shear": (n * per_shear + (GLUE_EDGE_PSI * area_in2 if glued else 0.0)) * LBF,
-            "why": {"bearing": f"the {edge}'s edge bearing on the {joint['face']}",
-                    "withdrawal": f"{screws_said} pulled out of the {edge}'s edge" if n
-                    else f"nothing holding the {edge}'s edge to the {joint['face']}",
-                    "shear": f"{screws_said} in shear into the {edge}'s edge" if n
-                    else f"glue alone on the {edge}'s edge"}}
+            "why": {"bearing": f"the {edge}'s {side} bearing on the {joint['face']}",
+                    "withdrawal": f"{screws_said} pulled out of the {edge}'s {side}" if n
+                    else f"nothing holding the {edge}'s {side} to the {joint['face']}",
+                    "shear": f"{screws_said} in shear into the {edge}'s {side}" if n
+                    else f"glue alone on the {edge}'s {side}"}}
 
 
 def _count(n: int) -> str:
@@ -536,11 +661,32 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
                  for j in joints if "unplaced" in j]
     unchecked += [f"the joint between the {j['pieces'][0]} and the {j['pieces'][1]} (a {j['kind']})"
                   for j in joints if "unplaced" not in j and not j.get("notch") and j.get("kind") not in EDGE_KINDS]
+    # a top on posts and on aprons: both paths, each joint the larger demand, and which (#316, the foreman's (c))
+    posts = any(j.get("post") for j in joints if "unplaced" not in j)
+    paths = ["posts", "frame"] if posts else [None]
+    gots, arrivals, why = {}, {}, {}
+    for pth in paths:
+        arr: dict = {}
+        try:
+            gots[pth] = demands(joints, setup_["pieces"], load, held, setup_["tol"], share, arrivals=arr, path=pth)
+            arrivals[pth] = arr
+        except NotChain as e:
+            why[pth] = e.why
+    if not gots:
+        return {"rows": [], "governing": None, "unchecked": [why[paths[0]]], "chain": False, "n": len(joints)}
+    got, which = _larger(gots)
+    pushing = sum(1 for j in joints if j.get("post") and tuple(j["pieces"]) in gots.get("posts", {})
+                  and float(np.linalg.norm(gots["posts"][tuple(j["pieces"])]["force"])) > 1e-9)
+    said_path = dict(PATH_SAID)
+    if pushing:                                   # four or more: the stiff top's answer; three: statics alone (#316)
+        said_path["posts"] = ("the top on its legs, shared as a rigid top" if pushing >= 4
+                              else "the top on its legs, by statics (three posts)")
+    unchecked += [f"{PATH_SAID[pth]} ({w})" for pth, w in why.items() if len(paths) > 1]
     arrived: dict = {}
-    try:
-        got = demands(joints, setup_["pieces"], load, held, setup_["tol"], share, arrivals=arrived)
-    except NotChain as e:
-        return {"rows": [], "governing": None, "unchecked": [e.why], "chain": False, "n": len(joints)}
+    for arr in arrivals.values():                             # each piece the most that comes down it, either way
+        for k, f in arr.items():
+            if k not in arrived or -float(f[2]) > -float(arrived[k][2]):
+                arrived[k] = f
     rows = []
     hosts = {}
     for j in joints:
@@ -572,7 +718,8 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
                      "holds": safety is None or safety >= min_safety,  # producer
                      "demand_lb": {m: round(v / LBF, 1) for m, v in parts.items() if v > 1e-6},
                      "capacity_lb": {m: round(cap[m] / LBF, 1) for m in by},
-                     "said": cap["why"][mode] if mode else "carries none of this load", "assumed": j["assumed"]})
+                     "said": cap["why"][mode] if mode else "carries none of this load", "assumed": j["assumed"],
+                     **({"path": said_path[which[tuple(j["pieces"])]]} if len(gots) > 1 else {})})
     f = np.asarray(load["force"], float)
     if float(np.linalg.norm(f[:2])) > 1e-6 * (float(np.linalg.norm(f)) or 1.0):
         # pushed sideways at all: a joint carries none only because the statics hold each side at the floor; racked, a
@@ -590,9 +737,75 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
                 unchecked.append(f"the {host} past its notch (its material isn't known here)")
             else:
                 rows.append(net_row(by[host], j["top_z"], down, mat, min_safety))
+    sideways = float(np.linalg.norm(np.asarray(load["force"], float)[:2])) > 1e-6 * (
+        float(np.linalg.norm(load["force"])) or 1.0)
+    for leg in dict.fromkeys(j["edge"] for j in joints if j.get("post") and "unplaced" not in j):
+        f = arrived.get(leg)
+        down = max(0.0, -float(f[2])) if f is not None else 0.0
+        if leg in by and down > 1e-9:
+            row = column_row(by[leg], down, min_safety)
+            if row is None:
+                unchecked.append(f"the {leg} as a column (its material's stiffness isn't known)")
+                continue
+            if sideways:                          # a post's column under a push: racking isn't checked (#317)
+                row["said"] += f"; {COLUMN_RACKING}"
+                unchecked.append(f"the {leg} as a column ({COLUMN_RACKING})")
+            rows.append(row)
     rated = [r for r in rows if r["safety"] is not None]
-    return {"rows": rows, "governing": min(rated, key=lambda r: r["safety"]) if rated else None,
-            "unchecked": unchecked, "chain": True, "n": len(joints)}
+    gov = min(rated, key=lambda r: r["safety"]) if rated else None
+    return {"rows": rows, "governing": gov, "unchecked": unchecked, "chain": True, "n": len(joints),
+            **({"path": gov["path"]} if gov and gov.get("path") else {})}
+
+
+def _larger(gots: dict) -> tuple[dict, dict]:
+    """Each joint's demand, the larger of its paths' (#316, the foreman's (c)), and the path it's from."""
+    got, which = {}, {}
+    for pth, g in gots.items():
+        for k, d in g.items():
+            if k not in got or float(np.linalg.norm(d["force"])) > float(np.linalg.norm(got[k]["force"])):
+                got[k], which[k] = d, pth
+    return got, which
+
+
+#: How each of a top's two paths is said (#316, the foreman's (c)): which one gave a joint its demand.
+PATH_SAID = {"posts": "the top on its legs, by the rigid-top rule", "frame": "the top on its aprons, then the legs",
+             None: "its load path"}
+#: A post as a column, Euler's buckling load, P = pi^2 E I / (K L)^2: K = 1, both ends held in place and free to turn,
+#: the aprons taken as stopping its top moving sideways (#316: interim, until racking is checked, #317).
+POST_K = 1.0                              # interim (racking, #317)
+#: A lumber post's crushing strength along its grain, MPa: the Wood Handbook (2021) Table 5-3a's weakest SPF species
+#: clear at 12% (Engelmann spruce, 30.9 MPa), scaled for knots as Caliper's lumber MOR is (20 of its 64 MPa clear).
+POST_CRUSH_MPA = 9.7                      # pending: Theo (#316)
+#: A screw's lateral value in a main member's end grain: NDS 2018 §12.5.2.2, Ceg = 0.67 (a post's screws from the top).
+CEG_END = 0.67
+#: What a post's column row adds under a sideways case.
+COLUMN_RACKING = "racking isn't checked (interim, #317)"
+
+
+def column_row(post: dict, down_n: float, min_safety: float) -> Optional[dict]:
+    """A post under ``down_n`` along it as a column (#316): Euler's buckling load at :data:`POST_K`, and its end grain's
+    crushing at :data:`POST_CRUSH_MPA`; the lower governs. None where its material's stiffness isn't known."""
+    from . import materials as M
+    from . import verdicts as V
+
+    mech = (M.STICKS.get(post.get("material") or "") or {}).get("mech")
+    if not mech:
+        return None
+    a, b, ax, L = _stick_axis(post)
+    thin = 2.0 * float(post["half"])
+    area = float(post["volume"]) / L
+    wide = area / thin
+    inertia = wide * thin ** 3 / 12.0
+    euler = math.pi ** 2 * float(mech["E"]) * inertia / (POST_K * L) ** 2
+    crush = POST_CRUSH_MPA * area
+    mode, cap, said = (("column", euler, f"the {post['key']} buckling as a column (Euler, K = {POST_K:g})")
+                       if euler <= crush else
+                       ("crushing", crush, f"the {post['key']} crushing along its grain ({POST_CRUSH_MPA:g} MPa, pending Theo)"))
+    safety = V.cut(cap / down_n)
+    return {"pieces": [post["key"]], "between": f"the {post['key']}, as a column", "mode": mode, "safety": safety,
+            "need": min_safety, "verdict": V.meets(safety, min_safety), "holds": safety >= min_safety,  # producer
+            "demand_lb": {mode: round(down_n / LBF, 1)}, "capacity_lb": {mode: round(cap / LBF, 1)}, "said": said,
+            "assumed": False}
 
 
 #: What a joint said to carry none of a case with a sideways push says (#313 review): the statics hold each side at the
