@@ -227,14 +227,27 @@ BUILT = "out[n] = ((x, y, 0), (x + L, y + L, h - t))"
 DECLARED = '"b": (x + L / 2, y + L / 2, h - t)}'
 
 
-def _gapped(tmp_path, built=0.0, declared=0.0):
-    """The stool with its legs short of the top by ``built`` mm in its solid and ``declared`` mm in its pieces."""
+#: A leg's top end, shaped (#321 re-check): a 10 mm hole 25 mm deep down its middle (a dowel's, a pilot's), a 24 mm bore
+#: (a hollow print: every ray starts in it), or a 15 mm or an 18 mm round on its edges (the 18's corner rays drop 1.2 mm).
+ENDS = {"hole": 'b = b.cut(cq.Workplane().circle(5).extrude(25).translate((lo[0] + L / 2, lo[1] + L / 2, hi[2] - 25)))',
+        "bore": 'b = b.cut(cq.Workplane().circle(12).extrude(25).translate((lo[0] + L / 2, lo[1] + L / 2, hi[2] - 25)))',
+        "round": 'b = b.faces(">Z").edges().fillet(15)', "round18": 'b = b.faces(">Z").edges().fillet(18)'}
+
+
+def _gapped(tmp_path, built=0.0, declared=0.0, end=None):
+    """The stool with its legs short of the top by ``built`` mm in its solid and ``declared`` mm in its pieces, each
+    leg's top end shaped as :data:`ENDS` says."""
     pytest.importorskip("cadquery")
     from caliper.design import DesignStore
 
     src = LEGGED.replace(BUILT, BUILT.replace("h - t)", f"h - t - {built})")) \
         .replace(DECLARED, DECLARED.replace("h - t)", f"h - t - {declared})"))
-    store = DesignStore.create("a stool", base=str(tmp_path / f"d{built}-{declared}" / "designs"))
+    if end:
+        src = src.replace("    for lo, hi in _boxes(p).values():\n", "    L = BUILD['leg']\n    for n, (lo, hi) in _boxes(p).items():\n") \
+            .replace("        out = b if out is None else out.union(b)",
+                     f"        if n.endswith('leg'):\n            {ENDS[end]}\n        out = b if out is None else out.union(b)")
+        assert ENDS[end] in src
+    store = DesignStore.create("a stool", base=str(tmp_path / f"d{built}-{declared}-{end}" / "designs"))
     store.write_part("stool", src, intent="a four-legged stool with aprons")
     su = JC.setup(store, "stool")
     mesh = store.part_geometry("stool").require_mesh()
@@ -273,6 +286,30 @@ def test_a_leg_declared_one_way_and_built_the_other_isn_t_checked_by_hand(tmp_pa
     declared 1 mm short read the aprons at 0.94 (a false red). Neither side's number: not checked by hand, in words."""
     _, _, _, got = _gapped(tmp_path, built=built, declared=declared)
     assert not got["chain"] and got["rows"] == [] and got["unchecked"] == [said], got
+
+
+@pytest.mark.parametrize("end, built, bears", [("hole", 0, True), ("hole", 3, False), ("round", 0, True),
+                                                  ("round18", 0, True)])
+def test_a_leg_s_end_is_read_across_it_not_down_its_middle(tmp_path, end, built, bears):
+    """The reviewer's re-check: a hole down the middle of a leg's end let the one ray up it and across a 3 mm gap, so a
+    leg built short read as bearing (a false green). Five rays across the end, kept where they start in the solid; it
+    bears where any touches (every would read a 15 mm round as short: its corner rays drop down the round)."""
+    _, su, _, got = _gapped(tmp_path, built=built, declared=0, end=end)
+    posts = [j for j in su["joints"] if j.get("post")]
+    if bears:
+        assert len(posts) == 4 and got["path"].startswith("the legs reach the top"), got["unchecked"]
+    else:
+        assert not posts and not got["chain"]
+        assert "the back left leg is declared flush with the top but built 3 mm short" in got["unchecked"], got
+
+
+def test_a_leg_end_no_ray_starts_inside_isn_t_measured(tmp_path):
+    """A hollow leg, its bore wider than the rays: none starts in the solid, so its end isn't measured: not checked by
+    hand, said so, never read as bearing or short."""
+    _, su, _, got = _gapped(tmp_path, built=0, declared=0, end="bore")
+    assert not [j for j in su["joints"] if j.get("post")] and not got["chain"]
+    assert "the back left leg's built end at the top isn't measured: no ray across it starts inside the solid" \
+        in got["unchecked"], got
 
 
 def test_each_leg_is_a_column(stool):

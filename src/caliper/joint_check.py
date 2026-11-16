@@ -122,22 +122,37 @@ def _stick_axis(stick: dict) -> tuple:
 BEARS_MM = 0.5
 
 
-def _built_gap(mesh, end: np.ndarray, into: np.ndarray, face_at: float) -> Optional[float]:
-    """How far short of a top's face the built solid's leg stops, mm, measured on the mesh's faces (#321): a ray from
-    5 mm inside the leg, along it toward the top. Where the solid runs on past the face, it touches: 0. None where the
-    ray finds no way out of the solid (it isn't inside it)."""
+#: Where across a leg's end its rays start (#321 re-check): the centre, and four toward its corners at this share of its
+#: half-width along each side. It stays on the flat of an 8 mm chamfer, and within about 0.1 mm of a 15 mm round, on a 2x2.
+RAY_AT = 0.3
+
+
+def _built_gap(mesh, end: np.ndarray, into: np.ndarray, face_at: float, half: float,
+               across: np.ndarray) -> Optional[float]:
+    """How far short of a top's face the built solid's leg stops, mm, measured on the mesh's faces (#321): rays from
+    5 mm inside the leg, along it toward the top, at its centre and four toward its corners (:data:`RAY_AT`). Only the
+    rays that start inside the solid count: a hole down the leg's middle (a dowel's, a pilot's, a hollow print) would
+    let one run up it and across a gap. The leg touches where **any** counted ray does (every would read a rounded end
+    short): the least gap. Where the solid runs on past the face: 0. None where no ray starts inside it."""
     from . import spatial
 
-    start = np.asarray(end, float) - into * 5.0
+    end, into = np.asarray(end, float), np.asarray(into, float)
+    e1 = np.asarray(across, float) - into * float(np.asarray(across, float) @ into)
+    e1 = e1 / (np.linalg.norm(e1) or 1.0)
+    e2 = np.cross(into, e1)
+    off = RAY_AT * float(half)
+    starts = [end - into * 5.0 + off * (i * e1 + j * e2) for i, j in ((0, 0), (1, 1), (1, -1), (-1, 1), (-1, -1))]
     try:
-        locs, _, _ = spatial.intersects_location(mesh, [start], [into])
+        kept = [s for s, inside in zip(starts, spatial.contains(mesh, np.array(starts))) if inside]
+        gaps = []
+        for start in kept:
+            locs, _, _ = spatial.intersects_location(mesh, [start], [into])
+            ahead = sorted(float((loc - start) @ into) for loc in locs if float((loc - start) @ into) > 1e-6)
+            if ahead:
+                gaps.append(max(0.0, 5.0 + face_at - ahead[0]))     # the top's face, from the ray's start
     except Exception:  # noqa: BLE001 — no ray test here: not measured, said by the caller
         return None
-    ahead = sorted(float((loc - start) @ into) for loc in locs if float((loc - start) @ into) > 1e-6)
-    if not ahead:
-        return None
-    face = 5.0 + face_at                                 # the top's face, from the ray's start
-    return max(0.0, face - ahead[0])
+    return min(gaps) if gaps else None
 
 
 def _post(stick: dict, sheet: dict, tol: float, mesh=None) -> Optional[dict]:
@@ -164,13 +179,15 @@ def _post(stick: dict, sheet: dict, tol: float, mesh=None) -> Optional[dict]:
             continue
         into = -inward                                    # from the post into the sheet
         declared = abs(gap) <= BEARS_MM
-        built_gap = _built_gap(mesh, end, into, max(gap, 0.0)) if mesh is not None else (0.0 if declared else gap)
-        built = built_gap is not None and built_gap <= BEARS_MM
+        built_gap = (_built_gap(mesh, end, into, max(gap, 0.0), float(stick["half"]), u) if mesh is not None else
+                     (0.0 if declared else gap))
         name = stick["key"]
+        if built_gap is None:                            # no ray across its end starts in the solid: not measured
+            return {"mismatch": f"the {name}'s built end at the {sheet['key']} isn't measured: no ray across it starts "
+                                "inside the solid"}
+        built = built_gap <= BEARS_MM
         if declared != built:
             said = (f"the {name} is declared flush with the {sheet['key']} but built {built_gap:.1f} mm short"
-                    if declared and built_gap is not None else
-                    f"the {name} is declared flush with the {sheet['key']} but its built end couldn't be measured"
                     if declared else
                     f"the {name} is declared {gap:.1f} mm short of the {sheet['key']} but built flush")
             return {"mismatch": said.replace(".0 mm", " mm")}
