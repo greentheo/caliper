@@ -76,7 +76,7 @@ def test_a_printed_part_that_holds_is_invited_to_carve_with_what_it_takes(tmp_pa
     _check(store, "tube", 3.0)
     (line,) = _offers(store, "tube")
     assert line["text"] == ("Carve the tube where it isn't working, to use less filament: it takes at least about "
-                            "50 min at this size.")                              # 60 s × 50 (#298)
+                            "33 min at this size.")                              # 60 s × 33 (#320)
     assert line["action"] == "carve" and line["better"] and line["status"] == "info"
     assert "study" not in line                                         # not a strength verdict, to any reader of those
 
@@ -236,7 +236,7 @@ def test_a_thin_named_piece_gets_how_thick_rounded_up_and_says_a_finer_check_fol
     assert wall["button"] == "Try it" and wall["action"] == "use_t" and not wall.get("disabled")
     assert wall["say"] == "Make the cone skirt at least 9.3 mm thick so the strength check can see it"
     assert carve_it["disabled"] and carve_it["action"] == "carve" and carve_it["lead"] == "Carve the tube where it isn't working"
-    assert carve_it["cost"] == "At least about 50 min at this size. It waits for a check it can trust."
+    assert carve_it["cost"] == "At least about 33 min at this size. It waits for a check it can trust."
 
 
 #: as a real check records it: a sliver at a point, not a piece (#159 review: the fixture's {"piece": …} hid this)
