@@ -68,7 +68,10 @@ def setup(store, pid: str) -> dict:
             continue
         t = float(edge["thickness"])
         sin = abs(float(marks._geom(face)[3] @ marks._geom(edge)[3])) if marks._sheet(face) and marks._sheet(edge) else 0.0
+        normal = np.asarray(marks._geom(face)[3], float) if marks._sheet(face) else np.asarray(g["out"], float)
+        normal = normal if float(normal @ np.asarray(g["out"], float)) >= 0 else -normal
         out.append({**base, "edge": edge["key"], "face": face["key"], "out": np.asarray(g["out"], float),
+                    "normal": normal / (np.linalg.norm(normal) or 1.0),   # the face it bears on, from the edge into it
                     "sin": sin, "edge_t": t,
                     "along": np.asarray(g["along"], float), "length_mm": float(g["length"]),
                     "area_mm2": float(g["length"]) * t, "mid": (np.asarray(g["a"]) + np.asarray(g["b"])) / 2.0,
@@ -79,7 +82,7 @@ def setup(store, pid: str) -> dict:
 def split(joint: dict, force: np.ndarray, loaded: str) -> dict:
     """What a force does across a joint: ``{"bearing", "withdrawal", "shear"}``, each a magnitude in the force's units.
     ``force`` is what ``loaded`` (one of the joint's two pieces) puts through the joint into the other."""
-    out = np.asarray(joint["out"], float)
+    out = _face(joint)                                        # against the face it bears on (#311 re-check B)
     into = out if loaded == joint["edge"] else -out          # the way ``loaded`` pushes into the other
     f = np.asarray(force, float)
     push = float(f @ into)
@@ -178,9 +181,16 @@ def _lever(mids: list[np.ndarray], at: np.ndarray, share: str) -> list[float]:
     return out
 
 
+def _face(joint: dict) -> np.ndarray:
+    """The normal of the face a joint bears on, from the edge piece into it: what bearing, withdrawal and shear are read
+    against (#301: "the load's direction against the joint face"; #311 re-check B: not the edge's own direction, which on a
+    splayed side's top read the push down its line as all bearing, 266 lb at 20°, where 91 lb of it crosses the screws)."""
+    return np.asarray(joint.get("normal", joint["out"]), float)
+
+
 def _into(joint: dict, piece: str) -> np.ndarray:
     """The way ``piece`` pushes into the joint's other piece."""
-    out = np.asarray(joint["out"], float)
+    out = _face(joint)
     return out if piece == joint["edge"] else -out
 
 
@@ -283,6 +293,7 @@ def demands(joints: list[dict], pieces: list[dict], load: dict, held: list[dict]
             down(to, fj, j["mid"], piece, depth + 1)
 
     down(start, force, at, None, 0)
+    pulls: dict = {}                                          # each tie's ends, and the thrust at each
     for side, f in arrived.items():                           # each splayed foot's thrust, into the tie nearest it
         if side not in splayed:
             continue
@@ -296,9 +307,26 @@ def demands(joints: list[dict], pieces: list[dict], load: dict, held: list[dict]
             other(j, side) in k["pieces"] and other(k, other(j, side)) in splayed and other(k, other(j, side)) != side
             for k in placed)]
         if not ties:
-            raise NotChain(NO_TIE)
-        put(min(ties, key=lambda j: float(j["mid"][2])), side, push * h)
+            raise NotChain(_untied(joints, side, splayed, came_by.get(side, set())))
+        tie = min(ties, key=lambda j: float(j["mid"][2]))
+        pulls.setdefault(other(tie, side), []).append((tie, side, push, h))
+    for ends in pulls.values():                               # a tie carries one tension: each end the larger (#311 re-check A)
+        most = max(p for _, _, p, _ in ends)
+        for tie, side, _, h in ends:
+            put(tie, side, most * h)
     return out
+
+
+def _untied(joints: list[dict], side: str, splayed: dict, came: set) -> str:
+    """Why a splayed foot's thrust has no tie the check can follow: a tie that's there but it can't place (v7's stringer,
+    through notches in its sides: CALI-192), named; else none (#311 re-check C)."""
+    for j in joints:
+        t = other(j, side)
+        if "unplaced" not in j or t is None or t in came:
+            continue
+        if any(other(k, t) in splayed and other(k, t) != side for k in joints):
+            return f"its tie, the {t}, isn't checked by hand: its joints are notches (CALI-192)"
+    return NO_TIE
 
 
 # ---------------------------------------------------------------------------------------------------------------------------

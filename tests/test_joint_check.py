@@ -527,8 +527,9 @@ def test_a_splayed_side_s_foot_thrust_goes_into_its_tie():
         assert np.hypot(*r["demand_lb"].values()) == pytest.approx(thrust, rel=0.05), r    # its parts across the slant
         assert r["mode"] == "withdrawal" and r["safety"] == 0                         # a butt tie, pulled from its edge
     top = next(r for r in got["rows"] if sorted(r["pieces"]) == ["left side", "step"])
-    # down the side's line: its top edge takes the load along it, all in bearing (250 / cos 10°), none across it
-    assert top["demand_lb"] == {"bearing": pytest.approx(load_lb / 2 / np.cos(np.radians(10.0)), rel=0.01)}, top
+    # down the side's line, read against the step's face it bears on (#311 re-check B): 250 lb into it, 44 lb across it
+    assert top["demand_lb"]["bearing"] == pytest.approx(load_lb / 2, rel=0.01)
+    assert top["demand_lb"]["shear"] == pytest.approx(thrust, rel=0.05), top
 
 
 def test_a_splayed_part_with_nothing_tying_its_feet_isn_t_checked_by_hand():
@@ -645,3 +646,76 @@ def test_a_push_away_from_one_joint_slides_on_another_before_it_pulls():
     got = dict((tuple(j["pieces"]), f) for j, f in JC._route([A, B], "P", np.array([10.0, 0.0, -100.0]),
                                                                 np.array([0.0, 0.0, 10.0]), "pairs"))
     assert np.allclose(got[("A", "P")], (10.0, 0.0, -100.0)) and np.allclose(got[("B", "P")], 0.0), got
+
+
+# --- #311 re-check -----------------------------------------------------------------------------------------------------------
+#: The splayed stool at 20°, and with a rail between the sides partway up, beside its stringer (#311 re-check D).
+STEEP = SPLAYED.replace('"splay": 10.0', '"splay": 20.0')
+RAILED = SPLAYED.replace('''    if TIED:
+        y0 = d / 2 - t / 2
+        tie = cq.Workplane("XZ", origin=(0, y0, 0))''', '''    y1 = d / 2 - t / 2
+    rail = cq.Workplane("XZ", origin=(0, y1, 0)).polyline(
+        [(t + 250 * k, 250), (w - t - 250 * k, 250), (w - t - 320 * k, 320), (t + 320 * k, 320)]).close().extrude(-t)
+    out = out.union(rail)
+    if TIED:
+        y0 = d / 2 - t / 2
+        tie = cq.Workplane("XZ", origin=(0, y0, 0))''').replace('''    if TIED:
+        y0 = d / 2 - t / 2
+        face["stringer"]''', '''    y1 = d / 2 - t / 2
+    face["rail"] = [(t + 250 * k, y1, 250), (w - t - 250 * k, y1, 250), (w - t - 320 * k, y1, 320), (t + 320 * k, y1, 320)]
+    if TIED:
+        y0 = d / 2 - t / 2
+        face["stringer"]''')
+#: Its stringer run through notches in the sides instead of butted between them (v7's, #311 re-check C).
+NOTCHED = SPLAYED.replace('''        tie = cq.Workplane("XZ", origin=(0, y0, 0)).polyline(
+            [(t + z0 * k, z0), (w - t - z0 * k, z0), (w - t - z1 * k, z1), (t + z1 * k, z1)]).close().extrude(-t)''',
+                          '''        tie = cq.Workplane("XZ", origin=(0, y0, 0)).polyline(
+            [(0, z0), (w, z0), (w, z1), (0, z1)]).close().extrude(-t)''').replace(
+    '''        face["stringer"] = [(t + z0 * k, y0, z0), (w - t - z0 * k, y0, z0), (w - t - z1 * k, y0, z1), (t + z1 * k, y0, z1)]''',
+    '''        face["stringer"] = [(0, y0, z0), (w, y0, z0), (w, y0, z1), (0, y0, z1)]''')
+
+
+def _check_at(script, dx):
+    """``_check`` with the load moved ``dx`` mm along x."""
+    import tempfile
+    from pathlib import Path
+
+    store = _store(Path(tempfile.mkdtemp()), script, "stool")
+    pieces, tol, held = _pieces(store)
+    load = _load(store)
+    load = {**load, "lo": tuple(np.add(load["lo"], (dx, 0, 0))), "hi": tuple(np.add(load["hi"], (dx, 0, 0)))}
+    return JC.check(JC.setup(store, "stool"), load, held, 2.0)
+
+
+def test_a_tie_carries_one_tension_its_ends_the_larger():
+    """#311 re-check A: off centre, toward the right foot, its two ends read 9 and 93 lb; a tie's ends pull together."""
+    got = _check_at(SPLAYED, 120.0)
+    ends = [r for r in got["rows"] if "stringer" in r["pieces"]]
+    pulls = [np.hypot(*r["demand_lb"].values()) for r in ends]
+    assert len(ends) == 2 and pulls[0] == pytest.approx(pulls[1], rel=1e-3), pulls
+    load_lb, k = 500.0, np.tan(np.radians(10.0))
+    right = load_lb * (0.5 + 120.0 / (406.4 - 2 * 400 * k)) * k                        # the nearer foot's share, × tan
+    assert max(pulls) == pytest.approx(right, rel=0.1)
+
+
+def test_a_splayed_side_s_top_is_read_against_the_face_it_bears_on():
+    """#311 re-check B: at 20°, down the side's line is 250 lb against the step's face and 91 lb across it, in the
+    screws, not 266 lb all in bearing."""
+    top = next(r for r in _check(STEEP)["rows"] if sorted(r["pieces"]) == ["left side", "step"])
+    assert top["demand_lb"]["bearing"] == pytest.approx(250.0, rel=0.01)
+    assert top["demand_lb"]["shear"] == pytest.approx(250.0 * np.tan(np.radians(20.0)), rel=0.02), top
+
+
+def test_a_tie_it_can_t_place_is_named_never_read_as_no_tie():
+    got = _check(NOTCHED)
+    assert got["chain"] is False
+    assert got["unchecked"] == ["its tie, the stringer, isn't checked by hand: its joints are notches (CALI-192)"], got
+
+
+def test_the_tie_nearest_the_foot_takes_the_thrust():
+    """#311 re-check D: a stringer at the foot and a rail partway up: the stringer takes it."""
+    got = _check(RAILED)
+    stringer = [r for r in got["rows"] if "stringer" in r["pieces"]]
+    rail = [r for r in got["rows"] if "rail" in r["pieces"] and "step" not in r["pieces"]]
+    assert len(stringer) == 2 and all(r["mode"] for r in stringer), stringer
+    assert rail and all(r["mode"] is None for r in rail), rail                       # carries none of it
