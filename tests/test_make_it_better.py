@@ -418,7 +418,7 @@ def test_the_time_goes_by_the_default_check_not_a_finer_one(tmp_path):
     _check(store, "tube", 3.0, spacing=4.6, rid="20261107-000000-default")
     default = next(r for r in load_study.list_runs(store, "tube") if r["id"].endswith("default"))
     _save(load_study.runs_dir(store), {**default, "seconds": 20.0})
-    assert better.carve_takes(load_study.default_check(store, "tube")) == "at least about 17 min at this size"   # 20 s x 50
+    assert better.carve_takes(load_study.default_check(store, "tube")) == "at least about 11 min at this size"   # 20 s x 33
 
 
 # --- #159 review: the card follows the runs, one click one run, no SDK error -------------------------------------------
