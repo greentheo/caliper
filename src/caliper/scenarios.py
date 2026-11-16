@@ -458,10 +458,13 @@ def put(store, pid: str, scenarios: list, supports: list) -> int:
     before = copy.deepcopy(getattr(store.design, "scenarios", None) or {})
     script = store.read_script(pid)
     if not edits and _same_supports(held_rows, _supports(declared)):   # nothing of theirs left: no override (#312)
-        store.design.scenarios = {k: v for k, v in before.items() if k != pid}
+        after = {k: v for k, v in before.items() if k != pid}
     else:
-        store.design.scenarios = {**before, pid: {"edits": edits, "supports": held_rows, "script_sha": _sha(script),
-                                                  "seen": list(script_rows)}}
+        after = {**before, pid: {"edits": edits, "supports": held_rows, "script_sha": _sha(script),
+                                 "seen": list(script_rows)}}
+    if after == before:                      # saved as they were: no new version, every check of it still current
+        return store.design.part(pid).version
+    store.design.scenarios = after
     new = get(store, pid)["scenarios"]
     still = asked(store, pid)
     try:

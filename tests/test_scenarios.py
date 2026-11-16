@@ -364,8 +364,11 @@ def test_the_scorecard_says_a_scenario_turned_off(store, monkeypatch):
     got = S.get(store, "stool")
     S.put(store, "stool", [got["scenarios"][0], {**got["scenarios"][1], "on": False}], got["supports"])
     L.study(store, "stool")
-    m = scorecard.compute(DesignStore.load(store.root))["metrics"]["strength.stool.safety"]
+    card = scorecard.compute(DesignStore.load(store.root))
+    m = card["metrics"]["strength.stool.safety"]
     assert "its rating (EN 14183, 150 kg) is turned off" in (m.get("note") or ""), m
+    (check,) = [c for c in card["checks"] if c.get("metric") == "strength.safety"]      # the line the page shows (#312)
+    assert "its rating (EN 14183, 150 kg) is turned off" in check["loads"] and check["loads"] in check["note"], check
 
 
 def test_a_row_s_standard_is_never_taken_from_the_request(store):
@@ -733,12 +736,33 @@ def test_the_scorecard_and_the_release_say_an_open_conflict(store, monkeypatch):
     L.study(store, "stool")
     fresh = DesignStore.load(store.root)
     monkeypatch.setattr(L, "unresolved", lambda run, c: False)     # a run fine enough: only the question is open
-    m = scorecard.compute(fresh)["metrics"]["strength.stool.safety"]
+    card = scorecard.compute(fresh)
+    m = card["metrics"]["strength.stool.safety"]
     assert "an open question about its loads: you'd edited 'stepping on the front edge' to 260 lb" in (m.get("note") or ""), m
-    assert m["trust"] == "not resolved", m
+    assert m["trust"] == "question open", m
+    (check,) = [c for c in card["checks"] if c.get("metric") == "strength.safety"]      # the line the page shows (#312)
+    assert check["trust"] == "question open", check
+    assert "an open question about its loads: you'd edited 'stepping on the front edge' to 260 lb" in check["loads"], check
+    assert check["loads"] in check["note"] and card["metrics"]["strength.safety"]["trust"] == "question open"
+    from caliper import verdicts
+
+    real = verdicts.goal
+
+    def braced(*a, **kw):                                            # a verdict resting on joints nothing checks (#265)
+        got = real(*a, **kw)
+        return {**got, "joints": True, "brace": {"joints_n": 2, "wood": True}, "why": "joints not checked"} \
+            if got["kind"] in ("holds", "fails") else got
+
+    with monkeypatch.context() as mp:                                # the question's label wins over the joints' one
+        mp.setattr(verdicts, "goal", braced)
+        (check,) = [c for c in scorecard.compute(fresh)["checks"] if c.get("metric") == "strength.safety"]
+        assert check["trust"] == "question open" and check["joints"], check
     with monkeypatch.context() as mp:                                # the same run with no question open: a model's
         mp.setattr(S, "asked", lambda store, pid: [])
-        assert scorecard.compute(fresh)["metrics"]["strength.stool.safety"]["trust"] == "model"
+        again = scorecard.compute(fresh)
+        assert again["metrics"]["strength.stool.safety"]["trust"] == "model"
+        (check,) = [c for c in again["checks"] if c.get("metric") == "strength.safety"]
+        assert check["trust"] != "question open" and not check.get("loads"), check
     asked = release._loads_asked(fresh, ["stool"])
     assert asked == {"stool": S.asked(fresh, "stool")}
     html = "".join(release.asked_html({"loads_asked": asked}))
@@ -785,6 +809,10 @@ def _readers(src: str, path: str) -> list:
         return n.id if isinstance(n, ast.Name) else None
 
     tree, lines, base = ast.parse(src), src.splitlines(), os.path.basename(path)
+    bound = {t.id for n in ast.walk(tree) if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)
+             and isinstance(n.value.func, ast.Attribute) and n.value.func.attr == "declared"
+             for t in n.targets if isinstance(t, ast.Name)}               # a name holding declarations: never the check's
+    edited = edited - bound
     skip = {id(x) for n in ast.walk(tree) if base == "load_study.py" and isinstance(n, ast.FunctionDef)
             and n.name == "prepare" for x in ast.walk(n)}
     out = []
@@ -792,17 +820,19 @@ def _readers(src: str, path: str) -> list:
         why = None
         if id(n) in skip:
             continue
-        if isinstance(n, ast.Subscript) and isinstance(n.slice, ast.Constant) and n.slice.value == "loads":
+        if (isinstance(n, ast.Subscript) and isinstance(n.ctx, ast.Load)          # a read, not a store into it
+                and isinstance(n.slice, ast.Constant) and n.slice.value == "loads"):
             why = root(n.value) not in edited and "reads loads"
         elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "get" and n.args
               and isinstance(n.args[0], ast.Constant) and n.args[0].value == "loads"):
             why = root(n.func.value) not in edited and "reads loads"
         elif isinstance(n, ast.Compare) and base != "consistency.py":
             ops = [n.left, *n.comparators]
-            why = (any(isinstance(o, ast.Constant) and o.value == "loads_edge" for o in ops)
+            why = (any(isinstance(x, ast.Constant) and x.value == "loads_edge" for o in ops for x in ast.walk(o))
                    and any(isinstance(o, ast.Attribute) and o.attr == "id" for o in ops)) and "the script's edge row"
-        elif (isinstance(n, ast.Call) and base != "tipping.py" and isinstance(n.func, ast.Attribute)
-              and n.func.attr == "unchecked" and root(n.func) == "tipping"):
+        elif (isinstance(n, ast.Call) and base != "tipping.py"
+              and ((isinstance(n.func, ast.Attribute) and n.func.attr == "unchecked" and root(n.func) == "tipping")
+                   or (isinstance(n.func, ast.Name) and n.func.id == "unchecked"))):
             a = n.args[0] if n.args else None
             why = not (isinstance(a, ast.Call) and isinstance(a.func, ast.Attribute) and a.func.attr == "declared"
                        and isinstance(a.func.value, ast.Name) and a.func.value.id in ("SC", "scenarios")) \
@@ -842,6 +872,7 @@ def test_the_guard_catches_each_way_reviewer_2_wrote_a_new_reader(path, src):
 
 @pytest.mark.parametrize("path, src", [
     ("new.py", 'x = ctx["loads"][0]'),                                           # a check's own: the edited loads
+    ("new.py", 'c["loads"] = words'),                                            # a store into a dict, not a read
     ("new.py", 'x = p.get("loads") and p.get("built")'),                         # a part state's has-loads flag
     ("load_study.py", 'def prepare(store, pid):\n    return declared["loads"]'),  # where the script's are read in
     ("new.py", 'x = declared["loads"]   # script\'s loads: the drawing of its script'),
@@ -849,3 +880,54 @@ def test_the_guard_catches_each_way_reviewer_2_wrote_a_new_reader(path, src):
 ])
 def test_the_guard_lets_the_check_s_own_and_the_marked_through(path, src):
     assert not _readers(src, path), src
+
+
+
+# --- #312 fourth round: _demand's unit and margin, an untouched Save, the guard's last realistic gaps ---------------
+
+def test_a_conflict_in_another_unit_orders_by_the_force(store):
+    _front_at(store, 150, unit="kg")                                                 # 330.7 lb
+    store.write_part("stool", RAISED, intent="heavier")                              # the design: 300 lb
+    assert _front_forces(store) == {"stepping on the front edge": 330.7}
+    assert "checked at yours, 150 kg, until you choose; the design's is 300 lb" in S.drift(store, "stool")
+
+
+def test_a_conflict_orders_by_the_margin_too(store):
+    _front_at(store, 260)                                                            # 260 lb × 2: 520
+    store.write_part("stool", RATED.replace('"lb": 250, "factor": 2.0,', '"lb": 300, "factor": 1.5,'), intent="less margin")
+    assert _front_forces(store) == {"stepping on the front edge": 260.0}               # yours: 300 × 1.5 is 450
+    assert "checked at yours, 260 lb, until you choose; the design's is 300 lb" in S.drift(store, "stool")
+
+
+def test_a_save_with_nothing_changed_writes_nothing(store):
+    v = store.design.part("stool").version
+    got = S.get(store, "stool")
+    assert S.put(store, "stool", got["scenarios"], got["supports"]) == v               # the script's, as they were
+    _lowered(store)
+    v = store.design.part("stool").version
+    n = len(DesignStore.load(store.root).history("stool"))
+    got = S.get(store, "stool")
+    assert S.put(store, "stool", got["scenarios"], got["supports"]) == v               # the edits, as they were
+    assert store.design.part("stool").version == v and len(DesignStore.load(store.root).history("stool")) == n
+
+
+@pytest.mark.parametrize("path, src", [
+    ("new.py", 'p = C.declared(store, pid)\nx = p.get("loads")'),
+    ("new.py", 'ctx = C.declared(store, pid)\nx = ctx["loads"]'),
+    ("new.py", 'run = construction.declared(store, pid)\nx = run["loads"]'),
+    ("new.py", 'from .tipping import unchecked\nx = unchecked(C.declared(store, pid), "")'),
+    ("new.py", 'x = [r for r in said if r.id in ("loads_edge",)]'),
+])
+def test_the_guard_catches_the_names_it_lets_through_when_they_hold_declarations(path, src):
+    assert _readers(src, path), src
+
+
+def test_the_page_says_the_strength_line_s_loads_and_its_trust():
+    from .test_carve_click import _page, _run
+
+    html = _run(_page(["scoreView", "scoreMark", "scoreNum", "safetyNum", "asOf"], consts=["esc", "TRUST", "goalLimit"],
+                      extra="""out = scoreView({parts: [], scorecards: [{created: 0, summary: {pass: 1, fail: 0},
+      objectives: [], checks: [{id: 'strength_loads', label: 'holds what its loads say', metric: 'strength.safety',
+        status: 'pass', value: 3.1, unit: '×', limit: 2, op: '>=', trust: 'question open',
+        loads: "an open question about its loads: you'd edited 'x' to 260 lb"}]}]});"""))
+    assert "question open" in html and "an open question about its loads: you'd edited 'x' to 260 lb" in html, html

@@ -39,6 +39,9 @@ LB = 0.224809                      # lbf per N
 
 
 
+#: A strength number checked at the more demanding of a person's edit and the design's change, until they choose (#312).
+QUESTION_OPEN = "question open"
+
 def yield_x(a: dict) -> float:
     """How many times its standing load a frame yields at, a goal's number: cut toward safe after the product (#214
     review: 1.33 x 1.5 = 1.995 was stored 2.0 and met a goal of 2)."""
@@ -435,6 +438,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     loaded, need = False, []          # parts that say what they must hold, and at what safety (CALI-113)
     left = []                         # parts whose strength isn't known: never left out of the verdict (#132 review)
     ran_filled = False                # a run of this version that ran on a solid with more in it than its pieces (#70)
+    loads_said = []                   # each part's loads turned off, or with a question open: on the check shown (#312)
+    asked_any = False
     for p in store.design.parts:
         if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
             continue
@@ -509,8 +514,12 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             asked_said = f"an open question about its loads: {'; '.join(asked)}" if asked else None
             note = "; ".join(x for x in (open_said, off_said, asked_said) if x)
             _metric(metrics, f"strength.{p.id}.safety", ran, "×", f"{p.id}, its weakest load",
-                    "not resolved" if open_said or asked_said else "model", "strength check",
+                    "not resolved" if open_said else QUESTION_OPEN if asked_said else "model", "strength check",
                     **({"note": note} if note else {}))
+            mine = "; ".join(x for x in (off_said, asked_said) if x)
+            if mine:
+                loads_said.append((p.id, mine))
+            asked_any = asked_any or bool(asked)
             worst = ran if worst is None else min(worst, ran)
         if breaks:
             prev = metrics.get("strength.breaks_lb", {}).get("value")
@@ -519,10 +528,13 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     if no_breaks:                     # never the rest's smallest (rule 6)
         _metric(metrics, "strength.breaks_lb", None, "lb", "the smallest predicted breaking load", "model", "strength check",
                 note=no_breaks)
+    # the loads' words, each part's named where there's more than one (#312: they reached no line the page shows)
+    loads_note = "; ".join(f"{pid}: {w}" if len(loads_said) > 1 else w for pid, w in loads_said) or None
     if worst is not None:
+        note = "; ".join(x for x in (unsettled or unsure, loads_note) if x)
         _metric(metrics, "strength.safety", worst, "×", "the weakest load any part must carry",
-                "not resolved" if unsettled or unsure else "model", "strength check",
-                **({"note": unsettled or unsure} if unsettled or unsure else {}))
+                "not resolved" if unsettled or unsure else QUESTION_OPEN if asked_any else "model", "strength check",
+                **({"note": note} if note else {}))
 
     # a strength number from a filled-in solid (or a shape that couldn't be checked) is no verdict (CALI-96)
     from .consistency import filled
@@ -617,6 +629,13 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
                            # a pass, said: what it rests on isn't checked (#265)
                            **({"trust": verdicts.brace_why(verdict.get("brace")), "joints": verdict["why"], "joints_kind": verdict["kind"]}
                               if verdict.get("joints") else {})})
+    for c in checks:                    # a strength line says its loads' words, and an open question its own trust (#312)
+        if not str(c.get("metric", "")).startswith("strength") or c.get("status") == "proposed" or not loads_note:
+            continue
+        c["loads"] = loads_note
+        c["note"] = "; ".join(x for x in (c.get("note"), loads_note) if x)
+        if asked_any and c["status"] in ("pass", "fail") and not str(c.get("trust") or "").startswith("not resolved"):
+            c["trust"] = QUESTION_OPEN
     previous = list_cards(store, 1)
     # a change is the design's, never the scorer's: against a card from an older scorer there's no "was" (#125 review)
     prev = previous[0]["metrics"] if previous and not previous[0].get("outdated") else {}

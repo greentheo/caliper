@@ -2462,7 +2462,8 @@ function scoreView(d) {
     <ul class="list small" style="margin-top:6px">${card.checks.map((c) => { const now = held.find((x) => x.id === c.id) || c;
       return `<li>${scoreMark(c, stale, when)}
       ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit, typeof c.limit === 'number' && (c.op || '>=').startsWith('>') ? c.limit : null)}${goalLimit(c)}${old}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
-      ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}</li>`; }).join('')}
+      ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}
+      ${c.loads ? `<div class="muted">${esc(c.loads)}</div>` : ''}</li>`; }).join('')}
       ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${esc(c.label || c.id)} ${from(c)}
         <span class="muted">— new since this card</span></li>`).join('')}</ul>
     <table class="st" style="margin-top:6px">${card.objectives.map((o) => `<tr><td style="text-align:left">${esc(o.label)}</td>
