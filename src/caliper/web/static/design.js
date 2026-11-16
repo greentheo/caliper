@@ -3225,9 +3225,10 @@ function scenarioRow(sc, i) {
       ${sc.standard.amount !== sc.amount || sc.standard.unit !== sc.unit ? `; the standard is ${sc.standard.amount} ${esc(sc.standard.unit)}` : ''}
       <button class="ghost" data-scen-std="${i}">Back to the standard</button></div>` : '';
   // the design changed a case under an edit of yours, or dropped it: asked, never settled for you (#312 re-check)
-  const asked = sc.conflict ? `<div class="small" style="color:var(--amber)">${esc(sc.conflict)}: ${sc.design
-      ? `<button class="ghost" data-scen-take="${i}">Take the design's</button> or save to keep yours.`
-      : 'remove it, or save to keep yours.'}</div>`
+  // until they choose, what's checked is said; a Save settles only the rows chosen on (#312 third round)
+  const asked = sc.conflict ? `<div class="small" style="color:var(--amber)">${esc(sc.conflict)}${sc.checked ? `: ${esc(sc.checked)}` : ''}.
+      ${sc.keep ? '<span class="muted">yours, kept when you save.</span>'
+        : `${sc.design ? `<button class="ghost" data-scen-take="${i}">Take the design's</button>` : ''}<button class="ghost" data-scen-keep="${i}">Keep mine</button>`}</div>`
     : sc.new ? '<div class="small muted">the design added this case since you edited them: it\'s checked as the script has it.</div>' : '';
   const whose = sc.source === 'edited' ? 'yours' : sc.source === 'added' ? 'yours, added' : sc.source === 'script' ? 'its script\'s' : '';
   return `<div class="card scen" data-scen="${i}" style="margin-top:6px">${asked}${whose ? `<div class="small muted">${whose}</div>` : ''}
@@ -3319,6 +3320,9 @@ function wireScenarioRows(p) {
     b.onclick = () => { keep(); const i = +b.dataset.scenTake, sc = S.scen[p.id].scenarios[i];
       S.scen[p.id].scenarios[i] = { ...sc.design, of: sc.of, source: 'script' }; repaint(); };
   });
+  document.querySelectorAll('#scenBody [data-scen-keep]').forEach((b) => {
+    b.onclick = () => { keep(); S.scen[p.id].scenarios[+b.dataset.scenKeep].keep = true; repaint(); };
+  });
   document.querySelectorAll('#scenBody [data-sup-del]').forEach((b) => {
     b.onclick = () => { keep(); S.scen[p.id].supports.splice(+b.dataset.supDel, 1); repaint(); };
   });
@@ -3337,7 +3341,8 @@ function wireScenarioRows(p) {
     try {
       const got2 = await api('PUT', `/api/designs/${S.slug}/parts/${p.id}/scenarios`, readScenarios(got));
       S.scen[p.id] = got2.scenarios; S.design = got2.design; render();       // the tree's version too
-      said(`Saved as v${got2.version}. Its checks are of the loads before: check it again.`);
+      const open = (got2.open || []).length ? ` Still open, until you choose: ${got2.open.join('; ')}.` : '';
+      said(`Saved as v${got2.version}.${open} Its checks are of the loads before: check it again.`);
     } catch (e) { save.disabled = false; said(plainly(e.message), true); }
   };
   const back = $('scenBack');

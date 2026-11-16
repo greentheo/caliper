@@ -578,8 +578,10 @@ def _edge_foot(mesh, declared: dict, pieces: list[dict], tol: float, rest: bool 
     a fail (the round still passes). None when there's no two-sided top to ask about."""
     from . import load_study as L
 
+    # strength cases only: a tipping case checks it doesn't tip, not that it holds, so it's no foot there (#314)
     try:
-        loads = L.parse_loads(declared["loads"])     # script's loads: or the edited ones, as bare_edge passes them
+        loads = L.parse_loads([ld for ld in declared["loads"]   # script's loads: or the edited ones bare_edge passes
+                               if not (isinstance(ld, dict) and ld.get("tip"))])
     except (ValueError, TypeError, KeyError):
         return None                                        # _loads says what's wrong with them
     from . import spatial

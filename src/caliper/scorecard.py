@@ -503,9 +503,14 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             off = run.get("loads_off") or []           # of the loads left on, said (#312 review: never with no note)
             off_said = (f"of the loads left on: {' and '.join(off)} {'is' if len(off) == 1 else 'are'} turned off"
                         if off else None)
-            note = "; ".join(x for x in (open_said, off_said) if x)
+            from . import scenarios as SC
+
+            asked = SC.asked(store, p.id)              # an open conflict on its loads, said (#312 third round)
+            asked_said = f"an open question about its loads: {'; '.join(asked)}" if asked else None
+            note = "; ".join(x for x in (open_said, off_said, asked_said) if x)
             _metric(metrics, f"strength.{p.id}.safety", ran, "×", f"{p.id}, its weakest load",
-                    "not resolved" if open_said else "model", "strength check", **({"note": note} if note else {}))
+                    "not resolved" if open_said or asked_said else "model", "strength check",
+                    **({"note": note} if note else {}))
             worst = ran if worst is None else min(worst, ran)
         if breaks:
             prev = metrics.get("strength.breaks_lb", {}).get("value")

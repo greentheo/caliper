@@ -1035,7 +1035,8 @@ def router():
                 version = scenarios.put(store, pid, req.scenarios, req.supports)
             except ValueError as e:
                 raise HTTPException(422, str(e))
-            return {"version": version, "scenarios": scenarios.get(store, pid), "design": design_state(store)}
+            return {"version": version, "scenarios": scenarios.get(store, pid), "design": design_state(store),
+                    "open": scenarios.asked(store, pid)}                 # what it kept open, said (#312 third round)
 
     @r.delete("/api/designs/{slug}/parts/{pid}/scenarios")
     def clear_part_scenarios(slug: str, pid: str):

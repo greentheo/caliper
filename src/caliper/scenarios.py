@@ -87,18 +87,30 @@ def get(store, pid: str) -> dict:
     said = _said(store, pid)
     if not said:
         rows = [{**r, "of": k, "source": "script"} for k, r in _script_rows(declared).items()]
-        held = declared.get("held")
-        supports = ([{"name": str(h.get("name") or f"support {i + 1}"), "lo": [float(v) for v in h["lo"]],
-                      "hi": [float(v) for v in h["hi"]]} for i, h in enumerate(held)] if held else [dict(FLOOR)])
-        got = {"scenarios": rows, "supports": supports, "overridden": False}
+        got = {"scenarios": rows, "supports": _supports(declared), "overridden": False}
     else:
         rows = [{**e["row"], "of": e["of"], "source": e["source"], "new": e.get("new", False),
-                 **({"conflict": e["conflict"], "design": e.get("design")} if e.get("conflict") else {})}
+                 **({"conflict": e["conflict"], "design": e.get("design"), "checked": e.get("checked")}
+                    if e.get("conflict") else {})}
                 for e in _effective(said, declared)]
         got = {"scenarios": rows, "supports": copy.deepcopy(said["supports"]), "overridden": True}
     for sc in got["scenarios"]:
         sc["said"] = name(sc)
     return got
+
+
+def _supports(declared: dict) -> list:
+    """What holds a part as its script says, as the editor's rows: its HELD, else the floor."""
+    held = declared.get("held")
+    return ([{"name": str(h.get("name") or f"support {i + 1}"), "lo": [float(v) for v in h["lo"]],
+              "hi": [float(v) for v in h["hi"]]} for i, h in enumerate(held)] if held else [dict(FLOOR)])
+
+
+def _same_supports(a: list, b: list) -> bool:
+    def key(s):
+        return ("floor",) if s.get("floor") else (s["name"], *[round(float(v), 6) for v in list(s["lo"]) + list(s["hi"])])
+
+    return sorted(map(key, a)) == sorted(map(key, b))
 
 
 def _edits(said: dict) -> list:
@@ -130,15 +142,61 @@ def _effective(said: dict, declared: dict) -> list:
         base = e.get("base")
         got = {"row": r, "of": k, "source": "edited"}
         if base and (_numbers(base, sc) or base.get("name") != sc.get("name")):
-            got.update(conflict=_changed(r, sc), design=copy.deepcopy(sc))
+            got.update(conflict=_changed(r, sc), design=copy.deepcopy(sc), **_both(r, sc))
         out.append(got)
     for e in edits:
         if e.get("of") and e["of"] not in script:            # its case is gone from the design: still read, and asked
             out.append({"row": copy.deepcopy(e["row"]), "of": e["of"], "source": "edited",
-                        "conflict": f"you'd edited '{e['of']}'; the design no longer has it", "design": None})
+                        "conflict": f"you'd edited '{e['of']}'; the design no longer has it", "design": None,
+                        "checked": "yours is still checked until you choose"})
         elif not e.get("of"):
             out.append({"row": copy.deepcopy(e["row"]), "of": None, "source": "added"})
     return out
+
+
+def _demand(r: dict) -> float:
+    return float(r["amount"]) * _per(r["unit"]) * float(r["factor"])
+
+
+def _both(mine: dict, now: dict) -> dict:
+    """What an open conflict checks until the person chooses (#312 third round), never greener than either: where theirs and
+    the design's order (the same name, way and box), the more demanding, said which; where they don't, both, each under
+    its own name. A row of theirs turned off: the design's."""
+    def unit(v):
+        n = math.sqrt(sum(float(x) ** 2 for x in v)) or 1.0
+        return [float(x) / n for x in v]
+
+    theirs = f"{_num(now['amount'])} {now['unit']}"
+    if not mine.get("on", True):
+        return {"checks": [now], "checked": f"checked at the design's {theirs} until you choose; yours is off"}
+    yours = f"{_num(mine['amount'])} {mine['unit']}"
+    same = (mine["name"] == now["name"]
+            and all(abs(a - b) < 1e-6 for a, b in zip(unit(mine["direction"]), unit(now["direction"])))
+            and all(abs(float(a) - float(b)) < 1e-6 for a, b in zip(list(mine["lo"]) + list(mine["hi"]),
+                                                                    list(now["lo"]) + list(now["hi"]))))
+    if same:
+        if _demand(now) > _demand(mine) * (1 + 1e-9):
+            return {"checks": [now], "checked": f"checked at the design's {theirs} until you choose; yours is {yours}"}
+        return {"checks": [mine], "checked": f"checked at yours, {yours}, until you choose; the design's is {theirs}"}
+    a, b = copy.deepcopy(mine), copy.deepcopy(now)
+    if name(a) == name(b):
+        a["name"], b["name"] = f"{a['name']} (yours)", f"{b['name']} (the design's)"
+    return {"checks": [a, b], "checked": "both checked until you choose"}
+
+
+def asked(store, pid: str) -> list:
+    """A part's open conflicts, each in words with what's checked until the person chooses (#312 third round): for the
+    reply, the card, the scorecard's strength note, the release and a Save's message. [] where none."""
+    said = _said(store, pid)
+    if not said:
+        return []
+    from . import construction as C
+
+    return [_asked(e) for e in _effective(said, C.declared(store, pid)) if e.get("conflict")]
+
+
+def _asked(e: dict) -> str:
+    return f"{e['conflict']}: {e['checked']}" if e.get("checked") else e["conflict"]
 
 
 def _numbers(a: dict, b: dict) -> bool:
@@ -203,7 +261,7 @@ def loads(store, pid: str, declared: dict) -> list:
     said = _said(store, pid)
     if not said:
         return [ld for ld in declared.get("loads") or [] if not (isinstance(ld, dict) and ld.get("tip"))]
-    return [_load(e["row"]) for e in _effective(said, declared) if e["row"].get("on", True)]
+    return [_load(r) for e in _effective(said, declared) for r in e.get("checks", [e["row"]]) if r.get("on", True)]
 
 
 def restored(had: Optional[dict], now: Optional[dict], target: int) -> str:
@@ -273,7 +331,7 @@ def _clean(store, pid: str, scenarios: list, supports: list) -> tuple[list, list
     script = _script_rows(C.declared(store, pid))
     # a standard's numbers are its script's, or kept with the edit: never the request's (#312 review)
     standards = {r["standard"]["name"]: r["standard"] for r in script.values() if r.get("standard")}
-    for r in (_said(store, pid) or {}).get("scenarios") or []:
+    for r in (e["row"] for e in _edits(_said(store, pid) or {})):
         if r.get("standard"):
             standards.setdefault(r["standard"]["name"], r["standard"])
     rch = L.reach(tolerance(mesh), 0.0)
@@ -309,8 +367,8 @@ def _clean(store, pid: str, scenarios: list, supports: list) -> tuple[list, list
         of = of if of in script or of in {e.get("of") for e in _edits(_said(store, pid) or {})} else None
         was = script.get(of) if of else None         # where its script puts it: unmoved follows the shape (#312 review)
         row["moved"] = not (was and all(abs(a - b) < 1e-6 for a, b in zip(lo + hi, was["lo"] + was["hi"])))
-        rows.append((row, of))
-    if not any(r["on"] for r, _ in rows):
+        rows.append((row, of, bool(sc.get("keep"))))     # Keep mine, pressed on an open conflict (#312 third round)
+    if not any(r["on"] for r, *_ in rows):
         raise ValueError("turn at least one scenario on: with none, there's nothing to check it holds")
     held_rows = []
     for i, s in enumerate(supports or [dict(FLOOR)]):
@@ -376,17 +434,22 @@ def put(store, pid: str, scenarios: list, supports: list) -> int:
 
     old = get(store, pid)["scenarios"]
     rows, held_rows = _clean(store, pid, scenarios, supports)
-    script_rows = _script_rows(C.declared(store, pid))
+    declared = C.declared(store, pid)
+    script_rows = _script_rows(declared)
+    prev = {e["of"]: e for e in _edits(_said(store, pid) or {}) if e.get("of")}
     edits, kept = [], set()
-    for row, of in rows:                     # each an edit on its script case, or one added (#312 re-check)
+    for row, of, keep in rows:               # each an edit on its script case, or one added (#312 re-check)
         sc = script_rows.get(of) if of else None
         if sc is not None:
             kept.add(of)
             if not _differs(row, sc) and row["name"] == sc["name"] and row["on"]:
-                continue                     # unchanged: the script's, entirely, as the script has it from now on
-            edits.append({"of": of, "row": row, "base": copy.deepcopy(sc)})
-        elif of:                             # its case gone from the design: kept as theirs, and asked about
-            edits.append({"of": of, "row": row, "base": None})
+                continue                     # unchanged: the script's, entirely (and Take the design's settles it)
+            was = (prev.get(of) or {}).get("base")
+            open_ = not keep and was is not None and (_numbers(was, sc) or was.get("name") != sc.get("name"))
+            # a Save settles only the conflicts acted on: one left as it was stays open (#312 third round)
+            edits.append({"of": of, "row": row, "base": copy.deepcopy(was if open_ else sc)})
+        elif of:                             # its case gone from the design: theirs, asked, till they keep or remove it
+            edits.append({"of": None, "row": row} if keep else {"of": of, "row": row, "base": None})
         else:
             edits.append({"of": None, "row": row})
     for k, sc in script_rows.items():        # a script case taken off the list: off, not gone
@@ -394,11 +457,16 @@ def put(store, pid: str, scenarios: list, supports: list) -> int:
             edits.append({"of": k, "row": {**copy.deepcopy(sc), "on": False, "moved": False}, "base": copy.deepcopy(sc)})
     before = copy.deepcopy(getattr(store.design, "scenarios", None) or {})
     script = store.read_script(pid)
-    store.design.scenarios = {**before, pid: {"edits": edits, "supports": held_rows, "script_sha": _sha(script),
-                                              "seen": list(script_rows)}}
+    if not edits and _same_supports(held_rows, _supports(declared)):   # nothing of theirs left: no override (#312)
+        store.design.scenarios = {k: v for k, v in before.items() if k != pid}
+    else:
+        store.design.scenarios = {**before, pid: {"edits": edits, "supports": held_rows, "script_sha": _sha(script),
+                                                  "seen": list(script_rows)}}
     new = get(store, pid)["scenarios"]
+    still = asked(store, pid)
     try:
-        return store.write_part(pid, script, action="loads", feedback=_changes(old, new))
+        return store.write_part(pid, script, action="loads", feedback=_changes(old, new)
+                                + (f"; still open: {'; '.join(still)}" if still else ""))
     except Exception:
         store.design.scenarios = before
         store.save()
@@ -427,8 +495,9 @@ def drift(store, pid: str) -> str:
     of theirs still read. Rows never edited are the script's, and rows never moved follow its boxes, so they're not said.
     "" when there's nothing to say."""
     said = _said(store, pid)
-    if not said or said.get("script_sha") == _sha(store.read_script(pid)):
+    if not said:
         return ""
+    shape = said.get("script_sha") != _sha(store.read_script(pid))
     from . import construction as C
     from . import load_study as L
     from .consistency import tolerance
@@ -436,7 +505,8 @@ def drift(store, pid: str) -> str:
     declared = C.declared(store, pid)
     entries = _effective(said, declared)
     out = []
-    moved = [e["row"] for e in entries if e["source"] != "script" and e["row"].get("moved") and e["row"].get("on", True)]
+    moved = [e["row"] for e in entries if shape and e["source"] != "script" and e["row"].get("moved")
+             and e["row"].get("on", True)]
     if moved:
         try:
             mesh = store.part_geometry(pid).require_mesh()
@@ -451,14 +521,15 @@ def drift(store, pid: str) -> str:
         it = "it" if len(moved) == 1 else "them"
         out.append(f"Its shape changed since you edited its loads: {'; '.join(said_rows)}. Check {it}, and move {it} under "
                    f"Scenarios and supports, or put {it} back to its script's there.")
-    asks = [e["conflict"] for e in entries if e.get("conflict")]
+    asks = [f"{_asked(e)}: {'keep yours, or take the design' + chr(39) + 's?' if e.get('design') else 'keep yours, or remove it?'}"
+            for e in entries if e.get("conflict")]                 # open till chosen, said each time (#312 third round)
     added = [name(e["row"]) for e in entries if e.get("new")]
     if asks or added:                                        # the design's own cases changed under the edit
         kept = [name(e["row"]) if name(e["row"]) != e["row"]["name"]           # a standard's says its own number
                 else f"'{name(e['row'])}' at {_num(e['row']['amount'])} {e['row']['unit']}" for e in entries
                 if e["source"] == "edited" and not e.get("conflict") and e["row"].get("on", True)]
-        items = ([f"{a}: keep yours, or take the design's?" for a in asks]
-                 + [f"the design added '{n}': it's checked" for n in added]
-                 + ([f"yours kept: {', '.join(kept)}"] if kept else []))
-        out.append("Its loads changed in the design since you edited them: " + "; ".join(items) + ".")
+        items = ([f"the design added '{n}': it's checked" for n in added]
+                 + ([f"yours kept: {', '.join(kept)}"] if kept else []) + asks)       # its questions last
+        line = "Its loads changed in the design since you edited them: " + "; ".join(items)
+        out.append(line if line.endswith("?") else line + ".")                       # never "?." (#312 third round)
     return " ".join(out)
