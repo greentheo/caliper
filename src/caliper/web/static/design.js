@@ -1247,6 +1247,7 @@ $('newBtn').onclick = startNew;
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
+  if (first) { S.fixes = {}; S.fixMine = {}; S.fixOpen = null; }    // Things to fix are this design's only (#318 review)
   if (first) { dropBuildFollow(); clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
   location.hash = encodeURIComponent(slug);
   if (first) showLoading(slug);
@@ -2084,6 +2085,11 @@ function answersKey() {               // what the answers depend on: a change to
     (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
     (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey, d.display_units]);
 }
+// a card's lines, and under a part's Will it work? its Things to fix (#300): one painter, for the first draw and the
+// fill when its answers come in (a fill with qlines alone dropped the list)
+function cardLines(k, c) {
+  return qlines(c) + (k === 'work' && S.scope && c ? fixesBox(S.scope) : '');
+}
 function qlines(c) {
   if (!c) return '<div class="qline muted"><span class="spin"></span>answering…</div>';
   if (!c.lines.length) return `<div class="qline muted">${esc(c.hint || 'Nothing to say yet.')}</div>`;
@@ -2103,6 +2109,113 @@ function betterLines(c, offers) {
     return `<div class="qoffer"><div class="qoffer-t">${esc(ln.lead)}.<span class="qoffer-c">${esc(ln.cost)}</span></div>
       ${ln.button ? `<button class="ghost" data-better="${i}" data-better-action="${esc(ln.action)}" data-better-part="${esc(ln.part)}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[carveKey(ln.part)]) ? ' disabled' : trackedFor(ln.action, ln.part) ? ' disabled data-job-off="1"' : ''}>${esc(ln.button)}</button>` : ''}</div>`;
   }).join('')}</div>`;
+}
+// ------------------------------------------------------------- things to fix (CALI-189, #300 slice A)
+// Under Will it work?: what's measured wrong with this part, each a tick, its fix (a choice where there are two), what
+// kind of change it is and what it costs; then the known limits apart, never ticked. Asked when it's opened, of this
+// version. A row reworded, or one added, is the person's words: said so, never "measured".
+// keyed by design and part (#318 review: another design's list painted under this one's part of the same id)
+const fixKey = (part) => `${S.slug}/${part}`;
+// a row's ticks and words go with it while its measurement is the same: a new number is a new row
+const fixRowKey = (r) => `${r.id}|${r.problem}`;
+function fixMine(part) {
+  S.fixMine = S.fixMine || {};
+  const k = fixKey(part);
+  return (S.fixMine[k] = S.fixMine[k] || { untick: [], words: {}, own: [], pick: {}, editing: null });
+}
+function fixRow(r, mine) {
+  const k = fixRowKey(r);
+  const ticked = !(mine.untick || []).includes(k);
+  const pick = (mine.pick || {})[k] || 0;
+  const words = (mine.words || {})[k];
+  const c = r.choices[pick] || r.choices[0];
+  // the problem is measured; a fix is proposed (#318 review); a row the person reworded is their words, never measured
+  const fix = mine.editing === k
+    ? `<input data-fix-words="${esc(k)}" value="${esc(words != null ? words : c.fix)}" style="width:80%">`
+    : words != null ? `${esc(words)} <span class="badge">your words</span>`
+    : (r.choices.length > 1 ? r.choices.map((x, j) => `<label><input type="radio" name="fx-${esc(k)}" data-fix-pick="${esc(k)}"
+        value="${j}"${j === pick ? ' checked' : ''}> ${esc(x.fix)}</label>`).join(' <span class="muted">or</span> ') : esc(c.fix))
+      + ' <span class="muted small">proposed</span>';
+  return `<div class="fixrow" data-fix-row="${esc(r.id)}"><label><input type="checkbox" data-fix-tick="${esc(k)}"${ticked ? ' checked' : ''}>
+      ${esc(r.problem)}</label>${words != null ? '' : ' <span class="badge ok">measured</span>'}
+    <div class="small">${fix} ${mine.editing === k ? '' : `<button class="ghost" data-fix-word="${esc(k)}">Reword</button>`}</div>
+    <div class="small muted">${esc(words != null ? 'a designer edit, in your words' : c.cost)}</div></div>`;
+}
+function fixesView(got, mine) {
+  mine = mine || {};
+  const rows = got.rows || [], own = mine.own || [];
+  return `${got.error ? `<div class="small" style="color:var(--bad)">${esc(got.error)}</div>` : ''}
+    ${rows.length || own.length || got.error ? '' : '<div class="small muted">Nothing measured wrong with it.</div>'}
+    ${rows.map((r) => fixRow(r, mine)).join('')}
+    ${own.map((o, i) => `<div class="fixrow own" data-fix-own="${i}"><label><input type="checkbox" data-fix-own-tick="${i}"${o.off ? '' : ' checked'}>
+      ${esc(o.fix)}</label>
+      <div class="small"><span class="badge">your words</span> <button class="ghost" data-fix-own-del="${i}">Remove</button></div>
+      <div class="small muted">a designer edit, in your words</div></div>`).join('')}
+    <div class="small fixadd"><input data-fix-add placeholder="add your own: “and round the top’s corners”" style="width:70%">
+      <button class="ghost" data-fix-add-go="1">Add</button></div>
+    ${(got.limits || []).length ? `<div class="qbetter-h" style="margin-top:6px">Known limits</div>
+      <ul class="small muted fixlimits">${got.limits.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`;
+}
+function fixesBox(part) {
+  const open = S.fixOpen === fixKey(part);
+  const got = open && S.fixes && S.fixes[fixKey(part)];
+  return `<details class="qbetter qfix" id="fixBox" data-fix-part="${esc(part)}"${open ? ' open' : ''}><summary>Things to fix
+      <span class="muted small">measured, with what each would take</span></summary>
+    <div id="fixBody">${got ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div></details>`;
+}
+function fixVersion(part) { return ((S.design.parts.find((p) => p.id === part)) || {}).version; }
+async function loadFixes(part) {
+  S.fixes = S.fixes || {};
+  const v = fixVersion(part), k = fixKey(part);
+  let got;
+  try { got = { ...(await api('GET', `/api/designs/${S.slug}/parts/${part}/fixes`)), v }; }
+  catch (e) { got = { rows: [], limits: [], error: plainly(e.message), v }; }
+  if (k !== fixKey(part)) return;                 // another design opened while it asked
+  S.fixes[k] = got;
+  paintFixes(part);
+}
+function paintFixes(part) {
+  const b = $('fixBody'), got = S.fixes && S.fixes[fixKey(part)];
+  if (!b || !got || (($('fixBox') || {}).dataset || {}).fixPart !== part) return;
+  b.innerHTML = fixesView(got, fixMine(part));
+  wireFixRows(part);
+}
+function wireFixes() {
+  const box = $('fixBox');
+  if (!box) return;
+  const part = box.dataset.fixPart;
+  // of this design (its key) and this version only
+  const fresh = () => { const got = S.fixes && S.fixes[fixKey(part)]; return !!got && got.v === fixVersion(part); };
+  box.ontoggle = () => { S.fixOpen = box.open ? fixKey(part) : null; if (box.open) { if (fresh()) paintFixes(part); else loadFixes(part); } };
+  if (box.open) { if (fresh()) wireFixRows(part); else loadFixes(part); }
+}
+function wireFixRows(part) {
+  const mine = fixMine(part), body = $('fixBody');
+  if (!body) return;
+  body.querySelectorAll('[data-fix-tick]').forEach((t) => { t.onchange = () => {
+    const id = t.dataset.fixTick;
+    mine.untick = mine.untick.filter((x) => x !== id).concat(t.checked ? [] : [id]);
+  }; });
+  body.querySelectorAll('[data-fix-pick]').forEach((t) => { t.onchange = () => { mine.pick[t.dataset.fixPick] = +t.value; paintFixes(part); }; });
+  body.querySelectorAll('[data-fix-word]').forEach((b) => { b.onclick = () => { mine.editing = b.dataset.fixWord; paintFixes(part); }; });
+  body.querySelectorAll('[data-fix-words]').forEach((i) => {
+    i.focus(); i.select();                                  // typing replaces it
+    const done = () => {
+      const r = (S.fixes[fixKey(part)].rows || []).find((x) => fixRowKey(x) === i.dataset.fixWords);
+      const was = r ? (r.choices[mine.pick[i.dataset.fixWords] || 0] || r.choices[0]).fix : '';
+      const v = i.value.trim();
+      if (v && v !== was) mine.words[i.dataset.fixWords] = v; else delete mine.words[i.dataset.fixWords];   // as it was: measured again
+      mine.editing = null; paintFixes(part);
+    };
+    i.onkeydown = (e) => { if (e.key === 'Enter') done(); if (e.key === 'Escape') { mine.editing = null; paintFixes(part); } };
+    i.onblur = done;
+  });
+  body.querySelectorAll('[data-fix-own-tick]').forEach((t) => { t.onchange = () => { mine.own[+t.dataset.fixOwnTick].off = !t.checked; }; });
+  body.querySelectorAll('[data-fix-own-del]').forEach((b) => { b.onclick = () => { mine.own.splice(+b.dataset.fixOwnDel, 1); paintFixes(part); }; });
+  const add = body.querySelector('[data-fix-add]'), go = body.querySelector('[data-fix-add-go]');
+  const put = () => { const v = add.value.trim(); if (v) { mine.own.push({ fix: v }); paintFixes(part); } };
+  if (go) go.onclick = put;
+  if (add) add.onkeydown = (e) => { if (e.key === 'Enter') put(); };
 }
 // each goes through what its panel already does: the chat, the carve, the lightening, or taking a step
 // a carve or Lighten of this version that's already finished, as the server has it now
@@ -2169,7 +2282,7 @@ function cardsView(groups) {
     const c = a ? a.cards.find((x) => x.key === k) : null;
     return `<section class="qcard q-${c ? c.status : 'info'}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
       <div class="qhead" title="${S.scope ? 'show this in 3D' : ''}"><span class="qmark">${c ? QMARK[c.status] : '·'}</span><h3>${q}</h3></div>
-      <div class="qlines" id="q-${k}">${qlines(c)}</div>
+      <div class="qlines" id="q-${k}">${cardLines(k, c)}</div>
       ${k === 'what' && picturePart() ? '<div class="qlinks"><button class="btn" data-picture="1">🦖 Put a picture on it</button></div>' : ''}
       <details class="numbers" data-card="${k}" ${numbersOpen(k) ? 'open' : ''}><summary>the numbers</summary>
         ${groups[k] || '<div class="empty">Nothing here yet.</div>'}</details>
@@ -2348,7 +2461,7 @@ async function loadAnswers() {
     if (!card) continue;
     card.className = `qcard q-${c.status}`;
     card.querySelector('.qmark').textContent = QMARK[c.status];
-    card.querySelector('.qlines').innerHTML = qlines(c);
+    card.querySelector('.qlines').innerHTML = cardLines(c.key, c);
   }
   wireCards();
   // a print time still being worked out (#97): ask again until it's in, while the same cards are showing
@@ -2357,6 +2470,7 @@ async function loadAnswers() {
   }
 }
 function wireCards() {
+  wireFixes();                                            // Things to fix, under Will it work? (#300)
   document.querySelectorAll('#inspector details.numbers').forEach((dt) => { dt.ontoggle = () => keepNumbersOpen(dt.dataset.card, dt.open); });
   document.querySelectorAll('#inspector .qcard .qhead').forEach((h) => { h.onclick = () => focusCard(h.parentElement.dataset.card); });
   document.querySelectorAll('#inspector .qline[data-goto]').forEach((ln) => { ln.onclick = () => goTo(ln.dataset.goto); });
