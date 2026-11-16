@@ -191,10 +191,16 @@ def _lever(mids: list[np.ndarray], at: np.ndarray, share: str, spans: Optional[l
         groups.setdefault(axis, []).append(i)
     out = [0.0] * len(mids)
     each = 1.0 / len(groups)
+    short = bool(spans) and any(sp[0] < MOST_OF_THE_WAY * sp[1] for sp in spans)
     if len(groups) > 1:
         if any(len(idx) > 2 for idx in groups.values()):
             raise NotChain(UNEVEN)
-        if spans and any(sp[0] < MOST_OF_THE_WAY * sp[1] for sp in spans):
+        if short:
+            raise NotChain(SHORT)
+    elif short and len(mids) == 2:          # two posts: nothing stops it turning about their line, off it (#311)
+        line = (mids[1] - mids[0])[:2]
+        off = abs(float(np.cross(line / (np.linalg.norm(line) or 1.0), (at - mids[0])[:2])))
+        if off > 1.0:
             raise NotChain(SHORT)
     for axis, idx in groups.items():
         xs = [float(mids[i][axis]) for i in idx]
