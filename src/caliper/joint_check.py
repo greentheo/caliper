@@ -108,6 +108,8 @@ DEEPEST = 3
 NOT_CHAIN = "its load path isn't a simple chain"
 #: A splayed part whose feet nothing ties: their thrust has nowhere to go but the floor's grip (#311 review).
 NO_TIE = "nothing ties its splayed sides"
+#: Three or more supports in a row under one piece: which carries what isn't settled by statics alone (#311).
+IN_A_ROW = "it rests on three or more supports in a row"
 #: A side leaning more than this off vertical is splayed: its foot pushes out.
 SPLAY_DEG = 2.0
 
@@ -159,7 +161,9 @@ def loaded_piece(pieces: list[dict], load: dict) -> Optional[str]:
 
 def _lever(mids: list[np.ndarray], at: np.ndarray, share: str) -> list[float]:
     """Each supporting joint's share of a load at ``at``: grouped by the way across the piece they lie (its two horizontal
-    axes), a group's share by the lever rule between two on either side of the load, equally otherwise."""
+    axes), a group's share by statics. Two in a group share it by the lever rule, a load past them included: the near one
+    then carries more than all of it and the far one is lifted, a negative share, so its joint takes a pull (#311: it read
+    half each). Three or more in a row are statically indeterminate: not checked by hand, never a third each."""
     if len(mids) == 1:
         return [1.0]
     d = [m - at for m in mids]
@@ -169,15 +173,17 @@ def _lever(mids: list[np.ndarray], at: np.ndarray, share: str) -> list[float]:
     out = [0.0] * len(mids)
     each = 1.0 / len(groups)
     for axis, idx in groups.items():
-        lo = [i for i in idx if d[i][axis] < 0]
-        hi = [i for i in idx if d[i][axis] >= 0]
-        if len(idx) == 2 and len(lo) == 1 and len(hi) == 1:
-            a, b = abs(d[lo[0]][axis]), abs(d[hi[0]][axis])
-            span = a + b or 1.0
-            out[lo[0]], out[hi[0]] = each * b / span, each * a / span     # the nearer one carries more
-        else:
+        xs = [float(mids[i][axis]) for i in idx]
+        if len(idx) == 1:
+            out[idx[0]] = each
+        elif len({round(x, 3) for x in xs}) == 1:          # side by side, not along it: equal
             for i in idx:
                 out[i] = each / len(idx)
+        elif len(idx) == 2:
+            (a, b), x = xs, float(at[axis])
+            out[idx[0]], out[idx[1]] = each * (b - x) / (b - a), each * (x - a) / (b - a)
+        else:
+            raise NotChain(IN_A_ROW)
     return out
 
 

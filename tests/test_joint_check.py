@@ -719,3 +719,36 @@ def test_the_tie_nearest_the_foot_takes_the_thrust():
     rail = [r for r in got["rows"] if "rail" in r["pieces"] and "step" not in r["pieces"]]
     assert len(stringer) == 2 and all(r["mode"] for r in stringer), stringer
     assert rail and all(r["mode"] is None for r in rail), rail                       # carries none of it
+
+
+# --- #311: the lever rule past its supports, and three in a row -------------------------------------------------------------
+@pytest.mark.parametrize("x,shares", [(50.0, [0.5, 0.5]), (95.0, [0.05, 0.95]), (100.0, [0.0, 1.0]),
+                                      (101.0, [-0.01, 1.01]), (110.0, [-0.1, 1.1])])
+def test_two_supports_share_a_load_by_statics_overhang_and_all(x, shares):
+    """Past its supports, the near one carries more than all of it and the far one is lifted (#311: it read 0.5 / 0.5)."""
+    got = JC._lever([np.array([0.0, 0.0, 0.0]), np.array([100.0, 0.0, 0.0])], np.array([x, 0.0, 0.0]), "pairs")
+    assert got == pytest.approx(shares, abs=1e-9)
+
+
+def test_three_supports_in_a_row_aren_t_checked_by_hand():
+    mids = [np.array([0.0, 0.0, 0.0]), np.array([100.0, 0.0, 0.0]), np.array([200.0, 0.0, 0.0])]
+    with pytest.raises(JC.NotChain) as e:
+        JC._lever(mids, np.array([190.0, 0.0, 0.0]), "pairs")
+    assert e.value.why == "it rests on three or more supports in a row"
+
+
+def test_a_load_past_a_splayed_top_lifts_the_far_side():
+    """The 20° stool loaded just past its right side's top: the right top bears more than the whole load; the left one is
+    lifted, a pull out of its edge, never read as pressed (#311: both read 250 lb at 0.98 of the span)."""
+    import tempfile
+    from pathlib import Path
+
+    store = _store(Path(tempfile.mkdtemp()), STEEP, "stool")
+    su = JC.setup(store, "stool")
+    right = next(j for j in su["joints"] if sorted(j["pieces"]) == ["right side", "step"])
+    load = _load(store)
+    centre = (np.asarray(load["lo"]) + np.asarray(load["hi"])) / 2.0
+    got = _check_at(STEEP, float(right["mid"][0]) + 2.0 - float(centre[0]))
+    rows = {tuple(sorted(r["pieces"])): r for r in got["rows"]}
+    assert rows[("right side", "step")]["demand_lb"]["bearing"] > 500.0
+    assert rows[("left side", "step")]["mode"] == "withdrawal" and "bearing" not in rows[("left side", "step")]["demand_lb"]
