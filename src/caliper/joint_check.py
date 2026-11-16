@@ -59,7 +59,13 @@ def setup(store, pid: str) -> dict:
         stick, sheet = ((a_, b_) if a_["kind"] == "stick" and b_["kind"] == "sheet" else
                         (b_, a_) if b_["kind"] == "stick" and a_["kind"] == "sheet" else (None, None))
         if stick is not None:                     # a post under a top, an apron's end on a leg (#316)
-            got = _post(stick, sheet, tol) or _apron(sheet, stick, tol)
+            got = _post(stick, sheet, tol, mesh) or _apron(sheet, stick, tol)
+            if got is not None and got.get("mismatch"):   # declared one way, built the other (#321): not checked
+                out.append({**base, "unplaced": got["mismatch"], "mismatch": True})
+                continue
+            if got is not None and "short" in got:       # short in both: no joint, said as that, not unchecked
+                out.append({**base, "short": got["short"], "said": got["said"]})
+                continue
             if got is not None:
                 out.append({**base, **got, "screws": int(s.get("n") or 0)})
                 continue
@@ -116,10 +122,30 @@ def _stick_axis(stick: dict) -> tuple:
 BEARS_MM = 0.5
 
 
-def _post(stick: dict, sheet: dict, tol: float) -> Optional[dict]:
-    """A stick standing square to a sheet with an end on its face, inside its outline: a post bearing into a top (#316).
+def _built_gap(mesh, end: np.ndarray, into: np.ndarray, face_at: float) -> Optional[float]:
+    """How far short of a top's face the built solid's leg stops, mm, measured on the mesh's faces (#321): a ray from
+    5 mm inside the leg, along it toward the top. Where the solid runs on past the face, it touches: 0. None where the
+    ray finds no way out of the solid (it isn't inside it)."""
+    start = np.asarray(end, float) - into * 5.0
+    try:
+        locs, _, _ = mesh.ray.intersects_location([start], [into])
+    except Exception:  # noqa: BLE001 — no ray test here: not measured, said by the caller
+        return None
+    ahead = sorted(float((loc - start) @ into) for loc in locs if float((loc - start) @ into) > 1e-6)
+    if not ahead:
+        return None
+    face = 5.0 + face_at                                 # the top's face, from the ray's start
+    return max(0.0, face - ahead[0])
+
+
+def _post(stick: dict, sheet: dict, tol: float, mesh=None) -> Optional[dict]:
+    """A stick standing square to a sheet with an end at its face, inside its outline: a post bearing into a top (#316).
     ``normal`` from the post into the sheet; its area the post's end; its span the post's own width (a post is short
-    against any top), so a top on posts shares by the rigid-top rule."""
+    against any top), so a top on posts shares by the rigid-top rule.
+
+    It bears only where its declared end is within :data:`BEARS_MM` of the face **and** the built solid shows it touching
+    (#321: either alone read a 3 mm gap one way or the other). Short in both: ``{"short": mm}``, said as that, not a joint.
+    Where they disagree: ``{"mismatch": why}``, and the case isn't checked by hand."""
     from . import marks
     from .consistency import _inside2d
 
@@ -129,13 +155,29 @@ def _post(stick: dict, sheet: dict, tol: float) -> Optional[dict]:
         return None
     for end, inward in ((a, ax), (b, -ax)):             # inward: from that end along the post
         d = float((end - o) @ N)                         # how far the end sits through the sheet's thickness
-        near = min(tol, BEARS_MM)                        # both declared exactly: touching, or it doesn't bear (#321)
-        on = (abs(d) <= near and float(inward @ N) < 0) or (abs(d - t) <= near and float(inward @ N) > 0)
-        if not on or not _inside2d(np.array([[float((end - o) @ u), float((end - o) @ v)]]), flat)[0]:
+        below = float(inward @ N) > 0                    # the post on the side the thickness goes to
+        gap = d - t if below else -d                     # short of the face it would bear on: positive
+        if abs(gap) > max(tol, BEARS_MM) or not _inside2d(
+                np.array([[float((end - o) @ u), float((end - o) @ v)]]), flat)[0]:
             continue
+        into = -inward                                    # from the post into the sheet
+        declared = abs(gap) <= BEARS_MM
+        built_gap = _built_gap(mesh, end, into, max(gap, 0.0)) if mesh is not None else (0.0 if declared else gap)
+        built = built_gap is not None and built_gap <= BEARS_MM
+        name = stick["key"]
+        if declared != built:
+            said = (f"the {name} is declared flush with the {sheet['key']} but built {built_gap:.1f} mm short"
+                    if declared and built_gap is not None else
+                    f"the {name} is declared flush with the {sheet['key']} but its built end couldn't be measured"
+                    if declared else
+                    f"the {name} is declared {gap:.1f} mm short of the {sheet['key']} but built flush")
+            return {"mismatch": said.replace(".0 mm", " mm")}
+        if not declared:
+            return {"short": gap, "said": f"the {name} stops {gap:.1f} mm short of the {sheet['key']}: it doesn't bear"
+                    .replace(".0 mm", " mm")}
         width = 2.0 * float(stick["half"])
         area = float(stick["volume"]) / L               # its section, as consistency weighed it
-        return {"edge": stick["key"], "face": sheet["key"], "post": True, "out": -inward, "normal": -inward,
+        return {"edge": stick["key"], "face": sheet["key"], "post": True, "out": into, "normal": into,
                 "sin": 0.0, "edge_t": width, "along": u, "length_mm": width, "area_mm2": area, "mid": end,
                 "face_t": t}
     return None
@@ -497,7 +539,7 @@ def demands(joints: list[dict], pieces: list[dict], load: dict, held: list[dict]
         raise NotChain(NOT_CHAIN)
     by = {pc["key"]: pc for pc in pieces}
     splayed = {k: s for k in ground if k in by for s in [_splay(by[k])] if s is not None}
-    placed = [j for j in joints if "unplaced" not in j]
+    placed = [j for j in joints if "unplaced" not in j and j.get("short") is None]    # a short leg is no joint (#321)
     force = np.asarray(load["force"], float) * float(load["factor"])
     at = (np.asarray(load["lo"], float) + np.asarray(load["hi"], float)) / 2.0
     out: dict = {}
@@ -667,6 +709,9 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
     ``safety`` is the joint's capacity over its share of the load × factor, against the run's ``min_safety`` as the wood's
     is (Theo: "the same safety factor that the rest of the stool is checked at")."""
     joints = setup_["joints"]
+    odd = [j["unplaced"] for j in joints if j.get("mismatch")]
+    if odd:                                       # a leg declared one way, built another: no number from either (#321)
+        return {"rows": [], "governing": None, "unchecked": [odd[0]], "chain": False, "n": len(joints)}
     unchecked = [f"the joint between the {j['pieces'][0]} and the {j['pieces'][1]} ({j['unplaced']})"
                  for j in joints if "unplaced" in j]
     unchecked += [f"the joint between the {j['pieces'][0]} and the {j['pieces'][1]} (a {j['kind']})"
@@ -697,6 +742,10 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
                         {"pieces": j["pieces"], "between": f"the {j['piece']} and the {j['host']}", "mode": None,
                          "safety": None, "holds": True, "said": "carries none of this load"})
             hosts.setdefault(j["host"], j)
+            continue
+        if j.get("short") is not None:                        # a leg short of the top: no joint, said (#321)
+            rows.append({"pieces": j["pieces"], "between": f"the {j['pieces'][0]} and the {j['pieces'][1]}", "mode": None,
+                         "safety": None, "holds": True, "said": j["said"]})
             continue
         if "unplaced" in j or j.get("kind") not in EDGE_KINDS:
             continue

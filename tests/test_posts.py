@@ -223,27 +223,56 @@ def test_the_legs_reach_the_top_so_it_rests_on_them_and_a_lifted_leg_is_named(st
     assert -fr[2] == pytest.approx(shares[1] * 500 * LBF, rel=1e-6) and shares.let_go == (LEGS.index("back left leg"),)
 
 
-def test_legs_that_stop_short_of_the_top_put_it_on_its_aprons(tmp_path):
-    """The foreman's (b): 3 mm short, the legs don't bear on the top, so it rests on its aprons, then the legs, and an
-    apron's end on a leg governs: one #8 screw with 0.5 in in the apron's edge, 90 lb, at 0.94."""
+BUILT = "out[n] = ((x, y, 0), (x + L, y + L, h - t))"
+DECLARED = '"b": (x + L / 2, y + L / 2, h - t)}'
+
+
+def _gapped(tmp_path, built=0.0, declared=0.0):
+    """The stool with its legs short of the top by ``built`` mm in its solid and ``declared`` mm in its pieces."""
     pytest.importorskip("cadquery")
     from caliper.design import DesignStore
 
-    short = LEGGED.replace("out[n] = ((x, y, 0), (x + L, y + L, h - t))", "out[n] = ((x, y, 0), (x + L, y + L, h - t - 3))") \
-        .replace('"b": (x + L / 2, y + L / 2, h - t)}', '"b": (x + L / 2, y + L / 2, h - t - 3)}')
-    assert short != LEGGED and "h - t - 3" in short
-    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
-    store.write_part("stool", short, intent="a four-legged stool with aprons")
+    src = LEGGED.replace(BUILT, BUILT.replace("h - t)", f"h - t - {built})")) \
+        .replace(DECLARED, DECLARED.replace("h - t)", f"h - t - {declared})"))
+    store = DesignStore.create("a stool", base=str(tmp_path / f"d{built}-{declared}" / "designs"))
+    store.write_part("stool", src, intent="a four-legged stool with aprons")
     su = JC.setup(store, "stool")
-    assert not [j for j in su["joints"] if j.get("post")]                       # no leg's end bears on the top
     mesh = store.part_geometry("stool").require_mesh()
     held = [{"name": "the floor", "lo": list(mesh.bounds[0] - 1),
              "hi": [mesh.bounds[1][0] + 1, mesh.bounds[1][1] + 1, mesh.bounds[0][2] + 0.5]}]
-    got = JC.check(su, _cases(store)[0], held, 2.0)
+    return store, su, held, JC.check(su, _cases(store)[0], held, 2.0)
+
+
+def test_legs_that_stop_short_of_the_top_put_it_on_its_aprons(tmp_path):
+    """The foreman's (b): 3 mm short, built and declared, the legs don't bear on the top, so it rests on its aprons,
+    then the legs, and an apron's end on a leg governs: one #8 screw with 0.5 in in the apron's edge, 90 lb, at 0.94.
+    Each leg's top says it stops short (#321 re-check), never as a joint not checked."""
+    store, su, held, got = _gapped(tmp_path, built=3, declared=3)
+    assert not [j for j in su["joints"] if j.get("post")]                       # no leg's end bears on the top
     assert got["path"] == "the legs stop short of the top: it rests on its aprons, then the legs"
     gov = got["governing"]
     assert "apron" in " ".join(gov["pieces"]) and gov["mode"] == "shear" and gov["safety"] == pytest.approx(0.94, abs=0.01)
     assert gov["capacity_lb"]["shear"] == pytest.approx(90.0, abs=0.5)
+    short = [r["said"] for r in got["rows"] if "short of the top" in r["said"]]
+    assert sorted(short) == sorted(f"the {leg} stops 3 mm short of the top: it doesn't bear" for leg in LEGS)
+    assert not [u for u in got["unchecked"] if "leg" in u and "top" in u], got["unchecked"]
+
+
+def test_a_leg_0_4_mm_short_still_bears(tmp_path):
+    """Within BEARS_MM (0.5) in its pieces and in its solid: it bears, the legs' path."""
+    _, su, _, got = _gapped(tmp_path, built=0.4, declared=0.4)
+    assert len([j for j in su["joints"] if j.get("post")]) == 4
+    assert got["path"].startswith("the legs reach the top")
+
+
+@pytest.mark.parametrize("built, declared, said", [
+    (3, 0, "the back left leg is declared flush with the top but built 3 mm short"),
+    (0, 1, "the back left leg is declared 1 mm short of the top but built flush")])
+def test_a_leg_declared_one_way_and_built_the_other_isn_t_checked_by_hand(tmp_path, built, declared, said):
+    """The reviewer's two: built 3 mm short but declared flush read the legs bearing at 2.93 (a false green); flush but
+    declared 1 mm short read the aprons at 0.94 (a false red). Neither side's number: not checked by hand, in words."""
+    _, _, _, got = _gapped(tmp_path, built=built, declared=declared)
+    assert not got["chain"] and got["rows"] == [] and got["unchecked"] == [said], got
 
 
 def test_each_leg_is_a_column(stool):
