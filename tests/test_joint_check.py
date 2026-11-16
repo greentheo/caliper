@@ -297,7 +297,8 @@ def test_a_path_it_can_t_follow_keeps_the_note_and_never_a_tick_or_a_cross_from_
     _, rec = studied(BOX_STOOL)
     (c,) = rec["cases"]
     assert c["governs"] != "joint" and c["joints"]["chain"] is False
-    assert rec["joints_unchecked"] == [JC.NOT_CHAIN]
+    assert rec["joints_unchained"] == [JC.NOT_CHAIN] and rec["joints_unchecked"] == []   # a reason, never a joint's name
+    assert rec["wood_joints"] == 8                                                       # all its joints, unchecked
 
 
 def test_a_lightening_step_s_judged_number_takes_the_joint_in():
@@ -387,3 +388,260 @@ def test_a_joint_loaded_two_ways_gives_by_the_weaker_of_them(sides):
     row = next(r for r in JC.check(su, load, held, 2.0)["rows"] if sorted(r["pieces"]) == ["left side", "step"])
     assert set(row["demand_lb"]) == {"bearing", "shear"}
     assert row["mode"] == "shear" and row["safety"] < row["capacity_lb"]["bearing"] / row["demand_lb"]["bearing"]
+
+
+# --- #311 review --------------------------------------------------------------------------------------------------------
+#: A step on splayed sides, 10° in toward the top, tied at the foot by a stringer between them.
+SPLAYED = '''import math
+
+import cadquery as cq
+
+PARAMS = {"w": 406.4, "d": 300.0, "h": 400.0, "splay": 10.0, "z0": 30.0, "z1": 130.0}
+BUILD = {"t": 19.05}
+TIED = True
+
+
+def _k(p):
+    return math.tan(math.radians(p["splay"]))
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    t, w, d, h, k, z0, z1 = BUILD["t"], p["w"], p["d"], p["h"], _k(p), p["z0"], p["z1"]
+    left = cq.Workplane("XZ").polyline([(0, 0), (t, 0), (t + h * k, h), (h * k, h)]).close().extrude(-d)
+    right = cq.Workplane("XZ").polyline([(w, 0), (w - t, 0), (w - t - h * k, h), (w - h * k, h)]).close().extrude(-d)
+    step = cq.Workplane().box(w - 2 * h * k, d, t, centered=False).translate((h * k, 0, h))
+    out = left.union(right).union(step)
+    if TIED:
+        y0 = d / 2 - t / 2
+        tie = cq.Workplane("XZ", origin=(0, y0, 0)).polyline(
+            [(t + z0 * k, z0), (w - t - z0 * k, z0), (w - t - z1 * k, z1), (t + z1 * k, z1)]).close().extrude(-t)
+        out = out.union(tie)
+    return out
+
+
+def construction(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    t, w, d, h, k, z0, z1 = BUILD["t"], p["w"], p["d"], p["h"], _k(p), p["z0"], p["z1"]
+    face = {"left side": [(0, 0, 0), (0, d, 0), (h * k, d, h), (h * k, 0, h)],
+            "right side": [(w, 0, 0), (w, d, 0), (w - h * k, d, h), (w - h * k, 0, h)],
+            "step": [(h * k, 0, h + t), (w - h * k, 0, h + t), (w - h * k, d, h + t), (h * k, d, h + t)]}
+    if TIED:
+        y0 = d / 2 - t / 2
+        face["stringer"] = [(t + z0 * k, y0, z0), (w - t - z0 * k, y0, z0), (w - t - z1 * k, y0, z1), (t + z1 * k, y0, z1)]
+    return [{"name": k_, "kind": "sheet", "material": "plywood", "thickness": t, "outline": v} for k_, v in face.items()]
+
+
+def loads(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    w, d, h, t = p["w"], p["d"], p["h"], BUILD["t"]
+    return [{"name": "standing on the step", "lb": 250, "factor": 2.0,
+             "lo": (w / 2 - 50, d / 2 - 50, h + t - 2), "hi": (w / 2 + 50, d / 2 + 50, h + t)}]
+'''
+UNTIED = SPLAYED.replace("TIED = True", "TIED = False")
+
+#: A shelf hung below a top from two hangers, screwed through the top and the shelf into the hangers' edges: a load on the
+#: shelf pulls them out of their edges, and nothing bears it. A genuine withdrawal.
+HUNG = '''import cadquery as cq
+
+PARAMS = {"w": 406.4, "d": 300.0, "h": 400.0, "s": 200.0, "a": 60.0}
+BUILD = {"t": 19.05}
+
+
+def _boxes(p, t):
+    w, d, h, s, a = p["w"], p["d"], p["h"], p["s"], p["a"]
+    return {"left side": ((0, 0, 0), (t, d, h)), "right side": ((w - t, 0, 0), (w, d, h)),
+            "top": ((0, 0, h), (w, d, h + t)),
+            "front hanger": ((a, 60, s + t), (w - a, 60 + t, h)), "back hanger": ((a, d - 60 - t, s + t), (w - a, d - 60, h)),
+            "shelf": ((a, 30, s), (w - a, d - 30, s + t))}
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    out = None
+    for lo, hi in _boxes(p, BUILD["t"]).values():
+        b = cq.Workplane().box(*(b - a for a, b in zip(lo, hi)), centered=False).translate(lo)
+        out = b if out is None else out.union(b)
+    return out
+
+
+def construction(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    t, w, d, h, s, a = BUILD["t"], p["w"], p["d"], p["h"], p["s"], p["a"]
+    face = {"left side": [(0, 0, 0), (0, d, 0), (0, d, h), (0, 0, h)],
+            "right side": [(w, 0, 0), (w, d, 0), (w, d, h), (w, 0, h)],
+            "top": [(0, 0, h + t), (w, 0, h + t), (w, d, h + t), (0, d, h + t)],
+            "front hanger": [(a, 60, s + t), (w - a, 60, s + t), (w - a, 60, h), (a, 60, h)],
+            "back hanger": [(a, d - 60, s + t), (w - a, d - 60, s + t), (w - a, d - 60, h), (a, d - 60, h)],
+            "shelf": [(a, 30, s), (w - a, 30, s), (w - a, d - 30, s), (a, d - 30, s)]}
+    return [{"name": k, "kind": "sheet", "material": "plywood", "thickness": t, "outline": v} for k, v in face.items()]
+
+
+def loads(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    w, d, s, t = p["w"], p["d"], p["s"], BUILD["t"]
+    return [{"name": "a box of books on the shelf", "lb": 40, "factor": 2.0,
+             "lo": (w / 2 - 50, d / 2 - 50, s + t - 2), "hi": (w / 2 + 50, d / 2 + 50, s + t)}]
+'''
+
+
+def _check(script, force=None, share=JC.SHARE, tmp=None):
+    import tempfile
+
+    store = _store(__import__("pathlib").Path(tmp or tempfile.mkdtemp()), script, "stool")
+    pieces, tol, held = _pieces(store)
+    load = _load(store)
+    if force is not None:
+        load = {**load, "force": tuple(force)}
+    return JC.check(JC.setup(store, "stool"), load, held, 2.0, share)
+
+
+def test_a_push_along_a_member_bears_where_it_pushes_never_pulls_the_other_end(sides):
+    """#311 review item 1: 1% sideways read 0.0x, the rail's far end pulled out of its edge. It bears on the side it pushes."""
+    store, _ = sides
+    down = _check(STEP_ON_SIDES)
+    f = np.asarray(_load(store)["force"], float)
+    for share in (0.01, 0.10):
+        tilted = _check(STEP_ON_SIDES, force=f + np.array([share * abs(f[2]), 0.0, 0.0]))
+        assert tilted["governing"]["safety"] == pytest.approx(down["governing"]["safety"], rel=0.12), (share, tilted["governing"])
+        assert all(r["mode"] != "withdrawal" for r in tilted["rows"]), [r for r in tilted["rows"] if r["mode"] == "withdrawal"]
+    along = _check(STEP_ON_SIDES, force=f + np.array([0.10 * abs(f[2]), 0.0, 0.0]))
+    rail_end = next(r for r in along["rows"] if sorted(r["pieces"]) == ["front rail", "right side"])
+    assert "bearing" in rail_end["demand_lb"]                                          # the rail bears on the side it pushes
+
+
+def test_a_shelf_hung_from_screws_in_edges_still_reads_a_cross():
+    got = _check(HUNG)
+    g = got["governing"]
+    assert g["mode"] == "withdrawal" and g["safety"] == 0 and not g["holds"] and "pulled out of the" in g["said"], g
+
+
+def test_a_splayed_side_s_foot_thrust_goes_into_its_tie():
+    """#311 review item 2: load × tan(splay) at each foot, carried by the tie's joints."""
+    got = _check(SPLAYED)
+    ties = [r for r in got["rows"] if "stringer" in r["pieces"]]
+    assert len(ties) == 2 and all(r["mode"] is not None for r in ties), ties          # never "carries none"
+    load_lb = 250 * 2.0
+    thrust = load_lb / 2 * np.tan(np.radians(10.0))                                   # about 44 lb a foot
+    for r in ties:
+        assert np.hypot(*r["demand_lb"].values()) == pytest.approx(thrust, rel=0.05), r    # its parts across the slant
+        assert r["mode"] == "withdrawal" and r["safety"] == 0                         # a butt tie, pulled from its edge
+    top = next(r for r in got["rows"] if sorted(r["pieces"]) == ["left side", "step"])
+    # down the side's line: its top edge takes the load along it, all in bearing (250 / cos 10°), none across it
+    assert top["demand_lb"] == {"bearing": pytest.approx(load_lb / 2 / np.cos(np.radians(10.0)), rel=0.01)}, top
+
+
+def test_a_splayed_part_with_nothing_tying_its_feet_isn_t_checked_by_hand():
+    got = _check(UNTIED)
+    assert got["chain"] is False and got["unchecked"] == ["nothing ties its splayed sides"] and got["governing"] is None
+
+
+@pytest.mark.parametrize("deg,lb", [(0.0, 180.0), (10.0, 180.0), (30.0, 135.0)])
+def test_a_screw_into_a_bevel_is_credited_the_thread_that_stays_in_the_wood(deg, lb):
+    """#311 review item 3: the 2 in screw comes out of a 30° bevel's edge piece after 3/4 in; the book says so too."""
+    import math
+
+    from caliper import marks
+
+    sin = math.sin(math.radians(deg))
+    j = {"edge": "rail", "face": "side", "fix": ["screws"], "screws": 1, "area_mm2": 1e4, "face_t": 19.05, "edge_t": 19.05,
+         "sin": sin}
+    assert JC.capacity(j, 50.8)["shear"] / JC.LBF == pytest.approx(lb, rel=0.01)
+    assert marks.thread_in(19.05, 19.05, sin, 50.8) == pytest.approx(min(31.75, 9.525 / sin) if sin else 31.75)
+    assert marks.comes_out(19.05, 19.05, sin, 50.8) == (deg == 30.0)                 # one rule for the book and the check
+
+
+def test_holed_buckling_lets_a_joint_govern_when_its_walls_aren_t_checked(monkeypatch):
+    """#311 review item 5: buckling governed, the holes leave no wall checked, and the joint is lower than what it took
+    over from."""
+    from caliper import lighten
+
+    monkeypatch.setattr(lighten, "narrowest", lambda *a, **k: None)
+    case = {"lb": 250, "factor": 2.0, "governs": "buckling", "over": "fea", "safety": 2.5,
+            "fea": {"safety": 4.0}, "buckling": [{"piece": "left", "done": True, "safety": 2.5, "load_n": 1000.0}],
+            "joints": {"governing": {"safety": 1.6, "between": "the front rail and the left side"}}}
+    got = lighten.holed_buckling(case, [{"name": "left"}], {"left": [[[0, 0, 0]]]}, {"force": (0, 0, -1000)}, 2.0)
+    assert got["governs"] == "joint" and got["safety"] == 1.6 and not got["holds"]
+
+
+# --- #311 review item 4: the words, case by case ------------------------------------------------------------------------
+def _brace_words(c, run=None):
+    from caliper import answers, verdicts
+
+    b = verdicts.wood_brace(run or {"wood_joints": 99}, c)
+    return b, (verdicts.brace_why(b) if b else None), (answers.joint_said(b, 2.0) if b else None)
+
+
+def test_a_case_whose_path_can_t_be_followed_counts_all_its_joints_and_says_why_once():
+    c = {"joints": {"n": 8, "chain": False, "rows": [], "governing": None, "unchecked": [JC.NOT_CHAIN]}}
+    b, badge, line = _brace_words(c)
+    assert badge == "8 joints not checked by hand", badge
+    assert line == "not checked by hand: its load path isn't a simple chain", line
+    assert line.count("simple chain") == 1
+
+
+def test_a_part_with_no_joint_it_can_place_keeps_today_s_words_exactly():
+    c = {"joints": {"n": 8, "chain": True, "rows": [], "governing": None,
+                    "unchecked": [f"the joint between the a{i} and the b{i} (a dado)" for i in range(8)]}}
+    b, badge, line = _brace_words(c)
+    assert badge == "joints not checked" and line == "the check takes its 8 joints as solid wood"
+
+
+def test_the_badge_counts_what_that_case_left_unchecked():
+    c = {"joints": {"n": 10, "chain": True, "rows": [{"safety": 3.3}], "governing": {"safety": 3.3},
+                    "unchecked": ["the joint between the stringer and the left side (a notch)"]}}
+    b, badge, line = _brace_words(c, {"wood_joints": 2, "joints_unchecked": ["x", "y"]})
+    assert badge == "1 joint not checked by hand"                                    # this case's, not the run's 2
+    assert line == "the joint between the stringer and the left side (a notch) isn't checked by hand"
+    assert _brace_words({"joints": {"n": 4, "chain": True, "rows": [{"safety": 3.0}], "unchecked": []}})[0] is None
+
+
+def test_the_station_bar_names_a_joint_that_decides_it():
+    import os
+
+    src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
+    i = src.index("    const decided = c.governs === 'joint'")
+    assert "`the joint between ${esc(c.joints.governing.between)}: ${esc(c.joints.governing.said)}`" in src[i:i + 300]
+
+
+def test_the_page_says_a_path_it_can_t_follow_once():
+    out = _page("""out = jointsLine({verdict: {joints: true, brace: {wood: true, joints_n: 8,
+      unchained: "its load path isn't a simple chain"}}}, {min_safety: 2});""")
+    assert out.count("simple chain") == 1 and "Joints not checked by hand:</b> its load path isn't a simple chain." in out, out
+
+
+RUN = {"id": "r1", "part": "stool", "version": 1, "min_safety": 2.0, "safety": 3.1, "spacing_mm": 2.0,
+       "thinnest_mm": 19.05, "across": 9.5, "finer": True, "wood_joints": 3,
+       "joints_unchecked": ["the joint between the a and the b (a dado)", "the joint between the c and the d (a dado)",
+                            "the joint between the e and the f (a dado)"]}
+
+
+def test_a_case_s_verdict_says_its_own_unchecked_joints_not_the_run_s():
+    from caliper import verdicts
+
+    c = {"name": "an adult", "lb": 200, "factor": 2.0, "safety": 3.1, "governs": "fea", "holds": True,
+         "joints": {"n": 10, "chain": True, "rows": [{"safety": 4.0}], "governing": {"safety": 4.0},
+                    "unchecked": ["the joint between the a and the b (a dado)"]}}
+    assert verdicts.case(RUN, c)["why"] == "1 joint not checked by hand"
+    clean = {**c, "joints": {**c["joints"], "unchecked": []}}
+    assert not verdicts.case(RUN, clean).get("joints")                                # every joint of it checked: no cap
+
+
+def test_a_lightening_step_reads_its_cases_joints():
+    from caliper import verdicts
+
+    st = {"index": 3, "safety": 3.0, "holds": True, "removed": 0.2, "saved_lb": 1.0, "verdict": None,
+          "cases": [{"safety": 3.0, "joints": {"n": 10, "chain": True, "rows": [{"safety": 4.0}], "unchecked": []}}]}
+    assert not verdicts.lighten_step(st, None, RUN).get("joints")                    # its cases checked every joint
+    st["cases"][0]["joints"]["unchecked"] = ["the joint between the a and the b (a dado)"]
+    assert verdicts.lighten_step(st, None, RUN)["why"] == "1 joint not checked by hand"
+
+
+def test_a_push_away_from_one_joint_slides_on_another_before_it_pulls():
+    """A piece sitting on A, its other side butted against B's face, pushed away from B: A takes it across (shear); B,
+    which it would only pull away from, takes none of it."""
+    A = {"pieces": ["A", "P"], "edge": "P", "face": "A", "out": np.array([0.0, 0.0, -1.0]), "mid": np.array([50.0, 0.0, 0.0])}
+    B = {"pieces": ["B", "P"], "edge": "P", "face": "B", "out": np.array([-1.0, 0.0, 0.0]), "mid": np.array([-50.0, 0.0, 50.0])}
+    got = dict((tuple(j["pieces"]), f) for j, f in JC._route([A, B], "P", np.array([10.0, 0.0, -100.0]),
+                                                                np.array([0.0, 0.0, 10.0]), "pairs"))
+    assert np.allclose(got[("A", "P")], (10.0, 0.0, -100.0)) and np.allclose(got[("B", "P")], 0.0), got

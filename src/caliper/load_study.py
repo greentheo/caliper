@@ -1545,10 +1545,15 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     }
     wooden = [pc for pc in ctx["pieces"] if pc.get("material") in ("plywood", "lumber")]
     if ctx.get("joints") is not None:                 # checked by hand (#301): the note stays only for those it couldn't
-        unchecked = sorted({u for c in cases for u in (c.get("joints") or {}).get("unchecked") or []})
+        chained = [c.get("joints") or {} for c in cases]
+        unchecked = sorted({u for J in chained if J.get("chain") is not False for u in J.get("unchecked") or []})
+        unchained = sorted({u for J in chained if J.get("chain") is False for u in J.get("unchecked") or []})
         record["joints_checked"] = True
-        record["joints_unchecked"] = unchecked
-        if unchecked:
+        record["joints_unchecked"] = unchecked        # joints, by name
+        record["joints_unchained"] = unchained        # a case's path it couldn't follow, why (#311 review)
+        if unchained:
+            record["wood_joints"] = len(ctx["joints"]["joints"])
+        elif unchecked:
             record["wood_joints"] = len(unchecked)
     elif len(wooden) > 1:                             # its joints, taken as solid wood: said on every verdict (#222 slice A)
         from . import joints as J

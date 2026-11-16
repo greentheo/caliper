@@ -104,20 +104,33 @@ def brace_why(brace: Optional[dict]) -> str:
     b = brace or {}
     if b.get("trim") and not (b.get("wood") or b.get("piece")):
         return TRIM_WHY
-    if b.get("names"):                          # those the hand check couldn't (#301): how many here, named where it's said
-        n = len(b["names"])
+    if b.get("names") or b.get("unchained"):    # those the hand check couldn't (#301): how many here, named where it's said
+        n = len(b["names"]) if b.get("names") else int(b.get("joints_n") or 0)
         return f"{n} joint{'s' if n != 1 else ''} not checked by hand"
     return JOINTS_WHY
 
 
-def wood_brace(run: Optional[dict]) -> Optional[dict]:
+def wood_brace(run: Optional[dict], c: Optional[dict] = None) -> Optional[dict]:
     """A run of a part of wood pieces: its joints taken as solid wood, counted or not (#222 slice A; #275: an old run, an
     uncounted one, a Lighten step: never a bare ✓). None for a part that isn't."""
+    J = (c or {}).get("joints")
+    if J is not None:                           # checked by hand (#301): what this case left, said as #311's review asks
+        n = int(J.get("n") or 0)
+        if J.get("chain") is False:             # its path couldn't be followed: all its joints, and why, once
+            why = (J.get("unchecked") or ["its load path isn't a simple chain"])[0]
+            return {"joints_n": n, "wood": True, "unchained": why}
+        names = list(J.get("unchecked") or [])
+        if not names:
+            return None
+        if not J.get("rows"):                   # none it could place: today's words, exactly
+            return {"joints_n": n, "wood": True}
+        return {"joints_n": len(names), "wood": True, "names": names}
     n = (run or {}).get("wood_joints")
     if not n:
         return None
     return {"joints_n": n if isinstance(n, int) and not isinstance(n, bool) else None, "wood": True,
-            **({"names": list(run["joints_unchecked"])} if run.get("joints_unchecked") else {})}
+            **({"unchained": run["joints_unchained"][0]} if run.get("joints_unchained") else
+               {"names": list(run["joints_unchecked"])} if run.get("joints_unchecked") else {})}
 
 
 def rests_on_brace(run: dict, c: dict) -> Optional[dict]:
@@ -207,7 +220,7 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
     kind = "close" if near(safety, run.get("min_safety")) else "holds"
     brace = rests_on_brace(run, c)
     if brace is None:                                 # glued trim left out (#272), wood joints taken as solid (#222): both said
-        trim, wood = ({"trim": list(run["trim"])} if run.get("trim") else None), wood_brace(run)
+        trim, wood = ({"trim": list(run["trim"])} if run.get("trim") else None), wood_brace(run, c)
         brace = {**trim, **wood} if trim and wood else trim or wood
     if brace is not None:                             # a pass resting on an unchecked joint: JOINT_CAP at most, and why (#265)
         return _make(JOINT_CAP if kind == "holds" else kind, safety, why=brace_why(brace), joints=True, brace=brace,
@@ -426,8 +439,10 @@ def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = N
     if old_on_limit(run, st.get("safety"), (run or {}).get("min_safety")):   # an old number on its limit (#214)
         return _make("recheck", st.get("safety"), why=UNCUT)
     need = {"min_safety": (run or {}).get("min_safety")}
-    brace = next((b for c in st.get("cases") or [] for b in [rests_on_brace(need, c)] if b is not None), None) \
-        or wood_brace(run)                             # its joints, from the run it comes from (#275)
+    cases = st.get("cases") or []
+    brace = next((b for c in cases for b in [rests_on_brace(need, c)] if b is not None), None) \
+        or (next((b for c in cases for b in [wood_brace(run, c)] if b is not None), None)   # its cases' own (#301)
+            if any(c.get("joints") is not None for c in cases) else wood_brace(run))    # else the run's (#275)
     if v["counts_as_pass"] and brace is not None:      # a step resting on an unchecked joint, as its case would (#265)
         return _make(JOINT_CAP if v["kind"] == "holds" else v["kind"], st.get("safety"), why=brace_why(brace), joints=True, brace=brace,
                      **({"near": True} if v["kind"] == "close" else {}))

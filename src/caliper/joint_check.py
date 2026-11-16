@@ -67,7 +67,9 @@ def setup(store, pid: str) -> dict:
             out.append({**base, "unplaced": "one runs through or past the other, not an edge on its face"})
             continue
         t = float(edge["thickness"])
+        sin = abs(float(marks._geom(face)[3] @ marks._geom(edge)[3])) if marks._sheet(face) and marks._sheet(edge) else 0.0
         out.append({**base, "edge": edge["key"], "face": face["key"], "out": np.asarray(g["out"], float),
+                    "sin": sin, "edge_t": t,
                     "along": np.asarray(g["along"], float), "length_mm": float(g["length"]),
                     "area_mm2": float(g["length"]) * t, "mid": (np.asarray(g["a"]) + np.asarray(g["b"])) / 2.0,
                     "screws": int(s.get("n") or 0), "face_t": float(face["thickness"])})
@@ -101,10 +103,19 @@ SHARE = "pairs"                          # pending: Theo (#301 decision 5; the f
 #: How many joints deep a load is followed before its path isn't a simple chain.
 DEEPEST = 3
 NOT_CHAIN = "its load path isn't a simple chain"
+#: A splayed part whose feet nothing ties: their thrust has nowhere to go but the floor's grip (#311 review).
+NO_TIE = "nothing ties its splayed sides"
+#: A side leaning more than this off vertical is splayed: its foot pushes out.
+SPLAY_DEG = 2.0
 
 
 class NotChain(ValueError):
-    """A load whose path down to what holds the part isn't one the hand check can follow."""
+    """A load whose path down to what holds the part isn't one the hand check can follow. ``why``: its own words, for a
+    person (never the exception's text, #311's CI: test_scrub_sweep)."""
+
+    def __init__(self, why: str):
+        super().__init__(why)
+        self.why = why
 
 
 def grounded(pieces: list[dict], held: list[dict], tol: float) -> set:
@@ -167,39 +178,126 @@ def _lever(mids: list[np.ndarray], at: np.ndarray, share: str) -> list[float]:
     return out
 
 
+def _into(joint: dict, piece: str) -> np.ndarray:
+    """The way ``piece`` pushes into the joint's other piece."""
+    out = np.asarray(joint["out"], float)
+    return out if piece == joint["edge"] else -out
+
+
+def _route(mine: list[dict], piece: str, f: np.ndarray, at: np.ndarray, share: str) -> list:
+    """A piece's force among its supporting joints, axis by axis (#311 review: a push along a rail went half to each end, so
+    one end was pulled out of its edge at 0x). Each component goes where the piece bears in that direction; where it bears
+    nowhere, across the joints that can take it in shear; only where neither can, it pulls on them (withdrawal). Each
+    share by the lever rule."""
+    out = [np.zeros(3) for _ in mine]
+    for axis in range(3):
+        c = float(f[axis])
+        if abs(c) < 1e-9:
+            continue
+        e = np.zeros(3)
+        e[axis] = 1.0 if c > 0 else -1.0
+        dots = [float(_into(j, piece) @ e) for j in mine]
+        bear = [i for i, d in enumerate(dots) if d > 0.7]
+        slide = [i for i, d in enumerate(dots) if abs(d) <= 0.7]
+        take = bear or slide or list(range(len(mine)))
+        for i, frac in zip(take, _lever([mine[i]["mid"] for i in take], at, share)):
+            out[i][axis] += frac * c
+    return list(zip(mine, out))
+
+
+def _splay(pc: dict) -> Optional[tuple]:
+    """A side leaning off vertical: ``(tan of its lean, the horizontal way its foot goes)``, or None. Its load runs down
+    its line, so at the foot it pushes out by the load × that tan (#301, #311 review)."""
+    from .consistency import _frame
+
+    if pc["kind"] != "sheet":
+        return None
+    n = _frame(pc["polys"][0])[3]
+    z = np.array([0.0, 0.0, 1.0])
+    nz = abs(float(n @ z))
+    if nz < np.sin(np.radians(SPLAY_DEG)) or nz > np.cos(np.radians(45.0)):
+        return None                                           # upright, or lying down (a top, not a side)
+    d = -z + float(z @ n) * n                                 # down its face
+    d /= np.linalg.norm(d)
+    h = d - float(d @ z) * z
+    return float(np.linalg.norm(h) / abs(float(d @ z))), h / np.linalg.norm(h)
+
+
 def demands(joints: list[dict], pieces: list[dict], load: dict, held: list[dict], tol: float,
             share: str = SHARE) -> dict:
     """What each joint carries under one load: ``{(a, b): {"from": the piece pushing, "force": N (3,)}}``. The load,
-    × its factor, from the piece it lands on to the pieces holding it up, down to what holds the part. Raises
-    :class:`NotChain` where that path can't be followed."""
+    × its factor, from the piece it lands on to the pieces holding it up, down to what holds the part; a splayed side's
+    foot thrust into the tie between the feet. Raises :class:`NotChain` where that path can't be followed."""
     ground = grounded(pieces, held, tol)
     start = loaded_piece(pieces, load)
     if start is None:
         raise NotChain(NOT_CHAIN)
+    by = {pc["key"]: pc for pc in pieces}
+    splayed = {k: s for k in ground if k in by for s in [_splay(by[k])] if s is not None}
     placed = [j for j in joints if "unplaced" not in j]
     force = np.asarray(load["force"], float) * float(load["factor"])
     at = (np.asarray(load["lo"], float) + np.asarray(load["hi"], float)) / 2.0
     out: dict = {}
+    arrived: dict = {}
+    came_by: dict = {}                                        # the pieces that brought each side its load
+    z = np.array([0.0, 0.0, 1.0])
+    # how many joints each piece is from what holds the part: a piece is held up by those no farther from it than itself
+    # (#311 review: a top read the shelf's other hanger, which hangs from it, as holding it up)
+    far = {k: 0 for k in ground}
+    edge = list(ground)
+    while edge:
+        nxt = []
+        for k in edge:
+            for j in placed:
+                o = other(j, k)
+                if o is not None and o not in far:
+                    far[o] = far[k] + 1
+                    nxt.append(o)
+        edge = nxt
+
+    def put(j: dict, piece: str, f: np.ndarray) -> None:
+        got = out.setdefault(tuple(j["pieces"]), {"from": piece, "force": np.zeros(3)})
+        got["force"] = got["force"] + f
 
     def down(piece: str, f: np.ndarray, at: np.ndarray, came: Optional[str], depth: int) -> None:
         if piece in ground:
+            arrived[piece] = arrived.get(piece, np.zeros(3)) + f
+            came_by.setdefault(piece, set()).add(came)
             return
-        if depth > DEEPEST:
+        if depth > DEEPEST or piece not in far:
             raise NotChain(NOT_CHAIN)
-        mine = [j for j in placed if piece in j["pieces"] and other(j, piece) != came]
+        mine = [j for j in placed if piece in j["pieces"] and other(j, piece) != came
+                and far.get(other(j, piece), DEEPEST + 9) <= far[piece]]
         if share == "ground" and any(other(j, piece) in ground for j in mine):
             mine = [j for j in mine if other(j, piece) in ground]
         if not mine:
             raise NotChain(NOT_CHAIN)
-        for j, frac in zip(mine, _lever([j["mid"] for j in mine], at, share)):
-            if frac <= 0:
+        for j, fj in _route(mine, piece, f, at, share):
+            if not np.any(np.abs(fj) > 1e-9):
                 continue
-            key = tuple(j["pieces"])
-            got = out.setdefault(key, {"from": piece, "force": np.zeros(3)})
-            got["force"] = got["force"] + frac * f
-            down(other(j, piece), frac * f, j["mid"], piece, depth + 1)
+            to = other(j, piece)
+            if to in splayed:                                 # down a leaning side's line: its top takes the lean too
+                tan, h = splayed[to]
+                fj = fj + max(0.0, -float(fj @ z)) * tan * h
+            put(j, piece, fj)
+            down(to, fj, j["mid"], piece, depth + 1)
 
     down(start, force, at, None, 0)
+    for side, f in arrived.items():                           # each splayed foot's thrust, into the tie nearest it
+        if side not in splayed:
+            continue
+        tan, h = splayed[side]
+        push = max(0.0, -float(f @ z)) * tan
+        if push <= 1e-9:
+            continue
+        # a tie: a piece joined to this side and another splayed one, not one that brought the load down (a step on top
+        # holds the tops; it doesn't tie the feet)
+        ties = [j for j in placed if side in j["pieces"] and other(j, side) not in came_by.get(side, set()) and any(
+            other(j, side) in k["pieces"] and other(k, other(j, side)) in splayed and other(k, other(j, side)) != side
+            for k in placed)]
+        if not ties:
+            raise NotChain(NO_TIE)
+        put(min(ties, key=lambda j: float(j["mid"][2])), side, push * h)
     return out
 
 
@@ -251,7 +349,10 @@ def capacity(joint: dict, screw_mm: float) -> dict:
     area_in2 = joint["area_mm2"] / IN ** 2
     screwed = "screws" in joint["fix"] and joint["screws"] > 0
     n = joint["screws"] if screwed else 0
-    into_in = max(0.0, (screw_mm - joint["face_t"]) / IN)
+    from . import marks
+
+    # the thread in the edge piece's wood: what's past the face piece, less what comes out of a bevel (#311 review)
+    into_in = marks.thread_in(joint["face_t"], joint.get("edge_t", joint["face_t"]), joint.get("sin", 0.0), screw_mm) / IN
     per_shear = SHEAR_EDGE_LB * min(1.0, into_in / SHEAR_EDGE_TESTED_IN)
     glued = "glue" in joint["fix"]
     edge = joint["edge"]
@@ -283,7 +384,7 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
     try:
         got = demands(joints, setup_["pieces"], load, held, setup_["tol"], share)
     except NotChain as e:
-        return {"rows": [], "governing": None, "unchecked": [str(e)], "chain": False}
+        return {"rows": [], "governing": None, "unchecked": [e.why], "chain": False, "n": len(joints)}
     rows = []
     for j in joints:
         if "unplaced" in j or j.get("kind") not in EDGE_KINDS:
@@ -310,7 +411,7 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
                      "said": cap["why"][mode] if mode else "carries none of this load", "assumed": j["assumed"]})
     rated = [r for r in rows if r["safety"] is not None]
     return {"rows": rows, "governing": min(rated, key=lambda r: r["safety"]) if rated else None,
-            "unchecked": unchecked, "chain": True}
+            "unchecked": unchecked, "chain": True, "n": len(joints)}
 
 
 #: The hand checks: a case they govern keeps, as ``over``, the check they took over from (``load_study.judged_by``).

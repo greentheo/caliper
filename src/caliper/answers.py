@@ -255,7 +255,9 @@ def joint_said(row: dict, need) -> str:
         many = len(names) > 1 or names[0].rstrip().endswith("s")
         said.append(f"the {' and the '.join(names)} {'are' if many else 'is'}n't checked: {'they' if many else 'it'}'re glued trim"
                     if many else f"the {names[0]} isn't checked: it's glued trim")
-    if row.get("names"):                             # the hand check couldn't place these (#301): named
+    if row.get("unchained"):                         # a path the hand check couldn't follow (#311 review): why, once
+        said.append(f"not checked by hand: {row['unchained']}")
+    elif row.get("names"):                           # the hand check couldn't place these (#301): named
         said.append(f"{' and '.join(row['names'])} {'aren' if len(row['names']) > 1 else 'isn'}'t checked by hand")
     elif row.get("wood") or (row.get("joints_n") is not None and not row.get("piece")):
         n = row.get("joints_n")
@@ -368,7 +370,8 @@ def _case_line(pid: str, run: dict, c: dict, filled: Optional[str], stale: bool,
     brace = ""
     if v.get("joints"):                              # what it rests on that isn't checked (#265, #272)
         said = joint_said(v["brace"], need)
-        brace = said if (v.get("brace") or {}).get("trim") or (v.get("brace") or {}).get("names") \
+        b_ = v.get("brace") or {}
+        brace = said if b_.get("trim") or b_.get("names") or b_.get("unchained") \
             else f"its joints aren't checked: {said}"
     by_hand = joints_said(c, need)                  # its joints, checked by hand (#301)
     if v["kind"] == "holds":

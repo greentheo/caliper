@@ -3598,7 +3598,9 @@ function jointsLine(c, run) {
     said.push(`<b>Not checked:</b> the ${esc(b.trim.join(' and the '))} ${many ? 'are' : 'is'}
       glued trim, left out of the check.`);
   }
-  if (b.names && b.names.length) {                  // the hand check couldn't place these: named (#301)
+  if (b.unchained) {                                // a path the hand check couldn't follow: why, once (#311 review)
+    said.push(`<b>Joints not checked by hand:</b> ${esc(b.unchained)}.`);
+  } else if (b.names && b.names.length) {           // the hand check couldn't place these: named (#301)
     said.push(`<b>Joints not checked by hand:</b> ${b.names.map(esc).join('; ')}.`);
   } else if (b.wood || (b.joints_n != null && !b.piece)) { // a part's joints taken as solid wood, counted or not (#222, #275)
     const n = b.joints_n;
@@ -3906,7 +3908,9 @@ async function showHeat(pid, run, index) {
     const grad = HEAT.map(([t, hex]) => `#${hex.toString(16).padStart(6, '0')} ${t * 100}%`).join(', ');
     // two numbers are on screen: the picture is the FEA's, the verdict may be the plate check's — say which is which
     const pl = c.plate && c.plate.done ? c.plate : null, f = c.fea || {};
-    const decided = c.governs === 'buckling'
+    const decided = c.governs === 'joint' && c.joints && c.joints.governing    // a joint by hand decides it (#311 review)
+      ? `the joint between ${esc(c.joints.governing.between)}: ${esc(c.joints.governing.said)}`
+      : c.governs === 'buckling'
       ? foldedBy(c)                                                       // the picture is the FEA's; the verdict isn't (#229)
       : c.governs === 'plate' && pl
       ? `the plate check on the ${esc(pl.piece)}: ${fixed(pl.stress_mpa, 1)} MPa, with the grain the wrong way`
