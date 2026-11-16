@@ -2084,6 +2084,11 @@ function answersKey() {               // what the answers depend on: a change to
     (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
     (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey, d.display_units]);
 }
+// a card's lines, and under a part's Will it work? its Things to fix (#300): one painter, for the first draw and the
+// fill when its answers come in (a fill with qlines alone dropped the list)
+function cardLines(k, c) {
+  return qlines(c) + (k === 'work' && S.scope && c ? fixesBox(S.scope) : '');
+}
 function qlines(c) {
   if (!c) return '<div class="qline muted"><span class="spin"></span>answering…</div>';
   if (!c.lines.length) return `<div class="qline muted">${esc(c.hint || 'Nothing to say yet.')}</div>`;
@@ -2103,6 +2108,102 @@ function betterLines(c, offers) {
     return `<div class="qoffer"><div class="qoffer-t">${esc(ln.lead)}.<span class="qoffer-c">${esc(ln.cost)}</span></div>
       ${ln.button ? `<button class="ghost" data-better="${i}" data-better-action="${esc(ln.action)}" data-better-part="${esc(ln.part)}" data-card="${esc(c.key)}"${ln.disabled || (ln.action === 'carve' && S.carveJob[carveKey(ln.part)]) ? ' disabled' : trackedFor(ln.action, ln.part) ? ' disabled data-job-off="1"' : ''}>${esc(ln.button)}</button>` : ''}</div>`;
   }).join('')}</div>`;
+}
+// ------------------------------------------------------------- things to fix (CALI-189, #300 slice A)
+// Under Will it work?: what's measured wrong with this part, each a tick, its fix (a choice where there are two), what
+// kind of change it is and what it costs; then the known limits apart, never ticked. Asked when it's opened, of this
+// version. A row reworded, or one added, is the person's words: said so, never "measured".
+function fixMine(part) {
+  S.fixMine = S.fixMine || {};
+  return (S.fixMine[part] = S.fixMine[part] || { untick: [], words: {}, own: [], pick: {}, editing: null });
+}
+function fixRow(r, mine) {
+  const ticked = !(mine.untick || []).includes(r.id);
+  const pick = (mine.pick || {})[r.id] || 0;
+  const words = (mine.words || {})[r.id];
+  const c = r.choices[pick] || r.choices[0];
+  const fix = mine.editing === r.id
+    ? `<input data-fix-words="${esc(r.id)}" value="${esc(words != null ? words : c.fix)}" style="width:80%">`
+    : words != null ? `${esc(words)} <span class="badge">your words</span>`
+    : (r.choices.length > 1 ? r.choices.map((x, j) => `<label><input type="radio" name="fx-${esc(r.id)}" data-fix-pick="${esc(r.id)}"
+        value="${j}"${j === pick ? ' checked' : ''}> ${esc(x.fix)}</label>`).join(' <span class="muted">or</span> ') : esc(c.fix))
+      + ' <span class="badge ok">measured</span>';
+  return `<div class="fixrow" data-fix-row="${esc(r.id)}"><label><input type="checkbox" data-fix-tick="${esc(r.id)}"${ticked ? ' checked' : ''}>
+      ${esc(r.problem)}</label>
+    <div class="small">${fix} ${mine.editing === r.id ? '' : `<button class="ghost" data-fix-word="${esc(r.id)}">Reword</button>`}</div>
+    <div class="small muted">${esc(words != null ? 'a designer edit, in your words' : c.cost)}</div></div>`;
+}
+function fixesView(got, mine) {
+  mine = mine || {};
+  const rows = got.rows || [], own = mine.own || [];
+  return `${got.error ? `<div class="small" style="color:var(--bad)">${esc(got.error)}</div>` : ''}
+    ${rows.length || own.length || got.error ? '' : '<div class="small muted">Nothing measured wrong with it.</div>'}
+    ${rows.map((r) => fixRow(r, mine)).join('')}
+    ${own.map((o, i) => `<div class="fixrow own" data-fix-own="${i}"><label><input type="checkbox" data-fix-own-tick="${i}"${o.off ? '' : ' checked'}>
+      ${esc(o.fix)}</label>
+      <div class="small"><span class="badge">your words</span> <button class="ghost" data-fix-own-del="${i}">Remove</button></div>
+      <div class="small muted">a designer edit, in your words</div></div>`).join('')}
+    <div class="small fixadd"><input data-fix-add placeholder="add your own: “and round the top’s corners”" style="width:70%">
+      <button class="ghost" data-fix-add-go="1">Add</button></div>
+    ${(got.limits || []).length ? `<div class="qbetter-h" style="margin-top:6px">Known limits</div>
+      <ul class="small muted fixlimits">${got.limits.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`;
+}
+function fixesBox(part) {
+  const open = S.fixOpen === part;
+  const got = open && S.fixes && S.fixes[part];
+  return `<details class="qbetter qfix" id="fixBox" data-fix-part="${esc(part)}"${open ? ' open' : ''}><summary>Things to fix
+      <span class="muted small">measured, with what each would take</span></summary>
+    <div id="fixBody">${got ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div></details>`;
+}
+function fixVersion(part) { return ((S.design.parts.find((p) => p.id === part)) || {}).version; }
+async function loadFixes(part) {
+  S.fixes = S.fixes || {};
+  const v = fixVersion(part);
+  try { S.fixes[part] = { ...(await api('GET', `/api/designs/${S.slug}/parts/${part}/fixes`)), v }; }
+  catch (e) { S.fixes[part] = { rows: [], limits: [], error: plainly(e.message), v }; }
+  paintFixes(part);
+}
+function paintFixes(part) {
+  const b = $('fixBody');
+  if (!b || !S.fixes || !S.fixes[part]) return;
+  b.innerHTML = fixesView(S.fixes[part], fixMine(part));
+  wireFixRows(part);
+}
+function wireFixes() {
+  const box = $('fixBox');
+  if (!box) return;
+  const part = box.dataset.fixPart;
+  const fresh = () => S.fixes && S.fixes[part] && S.fixes[part].v === fixVersion(part);     // of this version only
+  box.ontoggle = () => { S.fixOpen = box.open ? part : null; if (box.open) { if (fresh()) paintFixes(part); else loadFixes(part); } };
+  if (box.open) { if (fresh()) wireFixRows(part); else loadFixes(part); }
+}
+function wireFixRows(part) {
+  const mine = fixMine(part), body = $('fixBody');
+  if (!body) return;
+  body.querySelectorAll('[data-fix-tick]').forEach((t) => { t.onchange = () => {
+    const id = t.dataset.fixTick;
+    mine.untick = mine.untick.filter((x) => x !== id).concat(t.checked ? [] : [id]);
+  }; });
+  body.querySelectorAll('[data-fix-pick]').forEach((t) => { t.onchange = () => { mine.pick[t.dataset.fixPick] = +t.value; paintFixes(part); }; });
+  body.querySelectorAll('[data-fix-word]').forEach((b) => { b.onclick = () => { mine.editing = b.dataset.fixWord; paintFixes(part); }; });
+  body.querySelectorAll('[data-fix-words]').forEach((i) => {
+    i.focus(); i.select();                                  // typing replaces it
+    const done = () => {
+      const r = (S.fixes[part].rows || []).find((x) => x.id === i.dataset.fixWords);
+      const was = r ? (r.choices[mine.pick[r.id] || 0] || r.choices[0]).fix : '';
+      const v = i.value.trim();
+      if (v && v !== was) mine.words[i.dataset.fixWords] = v; else delete mine.words[i.dataset.fixWords];   // as it was: measured again
+      mine.editing = null; paintFixes(part);
+    };
+    i.onkeydown = (e) => { if (e.key === 'Enter') done(); if (e.key === 'Escape') { mine.editing = null; paintFixes(part); } };
+    i.onblur = done;
+  });
+  body.querySelectorAll('[data-fix-own-tick]').forEach((t) => { t.onchange = () => { mine.own[+t.dataset.fixOwnTick].off = !t.checked; }; });
+  body.querySelectorAll('[data-fix-own-del]').forEach((b) => { b.onclick = () => { mine.own.splice(+b.dataset.fixOwnDel, 1); paintFixes(part); }; });
+  const add = body.querySelector('[data-fix-add]'), go = body.querySelector('[data-fix-add-go]');
+  const put = () => { const v = add.value.trim(); if (v) { mine.own.push({ fix: v }); paintFixes(part); } };
+  if (go) go.onclick = put;
+  if (add) add.onkeydown = (e) => { if (e.key === 'Enter') put(); };
 }
 // each goes through what its panel already does: the chat, the carve, the lightening, or taking a step
 // a carve or Lighten of this version that's already finished, as the server has it now
@@ -2169,7 +2270,7 @@ function cardsView(groups) {
     const c = a ? a.cards.find((x) => x.key === k) : null;
     return `<section class="qcard q-${c ? c.status : 'info'}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
       <div class="qhead" title="${S.scope ? 'show this in 3D' : ''}"><span class="qmark">${c ? QMARK[c.status] : '·'}</span><h3>${q}</h3></div>
-      <div class="qlines" id="q-${k}">${qlines(c)}</div>
+      <div class="qlines" id="q-${k}">${cardLines(k, c)}</div>
       ${k === 'what' && picturePart() ? '<div class="qlinks"><button class="btn" data-picture="1">🦖 Put a picture on it</button></div>' : ''}
       <details class="numbers" data-card="${k}" ${numbersOpen(k) ? 'open' : ''}><summary>the numbers</summary>
         ${groups[k] || '<div class="empty">Nothing here yet.</div>'}</details>
@@ -2348,7 +2449,7 @@ async function loadAnswers() {
     if (!card) continue;
     card.className = `qcard q-${c.status}`;
     card.querySelector('.qmark').textContent = QMARK[c.status];
-    card.querySelector('.qlines').innerHTML = qlines(c);
+    card.querySelector('.qlines').innerHTML = cardLines(c.key, c);
   }
   wireCards();
   // a print time still being worked out (#97): ask again until it's in, while the same cards are showing
@@ -2357,6 +2458,7 @@ async function loadAnswers() {
   }
 }
 function wireCards() {
+  wireFixes();                                            // Things to fix, under Will it work? (#300)
   document.querySelectorAll('#inspector details.numbers').forEach((dt) => { dt.ontoggle = () => keepNumbersOpen(dt.dataset.card, dt.open); });
   document.querySelectorAll('#inspector .qcard .qhead').forEach((h) => { h.onclick = () => focusCard(h.parentElement.dataset.card); });
   document.querySelectorAll('#inspector .qline[data-goto]').forEach((ln) => { ln.onclick = () => goTo(ln.dataset.goto); });

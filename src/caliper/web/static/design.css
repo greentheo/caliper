@@ -273,6 +273,10 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
 .qbetter { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; display: flex; flex-direction: column; gap: 8px; }
 .qbetter-h { font-size: 12px; font-weight: 600; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); }
 .qoffer { display: flex; gap: 10px; align-items: flex-start; }
+.qfix summary { cursor: pointer; font-size: 13px; }                 /* Things to fix (#300) */
+.fixrow { display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: #c9d4de; }
+.fixrow.own { border-left: 2px solid var(--line); padding-left: 6px; }
+.fixlimits { margin: 2px 0 0 16px; padding: 0; }
 .qoffer-t { flex: 1 1 auto; font-size: 13px; line-height: 1.5; color: #c9d4de; }
 .qoffer-c { display: block; color: var(--muted); }
 .qoffer button { white-space: nowrap; padding: 6px 10px; }
