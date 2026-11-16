@@ -161,15 +161,18 @@ def loaded_piece(pieces: list[dict], load: dict) -> Optional[str]:
 
 def _lever(mids: list[np.ndarray], at: np.ndarray, share: str) -> list[float]:
     """Each supporting joint's share of a load at ``at``: grouped by the way across the piece they lie (its two horizontal
-    axes), a group's share by statics. Two in a group share it by the lever rule, a load past them included: the near one
+    axes, as they lie from each other), a group's share by statics. Two in a group share it by the lever rule, a load past
+    them included: the near one
     then carries more than all of it and the far one is lifted, a negative share, so its joint takes a pull (#311: it read
     half each). Three or more in a row are statically indeterminate: not checked by hand, never a third each."""
     if len(mids) == 1:
         return [1.0]
-    d = [m - at for m in mids]
+    # grouped by how they lie from each other, never from the load (#311: a load near one edge read its pair as two):
+    # each with the support farthest from it, along the horizontal axis the two differ in most
     groups: dict[int, list[int]] = {}
-    for i, v in enumerate(d):
-        groups.setdefault(int(np.argmax(np.abs(v[:2]))), []).append(i)
+    for i, m in enumerate(mids):
+        far = max((j for j in range(len(mids)) if j != i), key=lambda j: float(np.linalg.norm((mids[j] - m)[:2])))
+        groups.setdefault(int(np.argmax(np.abs((mids[far] - m)[:2]))), []).append(i)
     out = [0.0] * len(mids)
     each = 1.0 / len(groups)
     for axis, idx in groups.items():
