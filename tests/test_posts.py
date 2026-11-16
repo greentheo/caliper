@@ -200,54 +200,71 @@ def test_a_post_bears_at_360_psi_on_its_end_and_holds_no_pull(stool):
     assert cap["why"]["bearing"].endswith("leg's end bearing on the top")
 
 
-def test_both_paths_each_joint_its_own_and_the_case_says_which_governs(stool):
+def test_the_legs_reach_the_top_so_it_rests_on_them_and_a_lifted_leg_is_named(stool):
+    """One path, from the geometry (#321): the legs' ends bear on the top's face, so the top shares among them by the
+    rigid-top rule; the aprons carry none of a load on the top. The back left leg, which the top lifts off, says so."""
     store, su, held = stool
     corner = _cases(store)[0]
     got = JC.check(su, corner, held, 2.0)
     assert got["chain"] and not got["unchecked"], got["unchecked"]
+    assert got["path"] == "the legs reach the top: the top rests on them, by statics (three legs)"
     rows = {r["between"]: r for r in got["rows"]}
-    on_legs = [r for r in got["rows"] if str(r.get("path")).startswith("the top on its legs")]
-    # the back left leg let go, three push: statics alone (the foreman's condition: say which)
-    assert {r["path"] for r in on_legs} == {"the top on its legs, by statics (three posts)"}
-    on_aprons = [r for r in got["rows"] if r.get("path") == JC.PATH_SAID["frame"]]
-    # three legs carry it by the rigid-top rule; the back left one, which the top would lift off, carries none
-    assert {tuple(sorted(r["pieces"])) for r in on_legs} == {tuple(sorted(("top", leg))) for leg in LEGS if leg != "back left leg"}
-    assert rows["the top and the back left leg"]["said"] == "carries none of this load"
-    assert len(on_aprons) == 12                                                          # 4 on the top, 8 on the legs
-    assert got["path"] == got["governing"]["path"]
+    assert rows["the top and the back left leg"]["said"] == "the top lifts off it: the load is inside the other three legs"
+    on_legs = [r for r in got["rows"] if r.get("path") and r["pieces"][0] in LEGS + ("top",) and "leg" in " ".join(r["pieces"])
+               and not r["between"].endswith(", as a column") and r["mode"]]
+    assert {tuple(sorted(r["pieces"])) for r in on_legs} >= {tuple(sorted(("top", leg))) for leg in LEGS if leg != "back left leg"}
+    assert all(r["said"] == "carries none of this load" for r in got["rows"] if "apron" in " ".join(r["pieces"]))
     # the front right leg, nearest the load, by the rigid-top rule: its share of 250 lb × 2, the back left let go
     posts = JC.demands(su["joints"], su["pieces"], corner, held, su["tol"], path="posts")
     fr = posts[("front right leg", "top")]["force"]
     mids = [next(j for j in su["joints"] if j.get("post") and j["edge"] == leg)["mid"] for leg in LEGS]
     at = (np.asarray(corner["lo"]) + np.asarray(corner["hi"])) / 2
-    share = JC._rigid(mids, at)[1]
-    assert -fr[2] == pytest.approx(share * 500 * LBF, rel=1e-6)
-    assert ("back left leg", "top") not in posts or abs(posts[("back left leg", "top")]["force"][2]) < 1e-6   # let go
+    shares = JC._rigid(mids, at)
+    assert -fr[2] == pytest.approx(shares[1] * 500 * LBF, rel=1e-6) and shares.let_go == (LEGS.index("back left leg"),)
 
 
-def test_each_leg_is_a_column_on_the_larger_of_the_two_paths(stool):
+def test_legs_that_stop_short_of_the_top_put_it_on_its_aprons(tmp_path):
+    """The foreman's (b): 3 mm short, the legs don't bear on the top, so it rests on its aprons, then the legs, and an
+    apron's end on a leg governs: one #8 screw with 0.5 in in the apron's edge, 90 lb, at 0.94."""
+    pytest.importorskip("cadquery")
+    from caliper.design import DesignStore
+
+    short = LEGGED.replace("out[n] = ((x, y, 0), (x + L, y + L, h - t))", "out[n] = ((x, y, 0), (x + L, y + L, h - t - 3))") \
+        .replace('"b": (x + L / 2, y + L / 2, h - t)}', '"b": (x + L / 2, y + L / 2, h - t - 3)}')
+    assert short != LEGGED and "h - t - 3" in short
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", short, intent="a four-legged stool with aprons")
+    su = JC.setup(store, "stool")
+    assert not [j for j in su["joints"] if j.get("post")]                       # no leg's end bears on the top
+    mesh = store.part_geometry("stool").require_mesh()
+    held = [{"name": "the floor", "lo": list(mesh.bounds[0] - 1),
+             "hi": [mesh.bounds[1][0] + 1, mesh.bounds[1][1] + 1, mesh.bounds[0][2] + 0.5]}]
+    got = JC.check(su, _cases(store)[0], held, 2.0)
+    assert got["path"] == "the legs stop short of the top: it rests on its aprons, then the legs"
+    gov = got["governing"]
+    assert "apron" in " ".join(gov["pieces"]) and gov["mode"] == "shear" and gov["safety"] == pytest.approx(0.94, abs=0.01)
+    assert gov["capacity_lb"]["shear"] == pytest.approx(90.0, abs=0.5)
+
+
+def test_each_leg_is_a_column(stool):
     """2x2 SPF, 430.95 mm long, K = 1: Euler π²EI/L² = 84 kN (18,900 lb), crushing 9.7 MPa × 1451.6 mm² = 14.1 kN
-    (3,165 lb): crushing governs. Its load is the more of the top on its legs and the top on its aprons."""
+    (3,165 lb): crushing governs. Its load is what comes down it."""
     store, su, held = stool
     corner = _cases(store)[0]
     got = JC.check(su, corner, held, 2.0)
     col = {r["pieces"][0]: r for r in got["rows"] if r["between"].endswith(", as a column")}
-    assert set(col) == set(LEGS)
+    assert set(col) == set(LEGS) - {"back left leg"}                      # the lifted one carries nothing down
     area = 38.1 ** 2
     assert col["front right leg"]["mode"] == "crushing"
     assert col["front right leg"]["capacity_lb"]["crushing"] == pytest.approx(9.7 * area / LBF, rel=1e-3)
     inertia = 38.1 ** 4 / 12
     euler = np.pi ** 2 * 9000 * inertia / 430.95 ** 2
     assert euler / LBF > col["front right leg"]["capacity_lb"]["crushing"]                 # Euler: 18,900 lb
-    arrs = []
-    for pth in ("posts", "frame"):
-        arr = {}
-        JC.demands(su["joints"], su["pieces"], corner, held, su["tol"], arrivals=arr, path=pth)
-        arrs.append(arr)
-    for leg in LEGS:                                     # each its more of the two, whichever path that is
-        most = max(-float(arr[leg][2]) if leg in arr else 0.0 for arr in arrs)
-        assert col[leg]["demand_lb"]["crushing"] == pytest.approx(most / LBF, abs=0.1), leg
-    assert any(-float(arrs[1].get(leg, [0, 0, 0])[2]) > -float(arrs[0].get(leg, [0, 0, 0])[2]) for leg in LEGS)
+    arr = {}
+    JC.demands(su["joints"], su["pieces"], corner, held, su["tol"], arrivals=arr, path="posts")
+    for leg in LEGS:
+        if leg in col:
+            assert col[leg]["demand_lb"]["crushing"] == pytest.approx(-float(arr[leg][2]) / LBF, abs=0.1), leg
     assert "pending Theo" in col["front right leg"]["said"]
 
 
@@ -283,13 +300,6 @@ def test_a_seat_whose_legs_were_checked_as_columns_no_longer_says_their_buckling
 
 
 
-def test_each_joint_takes_the_larger_of_its_two_paths():
-    small, big = {"from": "top", "force": np.array([0.0, 0.0, -100.0])}, {"from": "top", "force": np.array([0.0, 0.0, -300.0])}
-    got, which = JC._larger({"posts": {("a", "b"): small, ("c", "d"): big}, "frame": {("a", "b"): big, ("c", "d"): small}})
-    assert got[("a", "b")] is big and which[("a", "b")] == "frame"
-    assert got[("c", "d")] is big and which[("c", "d")] == "posts"
-
-
 def test_a_slender_post_buckles_by_euler_at_k_1():
     """A 1x1 (19.05 mm) lumber post 1000 mm long: π²·9000·19.05⁴/12 / 1000² = 975 N; crushing 9.7 × 362.9 = 3520 N, so
     Euler governs; at K = 2 it would be a quarter of that."""
@@ -302,22 +312,22 @@ def test_a_slender_post_buckles_by_euler_at_k_1():
 
 
 
-def test_a_post_a_fixing_holds_in_a_pull_keeps_its_pull_share():
-    """The foreman's condition: only a post with no pull credit is let go. The far one held: the plane, as it is."""
-    got = JC._lever(RING, np.array([90.0, 0.0, 0.0]), "pairs", spans=SHORT, pulls=[False, True, False, False])
-    assert got == pytest.approx([0.70, -0.20, 0.25, 0.25])
-
-
-def test_a_stool_s_posts_hold_no_pull_today(stool):
-    """Its fixings go into the legs' end grain (glue, screws): no pull credit, so a lifted leg is let go."""
-    _, su, _ = stool
-    assert [j["pull"] for j in su["joints"] if j.get("post")] == [False] * 4
-
-
 def test_four_pushing_posts_are_said_as_shared_as_a_rigid_top(stool):
     """The rating, centred: all four legs push, so their split is the stiff top's answer, and the row says so."""
     store, su, held = stool
     rating = _cases(store)[1]
     got = JC.check(su, rating, held, 2.0)
-    legs = [r for r in got["rows"] if str(r.get("path")).startswith("the top on its legs")]
-    assert len(legs) == 4 and {r["path"] for r in legs} == {"the top on its legs, shared as a rigid top"}
+    assert got["path"] == "the legs reach the top: the top rests on them, shared as a rigid top"
+    legs = [r for r in got["rows"] if "top" in r["pieces"] and r["mode"] and "leg" in " ".join(r["pieces"])]
+    assert len(legs) == 4 and {r["path"] for r in legs} == {got["path"]}
+
+
+
+def test_a_2x4_post_buckles_about_its_weak_axis():
+    """A 2x4 (38.1 × 88.9 mm) 1500 mm long: about its weak axis, I = 88.9 × 38.1³ / 12 = 409,700 mm⁴, Euler 16.2 kN,
+    under its crushing (9.7 × 3,387 = 32.9 kN), so it governs. About the strong axis it would read 5.4 times that."""
+    post = {"key": "post", "kind": "stick", "material": "lumber", "a": np.array([0.0, 0.0, 0.0]),
+            "b": np.array([0.0, 0.0, 1500.0]), "half": 38.1 / 2, "volume": 38.1 * 88.9 * 1500.0}
+    row = JC.column_row(post, 1000.0, 2.0)
+    weak = np.pi ** 2 * 9000 * (88.9 * 38.1 ** 3 / 12) / 1500.0 ** 2
+    assert row["mode"] == "column" and row["capacity_lb"]["column"] == pytest.approx(weak / LBF, abs=0.5)
