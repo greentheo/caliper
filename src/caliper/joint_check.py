@@ -170,7 +170,7 @@ def other(joint: dict, piece: str) -> Optional[str]:
 #: How a piece held on more than two sides splits its load (#301 decision 5): "pairs", half each way (the pieces across it
 #: one way, and across it the other), each pair by the lever rule; "ground", only the pieces that stand on what holds the
 #: part, by the lever rule, while any do.
-SHARE = "pairs"                          # pending: Theo (#301 decision 5; the foreman's pick, (a))
+SHARE = "pairs"                          # interim, see #316 (CALI-194) (#301 decision 5; the foreman's pick, (a))
 #: How many joints deep a load is followed before its path isn't a simple chain.
 DEEPEST = 3
 NOT_CHAIN = "its load path isn't a simple chain"
@@ -182,8 +182,8 @@ IN_A_ROW = "it rests on three or more supports in a row"
 UNEVEN = "it rests on more supports one way than the other"
 #: Held both ways by supports that don't run most of the way across: how the load splits needs more than halves (#311).
 SHORT = "its supports are short, so how the load splits isn't simple"
-#: "Most of the way across": a support's joint at least this share of the piece's width along it (pending: Theo, with
-#: decision 5).
+#: "Most of the way across": a support's joint at least this share of the piece's width along it (interim with
+#: decision 5, see #316, CALI-194).
 MOST_OF_THE_WAY = 0.75
 #: A side leaning more than this off vertical is splayed: its foot pushes out.
 SPLAY_DEG = 2.0
@@ -469,28 +469,28 @@ SCREW_D_IN = 0.164                       # #8
 WITHDRAW_FACE_LB_PER_IN = 5 * 2850 * G_PLY ** 2 * SCREW_D_IN
 #: From an edge or end grain: no credit. NDS 2018 §12.2.2.3: "shall not be loaded in withdrawal from end grain"
 #: (APA E830 Table 6 tested 360 lb for a #8 into a 3/4 in edge; "not normally recommended": not relied on).
-WITHDRAW_EDGE_LB = 0.0                   # pending: Theo (#301 decision 2)
+WITHDRAW_EDGE_LB = 0.0                   # Theo, 2026-11-16 (#301 decision 2)
 #: In shear into a face, ultimate: Z = 69 lb (NDS 2018 Table 12L, 3/4 in side, G 0.42) is "about 1/5 of maximum tested"
 #: (NDS 2005 Commentary, p.231).
 SHEAR_FACE_LB = 5 * 69.0
 #: In shear into a plywood edge, ultimate: APA Technical Note E830 Table 6, a #8 into 3/4 in C-D plywood's edge, 1 in of
 #: thread; scaled by the thread the bought screw has in the edge, never past what was tested (#301 decision 1).
-SHEAR_EDGE_LB = 180.0                    # pending: Theo (#301 decision 1)
+SHEAR_EDGE_LB = 180.0                    # Theo, 2026-11-16 (#301 decision 1)
 #: Thread in an edge E830's 180 lb was tested at.
 SHEAR_EDGE_TESTED_IN = 1.0
 #: Glue face to face, by the plywood's rolling shear: APA Plywood Design Specification Y510 (1997) Table 3, "All Other"
 #: grades, dry, an allowable, not a mean (the safe side: #301 decision 3; the Wood Handbook's mean glue-line shear is
 #: 207 psi, Table 12-2). For the face-glued joints (a glue block, a rabbet's or dado's cheeks) when their rule is added.
-GLUE_FACE_PSI = 53.0                     # pending: Theo (#301 decision 3)
+GLUE_FACE_PSI = 53.0                     # Theo, 2026-11-16 (#301 decision 3)
 #: The same less 25% for a 3-layer panel over 5/8 in (Y510 Table 3 footnote 2): a panel whose plies aren't known is taken
 #: as that.
-GLUE_FACE_3PLY_PSI = 40.0                # pending: Theo (#301 decision 3)
+GLUE_FACE_3PLY_PSI = 40.0                # Theo, 2026-11-16 (#301 decision 3)
 #: Glue to an edge or end grain: no credit. Wood Handbook (2021) ch. 10, p.10-16: "practically impossible to make end-grain
 #: butt joints… strong enough".
 GLUE_EDGE_PSI = 0.0
 #: Bearing on a plywood face: APA Panel Design Specification (2020) §4.4.7, p.19, a design value at 0.04 in deformation
 #: (no plywood mean found): on the safe side.
-BEARING_PSI = 360.0                      # pending: Theo (#301 decision 4), a design value
+BEARING_PSI = 360.0                      # Theo, 2026-11-16 (#301 decision 4), a design value
 #: The kinds this check reads as an edge on a face. Others aren't checked until their own rules (a coupon for a dowel,
 #: pocket screw or printed connector: #222's table has no sourced number for them).
 EDGE_KINDS = ("butt", "bevel")
