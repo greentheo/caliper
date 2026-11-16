@@ -835,3 +835,19 @@ def test_three_supports_not_in_a_line_aren_t_called_a_row():
     with pytest.raises(JC.NotChain) as e:
         JC._lever(tri, np.array([90.0, 10.0, 0.0]), "pairs")
     assert e.value.why == "it rests on more supports one way than the other"
+
+
+@pytest.mark.parametrize("length,shares", [(74.0, None), (76.0, [0.5, 0.5])])
+def test_two_short_posts_with_the_load_off_their_line_aren_t_checked_by_hand(length, shares):
+    """Nothing stops the piece turning about the line between two posts: short ones can't share a load off it; supports
+    running most of the way across (75%) carry it along their length."""
+    posts = [np.array([0.0, 0.0, 0.0]), np.array([100.0, 0.0, 0.0])]
+    spans = [(length, 100.0, (0.0, 1.0, 0.0))] * 2
+    if shares is None:
+        with pytest.raises(JC.NotChain) as e:
+            JC._lever(posts, np.array([50.0, 20.0, 0.0]), "pairs", spans=spans)
+        assert e.value.why == JC.SHORT
+    else:
+        assert JC._lever(posts, np.array([50.0, 20.0, 0.0]), "pairs", spans=spans) == pytest.approx(shares)
+    on_line = JC._lever(posts, np.array([50.0, 0.0, 0.0]), "pairs", spans=spans)     # on their line: the lever rule
+    assert on_line == pytest.approx([0.5, 0.5])
