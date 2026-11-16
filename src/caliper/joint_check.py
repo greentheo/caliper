@@ -110,6 +110,13 @@ NOT_CHAIN = "its load path isn't a simple chain"
 NO_TIE = "nothing ties its splayed sides"
 #: Three or more supports in a row under one piece: which carries what isn't settled by statics alone (#311).
 IN_A_ROW = "it rests on three or more supports in a row"
+#: More supports one way across a piece than the other: no simple share either way (#311).
+UNEVEN = "it rests on more supports one way than the other"
+#: Held both ways by supports that don't run most of the way across: how the load splits needs more than halves (#311).
+SHORT = "its supports are short, so how the load splits isn't simple"
+#: "Most of the way across": a support's joint at least this share of the piece's width along it (pending: Theo, with
+#: decision 5).
+MOST_OF_THE_WAY = 0.75
 #: A side leaning more than this off vertical is splayed: its foot pushes out.
 SPLAY_DEG = 2.0
 
@@ -159,22 +166,36 @@ def loaded_piece(pieces: list[dict], load: dict) -> Optional[str]:
     return best[1] if best else None
 
 
-def _lever(mids: list[np.ndarray], at: np.ndarray, share: str) -> list[float]:
+def _lever(mids: list[np.ndarray], at: np.ndarray, share: str, spans: Optional[list] = None) -> list[float]:
     """Each supporting joint's share of a load at ``at``: grouped by the way across the piece they lie (its two horizontal
     axes, as they lie from each other), a group's share by statics. Two in a group share it by the lever rule, a load past
     them included: the near one
     then carries more than all of it and the far one is lifted, a negative share, so its joint takes a pull (#311: it read
-    half each). Three or more in a row are statically indeterminate: not checked by hand, never a third each."""
+    half each). Three or more in a row are statically indeterminate: not checked by hand, never a third each. ``spans``:
+    each support's joint length and the piece's width the same way; held both ways ("half each way", decision 5), each
+    pair takes only half the load's moment, which holds only where every support runs most of the way across (#311:
+    a ring of four posts read the near one at 0.475 where statics needs 0.9 or more), so short ones aren't checked."""
     if len(mids) == 1:
         return [1.0]
     # grouped by how they lie from each other, never from the load (#311: a load near one edge read its pair as two):
     # each with the support farthest from it, along the horizontal axis the two differ in most
     groups: dict[int, list[int]] = {}
     for i, m in enumerate(mids):
-        far = max((j for j in range(len(mids)) if j != i), key=lambda j: float(np.linalg.norm((mids[j] - m)[:2])))
-        groups.setdefault(int(np.argmax(np.abs((mids[far] - m)[:2]))), []).append(i)
+        sp = spans[i] if spans else None
+        if sp is not None and len(sp) > 2 and sp[0] >= MOST_OF_THE_WAY * sp[1]:
+            along = np.asarray(sp[2], float)                  # a support across the piece pairs across its own line
+            axis = int(np.argmin(np.abs(along[:2])))
+        else:
+            far = max((j for j in range(len(mids)) if j != i), key=lambda j: float(np.linalg.norm((mids[j] - m)[:2])))
+            axis = int(np.argmax(np.abs((mids[far] - m)[:2])))
+        groups.setdefault(axis, []).append(i)
     out = [0.0] * len(mids)
     each = 1.0 / len(groups)
+    if len(groups) > 1:
+        if any(len(idx) > 2 for idx in groups.values()):
+            raise NotChain(UNEVEN)
+        if spans and any(sp[0] < MOST_OF_THE_WAY * sp[1] for sp in spans):
+            raise NotChain(SHORT)
     for axis, idx in groups.items():
         xs = [float(mids[i][axis]) for i in idx]
         if len(idx) == 1:
@@ -185,8 +206,10 @@ def _lever(mids: list[np.ndarray], at: np.ndarray, share: str) -> list[float]:
         elif len(idx) == 2:
             (a, b), x = xs, float(at[axis])
             out[idx[0]], out[idx[1]] = each * (b - x) / (b - a), each * (x - a) / (b - a)
-        else:
-            raise NotChain(IN_A_ROW)
+        else:                                                 # three or more one way: in a row, or not
+            other = 1 - axis
+            spread = [float(mids[i][axis]) for i in idx], [float(mids[i][other]) for i in idx]
+            raise NotChain(IN_A_ROW if np.ptp(spread[1]) <= 0.1 * np.ptp(spread[0]) else UNEVEN)
     return out
 
 
@@ -203,7 +226,16 @@ def _into(joint: dict, piece: str) -> np.ndarray:
     return out if piece == joint["edge"] else -out
 
 
-def _route(mine: list[dict], piece: str, f: np.ndarray, at: np.ndarray, share: str) -> list:
+def _across(pieces: dict, piece: str, along) -> float:
+    """How wide a piece is the way a joint runs: its outline's spread along that direction, mm."""
+    pc = pieces.get(piece)
+    if pc is None or not pc.get("polys"):
+        return 0.0
+    pts = np.vstack(pc["polys"])
+    return float(np.ptp(pts @ np.asarray(along, float)))
+
+
+def _route(mine: list[dict], piece: str, f: np.ndarray, at: np.ndarray, share: str, pieces: Optional[dict] = None) -> list:
     """A piece's force among its supporting joints, axis by axis (#311 review: a push along a rail went half to each end, so
     one end was pulled out of its edge at 0x). Each component goes where the piece bears in that direction; where it bears
     nowhere, across the joints that can take it in shear; only where neither can, it pulls on them (withdrawal). Each
@@ -219,7 +251,9 @@ def _route(mine: list[dict], piece: str, f: np.ndarray, at: np.ndarray, share: s
         bear = [i for i, d in enumerate(dots) if d > 0.7]
         slide = [i for i, d in enumerate(dots) if abs(d) <= 0.7]
         take = bear or slide or list(range(len(mine)))
-        for i, frac in zip(take, _lever([mine[i]["mid"] for i in take], at, share)):
+        for i, frac in zip(take, _lever([mine[i]["mid"] for i in take], at, share,
+                                        [(float(mine[i]["length_mm"]), _across(pieces, piece, mine[i]["along"]),
+                                          mine[i]["along"]) for i in take] if pieces else None)):
             out[i][axis] += frac * c
     return list(zip(mine, out))
 
@@ -291,7 +325,7 @@ def demands(joints: list[dict], pieces: list[dict], load: dict, held: list[dict]
             mine = [j for j in mine if other(j, piece) in ground]
         if not mine:
             raise NotChain(NOT_CHAIN)
-        for j, fj in _route(mine, piece, f, at, share):
+        for j, fj in _route(mine, piece, f, at, share, by):
             if not np.any(np.abs(fj) > 1e-9):
                 continue
             to = other(j, piece)
