@@ -126,9 +126,11 @@ def _built_gap(mesh, end: np.ndarray, into: np.ndarray, face_at: float) -> Optio
     """How far short of a top's face the built solid's leg stops, mm, measured on the mesh's faces (#321): a ray from
     5 mm inside the leg, along it toward the top. Where the solid runs on past the face, it touches: 0. None where the
     ray finds no way out of the solid (it isn't inside it)."""
+    from . import spatial
+
     start = np.asarray(end, float) - into * 5.0
     try:
-        locs, _, _ = mesh.ray.intersects_location([start], [into])
+        locs, _, _ = spatial.intersects_location(mesh, [start], [into])
     except Exception:  # noqa: BLE001 — no ray test here: not measured, said by the caller
         return None
     ahead = sorted(float((loc - start) @ into) for loc in locs if float((loc - start) @ into) > 1e-6)
