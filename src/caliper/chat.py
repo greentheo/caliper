@@ -1823,6 +1823,36 @@ def undo_target(store: DesignStore, part_id: str) -> Optional[int]:
     return before[-1] if before else None
 
 
+def _loads_back(store: DesignStore, part_id: str, had: Optional[dict], now: Optional[dict], target: int) -> str:
+    """What a roll-back did to a part's loads (#312 review: it put back the same script and kept the edit, while saying it
+    rolled back): back to the script's, naming the edits undone, or as they were at that version. "" where they're the same."""
+    from . import scenarios as SC
+
+    return SC.restored(had, now, target)
+
+
+def drift_note(store: DesignStore, part_id: Optional[str]) -> str:
+    """What the reply adds when a write left the person's edited loads behind (#312 review)."""
+    from . import scenarios as SC
+
+    try:
+        return SC.drift(store, part_id) if part_id and store.design.part(part_id) is not None else ""
+    except Exception:  # noqa: BLE001 — the change landed; the card says it too
+        return ""
+
+
+def _with_drift(store: DesignStore, result: TurnResult) -> TurnResult:
+    """The reply, with what every part's edited loads did when this turn changed its shape (#312 review): said for each
+    part whose script changed since its loads were edited, so a write by any path (a revision, a shared number, a
+    roll-back) says it."""
+    for pid in sorted((store.design.scenarios or {}).keys()):
+        note = drift_note(store, pid)
+        if note:
+            note = note if pid == result.part else f"**{pid}**: {note}"
+            result.reply = f"{result.reply}\n\n{note}" if result.reply else note
+    return result
+
+
 def revert_part(store: DesignStore, part_id: str, *, to: Optional[int] = None, events=None, on_event=None) -> TurnResult:
     """Roll a part back and re-measure — so the rollback the reply offers is real. ``to``: that version (#299); else
     the last change undone (:func:`undo_target`), never redoing one undone already.
@@ -1865,7 +1895,11 @@ def revert_part(store: DesignStore, part_id: str, *, to: Optional[int] = None, e
     _emit(events, on_event, "reverting", f"{part_id} back to v{target}", part=part_id, target=target)   # named first
     promote.clear(store)                      # the change the offer referred to is being undone
     before, _ = _measure_design(store)
+    import copy
+
+    had = copy.deepcopy((store.design.scenarios or {}).get(part_id))
     version = store.restore(part_id, target)
+    loads_said = _loads_back(store, part_id, had, (store.design.scenarios or {}).get(part_id), target)
     _emit(events, on_event, "wrote", f"{part_id} rolled back to v{target} (saved as v{version})",
           part=part_id, version=version, restored_from=target)
 
@@ -1877,6 +1911,8 @@ def revert_part(store: DesignStore, part_id: str, *, to: Optional[int] = None, e
     if to is None and stepped:                 # the lineage, not the last action: said, and the way back (#305, foreman)
         lines[0] = (f"\u21a9 rolled **{part_id}** back to v{target}, the one before v{stepped[0]} (saved as v{version}). "
                     f"To go back to where you were, say \"go back to v{stepped[1]}\".")
+    if loads_said:                             # its loads came back with it (#312 review)
+        lines[0] = f"{lines[0].rstrip('.')}: {loads_said}."
     if fixed:
         lines.append(f"\u2713 That fixed: {', '.join(fixed)}")
     if broke:
@@ -2762,6 +2798,7 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
 
     said = _rolled_back(store, typed, scope, events, on_event)      # "roll it back (to v3)": no model (#299)
     if said is not None:
+        _with_drift(store, said)
         if not logged:
             store.append_log({"kind": "message", "text": message, "scope": scope, "action": "revert",
                               "part": said.part, "routed_by": "revert"})
@@ -2787,6 +2824,7 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
             if not logged:
                 store.append_log({"kind": "message", "text": message, "scope": scope, "action": "skeleton",
                                   "routed_by": "skeleton"})
+            _with_drift(store, result)              # a shared number moved parts: their edited loads, said (#312)
             store.append_log({"kind": "reply", "action": "skeleton", "ok": result.ok, "reply": result.reply})
             _emit(events, on_event, "done", "skeleton", ok=result.ok)
             return result
@@ -2853,6 +2891,7 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
             _emit(events, on_event, "error", f"couldn't update the scorecard's checks: {scrubbed(e)}")
         if said:
             result.reply = f"{result.reply}\n\n{said}" if result.reply else said
+    _with_drift(store, result)                 # a write that left the person's edited loads behind: said (#312 review)
     _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)
     # the reply TEXT is logged too, so a reloaded page can redraw the conversation as it was
     store.append_log({"kind": "reply", "action": result.action, "part": result.part,

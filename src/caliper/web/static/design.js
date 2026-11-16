@@ -2462,7 +2462,8 @@ function scoreView(d) {
     <ul class="list small" style="margin-top:6px">${card.checks.map((c) => { const now = held.find((x) => x.id === c.id) || c;
       return `<li>${scoreMark(c, stale, when)}
       ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit, typeof c.limit === 'number' && (c.op || '>=').startsWith('>') ? c.limit : null)}${goalLimit(c)}${old}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
-      ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}</li>`; }).join('')}
+      ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}
+      ${c.loads ? `<div class="muted">${esc(c.loads)}</div>` : ''}</li>`; }).join('')}
       ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${esc(c.label || c.id)} ${from(c)}
         <span class="muted">— new since this card</span></li>`).join('')}</ul>
     <table class="st" style="margin-top:6px">${card.objectives.map((o) => `<tr><td style="text-align:left">${esc(o.label)}</td>
@@ -3180,10 +3181,180 @@ function loadView(p) {
     <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button>
       ${runs[0] && runs[0].finer && runs[0].version === p.version ? `<button id="lFiner" title="voxels of ${wallLen(runs[0].finer.spacing_mm)}, enough
         to see its ${wallLen(runs[0].thinnest_mm)} walls">Check it again finer${runs[0].finer.minutes ? ` (about ${runs[0].finer.minutes} min)` : ' (how long: unknown)'}</button>` : ''}</div>
+    ${scenariosBox(p)}
     <div id="lProgress"></div>
     ${runs.length ? loadResults(p, runs[pick], runs) : ''}
     ${p.study === 'carve' ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : ''}
     ${lightenShown(p, runs) ? lightenView(p) : ''}`;
+}
+
+// --------------------------------------------------------------------- scenarios and supports (CALI-185, #296 slice A)
+// What it must hold and what holds it, as rows the person edits: kept in design.yaml in place of the script's loads() and
+// HELD. Saving writes a new version of the part (the same script), so its checks read "older version" (Rule 6).
+const SCEN_DIRS = { down: [0, 0, -1], front: [0, -1, 0], back: [0, 1, 0], left: [-1, 0, 0], right: [1, 0, 0] };
+const SCEN_SAID = { down: 'down', front: 'toward the front', back: 'toward the back', left: 'toward the left',
+  right: 'toward the right', angle: 'at an angle…' };
+// a direction from the picker: one of SCEN_DIRS, or an angle from straight down and a heading (0 toward the front,
+// 90 toward the right), the front at -y as the rest of Caliper has it
+function dirFromPick(kind, deg, heading) {
+  if (SCEN_DIRS[kind]) return SCEN_DIRS[kind].slice();
+  const t = (Number(deg) || 0) * Math.PI / 180, h = (Number(heading) || 0) * Math.PI / 180;
+  const r = (v) => Math.round(v * 1e6) / 1e6;
+  return [r(Math.sin(t) * Math.sin(h)), r(-Math.sin(t) * Math.cos(h)), r(-Math.cos(t))];
+}
+function pickFromDir(d) {
+  const n = Math.hypot(...d) || 1, u = d.map((v) => v / n);
+  for (const [k, v] of Object.entries(SCEN_DIRS)) if (v.every((x, i) => Math.abs(x - u[i]) < 1e-6)) return { kind: k };
+  const deg = Math.acos(Math.max(-1, Math.min(1, -u[2]))) * 180 / Math.PI;
+  const heading = ((Math.atan2(u[0], -u[1]) * 180 / Math.PI) + 360) % 360;
+  return { kind: 'angle', deg: Math.round(deg * 10) / 10, heading: Math.round(heading * 10) / 10 };
+}
+const xyz = (v) => (v || []).map((x) => Math.round(Number(x) * 1000) / 1000).join(', ');
+// a field left as it was shown keeps its exact value, never the shown rounding (a standard's case put back read edited)
+function keptXyz(was, text) {
+  if (was && text.trim() === xyz(was)) return was;
+  return String(text).split(',').map((v) => Number(v.trim()));
+}
+function keptDir(was, kind, deg, heading) {
+  const shown = pickFromDir(was || [0, 0, -1]);
+  if (was && kind === shown.kind && (kind !== 'angle' || (Number(deg) === shown.deg && Number(heading) === shown.heading))) return was;
+  return dirFromPick(kind, deg, heading);
+}
+function scenarioRow(sc, i) {
+  const d = pickFromDir(sc.direction || [0, 0, -1]);
+  const std = sc.standard ? `<div class="small muted">a standard's case: ${esc(sc.standard.name)}
+      ${sc.standard.amount !== sc.amount || sc.standard.unit !== sc.unit ? `; the standard is ${sc.standard.amount} ${esc(sc.standard.unit)}` : ''}
+      <button class="ghost" data-scen-std="${i}">Back to the standard</button></div>` : '';
+  // the design changed a case under an edit of yours, or dropped it: asked, never settled for you (#312 re-check)
+  // until they choose, what's checked is said; a Save settles only the rows chosen on (#312 third round)
+  const asked = sc.conflict ? `<div class="small" style="color:var(--amber)">${esc(sc.conflict)}${sc.checked ? `: ${esc(sc.checked)}` : ''}.
+      ${sc.keep ? '<span class="muted">yours, kept when you save.</span>'
+        : `${sc.design ? `<button class="ghost" data-scen-take="${i}">Take the design's</button>` : ''}<button class="ghost" data-scen-keep="${i}">Keep mine</button>`}</div>`
+    : sc.new ? '<div class="small muted">the design added this case since you edited them: it\'s checked as the script has it.</div>' : '';
+  const whose = sc.source === 'edited' ? 'yours' : sc.source === 'added' ? 'yours, added' : sc.source === 'script' ? 'its script\'s' : '';
+  return `<div class="card scen" data-scen="${i}" style="margin-top:6px">${asked}${whose ? `<div class="small muted">${whose}</div>` : ''}
+      <div class="form"><span>what</span><span><input data-f="name" value="${esc(sc.said || sc.name)}"${sc.standard ? ' readonly title="a standard\'s case is named for what it is: edit its numbers"' : ''} style="width:100%"></span>
+      <span>how much</span><span><input data-f="amount" type="number" step="any" min="0" value="${sc.amount}" style="width:7em">
+        <select data-f="unit">${['lb', 'kg', 'N'].map((u) => `<option${u === sc.unit ? ' selected' : ''}>${u}</option>`).join('')}</select></span>
+      <span>which way</span><span><select data-f="dir">${Object.entries(SCEN_SAID).map(([k, w]) =>
+        `<option value="${k}"${k === d.kind ? ' selected' : ''}>${w}</option>`).join('')}</select>
+        <span data-angle ${d.kind === 'angle' ? '' : 'hidden'}><input data-f="deg" type="number" step="any" value="${d.deg ?? 0}" style="width:5em">°
+          from straight down, heading <input data-f="heading" type="number" step="any" value="${d.heading ?? 0}" style="width:5em">°</span></span>
+      <span>margin</span><span>× <input data-f="factor" type="number" step="any" min="0" value="${sc.factor}" style="width:5em"></span>
+      <span>where</span><span><input data-f="lo" value="${xyz(sc.lo)}" title="one corner of the box it pushes on, x, y, z mm" style="width:12em"> to
+        <input data-f="hi" value="${xyz(sc.hi)}" title="the opposite corner" style="width:12em"> mm</span>
+      <span>checked</span><span><label><input data-f="on" type="checkbox"${sc.on === false ? '' : ' checked'}> on</label>
+        <button class="ghost" data-scen-del="${i}">Remove</button></span></div>${std}</div>`;
+}
+function supportRow(s, i) {
+  if (s.floor) return `<div class="small" data-sup="${i}" data-floor="1" style="margin-top:4px">• the floor at its underside
+      <button class="ghost" data-sup-del="${i}">Remove</button></div>`;
+  return `<div class="small" data-sup="${i}" style="margin-top:4px">• <input data-f="name" value="${esc(s.name)}">
+      <input data-f="lo" value="${xyz(s.lo)}" style="width:12em"> to <input data-f="hi" value="${xyz(s.hi)}" style="width:12em"> mm
+      <button class="ghost" data-sup-del="${i}">Remove</button></div>`;
+}
+function scenariosView(p, got) {
+  if (!got) return '<div class="small muted">reading them…</div>';
+  return `${got.overridden ? '<div class="small">Yours where you edited them; the rest as its script says them, now and as it changes.</div>'
+      : '<div class="small muted">As its script says them. Edit and save to keep yours instead.</div>'}
+    ${got.scenarios.map(scenarioRow).join('')}
+    <div class="actions"><button class="ghost" id="scenAdd">Add a scenario</button></div>
+    <div style="margin-top:8px"><b class="small">What holds it</b>${got.supports.map(supportRow).join('')}</div>
+    <div class="actions"><button class="ghost" id="supAdd">Add a support</button><button class="ghost" id="supFloor">The floor</button></div>
+    <div class="actions"><button class="primary" id="scenSave">Save them</button>
+      ${got.overridden ? '<button class="ghost" id="scenBack">Back to its script\'s</button>' : ''}</div>
+    <div class="small muted">Saving makes a new version of ${esc(p.id)}, the same script: its checks, Lighten and carves are out
+      of date until it's checked again.</div><div id="scenSaid"></div>`;
+}
+function scenariosBox(p) {
+  const open = S.scenOpen === p.id;
+  return `<details id="scenBox"${open ? ' open' : ''} style="margin-top:6px"><summary>Scenarios and supports
+      <span class="muted small">what it must hold, and what holds it</span></summary>
+      <div id="scenBody">${open ? scenariosView(p, (S.scen || {})[p.id]) : ''}</div></details>`;
+}
+// the rows as they stand in the page, back into scenarios and supports
+function readScenarios(got) {
+  const scen = [...document.querySelectorAll('#scenBody .scen')].map((el) => {
+    const f = (k) => el.querySelector(`[data-f="${k}"]`);
+    const i = +el.dataset.scen, was = got.scenarios[i] || {};
+    return { ...was, name: was.standard ? was.name : f('name').value.trim(), amount: Number(f('amount').value), unit: f('unit').value,
+      direction: keptDir(was.direction, f('dir').value, f('deg').value, f('heading').value), factor: Number(f('factor').value),
+      lo: keptXyz(was.lo, f('lo').value), hi: keptXyz(was.hi, f('hi').value), on: f('on').checked };
+  });
+  const sup = [...document.querySelectorAll('#scenBody [data-sup]')].map((el) => {
+    const was = got.supports[+el.dataset.sup] || {};
+    return el.dataset.floor ? { name: 'the floor', floor: true }
+      : { name: el.querySelector('[data-f="name"]').value.trim(), lo: keptXyz(was.lo, el.querySelector('[data-f="lo"]').value),
+          hi: keptXyz(was.hi, el.querySelector('[data-f="hi"]').value) };
+  });
+  return { scenarios: scen, supports: sup };
+}
+function wireScenarios(p) {
+  const box = $('scenBox');
+  if (!box) return;
+  const paint = () => { $('scenBody').innerHTML = scenariosView(p, (S.scen || {})[p.id]); wireScenarioRows(p); };
+  box.ontoggle = async () => {
+    S.scenOpen = box.open ? p.id : null;
+    if (!box.open || $('scenSave')) return;      // painted already (a render with it open): keep what it says
+    S.scen = S.scen || {};
+    if (!S.scen[p.id]) { paint(); S.scen[p.id] = await api('GET', `/api/designs/${S.slug}/parts/${p.id}/scenarios`); }
+    paint();
+  };
+  if (box.open) wireScenarioRows(p);
+}
+function wireScenarioRows(p) {
+  const got = (S.scen || {})[p.id];
+  if (!got) return;
+  const keep = () => { S.scen[p.id] = { ...got, ...readScenarios(got) }; };
+  const repaint = () => { $('scenBody').innerHTML = scenariosView(p, S.scen[p.id]); wireScenarioRows(p); };
+  document.querySelectorAll('#scenBody [data-f="dir"]').forEach((sel) => {
+    sel.onchange = () => { sel.parentElement.querySelector('[data-angle]').hidden = sel.value !== 'angle'; };
+  });
+  document.querySelectorAll('#scenBody [data-scen-del]').forEach((b) => {
+    b.onclick = () => { keep(); S.scen[p.id].scenarios.splice(+b.dataset.scenDel, 1); repaint(); };
+  });
+  document.querySelectorAll('#scenBody [data-scen-std]').forEach((b) => {
+    b.onclick = () => { keep(); const sc = S.scen[p.id].scenarios[+b.dataset.scenStd];
+      S.scen[p.id].scenarios[+b.dataset.scenStd] = { ...sc.standard, standard: sc.standard, on: sc.on !== false }; repaint(); };
+  });
+  document.querySelectorAll('#scenBody [data-scen-take]').forEach((b) => {
+    b.onclick = () => { keep(); const i = +b.dataset.scenTake, sc = S.scen[p.id].scenarios[i];
+      S.scen[p.id].scenarios[i] = { ...sc.design, of: sc.of, source: 'script' }; repaint(); };
+  });
+  document.querySelectorAll('#scenBody [data-scen-keep]').forEach((b) => {
+    b.onclick = () => { keep(); S.scen[p.id].scenarios[+b.dataset.scenKeep].keep = true; repaint(); };
+  });
+  document.querySelectorAll('#scenBody [data-sup-del]').forEach((b) => {
+    b.onclick = () => { keep(); S.scen[p.id].supports.splice(+b.dataset.supDel, 1); repaint(); };
+  });
+  const add = $('scenAdd');
+  if (add) add.onclick = () => { keep(); const last = S.scen[p.id].scenarios.slice(-1)[0] || {};
+    S.scen[p.id].scenarios.push({ name: 'a new load', amount: 50, unit: 'lb', direction: [0, 0, -1], factor: 1, on: true,
+      lo: last.lo || [0, 0, 0], hi: last.hi || [10, 10, 10] }); repaint(); };
+  const sAdd = $('supAdd');
+  if (sAdd) sAdd.onclick = () => { keep(); S.scen[p.id].supports.push({ name: 'held here', lo: [0, 0, 0], hi: [10, 10, 10] }); repaint(); };
+  const floor = $('supFloor');
+  if (floor) floor.onclick = () => { keep(); if (!S.scen[p.id].supports.some((s) => s.floor)) S.scen[p.id].supports.push({ name: 'the floor', floor: true }); repaint(); };
+  const said = (t, bad) => { $('scenSaid').innerHTML = `<div class="small" style="color:var(--${bad ? 'bad' : 'ok'})">${esc(t)}</div>`; };
+  const save = $('scenSave');
+  if (save) save.onclick = async () => {
+    save.disabled = true;
+    try {
+      const got2 = await api('PUT', `/api/designs/${S.slug}/parts/${p.id}/scenarios`, readScenarios(got));
+      S.scen[p.id] = got2.scenarios; S.design = got2.design; render();       // the tree's version too
+      const open = (got2.open || []).length ? ` Still open, until you choose: ${got2.open.join('; ')}.` : '';
+      said(`Saved as v${got2.version}.${open} Its checks are of the loads before: check it again.`);
+    } catch (e) { save.disabled = false; said(plainly(e.message), true); }
+  };
+  const back = $('scenBack');
+  if (back) back.onclick = async () => {
+    back.disabled = true;
+    try {
+      const got2 = await api('DELETE', `/api/designs/${S.slug}/parts/${p.id}/scenarios`);
+      S.scen[p.id] = got2.scenarios; S.design = got2.design; render();
+      said(`Back to its script's, as v${got2.version}: check it again.`);
+    } catch (e) { back.disabled = false; said(plainly(e.message), true); }
+  };
 }
 
 // carve it (CALI-82): a printed part, carved free-form where it isn't working; each step checked
@@ -3646,6 +3817,7 @@ function wireLoad(p) {
   if (ask) ask.onclick = () => { $('msg').value = 'It has to hold '; $('msg').focus(); };
   const go = $('lGo');
   if (go) go.onclick = () => runLoad(p);
+  wireScenarios(p);                                // its scenarios and supports, as data (#296)
   const finer = $('lFiner');                       // a run too coarse to see its walls: again, finer (CALI-97)
   if (finer) finer.onclick = () => runLoad(p, loadRuns(p.id)[0].finer.spacing_mm);
   const sel = $('lRun');

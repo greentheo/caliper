@@ -234,6 +234,15 @@ def _small_len(mm: float, inches: bool) -> str:
 RACKING = "Racking (the frame leaning over at its joints) isn't checked: the FEA takes the joints as solid."
 
 
+def off_lines(run: dict) -> list[dict]:
+    """The scenarios the person turned off, said where its strength is (#296: a standard's case "off" said on the card):
+    a standard's in amber, since the part isn't checked to it; one of the person's own, as information."""
+    from .scenarios import STANDARD
+
+    return [_line(f"Not checked: {n} is turned off.", "warn" if STANDARD.search(n) else "info", study="load")
+            for n in run.get("loads_off") or []]
+
+
 def joints_said(c: dict, need) -> str:
     """A passing case's joints, checked by hand (#301): the joint that governs it named, or the weakest joint's own number
     beside the wood's. "" where none was checked."""
@@ -601,7 +610,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             said = consistency.checked(store, pid)
             smaller = consistency.plan_differs(C.declared(store, pid), geom)
             off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
-            edge = next((r.detail for r in said if r.id == "loads_edge" and r.detail), "")   # (CALI-94)
+            edge = consistency.bare_edge(store, pid) or ""    # (CALI-94) of the loads it checks, edited too (#312)
             meta = geom.require_mesh().metadata
             strays = _strays(meta, inches) if meta.get("strays") else None
         except Exception:  # noqa: BLE001 — the card says what it can
@@ -636,6 +645,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             elif c.get("safety") is not None:
                 work.append(_case_line(part_name(p), run, c, filled, stale, inches, edge=bool(edge)))
         work += _grain_lines(store, pid, run, stale, filled, bool(edge))
+        work += off_lines(run)
     elif p.get("loads"):
         failed = next((h for h in reversed(p.get("history") or []) if h.get("kind") == "load"
                        and h.get("action") == "failed" and h.get("version") == p["version"]), None)
@@ -644,6 +654,11 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     elif p.get("built") and p.get("role") != "fixed" and not p.get("framed"):
         work.append(_line("Not checked yet: say what it has to hold (\"it has to hold me, 200 lb\").", "warn",
                           study="load"))
+    from .scenarios import drift
+
+    left = drift(store, pid) if p.get("scripted", True) else ""      # its edited loads left behind by its shape (#312)
+    if left:
+        work.append(_line(left, "warn", study="load"))
     if p.get("loads") and p.get("role") != "fixed":
         from . import trials
 
@@ -666,7 +681,9 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             if ways:
                 work.append(_line(f"Not checked yet: {' or '.join(ways)} (no push is declared that way, and its base "
                                   f"is no wider that way).", "warn", study="tip"))
-            missing = tipping.unchecked(C.declared(store, pid), p.get("intent") or "")
+            from . import scenarios as SC
+
+            missing = tipping.unchecked(SC.declared(store, pid), p.get("intent") or "")   # edited too (#312 re-check)
         except Exception as e:  # noqa: BLE001 — said, never a crash of the card
             work.append(_line(f"Tipping: not checked ({scrubbed(e)}).", "warn", study="tip"))
             missing = []

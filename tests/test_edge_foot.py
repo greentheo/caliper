@@ -233,3 +233,34 @@ def test_the_last_checked_line_says_middle_only():
 def test_times_owns_about(x, about, said):
     assert answers._times(x, about) == said
     assert answers._num("strength.safety", x, about=about) == said
+
+
+# --- #314 (CALI-193): a tipping case checks it doesn't tip, not that it holds: it's no foot at the free edge ----------
+
+#: The middle only, with a tipping case at the free edge: someone leaning off the front edge.
+TIPPED = CENTRED.replace('''    return [{"name": "an adult stepping up"''', '''    return [{"name": "leaning off the front edge", "tip": True, "force": (0, -20, -600), "factor": 1.0,
+             "lo": (-10, -d / 2, h - 2), "hi": (10, -d / 2 + 20, h)},
+            {"name": "an adult stepping up"''')
+#: The same, with a strength case at the edge too.
+TIPPED_AND_STOOD = LOADS.replace('''    return [{"name": "stepping on the front edge"''', '''    return [{"name": "leaning off the front edge", "tip": True, "force": (0, -20, -600), "factor": 1.0,
+             "lo": (-10, -d / 2, h - 2), "hi": (10, -d / 2 + 20, h)},
+            {"name": "stepping on the front edge"''')
+
+
+def test_a_tipping_case_at_the_free_edge_is_no_foot_there():
+    assert TIPPED != CENTRED and '"tip": True' in TIPPED and "stepping on the front edge" not in TIPPED
+    edge = _checks(STOOL + TIPPED)["loads_edge"]
+    assert edge.passed and edge.detail == WARN, edge.detail                   # middle only, as without it
+
+
+def test_a_tipping_case_beside_a_strength_case_at_the_edge_says_nothing():
+    assert '"tip": True' in TIPPED_AND_STOOD and "stepping on the front edge" in TIPPED_AND_STOOD
+    assert _checks(STOOL + TIPPED_AND_STOOD)["loads_edge"].detail == ""
+
+
+def test_the_card_and_bare_edge_say_middle_only_with_just_a_tipping_case_there(tmp_path):
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", STOOL + TIPPED, intent="a step stool")
+    assert consistency.bare_edge(store, "stool") == WARN
+    lines = answers.answers(store, design_api.design_state(store), "stool")[0]["lines"]
+    assert {"text": WARN[0].upper() + WARN[1:] + ".", "status": "warn", "study": "load"} in lines

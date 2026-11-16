@@ -83,7 +83,7 @@ def check(store: DesignStore, part_id: str) -> list[dict]:
     from .load_study import parse_loads
 
     d = C.declared(store, part_id)
-    cases = [ld for ld in (d.get("loads") or []) if isinstance(ld, dict) and ld.get("tip")]
+    cases = [ld for ld in (d.get("loads") or []) if isinstance(ld, dict) and ld.get("tip")]   # script's loads: tipping cases
     if not cases:
         return []
     out = []
@@ -134,7 +134,7 @@ def undeclared_ways(store: DesignStore, part_id: str) -> list[str]:
     review): a bar stool on a square base, pushed only forward, isn't checked sideways. "tipping sideways" (across x),
     "tipping front to back" (across y); [] when it declares none, or every way that matters."""
     d = C.declared(store, part_id)
-    cases = [ld for ld in (d.get("loads") or []) if isinstance(ld, dict) and ld.get("tip")]
+    cases = [ld for ld in (d.get("loads") or []) if isinstance(ld, dict) and ld.get("tip")]   # script's loads: tipping cases
     if not cases:
         return []
     try:
@@ -159,12 +159,12 @@ def undeclared_ways(store: DesignStore, part_id: str) -> list[str]:
 
 def unchecked(declared: dict, intent: str, cases: Optional[list] = None) -> list[str]:
     """For a seat (stool, chair, bench), the cases it doesn't declare, in words (#86 item 3): what nobody checked."""
-    words = f"{intent} " + " ".join(str(ld.get("name", "")) for ld in declared.get("loads") or [] if isinstance(ld, dict))
+    words = f"{intent} " + " ".join(str(ld.get("name", "")) for ld in declared.get("loads") or [] if isinstance(ld, dict))   # edited: callers pass scenarios.declared
     # a step stool is stood on, not sat on: its cases are a step's (the guide's table), not a seat's
     words = words.lower().replace("step stool", "step").replace("step-stool", "step")
     if not any(k in words for k in ("stool", "chair", "bench", "seat", "sit")):
         return []
-    loads = [ld for ld in declared.get("loads") or [] if isinstance(ld, dict)]
+    loads = [ld for ld in declared.get("loads") or [] if isinstance(ld, dict)]   # edited: callers pass scenarios.declared
     side = [ld for ld in loads if not ld.get("tip") and isinstance(ld.get("force"), (list, tuple))
             and len(ld["force"]) == 3 and any(abs(float(v)) > 0 for v in ld["force"][:2])]
     out = []

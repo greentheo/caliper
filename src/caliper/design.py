@@ -200,6 +200,9 @@ class Design(_Base):
     #: CALI-126 (#150): the sheets' face grain as the person said it, ``{part: {piece: {grain, runs, said}}}``: only
     #: these move a strength verdict, and the cut list and build book tell the maker (see :mod:`caliper.grain`)
     grain: dict = Field(default_factory=dict)
+    #: CALI-185 (#296): a part's scenarios and supports as the person edited them, ``{part: {"scenarios", "supports"}}``,
+    #: read in place of its script's ``loads()`` and ``HELD`` (see :mod:`caliper.scenarios`)
+    scenarios: dict = Field(default_factory=dict)
     created: str = Field(default_factory=_now)
     updated: str = Field(default_factory=_now)
 
@@ -416,6 +419,9 @@ class DesignStore:
             _write_atomic(os.path.join(vdir, "spec.yaml"), spec.to_yaml())
         if report is not None:
             _write_atomic(os.path.join(vdir, "report.json"), json.dumps(report, indent=2, default=str))
+        said = (self.design.scenarios or {}).get(part_id)
+        if said:                                  # its loads as edited, with the version: a restore puts them back (#312)
+            _write_atomic(os.path.join(vdir, "scenarios.yaml"), yaml.safe_dump(said, sort_keys=False))
 
         # the assembly's cache keys on (path, mtime); a same-tick rewrite could otherwise serve stale
         # geometry to the very re-measure that's meant to prove the change landed.
@@ -577,7 +583,20 @@ class DesignStore:
         if os.path.exists(script_src):
             with open(script_src) as f:
                 script = f.read()
-            return self.write_part(part_id, script, action="restore",
+            # that version's loads too: as it had them edited, else its script's (#312 review: a roll-back after a load
+            # edit put back the same script and kept the edit)
+            said = os.path.join(vdir, "scenarios.yaml")
+            loads = dict(self.design.scenarios or {})
+            if os.path.exists(said):
+                with open(said) as f:
+                    loads[part_id] = yaml.safe_load(f)
+            else:
+                loads.pop(part_id, None)
+            from .scenarios import restored
+
+            said = restored((self.design.scenarios or {}).get(part_id), loads.get(part_id), version)
+            self.design.scenarios = loads
+            return self.write_part(part_id, script, action="restore", feedback=said or None,   # in its history (#312)
                                    extra={"restored_from": version})
         if os.path.exists(mesh_src):
             with open(mesh_src, "rb") as f:

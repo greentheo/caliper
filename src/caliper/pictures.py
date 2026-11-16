@@ -147,7 +147,7 @@ def panels(store: DesignStore, part_id: str) -> list[dict]:
     mesh = store.part_geometry(part_id).require_mesh()
     pieces = shapes(declared)
     _sides(mesh, pieces)
-    loads = L.parse_loads(declared["loads"]) if declared.get("loads") else []
+    loads = L.parse_loads(declared["loads"]) if declared.get("loads") else []   # script's loads: the drawing of its script
     tol = tolerance(mesh)
     out = []
     for pc in pieces:
