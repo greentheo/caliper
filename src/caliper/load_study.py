@@ -1432,7 +1432,8 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     if ctx.get("joints"):                          # each joint by hand, needing what the wood needs (#301)
         from . import joint_check as JC
 
-        case["joints"] = JC.check(ctx["joints"], load, ctx.get("held") or [], min_safety)
+        case["joints"] = JC.check(ctx["joints"], load, ctx.get("held") or [], min_safety,
+                                  mat=ctx.get("plate_mat") or mat)       # a notched side's net section, by its strength (CALI-192)
         governs, safety = JC.lower(case, governs, safety)
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
                  "holds": bool(safety is not None and safety >= min_safety),  # producer
