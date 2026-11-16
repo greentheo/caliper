@@ -49,6 +49,11 @@ class NotClosed(ValueError):
     """A carved step whose shape isn't watertight, even repaired."""
 
 
+
+#: The sweep's solves stop at this tolerance (whittle#8, 25e282e; #298): they only rank which voxels go next, and each
+#: station is checked again at whittle's default 1e-5 (``load_study.check_load``), the number its verdict reads.
+SWEEP_RTOL = 1e-3
+
 def _closed(mesh):
     """The mesh as it will be read back, closed: its holes filled if that closes it (trimesh's repair: small gaps,
     flipped faces), or None.
@@ -169,7 +174,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
             emit("carving", "", progress=round(0.7 * f, 3))
 
         try:
-            sweep = ls.sweep(remove_up_to=remove_up_to, stations=stations, progress=swept)
+            sweep = ls.sweep(remove_up_to=remove_up_to, stations=stations, progress=swept, rtol=SWEEP_RTOL)
         except ZeroDivisionError:              # whittle divides by the peak stress, and a step can read none (#202)
             raise ValueError("Can't carve it: a step of the carve read no stress in the part, so it has nothing to go by.") from None
         density = M.printed(mat["key"])["density"] / 1000.0           # g/cm³, solid

@@ -24,10 +24,10 @@ from typing import Optional
 
 from .design import DesignStore
 
-#: a carve takes at least this many of its default check's time (#102). Measured under whittle's multigrid (#298 slice 0):
-#: 51x on the printed box (197 s against 3.9 s), 75x on the v5 printed stool (1,005 s against 13.4 s); its sweep is
-#: 90-98% of it, so the ratio rose as the check got faster
-CARVE_PER_CHECK = 50
+#: a carve takes at least this many of its default check's time (#102). Measured under whittle 25e282e with the sweep at
+#: rtol 1e-3 (#298, #320): 33x on the v5 printed stool (419 s against 12.8 s), 41x on the printed box (caliper-reviewer's);
+#: the card says "at least about", so the low end. Before, at slice 0 (87c1470): 51x the box, 75x the stool
+CARVE_PER_CHECK = 33
 
 
 def _minutes(m: float) -> str:
@@ -89,8 +89,20 @@ def _sheet_offers(run: dict, fails: bool) -> list[dict]:
     A panel with a load the FEA governs, or one not settled, is left out: its number at another thickness isn't known.
     Failing, only a panel that fails is offered (never more material on one that holds), and nothing at all if a load
     fails that the plate check doesn't govern: a thicker sheet may not fix that."""
-    from . import verdicts
     from .answers import _times
+
+    out = []
+    for pk in _sheet_picks(run, fails):
+        said = f"Make the {pk['piece']} from {pk['label']} instead of {pk['label_now']}"
+        out.append(_line(said, f"{'That panel holds then' if fails else 'Still'}{',' if fails else ''} "
+                               f"{_times(pk['worst'], about=True)} by the plate check.", "Try it", "use_t", say=said))
+    return out
+
+
+def _sheet_picks(run: dict, fails: bool) -> list[dict]:
+    """The sheets :func:`_sheet_offers` offers, as numbers: ``{piece, t, label, now, label_now, worst, now_safety}``
+    (the Things to fix list reads the same, #300)."""
+    from . import verdicts
 
     every = run.get("cases") or []
     judged = {id(c): verdicts.case(run, c)["kind"] for c in every}
@@ -121,9 +133,9 @@ def _sheet_offers(run: dict, fails: bool) -> list[dict]:
         if not ok:
             continue
         t = min(ok)
-        said = f"Make the {piece} from {label[t]} instead of {label_now}"
-        out.append(_line(said, f"{'That panel holds then' if fails else 'Still'}{',' if fails else ''} "
-                               f"{_times(worst[t], about=True)} by the plate check.", "Try it", "use_t", say=said))
+        out.append({"piece": piece, "t": t, "t_mm": tables[0][t]["thickness_mm"], "label": label[t], "now": now,
+                    "label_now": label_now, "worst": worst[t],
+                    "now_safety": min(c["safety"] for c in on)})
     return out
 
 

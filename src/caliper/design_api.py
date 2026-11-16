@@ -833,6 +833,17 @@ def router():
             store.save()
             return design_state(store)
 
+    @r.get("/api/designs/{slug}/parts/{pid}/fixes")
+    def part_fixes(slug: str, pid: str):
+        """Things to fix under Will it work? (CALI-189, #300): what's measured wrong, each with its proposed fix, kind
+        and cost, and the known limits apart. No model call; asked when the list is opened, so the cards stay fast."""
+        from . import fixes
+
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(404, f"no part {pid!r}")
+        return fixes.listed(store, design_state(store), pid)
+
     @r.get("/api/designs/{slug}/parts/{pid}/params")
     def part_params(slug: str, pid: str):
         """The part's exact numbers (CALI-108): each PARAMS entry in plain words, its value (mm for a length), its

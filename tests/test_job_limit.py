@@ -67,14 +67,15 @@ def test_the_limit_is_six_hours():
 def test_a_carve_estimate_past_the_limit_says_so_before_the_click():
     from caliper import better
 
-    # 50 checks' time: under multigrid a carve took 51x its check on the printed box, 75x on the v5 stool (#298 slice 0)
-    within = better.carve_takes({"seconds": 60})                 # 50 min
-    assert within == "at least about 50 min at this size"
-    past = better.carve_takes({"seconds": 600})                  # 8.3 hours
-    assert past.startswith("at least about 8.3 hours at this size")
+    # 33 checks' time: whittle 25e282e with the sweep at rtol 1e-3, 33x on the v5 stool, 41x on the box (#320)
+    assert better.CARVE_PER_CHECK == 33
+    within = better.carve_takes({"seconds": 60})                 # 33 min
+    assert within == "at least about 33 min at this size"
+    past = better.carve_takes({"seconds": 1000})                 # 9.2 hours
+    assert past.startswith("at least about 9.2 hours at this size")
     assert "past the 6-hour limit" in past and "keeps the steps it finished" in past, past
-    assert "past the" not in better.carve_takes({"seconds": 430})   # 5.97 hours: within it
-    assert "past the" in better.carve_takes({"seconds": 433})       # 6.01 hours: past it
+    assert "past the" not in better.carve_takes({"seconds": 654})   # 5.995 hours: within it
+    assert "past the" in better.carve_takes({"seconds": 655})       # 6.004 hours: past it
 
 
 def test_the_clock_starts_when_the_study_takes_its_turn(monkeypatch):
