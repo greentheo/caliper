@@ -34,6 +34,17 @@ def _shape_of(result, cq):
     raise ValueError(f"build(params) returned {type(result).__name__}, not a CadQuery Workplane/Shape")
 
 
+def answer(shape, tolerance: float, angular: float):
+    """One build's tessellation, as the bytes the parent reads: float64 vertices and int64 triangles, little-endian.
+    Read off OCC's triangulation directly (#298): CadQuery's ``tessellate`` copy was 95% of a drag candidate."""
+    import numpy as np
+
+    from caliper.tess import triangles
+
+    v, f = triangles(shape, tolerance, angular)
+    return np.ascontiguousarray(v, dtype="<f8"), np.ascontiguousarray(f, dtype="<i8")
+
+
 def main() -> int:
     out = os.fdopen(int(sys.argv[1]), "wb", buffering=0)
     tolerance, angular = float(sys.argv[2]), float(sys.argv[3])
@@ -65,10 +76,7 @@ def main() -> int:
             continue
         try:
             params = json.loads(line)
-            shape = _shape_of(builder(params), cq)
-            verts, tris = shape.tessellate(tolerance, angular)
-            v = np.asarray([p.toTuple() for p in verts], dtype="<f8").reshape(-1, 3)
-            f = np.asarray(tris, dtype="<i8").reshape(-1, 3)
+            v, f = answer(_shape_of(builder(params), cq), tolerance, angular)
             reply({"ok": True, "nv": len(v), "nf": len(f)}, v.tobytes() + f.tobytes())
         except Exception as e:  # noqa: BLE001 — a failed candidate is an answer, not a crash
             reply({"ok": False, "error": f"{type(e).__name__}: {e}"})
