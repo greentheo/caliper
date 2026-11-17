@@ -275,6 +275,19 @@ def _ring(p: dict, cells: np.ndarray, shape) -> np.ndarray:
     return ndimage.binary_dilation(gone, iterations=1)
 
 
+def _gone_ring(p: dict, filled: np.ndarray, solid: np.ndarray) -> np.ndarray:
+    """The voxels next to a panel's holes as a solve has them: its voxels filled in but not in ``solid`` (#323). A cut
+    part's holes voxelize as its mesh falls on the grid, not as the circles' cells do: Theo's v8 lost 200 voxels just
+    outside its circles and kept 80 inside, and the voxels at that real edge, stair-stepped, read in the panel's peak."""
+    from scipy import ndimage
+
+    vx = p["voxels"]
+    m = filled[vx[:, 0], vx[:, 1], vx[:, 2]] & ~solid[vx[:, 0], vx[:, 1], vx[:, 2]]
+    gone = np.zeros(filled.shape, dtype=bool)
+    gone[vx[m, 0], vx[m, 1], vx[m, 2]] = True
+    return ndimage.binary_dilation(gone, iterations=1)
+
+
 def _in_plane(p: dict, h) -> "Polygon":
     """A hole's 3D outline (points on the panel's face) in the panel's own (u, v) plane."""
     from shapely.geometry import Polygon
@@ -352,7 +365,9 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
         peak0 = _panel_peak(p, r0.von_mises, r0.solid, near)
         k = max(1.0, pl["stress_mpa"] / peak0) if pl and pl.get("done") and pl["piece"] == pc["name"] and peak0 > 0 else 1.0
         cells = _covered(p, [_in_plane(p, h) for h in pc["holes"]], s)
-        peak = _panel_peak(p, r.von_mises, r.solid, near, _ring(p, cells, filled.shape))
+        # the ring round the holes as the circles' cells have them and as this solve does (#323): the same ring Lighten's
+        # step left out, where it cut the cells themselves
+        peak = _panel_peak(p, r.von_mises, r.solid, near, _ring(p, cells, filled.shape) | _gone_ring(p, filled, r.solid))
         before = _column_stress(p, r0.von_mises, filled)
         edge = float(np.max(np.where(cells, before, 0.0)))
         mine = min(allow / (peak * k) if peak > 0 else np.inf, allow / (KT_HOLE * edge * k) if edge > 0 else np.inf)
@@ -780,8 +795,10 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
             "and the hand buckling check of each wall the load runs down: a wall with holes as a column of its "
             "narrowest strip of wood across the load, the safe side, or \"not checked\" where that can't be found. "
             "No hole comes within 1.5 in of where another piece meets a panel. Once you cut a step "
-            "in, the strength check runs again on the part as rebuilt, and that's the number to go by: a hole's "
-            "edge is sensitive to where the grid falls, so it can read lower than its step did.",
+            "in, the strength check runs again on the part as rebuilt, and that's the number to go by: "
+            f"the check of the cut part can read up to about {V.CUT_DRIFT:.0%} either way from its step (its holes "
+            "fall on the voxel grid as the rebuilt part's do, not as the step's did), so a step within that of its "
+            f"minimum reads \"{V.CUT_DECIDES}\".",
         ],
     }
     with open(os.path.join(out_dir, "run.json"), "w") as f:
