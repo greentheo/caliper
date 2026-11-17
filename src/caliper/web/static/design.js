@@ -3282,10 +3282,11 @@ function loadRuns(pid) { return (S.design.load_runs || []).filter((r) => r.part 
 
 function loadView(p) {
   if (!S.design.aero_available) return '<div class="empty">whittle isn\'t installed in Caliper\'s environment.</div>';
-  if (!p.loads) {
-    return `<div class="empty">It doesn't say what it must carry yet. Tell me, like “it has to hold me, 200 lb,
-      stepping onto the top”, and I'll add its <code>loads()</code>.</div>
-      <div class="actions"><button id="lAsk">Say what it must hold</button></div>`;
+  if (!p.loads) {                               // the designer's way, or the person's own in the editor (#327)
+    return `<div class="empty">It doesn't say what it must hold yet: add a scenario below, or tell me, like “it has to
+      hold me, 200 lb, stepping onto the top”, and I'll add its <code>loads()</code>.</div>
+      <div class="actions"><button id="lAsk">Say what it must hold</button></div>
+      ${scenariosBox(p)}`;
   }
   const runs = loadRuns(p.id);
   const pick = Math.min(S.loadRun[p.id] || 0, Math.max(runs.length - 1, 0));
@@ -3370,6 +3371,8 @@ function supportRow(s, i) {
 function scenariosView(p, got) {
   if (!got) return '<div class="small muted">reading them…</div>';
   return `${got.overridden ? '<div class="small">Yours where you edited them; the rest as its script says them, now and as it changes.</div>'
+      : !got.scenarios.some((s) => s.source === 'script')    // none of them its script's: none, or added here (#327)
+        ? `<div class="small">Its script doesn't say what it must hold: ${got.scenarios.length ? 'save yours to keep them' : 'add a scenario'}.</div>`
       : '<div class="small muted">As its script says them. Edit and save to keep yours instead.</div>'}
     ${got.scenarios.map(scenarioRow).join('')}
     <div class="actions"><button class="ghost" id="scenAdd">Add a scenario</button></div>
