@@ -117,11 +117,17 @@ def _held(pc: dict, k: int, e: int, pieces: list[dict], tol: float) -> bool:
     return True
 
 
-def check(pieces: list[dict], load: dict, mat: dict, tol: float) -> list[dict]:
+def check(pieces: list[dict], load: dict, mat: dict, tol: float, held: Optional[list] = None) -> list[dict]:
     """Each sheet in line with ``load`` (its force within :data:`IN_PLANE` of the sheet's plane): its buckling check, or why it
     isn't checked. ``load["force"]`` is in N, before its factor. A row says what its wall was taken as: ``braced_by`` (the piece
     whose unchecked joint is taken to hold its top square, or None), ``share`` (of the load, by the lever rule), and for a braced
-    wall ``sway_safety``, what it reads if that joint gives and it racks (#264, #265)."""
+    wall ``sway_safety``, what it reads if that joint gives and it racks (#264, #265). Each wall in its own material (#328).
+
+    A load that lands face-on on a sheet resting on one of ``held`` right under it (the plate check's own test,
+    :func:`load_study.rests_on`) goes into that support, not down a wall: each wall in line with it gets a row marked
+    ``rests``, which isn't a gap (#272's "not checked"), and no number (#328). Less than that backed, the walls carry all
+    of it, as before: when in doubt, they do."""
+    from . import load_study as L
     from .consistency import _frame
 
     f = np.asarray(load["force"], float) * float(load.get("factor", 1.0))
@@ -129,6 +135,7 @@ def check(pieces: list[dict], load: dict, mat: dict, tol: float) -> list[dict]:
     out, walls = [], []
     if size <= 0:
         return out
+    rests = L.rests_on(pieces, load, held, tol) if held else None
     for pc in pieces:
         if pc["kind"] != "sheet":
             continue
@@ -141,6 +148,11 @@ def check(pieces: list[dict], load: dict, mat: dict, tol: float) -> list[dict]:
             d /= push
             # whether it runs down the sheet: a shove in its plane is taken as a squeeze too, the safe side (#235 review)
             row = {"piece": pc["name"], "load_n": round(push, 1), "down": bool(d[2] < -(1 - SQUARE))}
+            if rests is not None:
+                out.append({**row, "done": False, "rests": True,
+                            "why": f"the load goes straight through the {rests[0]['name']} into "
+                                   f"{L.support_name(rests[1])}, so it doesn't run down this wall"})
+                continue
             why = None
             if len(poly) != 4 or len(pc["polys"]) != 1:
                 why = "it isn't a plain rectangle"
@@ -180,7 +192,7 @@ def check(pieces: list[dict], load: dict, mat: dict, tol: float) -> list[dict]:
             out[w["row"]] = {k_: r[k_] for k_ in ("piece", "load_n", "down")} | {
                 "done": False, "why": "the load lifts it here: it's pulled, not pushed, so this load can't fold it"}
             continue
-        E, t = weak_E(mat), float(w["pc"]["thickness"])
+        E, t = weak_E(L.own_material(w["pc"], mat)), float(w["pc"]["thickness"])
         braced = w["by"] is not None
         sigma = critical_stress(E, t, w["a"], w["b"], w["held"], braced)
         p_cr = sigma * w["b"] * t
