@@ -51,9 +51,10 @@ def _moved(item: dict, run: Optional[dict], rows: list[dict]) -> Optional[dict]:
     for is in the fresh run and passes. None: fixed, nothing to add. Else ``{"status", "why"}``:
 
     - a case not in the fresh run: still open, "'…' isn't checked any more";
-    - a case failing, a row of its own kind speaking for it (a piece renamed is a new id): still open, "it's measured
-      as '…' now";
-    - a case failing on another kind only (a joint fixed, its case failing on the plate): fixed, and said."""
+    - a case failing: by the row's own measurement there, fixed (and what still fails it, said) or still open (its
+      number, said);
+    - its own not measured there: still open, "it's measured as '…' now" where a plate or buckling row of its kind
+      speaks for the case (a piece renamed is a new id), else "not measured as fixed"."""
     from . import verdicts
 
     spoke = item.get("cases") or []
@@ -71,14 +72,16 @@ def _moved(item: dict, run: Optional[dict], rows: list[dict]) -> Optional[dict]:
         return None
     kind = str(item.get("id") or "").split(":")[0]
     covers = [r for r in rows if set(r.get("cases") or []) & failing]
-    same = next((r for r in covers if str(r["id"]).split(":")[0] == kind), None)
-    if same is not None:
-        return {"status": "still open", "why": f"it's measured as '{same.get('what') or same['problem']}' now"}
-    # no row of its own kind: the list makes a plate row only where the plate governs, so read the row's own measurement
-    # in the fresh run, not the list (#322, reviewer-2 at 03a312a: the step's plate at 1.91x read "fixed (the plate)")
+    # the row's own measurement in the fresh run first, wherever it's found (#322, caliper-reviewer at 28b0707: the left
+    # front joint fixed at 2.4x read "still open: measured as" the right one, which governs at 1.62x); the list makes a
+    # plate row only where the plate governs (reviewer-2 at 03a312a: the step's plate at 1.91x read "fixed")
     key = str(item.get("id") or "").split(":", 1)[1] if ":" in str(item.get("id") or "") else ""
     own = [_own(kind, key, by[n]) for n in sorted(failing)]
-    if any(s is None for s in own):
+    if any(s is None for s in own):                  # not measured there: renamed, or no longer checked
+        same = next((r for r in covers if str(r["id"]).split(":")[0] == kind), None)
+        if same is not None and kind in ("plate", "buckling"):      # a panel by another name: the other of a pair of
+            return {"status": "still open",                         # joints isn't a rename
+                    "why": f"it's measured as '{same.get('what') or same['problem']}' now"}
         return {"status": "still open", "why": "not measured as fixed"}
     worst = min(own)
     if not verdicts.meets(worst, need)["counts_as_pass"]:
@@ -110,6 +113,13 @@ def _own(kind: str, key: str, case: dict) -> Optional[float]:
     if kind == "fails":
         return case.get("safety")
     return None
+
+
+def _said_number(c: dict) -> str:
+    """A number change at Go ahead: "t: make the top from 5/8 in", or the choice's own words where they name the number
+    already (#322, caliper-reviewer at 28b0707: "fillet_r: remove the inside corner fillet strips: fillet_r to 0")."""
+    words = c["fix"][:1].lower() + c["fix"][1:]
+    return words if f"{c['param']} to " in c["fix"] else f"{c['param']}: {words}"
 
 
 def plan(store: DesignStore, state: dict, pid: str, picked: list[dict], own: Optional[list[dict]] = None) -> dict:
@@ -160,7 +170,7 @@ def plan(store: DesignStore, state: dict, pid: str, picked: list[dict], own: Opt
     parts = []
     if numbers:                                          # what each moves, said at Go ahead (#322 review)
         parts.append(f"{_plural(len(numbers), 'number change', 'number changes')}, at once ("
-                     + "; ".join(f"{c['param']}: {c['fix'][:1].lower() + c['fix'][1:]}" for c in numbers) + ")")
+                     + "; ".join(_said_number(c) for c in numbers) + ")")
     if loads:
         parts.append(f"{_plural(len(loads), 'change', 'changes')} to its loads, at once")
     if designer:

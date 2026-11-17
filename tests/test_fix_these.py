@@ -564,3 +564,64 @@ def test_a_plate_row_for_two_cases_is_fixed_only_where_it_holds_in_both(tmp_path
     got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0, "words": "Make the top from 1 in"}])
     (r,) = got["results"]
     assert (r["status"], r["why"]) == ("still open", "measured: the top's plate is still 1.91× where it needs 2×"), r
+
+
+#: the other front joint of the pair: the stool is symmetric, and the list makes each its own row
+RIGHT = {**WEAK, "pieces": ["front rail", "right side"], "between": "the front rail and the right side"}
+
+
+def _pair(left):
+    """One stepping case: the left front joint at ``left``, the right one at 1.62x governing, and the fresh list's row for
+    the right joint speaking for the case."""
+    run = {"min_safety": 2.0, "cases": [{"name": "a foot", "safety": 1.62, "governs": "joint",
+                                         "joints": {"governing": RIGHT, "rows": [{**WEAK, "safety": left}, RIGHT]}}]}
+    rows = [{"id": "joint:front rail|right side", "cases": ["a foot"], "what": "the joint between the front rail and the right side",
+             "problem": "The joint between the front rail and the right side gives too"}]
+    item = {"id": "joint:front rail|left side", "cases": ["a foot"], "what": "the joint between the front rail and the left side"}
+    return fixing._moved(item, run, rows)
+
+
+def test_one_joint_of_a_pair_fixed_is_fixed_never_measured_as_the_other():
+    """caliper-reviewer at 28b0707: the left front joint fixed at 2.4x read "still open: it's measured as 'the joint between
+    the front rail and the right side' now". The other joint of a pair isn't a rename: the left one's own number decides."""
+    assert _pair(2.4) == {"status": "fixed", "why": "fixed (the joint), and the case still fails: the joint between the "
+                                                    "front rail and the right side"}
+    assert _pair(1.7) == {"status": "still open", "why": "measured: the joint between the front rail and the left side is "
+                                                         "still 1.7× where it needs 2×"}
+
+
+def test_a_joint_not_measured_any_more_beside_its_pair_is_not_measured_never_renamed():
+    """The reviewer's glue block: the left joint out of the check, the right one governing. Not "measured as" the right."""
+    run = {"min_safety": 2.0, "cases": [{"name": "a foot", "safety": 1.8, "governs": "joint",
+                                         "joints": {"governing": RIGHT, "rows": [{**RIGHT, "safety": 1.8}]}}]}
+    rows = [{"id": "joint:front rail|right side", "cases": ["a foot"], "what": "the joint between the front rail and the right side",
+             "problem": "The joint between the front rail and the right side gives too"}]
+    item = {"id": "joint:front rail|left side", "cases": ["a foot"], "what": "the joint between the front rail and the left side"}
+    assert fixing._moved(item, run, rows) == {"status": "still open", "why": "not measured as fixed"}
+
+
+def test_a_case_s_own_row_is_read_by_its_own_number():
+    """A ``fails:`` row (the FEA's, or a check with no thickness to offer) is the case's safety in the fresh run, said."""
+    run = {"min_safety": 2.0, "cases": [{"name": "a foot", "safety": 1.6, "governs": "plate",
+                                         "plate": {"done": True, "piece": "top", "safety_across": 1.6}}]}
+    rows = [{"id": "plate:top", "cases": ["a foot"], "what": "the top", "problem": "The top fails by the plate check"}]
+    item = {"id": "fails:a foot", "cases": ["a foot"], "what": "'a foot'"}          # as fixes._spoke words it
+    assert fixing._moved(item, run, rows) == {"status": "still open", "why": "measured: 'a foot' is still 1.6× where it needs 2×"}
+    passing = {**run, "cases": [{**run["cases"][0], "safety": 2.3}]}
+    assert fixing._moved(item, passing, []) is None
+
+
+def test_a_plate_renamed_is_measured_as_the_new_panel():
+    """Where the row's own isn't measured, a plate row of its kind for the case is the panel by another name."""
+    run = {"min_safety": 2.0, "cases": [{"name": "a foot", "safety": 1.91, "governs": "plate",
+                                         "plate": {"done": True, "piece": "step", "safety_across": 1.91}}]}
+    rows = [{"id": "plate:step", "cases": ["a foot"], "what": "the step", "problem": "The step fails by the plate check"}]
+    item = {"id": "plate:top", "cases": ["a foot"], "what": "the top"}
+    assert fixing._moved(item, run, rows) == {"status": "still open", "why": "it's measured as 'the step' now"}
+
+
+def test_a_number_change_whose_words_name_its_number_says_it_once():
+    """caliper-reviewer at 28b0707: "1 number change, at once (fillet_r: remove the inside corner fillet strips: fillet_r to 0)"."""
+    assert fixing._said_number({"param": "fillet_r", "fix": "Remove the inside corner fillet strips: fillet_r to 0"}) == \
+        "remove the inside corner fillet strips: fillet_r to 0"
+    assert fixing._said_number({"param": "t", "fix": "Make the top from 5/8 in"}) == "t: make the top from 5/8 in"
