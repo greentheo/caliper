@@ -455,8 +455,12 @@ def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = N
              and safety <= need_n * (1 + CUT_DRIFT) + 1e-9)
     if v["counts_as_pass"] and brace is not None:      # a step resting on an unchecked joint, as its case would (#265)
         kind = "close" if drift else v["kind"]
-        return _make(JOINT_CAP if kind == "holds" else kind, st.get("safety"), why=brace_why(brace), joints=True, brace=brace,
-                     **({"near": True} if kind == "close" else {}))
+        got = _make(JOINT_CAP if kind == "holds" else kind, st.get("safety"), why=brace_why(brace), joints=True, brace=brace,
+                    **({"near": True} if kind == "close" else {}))
+        if drift:                                    # the cut's words stay, beside the joints' (#326 review)
+            got = {**got, "word": f"{CUT_DECIDES}, and {brace_why(brace)}",
+                   "short": f"holds {safety:.1f}x, close: cut it and the check decides, and {brace_why(brace)}"}
+        return got
     if drift:
         return {**_make("close", safety, why=CUT_DECIDES), "word": CUT_DECIDES,
                 "short": f"holds {safety:.1f}x, close: cut it and the check decides"}

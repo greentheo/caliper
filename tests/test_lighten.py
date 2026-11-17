@@ -157,8 +157,13 @@ def test_the_check_s_ring_is_round_the_holes_its_solve_has(stool, monkeypatch):
         return real(p, vm, solid, near, ring)
 
     monkeypatch.setattr(lighten, "_panel_peak", spy)
-    covered = lighten._covered                                   # the circles' cells a column off the solve's holes,
-    monkeypatch.setattr(lighten, "_covered", lambda p, polys, s: np.roll(covered(p, polys, s), 1, axis=0))   # as v8's
+    covered, shifted = lighten._covered, []                      # the circles' cells a column off the solve's holes,
+
+    def off(p, polys, s):                                          # as v8's
+        shifted.append(np.roll(covered(p, polys, s), 1, axis=0))
+        return shifted[-1]
+
+    monkeypatch.setattr(lighten, "_covered", off)
     load_study.study(stool, "stool", min_safety=1.3)
     pairs = [(a, b) for a, b in zip(calls, calls[1:]) if a[2] is None and b[2] is not None and a[0] is b[0]]
     assert pairs                                                   # judge_holed's: the filled solve's, then the holed
@@ -172,6 +177,13 @@ def test_the_check_s_ring_is_round_the_holes_its_solve_has(stool, monkeypatch):
         inside = solid[vx[:, 0], vx[:, 1], vx[:, 2]]
         ringed = ring[vx[:, 0], vx[:, 1], vx[:, 2]] & inside
         assert ringed.sum() < 0.5 * inside.sum()                   # the rest of the panel is still the FEA's to read
+        # and it's one voxel wide (caliper-reviewer on #326: a 3-voxel ring passed): every ringed voxel is next to a hole,
+        # as the solve has it or as the circles' cells do
+        holes = gone.copy()
+        cells = shifted[-1][p["cells"][:, 0], p["cells"][:, 1]]
+        holes[vx[cells, 0], vx[cells, 1], vx[cells, 2]] = True
+        far = ndimage.distance_transform_edt(~holes)
+        assert far[ring].max() <= 1.0, float(far[ring].max())
 
 
 
@@ -193,3 +205,17 @@ def test_a_step_within_the_band_of_its_minimum_holds_close_and_the_check_decides
     if kind == "close":
         assert v["word"] == "holds, close: cut it and the check decides" and v["counts_as_pass"] and v["status"] == "warn"
     assert verdicts.CUT_DRIFT == 0.07
+
+
+
+def test_a_close_step_resting_on_a_joint_keeps_cut_it_and_the_check_decides():
+    """caliper-reviewer on #326: on the brace path the cut's words went, and only the joints' were said."""
+    from caliper import verdicts
+
+    st = {"index": 14, "holds": True, "safety": 1.35, "holes": 10, "top_holes": 10, "saved_lb": 1.0, "cases": []}
+    v = verdicts.lighten_step(st, None, {"min_safety": 1.3, "kind": "lighten", "wood_joints": "uncounted"})
+    assert v["kind"] == "close" and v["joints"] and v["counts_as_pass"]
+    assert v["word"] == "holds, close: cut it and the check decides, and joints not checked"
+    assert v["short"] == "holds 1.4x, close: cut it and the check decides, and joints not checked"
+    far = verdicts.lighten_step({**st, "safety": 1.5}, None, {"min_safety": 1.3, "kind": "lighten", "wood_joints": "uncounted"})
+    assert "cut it" not in far["word"]                              # outside the band: the joints' words alone
