@@ -54,8 +54,9 @@ def test_a_number_that_turns_a_piece_off_is_found_by_building_it(store):
 
 
 def test_delete_by_its_number_is_a_new_version_at_once_and_says_what_went(store):
+    pieces.off_switch(store, "stool", "fillet strips")                # built: its Delete… clicked once (#332)
     p = pieces.plan(store, "stool", "fillet strips")
-    assert p["how"] == "number" and not p["designer_call"]
+    assert p["how"] == "number" and p["checked"] and not p["designer_call"]
     assert p["said"] == ("Delete the fillet strips: fillet_r to 0 turns them off. A number change, at once (no Claude): "
                          "a new version of stool, rolled back as any other.")
     got = pieces.delete(store, "stool", "fillet strips")
@@ -70,8 +71,8 @@ def test_a_piece_no_number_turns_off_is_the_designer_s_with_its_cost(store):
     p = pieces.plan(store, "stool", "top")
     assert p["how"] == "designer" and p["designer_call"]
     assert p["said"].startswith("Delete the top: that changes stool's code, so it asks the designer (one Claude call")
-    with pytest.raises(ValueError, match="designer's to take out"):
-        pieces.delete(store, "stool", "top")
+    got = pieces.delete(store, "stool", "top")                         # the plan back, nothing set (#332)
+    assert got == p and DesignStore.load(store.root).design.part("stool").version == 1
 
 
 def test_the_routes_plan_then_delete_and_refuse_while_busy(store, monkeypatch):
@@ -214,3 +215,215 @@ def test_a_number_that_also_thins_another_piece_isn_t_the_off_switch(tmp_path):
     s = _part(tmp_path, THINS, "thin")
     assert pieces.off_switch(s, "stool", "fillet strips") is None
     assert pieces.off_why(s, "stool", "fillet strips") == "fillet_r turns them off but also changes the top"
+
+
+# --- #332 round two: the off switch measured exactly; decided on the Delete click; the piece's key, not its words ---------
+
+#: caliper-reviewer's case, at step_stool's size (406 × 559 × 406): nose_r rounds the step's corners and draws the nose strip.
+#: At 3 mm the corners it squares back are 147 mm³, under one cell of the 200k-point grid this replaced.
+NOSED = '''import cadquery as cq
+
+PARAMS = {"w": 406.0, "d": 559.0, "h": 406.0, "t": 19.05, "nose_r": 3.0}
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    w, d, h, t = p["w"], p["d"], p["h"], p["t"]
+    out = cq.Workplane().box(w, d, t, centered=(True, True, False)).translate((0, 0, h - t))
+    if p["nose_r"] > 0:                       # it rounds the step's corners, and it draws the nose strip
+        out = out.edges("|Z").fillet(p["nose_r"])
+    out = out.union(cq.Workplane().box(t, d, h - t, centered=(True, True, False)).translate((-w / 2 + t / 2, 0, 0)))
+    if p["nose_r"] > 0:
+        out = out.union(cq.Workplane().box(w - 2 * t, 30, t, centered=(True, False, False)).translate((t / 2, -d / 2, h - 2 * t)))
+    return out
+
+
+def construction(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    w, d, h, t = p["w"], p["d"], p["h"], p["t"]
+    items = [{"name": "step", "kind": "sheet", "material": "plywood", "thickness": t,
+              "outline": [(-w / 2, -d / 2, h), (w / 2, -d / 2, h), (w / 2, d / 2, h), (-w / 2, d / 2, h)]},
+             {"name": "side", "kind": "sheet", "material": "plywood", "thickness": t,
+              "outline": [(-w / 2, -d / 2, 0), (-w / 2, d / 2, 0), (-w / 2, d / 2, h - t), (-w / 2, -d / 2, h - t)]}]
+    if p["nose_r"] > 0:
+        items.append({"name": "nose strip", "kind": "printed", "material": "pla"})
+    return items
+'''
+
+#: The same with a nose_w that only sizes the strip: it's the switch, tried after nose_r.
+NOSE_W = (NOSED.replace('"nose_r": 3.0}', '"nose_r": 3.0, "nose_w": 30.0}')
+          .replace('''    if p["nose_r"] > 0:
+        out = out.union(cq.Workplane().box(w - 2 * t, 30,''', '''    if p["nose_r"] > 0 and p["nose_w"] > 0:
+        out = out.union(cq.Workplane().box(w - 2 * t, p["nose_w"],''')
+          .replace('''    if p["nose_r"] > 0:
+        items.append''', '''    if p["nose_r"] > 0 and p["nose_w"] > 0:
+        items.append'''))
+
+
+def test_a_3_mm_rounding_is_seen_wherever_the_part_is_big(tmp_path, monkeypatch):
+    """The reviewer's step_stool: nose_r at 0 squares the step's corners back (147 mm³), so it isn't the switch."""
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, NOSED, "nose")
+    assert pieces.off_switch(s, "stool", "nose strip") is None
+    assert pieces.off_why(s, "stool", "nose strip") == "nose_r turns it off but also changes the step"
+
+
+def test_with_a_number_that_only_sizes_it_that_one_is_the_switch(tmp_path, monkeypatch):
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, NOSE_W, "nosew")
+    assert [e["name"] for e in pieces.named(s, "stool", "nose strip")] == ["nose_r", "nose_w"]
+    assert pieces.off_switch(s, "stool", "nose strip") == {"param": "nose_w", "value": 0, "unit": "mm"}
+
+
+def test_what_else_a_build_changes_is_measured_exactly():
+    """The two builds' difference is the booleans', to the mm³: the 3 mm rounding at any size, and nothing where the
+    number only took the piece away."""
+    import math
+
+    run = pieces._build(NOSED)
+    at0 = pieces._build(NOSED, {"nose_r": 0})
+    import trimesh
+
+    added = trimesh.boolean.difference([at0["mesh"], run["mesh"]], engine="manifold").volume
+    assert added == pytest.approx(4 * (1 - math.pi / 4) * 9 * 19.05, rel=0.02)     # 147 mm³ by hand
+    assert pieces._also(run, at0, "nose strip") == "changes the step"
+    assert pieces._also({**run, "declared": {}}, at0, "nose strip") == "adds to the part where nothing is declared"
+    w = pieces._build(NOSE_W)
+    assert pieces._also(w, pieces._build(NOSE_W, {"nose_w": 0}), "nose strip") is None
+    assert 1.0 <= pieces.CHANGE_MM3 < 147                                             # near a mm³, under the rounding
+
+
+def _no_builds(monkeypatch):
+    monkeypatch.setattr(pieces, "_FOUND", {})
+
+    def built(*a, **k):
+        raise AssertionError("built")
+
+    monkeypatch.setattr(pieces, "_build", built)
+
+
+def test_the_plan_builds_nothing_and_says_the_click_builds_it(store, monkeypatch):
+    """The menu's GET: names only (the reviewer timed 37–110 s of builds and compares on step_stool)."""
+    _no_builds(monkeypatch)
+    p = pieces.plan(store, "stool", "fillet strips")
+    assert p["how"] == "number" and p["params"] == ["fillet_gap", "fillet_r"] and not p["checked"]
+    assert not p["designer_call"] and "param" not in p                 # fillet_gap only looks right: none named as it
+    assert p["said"] == ("Delete the fillet strips: fillet_gap or fillet_r at 0 may turn them off. Each is built first to "
+                         "be sure (a few seconds, no Claude); where none only does that, it's the designer's instead. A "
+                         "new version of stool, rolled back as any other.")
+    assert pieces.plan(store, "stool", "top")["how"] == "designer"                    # nothing named for it: no build
+
+
+def test_the_delete_click_decides_and_a_number_that_does_two_jobs_goes_back_to_the_designer(tmp_path, monkeypatch):
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, ONE_JOB, "one")
+    assert pieces.plan(s, "stool", "fillet strips")["how"] == "number"               # by its name, not yet built
+    got = pieces.delete(s, "stool", "fillet strips")
+    assert got["how"] == "designer" and got["designer_call"] and "version" not in got
+    assert got["said"].startswith("Delete the fillet strips: fillet_r turns them off but also changes the top, so it "
+                                  "asks the designer")
+    assert DesignStore.load(s.root).design.part("stool").version == 1                 # nothing set
+    assert pieces.plan(s, "stool", "fillet strips") == {k: v for k, v in got.items()}  # known now: said as found
+
+
+def test_the_delete_route_says_the_designer_s_way_without_a_new_version(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, ONE_JOB, "one")
+    monkeypatch.setenv("CALIPER_DESIGNS", os.path.dirname(str(s.root)))
+    got = TestClient(create_app()).post(f"/api/designs/{s.design.slug}/parts/stool/pieces/fillet%20strips/delete")
+    assert got.status_code == 200 and got.json()["how"] == "designer"
+    assert DesignStore.load(s.root).design.part("stool").version == 1
+    assert not any("from its menu" in str(e.get("text")) for e in DesignStore.load(s.root).log())   # nothing done, nothing said
+
+
+#: Pieces named as step-stool-5 names them, in plain words with of/on in them (the reviewer's table).
+WORDY = STRIPPED.replace('{"name": "top",', '{"name": "top of the step",').replace(
+    '"fillet strips"', '"strip on the front"')
+
+
+def _wordy(tmp_path):
+    s = DesignStore.create("step-stool-5", base=str(tmp_path / "designs"))
+    s.write_part("step_stool", WORDY, intent="a top with a strip")
+    return s
+
+
+def _designer(asked):
+    def author(spec, feedback, prior):
+        asked.append(feedback)
+        return prior or WORDY
+    return author
+
+
+@pytest.mark.parametrize("said", ["Remove the top of the step from step_stool.",
+                                  "Remove the strip on the front from step_stool."])
+@pytest.mark.parametrize("scope", [None, "step_stool"])
+@pytest.mark.parametrize("waiting", [None, "remove_which"])
+def test_a_piece_with_of_or_on_in_its_name_is_its_part_s_revise(tmp_path, said, scope, waiting):
+    from caliper import awaiting, chat
+
+    s = _wordy(tmp_path)
+    if waiting:
+        awaiting.park(s, waiting)
+    asked = []
+    got = chat.turn(s, said, scope=scope, use_llm=False, author=_designer(asked), max_rounds=1)
+    assert "Remove which part" not in got.reply and "trash" not in got.reply, got.reply
+    assert asked and s.design.part("step_stool") is not None
+
+
+def test_the_page_s_delete_sends_the_piece_s_key_and_no_words_are_read(tmp_path, monkeypatch):
+    from caliper import chat
+
+    s = _wordy(tmp_path)
+    monkeypatch.setattr(chat, "_names_a_piece", lambda *a, **k: False)              # whatever the words would say
+    got = chat.turn(s, "Remove the top of the step from step_stool.", scope="step_stool", use_llm=False,
+                    author=_designer([]), max_rounds=1)
+    assert "Remove which part" in got.reply or "trash" in got.reply                  # the control: words alone, read wrong
+    from caliper import awaiting
+
+    awaiting.park(s, "remove_which")
+    asked = []
+    got = chat.turn(s, "Remove the top of the step from step_stool.", scope="step_stool", piece="top of the step",
+                    use_llm=False, author=_designer(asked), max_rounds=1)
+    assert "Remove which part" not in got.reply and "trash" not in got.reply and asked, got.reply
+    assert awaiting.pending(s) is None                                                # the question it waited on lapsed
+
+
+def test_the_chat_route_passes_the_piece_on():
+    import inspect
+
+    from caliper import design_api
+
+    assert "piece: Optional[str] = None" in inspect.getsource(design_api.ChatMessage)
+    assert "piece=req.piece" in inspect.getsource(design_api)
+
+
+def test_a_part_whose_name_has_of_in_it_is_found_at_an_earlier_split(tmp_path):
+    """Every split, not only the last: "the top of the step from rack of shelves" is the top of the step, of
+    rack_of_shelves (its last "of" would read "shelves")."""
+    from caliper import chat
+
+    s = DesignStore.create("a rack", base=str(tmp_path / "designs"))
+    s.write_part("rack_of_shelves", WORDY, intent="a top with a strip")
+    asked = []
+    got = chat.turn(s, "Remove the top of the step from the rack of shelves part.", use_llm=False,
+                    author=_designer(asked), max_rounds=1)          # "… part": read as a part's name, were it split wrong
+    assert "Remove which part" not in got.reply and "trash" not in got.reply and asked, got.reply
+
+
+#: The top built 0.3 mm thinner from below than it's declared (19.05 declared, as a designer rounds), the strips against
+#: its built underside: inside the declared top's solid by 0.3 mm, so only its inset keeps them the strips' own.
+OFF_BY = STRIPPED.replace(
+    'out = cq.Workplane().box(p["w"], p["w"], p["t"], centered=(True, True, False))',
+    'out = cq.Workplane().box(p["w"], p["w"], p["t"] - 0.3, centered=(True, True, False)).translate((0, 0, 0.3))').replace(
+    '.translate((0, -p["w"] / 2, -r)))', '.translate((0, -p["w"] / 2, -r + 0.3)))')
+
+
+def test_a_sheet_declared_a_little_off_its_build_isn_t_changed_by_the_switch(tmp_path, monkeypatch):
+    assert OFF_BY.count("+ 0.3") == 1 and OFF_BY.count("translate((0, 0, 0.3))") == 1
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, OFF_BY, "off")
+    assert pieces.off_switch(s, "stool", "fillet strips") == {"param": "fillet_r", "value": 0, "unit": "mm"}

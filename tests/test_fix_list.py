@@ -493,11 +493,33 @@ def test_unsized_strips_a_number_turns_off_are_removed_by_it_at_once(tmp_path):
     """#324, Theo's step_stool: fillet_r = 0 skips its strips, so Remove them is a number change, no Claude."""
     from .test_piece_delete import STRIPPED
 
+    from caliper import pieces
+
     store = _store(tmp_path, STRIPPED, "stool")
     _check(store, "stool", 2.15, thinnest=19.05, spacing=4.76, unsized=["fillet strips"],
            unseen=[{"mm": None, "piece": "fillet strips"}])
+    pieces.off_switch(store, "stool", "fillet strips")      # its Delete… built it (#332: Things to fix never does)
     (row,) = [r for r in _list(store)["rows"] if r["id"] == "unsized"]
     rm = row["choices"][2]
     assert (rm["fix"], rm["kind"], rm["param"], rm["value"]) == ("Remove the fillet strips: fillet_r to 0", "number",
                                                                  "fillet_r", 0)
     assert [c["kind"] for c in row["choices"][:2]] == ["designer", "designer"]
+
+
+def test_things_to_fix_never_builds_to_find_a_number_and_says_the_designer_s_way_till_one_is_known(tmp_path, monkeypatch):
+    """#332 review: the off switch's builds took 37–110 s on step_stool, and Things to fix asks on every open."""
+    from caliper import pieces
+
+    from .test_piece_delete import STRIPPED
+
+    store = _store(tmp_path, STRIPPED, "stool")
+    _check(store, "stool", 2.15, thinnest=19.05, spacing=4.76, unsized=["fillet strips"],
+           unseen=[{"mm": None, "piece": "fillet strips"}])
+    monkeypatch.setattr(pieces, "_FOUND", {})
+
+    def built(*a, **k):
+        raise AssertionError("built")
+
+    monkeypatch.setattr(pieces, "_build", built)
+    (row,) = [r for r in _list(store)["rows"] if r["id"] == "unsized"]
+    assert (row["choices"][2]["fix"], row["choices"][2]["kind"]) == ("Remove the fillet strips", "designer")

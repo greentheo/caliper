@@ -53,12 +53,14 @@ def _row(rid: str, problem: str, choices: list[dict], part: str) -> dict:
 
 def _removed(store: DesignStore, pid: str, names: list[str], these: str, name: str) -> dict:
     """Remove them (#324): a number change where one number turns every one of them off, built to be sure (step_stool's
-    ``fillet_r``: 0 skips its strips; a ``fillet_gap`` that only shares the name doesn't), else the designer's."""
+    ``fillet_r``: 0 skips its strips; a ``fillet_gap`` that only shares the name doesn't), else the designer's. Only what
+    a piece's Delete… has built for this version (#332 review: Things to fix never waits on a build): not built yet is the
+    designer's."""
     from . import pieces
 
     try:
-        found = [pieces.off_switch(store, pid, n) for n in names] if store.is_scripted(pid) else [None]
-    except ValueError:                           # no numbers to set
+        found = [(pieces.known(store, pid, n) or (None, None))[0] for n in names] if store.is_scripted(pid) else [None]
+    except (ValueError, OSError):                # no numbers to set, no script to read
         found = [None]
     sw = found[0] if found and all(f is not None and f == found[0] for f in found) else None
     if sw is None:

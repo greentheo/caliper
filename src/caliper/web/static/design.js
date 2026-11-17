@@ -425,10 +425,14 @@ function pieceConfirmHtml(plan) {               // Delete… on a piece: what it
     <div class="pmenu-row"><button role="menuitem" class="danger" data-menu="deletePieceYes">Delete</button>
       <button role="menuitem" data-menu="keep">Keep it</button></div>`;
 }
-async function deletePiece(pid, piece, plan) {   // by its number, at once; else the designer's revise, as the chat asks it
-  if (plan.how !== 'number') { closeMenu(); return send(`Remove the ${plan.name} from ${pid}.`, pid); }
+async function deletePiece(pid, piece, plan) {   // by its number, built first to be sure; else the designer's revise, by the piece's key (#332)
+  if (plan.how !== 'number') { closeMenu(); return send(`Remove the ${plan.name} from ${pid}.`, pid, null, null, null, piece); }
   try {
     const got = await api('POST', `/api/designs/${S.slug}/parts/${pid}/pieces/${encodeURIComponent(piece)}/delete`);
+    if (got.how === 'designer') {                   // built, it does more than take the piece away: said, and asked again
+      if (S.menu) S.menu.plan = got;
+      return menuConfirm(pieceConfirmHtml(got));
+    }
     closeMenu();
     S.design = got.design;
     render();
@@ -1623,14 +1627,14 @@ function aboutPiece(text) {
   const piece = pieceInScope();
   return piece ? `About the ${piece.name}: ${text}` : text;
 }
-async function send(text, scope, pick, shown, typed) {
+async function send(text, scope, pick, shown, typed, piece) {
   if (S.busy || S.opening || !text.trim()) return;      // never to a design that isn't on screen yet (#173)
   if (!S.slug) return createDesign(text);
   S.busy = true; $('send').disabled = true;
   const sent = S.pick;                          // the pick this message is about: one made while it's answered isn't it
   const live = liveTurn(shown || text, scope);
   try {
-    const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}), ...(shown ? { shown } : {}), ...(typed ? { typed } : {}) });
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}), ...(shown ? { shown } : {}), ...(typed ? { typed } : {}), ...(piece != null ? { piece } : {}) });
     await follow(job_id, (ev) => live.step(ev));
     S.busy = false;
     if (shown && S.pick === sent) clearPick();                     // it's been used; after an error it stays, so asking again doesn't mean picking again

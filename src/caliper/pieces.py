@@ -63,22 +63,32 @@ def _build(script: str, values: Optional[dict] = None) -> Optional[dict]:
             "declared": declared, "mesh": mesh}
 
 
-#: How finely the two builds are compared (#332 review): about this many points across the part's box.
-SAMPLES = 200_000
-#: Material a build at 0 may add or take from another piece and still only have taken that piece away: tessellation's
-#: noise, never a rounded corner or a thinner sheet (the reviewer's fillet_r squared the top's corners: +2,350 mm³).
-CHANGE_MM3 = 50.0
+#: Material (mm³) a build at 0 may add, or take from another declared piece, and still have only taken that piece away
+#: (#332 review). Measured exactly (manifold3d booleans, about 5 ms a compare), so the bar is the booleans' own noise: a
+#: true off switch read 0.0000 mm³ added and 0.0000 mm³ taken from another piece on every one tried, step-stool-5's
+#: v010 fillet_r (its curved strips) among them. The smallest real change it must see, a 3 mm rounding of a 3/4 in
+#: sheet's corners, is 147 mm³.
+CHANGE_MM3 = 1.0
 
 
-def _regions(shapes: list, mesh, pts: np.ndarray, margin: float) -> np.ndarray:
-    """For each point, the index of the declared sheet or stick it's inside (by a margin), or -1. A sheet's thickness goes
-    to the side of its outline the solid is on."""
+def _vol(m) -> float:
+    return 0.0 if m is None or len(getattr(m, "faces", [])) == 0 else float(abs(m.volume))
+
+
+def _prisms(shapes: list, mesh, margin: float = 0.5) -> list:
+    """Each declared sheet and stick as a solid, inset by ``margin`` (never more than a quarter of its thickness) so a
+    neighbour's face against it isn't in it: ``[(name, trimesh)]``. A sheet's thickness goes to the side of its outline the
+    solid is on."""
+    import shapely.geometry as G
+    import trimesh
+
     from . import spatial
-    from .consistency import _inside2d
 
-    owner = np.full(len(pts), -1)
-    for i, sh in enumerate(shapes):
+    out = []
+    for sh in shapes:
         if sh["kind"] == "sheet":
+            t = float(sh["thickness"])
+            m = min(margin, t / 4)
             for poly in sh["polys"]:
                 o = poly[0]
                 n = np.cross(poly[1] - poly[0], poly[2] - poly[0])
@@ -86,55 +96,65 @@ def _regions(shapes: list, mesh, pts: np.ndarray, margin: float) -> np.ndarray:
                     if np.linalg.norm(n) > 1e-9:
                         break
                     n = np.cross(poly[k] - poly[0], poly[k + 1] - poly[0])
-                n = n / (np.linalg.norm(n) or 1.0)
+                if np.linalg.norm(n) <= 1e-9:
+                    continue
+                n = n / np.linalg.norm(n)
+                side = 1.0 if spatial.contains(mesh, np.array([poly.mean(axis=0) + n * t / 2]))[0] else -1.0
                 u = (poly[1] - poly[0]) / (np.linalg.norm(poly[1] - poly[0]) or 1.0)
-                v = np.cross(n, u)
-                t = float(sh["thickness"])
-                mid = poly.mean(axis=0)
-                side = 1.0 if spatial.contains(mesh, np.array([mid + n * t / 2]))[0] else -1.0
-                rel = pts - o
-                d = rel @ (n * side)
-                m = min(margin, t / 4)
-                inside = (d > m) & (d < t - m) & _inside2d(np.stack([rel @ u, rel @ v], 1),
-                                                            np.stack([(poly - o) @ u, (poly - o) @ v], 1))
-                owner[inside & (owner < 0)] = i
+                w = side * n                             # into the solid; (u, v, w) right-handed
+                v = np.cross(w, u)
+                flat = G.Polygon(np.stack([(poly - o) @ u, (poly - o) @ v], 1)).buffer(0).buffer(-m)
+                if flat.is_empty or t - 2 * m <= 0:
+                    continue
+                for part in getattr(flat, "geoms", [flat]):
+                    pr = trimesh.creation.extrude_polygon(part, t - 2 * m)
+                    frame = np.eye(4)
+                    frame[:3, 0], frame[:3, 1], frame[:3, 2], frame[:3, 3] = u, v, w, o + w * m
+                    out.append((sh["name"], pr.apply_transform(frame)))
         elif sh["kind"] == "stick":
             a, b, half = np.asarray(sh["a"], float), np.asarray(sh["b"], float), float(sh["half"])
-            L = float(np.linalg.norm(b - a)) or 1.0
-            ax = (b - a) / L
-            along = (pts - a) @ ax
-            off = np.linalg.norm((pts - a) - np.outer(along, ax), axis=1)
+            L = float(np.linalg.norm(b - a))
             m = min(margin, half / 2)
-            inside = (along > m) & (along < L - m) & (off < half - m)
-            owner[inside & (owner < 0)] = i
-    return owner
+            if L <= 2 * m:
+                continue
+            ax = (b - a) / L
+            out.append((sh["name"], trimesh.creation.cylinder(radius=half - m, segment=[a + ax * m, b - ax * m])))
+    return out
 
 
 def _also(before: dict, after: dict, piece: str) -> Optional[str]:
     """What else the build at 0 changes, in words, or None where it only took ``piece`` away (#332 review): material
-    added anywhere (a corner squared), or taken from inside another declared piece (a sheet thinned)."""
-    from . import consistency, spatial
+    added anywhere (a corner squared), or taken from inside another declared piece (a sheet thinned). Exact: manifold3d
+    booleans of the two builds, and what was taken against each other piece's solid."""
+    import trimesh
+
+    from . import consistency
 
     m0, m1 = before["mesh"], after["mesh"]
     if m0 is None or m1 is None:
         return "its shape couldn't be compared"
-    lo, hi = np.minimum(m0.bounds[0], m1.bounds[0]), np.maximum(m0.bounds[1], m1.bounds[1])
-    s = max(float(np.prod(hi - lo) / SAMPLES) ** (1 / 3), 0.25)
-    axes = [np.arange(lo[k] + s / 2, hi[k], s) for k in range(3)]
-    pts = np.stack(np.meshgrid(*axes, indexing="ij"), -1).reshape(-1, 3)
-    was, now = spatial.contains(m0, pts), spatial.contains(m1, pts)
-    cell = s ** 3
+    try:
+        added = trimesh.boolean.difference([m1, m0], engine="manifold")
+        taken = trimesh.boolean.difference([m0, m1], engine="manifold")
+    except Exception:  # noqa: BLE001 — a mesh manifold won't take: not compared, so never the switch
+        return "its shape couldn't be compared"
     try:
         shapes = [sh for sh in consistency.shapes(before["declared"]) if sh["name"] != piece]
-    except ValueError:                           # a piece it can't weigh: no regions to name
+    except ValueError:                           # a piece it can't weigh: no solids to name
         shapes = []
-    owner = _regions(shapes, m0, pts, s / 2) if shapes else np.full(len(pts), -1)
-    added, taken = now & ~was, was & ~now & (owner >= 0)
-    for what, mask in (("changes", added), ("changes", taken)):
-        if mask.sum() * cell > CHANGE_MM3:
-            hit = owner[mask & (owner >= 0)]
-            if len(hit):
-                return f"{what} the {shapes[int(np.bincount(hit).argmax())]['name']}"
+    prisms = None
+    for solid, gone in ((added, False), (taken, True)):
+        if _vol(solid) <= CHANGE_MM3:
+            continue
+        if prisms is None:
+            prisms = _prisms(shapes, m0)
+        into: dict = {}
+        for name, pr in prisms:
+            into[name] = into.get(name, 0.0) + _vol(trimesh.boolean.intersection([solid, pr], engine="manifold"))
+        name, most = max(into.items(), key=lambda kv: kv[1], default=(None, 0.0))
+        if most > CHANGE_MM3:
+            return f"changes the {name}"
+        if not gone:                              # what was taken outside every other piece is the piece itself
             return "adds to the part where nothing is declared"
     return None
 
@@ -144,16 +164,25 @@ def _also(before: dict, after: dict, piece: str) -> Optional[str]:
 _FOUND: dict = {}
 
 
-def _found(store: DesignStore, pid: str, piece: str) -> tuple:
+def _key(store: DesignStore, pid: str, piece: str) -> tuple:
     import hashlib
 
-    script = store.read_script(pid)
-    key = (hashlib.sha1(script.encode()).hexdigest(), piece)
+    return hashlib.sha1(store.read_script(pid).encode()).hexdigest(), piece
+
+
+def _found(store: DesignStore, pid: str, piece: str) -> tuple:
+    key = _key(store, pid, piece)
     if key not in _FOUND:
         if len(_FOUND) > 256:
             _FOUND.clear()
-        _FOUND[key] = _off_switch(store, pid, piece, script)
+        _FOUND[key] = _off_switch(store, pid, piece, store.read_script(pid))
     return _FOUND[key]
+
+
+def known(store: DesignStore, pid: str, piece: str) -> Optional[tuple]:
+    """What :func:`off_switch` found for this version, ``(switch, why)``, or None where it hasn't been built yet: never a
+    build (#332 review: the menu and Things to fix don't wait on one)."""
+    return _FOUND.get(_key(store, pid, piece))
 
 
 def off_switch(store: DesignStore, pid: str, piece: str) -> Optional[dict]:
@@ -195,20 +224,36 @@ def _off_switch(store: DesignStore, pid: str, piece: str, script: str) -> tuple:
 
 def plan(store: DesignStore, pid: str, piece: str) -> dict:
     """What Delete… on a piece will do, said before it's done: ``{"piece", "name", "how": number | designer, "param"?,
-    "said", "designer_call"}``."""
+    "checked"?, "said", "designer_call"}``. Never a build (#332 review): what the Delete click found, where it has been
+    clicked for this version; else the number its name points to, said as built first to be sure (``checked`` False)."""
     from .tree import pieces
 
     row = next((p for p in pieces(store, pid) if p["key"] == piece), None)
     if row is None:
         raise KeyError(f"{pid} has no piece {piece!r}")
     name = row["name"]
-    sw = off_switch(store, pid, piece)
+    them = "them" if _many(name) else "it"
+    found = known(store, pid, piece)
+    if found is None:
+        tries = [e["name"] for e in named(store, pid, piece)[:TRIES]]
+        if tries:                                 # by name only: which, if any, is the switch is the click's to build
+            each = "It's" if len(tries) == 1 else "Each is"
+            return {"piece": piece, "name": name, "how": "number", "params": tries, "checked": False,
+                    "designer_call": False,
+                    "said": f"Delete the {name}: {' or '.join(tries)} at 0 may turn {them} off. {each} built first to be "
+                            f"sure (a few seconds, no Claude); where none only does that, it's the designer's instead. A "
+                            f"new version of {pid}, rolled back as any other."}
+        found = (None, None)
+    sw, why = found
     if sw is not None:
-        return {"piece": piece, "name": name, "how": "number", **sw, "designer_call": False,
-                "said": f"Delete the {name}: {sw['param']} to 0 turns {'them' if _many(name) else 'it'} off. A number "
-                        f"change, at once (no Claude): a new version of {pid}, rolled back as any other."}
-    why = off_why(store, pid, piece)              # a number that would, but changes another piece too: said (#332)
-    lead = f"{why}, so it" if why else f"that changes {pid}'s code, so it"
+        return {"piece": piece, "name": name, "how": "number", **sw, "checked": True, "designer_call": False,
+                "said": f"Delete the {name}: {sw['param']} to 0 turns {them} off. A number change, at once (no Claude): "
+                        f"a new version of {pid}, rolled back as any other."}
+    return _designer(piece, name, pid, why)
+
+
+def _designer(piece: str, name: str, pid: str, why: Optional[str]) -> dict:
+    lead = f"{why}, so it" if why else f"that changes {pid}'s code, so it"      # a number that would, but does more: said
     return {"piece": piece, "name": name, "how": "designer", "designer_call": True, **({"why": why} if why else {}),
             "said": f"Delete the {name}: {lead} asks the designer (one Claude call, about a minute). A new version of "
                     f"{pid}, rolled back as any other."}
@@ -219,13 +264,17 @@ def _many(name: str) -> bool:
 
 
 def delete(store: DesignStore, pid: str, piece: str) -> dict:
-    """Delete… by its number (the designer's way goes through the chat, as any revise): ``{"version", "said"}``, the
-    reply naming what went. Raises ValueError where no number turns it off."""
+    """The Delete click: its number built at 0 to be sure, then set (``{"version", "how": "number", "said"}``, the reply
+    naming what went); or, where no number only turns it off, the designer's plan with why, nothing set (the page asks
+    again before the designer's revise)."""
     from . import params
 
     p = plan(store, pid, piece)
+    if p["how"] == "number" and not p["checked"]:
+        off_switch(store, pid, piece)             # the builds: here, on the click
+        p = plan(store, pid, piece)
     if p["how"] != "number":
-        raise ValueError(f"no number turns the {p['name']} off: it's the designer's to take out")
+        return p
     got = params.set_values(store, pid, [{"name": p["param"], "value": 0, "unit": p["unit"]}])
     return {"version": got["version"], "how": "number",
             "said": f"Deleted the {p['name']} from {pid}: {p['param']} to 0 (v{got['version']}). Roll it back to put "
