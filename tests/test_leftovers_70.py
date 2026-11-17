@@ -10,13 +10,15 @@ from .test_carve_click import _fn, _node
 from .test_small_words import _js
 
 #: partView's neighbours, stubbed: only its heading and its Advanced line are under test.
-STUBS = """const S = { design: { rules: [], in_air: { yes: false } } };
+STUBS = """const S = { design: { rules: [], in_air: { yes: false } }, making: {} };
 const len = (x) => String(x);
 const ruleItem = () => '', historyItem = () => '', loadView = () => '', trialView = () => '', frameView = () => '',
   aeroView = () => '', whittleView = () => '', aeroRuns = () => [], runsFor = () => [], buildView = () => '',
   makingView = () => '', patternView = () => '', cutplanView = () => '', paramView = () => '';
-const sub = (k, summary, body) => body, subOpen = () => false, partActions = () => '', cutplanRun = () => null,
-  sizeText = () => '';
+const partActions = () => '', cutplanRun = () => null, sizeText = () => '', loadRuns = () => [], lightenRuns = () => [],
+  carveRuns = () => [], runWord = () => '', verdictTone = () => 'ok', fixesSection = () => null, lightenShown = () => false;
+// the sections (#325): each its title and answer as a summary, then its body
+const ssecs = (card, list) => list.filter(Boolean).map((x) => `<summary>${x.title} ${x.answer}</summary>${x.body}`).join('');
 function cardsView(c) { return c.what; }
 """
 

@@ -288,7 +288,8 @@ _LIST = """[
   { name: 'mesh_rows', note: 'rows of holes', value: 4, unit: 'count', range: [1, 8], read: true },
   { name: 'spare', note: '', value: 3, unit: 'mm', range: null, read: false },
   { name: 'tilt', note: 'lean angle', value: 5, unit: 'deg', range: null, read: true } ]"""
-_FNS = ("inchText", "paramName", "readNumber", "paramRange", "paramProblem", "paramRows", "paramsHtml", "paramView")
+_FNS = ("inchText", "paramName", "readNumber", "paramRange", "paramProblem", "paramRows", "paramsHtml", "paramView",
+        "paramsHead", "paramsOpen")
 
 
 def _page(body: str, units: str = "in") -> dict:
@@ -307,6 +308,8 @@ const paramText = (e, v) => (isLength(e) && inches() ? inchText(v) : `${+Number(
 const paramUnit = (e) => (isLength(e) ? (inches() ? 'in' : 'mm') : e.unit === 'deg' ? 'deg' : '');
 let loaded = 0;
 const loadParams = () => { loaded += 1; };
+const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' }, loadRuns = () => [];      // Parameters' own header (#325)
+const localStorage = { getItem: () => null };
 globalThis.setTimeout = (f) => f();
 const LIST = LIST_HERE;
 const P = { id: 'box', version: 5, scripted: true, role: 'part' };

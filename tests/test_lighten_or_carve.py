@@ -81,8 +81,8 @@ def test_the_card_and_the_panel_read_the_rule_not_whether_anything_is_printed():
     src = inspect.getsource(better.offers)
     assert 'p.get("study") == "carve"' in src and 'p.get("study") == "lighten"' in src
     assert 'p.get("printed") and not p.get("carved")' not in src
-    view = _fn(open(JS).read(), "loadView")
-    assert "p.study === 'carve'" in view, view
+    view = _fn(open(JS).read(), "partView")                    # Lighten and Carve are sections of their own (#325)
+    assert "p.study === 'carve' &&" in view and "p.study === 'lighten' && lightenShown(p, runs)" in view
     shown = _fn(open(JS).read(), "lightenShown")
     assert "p.study === 'lighten'" in shown and "p.printed" not in shown, shown
 

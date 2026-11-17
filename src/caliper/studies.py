@@ -338,8 +338,12 @@ def menu(p: dict, air: Optional[dict] = None, check=...) -> list[dict]:
 
     airborne, grounded = (air is None or air["yes"]), (air or {}).get("why", "")
 
+    held = chain(p, check)                       # where the chain holds a study back, ready on its own (#325)
+
     def item(kind, ready, why=""):
         label, what = KINDS[kind]
+        if ready and held and (kind in AFTER_CHECK or (kind == "load" and held == "it doesn't build yet")):
+            ready, why = False, held
         return {"kind": kind, "label": label, "what": what, "ready": bool(ready), "why": "" if ready else why}
 
 
@@ -376,12 +380,6 @@ def menu(p: dict, air: Optional[dict] = None, check=...) -> list[dict]:
              else "it doesn't say what it's built from (construction())"),
         item("cutplan", p.get("built"), roll if mesh else "it doesn't say what it's built from (construction())"),
     ]
-    held = chain(p, check)
-    for m in out:                                 # ready on its own, held back by the chain: the chain's why
-        if not held:
-            break
-        if m["ready"] and (m["kind"] in AFTER_CHECK or (m["kind"] == "load" and held == "it doesn't build yet")):
-            m["ready"], m["why"] = False, held
     return out
 
 

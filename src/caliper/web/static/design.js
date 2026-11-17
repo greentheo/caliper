@@ -1836,8 +1836,29 @@ function paramsHtml(p, st, done) {
   const said = done && done.part === p.id && done.version === p.version ? `<div class="pdone">v${done.version} written: ${esc(done.said)} set exactly as typed; the whole design re-measured.</div>
     ${done.followed ? `<div class="pnote">${esc(done.followed.charAt(0).toUpperCase() + done.followed.slice(1))}.</div>` : ''}
     ${done.warning ? `<div class="pnote warn">${esc(done.warning)}.</div>` : ''}${(done.notes || []).map((n) => `<div class="pnote">${esc(n)}.</div>`).join('')}` : '';
-  return `<section class="params"><div class="phead"><b>Parameters</b><span class="small muted">set by hand, no Claude call</span></div>
-    ${body}${foot}${st.err ? `<div class="pnote bad">${esc(st.err)}</div>` : ''}${said}</section>`;
+  const head = paramsHead(p, rows);
+  return `<details class="params psec t-${head.tone}" id="paramSec"${paramsOpen() ? ' open' : ''}><summary class="phead">
+      <span class="qmark">${QMARK[head.tone]}</span><b>Parameters</b><span class="small muted">${esc(head.answer)}</span></summary>
+    <div class="small muted">set by hand, no Claude call</div>
+    ${body}${foot}${st.err ? `<div class="pnote bad">${esc(st.err)}</div>` : ''}${said}</details>`;
+}
+// Parameters' own header (#325): how many, the sheet's thickness where it has one, and a mark where something needs a
+// look: a number that won't do (✗), one typed and not rebuilt yet, one saved outside its range, or a part changed since
+// its check (!)
+function paramsHead(p, rows) {
+  const n = rows.length, bad = rows.filter((r) => r.problem), dirty = rows.filter((r) => r.changed);
+  const out = rows.filter((r) => r.e.range && (r.e.value < r.e.range[0] - 1e-9 || r.e.value > r.e.range[1] + 1e-9));
+  const run = p.loads ? (loadRuns(p.id) || [])[0] : null, since = !!(run && run.version !== p.version);
+  const sheet = rows.find((r) => /(^|_)(t|ply|thick|sheet)(_|$)|thick/i.test(r.e.name));
+  const what = `${n} number${n === 1 ? '' : 's'}${sheet ? ` · ${paramName(sheet.e)} ${sheet.shown}${paramUnit(sheet.e) ? ` ${paramUnit(sheet.e)}` : ''}` : ''}`;
+  if (bad.length) return { tone: 'bad', answer: `${what} · ${bad.length} won't do` };
+  if (dirty.length) return { tone: 'warn', answer: `${what} · ${dirty.length} changed, not rebuilt yet` };
+  if (out.length) return { tone: 'warn', answer: `${what} · ${paramName(out[0].e)} is outside its range` };
+  if (since) return { tone: 'warn', answer: `${what} · changed since its check` };
+  return { tone: 'info', answer: what };
+}
+function paramsOpen() {                          // open by default; kept as it was left
+  try { return localStorage.getItem('caliper.params.open') !== '0'; } catch (e) { return true; }
 }
 function paramView(p) {
   if (!S.design || !p || !p.scripted || p.role === 'fixed') return '';
@@ -2087,7 +2108,7 @@ function answersKey() {               // what the answers depend on: a change to
 // a card's lines, and under a part's Will it work? its Things to fix (#300): one painter, for the first draw and the
 // fill when its answers come in (a fill with qlines alone dropped the list)
 function cardLines(k, c) {
-  return qlines(c) + (k === 'work' && S.scope && c ? fixesBox(S.scope) : '');
+  return qlines(c);                             // Things to fix is a section of the card now (#325)
 }
 function qlines(c) {
   if (!c) return '<div class="qline muted"><span class="spin"></span>answering…</div>';
@@ -2155,12 +2176,14 @@ function fixesView(got, mine) {
     ${(got.limits || []).length ? `<div class="qbetter-h" style="margin-top:6px">Known limits</div>
       <ul class="small muted fixlimits">${got.limits.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`;
 }
-function fixesBox(part) {
-  const open = S.fixOpen === fixKey(part);
-  const got = open && S.fixes && S.fixes[fixKey(part)];
-  return `<details class="qbetter qfix" id="fixBox" data-fix-part="${esc(part)}"${open ? ' open' : ''}><summary>Things to fix
-      <span class="muted small">measured, with what each would take</span></summary>
-    <div id="fixBody">${got ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div></details>`;
+// Things to fix as a section of Will it work? (#325): its mark and its count once its list is read
+function fixesSection(part) {
+  const got = S.fixes && S.fixes[fixKey(part)], fresh = got && got.v === fixVersion(part);
+  const n = fresh ? (got.rows || []).length : null;
+  return { k: 'fix', title: 'Things to fix', tone: n == null ? 'info' : n ? 'warn' : 'ok',
+    answer: n == null ? 'measured, with what each would take' : n ? `${n} measured wrong` : 'nothing measured wrong',
+    attrs: ` id="fixBox" data-fix-part="${esc(part)}"`,
+    body: `<div id="fixBody">${fresh ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div>` };
 }
 function fixVersion(part) { return ((S.design.parts.find((p) => p.id === part)) || {}).version; }
 async function loadFixes(part) {
@@ -2177,6 +2200,9 @@ function paintFixes(part) {
   const b = $('fixBody'), got = S.fixes && S.fixes[fixKey(part)];
   if (!b || !got || (($('fixBox') || {}).dataset || {}).fixPart !== part) return;
   b.innerHTML = fixesView(got, fixMine(part));
+  const head = $('fixBox').querySelector('summary'), x = fixesSection(part);   // its header: the count, its mark
+  if (head) head.innerHTML = subHead(x);
+  $('fixBox').classList.toggle('attn', ATTN(x.tone));
   wireFixRows(part);
 }
 function wireFixes() {
@@ -2292,7 +2318,7 @@ function cardsView(groups) {
   return QUESTIONS.map(([k, q]) => {
     const c = a ? a.cards.find((x) => x.key === k) : null, on = k === open;
     return `<section class="qcard q-${c ? c.status : 'info'}${on ? ' open' : ''}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
-      <h3 class="qhead"><button type="button" class="qtoggle" aria-expanded="${on}" aria-controls="qbody-${k}" data-qopen="${k}"${S.scope ? ' title="show this in 3D"' : ''}><span class="qmark">${c ? QMARK[c.status] : '·'}</span><span class="qtitle">${q}</span><span class="qcaret" aria-hidden="true">${on ? '▾' : '▸'}</span></button></h3>
+      <h3 class="qhead"><button type="button" class="qtoggle" aria-expanded="${on}" aria-controls="qbody-${k}" data-qopen="${k}"${S.scope ? ' title="show this in 3D"' : ''}><span class="qmark">${c ? QMARK[c.status] : '·'}</span><span class="qtitle">${q}</span>${/class="ssec[^"]*\battn\b/.test(groups[k] || '') ? '<span class="qinside" title="something inside needs a look">● inside</span>' : ''}<span class="qcaret" aria-hidden="true">${on ? '▾' : '▸'}</span></button></h3>
       <div class="qlines" id="q-${k}">${cardLines(k, c)}</div>
       ${k === 'what' && picturePart() ? '<div class="qlinks"><button class="btn" data-picture="1">🦖 Put a picture on it</button></div>' : ''}
       <div class="qbody" id="qbody-${k}" role="region" aria-label="${q}"${on ? '' : ' hidden'}>${groups[k] || '<div class="empty">Nothing here yet.</div>'}</div>
@@ -2316,10 +2342,53 @@ function showOpen(to) {
   });
 }
 // a block one level down, closed until opened, kept open or closed by what it is (#325)
-function subOpen(k) {
-  try { return localStorage.getItem(`caliper.sub.${k}`) === '1'; } catch (e) { return false; }
+// the sections inside a card (#325, Theo's refinements): a sub-accordion, each header with its own mark and its one-line
+// answer, so a problem shows while everything is closed. SUB_ONE is the one switch: true, one open at a time within a
+// card; false, each opens and closes on its own (Theo isn't sure which he wants)
+const SUB_ONE = true;
+const subKey = (card, k) => `${cardStore()}/${card}${SUB_ONE ? '' : `/${k}`}`;
+function subKept(card, k) {
+  const key = subKey(card, k);
+  if (S.subOpen && key in S.subOpen) return S.subOpen[key];
+  try { return localStorage.getItem(`caliper.ssec.${key}`); } catch (e) { return null; }
 }
-const sub = (k, summary, body) => `<details class="sub" data-sub="${k}"${subOpen(k) ? ' open' : ''}><summary>${summary}</summary>${body}</details>`;
+const ATTN = (tone) => tone === 'bad' || tone === 'warn';
+// which are open: SUB_ONE, the one kept, else the first that needs attention, else the first; else each by what it was
+// left as, else open where it needs attention
+function subsOpen(card, list) {
+  if (!SUB_ONE) return new Set(list.filter((x) => { const kept = subKept(card, x.k); return kept != null ? kept === '1' : ATTN(x.tone); }).map((x) => x.k));
+  const kept = subKept(card, null);
+  if (kept != null && (kept === '' || list.some((x) => x.k === kept))) return new Set(kept ? [kept] : []);
+  const first = list.find((x) => x.tone === 'bad') || list.find((x) => x.tone === 'warn') || list[0];
+  return new Set(first ? [first.k] : []);
+}
+const subHead = (x) => `<span class="qmark">${QMARK[x.tone] || '·'}</span><span class="stitle">${x.title}</span>${x.answer ? `<span class="sanswer">${x.answer}</span>` : ''}`;
+function ssecs(card, list) {
+  const open = subsOpen(card, list.filter(Boolean));
+  return list.filter(Boolean).map((x) => `<details class="ssec t-${x.tone}${ATTN(x.tone) ? ' attn' : ''}" data-ssec="${x.k}" data-in="${card}"${x.attrs || ''}${open.has(x.k) ? ' open' : ''}>
+    <summary>${subHead(x)}</summary><div class="sbody">${x.body}</div></details>`).join('');
+}
+function keepSub(dt) {                          // what's left open is kept; with SUB_ONE, opening one closes the others
+  const card = dt.dataset.in, k = dt.dataset.ssec;
+  if (SUB_ONE && dt.open) {
+    document.querySelectorAll(`#inspector details.ssec[data-in="${card}"]`).forEach((o) => { if (o !== dt && o.open) o.open = false; });
+  }
+  const now = SUB_ONE ? (dt.open ? k : ([...document.querySelectorAll(`#inspector details.ssec[data-in="${card}"]`)].find((o) => o.open) || {}).dataset?.ssec || '')
+    : (dt.open ? '1' : '0');
+  S.subOpen = S.subOpen || {};
+  S.subOpen[subKey(card, k)] = now;
+  try { localStorage.setItem(`caliper.ssec.${subKey(card, k)}`, now); } catch (e) { /* private window */ }
+}
+// what each action opens (#325): the section it feeds, in its card, so its progress and its result are in view
+const GO_OPENS = { lGo: ['work', 'result'], lightGo: ['work', 'lighten'], carveGo: ['work', 'carve'], aGo: ['work', 'aero'],
+  cpGo: ['make', 'cutplan'] };
+function showSection(card, k) {
+  const sec = document.querySelector(`#inspector .qcard[data-card="${card}"]`);
+  if (sec && !sec.classList.contains('open')) openCard(card);
+  const dt = document.querySelector(`#inspector details.ssec[data-in="${card}"][data-ssec="${k}"]`);
+  if (dt && !dt.open) { dt.open = true; keepSub(dt); }
+  if (dt) dt.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 // ------------------------------------------------------------------- test it (CALI-80)
 // What the strength check predicts at each load step, what to measure the sag with, and what the real one did.
 const sagText = (mm) => (inches() ? `${(mm / IN).toFixed(3)} in` : `${mm.toFixed(2)} mm`);
@@ -2503,8 +2572,10 @@ async function loadAnswers() {
 }
 function wireCards() {
   wireFixes();                                            // Things to fix, under Will it work? (#300)
-  document.querySelectorAll('#inspector details.sub').forEach((dt) => {
-    dt.ontoggle = () => { try { localStorage.setItem(`caliper.sub.${dt.dataset.sub}`, dt.open ? '1' : '0'); } catch (e) { /* private */ } };
+  document.querySelectorAll('#inspector details.ssec').forEach((dt) => {
+    if (dt.dataset.wiredSub) return;
+    dt.dataset.wiredSub = '1';
+    dt.addEventListener('toggle', () => keepSub(dt));     // its own ontoggle (Things to fix's, Advanced's) stays its own
   });
   document.querySelectorAll('#inspector .qtoggle').forEach((b) => {
     b.onclick = () => { openCard(b.dataset.qopen); focusCard(b.dataset.qopen); };
@@ -2760,7 +2831,11 @@ function wirePartActions() {                    // a greyed one says why, on a c
   bar.dataset.wired = '1';
   bar.addEventListener('click', (e) => {
     const b = e.target.closest('button');
-    if (!b || b.getAttribute('aria-disabled') !== 'true') { if (why) why.textContent = ''; return; }
+    if (!b || b.getAttribute('aria-disabled') !== 'true') {
+      if (why) why.textContent = '';
+      if (b && GO_OPENS[b.id]) showSection(...GO_OPENS[b.id]);        // its section open first: its progress shows there
+      return;
+    }
     e.stopPropagation(); e.preventDefault();
     if (why) why.textContent = b.dataset.why;
   }, true);
@@ -2772,40 +2847,64 @@ function partView(p) {
   const designRules = d.rules.filter(mine);
   const origin = p.origin === 'whittled' ? '<span class="badge whittled">whittled mesh</span>'
     : p.scripted ? '<span class="badge">parametric</span>' : '<span class="badge">imported</span>';
-  const nRules = p.rules.length + designRules.length;
+  const rules = [...p.rules, ...designRules], failing = rules.filter((r) => r.verdict && r.verdict.kind === 'fails');
   const revisions = p.history.filter((h) => h.kind === 'revision').length;
   const what = `<label class="small muted" style="display:block;margin-top:2px">
       <input type="checkbox" id="roleRef" ${p.role === 'fixed' ? 'checked' : ''}> treat as a reference (context, e.g. the car)</label>
-    ${sub('size', `Size${p.bbox ? `: ${sizeText(p.bbox.size)}` : ': it won\'t build'}`, p.bbox ? `<div class="kv">
+    ${ssecs('what', [
+      { k: 'size', title: 'Size', tone: p.bbox ? 'info' : 'bad', answer: p.bbox ? sizeText(p.bbox.size) : 'it won\'t build',
+        body: p.bbox ? `<div class="kv">
       <span class="k">width</span><span>${len(p.bbox.size[1])}</span>
       <span class="k">depth</span><span>${len(p.bbox.size[0])}</span>
       <span class="k">height</span><span>${len(p.bbox.size[2])}</span>
-      <span class="k">bottom at</span><span>${len(p.bbox.min[2])}</span></div>` : '<div class="empty">won\'t build</div>')}
-    ${sub('rules', `Rules on this part: ${nRules ? nRules : 'none yet'}`, nRules ? '<ul class="list">' +
-      [...p.rules, ...designRules].map(ruleItem).join('') + '</ul>'
-    : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>')}
-    <details class="sub" data-sub="history" id="partHistory"${subOpen('history') ? ' open' : ''}><summary>History: ${revisions} version${revisions === 1 ? '' : 's'}, now v${p.version}</summary>
-    <ul class="list">${p.history.slice().reverse().map((h) => historyItem(h, p.version)).join('')}</ul></details>
-    <details id="adv"><summary>Advanced — script &amp; spec <span class="muted">${esc(p.id)}</span> ${origin}</summary><div id="advBody" class="small muted">loading…</div></details>`;
-  const work = `${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
-    <div id="loadBox">${loadView(p)}</div>` : ''}
-    ${p.loads && p.role !== 'fixed' ? sub('trial', 'Test it <span class="badge">the real one</span>: what to measure, and what it did',
-      `<div id="trialBox">${trialView(p)}</div>`) : ''}
-    ${p.framed ? `<h4>Size the frame <span class="badge">tubes back</span></h4>
-    <div id="frameBox">${frameView(p)}</div>` : ''}
-    ${!p.framed && (S.design.in_air.yes || aeroRuns(p.id).length || runsFor(p.id).length)
-      ? sub('aero', `Shape it for drag <span class="badge">numbers back</span>: ${aeroRuns(p.id).length} search${aeroRuns(p.id).length === 1 ? '' : 'es'}`,
-        `<div id="aeroBox">${aeroView(p)}</div>`)
-      + sub('whittle', 'whittle carving <span class="badge">mesh back</span>', `<div id="whittleBox">${whittleView(p)}</div>`) : ''}`;
-  const buy = p.built ? sub('buy', 'Built from <span class="badge">weight &amp; shopping list</span>: the stock and what to buy',
-    `<div id="buildBox">${buildView(p)}</div>`) : '';
-  const cut = cutplanRun(p);
-  const make = p.built ? `<div id="makingBox">${makingView(p)}</div>
-    ${sub('patterns', 'Patterns for hand tools: every flat piece, full size', `<div id="patternBox">${patternView(p)}</div>`)}
-    ${sub('cutplan', `The cut plan: ${cut ? 'the sheets laid out flat' : 'not made yet'}`, `<div id="cutplanBox">${cutplanView(p)}</div>`)}` : '';
+      <span class="k">bottom at</span><span>${len(p.bbox.min[2])}</span></div>` : '<div class="empty">won\'t build</div>' },
+      { k: 'rules', title: 'Rules on this part', tone: failing.length ? 'bad' : rules.length ? 'ok' : 'info',
+        answer: !rules.length ? 'none yet' : failing.length ? `${failing.length} of ${rules.length} broken` : `${rules.length}, all kept`,
+        body: rules.length ? `<ul class="list">${rules.map(ruleItem).join('')}</ul>`
+          : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>' },
+      { k: 'history', title: 'History', tone: 'info', answer: `${revisions} version${revisions === 1 ? '' : 's'}, now v${p.version}`,
+        attrs: ' id="partHistory"', body: `<ul class="list">${p.history.slice().reverse().map((h) => historyItem(h, p.version)).join('')}</ul>` },
+      { k: 'adv', title: 'Advanced', tone: 'info', answer: `script &amp; spec <span class="muted">${esc(p.id)}</span> ${origin}`,
+        attrs: ' id="adv"', body: '<div id="advBody" class="small muted">loading…</div>' }])}`;
+  const runs = loadRuns(p.id), run = runs[0];
+  const checked = !run ? { tone: 'info', answer: p.loads ? 'not checked yet' : 'it doesn\'t say what it must carry yet' }
+    : run.version !== p.version ? { tone: 'warn', answer: `${runWord(run)}, of v${run.version}: the part has changed since` }
+      : { tone: run.verdict ? (verdictTone(run.verdict) === 'ok' ? 'ok' : verdictTone(run.verdict) === 'bad' ? 'bad' : 'warn') : 'info',
+        answer: run.verdict && run.verdict.short ? run.verdict.short : runWord(run) };
+  const light = lightenRuns(p.id)[0], carve = carveRuns(p.id)[0];
+  const later = (r, none) => (!r ? { tone: 'info', answer: none } : r.version != null && r.version !== p.version
+    ? { tone: 'warn', answer: `of v${r.version}: the part has changed since` } : { tone: 'info', answer: `its steps, of v${r.version != null ? r.version : p.version}` });
+  const air = !p.framed && (S.design.in_air.yes || aeroRuns(p.id).length || runsFor(p.id).length);
+  const work = ssecs('work', [
+    !p.framed && (p.built || p.loads) && p.role !== 'fixed' && { k: 'result', title: 'Will it hold? <span class="badge">strength</span>', ...checked,
+      body: `<div id="loadBox">${loadView(p)}</div>` },
+    S.scope && p.role !== 'fixed' && fixesSection(p.id),
+    p.study === 'lighten' && lightenShown(p, runs) && { k: 'lighten', title: 'Make it lighter', ...later(light, 'not lightened yet'),
+      body: lightenView(p) },
+    p.study === 'carve' && (runs.length || carveRuns(p.id).length) && { k: 'carve', title: 'Carve it <span class="badge">printed, any shape</span>',
+      ...later(carve, 'not carved yet'), body: carveView(p) },
+    p.loads && p.role !== 'fixed' && { k: 'trial', title: 'Test it <span class="badge">the real one</span>', tone: 'info',
+      answer: 'what to measure, and what it did', body: `<div id="trialBox">${trialView(p)}</div>` },
+    p.framed && { k: 'frame', title: 'Size the frame <span class="badge">tubes back</span>', tone: 'info', answer: '',
+      body: `<div id="frameBox">${frameView(p)}</div>` },
+    air && { k: 'aero', title: 'Shape it for drag <span class="badge">numbers back</span>', tone: 'info',
+      answer: `${aeroRuns(p.id).length} search${aeroRuns(p.id).length === 1 ? '' : 'es'}`, body: `<div id="aeroBox">${aeroView(p)}</div>` },
+    air && { k: 'whittle', title: 'whittle carving <span class="badge">mesh back</span>', tone: 'info', answer: '',
+      body: `<div id="whittleBox">${whittleView(p)}</div>` }]);
+  const buy = p.built ? ssecs('buy', [{ k: 'stock', title: 'Built from <span class="badge">weight &amp; shopping list</span>', tone: 'info',
+    answer: 'the stock and what to buy', body: `<div id="buildBox">${buildView(p)}</div>` }]) : '';
+  const cut = cutplanRun(p), shop = S.making[p.id] && S.making[p.id].data;
+  const make = p.built ? ssecs('make', [
+    { k: 'shop', title: 'Made in your shop', tone: shop ? (shop.ok ? 'ok' : 'bad') : 'info',
+      answer: shop ? (shop.ok ? 'all of it' : 'not all of it') : 'planning…', body: `<div id="makingBox">${makingView(p)}</div>` },
+    { k: 'patterns', title: 'Patterns for hand tools', tone: 'info', answer: 'every flat piece, full size',
+      body: `<div id="patternBox">${patternView(p)}</div>` },
+    { k: 'cutplan', title: 'Cut plan', tone: cut && cut.version != null && cut.version !== p.version ? 'warn' : 'info',
+      answer: !cut ? 'not made yet' : cut.version != null && cut.version !== p.version ? `of v${cut.version}: the part has changed since`
+        : 'the sheets laid out flat', body: `<div id="cutplanBox">${cutplanView(p)}</div>` }]) : '';
   // the heading is the part's own name; its id and how it was made are one click down, under Advanced (#70 item 21);
   // its actions beside it, its numbers under it, then the four questions (#325)
-  return `<div class="phead"><div><h2>${esc(p.name || p.id)}</h2>
+  return `<div class="parthead"><div><h2>${esc(p.name || p.id)}</h2>
     <div class="muted small">v${p.version}</div></div>${partActions(p)}</div>
     <div id="paramBox">${paramView(p)}</div>
     ${cardsView({ what, work, buy, make })}`;
@@ -3373,9 +3472,7 @@ function loadView(p) {
         to see its ${wallLen(runs[0].thinnest_mm)} walls">Check it again finer${runs[0].finer.minutes ? ` (about ${runs[0].finer.minutes} min)` : ' (how long: unknown)'}</button>` : ''}</div>
     ${scenariosBox(p)}
     <div id="lProgress"></div>
-    ${runs.length ? loadResults(p, runs[pick], runs) : ''}
-    ${p.study === 'carve' ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : ''}
-    ${lightenShown(p, runs) ? lightenView(p) : ''}`;
+    ${runs.length ? loadResults(p, runs[pick], runs) : ''}`;
 }
 
 // --------------------------------------------------------------------- scenarios and supports (CALI-185, #296 slice A)
