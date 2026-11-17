@@ -131,6 +131,8 @@ def of_solid(solid, pose=None) -> dict:
     from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape  # type: ignore
     import cadquery as cq
 
+    from .tess import triangles
+
     shape = solid.val() if hasattr(solid, "val") else solid
     if len(getattr(solid, "vals", lambda: [shape])()) > 1:
         shape = cq.Compound.makeCompound(solid.vals())
@@ -141,8 +143,8 @@ def of_solid(solid, pose=None) -> dict:
     for i, f in enumerate(faces):
         fid = f"f{i}"
         index[f.hashCode()] = (fid, f)
-        verts, tris = f.tessellate(LINEAR, ANGULAR)
-        pts = np.array([_apply(pose, v.toTuple()) for v in verts], float)
+        verts, tris = triangles(f, LINEAR, ANGULAR)        # the face's tessellate(), read straight off OCC (#298)
+        pts = np.array([_apply(pose, tuple(v)) for v in verts], float)
         surf = _surface(f)
         c = np.array(f.Center().toTuple())
         row = {"id": fid, "type": _FACE_KIND.get(f.geomType(), "surface"), "centre": _vec(_apply(pose, c)), "local": _vec(c),
@@ -159,11 +161,11 @@ def of_solid(solid, pose=None) -> dict:
         if "semi" in surf:
             row["semi"] = round(surf["semi"], 6)
         if f.geomType() == "CYLINDER" and len(verts):          # a hole's wall faces its axis; a post's faces away from it
-            on = np.array(verts[0].toTuple())
+            on = np.array(verts[0], float)
             axis_d = np.asarray(surf["axis"], float)
             out_from_axis = (on - np.asarray(surf["at"], float))
             out_from_axis -= axis_d * float(np.dot(out_from_axis, axis_d))
-            row["hollow"] = bool(float(np.dot(np.array(f.normalAt(verts[0]).toTuple()), out_from_axis)) < 0)
+            row["hollow"] = bool(float(np.dot(np.array(f.normalAt(cq.Vector(*on)).toTuple()), out_from_axis)) < 0)
         if "at" in surf:
             row["at"] = _vec(_apply(pose, surf["at"]))
         out_faces.append(row)
