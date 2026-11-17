@@ -74,10 +74,42 @@ def _moved(item: dict, run: Optional[dict], rows: list[dict]) -> Optional[dict]:
     same = next((r for r in covers if str(r["id"]).split(":")[0] == kind), None)
     if same is not None:
         return {"status": "still open", "why": f"it's measured as '{same.get('what') or same['problem']}' now"}
+    # no row of its own kind: the list makes a plate row only where the plate governs, so read the row's own measurement
+    # in the fresh run, not the list (#322, reviewer-2 at 03a312a: the step's plate at 1.91x read "fixed (the plate)")
+    key = str(item.get("id") or "").split(":", 1)[1] if ":" in str(item.get("id") or "") else ""
+    own = [_own(kind, key, by[n]) for n in sorted(failing)]
+    if any(s is None for s in own):
+        return {"status": "still open", "why": "not measured as fixed"}
+    worst = min(own)
+    if not verdicts.meets(worst, need)["counts_as_pass"]:
+        from .fixes import _x
+
+        what = item.get("what") or f"the {key}"
+        mine = what if kind in ("joint", "fails") else f"{what}'s {_KIND.get(kind, 'check')}"
+        return {"status": "still open", "why": f"measured: {mine} is still {_x(worst, need)} where it needs {need:g}×"}
     other = covers[0] if covers else None
-    on = (f": {other.get('what') or other['problem']}'s {_KIND.get(str(other['id']).split(':')[0], 'check')}"
-          if other is not None else "")
+    okind = str(other["id"]).split(":")[0] if other is not None else ""
+    said = (other.get("what") or other["problem"]) if other is not None else ""
+    on = ("" if other is None or okind == "fails" else       # a case's own row: the case, said already
+          f": {said}" if okind == "joint" else f": {said}'s {_KIND.get(okind, 'check')}")   # a joint's what says joint
     return {"status": "fixed", "why": f"fixed (the {_KIND.get(kind, 'check')}), and the case still fails{on}"}
+
+
+def _own(kind: str, key: str, case: dict) -> Optional[float]:
+    """A row's own measurement in a fresh case (#322): the plate check's safety across the grain for that panel, the
+    joint's by its pieces, the panel's buckling, or a case's own. None where it isn't measured there (a piece renamed)."""
+    if kind == "plate":
+        pl = case.get("plate") or {}
+        return pl.get("safety_across") if pl.get("piece") == key and pl.get("done") else None
+    if kind == "joint":
+        return next((jr.get("safety") for jr in (case.get("joints") or {}).get("rows") or []
+                     if "|".join(jr.get("pieces") or []) == key), None)
+    if kind == "buckling":
+        return next((b.get("safety") for b in case.get("buckling") or [] if b.get("piece") == key and b.get("done")),
+                    None)
+    if kind == "fails":
+        return case.get("safety")
+    return None
 
 
 def plan(store: DesignStore, state: dict, pid: str, picked: list[dict], own: Optional[list[dict]] = None) -> dict:

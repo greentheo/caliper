@@ -219,9 +219,13 @@ def test_a_joint_fixed_while_its_case_fails_on_the_plate_is_fixed_and_says_the_c
     assert row["id"] == "joint:front rail|left side"
     monkeypatch.setattr(chat, "refine_part", Designer())
 
-    def study(store, pid, **kw):                                   # the joint holds now; the top fails by the plate
+    def study(store, pid, **kw):                                   # the joint holds now (2.4x); the top fails by the plate
         _check(store, pid, 1.4, rid=f"20261116-1{store.design.part(pid).version:05d}-check",
                plate={**_plate(t=12.7), "safety_across": 1.4}, sheet={"pieces": {"top": "t"}})
+        fresh = _run(store)                                         # a real run lists every joint it checks, holding too
+        held = {**weak, "safety": 2.4, "holds": True}
+        fresh["cases"][0]["joints"] = {"chain": True, "n": 1, "unchecked": [], "governing": held, "rows": [held]}
+        _resave(store, fresh)
 
     monkeypatch.setattr(load_study, "study", study)
     got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0}])
@@ -420,3 +424,143 @@ def test_the_fix_route_refuses_while_a_job_works_on_the_part(tmp_path, monkeypat
     r = TestClient(create_app()).post(f"/api/designs/{store.design.slug}/parts/stool/fixes",
                                       json={"picked": [{"id": row["id"], "choice": 0}], "own": []})
     assert r.status_code == 409 and "being checked" in r.json()["detail"]
+
+
+# --- round four: "fixed (the X)" is the row's own measurement in the fresh run (#322, reviewer-2 at 03a312a) -----------
+WEAK = {"pieces": ["front rail", "left side"], "between": "the front rail and the left side", "mode": "withdrawal",
+        "safety": 1.62, "need": 2.0, "holds": False, "said": "two #8 screws pulled out of the front rail's edge"}
+
+
+def _fresh(plate_piece="top", across=1.91):
+    """The 500 lb run's shape: one case, the plate at ``across``, a front-rail joint at 1.62x governing it."""
+    def study(store, pid, **kw):
+        _check(store, pid, 1.62, rid=f"20261116-1{store.design.part(pid).version:05d}-check",
+               plate={**_plate(t=12.7), "piece": plate_piece, "safety_across": across},
+               sheet={"pieces": {plate_piece: "t"}})
+        run = _run(store)
+        run["cases"][0].update(governs="joint", joints={"chain": True, "n": 1, "unchecked": [], "governing": WEAK,
+                                                        "rows": [WEAK]})
+        _resave(store, run)
+    return study
+
+
+def test_a_plate_still_failing_under_a_joint_that_governs_now_is_still_open(tmp_path, monkeypatch):
+    """reviewer-2's real run: step-stool-5 at 500 lb, every panel thickened, the step's plate 1.91x and the front rail's
+    joints at 1.62x governing. The plate row went (it's made only where the plate governs) and read "fixed (the plate)"."""
+    from caliper import chat, load_study
+
+    store = _failing_plate(tmp_path)
+    (row,) = _rows(store)
+    assert row["id"] == "plate:top"
+    monkeypatch.setattr(chat, "refine_part", Designer())
+    monkeypatch.setattr(load_study, "study", _fresh())
+    got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0, "words": "Make every panel 1 in"}])
+    assert [r["id"] for r in _rows(store)] == ["joint:front rail|left side"]        # no plate row: the joint governs
+    (r,) = got["results"]
+    assert (r["status"], r["why"]) == ("still open", "measured: the top's plate is still 1.91× where it needs 2×"), r
+
+
+def test_a_plate_whose_piece_isn_t_in_the_fresh_run_is_not_measured_as_fixed(tmp_path, monkeypatch):
+    from caliper import chat, load_study
+
+    store = _failing_plate(tmp_path)
+    (row,) = _rows(store)
+    monkeypatch.setattr(chat, "refine_part", Designer())
+    monkeypatch.setattr(load_study, "study", _fresh(plate_piece="seat", across=2.5))   # renamed, and the seat holds
+    got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0, "words": "Make the top from 1 in"}])
+    (r,) = got["results"]
+    assert (r["status"], r["why"]) == ("still open", "not measured as fixed"), r
+
+
+def test_a_plate_fixed_while_a_joint_fails_its_case_says_the_joint_in_its_own_words(tmp_path, monkeypatch):
+    """The small ask: "the joint between the front rail and the left side's joint" said the joint twice."""
+    from caliper import chat, load_study
+
+    store = _failing_plate(tmp_path)
+    (row,) = _rows(store)
+    monkeypatch.setattr(chat, "refine_part", Designer())
+    monkeypatch.setattr(load_study, "study", _fresh(across=2.3))                       # the plate holds now
+    got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0, "words": "Make the top from 1 in"}])
+    (r,) = got["results"]
+    assert (r["status"], r["why"]) == (
+        "fixed", "fixed (the plate), and the case still fails: the joint between the front rail and the left side"), r
+
+
+def test_a_joint_the_fresh_run_doesn_t_check_is_not_measured_as_fixed(tmp_path, monkeypatch):
+    """Its own joint by its pieces, not the first joint listed: another joint holding says nothing of this one."""
+    from caliper import chat, load_study
+
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 1.4)
+    run = _run(store)
+    weak = {**WEAK, "safety": 1.4}
+    run["cases"][0].update(governs="joint", joints={"chain": True, "n": 1, "unchecked": [], "governing": weak, "rows": [weak]})
+    _resave(store, run)
+    (row,) = _rows(store)
+    monkeypatch.setattr(chat, "refine_part", Designer())
+
+    def study(store, pid, **kw):                     # the back rail's joint now, holding; the front rail's not checked
+        _check(store, pid, 1.4, rid=f"20261116-1{store.design.part(pid).version:05d}-check",
+               plate={**_plate(t=12.7), "safety_across": 1.4}, sheet={"pieces": {"top": "t"}})
+        fresh = _run(store)
+        other = {**WEAK, "pieces": ["back rail", "left side"], "between": "the back rail and the left side",
+                 "safety": 2.4, "holds": True}
+        fresh["cases"][0]["joints"] = {"chain": True, "n": 1, "unchecked": [], "governing": other, "rows": [other]}
+        _resave(store, fresh)
+
+    monkeypatch.setattr(load_study, "study", study)
+    got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0}])
+    (r,) = got["results"]
+    assert (r["status"], r["why"]) == ("still open", "not measured as fixed"), r
+
+
+def test_a_panel_that_still_buckles_while_the_plate_governs_is_still_open(tmp_path, monkeypatch):
+    from caliper import chat, load_study
+
+    side = {"done": True, "piece": "left side", "thickness_mm": 12.7, "safety": 1.4, "down": True}
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 1.4)
+    run = _run(store)
+    run["cases"][0].update(governs="buckling", buckling=[side])
+    _resave(store, run)
+    (row,) = _rows(store)
+    assert row["id"] == "buckling:left side"
+    monkeypatch.setattr(chat, "refine_part", Designer())
+
+    def study(store, pid, **kw):                     # the top's plate governs now; the side still buckles at 1.5x
+        _check(store, pid, 1.4, rid=f"20261116-1{store.design.part(pid).version:05d}-check",
+               plate={**_plate(t=12.7), "safety_across": 1.4}, sheet={"pieces": {"top": "t"}})
+        fresh = _run(store)
+        fresh["cases"][0]["buckling"] = [{**side, "safety": 1.5}]
+        _resave(store, fresh)
+
+    monkeypatch.setattr(load_study, "study", study)
+    got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0, "words": "Brace the left side"}])
+    assert "buckling:left side" not in [r["id"] for r in _rows(store)]           # the plate governs: no buckling row
+    (r,) = got["results"]
+    assert (r["status"], r["why"]) == ("still open", "measured: the left side's buckling is still 1.5× where it needs 2×"), r
+
+
+def test_a_plate_row_for_two_cases_is_fixed_only_where_it_holds_in_both(tmp_path, monkeypatch):
+    """Its worst case decides: the plate holding under one case says nothing of the other (reviewer-2's two stepping cases)."""
+    from caliper import chat, load_study
+
+    store = _failing_plate(tmp_path)
+    run = _run(store)
+    run["cases"].append({**run["cases"][0], "name": "a hand"})
+    _resave(store, run)
+    (row,) = _rows(store)
+    assert row["cases"] == ["a foot", "a hand"]
+    monkeypatch.setattr(chat, "refine_part", Designer())
+
+    def study(store, pid, **kw):                     # both cases fail by the joint; the plate holds under 'a foot' only
+        _fresh(across=2.3)(store, pid)
+        fresh = _run(store)
+        fresh["cases"].append({**fresh["cases"][0], "name": "a hand",
+                               "plate": {**fresh["cases"][0]["plate"], "safety_across": 1.91}})
+        _resave(store, fresh)
+
+    monkeypatch.setattr(load_study, "study", study)
+    got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0, "words": "Make the top from 1 in"}])
+    (r,) = got["results"]
+    assert (r["status"], r["why"]) == ("still open", "measured: the top's plate is still 1.91× where it needs 2×"), r
