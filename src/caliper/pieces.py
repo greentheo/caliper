@@ -78,20 +78,38 @@ def _vol(m) -> float:
     return 0.0 if m is None or len(getattr(m, "faces", [])) == 0 else float(abs(m.volume))
 
 
-def _prisms(shapes: list, mesh, margin: float = 0.5) -> list:
+#: How much more of a sheet's mid-thickness one side of its outline must have inside the build than the other, for its
+#: thickness to go that way (#332 round four). Less, and the side isn't known: two sheets face to face, a doubler.
+SIDE_CLEAR = 0.25
+
+
+def _side(mesh, poly, n, t: float, holes=()) -> Optional[float]:
+    """Which way a sheet's thickness goes from its outline: the side whose mid-thickness, over the sheet's own sample
+    points (its holes left out), has clearly more inside the build; None where neither does. One probe at the centroid
+    went wrong where a neighbour sat there (a tube on the plate's centre line) or a hole did (a rail's hand hole)."""
+    from . import spatial
+    from .consistency import polygon_samples
+
+    pts = polygon_samples(poly, holes=holes)
+    up, down = (float(np.mean(spatial.contains(mesh, pts + s * n * t / 2))) for s in (1.0, -1.0))
+    if abs(up - down) < SIDE_CLEAR:
+        return None
+    return 1.0 if up > down else -1.0
+
+
+def _prisms(shapes: list, mesh, margin: float = 0.5) -> Optional[list]:
     """Each declared sheet and stick as a solid, inset by ``margin`` (never more than a quarter of its thickness) so a
-    neighbour's face against it isn't in it: ``[(name, trimesh)]``. A sheet's thickness goes to the side of its outline the
-    solid is on."""
+    neighbour's face against it isn't in it: ``[(name, trimesh)]``. A sheet's thickness goes to the side of its outline
+    most of it is built on (:func:`_side`), its declared holes left out; None where a sheet's side isn't clear."""
     import shapely.geometry as G
     import trimesh
-
-    from . import spatial
 
     out = []
     for sh in shapes:
         if sh["kind"] == "sheet":
             t = float(sh["thickness"])
             m = min(margin, t / 4)
+            holes = (sh.get("holes") or []) if len(sh["polys"]) == 1 else []     # a bent panel's facets: none, as consistency
             for poly in sh["polys"]:
                 o = poly[0]
                 n = np.cross(poly[1] - poly[0], poly[2] - poly[0])
@@ -102,11 +120,16 @@ def _prisms(shapes: list, mesh, margin: float = 0.5) -> list:
                 if np.linalg.norm(n) <= 1e-9:
                     continue
                 n = n / np.linalg.norm(n)
-                side = 1.0 if spatial.contains(mesh, np.array([poly.mean(axis=0) + n * t / 2]))[0] else -1.0
+                side = _side(mesh, poly, n, t, holes)
+                if side is None:
+                    return None
                 u = (poly[1] - poly[0]) / (np.linalg.norm(poly[1] - poly[0]) or 1.0)
                 w = side * n                             # into the solid; (u, v, w) right-handed
                 v = np.cross(w, u)
-                flat = G.Polygon(np.stack([(poly - o) @ u, (poly - o) @ v], 1)).buffer(0).buffer(-m)
+                flat = G.Polygon(np.stack([(poly - o) @ u, (poly - o) @ v], 1)).buffer(0)
+                for h in holes:                          # a grommet in a hole isn't in the sheet
+                    flat = flat.difference(G.Polygon(np.stack([(h - o) @ u, (h - o) @ v], 1)).buffer(0))
+                flat = flat.buffer(-m)
                 if flat.is_empty or t - 2 * m <= 0:
                     continue
                 for part in getattr(flat, "geoms", [flat]):
@@ -167,7 +190,7 @@ def _also(before: dict, after: dict, piece: str) -> Optional[str]:
             return None
         shapes = [sh for sh in consistency.shapes(before["declared"]) if sh["name"] != piece]
         prisms = _prisms(shapes, before["mesh"]) if before.get("mesh") is not None else None
-        if prisms is None:
+        if prisms is None:                        # no mesh to place them by, or a sheet whose side isn't clear
             return UNCOMPARED
         for solid, gone in change:
             if solid is None:

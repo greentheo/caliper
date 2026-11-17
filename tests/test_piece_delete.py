@@ -530,3 +530,130 @@ def test_a_key_that_isn_t_one_of_the_part_s_pieces_is_said_never_read_as_words(t
                     max_rounds=1)
     assert got.reply == f"step_stool has no {key} now: nothing was changed." and not asked
     assert "trash" not in got.reply and s.design.part("step_stool") is not None
+
+
+# --- round four: a sheet's prism on the side most of it is built (#332) -------------------------------------------------
+#: clip_w at 0 also pockets the plate's underside, 50 x 50 x 3 mm, under the tube: the re-check's false green
+POCKET = TUBED.replace('''        out = out.union(clip)
+    return out''', '''        out = out.union(clip)
+    else:
+        out = out.cut(cq.Workplane().box(50, 50, 3, centered=(True, True, False)))
+    return out''')
+
+
+@pytest.mark.parametrize("od", [25.4, 50.8], ids=["1 in tube", "2 in tube"])
+def test_a_switch_that_also_pockets_the_plate_under_the_tube_isn_t_the_switch(tmp_path, monkeypatch, od):
+    """With one probe at the plate's centre, the tube sat on it: the plate's prism went above the plate, and 7,500 mm³
+    out of its underside read as nothing else changed."""
+    assert POCKET.count("box(50, 50, 3") == 1
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, POCKET.replace('"od": 50.8', f'"od": {od}'), "pocket")
+    assert pieces.off_switch(s, "stool", "clip") is None
+    assert pieces.off_why(s, "stool", "clip") == "clip_w turns it off but also changes the plate"
+
+
+@pytest.mark.parametrize("src", [TUBED, RESTING], ids=["sunk into the plate", "resting on it, two solids"])
+def test_a_clip_on_a_half_inch_tube_at_the_plate_s_centre_is_the_switch(tmp_path, monkeypatch, src):
+    """The re-check's false red: the plate's prism above the plate held the clip."""
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, src.replace('"od": 50.8', '"od": 12.7'), "half")
+    assert pieces.off_switch(s, "stool", "clip") == {"param": "clip_w", "value": 0, "unit": "mm"}, pieces.off_why(
+        s, "stool", "clip")
+
+
+#: a plate declared by its underside (thickness up) with a square hole at its centroid, as the back rail's hand hole is;
+#: knob_h at 0 takes the knob off, and with ``POCKETS`` also 3 mm out of the plate's top
+HOLED = '''import cadquery as cq
+
+PARAMS = {"knob_h": 10.0}
+POCKETS = False
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    out = cq.Workplane().box(300, 100, 12.7, centered=(True, True, False)).cut(
+        cq.Workplane().box(30, 30, 12.7, centered=(True, True, False)))
+    if p["knob_h"] > 0:
+        return out.union(cq.Workplane().box(20, 20, p["knob_h"], centered=(True, True, False)).translate((100, 0, 12.7)))
+    if POCKETS:
+        out = out.cut(cq.Workplane().box(50, 50, 3, centered=(True, True, False)).translate((-80, 0, 9.7)))
+    return out
+
+
+def construction(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    items = [{"name": "plate", "kind": "sheet", "material": "plywood", "thickness": 12.7,
+              "outline": [(-150, -50, 0), (150, -50, 0), (150, 50, 0), (-150, 50, 0)],
+              "holes": [[(-15, -15, 0), (15, -15, 0), (15, 15, 0), (-15, 15, 0)]]}]
+    if p["knob_h"] > 0:
+        items.append({"name": "knob", "kind": "printed", "material": "pla"})
+    return items
+'''
+
+
+@pytest.mark.parametrize("pockets, said", [(False, None), (True, "knob_h turns it off but also changes the plate")],
+                         ids=["the knob alone", "and a pocket in the plate"])
+def test_a_sheet_with_a_hole_at_its_centroid_is_set_on_its_side(tmp_path, monkeypatch, pockets, said):
+    """The back rail's case: one probe at the centroid lands in the hole on both sides, and fell to the wrong one."""
+    assert HOLED.count("POCKETS = False") == 1
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, HOLED.replace("POCKETS = False", f"POCKETS = {pockets}"), "holed")
+    got = pieces.off_switch(s, "stool", "knob")
+    if said:
+        assert got is None and pieces.off_why(s, "stool", "knob") == said
+    else:
+        assert got == {"param": "knob_h", "value": 0, "unit": "mm"}, pieces.off_why(s, "stool", "knob")
+
+
+#: two plates face to face, a doubler: each one's other side is the other plate, so neither side is clearly its own
+DOUBLED = HOLED.replace('''    out = cq.Workplane().box(300, 100, 12.7, centered=(True, True, False)).cut(
+        cq.Workplane().box(30, 30, 12.7, centered=(True, True, False)))''', '''    out = cq.Workplane().box(300, 100, 25.4, centered=(True, True, False))''').replace(
+    '''.translate((100, 0, 12.7))''', '''.translate((100, 0, 25.4))''').replace(
+    '''              "outline": [(-150, -50, 0), (150, -50, 0), (150, 50, 0), (-150, 50, 0)],
+              "holes": [[(-15, -15, 0), (15, -15, 0), (15, 15, 0), (-15, 15, 0)]]}]''', '''              "outline": [(-150, -50, 12.7), (150, -50, 12.7), (150, 50, 12.7), (-150, 50, 12.7)]},
+             {"name": "doubler", "kind": "sheet", "material": "plywood", "thickness": 12.7,
+              "outline": [(-150, -50, 12.7), (-150, 50, 12.7), (150, 50, 12.7), (150, -50, 12.7)]}]''')
+
+
+def test_a_sheet_with_no_clear_side_is_never_compared(tmp_path, monkeypatch):
+    assert DOUBLED.count('"doubler"') == 1 and DOUBLED.count("25.4") == 2
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, DOUBLED, "doubled")
+    assert pieces.off_switch(s, "stool", "knob") is None
+    assert pieces.off_why(s, "stool", "knob") == "knob_h turns it off but also its shape couldn't be compared"
+
+
+def test_a_stale_key_lets_a_waiting_remove_lapse(tmp_path):
+    """The re-check's surviving mutant: a stale key that left "Remove step_stool?" waiting, so the next bare "yes" sent the
+    part to the trash."""
+    from caliper import chat
+
+    s = _wordy(tmp_path)
+    asked = []
+    got = chat.turn(s, "Remove step_stool.", scope="step_stool", use_llm=False, author=_designer(asked), max_rounds=1)
+    assert "trash" in got.reply and not asked                                  # the question, waiting
+    got = chat.turn(s, "yes", scope="step_stool", piece="inside corner strips", use_llm=False,
+                    author=_designer(asked), max_rounds=1)
+    assert got.reply == "step_stool has no inside corner strips now: nothing was changed."
+    chat.turn(s, "yes", scope="step_stool", use_llm=False, author=_designer(asked), max_rounds=1)
+    assert DesignStore.load(s.root).design.part("step_stool") is not None              # still there, not in the trash
+
+
+#: a printed plug in the plate's hole, plug_w at 0 takes it out: in the hole, never in the plate
+PLUGGED = HOLED.replace('''PARAMS = {"knob_h": 10.0}''', '''PARAMS = {"knob_h": 0.0, "plug_w": 28.0}''').replace(
+    '''    if POCKETS:''', '''    if p["plug_w"] > 0:
+        out = out.union(cq.Workplane().box(p["plug_w"], p["plug_w"], 12.7, centered=(True, True, False)))
+    if POCKETS:''').replace('''    return items
+''', '''    if p["plug_w"] > 0:
+        items.append({"name": "plug", "kind": "printed", "material": "pla"})
+    return items
+''')
+
+
+def test_a_plug_in_a_sheet_s_declared_hole_isn_t_in_the_sheet(tmp_path, monkeypatch):
+    """The re-check's grommet: a sheet's prism took its declared holes in, so what filled one read as part of it."""
+    assert PLUGGED.count("plug_w") == 5
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, PLUGGED, "plugged")
+    assert pieces.off_switch(s, "stool", "plug") == {"param": "plug_w", "value": 0, "unit": "mm"}, pieces.off_why(
+        s, "stool", "plug")
