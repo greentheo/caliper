@@ -313,13 +313,19 @@ _SHAPE = re.compile(r"(tail|drop|pinch|taper|nose|boat|chamfer)")
 
 def suggest(name: str, value: float, ranges: Optional[dict] = None) -> dict:
     """Whether to search a parameter, and over what range: the part's own ``RANGES`` if it gives one,
-    else a starting guess from the name. The UI lets you edit it."""
+    else a starting guess from the name. The UI lets you edit it. The range's ends are tidied: 4 × 391.16 is
+    1564.64, never 1564.6399999999999 in its box (#330)."""
+    got = _suggest(name, value, ranges)
+    return {**got, "bounds": [round(float(b), 6) for b in got["bounds"]]}
+
+
+def _suggest(name: str, value: float, ranges: Optional[dict] = None) -> dict:
     if ranges:
         if name in ranges:
             lo, hi = ranges[name]
             return {"search": True, "bounds": [min(lo, value), max(hi, value)], "from": "part"}
         # a part that gives its own ranges has said which numbers to search: not this one
-        return {**suggest(name, value), "search": False}
+        return {**_suggest(name, value), "search": False}
     if _RADIUS.search(name):
         return {"search": True, "bounds": [max(0.0, min(value, 5.0)), max(150.0, 4 * value)]}
     if _ANGLE.search(name):
@@ -496,7 +502,7 @@ def study(store: DesignStore, part_id: str, bounds: dict, *, obstacles=(),
                  progress=f, builds=count["n"], eta_s=eta)
 
         def station(n, removed, drag):
-            emit("station", f"station {n}: {removed:.1%} of the volume, drag {drag:.0%} of the start")
+            emit("station", f"design {n}: {removed:.1%} of the volume, drag {drag:.0%} of the start")
 
         sweep = sweep_study.sweep(remove_up_to=float(remove_up_to), stations=int(stations),
                                   effort=float(effort), seed=0, callback=station, progress=progress)
@@ -532,6 +538,7 @@ def study(store: DesignStore, part_id: str, bounds: dict, *, obstacles=(),
 
     record = {
         "id": rid, "part": part_id, "kind": "parametric", "created": time.time(),
+        "version": store.design.part(part_id).version, "effort": float(effort),
         "bounds": {k: list(v) for k, v in clean.items()}, "start": start,
         "obstacles": [o for o in obstacles if o != part_id], "speed_kmh": float(speed_kmh),
         "notes": notes, "stations": rows, "builds": count["n"], "seconds": round(time.time() - t0),
@@ -605,6 +612,23 @@ def list_runs(store: DesignStore, part_id: Optional[str] = None) -> list[dict]:
     return newest_first(out)          # made last first, not by id (CALI-97)
 
 
+def places(lo: float, hi: float) -> int:
+    """Decimals a searched number is shown and written to (#330): a hundredth of its range, at least one, at most
+    three. A shoulder of 1–2.5 reads 1.06, never 1 on every design, and a 600 mm tail stays at 0.1 mm, as fine as foam
+    board holds."""
+    span = abs(float(hi) - float(lo))
+    if span <= 0:
+        return 1
+    return int(min(3, max(1, math.ceil(-math.log10(span / 100) - 1e-9))))
+
+
+def uses(rec: dict, st: dict) -> dict:
+    """What Use writes for a design: each searched number to its :func:`places`, so the table shows what the script
+    gets (#330: Use wrote 1.1 for a scored 1.061)."""
+    bounds = rec.get("bounds") or {}
+    return {k: round(float(st["design"][k]), places(*bounds[k]) if k in bounds else 1) for k in rec["searched"]}
+
+
 def load_run(store: DesignStore, rid: str) -> Optional[dict]:
     if not rid or "/" in rid or ".." in rid:
         return None
@@ -612,7 +636,12 @@ def load_run(store: DesignStore, rid: str) -> Optional[dict]:
     if not os.path.exists(path):
         return None
     with open(path) as f:
-        return json.load(f)
+        rec = json.load(f)
+    if rec.get("kind") == "parametric":           # what the page shows and Use writes, said once, here
+        rec["places"] = {k: places(*b) for k, b in (rec.get("bounds") or {}).items()}
+        for st in rec.get("stations") or []:
+            st["uses"] = uses(rec, st)
+    return rec
 
 
 def station_path(store: DesignStore, rid: str, index: int) -> str:
@@ -643,8 +672,7 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     if stale:
         raise ValueError(f"this study was run on an earlier version of '{pid}' — its script has been "
                          f"rebuilt since, so these numbers may not mean the same thing. Run it again.")
-    # 0.1 mm is finer than foam board can hold; more digits would only be noise in the script
-    chosen = {k: round(float(st["design"][k]), 1) for k in rec["searched"]}
+    chosen = uses(rec, st)          # to its range's places: what the table showed (#330)
     before = store.part_geometry(pid).require_mesh().bounds
     from . import carve
     from .whittle_bridge import growth
@@ -654,7 +682,7 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     pretty = ", ".join(f"{k} {_format(v)}" for k, v in chosen.items())
     version = store.write_part(
         pid, script, action="aero",
-        feedback=f"shaped for drag: station {index} ({pretty})" + (f". {note}" if note else ""),
+        feedback=f"shaped for drag: design {index} ({pretty})" + (f". {note}" if note else ""),
         extra={"aero_run": rid, "station": int(index), "params": chosen,
                "metrics": st.get("metrics", {}), "derived": st.get("derived")})
     grew = growth(before, store.part_geometry(pid).require_mesh().bounds)

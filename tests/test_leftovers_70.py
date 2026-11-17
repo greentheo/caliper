@@ -41,7 +41,7 @@ def _bar(kind, run_v, part_v, index=2):
 const partOf = (pid) => S.design.parts.find((x) => x.id === pid) || {{}};
 const holdsHere = () => true;
 """
-    return _js(["stationAction"], f"return stationAction('stool', {{ kind: '{kind}', version: {run_v} }}, {index}, {{}});", head)
+    return _js(["stationAction", "aeroInUse", "aeroUses"], f"return stationAction('stool', {{ kind: '{kind}', version: {run_v} }}, {index}, {{}});", head)
 
 
 @pytest.mark.parametrize("kind,again", [("lighten", "lighten it again"), ("carve", "carve it again")])
