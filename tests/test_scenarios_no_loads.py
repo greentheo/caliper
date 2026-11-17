@@ -264,6 +264,9 @@ def test_a_picture_cut_from_a_part_with_a_case_is_checked_again():
 
 #: the floor alone, as built as declared: no joints, not filled, so a light case passes and is the scorecard's to qualify
 FLOOR = SLAB.replace("box(400.0, 300.0, 200.0, centered=False)", "box(400.0, 300.0, 12.7, centered=False)")
+# held at its two ends, so the case spans between them: on the ground it goes straight through, "not resolved"
+ENDS = [{"name": "left end", "lo": [0, 0, 0], "hi": [20, 300, 0.5]},
+        {"name": "right end", "lo": [380, 0, 0], "hi": [400, 300, 0.5]}]
 
 
 def test_the_scorecard_asks_whether_a_part_with_a_case_was_checked_in_the_middle_only(tmp_path, monkeypatch):
@@ -273,7 +276,7 @@ def test_the_scorecard_asks_whether_a_part_with_a_case_was_checked_in_the_middle
 
     s = DesignStore.create("a floor", base=str(tmp_path / "designs"))
     s.write_part("bin", FLOOR, intent="a plywood floor")
-    S.put(s, "bin", [{**LYING, "amount": 1}], S.get(s, "bin")["supports"])
+    S.put(s, "bin", [{**LYING, "amount": 1}], ENDS)
     assert [c["status"] for c in _strength(_card(s, monkeypatch, 4))] == ["pass"]       # fine enough to see its 12.7 mm
     asked = []
     monkeypatch.setattr(consistency, "bare_edge", lambda store, pid: asked.append(pid) or consistency.MIDDLE_ONLY)
@@ -313,5 +316,6 @@ def test_saved_cases_on_a_part_whose_script_says_none_never_read_as_the_rest_its
 def test_add_a_scenario_starts_from_the_part_s_top_where_there_s_no_row_to_copy():
     from .test_carve_click import _fn
 
-    wire = _fn(open(JS).read(), "wireScenarios")
-    assert "const box = last.lo ? { lo: last.lo, hi: last.hi } : newLoadBox(p);" in wire and "[10, 10, 10]" not in wire
+    wire = _fn(open(JS).read(), "wireScenarioRows")
+    add = wire[wire.index("const add = $('scenAdd');"):wire.index("const sAdd = $('supAdd');")]    # its own handler
+    assert "const box = last.lo ? { lo: last.lo, hi: last.hi } : newLoadBox(p);" in add and "[10, 10, 10]" not in add
