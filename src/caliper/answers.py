@@ -306,7 +306,7 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     from . import load_study as L
 
     judge = L.judged_by(run, c)
-    if judge != "fea":                               # a hand check fails it: what fails, never the FEA's spot (#329)
+    if judge not in L.FEA:                           # a hand check fails it: what fails, never the FEA's spot (#329)
         piece = (c.get("plate") or {}).get("piece") if judge == "plate" else None
         return (f" The {piece} fails first, by its plate check (a hand check of the panel on its own)." if piece
                 else f" It fails first {fails_where(run, c, inches)}.")
@@ -451,7 +451,7 @@ def fails_where(run: dict, c: dict, inches: bool) -> str:
     from . import load_study as L
 
     judge = L.judged_by(run, c)
-    if judge == "fea":
+    if judge in L.FEA:                               # a holed panel stood on is the FEA's, calibrated (#338 review)
         return worst_at(run, c, inches)[0]
     return f"{'at' if judge == 'joint' else 'by'} {L.governing_words({**c, 'governs': judge})}"
 

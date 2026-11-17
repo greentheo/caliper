@@ -107,3 +107,44 @@ def test_carve_reads_its_weak_link_from_the_governing_check():
     src = open(carve.__file__).read()
     assert "load_study.weak_link(case)" in src or "L.weak_link(case)" in src
     assert 'else case["fea"].get("in")' not in src
+
+
+#: caliper-reviewer at 913b948: the box stool with a 2 x 2 in hole in its top, off the load, at 3,000 lb. A panel stood on
+#: with holes is judged by the FEA, calibrated (lighten.judge_holed): "fea-calibrated", the FEA's own number
+def _holed():
+    from .test_load_study import BOX_STOOL
+
+    assert BOX_STOOL.count('"lb": 200,') == 1
+    return BOX_STOOL.replace('"lb": 200,', '"lb": 3000,') + '''
+
+HOLES = [{"piece": "top", "normal": [0, 0, -1], "depth": 19.05,
+          "polygons": [[[60.0, 60.0, 228.6], [110.8, 60.0, 228.6], [110.8, 110.8, 228.6], [60.0, 110.8, 228.6]]]}]
+'''
+
+
+def test_a_holed_panel_stood_on_is_the_fea_s_and_says_where_its_worst_stress_is(tmp_path, monkeypatch):
+    """At 913b948 it read "It fails first by the FEA." and "(0.2 times over, by the FEA)", where main said where."""
+    pytest.importorskip("whittle")
+    from .test_make_it_better import _store
+
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 2)
+    store = _store(tmp_path, _holed(), "stool")
+    rec = load_study.study(store, "stool")
+    (c,) = rec["cases"]
+    assert c["governs"] == "fea-calibrated" and not c["holds"], (c["governs"], c["safety"])
+    where = answers.worst_at(rec, c, False)[0]
+    assert where.startswith("in the ") and " around z " in where
+    v = verdicts.case(rec, c)
+    hedge = answers.fail_hedge(rec, c, v, False)
+    assert where in hedge and "by the FEA" not in hedge and "fails first" not in hedge, hedge
+    said = load_study.already_fails(store, "stool")
+    assert said.endswith(f", {where}): make it hold first") or f"; {where}): make it hold first" in said, said
+    assert "by the FEA" not in said
+    assert load_study.weak_link(c) == c["fea"]["in"]
+
+
+def test_a_calibrated_fea_fail_says_where_as_the_fea_s_does():
+    case = _case("fea-calibrated", 0.2, fea={**FEA, "safety": 0.2})
+    assert _hedge(case) == " Its worst stress is in the back around z 22.4 in."
+    run = _run(case)
+    assert answers.fails_where(run, case, True) == "in the back around z 22.4 in"
