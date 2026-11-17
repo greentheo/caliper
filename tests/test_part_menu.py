@@ -182,7 +182,7 @@ def _menu(body: str) -> dict:
 
     src = open(JS).read()
     names = ("seen", "keepTree", "underPart", "menuItems", "menuHtml", "confirmHtml", "toggleHidden", "showOnly",
-             "menuDo", "deletePart")
+             "menuDo", "deletePart", "pieceConfirmHtml", "deletePiece")
     script = (_STUBS.replace("DESIGN", _DESIGN) + "\n".join(_fn(src, n) for n in names)
               + f"\nconst out = await (async () => {{ {body} }})();\nconsole.log(JSON.stringify(out));")
     got = subprocess.run([_node(), "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
@@ -202,7 +202,8 @@ def test_a_part_s_menu_has_every_item_and_a_piece_s_only_what_applies():
     assert [i["label"] for i in got["part"]][:5] == ["Delete…", "Rename…", "Hide", "Show only this", "Ask about this"]
     light = next(i for i in got["part"] if i["id"] == "lighten")
     assert light["off"] and light["why"] == "check what it must hold first (its loads())"   # the panels' own rule
-    assert _ids(got["piece"]) == ["rename", "only", "ask"]
+    assert _ids(got["piece"]) == ["deletePiece", "rename", "hide", "only", "ask"]          # #324: Delete… and Hide too
+    assert [i["label"] for i in got["piece"]][:3] == ["Delete…", "Rename…", "Hide"]
     assert "carve" in _ids(got["printed"]) and "lighten" not in _ids(got["printed"])       # by made_of
     neither = _menu("return menuItems(S.design, 'strip', null);")                        # made_of says neither
     assert "check" in _ids(neither) and not {"lighten", "carve"} & set(_ids(neither))
@@ -213,6 +214,39 @@ def test_a_mirror_breaks_and_a_reference_isn_t_renamed_or_checked():
     assert "mirror" not in _ids(got["mirror"])
     assert next(i for i in got["mirror"] if i["id"] == "unmirror")["label"] == "Break the mirror (of side_right)"
     assert "rename" not in _ids(got["car"]) and next(i for i in got["car"] if i["id"] == "check")["off"]
+
+
+def test_a_piece_hides_and_shows_from_its_menu():
+    """#324: toggleHidden took pieces already; the menu didn't offer it."""
+    got = _menu("""S.menu = { pid: 'step_stool', piece: 'top' }; await menuDo('hide');
+                   const hid = [...seen().pieces]; const label = menuItems(S.design, 'step_stool', 'top')[2].label;
+                   S.menu = { pid: 'step_stool', piece: 'top' }; await menuDo('hide');
+                   return { hid, label, after: [...seen().pieces], parts: [...seen().parts] };""")
+    assert got == {"hid": ["step_stool/top"], "label": "Show", "after": [], "parts": []}
+
+
+def test_a_piece_s_delete_says_what_it_will_do_then_does_it_by_its_number_or_asks_the_designer():
+    """#324: Delete… on a piece asks the server what it takes, says it in the menu's own confirm, then sets its number
+    (a new version at once) or sends the designer the revise, as the chat would."""
+    got = _menu("""answer = { how: 'number', name: 'top', param: 'fillet_r', said: 'Delete the top: fillet_r to 0 …' };
+                   S.menu = { pid: 'step_stool', piece: 'top' }; await menuDo('deletePiece');
+                   const confirm = calls.find((c) => c[0] === 'confirm')[1];
+                   answer = { said: 'Deleted the top from step_stool: fillet_r to 0 (v8).', design: S.design };
+                   await menuDo('deletePieceYes');
+                   const sent = [];
+                   globalThis.send = async (t, scope) => sent.push([t, scope]);
+                   answer = { how: 'designer', name: 'top', said: 'Delete the top: that changes …' };
+                   S.menu = { pid: 'step_stool', piece: 'top' }; await menuDo('deletePiece');
+                   await menuDo('deletePieceYes');
+                   return { confirm, posted, sent, said: calls.filter((c) => c[0] === 'say') };""")
+    assert "Delete the top: fillet_r to 0" in got["confirm"] and 'data-menu="deletePieceYes"' in got["confirm"]
+    assert 'data-menu="keep"' in got["confirm"]
+    assert [p[:2] for p in got["posted"]] == [
+        ["GET", "/api/designs/step-stool-5/parts/step_stool/pieces/top/delete"],
+        ["POST", "/api/designs/step-stool-5/parts/step_stool/pieces/top/delete"],
+        ["GET", "/api/designs/step-stool-5/parts/step_stool/pieces/top/delete"]]                 # the designer's: no POST of its own
+    assert got["said"] == [["say", "Deleted the top from step_stool: fillet_r to 0 (v8)."]]
+    assert got["sent"] == [["Remove the top from step_stool.", "step_stool"]]
 
 
 def test_hidden_parts_say_show_and_show_everything():

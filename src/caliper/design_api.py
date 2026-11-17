@@ -814,6 +814,8 @@ def router():
             store.append_log({"kind": "message", "text": f"Go back to v{req.version} of {pid} (from its history)",
                               "action": "revert", "part": pid, "routed_by": "history"})
             got = chat.revert_part(store, pid, to=req.version)
+            if got.error == "already":                   # pressed twice (#324): refused in words, nothing saved
+                raise HTTPException(409, got.reply)
             store.append_log({"kind": "reply", "action": "revert", "part": pid, "version": got.version, "ok": got.ok,
                               "reply": got.reply})
             return {"reply": got.reply, "ok": got.ok, "version": got.version, "design": design_state(store)}
@@ -878,6 +880,42 @@ def router():
             return {"version": got["version"], "said": got["said"], "followed": got.get("followed") or "",   # (#271 review)
                     "warning": got["warning"], "notes": got["notes"],
                     "design": design_state(store)}
+
+    @r.get("/api/designs/{slug}/parts/{pid}/pieces/{key}/delete")
+    def piece_delete_plan(slug: str, pid: str, key: str):
+        """Delete… on a piece (#324): what it will do, said first. A number that turns it off (built to be sure: a few
+        builds at most), or the designer's, with its cost."""
+        from . import pieces
+
+        store = load(slug)
+        if store.design.part(pid) is None or not store.is_scripted(pid):
+            raise HTTPException(404, f"no part {pid!r} with pieces")
+        try:
+            return pieces.plan(store, pid, key)
+        except KeyError as e:
+            raise HTTPException(404, str(e).strip("'\""))
+
+    @r.post("/api/designs/{slug}/parts/{pid}/pieces/{key}/delete")
+    def piece_delete(slug: str, pid: str, key: str):
+        """Delete… by its number (#324): a new version at once, no Claude, the reply naming what went. The designer's way is
+        a revise through the chat. Never while a job works on the part."""
+        from . import pieces
+
+        _refuse_while_busy(slug, [pid])
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None or not store.is_scripted(pid):
+                raise HTTPException(404, f"no part {pid!r} with pieces")
+            try:
+                got = pieces.delete(store, pid, key)
+            except KeyError as e:
+                raise HTTPException(404, str(e).strip("'\""))
+            except ValueError as e:
+                raise HTTPException(409, str(e))
+            store.append_log({"kind": "message", "text": f"Delete the {key} of {pid} (from its menu)", "action": "params",
+                              "part": pid})
+            store.append_log({"kind": "reply", "action": "params", "part": pid, "ok": True, "reply": got["said"]})
+            return {**got, "design": design_state(store)}
 
     @r.post("/api/designs/{slug}/parts/{pid}/unmirror")
     def unmirror_part(slug: str, pid: str):

@@ -51,6 +51,22 @@ def _row(rid: str, problem: str, choices: list[dict], part: str) -> dict:
     return {"id": rid, "problem": problem, "choices": choices, "part": part, "measured": True}
 
 
+def _removed(store: DesignStore, pid: str, names: list[str], these: str, name: str) -> dict:
+    """Remove them (#324): a number change where one number turns every one of them off, built to be sure (step_stool's
+    ``fillet_r``: 0 skips its strips; a ``fillet_gap`` that only shares the name doesn't), else the designer's."""
+    from . import pieces
+
+    try:
+        found = [pieces.off_switch(store, pid, n) for n in names] if store.is_scripted(pid) else [None]
+    except ValueError:                           # no numbers to set
+        found = [None]
+    sw = found[0] if found and all(f is not None and f == found[0] for f in found) else None
+    if sw is None:
+        return _choice(f"Remove the {these}", DESIGNER, _designer_cost(name))
+    return _choice(f"Remove the {these}: {sw['param']} to 0", NUMBER, NUMBER_COST, param=sw["param"], value=0,
+                   unit=sw["unit"])
+
+
 def _these(names: list[str]) -> str:
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" and {names[-1]}"
 
@@ -113,8 +129,11 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
         many = len(names) > 1 or names[0].rstrip().endswith("s")        # "fillet strips": one name, many (as the card)
         rows.append(_row("unsized", f"The {these} {'aren' if many else 'isn'}'t checked: "
                                     f"{'their' if many else 'its'} size isn't declared",
-                         [_choice(f"Remove the {these}", DESIGNER, _designer_cost(name)),
-                          _choice(f"Give the {these} a declared size", DESIGNER, _designer_cost(name))], pid))
+                         [_choice(f"They're trim, not holding anything up: declare the {these} trim", DESIGNER,
+                                  _designer_cost(name)),
+                          _choice(f"Give the {these} {'their' if many else 'its'} size: a declared section, in mm",
+                                  DESIGNER, _designer_cost(name)),
+                          _removed(store, pid, names, these, name)], pid))
     thin, spacing = run.get("thinnest_mm"), run.get("spacing_mm")
     coarse = bool(thin and spacing) and not L._sees(run.get("across") or thin / spacing)
     unresolved = [c["name"] for c, v in said if v["kind"] in ("unresolved", "unchecked")]

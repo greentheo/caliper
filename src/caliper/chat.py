@@ -1853,6 +1853,26 @@ def _with_drift(store: DesignStore, result: TurnResult) -> TurnResult:
     return result
 
 
+def _already_as(store: DesignStore, part_id: str, version: int) -> bool:
+    """The part is now as ``version`` was: its script and its loads (#324). A mesh part: never said so (a restore of one is
+    its bytes, read back as they were)."""
+    import yaml
+
+    vdir = store.version_dir(part_id, version)
+    script = os.path.join(vdir, "part.py")
+    if not os.path.exists(script) or not store.is_scripted(part_id):
+        return False
+    with open(script) as f:
+        if f.read() != store.read_script(part_id):
+            return False
+    said = os.path.join(vdir, "scenarios.yaml")
+    then = None
+    if os.path.exists(said):
+        with open(said) as f:
+            then = yaml.safe_load(f)
+    return then == (store.design.scenarios or {}).get(part_id)
+
+
 def revert_part(store: DesignStore, part_id: str, *, to: Optional[int] = None, events=None, on_event=None) -> TurnResult:
     """Roll a part back and re-measure — so the rollback the reply offers is real. ``to``: that version (#299); else
     the last change undone (:func:`undo_target`), never redoing one undone already.
@@ -1884,6 +1904,9 @@ def revert_part(store: DesignStore, part_id: str, *, to: Optional[int] = None, e
         while k > 0 and versions[k] in back:
             k -= 1
         stepped = (_restored_root(store, part_id, versions), versions[k])
+    if to is not None and _already_as(store, part_id, to):   # Go back to this pressed twice (#324): nothing to save
+        return TurnResult(action="revert", ok=False, part=part_id, events=events, error="already",
+                          reply=f"{part_id} is already as v{target} was: nothing to go back to.")
     if target is None:
         first = versions[0]
         return TurnResult(action="revert", ok=False, part=part_id, events=events, error="nothing before it",
