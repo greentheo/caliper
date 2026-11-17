@@ -15,6 +15,8 @@ const len = (x) => String(x);
 const ruleItem = () => '', historyItem = () => '', loadView = () => '', trialView = () => '', frameView = () => '',
   aeroView = () => '', whittleView = () => '', aeroRuns = () => [], runsFor = () => [], buildView = () => '',
   makingView = () => '', patternView = () => '', cutplanView = () => '', paramView = () => '';
+const sub = (k, summary, body) => body, subOpen = () => false, partActions = () => '', cutplanRun = () => null,
+  sizeText = () => '';
 function cardsView(c) { return c.what; }
 """
 
@@ -32,7 +34,7 @@ def test_the_part_view_heading_is_the_part_s_own_name(kw, word):
                .replace("False", "false"), STUBS)
     heading = re.search(r"<h2>(.*?)</h2>", html, re.S).group(1)
     assert heading.strip() == "Step stool"
-    advanced = re.search(r"<summary>(.*?)</summary>", html, re.S).group(1)
+    advanced = re.search(r"<summary>(Advanced.*?)</summary>", html, re.S).group(1)       # its own, one level down
     assert "step_stool" in advanced and word in advanced
 
 

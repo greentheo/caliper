@@ -493,11 +493,14 @@ def test_rebuild_asks_for_the_new_model():
     assert fn.index("S.design = got.design;") < fn.index("await syncParts(S.design, false);")
 
 
-def test_the_panel_sits_after_will_it_work():
+def test_the_panel_sits_at_the_top():
+    """#325, Theo: Parameters at the top, under the part's name, always in view; not inside the four questions."""
     from .test_carve_click import _fn
 
-    fn = _fn(open(JS).read(), "cardsView")
-    assert "${k === 'work' ? groups.params || '' : ''}" in fn
+    src = open(JS).read()
+    part = _fn(src, "partView")
+    assert part.index('<div id="paramBox">${paramView(p)}</div>') < part.index("${cardsView({ what, work, buy, make })}")
+    assert "groups.params" not in _fn(src, "cardsView")
 
 
 @pytest.mark.parametrize("name,note,said", [

@@ -211,10 +211,32 @@ table.studies-table td.when { white-space: nowrap; color: var(--muted); }
 .qline.top { font-size: 15px; color: var(--ink); }
 .qline.q-bad { color: var(--bad); } .qline.q-warn { color: #e3b341; }
 .qline.go { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
-details.numbers { margin: 6px 0 0 22px; }
-details.numbers > summary { margin-top: 2px; }
 .qcard.focus { box-shadow: 0 0 0 1px var(--accent); }
-.qcard .qhead { cursor: pointer; }
+/* the four questions as an accordion (#325): the header a real button, the answer lines always shown, one body open */
+.qhead { margin: 0; font-size: 15px; }
+.qtoggle { display: flex; gap: 8px; align-items: baseline; width: 100%; background: none; border: 0; padding: 0; color: inherit;
+  font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.qtoggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.qtitle { flex: 1; }
+.qcaret { color: var(--muted); font-size: 12px; }
+.qbody { margin: 8px 0 0 22px; }
+/* a block one level down, closed until opened, its summary saying what's in it (#325) */
+details.sub { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+details.sub > summary { cursor: pointer; font-size: 13px; color: #c9d4de; }
+details.sub[open] > summary { margin-bottom: 4px; }
+/* the part's name, and its actions beside it (#325) */
+.phead { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.phead h2 { margin: 0; }
+.pacts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 60%; }
+button.small { font-size: 12px; padding: 3px 9px; }
+button.off, button[aria-disabled="true"] { opacity: .5; cursor: help; }
+.pacts-why { flex-basis: 100%; max-width: 100%; text-align: right; white-space: normal; overflow-wrap: anywhere; }
+.pacts-why:empty { display: none; }
+@media (max-width: 640px) {
+  .pacts { max-width: none; justify-content: flex-start; }
+  .pacts-why { text-align: left; }
+  .qbody { margin-left: 0; }
+}
 .qlinks { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 2px; }
 .qlinks .btn { font-size: 12px; padding: 2px 8px; }
 

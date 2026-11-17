@@ -329,10 +329,10 @@ S.carveJob.stool = { job: 'j1', text: 'step 2: 20% of the printed part carved aw
                      t0: Date.now() - 600000, p0t: Date.now() - 300000, p0: 0.1 };
 out = { before, during: carveView(p) };
 """))
-    assert "a few minutes" not in out["before"] and 'id="carveGo" >' in out["before"]
+    assert "a few minutes" not in out["before"] and 'id="carveGo"' not in out["before"]   # its button is top right (#325)
     assert "at least about 68 min at this size" in out["before"]               # 90 s x 45
     during = out["during"]
-    assert 'id="carveGo" disabled' in during
+    assert 'id="carveGo"' not in during                    # a running carve shows on the bar's button (test_part_panel)
     assert "step 3 of 7: 20% of the printed part carved away" in during and 'width:40%' in during
     assert "about 10 min left" in during                       # 0.3 of the way in 5 min: 0.6 to go, 10 min
     assert 'id="carveStop"' in during and ">Cancel<" in during

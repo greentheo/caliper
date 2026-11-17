@@ -2063,7 +2063,8 @@ function designView(d) {
   const buy = d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : '';
   const make = `<h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>`;
   return `<h2>${esc(d.name)} ${status}</h2>
-    ${cardsView({ what, work, buy, make, params: d.parts.length === 1 ? `<div id="paramBox">${paramView(d.parts[0])}</div>` : '' })}`;
+    ${d.parts.length === 1 ? `<div id="paramBox">${paramView(d.parts[0])}</div>` : ''}
+    ${cardsView({ what, work, buy, make })}`;
 }
 
 // ------------------------------------------------------------- the four questions (spec step 1)
@@ -2074,8 +2075,6 @@ const QUESTIONS = [['what', 'What is it?'], ['work', 'Will it work?'], ['buy', '
 const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' };
 const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox', trial: 'trialBox',
   carve: 'loadBox' };                 // the carve's panel is under Will it hold? (#89 item 6)
-function numbersOpen(k) { try { return localStorage.getItem(`caliper.numbers.${k}`) === '1'; } catch (e) { return false; } }
-function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${k}`, on ? '1' : '0'); } catch (e) { /* private window */ } }
 
 function answersKey() {               // what the answers depend on: a change to any of it asks again
   const d = S.design;
@@ -2275,20 +2274,52 @@ async function focusCard(k) {
   }
   renderLayers && renderLayers();
 }
+// the four questions as an accordion (#325): one open at a time, each header keeping its mark and its answer line, so a
+// closed card still says how it stands. Which is open is kept per design and part; else the first that fails, else Will it
+// work?
+const cardStore = () => `${S.slug}/${S.scope || ''}`;
+function openCardFor(a) {
+  const k = cardStore();
+  if (S.openCard && k in S.openCard) return S.openCard[k];
+  try { const kept = localStorage.getItem(`caliper.open.${k}`); if (kept !== null) return kept; } catch (e) { /* none allowed */ }
+  const bad = a && a.cards.find((c) => c.status === 'bad');
+  return bad ? bad.key : 'work';
+}
 function cardsView(groups) {
   const a = S.answers && S.answers.key === answersKey() && S.answers.cards ? S.answers : null;
   if (!a && !(S.answers && S.answers.key === answersKey() && S.answers.loading)) setTimeout(loadAnswers, 0);
+  const open = openCardFor(a);
   return QUESTIONS.map(([k, q]) => {
-    const c = a ? a.cards.find((x) => x.key === k) : null;
-    return `<section class="qcard q-${c ? c.status : 'info'}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
-      <div class="qhead" title="${S.scope ? 'show this in 3D' : ''}"><span class="qmark">${c ? QMARK[c.status] : '·'}</span><h3>${q}</h3></div>
+    const c = a ? a.cards.find((x) => x.key === k) : null, on = k === open;
+    return `<section class="qcard q-${c ? c.status : 'info'}${on ? ' open' : ''}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
+      <h3 class="qhead"><button type="button" class="qtoggle" aria-expanded="${on}" aria-controls="qbody-${k}" data-qopen="${k}"${S.scope ? ' title="show this in 3D"' : ''}><span class="qmark">${c ? QMARK[c.status] : '·'}</span><span class="qtitle">${q}</span><span class="qcaret" aria-hidden="true">${on ? '▾' : '▸'}</span></button></h3>
       <div class="qlines" id="q-${k}">${cardLines(k, c)}</div>
       ${k === 'what' && picturePart() ? '<div class="qlinks"><button class="btn" data-picture="1">🦖 Put a picture on it</button></div>' : ''}
-      <details class="numbers" data-card="${k}" ${numbersOpen(k) ? 'open' : ''}><summary>the numbers</summary>
-        ${groups[k] || '<div class="empty">Nothing here yet.</div>'}</details>
-    </section>${k === 'work' ? groups.params || '' : ''}`;
+      <div class="qbody" id="qbody-${k}" role="region" aria-label="${q}"${on ? '' : ' hidden'}>${groups[k] || '<div class="empty">Nothing here yet.</div>'}</div>
+    </section>`;
   }).join('');
 }
+function openCard(k) {                          // opening one closes the others; the open one closes again on its head
+  const now = document.querySelector('#inspector .qcard.open');
+  const to = now && now.dataset.card === k ? '' : k;
+  S.openCard = S.openCard || {};
+  S.openCard[cardStore()] = to;
+  try { localStorage.setItem(`caliper.open.${cardStore()}`, to); } catch (e) { /* private window */ }
+  showOpen(to);
+}
+function showOpen(to) {
+  document.querySelectorAll('#inspector .qcard').forEach((sec) => {
+    const on = sec.dataset.card === to, b = sec.querySelector('.qtoggle'), body = sec.querySelector('.qbody');
+    sec.classList.toggle('open', on);
+    if (b) { b.setAttribute('aria-expanded', String(on)); b.querySelector('.qcaret').textContent = on ? '▾' : '▸'; }
+    if (body) body.hidden = !on;
+  });
+}
+// a block one level down, closed until opened, kept open or closed by what it is (#325)
+function subOpen(k) {
+  try { return localStorage.getItem(`caliper.sub.${k}`) === '1'; } catch (e) { return false; }
+}
+const sub = (k, summary, body) => `<details class="sub" data-sub="${k}"${subOpen(k) ? ' open' : ''}><summary>${summary}</summary>${body}</details>`;
 // ------------------------------------------------------------------- test it (CALI-80)
 // What the strength check predicts at each load step, what to measure the sag with, and what the real one did.
 const sagText = (mm) => (inches() ? `${(mm / IN).toFixed(3)} in` : `${mm.toFixed(2)} mm`);
@@ -2459,10 +2490,11 @@ async function loadAnswers() {
   for (const c of S.answers.cards) {
     const card = document.querySelector(`#inspector .qcard[data-card="${c.key}"]`);
     if (!card) continue;
-    card.className = `qcard q-${c.status}`;
+    card.className = `qcard q-${c.status}${card.classList.contains('open') ? ' open' : ''}${card.classList.contains('focus') ? ' focus' : ''}`;
     card.querySelector('.qmark').textContent = QMARK[c.status];
     card.querySelector('.qlines').innerHTML = cardLines(c.key, c);
   }
+  showOpen(openCardFor(S.answers));                    // drawn before its marks: the first that fails, unless one was kept
   wireCards();
   // a print time still being worked out (#97): ask again until it's in, while the same cards are showing
   if ((S.answers.cards || []).some((c) => c.lines.some((ln) => ln.working))) {
@@ -2471,8 +2503,12 @@ async function loadAnswers() {
 }
 function wireCards() {
   wireFixes();                                            // Things to fix, under Will it work? (#300)
-  document.querySelectorAll('#inspector details.numbers').forEach((dt) => { dt.ontoggle = () => keepNumbersOpen(dt.dataset.card, dt.open); });
-  document.querySelectorAll('#inspector .qcard .qhead').forEach((h) => { h.onclick = () => focusCard(h.parentElement.dataset.card); });
+  document.querySelectorAll('#inspector details.sub').forEach((dt) => {
+    dt.ontoggle = () => { try { localStorage.setItem(`caliper.sub.${dt.dataset.sub}`, dt.open ? '1' : '0'); } catch (e) { /* private */ } };
+  });
+  document.querySelectorAll('#inspector .qtoggle').forEach((b) => {
+    b.onclick = () => { openCard(b.dataset.qopen); focusCard(b.dataset.qopen); };
+  });
   document.querySelectorAll('#inspector .qline[data-goto]').forEach((ln) => { ln.onclick = () => goTo(ln.dataset.goto); });
   document.querySelectorAll('#inspector [data-better]').forEach((b) => {
     b.onclick = (e) => {
@@ -2505,8 +2541,9 @@ function goTo(id, again) {            // open the card's numbers and bring that 
     setTimeout(() => goTo(id, true), 50);
     return;
   }
-  const dt = box.closest('details.numbers');
-  if (dt && !dt.open) dt.open = true;
+  const sec = box.closest('.qcard');                // its card open, and every block it sits in (#325)
+  if (sec && !sec.classList.contains('open')) openCard(sec.dataset.card);
+  for (let dt = box.closest('details'); dt; dt = dt.parentElement && dt.parentElement.closest('details')) dt.open = true;
   (box.previousElementSibling || box).scrollIntoView({ behavior: 'smooth', block: 'start' });
   box.classList.add('flash');
   setTimeout(() => box.classList.remove('flash'), 1600);
@@ -2693,46 +2730,85 @@ function historyItem(h, now) {
   return '';
 }
 
+// the part's actions, small, top right, in the chain's order (#325): each greyed until it can run, with the right-click
+// menu's own ready/why (design.studies.menu), so the two never disagree; a running job shows on its button (jobOff). The
+// ids are the panels' own, so their wiring and progress go as before: each action has one place.
+function partActions(p) {
+  const menu = {};
+  ((((S.design.studies || {}).menu) || {})[p.id] || []).forEach((m) => { menu[m.kind] = m; });
+  const air = !p.framed && !!((S.design.in_air && S.design.in_air.yes) || aeroRuns(p.id).length || runsFor(p.id).length);
+  const cut = cutplanRun(p);
+  const acts = [
+    p.role !== 'fixed' && !p.framed && ['load', 'lGo', loadRuns(p.id).length ? 'Check it again' : 'Check it holds', ''],
+    p.study === 'lighten' && ['lighten', 'lightGo', lightenRuns(p.id).length ? 'Lighten it again' : 'Lighten it', lightenRuns(p.id).length ? ' data-again="1"' : ''],
+    p.study === 'carve' && ['carve', 'carveGo', carveRuns(p.id).length ? 'Carve it again' : 'Carve it', carveRuns(p.id).length ? ' data-again="1"' : ''],
+    air && ['aero', 'aGo', 'Shape for drag', ''],
+    p.built && ['cutplan', 'cpGo', cut ? 'Make the cut plan again' : 'Make the cut plan', ''],
+  ].filter(Boolean);
+  const buttons = acts.map(([kind, id, label, again]) => {
+    const m = menu[kind] || { ready: true, why: '' };
+    const running = kind === 'carve' && S.carveJob[carveKey(p.id)];
+    const off = !m.ready ? ` aria-disabled="true" data-why="${esc(m.why)}" title="${esc(`Not yet: ${m.why}`)}"` : '';
+    return `<button class="small${m.ready ? '' : ' off'}" id="${id}"${again}${off}${running ? ' disabled' : ''}>${label}</button>`;
+  }).join('');
+  return `<div class="pacts" role="toolbar" aria-label="What to do with it" id="pacts">${buttons}</div>
+    <div class="small muted pacts-why" id="pactsWhy" aria-live="polite"></div>`;
+}
+function wirePartActions() {                    // a greyed one says why, on a click or a tap, and never runs
+  const bar = $('pacts'), why = $('pactsWhy');
+  if (!bar || bar.dataset.wired) return;
+  bar.dataset.wired = '1';
+  bar.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || b.getAttribute('aria-disabled') !== 'true') { if (why) why.textContent = ''; return; }
+    e.stopPropagation(); e.preventDefault();
+    if (why) why.textContent = b.dataset.why;
+  }, true);
+}
+function cutplanRun(p) { return (S.design.cutplans || []).find((r) => r.part === p.id) || null; }
 function partView(p) {
   const d = S.design;
   const mine = (r) => new RegExp(`\\b${p.id}\\b`).test(r.expr);
   const designRules = d.rules.filter(mine);
   const origin = p.origin === 'whittled' ? '<span class="badge whittled">whittled mesh</span>'
     : p.scripted ? '<span class="badge">parametric</span>' : '<span class="badge">imported</span>';
-  const what = `<h4>Size</h4>
-    ${p.bbox ? `<div class="kv">
+  const nRules = p.rules.length + designRules.length;
+  const revisions = p.history.filter((h) => h.kind === 'revision').length;
+  const what = `<label class="small muted" style="display:block;margin-top:2px">
+      <input type="checkbox" id="roleRef" ${p.role === 'fixed' ? 'checked' : ''}> treat as a reference (context, e.g. the car)</label>
+    ${sub('size', `Size${p.bbox ? `: ${sizeText(p.bbox.size)}` : ': it won\'t build'}`, p.bbox ? `<div class="kv">
       <span class="k">width</span><span>${len(p.bbox.size[1])}</span>
       <span class="k">depth</span><span>${len(p.bbox.size[0])}</span>
       <span class="k">height</span><span>${len(p.bbox.size[2])}</span>
-      <span class="k">bottom at</span><span>${len(p.bbox.min[2])}</span></div>` : '<div class="empty">won\'t build</div>'}
-    <label class="small muted" style="display:block;margin-top:8px">
-      <input type="checkbox" id="roleRef" ${p.role === 'fixed' ? 'checked' : ''}> treat as a reference (context, e.g. the car)</label>
-    <h4>Rules on this part</h4>
-    ${p.rules.length || designRules.length ? '<ul class="list">' +
+      <span class="k">bottom at</span><span>${len(p.bbox.min[2])}</span></div>` : '<div class="empty">won\'t build</div>')}
+    ${sub('rules', `Rules on this part: ${nRules ? nRules : 'none yet'}`, nRules ? '<ul class="list">' +
       [...p.rules, ...designRules].map(ruleItem).join('') + '</ul>'
-    : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
-    <h4 id="partHistory">History</h4>
-    <ul class="list">${p.history.slice().reverse().map((h) => historyItem(h, p.version)).join('')}</ul>
+    : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>')}
+    <details class="sub" data-sub="history" id="partHistory"${subOpen('history') ? ' open' : ''}><summary>History: ${revisions} version${revisions === 1 ? '' : 's'}, now v${p.version}</summary>
+    <ul class="list">${p.history.slice().reverse().map((h) => historyItem(h, p.version)).join('')}</ul></details>
     <details id="adv"><summary>Advanced — script &amp; spec <span class="muted">${esc(p.id)}</span> ${origin}</summary><div id="advBody" class="small muted">loading…</div></details>`;
   const work = `${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
     <div id="loadBox">${loadView(p)}</div>` : ''}
-    ${p.loads && p.role !== 'fixed' ? `<h4>Test it <span class="badge">the real one</span></h4>
-    <div id="trialBox">${trialView(p)}</div>` : ''}
+    ${p.loads && p.role !== 'fixed' ? sub('trial', 'Test it <span class="badge">the real one</span>: what to measure, and what it did',
+      `<div id="trialBox">${trialView(p)}</div>`) : ''}
     ${p.framed ? `<h4>Size the frame <span class="badge">tubes back</span></h4>
     <div id="frameBox">${frameView(p)}</div>` : ''}
-    ${!p.framed && (S.design.in_air.yes || aeroRuns(p.id).length || runsFor(p.id).length) ? `<h4>Shape it for drag <span class="badge">numbers back</span></h4>
-    <div id="aeroBox">${aeroView(p)}</div>
-    <h4>whittle carving <span class="badge">mesh back</span></h4>
-    <div id="whittleBox">${whittleView(p)}</div>` : ''}`;
-  const buy = p.built ? `<h4>Built from <span class="badge">weight &amp; shopping list</span></h4>
-    <div id="buildBox">${buildView(p)}</div>` : '';
+    ${!p.framed && (S.design.in_air.yes || aeroRuns(p.id).length || runsFor(p.id).length)
+      ? sub('aero', `Shape it for drag <span class="badge">numbers back</span>: ${aeroRuns(p.id).length} search${aeroRuns(p.id).length === 1 ? '' : 'es'}`,
+        `<div id="aeroBox">${aeroView(p)}</div>`)
+      + sub('whittle', 'whittle carving <span class="badge">mesh back</span>', `<div id="whittleBox">${whittleView(p)}</div>`) : ''}`;
+  const buy = p.built ? sub('buy', 'Built from <span class="badge">weight &amp; shopping list</span>: the stock and what to buy',
+    `<div id="buildBox">${buildView(p)}</div>`) : '';
+  const cut = cutplanRun(p);
   const make = p.built ? `<div id="makingBox">${makingView(p)}</div>
-    <div id="patternBox">${patternView(p)}</div>
-    <div id="cutplanBox">${cutplanView(p)}</div>` : '';
-  // the heading is the part's own name; its id and how it was made are one click down, under Advanced (#70 item 21)
-  return `<h2>${esc(p.name || p.id)}</h2>
-    <div class="muted small">v${p.version}</div>
-    ${cardsView({ what, work, buy, make, params: `<div id="paramBox">${paramView(p)}</div>` })}`;
+    ${sub('patterns', 'Patterns for hand tools: every flat piece, full size', `<div id="patternBox">${patternView(p)}</div>`)}
+    ${sub('cutplan', `The cut plan: ${cut ? 'the sheets laid out flat' : 'not made yet'}`, `<div id="cutplanBox">${cutplanView(p)}</div>`)}` : '';
+  // the heading is the part's own name; its id and how it was made are one click down, under Advanced (#70 item 21);
+  // its actions beside it, its numbers under it, then the four questions (#325)
+  return `<div class="phead"><div><h2>${esc(p.name || p.id)}</h2>
+    <div class="muted small">v${p.version}</div></div>${partActions(p)}</div>
+    <div id="paramBox">${paramView(p)}</div>
+    ${cardsView({ what, work, buy, make })}`;
 }
 
 function wireInspector(p) {
@@ -2758,6 +2834,7 @@ function wireInspector(p) {
     };
   });
   if (!p) { wireBalance(); wireScore(); wireRelease(); return; }
+  wirePartActions();                                // the actions top right: a greyed one says why (#325)
   wireBuilt(p);
   wireCutplan(p);
   wireTrial(p);
@@ -3126,7 +3203,7 @@ function cutplanView(p) {
       ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`
       : `<div class="muted small">Flatten every panel onto the sheets it's cut from — score lines where it bends — and list every
          stick to cut. Uses unfold-to-sheets.</div>`}
-    <div class="actions"><button id="cpGo">${run ? 'Make it again' : 'Make the cut plan'}</button></div><div id="cpProgress"></div>`;
+    <div id="cpProgress"></div>`;
 }
 
 function wireCutplan(p) {
@@ -3292,8 +3369,7 @@ function loadView(p) {
   return `<div class="form">
       <span>least safety</span><span><input type="number" id="lSafety" value="${(runs[0] && runs[0].min_safety) || 2}" min="1" max="10" step="0.5">
         × at each load times its factor</span></div>
-    <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button>
-      ${runs[0] && runs[0].finer && runs[0].version === p.version ? `<button id="lFiner" title="voxels of ${wallLen(runs[0].finer.spacing_mm)}, enough
+    <div class="actions">${runs[0] && runs[0].finer && runs[0].version === p.version ? `<button id="lFiner" title="voxels of ${wallLen(runs[0].finer.spacing_mm)}, enough
         to see its ${wallLen(runs[0].thinnest_mm)} walls">Check it again finer${runs[0].finer.minutes ? ` (about ${runs[0].finer.minutes} min)` : ' (how long: unknown)'}</button>` : ''}</div>
     ${scenariosBox(p)}
     <div id="lProgress"></div>
@@ -3483,8 +3559,7 @@ function carveView(p) {
   const head = `<h5 style="margin:14px 0 4px">Carve it <span class="badge">printed, any shape</span></h5>
     <div class="muted small">A printer makes any shape, so the printed part can be carved wherever it isn't working: in steps,
       each one checked. ${p.carved ? 'It\'s carved now; carving again starts from its shape as drawn.' : ''}</div>
-    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo"${run ? ' data-again="1"' : ''} ${S.carveJob[carveKey(p.id)] || carveBlocked(p) ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
-      <span class="muted small">${esc(carveTime(p))}</span></div><div id="carveProgress">${carveProgress(p.id)}</div>`;
+    <div class="muted small">${esc(carveTime(p))}</div><div id="carveProgress">${carveProgress(p.id)}</div>`;
   if (!run) return head;
   if (run.status === 'cancelled' || run.status === 'timed_out') {   // stopped: the steps it finished (CALI-101)
     // past its limit isn't a cancel nobody made (#211 review)
@@ -3724,8 +3799,7 @@ function lightenView(p) {
     <div class="muted small">Down until the safety runs out: holes in the walls where the wood isn't working (a jigsaw cuts
       them, a solid rim where it's glued and screwed), then hole-saw holes in the panel you stand on, one at a time,
       then thinner sheet. Every step is checked again.</div>
-    <div class="actions"><button id="lightGo"${run ? ' data-again="1"' : ''} ${lightenBlocked(p) ? 'disabled' : ''}>${run ? 'Lighten it again' : 'Lighten it'}</button>
-      ${lightenBlocked(p) ? `<span class="muted small">${esc(lightenBlocked(p))}</span>` : ''}</div>
+    ${lightenBlocked(p) ? `<div class="muted small">${esc(lightenBlocked(p))}</div>` : ''}
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (run.not_trusted ? esc(run.not_trusted) : p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
@@ -4084,7 +4158,7 @@ function paintJobs() {
   document.querySelectorAll('#inspector [data-job-off]').forEach((b) => { b.disabled = false; b.title = ''; delete b.dataset.jobOff; });
   for (const t of jobsHere()) {
     const here = t.kind === 'release' || S.scope === t.part, panel = here ? $(JOB_BOX[t.kind]) : null;
-    const box = panel && panel.closest && panel.closest('details:not([open])') ? null : panel;   // folded away isn't on screen
+    const box = panel && panel.closest && panel.closest('details:not([open]), [hidden]') ? null : panel;   // folded away isn't on screen
     if (box) { box.innerHTML = jobHtml(t, false); box.dataset.job = t.job; } else lines.push(jobHtml(t, true));
     const go = here && $(JOB_GO[t.kind]);
     if (go) jobOff(go);
@@ -4424,7 +4498,6 @@ function aeroView(p) {
       <span>designs</span><input type="number" id="aStations" value="4" min="2" max="8">
       <span>search</span><select id="aEffort"><option value="0.3">quick</option><option value="0.6" selected>normal</option><option value="1">thorough</option></select>
     </div>
-    <div class="actions"><button class="primary" id="aGo">Shape it</button></div>
     <div id="aProgress"></div>
     ${runs.length ? aeroResults(p, runs[Math.min(S.aeroRun[p.id] || 0, runs.length - 1)], runs) : ''}`;
 }
