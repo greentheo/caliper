@@ -477,8 +477,9 @@ def coarse(run: dict, inches: bool = True, holds: bool = True) -> str:
     ✗, and says the fail may be the model's."""
     from . import load_study as L
 
-    if any(L.blind(run, c) for c in run.get("cases") or []):    # not its walls: it saw no stress at all (#202)
-        return L.BLIND
+    seen = next((c for c in run.get("cases") or [] if L.blind(run, c)), None)
+    if seen is not None:                                         # not its walls: it saw no stress at all (#202)
+        return L.blind_why(seen)
     walls = f"thinnest walls, {_wall(run.get('thinnest_mm') or 0)}{_thin_at(run, inches)}"   # which, and where (#139)
     if not holds:
         return (f"The fail may be the model's: the voxels can't see its {walls}. "
@@ -641,7 +642,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         edge = consistency.bare_edge(store, pid)             # where people stand wasn't loaded (CALI-94)
         for c in run["cases"]:
             if L.blind(run, c):                 # named, beside any that did read: one reason (#202)
-                work.append(_line(f"! {c['name'][:1].upper()}{c['name'][1:]}: {L.BLIND}", "warn", study="load"))
+                work.append(_line(f"! {c['name'][:1].upper()}{c['name'][1:]}: {L.blind_why(c)}", "warn", study="load"))
             elif c.get("safety") is not None:
                 work.append(_case_line(part_name(p), run, c, filled, stale, inches, edge=bool(edge)))
         work += _grain_lines(store, pid, run, stale, filled, bool(edge))
@@ -687,6 +688,10 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         except Exception as e:  # noqa: BLE001 — said, never a crash of the card
             work.append(_line(f"Tipping: not checked ({scrubbed(e)}).", "warn", study="tip"))
             missing = []
+        latest = next((r for r in state.get("load_runs") or [] if r["part"] == pid and r.get("version") == p["version"]), None)
+        if latest and any(r.get("between", "").endswith(", as a column") for c in latest.get("cases") or []
+                          for r in (c.get("joints") or {}).get("rows") or []):
+            missing = [m for m in missing if m != tipping.LEGS_BUCKLING]     # its legs checked as columns (#316)
         if missing:                             # a seat's cases nobody checked, said (#86 item 3)
             work.append(_line("Not checked yet for a seat: " + "; ".join(missing) + ".", "warn", study="tip"))
     frames = [r for r in state.get("frame_runs") or [] if r["part"] == pid]

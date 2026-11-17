@@ -166,7 +166,8 @@ def test_a_sheet_part_s_printed_piece_of_no_declared_size_isn_t_checked(checked)
 
     v = verdicts.run(rec)
     assert not v["counts_as_pass"], v
-    assert L.unseen(rec, rec["cases"][0]) == "the fillet strip isn't checked: its size isn't declared"
+    assert L.unseen(rec, rec["cases"][0]) == ("the fillet strip isn't checked: its size isn't declared: say it's trim, give "
+                                              "its size, or remove it (Things to fix has each)")       # the ways out (#324)
 
 
 def test_lighten_isn_t_held_back_by_trim_it_leaves_out(checked, monkeypatch):

@@ -150,6 +150,12 @@ def rests_on_brace(run: dict, c: dict) -> Optional[dict]:
 #: A pass at or under this many times its limit is amber, ``close``: it holds, but near the line (the four-questions
 #: spec's proposal, "within 25% of the limit"; the owner may change the band). CALI-88, #64 item 2.
 CLOSE = 1.25
+#: How far the strength check of a cut Lighten step can read from the step, either way (#323): the cut part's holes fall
+#: on the grid as its mesh does, not as the step's cells did. Theo's step-stool-5 v8, its holes cut from step 14, reads
+#: 1.67, 1.47 and 7.72 where its step read 1.59, 1.47 and 8.28. The foreman's band.
+CUT_DRIFT = 0.07
+#: A step that close to its minimum: it holds, and the check of the part as cut is what decides (#323).
+CUT_DECIDES = "holds, close: cut it and the check decides"
 #: The kinds with a number a person may build on (it holds, close to the line or not, or it fails), and the passes.
 SETTLED = ("holds", "close", "fails")
 PASSES = ("holds", "close")
@@ -182,10 +188,10 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
     a two-sided top whose loads skip its free edge (#106: or the case says ``middle_only``); ``stale``: the run is
     of an older version."""
     safety = c.get("safety")
-    from .load_study import BLIND, blind
+    from .load_study import blind, blind_why
 
     if blind(run, c):                                  # it saw no stress to judge by (#202): neither a ✓ nor a number to read
-        return _make("unresolved", safety, why=BLIND, blind=True)
+        return _make("unresolved", safety, why=blind_why(c), blind=True)
     if safety is None:
         return _make("waiting", why=c.get("why") or "")
     if (c.get("fea") or {}).get("supported") is False and c.get("governs", "fea") == "fea":
@@ -443,9 +449,21 @@ def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = N
     brace = next((b for c in cases for b in [rests_on_brace(need, c)] if b is not None), None) \
         or (next((b for c in cases for b in [wood_brace(run, c)] if b is not None), None)   # its cases' own (#301)
             if any(c.get("joints") is not None for c in cases) else wood_brace(run))    # else the run's (#275)
+    # a step that cuts something, within CUT_DRIFT of its minimum: the check of the cut part decides (#323)
+    need_n, safety = (run or {}).get("min_safety"), st.get("safety")
+    drift = (v["kind"] == "holds" and (st.get("holes") or 0) > 0 and need_n is not None and safety is not None
+             and safety <= need_n * (1 + CUT_DRIFT) + 1e-9)
     if v["counts_as_pass"] and brace is not None:      # a step resting on an unchecked joint, as its case would (#265)
-        return _make(JOINT_CAP if v["kind"] == "holds" else v["kind"], st.get("safety"), why=brace_why(brace), joints=True, brace=brace,
-                     **({"near": True} if v["kind"] == "close" else {}))
+        kind = "close" if drift else v["kind"]
+        got = _make(JOINT_CAP if kind == "holds" else kind, st.get("safety"), why=brace_why(brace), joints=True, brace=brace,
+                    **({"near": True} if kind == "close" else {}))
+        if drift:                                    # the cut's words stay, beside the joints' (#326 review)
+            got = {**got, "word": f"{CUT_DECIDES}, and {brace_why(brace)}",
+                   "short": f"holds {safety:.1f}x, close: cut it and the check decides, and {brace_why(brace)}"}
+        return got
+    if drift:
+        return {**_make("close", safety, why=CUT_DECIDES), "word": CUT_DECIDES,
+                "short": f"holds {safety:.1f}x, close: cut it and the check decides"}
     return v
 
 

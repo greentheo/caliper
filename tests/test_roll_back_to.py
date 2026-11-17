@@ -272,3 +272,30 @@ def test_a_refine_that_wrote_an_earlier_script_again_is_still_a_refine(tmp_path)
     s.write_part("p", _box(dx=100), intent="a box")                 # v3: v1's script, written by a revise
     got = chat.revert_part(s, "p")
     assert got.ok and "back to v2 (saved as v4)" in got.reply, got.reply
+
+
+def test_go_back_to_this_pressed_twice_saves_one_version(site):
+    """#324, Theo's step-stool-5: Go back to this, pressed twice, saved v9 and v10, both "rolled back to v6", three seconds
+    apart. A revert to the version it's already as is refused in words, and saves nothing."""
+    c, slug, s = site
+    base = f"/api/designs/{slug}/parts/step_stool/restore"
+    assert c.post(base, json={"version": 2}).status_code == 200                       # v8, as v2 was
+    again = c.post(base, json={"version": 2})
+    assert again.status_code == 409 and again.json()["detail"] == "step_stool is already as v2 was: nothing to go back to."
+    assert DesignStore.load(s.root).versions("step_stool")[-1] == 8
+    assert c.post(base, json={"version": 3}).status_code == 200                       # another version still goes
+
+
+def test_roll_it_back_to_the_version_it_s_already_as_says_so(stool):
+    stool.restore("step_stool", 3)                                                     # v8, as v3 was
+    got = chat.revert_part(stool, "step_stool", to=3)
+    assert not got.ok and got.reply == "step_stool is already as v3 was: nothing to go back to."
+    assert stool.versions("step_stool")[-1] == 8
+
+
+def test_go_back_to_this_is_taken_once_and_its_button_is_off_while_it_runs():
+    src = open(JS).read()
+    body = src[src.index("async function goBackTo(pid, v) {"):src.index("document.addEventListener('click', (e) => {     // the history's")]
+    assert "const once = `goback:${S.slug}/${pid}`;" in body and "if (S.running[once]) return;" in body
+    assert "document.querySelectorAll('[data-goback-v]').forEach((b) => { b.disabled = true; });" in body
+    assert "finally { delete S.running[once];" in body
