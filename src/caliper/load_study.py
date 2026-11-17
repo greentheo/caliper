@@ -844,10 +844,14 @@ def _backed(pc: dict, k: int, load: dict, held: list[dict], tol: float, voxel: O
         b0, b1 = np.asarray(h["lo"], float) - grow, np.asarray(h["hi"], float) + grow
         inside.append(np.any([np.all((q >= b0) & (q <= b1), axis=1)
                               for q in (pts + away * d for d in np.linspace(0.0, reach, 5))], axis=0))
+    gaps = [_gap(pts[i], away, h) if i.any() else np.inf for i, h in zip(inside, held)]
+    # backed only where its face is within the reach of the support's own face: the default floor's slab is a voxel's
+    # depth over the ground, and its top let a floor read backed to ~1.6 voxels up (#334 round four)
+    inside = [i if g <= reach else np.zeros_like(i) for i, g in zip(inside, gaps)]
     if float(np.mean(np.any(inside, axis=0))) < BACKED:
         return None
     j = int(np.argmax([float(np.mean(i)) for i in inside]))
-    return {**held[j], "gap_mm": _gap(pts[inside[j]], away, held[j]), "reach_mm": reach}
+    return {**held[j], "gap_mm": gaps[j], "reach_mm": reach}
 
 
 #: A panel's face within this of its support's is on it (a declared size rounded); further, but within the voxel's reach,

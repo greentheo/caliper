@@ -246,21 +246,24 @@ def _raised(r, dims=None):
     return src
 
 
-@pytest.mark.parametrize("src", [_raised(12), _raised(19), _raised(63.5, "1900.0, 1000.0, 600.0")],
-                         ids=["12 mm up", "a 3/4 in cleat up", "a camper on 2 1/2 in skids"])
+@pytest.mark.parametrize("src", [_raised(8), _raised(12), _raised(19), _raised(63.5, "1900.0, 1000.0, 600.0")],
+                         ids=["8 mm up, past a voxel", "12 mm up", "a 3/4 in cleat up", "a camper on 2 1/2 in skids"])
 def test_a_floor_raised_off_its_support_spans_and_its_walls_carry_it(tmp_path, src):
-    """caliper-reviewer's table: the support's box grown 3·tol each way, plus the probe's 2·tol, read these as resting."""
+    """caliper-reviewer's table: the support's box grown 3·tol each way, plus the probe's 2·tol, read these as resting.
+    8 mm (#334 round four): past a voxel (6.2 mm) over the ground, where the slab's top let it read backed to ~1.6 voxels,
+    under words saying "8 mm above the ground, under one voxel"."""
     ctx, pl = _plate(tmp_path, src)
     assert pl["piece"] == "floor" and pl["done"] and "rests_on" not in pl
+    assert "under one voxel" not in (pl.get("why") or "")
     _, rows = _walls(tmp_path / "walls", src)
     assert rows and all(r["done"] and not r.get("rests") for r in rows)
 
 
 def test_a_floor_on_its_support_still_rests_where_it_s_within_a_voxel_of_it(tmp_path):
     ctx, pl = _plate(tmp_path, BOX)
-    up = ctx["spacing"] * 0.9                           # under a voxel off the support's box (its top: 0.6 of one)
+    up = ctx["spacing"] * 0.9                           # under a voxel over the ground (#334 round four: not the slab's top)
     assert up > ctx["tol"]                              # and more than tol: the voxel, not tol, is the reach
-    src = _raised(round(0.6 * ctx["spacing"] + up, 2))
+    src = _raised(round(up, 2))
     _, pl = _plate(tmp_path / "up", src)
     assert pl["rests_on"] == "the floor"
     _, rows = _walls(tmp_path / "walls", src)
@@ -383,7 +386,8 @@ def test_a_floor_a_few_mm_over_a_named_pad_names_it(tmp_path):
                          f"whether it spans or bottoms out")
 
 
-@pytest.mark.parametrize("r, rests", [(0, True), (4, True), (12, False)], ids=["on the ground", "4 mm up", "12 mm up"])
+@pytest.mark.parametrize("r, rests", [(0, True), (4, True), (8, False), (12, False)],
+                         ids=["on the ground", "4 mm up", "8 mm up", "12 mm up"])
 def test_a_floor_declared_by_its_loaded_face_is_probed_from_its_far_face(tmp_path, r, rests):
     """The camper sample's floor is declared by its underside, its thickness away from the load: probed from there, down."""
     src = _under(_raised(r)) if r else _under(BOX)
