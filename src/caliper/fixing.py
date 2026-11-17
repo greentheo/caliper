@@ -79,6 +79,14 @@ def plan(store: DesignStore, state: dict, pid: str, picked: list[dict], own: Opt
         c = r["choices"][k if 0 <= k < len(r["choices"]) else 0]
         item = {"id": r["id"], "fix": c["fix"], "problem": r["problem"], **c, **_spoken(r)}
         {NUMBER: numbers, LOADS: loads, DESIGNER: designer, CHECK: checks}.get(c["kind"], designer).append(item)
+    same = []                                            # a second row on a parameter: one change, the first's value
+    seen_params: dict = {}
+    for c in list(numbers):
+        if c["param"] in seen_params:
+            numbers.remove(c)
+            same.append({**c, "first": seen_params[c["param"]]})
+        else:
+            seen_params[c["param"]] = c
     for o in own or []:
         words = str(o.get("fix") or "").strip()
         if words:
@@ -95,8 +103,9 @@ def plan(store: DesignStore, state: dict, pid: str, picked: list[dict], own: Opt
     from .fixes import _check_cost
 
     parts = []
-    if numbers:
-        parts.append(f"{_plural(len(numbers), 'number change', 'number changes')}, at once")
+    if numbers:                                          # what each moves, said at Go ahead (#322 review)
+        parts.append(f"{_plural(len(numbers), 'number change', 'number changes')}, at once ("
+                     + "; ".join(f"{c['param']}: {c['fix'][:1].lower() + c['fix'][1:]}" for c in numbers) + ")")
     if loads:
         parts.append(f"{_plural(len(loads), 'change', 'changes')} to its loads, at once")
     if designer:
@@ -106,9 +115,12 @@ def plan(store: DesignStore, state: dict, pid: str, picked: list[dict], own: Opt
     picked_ids = {pk.get("id") for pk in picked or []}
     left = [r["problem"] for r in got["rows"] if r["id"].startswith("asked:") and r["id"] not in picked_ids]
     said = "; ".join(parts) or "nothing to do"
+    for c in same:
+        said += (f"; “{c['fix']}” isn't done: it sets {c['param']} too, and the first one's "
+                 f"{c['first']['value']:g} {c['first'].get('unit') or 'mm'} goes")
     if left:                                      # an untouched question never settles itself: asked by name (#318)
         said += "; left open: " + "; ".join(q[:1].lower() + q[1:] for q in left)
-    return {"numbers": numbers, "loads": loads, "designer": designer, "check": check, "gone": gone, "left": left,
+    return {"numbers": numbers, "loads": loads, "designer": designer, "check": check, "gone": gone, "left": left, "same": same,
             "designer_call": bool(designer), "said": said}
 
 
@@ -175,7 +187,8 @@ def apply(store: DesignStore, pid: str, picked: list[dict], own: Optional[list[d
     if p["designer"]:
         say("fixing", "the designer's edits, in one revise")
         before = store.design.part(pid).version
-        res = chat.refine_part(store, pid, _message(name, p["designer"]), on_event=None)
+        # the same code back writes no version (#322 review: the card was left "of v7, not this version" for nothing)
+        res = chat.refine_part(store, pid, _message(name, p["designer"]), on_event=None, keep_same=False)
         store = DesignStore.load(store.root)
         designer_changed = bool(res.ok) and store.design.part(pid).version != before
     checked, check_why = False, ""
@@ -192,8 +205,13 @@ def apply(store: DesignStore, pid: str, picked: list[dict], own: Optional[list[d
     after = {r["id"] for r in rows_after}
     run_after = next((r for r in now.get("load_runs") or [] if r["part"] == pid), None)
     results = []
-    for item in p["numbers"] + p["loads"] + p["designer"] + [{"id": r, "fix": None, "gone": True} for r in p["gone"]]:
+    for item in p["numbers"] + p["loads"] + p["designer"] + [{"id": r, "fix": None, "gone": True} for r in p["gone"]] \
+            + [{**c, "same": True} for c in p["same"]]:
         rid = item.get("id")
+        if item.get("same"):
+            results.append({"id": rid, "fix": item["fix"], "status": "not done",
+                            "why": f"it sets {item['param']} too: the first one's value went"})
+            continue
         if item.get("gone"):
             results.append({"id": rid, "fix": None, "status": "gone", "why": "it wasn't on the list any more"})
             continue

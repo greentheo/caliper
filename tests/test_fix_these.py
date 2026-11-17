@@ -44,6 +44,7 @@ class Designer:
         from caliper.chat import TurnResult
 
         self.calls.append(message)
+        self.kw = kw
         if self.change:
             v = store.write_part(pid, store.read_script(pid) + f"\n# revised {len(self.calls)}\n", intent="revised")
             return TurnResult(action="refine", reply="✓ revised", ok=True, part=pid, version=v)
@@ -68,8 +69,9 @@ def test_the_cost_is_said_first_naming_the_designer_call(tmp_path):
     p = fixing.plan(store, design_api.design_state(store), "stool", [{"id": row["id"], "choice": 0}],
                    own=[{"fix": "round the top's corners"}])
     assert [c["param"] for c in p["numbers"]] == ["t"] and [d["fix"] for d in p["designer"]] == ["round the top's corners"]
-    assert p["said"] == ("1 number change, at once; 1 designer edit on the stool (one Claude call); then a check, "
-                         "about 1 min")
+    fix = row["choices"][0]["fix"]
+    assert p["said"] == (f"1 number change, at once (t: {fix[:1].lower() + fix[1:]}); 1 designer edit on the stool "
+                         "(one Claude call); then a check, about 1 min")               # what it moves, at Go ahead
     assert p["designer_call"] is True
 
 
@@ -115,6 +117,7 @@ def test_the_designer_s_items_go_as_one_revise_and_own_rows_are_never_fixed(tmp_
     monkeypatch.setattr(review, "findings", lambda store, report=None: after(store) if designer.calls else {"findings": found})
     got = fixing.apply(store, "stool", picked, own=[{"fix": "round the top's corners"}])
     assert len(designer.calls) == 1                                               # one revise, everything in it
+    assert designer.kw.get("keep_same") is False                     # the same code back writes no version (#322)
     msg = designer.calls[0]
     assert "Size the pocket to it" in msg and "Mirror the left side" in msg and "round the top's corners" in msg
     status = {r["fix"]: r["status"] for r in got["results"]}
@@ -325,3 +328,47 @@ def test_the_page_badges_your_loads_and_leaves_an_open_question_unticked_until_y
     assert " checked" in html.split('data-fix-tick="', 1)[1].split(">", 1)[0]         # ticked once you tick it
     src = open(__file__.replace("tests/test_fix_these.py", "src/caliper/web/static/design.js")).read()
     assert "picked: (got.rows || []).filter((r) => fixTicked(r, mine))" in src
+
+
+def test_two_rows_on_one_parameter_are_one_change_and_the_other_is_said_not_done(tmp_path, monkeypatch):
+    """reviewer-2: two number rows on one parameter counted "2 number changes" and set only the first's value."""
+    from caliper import params
+
+    store = _failing_plate(tmp_path)
+    two = [{"id": f"plate:{n}", "problem": f"The {n} fails", "part": "stool", "measured": True, "cases": ["a foot"],
+            "choices": [{"fix": f"Make the {n} from {lab}", "kind": "number", "cost": "x", "param": "t", "value": v,
+                         "unit": "mm"}]} for n, lab, v in (("top", "5/8 in", 15.875), ("seat", "1 in", 25.4))]
+    monkeypatch.setattr(fixing, "listed", lambda *a, **k: {"part": "stool", "rows": list(two), "limits": []})
+    seen = []
+    monkeypatch.setattr(params, "set_values", lambda store, pid, ch: seen.append(ch) or {"version": store.write_part(
+        pid, store.read_script(pid) + "\n# t\n", intent="t")})
+    picked = [{"id": "plate:top", "choice": 0}, {"id": "plate:seat", "choice": 0}]
+    p = fixing.plan(store, design_api.design_state(store), "stool", picked)
+    assert p["said"].startswith("1 number change, at once (t: make the top from 5/8 in); ")
+    assert "“Make the seat from 1 in” isn't done: it sets t too, and the first one's 15.875 mm goes" in p["said"]
+    got = fixing.apply(store, "stool", picked, check=False)
+    assert seen == [[{"name": "t", "value": 15.875, "unit": "mm"}]]
+    r = {x["id"]: x for x in got["results"]}
+    assert (r["plate:seat"]["status"], r["plate:seat"]["why"]) == ("not done", "it sets t too: the first one's value went")
+
+
+def test_the_fix_route_refuses_while_a_job_works_on_the_part(tmp_path, monkeypatch):
+    """reviewer-2's survivor: a fix started while a check, a Lighten or a carve works on the part refuses in words, never
+    queues silently behind it (#302)."""
+    from fastapi import HTTPException
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    store = _failing_plate(tmp_path)
+    (row,) = _rows(store)
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+
+    def busy(slug, parts):
+        assert parts == ["stool"]
+        raise HTTPException(409, "stool is being checked: wait for it, or stop that first.")
+
+    monkeypatch.setattr(design_api, "_refuse_while_busy", busy)
+    r = TestClient(create_app()).post(f"/api/designs/{store.design.slug}/parts/stool/fixes",
+                                      json={"picked": [{"id": row["id"], "choice": 0}], "own": []})
+    assert r.status_code == 409 and "being checked" in r.json()["detail"]
