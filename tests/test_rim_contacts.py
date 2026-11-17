@@ -166,7 +166,8 @@ def test_the_book_cell_gives_the_card_s_reason():
     import html
 
     assert html.unescape(cell) == ("not checked: the step's plate check holds 2.15 times over; the inside corner fillet strips "
-                                   "aren't checked: their size isn't declared"), cell
+                                   "aren't checked: their size isn't declared: say they're trim, give their size, or remove them "
+                                   "(Things to fix has each)"), cell                    # the ways out (#324)
     assert breaks == "—"
     plain = {**c, "verdict": {**c["verdict"], "why": ""}}
     assert release._safety_cell(plain)[0] == "not resolved: too coarse to see its walls"

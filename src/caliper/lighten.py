@@ -357,7 +357,8 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
     r0, tops, walls, filled = cache[i]
     near = ndimage.binary_dilation(ctx["attach"], iterations=1)
     load, worst, allow = ctx["loads"][i], None, mat["strength"] * mat["across"]
-    pl = L.plate_check(ctx["pieces"], load, mat, ctx["tol"])
+    pl = L.plate_check(ctx["pieces"], load, mat, ctx["tol"], held=ctx.get("held"),   # as the check reads it (#328)
+                       voxel=ctx.get("spacing"))
     for pc in holed:
         p = tops.get(pc["name"])
         if p is None:
@@ -862,7 +863,9 @@ def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
 def _plate_at(ctx, case_name: str, t: float) -> Optional[float]:
     """The plate check's safety (grain the wrong way) for a load at another sheet thickness, if it has one."""
     i = next((k for k, ld in enumerate(ctx["loads"]) if ld["name"] == case_name), None)
-    pl = L.plate_check(ctx["pieces"], ctx["loads"][i], sheet_of(ctx), ctx["tol"]) if i is not None else None
+    pl = (L.plate_check(ctx["pieces"], ctx["loads"][i], sheet_of(ctx), ctx["tol"], held=ctx.get("held"),
+                         voxel=ctx.get("spacing"))
+          if i is not None else None)
     if not pl or not pl.get("done"):
         return None
     return min(pl["by_thickness"], key=lambda b: abs(b["thickness_mm"] - t))["safety_across"]

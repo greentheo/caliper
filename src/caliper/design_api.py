@@ -46,6 +46,7 @@ class ChatMessage(BaseModel):
     pick: Optional[dict] = None           # the face or edge picked: {kind, id} (#109)
     shown: Optional[str] = None           # what their own bubble says, where ``message`` has coordinates for the designer (#181)
     typed: Optional[str] = None           # what was typed, without the chip's "About the …:" context (#288 review)
+    piece: Optional[str] = None           # a piece's Delete…: its key, so its words are never read as a part's (#332)
 
 
 class ParamSet(BaseModel):
@@ -771,6 +772,7 @@ def router():
             before = len(store.log())
             try:
                 res = chat.turn(store, message, scope=req.scope or None, logged=True, pick=req.pick, typed=req.typed,
+                                piece=req.piece,
                                 on_event=lambda ev: j.emit(ev.kind, ev.text, **ev.data))
             except Exception as e:
                 # the message is in the log: so is its answer, even when the answer is that it broke (CALI-87): the
@@ -820,6 +822,8 @@ def router():
             store.append_log({"kind": "message", "text": f"Go back to v{req.version} of {pid} (from its history)",
                               "action": "revert", "part": pid, "routed_by": "history"})
             got = chat.revert_part(store, pid, to=req.version)
+            if got.error == "already":                   # pressed twice (#324): refused in words, nothing saved
+                raise HTTPException(409, got.reply)
             store.append_log({"kind": "reply", "action": "revert", "part": pid, "version": got.version, "ok": got.ok,
                               "reply": got.reply})
             return {"reply": got.reply, "ok": got.ok, "version": got.version, "design": design_state(store)}
@@ -919,6 +923,45 @@ def router():
             return {"version": got["version"], "said": got["said"], "followed": got.get("followed") or "",   # (#271 review)
                     "warning": got["warning"], "notes": got["notes"],
                     "design": design_state(store)}
+
+    @r.get("/api/designs/{slug}/parts/{pid}/pieces/{key}/delete")
+    def piece_delete_plan(slug: str, pid: str, key: str):
+        """Delete… on a piece (#324): what it will do, said first. A number that turns it off, or the designer's, with
+        its cost. Never a build (#332 review): the click builds it."""
+        from . import pieces
+
+        store = load(slug)
+        if store.design.part(pid) is None or not store.is_scripted(pid):
+            raise HTTPException(404, f"no part {pid!r} with pieces")
+        try:
+            return pieces.plan(store, pid, key)
+        except KeyError as e:
+            raise HTTPException(404, str(e).strip("'\""))
+
+    @r.post("/api/designs/{slug}/parts/{pid}/pieces/{key}/delete")
+    def piece_delete(slug: str, pid: str, key: str):
+        """Delete… by its number (#324): built at 0 to be sure, then a new version, no Claude, the reply naming what went.
+        Where the build shows it does more (#332), the designer's plan, nothing set: its way is a revise through the chat.
+        Never while a job works on the part."""
+        from . import pieces
+
+        _refuse_while_busy(slug, [pid])
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            if store.design.part(pid) is None or not store.is_scripted(pid):
+                raise HTTPException(404, f"no part {pid!r} with pieces")
+            try:
+                got = pieces.delete(store, pid, key)
+            except KeyError as e:
+                raise HTTPException(404, str(e).strip("'\""))
+            except ValueError as e:                # a number its PARAMS won't take
+                raise HTTPException(409, str(e))
+            if got["how"] != "number":           # built, and it does more than take the piece away: asked again
+                return {**got, "design": design_state(store)}
+            store.append_log({"kind": "message", "text": f"Delete the {key} of {pid} (from its menu)", "action": "params",
+                              "part": pid})
+            store.append_log({"kind": "reply", "action": "params", "part": pid, "ok": True, "reply": got["said"]})
+            return {**got, "design": design_state(store)}
 
     @r.post("/api/designs/{slug}/parts/{pid}/unmirror")
     def unmirror_part(slug: str, pid: str):
