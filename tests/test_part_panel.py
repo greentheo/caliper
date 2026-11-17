@@ -59,7 +59,7 @@ def test_the_open_card_is_remembered_per_part():
     assert _open(got["a"]) == ["make"] and _open(got["b"]) == ["work"]
 
 
-BAR = """
+BAR_ONLY = """
 const esc = (s) => String(s);
 const S = { slug: 's', carveJob: {}, design: { in_air: { yes: false }, studies: { menu: { stool: [
   { kind: 'load', ready: true, why: '' },
@@ -72,6 +72,8 @@ const loadRuns = () => [{ id: 'L1' }], lightenRuns = () => [], carveRuns = () =>
 const cutplanRun = () => null;
 const p = { id: 'stool', study: 'lighten', built: true, loads: true, role: 'movable', framed: false };
 """
+# the bar without Fix these, whose list is its own (test_fix_act)
+BAR = BAR_ONLY + "const fixAct = () => '';\n"
 
 
 def test_the_actions_are_small_buttons_in_the_chain_s_order_greyed_with_the_menu_s_reason():
@@ -177,7 +179,7 @@ runs = []; out.out = paramsHead(p, [row('w', 'Side to side', 600, '24'), rows[1]
 def test_each_action_opens_the_section_it_feeds():
     src = open(JS).read()
     assert ("const GO_OPENS = { lGo: ['work', 'result'], lightGo: ['work', 'lighten'], carveGo: ['work', 'carve'], "
-            "aGo: ['work', 'aero'],\n  cpGo: ['make', 'cutplan'] };") in src
+            "aGo: ['work', 'aero'],\n  cpGo: ['make', 'cutplan'], fixGo: ['work', 'fix'] };") in src
     bar = _fn(src, "wirePartActions")
     assert bar.index("if (b && GO_OPENS[b.id]) showSection(...GO_OPENS[b.id]);") < bar.index("e.stopPropagation()")
     show = _fn(src, "showSection")

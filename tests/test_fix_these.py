@@ -348,7 +348,7 @@ LIST = {"part": "stool", "rows": [{"id": "plate:top", "problem": "The top fails"
 
 def test_the_page_says_the_cost_before_it_runs_and_each_row_s_status_after():
     html = _page(f"out = fixesView({json.dumps(LIST)}, {{}});")
-    assert 'data-fix-plan="1"' in html and "Fix these" in html and "Go ahead" not in html
+    assert "Go ahead" not in html and "It takes" not in html          # Fix these is the part's, top right (#325, test_fix_act)
     planned = {"plan": {"said": "1 number change, at once; then a check, about 1 min"}}
     html = _page(f"out = fixesView({json.dumps(LIST)}, {json.dumps(planned)});")
     assert "It takes 1 number change, at once; then a check, about 1 min." in html and 'data-fix-go="1"' in html

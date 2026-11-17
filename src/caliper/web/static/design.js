@@ -2210,20 +2210,52 @@ function fixesView(got, mine) {
       <div class="small muted">a designer edit, in your words</div></div>`).join('')}
     <div class="small fixadd"><input data-fix-add placeholder="add your own: “and round the top’s corners”" style="width:70%">
       <button class="ghost" data-fix-add-go="1">Add</button></div>
-    ${fixGo(mine, rows.length + own.length)}
+    ${fixGo(mine)}
     ${(got.limits || []).length ? `<div class="qbetter-h" style="margin-top:6px">Known limits</div>
       <ul class="small muted fixlimits">${got.limits.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`;
 }
 // Fix these (#300 slice B): its cost first, from the server's own plan (pressing Go ahead is the person's word for any
-// designer call it names); while it runs, said; after, each row Fixed only where measured, Still open, or Not done
-function fixGo(mine, n) {
+// designer call it names); while it runs, said; after, each row Fixed only where measured, Still open, or Not done. The
+// button that asks the plan is the part's, top right (fixAct, #325)
+function fixGo(mine) {
   const results = (mine.results || []).length ? `<div class="qbetter-h" style="margin-top:6px">The last fix</div><ul class="small fixresults">${
     mine.results.map((x) => `<li>${esc(x.fix || x.id || '')}: <b>${esc(x.status)}</b> <span class="muted">${esc(x.why || '')}</span></li>`).join('')}</ul>` : '';
   if (mine.running) return `<div class="small muted">fixing… ${esc(mine.running === true ? '' : mine.running)}</div>${results}`;
   if (mine.plan) return `<div class="small">It takes ${esc(mine.plan.said)}.
       <button class="primary" data-fix-go="1">Go ahead</button> <button class="ghost" data-fix-cancel="1">Not now</button></div>${results}`;
-  return `<div class="actions"><button class="primary" data-fix-plan="1"${n ? '' : ' disabled'}>Fix these</button></div>
-    ${mine.error ? `<div class="small" style="color:var(--bad)">${esc(mine.error)}</div>` : ''}${results}`;
+  return `${mine.error ? `<div class="small" style="color:var(--bad)">${esc(mine.error)}</div>` : ''}${results}`;
+}
+// Fix these, top right with the part's other actions (#325): where its list, read for this version and its newest check,
+// has rows; greyed, with why, while none is ticked; "Fixing…" while it runs. It opens Things to fix (GO_OPENS) and asks
+// the plan, whose cost is said there before anything runs
+function fixAct(part) {
+  if (!fixFresh(part)) return '';
+  const got = S.fixes[fixKey(part)], mine = fixMine(part);
+  if (!(got.rows || []).length && !(mine.own || []).length) return '';
+  const sel = fixPicked(part), n = sel.picked.length + sel.own.length;
+  const why = "nothing's ticked in Things to fix";
+  const off = n ? '' : ` aria-disabled="true" data-why="${esc(why)}" title="${esc(`Not yet: ${why}`)}"`;
+  return `<button class="small${n ? '' : ' off'}" id="fixGo"${off}${mine.running ? ' disabled' : ''}>${
+    mine.running ? runningLabel('fix') : 'Fix these'}</button>`;
+}
+// the bar's Fix these drawn again, alone, as the list lands or a tick changes: the other buttons keep their wiring
+function paintFixAct(part) {
+  const bar = $('pacts');
+  if (!bar || S.scope !== part) return;
+  const old = $('fixGo'), html = fixAct(part);
+  if (old) old.remove();
+  if (html) bar.insertAdjacentHTML('beforeend', html);
+  const b = $('fixGo');
+  if (b) b.onclick = () => fixPlan(part);
+}
+async function fixPlan(part) {
+  const mine = fixMine(part), b = $('fixGo');
+  if (b) b.disabled = true;
+  mine.error = null;
+  try { mine.plan = await api('POST', `/api/designs/${S.slug}/parts/${part}/fixes/plan`, fixPicked(part)); }
+  catch (e) { mine.error = plainly(e.message); }
+  if (b) b.disabled = false;
+  paintFixes(part);
 }
 // what's ticked, as the server reads it: each row by its id and the choice made, the person's words where they gave them
 function fixPicked(part) {
@@ -2278,6 +2310,7 @@ async function loadFixes(part) {
   paintFixes(part);
 }
 function paintFixes(part) {
+  paintFixAct(part);
   const b = $('fixBody'), got = S.fixes && S.fixes[fixKey(part)];
   if (!b || !got || (($('fixBox') || {}).dataset || {}).fixPart !== part) return;
   b.innerHTML = fixesView(got, fixMine(part));
@@ -2290,6 +2323,7 @@ function wireFixes() {
   const box = $('fixBox');
   if (!box) return;
   const part = box.dataset.fixPart;
+  paintFixAct(part);
   // of this design (its key) and this version only
   const fresh = () => fixFresh(part);
   box.ontoggle = () => { S.fixOpen = box.open ? fixKey(part) : null; if (box.open) { if (fresh()) paintFixes(part); else loadFixes(part); } };
@@ -2304,6 +2338,7 @@ function wireFixRows(part) {
     const id = t.dataset.fixTick;
     mine.untick = mine.untick.filter((x) => x !== id).concat(t.checked ? [] : [id]);
     mine.tick = (mine.tick || []).filter((x) => x !== id).concat(t.checked ? [id] : []);
+    paintFixAct(part);
   }; });
   body.querySelectorAll('[data-fix-pick]').forEach((t) => { t.onchange = () => { mine.pick[t.dataset.fixPick] = +t.value; paintFixes(part); }; });
   body.querySelectorAll('[data-fix-word]').forEach((b) => { b.onclick = () => { mine.editing = b.dataset.fixWord; paintFixes(part); }; });
@@ -2319,15 +2354,10 @@ function wireFixRows(part) {
     i.onkeydown = (e) => { if (e.key === 'Enter') done(); if (e.key === 'Escape') { mine.editing = null; paintFixes(part); } };
     i.onblur = done;
   });
-  body.querySelectorAll('[data-fix-own-tick]').forEach((t) => { t.onchange = () => { mine.own[+t.dataset.fixOwnTick].off = !t.checked; }; });
+  body.querySelectorAll('[data-fix-own-tick]').forEach((t) => { t.onchange = () => {
+    mine.own[+t.dataset.fixOwnTick].off = !t.checked; paintFixAct(part);
+  }; });
   body.querySelectorAll('[data-fix-own-del]').forEach((b) => { b.onclick = () => { mine.own.splice(+b.dataset.fixOwnDel, 1); paintFixes(part); }; });
-  const plan = body.querySelector('[data-fix-plan]');
-  if (plan) plan.onclick = async () => {
-    plan.disabled = true; mine.error = null;
-    try { mine.plan = await api('POST', `/api/designs/${S.slug}/parts/${part}/fixes/plan`, fixPicked(part)); }
-    catch (e) { mine.error = plainly(e.message); }
-    paintFixes(part);
-  };
   const cancel = body.querySelector('[data-fix-cancel]');
   if (cancel) cancel.onclick = () => { mine.plan = null; paintFixes(part); };
   const goNow = body.querySelector('[data-fix-go]');
@@ -2488,7 +2518,7 @@ function keepSub(dt) {                          // what's left open is kept; wit
 }
 // what each action opens (#325): the section it feeds, in its card, so its progress and its result are in view
 const GO_OPENS = { lGo: ['work', 'result'], lightGo: ['work', 'lighten'], carveGo: ['work', 'carve'], aGo: ['work', 'aero'],
-  cpGo: ['make', 'cutplan'] };
+  cpGo: ['make', 'cutplan'], fixGo: ['work', 'fix'] };
 function showSection(card, k) {
   const sec = document.querySelector(`#inspector .qcard[data-card="${card}"]`);
   if (sec && !sec.classList.contains('open')) openCard(card);
@@ -2931,7 +2961,7 @@ function partActions(p) {
     const off = !m.ready ? ` aria-disabled="true" data-why="${esc(m.why)}" title="${esc(`Not yet: ${m.why}`)}"` : '';
     return `<button class="small${m.ready ? '' : ' off'}" id="${id}"${again}${off}${running ? ' disabled' : ''}>${running ? runningLabel(kind) || label : label}</button>`;
   }).join('');
-  return `<div class="pacts" role="toolbar" aria-label="What to do with it" id="pacts">${buttons}</div>
+  return `<div class="pacts" role="toolbar" aria-label="What to do with it" id="pacts">${buttons}${fixAct(p.id)}</div>
     <div class="small muted pacts-why" id="pactsWhy" aria-live="polite"></div>`;
 }
 function wirePartActions() {                    // a greyed one says why, on a click or a tap, and never runs
@@ -4372,7 +4402,7 @@ function jobOn(b) {
   if (b.dataset.jobLabel != null) { b.textContent = b.dataset.jobLabel; delete b.dataset.jobLabel; }
 }
 function runningLabel(kind) {
-  return ({ load: 'Checking…', lighten: 'Lightening…', carve: 'Carving…' })[kind] || '';
+  return ({ load: 'Checking…', lighten: 'Lightening…', carve: 'Carving…', fix: 'Fixing…' })[kind] || '';
 }
 function jobHtml(t, named) {
   const pct = typeof t.progress === 'number' ? Math.round(t.progress * 100) : null;

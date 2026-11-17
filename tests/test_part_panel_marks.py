@@ -226,6 +226,7 @@ out = {{ broke: [broke.tone, broke.answer], other: [other.tone, other.answer] }}
 FAILING = """
 const esc = (s) => String(s), plainly = (s) => s;
 const fixMine = () => ({}), fixRow = () => '<div class="fixrow"></div>', fixGo = () => '', paintFixes = () => {};
+const paintFixAct = () => {};
 const S = { slug: 's', fixes: {}, design: { parts: [{ id: 'stool', version: 3 }],
                                            load_runs: [{ id: '20261117-020000-check', part: 'stool', version: 3 }] } };
 const fixVersion = () => 3;
@@ -266,6 +267,7 @@ const els = { fixBody: { innerHTML: '' }, fixBox: box };
 const $ = (id) => els[id] || null;
 const S = { fixes: { k: { rows: [1, 2, 3] } } };
 const fixKey = () => 'k', fixMine = () => ({}), fixesView = () => 'rows', wireFixRows = () => {}, ATTN = () => true;
+const paintFixAct = () => {};
 const fixesSection = () => ({ answer: '3 measured wrong' }), subHead = (x) => `· ${x.answer}`;
 paintFixes('stool');
 out = head.innerHTML;"""))
