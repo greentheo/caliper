@@ -19,7 +19,7 @@ JS = os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "sta
 
 FIX = """
 const esc = (s) => String(s);
-const fixMine = () => ({}), fixRow = () => '<div class="fixrow"></div>';
+const fixMine = () => ({}), fixRow = () => '<div class="fixrow"></div>', fixGo = () => '';
 const S = { slug: 's', fixes: {}, design: { parts: [{ id: 'stool', version: 3 }], load_runs: [] } };
 const fixVersion = () => 3;
 const loadRuns = (pid) => S.design.load_runs.filter((r) => r.part === pid);
@@ -225,7 +225,7 @@ out = {{ broke: [broke.tone, broke.answer], other: [other.tone, other.answer] }}
 
 FAILING = """
 const esc = (s) => String(s), plainly = (s) => s;
-const fixMine = () => ({}), fixRow = () => '<div class="fixrow"></div>', paintFixes = () => {};
+const fixMine = () => ({}), fixRow = () => '<div class="fixrow"></div>', fixGo = () => '', paintFixes = () => {};
 const S = { slug: 's', fixes: {}, design: { parts: [{ id: 'stool', version: 3 }],
                                            load_runs: [{ id: '20261117-020000-check', part: 'stool', version: 3 }] } };
 const fixVersion = () => 3;

@@ -109,7 +109,8 @@ def _refuse_while_busy(slug: str, parts: list) -> None:
 #: What a job is doing to a part, said when a delete has to wait for it (CALI-183).
 DOING = {"load": "checked", "lighten": "lightened", "carve": "carved", "release": "packaged", "firstrun": "built",
          "chat": "revised", "whittle": "whittled", "aero": "shaped for drag", "frame": "sized", "gussets": "given gussets",
-         "picture": "given a picture", "cutplan": "planned for cutting", "preview": "previewed"}
+         "picture": "given a picture", "cutplan": "planned for cutting", "preview": "previewed",
+         "fix": "fixed"}                          # Things to fix, done (#300 slice B)
 
 
 class LabelSet(BaseModel):
@@ -120,6 +121,11 @@ class LabelSet(BaseModel):
 class GrainSet(BaseModel):
     piece: str
     grain: str                            # "along" or "across" the gap the panel spans (CALI-126)
+
+
+class FixRequest(BaseModel):
+    picked: list[dict] = []               # the rows ticked: {id, choice, words?} (#300 slice B)
+    own: list[dict] = []                  # the person's own rows: {fix}
 
 
 class ScenariosSet(BaseModel):
@@ -848,6 +854,41 @@ def router():
         if store.design.part(pid) is None:
             raise HTTPException(404, f"no part {pid!r}")
         return fixes.listed(store, design_state(store), pid)
+
+    @r.post("/api/designs/{slug}/parts/{pid}/fixes/plan")
+    def part_fixes_plan(slug: str, pid: str, req: FixRequest):
+        """What Fix these will do and what it costs, before it runs (#300 slice B): the cost line names any designer call."""
+        from . import fixing
+
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(404, f"no part {pid!r}")
+        return fixing.plan(store, design_state(store), pid, req.picked, req.own)
+
+    @r.post("/api/designs/{slug}/parts/{pid}/fixes")
+    def part_fixes_apply(slug: str, pid: str, req: FixRequest):
+        """Fix these (#300 slice B): numbers, loads, one designer revise, the check again, then measured again. Pressing it
+        is the person's word for the designer call its plan names."""
+        from . import fixing
+
+        store = load(slug)
+        if store.design.part(pid) is None:
+            raise HTTPException(404, f"no part {pid!r}")
+        p = fixing.plan(store, design_state(store), pid, req.picked, req.own)
+        if p["designer_call"] and not _claude():
+            raise HTTPException(409, "the designer's edits need Claude, and it isn't connected: untick them, or connect it")
+        _refuse_while_busy(slug, [pid])
+
+        def work(j):
+            s = DesignStore.load(slug)
+            return fixing.apply(s, pid, req.picked, req.own, emit=lambda k, t="", **d: j.emit(k, t, **d), stop=j.check)
+
+        try:
+            job = RUNNER.submit("fix", work, label=f"fix · {pid}", lock=_lock(slug),
+                                meta=_on_part(slug, pid, version=store.design.part(pid).version), only=f"fix:{slug}:{pid}")
+        except Busy:
+            raise HTTPException(status_code=409, detail="This part's fixes are already being made.")
+        return {"job_id": job.id, "plan": p}
 
     @r.get("/api/designs/{slug}/parts/{pid}/params")
     def part_params(slug: str, pid: str):

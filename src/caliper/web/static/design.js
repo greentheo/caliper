@@ -1278,7 +1278,7 @@ $('newBtn').onclick = startNew;
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
-  if (first) { S.fixes = {}; S.fixMine = {}; S.fixOpen = null; }    // Things to fix are this design's only (#318 review)
+  if (first) { S.fixes = {}; S.fixOpen = null; }      // the list is this design's; your own rows are kept per design (#318)
   if (first) { dropBuildFollow(); clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
   location.hash = encodeURIComponent(slug);
   if (first) showLoading(slug);
@@ -2172,11 +2172,17 @@ const fixRowKey = (r) => `${r.id}|${r.problem}`;
 function fixMine(part) {
   S.fixMine = S.fixMine || {};
   const k = fixKey(part);
-  return (S.fixMine[k] = S.fixMine[k] || { untick: [], words: {}, own: [], pick: {}, editing: null });
+  return (S.fixMine[k] = S.fixMine[k] || { untick: [], tick: [], words: {}, own: [], pick: {}, editing: null });
+}
+// ticked: by default, or, where the row says it starts unticked (an open question: it never settles itself, #318), only
+// once the person ticks it
+function fixTicked(r, mine) {
+  const k = fixRowKey(r);
+  return r.ticked === false ? (mine.tick || []).includes(k) : !(mine.untick || []).includes(k);
 }
 function fixRow(r, mine) {
   const k = fixRowKey(r);
-  const ticked = !(mine.untick || []).includes(k);
+  const ticked = fixTicked(r, mine);
   const pick = (mine.pick || {})[k] || 0;
   const words = (mine.words || {})[k];
   const c = r.choices[pick] || r.choices[0];
@@ -2188,7 +2194,7 @@ function fixRow(r, mine) {
         value="${j}"${j === pick ? ' checked' : ''}> ${esc(x.fix)}</label>`).join(' <span class="muted">or</span> ') : esc(c.fix))
       + ' <span class="muted small">proposed</span>';
   return `<div class="fixrow" data-fix-row="${esc(r.id)}"><label><input type="checkbox" data-fix-tick="${esc(k)}"${ticked ? ' checked' : ''}>
-      ${esc(r.problem)}</label>${words != null ? '' : ' <span class="badge ok">measured</span>'}
+      ${esc(r.problem)}${words != null ? '' : r.badge ? ` <span class="badge">${esc(r.badge)}</span>` : ' <span class="badge ok">measured</span>'}</label>
     <div class="small">${fix} ${mine.editing === k ? '' : `<button class="ghost" data-fix-word="${esc(k)}">Reword</button>`}</div>
     <div class="small muted">${esc(words != null ? 'a designer edit, in your words' : c.cost)}</div></div>`;
 }
@@ -2204,8 +2210,30 @@ function fixesView(got, mine) {
       <div class="small muted">a designer edit, in your words</div></div>`).join('')}
     <div class="small fixadd"><input data-fix-add placeholder="add your own: “and round the top’s corners”" style="width:70%">
       <button class="ghost" data-fix-add-go="1">Add</button></div>
+    ${fixGo(mine, rows.length + own.length)}
     ${(got.limits || []).length ? `<div class="qbetter-h" style="margin-top:6px">Known limits</div>
       <ul class="small muted fixlimits">${got.limits.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`;
+}
+// Fix these (#300 slice B): its cost first, from the server's own plan (pressing Go ahead is the person's word for any
+// designer call it names); while it runs, said; after, each row Fixed only where measured, Still open, or Not done
+function fixGo(mine, n) {
+  const results = (mine.results || []).length ? `<div class="qbetter-h" style="margin-top:6px">The last fix</div><ul class="small fixresults">${
+    mine.results.map((x) => `<li>${esc(x.fix || x.id || '')}: <b>${esc(x.status)}</b> <span class="muted">${esc(x.why || '')}</span></li>`).join('')}</ul>` : '';
+  if (mine.running) return `<div class="small muted">fixing… ${esc(mine.running === true ? '' : mine.running)}</div>${results}`;
+  if (mine.plan) return `<div class="small">It takes ${esc(mine.plan.said)}.
+      <button class="primary" data-fix-go="1">Go ahead</button> <button class="ghost" data-fix-cancel="1">Not now</button></div>${results}`;
+  return `<div class="actions"><button class="primary" data-fix-plan="1"${n ? '' : ' disabled'}>Fix these</button></div>
+    ${mine.error ? `<div class="small" style="color:var(--bad)">${esc(mine.error)}</div>` : ''}${results}`;
+}
+// what's ticked, as the server reads it: each row by its id and the choice made, the person's words where they gave them
+function fixPicked(part) {
+  const got = S.fixes[fixKey(part)], mine = fixMine(part);
+  return {
+    picked: (got.rows || []).filter((r) => fixTicked(r, mine)).map((r) => ({
+      id: r.id, choice: mine.pick[fixRowKey(r)] || 0,
+      ...(mine.words[fixRowKey(r)] != null ? { words: mine.words[fixRowKey(r)] } : {}) })),
+    own: (mine.own || []).filter((o) => !o.off).map((o) => ({ fix: o.fix })),
+  };
 }
 // Things to fix as a section of Will it work? (#325): its mark and its count once its list is read
 function fixesSection(part) {
@@ -2275,6 +2303,7 @@ function wireFixRows(part) {
   body.querySelectorAll('[data-fix-tick]').forEach((t) => { t.onchange = () => {
     const id = t.dataset.fixTick;
     mine.untick = mine.untick.filter((x) => x !== id).concat(t.checked ? [] : [id]);
+    mine.tick = (mine.tick || []).filter((x) => x !== id).concat(t.checked ? [id] : []);
   }; });
   body.querySelectorAll('[data-fix-pick]').forEach((t) => { t.onchange = () => { mine.pick[t.dataset.fixPick] = +t.value; paintFixes(part); }; });
   body.querySelectorAll('[data-fix-word]').forEach((b) => { b.onclick = () => { mine.editing = b.dataset.fixWord; paintFixes(part); }; });
@@ -2292,6 +2321,29 @@ function wireFixRows(part) {
   });
   body.querySelectorAll('[data-fix-own-tick]').forEach((t) => { t.onchange = () => { mine.own[+t.dataset.fixOwnTick].off = !t.checked; }; });
   body.querySelectorAll('[data-fix-own-del]').forEach((b) => { b.onclick = () => { mine.own.splice(+b.dataset.fixOwnDel, 1); paintFixes(part); }; });
+  const plan = body.querySelector('[data-fix-plan]');
+  if (plan) plan.onclick = async () => {
+    plan.disabled = true; mine.error = null;
+    try { mine.plan = await api('POST', `/api/designs/${S.slug}/parts/${part}/fixes/plan`, fixPicked(part)); }
+    catch (e) { mine.error = plainly(e.message); }
+    paintFixes(part);
+  };
+  const cancel = body.querySelector('[data-fix-cancel]');
+  if (cancel) cancel.onclick = () => { mine.plan = null; paintFixes(part); };
+  const goNow = body.querySelector('[data-fix-go]');
+  if (goNow) goNow.onclick = async () => {
+    const slug = S.slug;
+    mine.plan = null; mine.running = true; paintFixes(part);
+    try {
+      const { job_id } = await api('POST', `/api/designs/${S.slug}/parts/${part}/fixes`, fixPicked(part));
+      const res = await trackJob(job_id, { kind: 'fix', part, text: 'fixing…' }).done;
+      if (S.slug !== slug) return;
+      mine.results = res.results || []; mine.untick = []; mine.words = {}; mine.own = []; mine.pick = {};
+    } catch (e) { mine.error = plainly(e.message); }
+    mine.running = false;
+    await refresh().catch(() => {});                // the new version: its list is read again, measured
+    paintFixes(part);
+  };
   const add = body.querySelector('[data-fix-add]'), go = body.querySelector('[data-fix-add-go]');
   const put = () => { const v = add.value.trim(); if (v) { mine.own.push({ fix: v }); paintFixes(part); } };
   if (go) go.onclick = put;
