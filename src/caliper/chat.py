@@ -2836,12 +2836,15 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
             return result
 
     # a piece's Delete… (#332 review): the page sends its key, so it's its part's revise, the designer's, whatever its
-    # words would read as; a question waiting lapses, as any other message lets it
+    # words would read as; a key that isn't one of the part's pieces is said. A question waiting lapses either way
     said = None
-    if _a_piece_of(store, piece, scope):
+    if piece:
         from . import awaiting
 
         awaiting.clear(store)
+        if not _a_piece_of(store, piece, scope):  # gone since the menu opened, or never one: said, never the words (#332)
+            said = TurnResult(action="ask", ok=False, part=scope, events=events,
+                              reply=f"{scope or 'the part'} has no {piece} now: nothing was changed.")
     else:
         # what Caliper's own last question waits for (#98): a short go-ahead or no answers it, with no LLM
         said = _awaited(store, typed, scope, author=author, client=client, max_rounds=max_rounds, events=events,

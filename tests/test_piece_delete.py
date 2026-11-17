@@ -282,10 +282,8 @@ def test_what_else_a_build_changes_is_measured_exactly():
 
     run = pieces._build(NOSED)
     at0 = pieces._build(NOSED, {"nose_r": 0})
-    import trimesh
-
-    added = trimesh.boolean.difference([at0["mesh"], run["mesh"]], engine="manifold").volume
-    assert added == pytest.approx(4 * (1 - math.pi / 4) * 9 * 19.05, rel=0.02)     # 147 mm³ by hand
+    added = pieces._exact(at0).cut(*pieces._exact(run).Solids()).Volume()          # the solids, not their meshes
+    assert added == pytest.approx(4 * (1 - math.pi / 4) * 9 * 19.05, rel=0.001)    # 147.14 mm³ by hand
     assert pieces._also(run, at0, "nose strip") == "changes the step"
     assert pieces._also({**run, "declared": {}}, at0, "nose strip") == "adds to the part where nothing is declared"
     w = pieces._build(NOSE_W)
@@ -427,3 +425,108 @@ def test_a_sheet_declared_a_little_off_its_build_isn_t_changed_by_the_switch(tmp
     monkeypatch.setattr(pieces, "_FOUND", {})
     s = _part(tmp_path, OFF_BY, "off")
     assert pieces.off_switch(s, "stool", "fillet strips") == {"param": "fillet_r", "value": 0, "unit": "mm"}
+
+
+# --- #332 re-check: exact solids, a failure is never "no change", a stale key is said ------------------------------------
+
+#: caliper-reviewer's tube: a round steel tube sunk 1 mm into a plywood plate (one solid), a printed clip cut to its round
+#: and unioned onto it.
+#: clip_w at 0 skips the clip and nothing else, but the tube's round face is tessellated differently with the clip on it:
+#: mesh booleans read 4–9 mm³ "added" there.
+TUBED = '''import cadquery as cq
+
+PARAMS = {"L": 400.0, "od": 50.8, "clip_w": 20.0}
+
+
+def _tube(p):
+    return cq.Workplane("YZ").circle(p["od"] / 2).extrude(p["L"]).translate((-p["L"] / 2, 0, 11.7 + p["od"] / 2))
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    out = cq.Workplane().box(p["L"], 100, 12.7, centered=(True, True, False)).union(_tube(p))
+    if p["clip_w"] > 0:
+        clip = cq.Workplane().box(p["clip_w"], p["od"], p["od"] / 2 + 6, centered=(True, True, False)).translate(
+            (0, 0, 11.7 + p["od"] / 2)).cut(_tube(p))
+        out = out.union(clip)
+    return out
+
+
+def construction(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    L, od = p["L"], p["od"]
+    items = [{"name": "plate", "kind": "sheet", "material": "plywood", "thickness": 12.7,
+              "outline": [(-L / 2, -50, 12.7), (L / 2, -50, 12.7), (L / 2, 50, 12.7), (-L / 2, 50, 12.7)]},
+             {"name": "tube", "kind": "stick", "material": "steel", "outer": od, "wall": 1.6,
+              "a": (-L / 2, 0, 11.7 + od / 2), "b": (L / 2, 0, 11.7 + od / 2)}]
+    if p["clip_w"] > 0:
+        items.append({"name": "clip", "kind": "printed", "material": "pla"})
+    return items
+'''
+
+#: clip_w at 0 also cuts 40 mm off the tube's end: taken from the tube, a stick, which only its solid in _prisms sees
+TUBE_CUT = TUBED.replace('''def _tube(p):
+    return cq.Workplane("YZ").circle(p["od"] / 2).extrude(p["L"])''', '''def _tube(p):
+    return cq.Workplane("YZ").circle(p["od"] / 2).extrude(p["L"] if p["clip_w"] > 0 else p["L"] - 40)''')
+
+
+#: the tube resting on the plate, touching it along a line: the build is two solids, a compound
+RESTING = TUBED.replace("11.7 + ", "12.7 + ")
+
+
+@pytest.mark.parametrize("src", [TUBED, RESTING], ids=["sunk into the plate", "resting on it, two solids"])
+def test_a_switch_beside_a_round_tube_is_the_switch(tmp_path, monkeypatch, src):
+    """The re-check's tube: the exact solids read 0.000000 mm³ added where the meshes read 8.77. Two solids are cut by
+    each other's, one by one: cut by the compound whole, all of the plate read as taken."""
+    assert RESTING.count("12.7 + ") == 4
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, src, "tube")
+    assert pieces.off_switch(s, "stool", "clip") == {"param": "clip_w", "value": 0, "unit": "mm"}, pieces.off_why(
+        s, "stool", "clip")
+
+
+@pytest.mark.parametrize("src", [TUBE_CUT, TUBE_CUT.replace("11.7 + ", "12.7 + ")],
+                         ids=["sunk into the plate", "resting on it, two solids"])
+def test_a_number_that_also_cuts_a_stick_isn_t_the_switch(tmp_path, monkeypatch, src):
+    """Resting, the builds are two solids each: cut by the other's compound whole, all of the plate read as taken."""
+    assert TUBE_CUT.count("p[\"L\"] - 40") == 1
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, src, "cut")
+    assert pieces.off_switch(s, "stool", "clip") is None
+    assert pieces.off_why(s, "stool", "clip") == "clip_w turns it off but also changes the tube"
+
+
+@pytest.mark.parametrize("where", ["a mesh that throws", "no solid", "no mesh"])
+def test_a_compare_that_fails_is_never_no_change(tmp_path, monkeypatch, where):
+    """A boolean that throws, or a build with no solid to cut: not compared, so the number isn't offered and the Delete
+    is the designer's, said why."""
+    monkeypatch.setattr(pieces, "_FOUND", {})
+    s = _part(tmp_path, STRIPPED, "fail")
+
+    def broken(*a, **k):
+        raise RuntimeError("the kernel gave up")
+
+    if where == "no solid":
+        monkeypatch.setattr(pieces, "_exact", lambda build: None)
+    elif where == "no mesh":                                  # nothing to place the other pieces' solids by
+        built = pieces._build
+        monkeypatch.setattr(pieces, "_build", lambda *a, **k: {**built(*a, **k), "mesh": None})
+    else:
+        monkeypatch.setattr(pieces, "_meshed", broken)
+    assert pieces.off_switch(s, "stool", "fillet strips") is None
+    assert pieces.off_why(s, "stool", "fillet strips") == "fillet_r turns them off but also its shape couldn't be compared"
+    got = pieces.delete(s, "stool", "fillet strips")
+    assert got["how"] == "designer" and "version" not in got
+
+
+@pytest.mark.parametrize("key", ["inside corner strips", "seat strip"], ids=["gone since the menu opened", "forged"])
+def test_a_key_that_isn_t_one_of_the_part_s_pieces_is_said_never_read_as_words(tmp_path, key):
+    """The re-check's stale key: the words alone asked "Remove which part?", with trash two answers away."""
+    from caliper import chat
+
+    s = _wordy(tmp_path)
+    asked = []
+    got = chat.turn(s, "Remove step_stool.", scope="step_stool", piece=key, use_llm=False, author=_designer(asked),
+                    max_rounds=1)
+    assert got.reply == f"step_stool has no {key} now: nothing was changed." and not asked
+    assert "trash" not in got.reply and s.design.part("step_stool") is not None

@@ -60,15 +60,18 @@ def _build(script: str, values: Optional[dict] = None) -> Optional[dict]:
     except Exception:  # noqa: BLE001 — no mesh to compare: its shape isn't known, said by the caller
         mesh = None
     return {"names": [it.get("name") for it in declared.get("construction") or [] if isinstance(it, dict)],
-            "declared": declared, "mesh": mesh}
+            "declared": declared, "mesh": mesh, "solid": run.geometry.solid}
 
 
 #: Material (mm³) a build at 0 may add, or take from another declared piece, and still have only taken that piece away
-#: (#332 review). Measured exactly (manifold3d booleans, about 5 ms a compare), so the bar is the booleans' own noise: a
-#: true off switch read 0.0000 mm³ added and 0.0000 mm³ taken from another piece on every one tried, step-stool-5's
-#: v010 fillet_r (its curved strips) among them. The smallest real change it must see, a 3 mm rounding of a 3/4 in
-#: sheet's corners, is 147 mm³.
+#: (#332 review). Measured on the exact solids (OCC booleans, 30–40 ms a compare), so the bar is the kernel's own
+#: noise: a true off switch reads 0.000000 mm³, beside a round tube too (#332 re-check: mesh booleans read the tube
+#: re-tessellated as 4–9 mm³ "added"). The smallest real change it must see, a 3 mm rounding of a 3/4 in sheet's
+#: corners, is 147 mm³.
 CHANGE_MM3 = 1.0
+
+#: Couldn't be compared: never read as "no change" (#332 re-check), so the number isn't offered and it's the designer's.
+UNCOMPARED = "its shape couldn't be compared"
 
 
 def _vol(m) -> float:
@@ -122,40 +125,63 @@ def _prisms(shapes: list, mesh, margin: float = 0.5) -> list:
     return out
 
 
+def _exact(build: dict):
+    """A build's solid, as one OCC shape (a Workplane's solids together), or None."""
+    wp = build.get("solid")
+    if wp is None:
+        return None
+    return wp.findSolid() if hasattr(wp, "findSolid") else wp
+
+
+def _meshed(shape):
+    """A small exact solid (what one build has that the other hasn't) as a mesh, for its overlap with the pieces' solids:
+    its own skin's error, never the whole part's."""
+    import trimesh
+
+    vs, fs = shape.tessellate(0.05, 0.1)
+    return trimesh.Trimesh([(v.x, v.y, v.z) for v in vs], fs)
+
+
 def _also(before: dict, after: dict, piece: str) -> Optional[str]:
     """What else the build at 0 changes, in words, or None where it only took ``piece`` away (#332 review): material
-    added anywhere (a corner squared), or taken from inside another declared piece (a sheet thinned). Exact: manifold3d
-    booleans of the two builds, and what was taken against each other piece's solid."""
+    added anywhere (a corner squared), or taken from inside another declared piece (a sheet thinned). Exact: the two
+    builds' solids cut each other (OCC), and what was taken is set against each other piece's solid. Anything that
+    fails on the way is :data:`UNCOMPARED`, never None."""
     import trimesh
 
     from . import consistency
+    from .occt import OCCT
 
-    m0, m1 = before["mesh"], after["mesh"]
-    if m0 is None or m1 is None:
-        return "its shape couldn't be compared"
     try:
-        added = trimesh.boolean.difference([m1, m0], engine="manifold")
-        taken = trimesh.boolean.difference([m0, m1], engine="manifold")
-    except Exception:  # noqa: BLE001 — a mesh manifold won't take: not compared, so never the switch
-        return "its shape couldn't be compared"
-    try:
+        with OCCT:
+            s0, s1 = _exact(before), _exact(after)
+            if s0 is None or s1 is None:
+                return UNCOMPARED
+            # by each of the other's solids: a build of two touching solids (a tube on a plate) comes as a compound, and
+            # cut by the compound whole, all of the plate read as taken
+            added, taken = s1.cut(*s0.Solids()), s0.cut(*s1.Solids())
+            change = [(added if added.Volume() > CHANGE_MM3 else None, False),
+                      (taken if taken.Volume() > CHANGE_MM3 else None, True)]
+            change = [(_meshed(sh) if sh is not None else None, gone) for sh, gone in change]
+        if all(m is None for m, _ in change):
+            return None
         shapes = [sh for sh in consistency.shapes(before["declared"]) if sh["name"] != piece]
-    except ValueError:                           # a piece it can't weigh: no solids to name
-        shapes = []
-    prisms = None
-    for solid, gone in ((added, False), (taken, True)):
-        if _vol(solid) <= CHANGE_MM3:
-            continue
+        prisms = _prisms(shapes, before["mesh"]) if before.get("mesh") is not None else None
         if prisms is None:
-            prisms = _prisms(shapes, m0)
-        into: dict = {}
-        for name, pr in prisms:
-            into[name] = into.get(name, 0.0) + _vol(trimesh.boolean.intersection([solid, pr], engine="manifold"))
-        name, most = max(into.items(), key=lambda kv: kv[1], default=(None, 0.0))
-        if most > CHANGE_MM3:
-            return f"changes the {name}"
-        if not gone:                              # what was taken outside every other piece is the piece itself
-            return "adds to the part where nothing is declared"
+            return UNCOMPARED
+        for solid, gone in change:
+            if solid is None:
+                continue
+            into: dict = {}
+            for name, pr in prisms:
+                into[name] = into.get(name, 0.0) + _vol(trimesh.boolean.intersection([solid, pr], engine="manifold"))
+            name, most = max(into.items(), key=lambda kv: kv[1], default=(None, 0.0))
+            if most > CHANGE_MM3:
+                return f"changes the {name}"
+            if not gone:                          # what was taken outside every other piece is the piece itself
+                return "adds to the part where nothing is declared"
+    except Exception:  # noqa: BLE001 — a boolean, a mesh or a piece it can't read: not compared, so never the switch
+        return UNCOMPARED
     return None
 
 
