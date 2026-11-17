@@ -116,3 +116,80 @@ def test_using_a_station_cuts_its_holes_into_the_part(stool):
     # and lightening it again starts from the holes it has
     again = lighten.study(stool, "stool", steps=(1.0,))
     assert again["stations"][0]["safety"] == pytest.approx(st["safety"], rel=0.15)
+
+
+def test_the_check_of_a_cut_step_reads_as_the_step_did(stool):
+    """#323 (Theo's step-stool-5 v8): Lighten's step 14 read 1.47 standing; the check of the shape it cut read 1.10. The
+    rebuilt holes voxelize a few columns wider than the circles Lighten cut, and the check's ring round them was the
+    circles': the stair-stepped voxels at the real edge counted in the panel's peak. Each case of the check of the cut
+    shape reads within the band the card says, CUT_DRIFT (7%) either way: v8 rebuilt reads 1.67, 1.47 and 7.72 where its
+    step read 1.59, 1.47 and 8.28."""
+    rec = lighten.study(stool, "stool", steps=(1.0,), min_safety=1.3)
+    assert any("the check of the cut part can read up to about 7% either way from its step" in n and
+               '"holds, close: cut it and the check decides"' in n for n in rec["notes"])          # the card's note
+    top = [s for s in rec["stations"] if s["phase"] == "top" and s["holds"] and not s.get("estimate")]
+    st = max(top, key=lambda s: s["top_holes"])
+    lighten.adopt(stool, rec["id"], st["index"])
+    run = load_study.study(stool, "stool", min_safety=1.3)
+    step = {c["name"]: c["safety"] for c in st["cases"]}
+    got = {c["name"]: c["safety"] for c in run["cases"]}
+    assert set(got) == set(step)
+    from caliper import verdicts
+
+    off = {n: (step[n], got[n]) for n in step if abs(got[n] / step[n] - 1) > verdicts.CUT_DRIFT}
+    assert not off, f"step {st['index']} ({st['top_holes']} holes): the check reads off its step by more than the band {off}"
+
+
+def test_the_check_s_ring_is_round_the_holes_its_solve_has(stool, monkeypatch):
+    """#323: the ring left out of a holed panel's peak is round the holes as the solve has them (the panel's voxels
+    filled in but not in the solid), not only round the circles' cells: Theo's v8 voxelized 200 voxels just outside its
+    circles (19.2 to 20.3 mm from their centres, the circles 19.05) and kept 80 inside, and the voxels at that real edge
+    counted in the peak, 8.40 MPa where Lighten's step read 5.61."""
+    from scipy import ndimage
+
+    rec = lighten.study(stool, "stool", steps=(1.0,), min_safety=1.3)
+    st = max((s for s in rec["stations"] if s["phase"] == "top" and s["holds"]), key=lambda s: s["top_holes"])
+    lighten.adopt(stool, rec["id"], st["index"])
+    calls, real = [], lighten._panel_peak
+
+    def spy(p, vm, solid, near, ring=None):
+        calls.append((p, solid, ring))
+        return real(p, vm, solid, near, ring)
+
+    monkeypatch.setattr(lighten, "_panel_peak", spy)
+    covered = lighten._covered                                   # the circles' cells a column off the solve's holes,
+    monkeypatch.setattr(lighten, "_covered", lambda p, polys, s: np.roll(covered(p, polys, s), 1, axis=0))   # as v8's
+    load_study.study(stool, "stool", min_safety=1.3)
+    pairs = [(a, b) for a, b in zip(calls, calls[1:]) if a[2] is None and b[2] is not None and a[0] is b[0]]
+    assert pairs                                                   # judge_holed's: the filled solve's, then the holed
+    for (p, filled, _), (_, solid, ring) in pairs:
+        vx = p["voxels"]
+        gone = np.zeros(filled.shape, bool)
+        m = filled[vx[:, 0], vx[:, 1], vx[:, 2]] & ~solid[vx[:, 0], vx[:, 1], vx[:, 2]]
+        gone[vx[m, 0], vx[m, 1], vx[m, 2]] = True
+        edge = ndimage.binary_dilation(gone, iterations=1) & solid
+        assert m.any() and not (edge & ~ring).any(), int((edge & ~ring).sum())
+        inside = solid[vx[:, 0], vx[:, 1], vx[:, 2]]
+        ringed = ring[vx[:, 0], vx[:, 1], vx[:, 2]] & inside
+        assert ringed.sum() < 0.5 * inside.sum()                   # the rest of the panel is still the FEA's to read
+
+
+
+@pytest.mark.parametrize("safety, holes, estimate, kind", [
+    (1.35, 10, False, "close"),           # within 7% of 1.3: the check of the cut part decides
+    (1.39, 3, False, "close"),
+    (1.40, 3, False, "holds"),            # 1.3 x 1.07 = 1.391
+    (1.35, 0, False, "holds"),            # nothing cut: the part as it is, no drift to allow
+    (1.35, 10, True, "estimate")])        # a thinner sheet stays an estimate
+def test_a_step_within_the_band_of_its_minimum_holds_close_and_the_check_decides(safety, holes, estimate, kind):
+    """#323, the foreman: what Theo hit. A step within CUT_DRIFT of its minimum reads "holds, close: cut it and the check
+    decides", not a plain holds, and the run's note says the band."""
+    from caliper import verdicts
+
+    st = {"index": 14, "holds": True, "safety": safety, "holes": holes, "top_holes": holes, "saved_lb": 1.0,
+          "cases": [], **({"estimate": True} if estimate else {})}
+    v = verdicts.lighten_step(st, None, {"min_safety": 1.3, "kind": "lighten"})
+    assert v["kind"] == kind
+    if kind == "close":
+        assert v["word"] == "holds, close: cut it and the check decides" and v["counts_as_pass"] and v["status"] == "warn"
+    assert verdicts.CUT_DRIFT == 0.07
