@@ -1853,6 +1853,26 @@ def _with_drift(store: DesignStore, result: TurnResult) -> TurnResult:
     return result
 
 
+def _already_as(store: DesignStore, part_id: str, version: int) -> bool:
+    """The part is now as ``version`` was: its script and its loads (#324). A mesh part: never said so (a restore of one is
+    its bytes, read back as they were)."""
+    import yaml
+
+    vdir = store.version_dir(part_id, version)
+    script = os.path.join(vdir, "part.py")
+    if not os.path.exists(script) or not store.is_scripted(part_id):
+        return False
+    with open(script) as f:
+        if f.read() != store.read_script(part_id):
+            return False
+    said = os.path.join(vdir, "scenarios.yaml")
+    then = None
+    if os.path.exists(said):
+        with open(said) as f:
+            then = yaml.safe_load(f)
+    return then == (store.design.scenarios or {}).get(part_id)
+
+
 def revert_part(store: DesignStore, part_id: str, *, to: Optional[int] = None, events=None, on_event=None) -> TurnResult:
     """Roll a part back and re-measure — so the rollback the reply offers is real. ``to``: that version (#299); else
     the last change undone (:func:`undo_target`), never redoing one undone already.
@@ -1884,6 +1904,9 @@ def revert_part(store: DesignStore, part_id: str, *, to: Optional[int] = None, e
         while k > 0 and versions[k] in back:
             k -= 1
         stepped = (_restored_root(store, part_id, versions), versions[k])
+    if to is not None and _already_as(store, part_id, to):   # Go back to this pressed twice (#324): nothing to save
+        return TurnResult(action="revert", ok=False, part=part_id, events=events, error="already",
+                          reply=f"{part_id} is already as v{target} was: nothing to go back to.")
     if target is None:
         first = versions[0]
         return TurnResult(action="revert", ok=False, part=part_id, events=events, error="nothing before it",
@@ -2413,6 +2436,44 @@ def _one_edit(a: str, b: str) -> bool:
     return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
 
 
+def _names_a_piece(store: DesignStore, words: str, scope: Optional[str]) -> bool:
+    """Whether a remove's words name one of a part's declared pieces (#332 review): "the top from step_stool", or "the
+    top" with step_stool selected. A piece's Delete… sends these as a revise of the part; the part remove asked "Remove
+    which part?" and offered to trash step_stool. Every split is tried, the last "from"/"of"/"off"/"on" first (#332
+    review): "the top of the step from step_stool" is the top of the step."""
+    from .tree import pieces
+
+    w = words.strip().rstrip(".!")
+    cuts = [m for m in re.finditer(r"\s+(?:from|of|off|on)\s+(?:the\s+)?", w, re.I)]
+    tries = [(re.sub(r"^the\s+", "", w[:m.start()], flags=re.I), _named_part(store, w[m.end():], scope))
+             for m in reversed(cuts)]
+    if scope:
+        tries.append((re.sub(r"^the\s+", "", w, flags=re.I), scope))
+    norm = lambda t: " ".join(str(t).lower().replace("_", " ").split())  # noqa: E731
+    for piece, pid in tries:
+        if pid is None or store.design.part(pid) is None or not store.is_scripted(pid):
+            continue
+        try:
+            names = {norm(x) for pc in pieces(store, pid) for x in (pc["key"], pc["name"])}
+        except Exception:  # noqa: BLE001 — a part whose pieces can't be read names none here
+            continue
+        if norm(piece) in names:
+            return True
+    return False
+
+
+def _a_piece_of(store: DesignStore, piece: Optional[str], scope: Optional[str]) -> bool:
+    """Whether ``piece`` is the key of one of the selected part's declared pieces (the page's Delete…, #332 review)."""
+    from .tree import pieces
+
+    if not piece or not scope or store.design.part(scope) is None or not store.is_scripted(scope):
+        return False
+    try:
+        return any(pc["key"] == piece for pc in pieces(store, scope))
+    except Exception:  # noqa: BLE001 — pieces it can't read: the words are read, as ever
+        return False
+
+
 def _remove_target(store: DesignStore, words: str, scope: Optional[str]):
     """The part a remove names (#287): exactly (:func:`_named_part`); or closely, its words in any order, one letter
     astray or an underscore stray, the selected one where several are close. A list of the parts to ask between where
@@ -2422,6 +2483,8 @@ def _remove_target(store: DesignStore, words: str, scope: Optional[str]):
     pid = _named_part(store, words, scope)
     if pid is not None:
         return pid
+    if _names_a_piece(store, words, scope):          # a piece of a part: its revise, the designer's (#332 review)
+        return None
     ids = [p.id for p in store.design.parts]
     w = _words_of(words)
     if not w:
@@ -2738,7 +2801,7 @@ def _grain_reply(got: dict) -> TurnResult:
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
          use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
          on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False,
-         pick: Optional[dict] = None, typed: Optional[str] = None) -> TurnResult:
+         pick: Optional[dict] = None, typed: Optional[str] = None, piece: Optional[str] = None) -> TurnResult:
     """One conversational turn: route the message, make the move, measure the whole design, reply.
 
     ``scope`` is the part the user clicked (``None`` = the design). ``author``/``classifier``/
@@ -2772,11 +2835,22 @@ def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, autho
             _emit(events, on_event, "done", result.action, ok=result.ok, part=result.part)
             return result
 
-    # what Caliper's own last question waits for (#98): a short go-ahead or no answers it, with no LLM
-    said = _awaited(store, typed, scope, author=author, client=client, max_rounds=max_rounds, events=events,
-                    on_event=on_event, use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
-    if said is None:
-        said = _remove_or_restore(store, typed, scope, events=events, on_event=on_event)
+    # a piece's Delete… (#332 review): the page sends its key, so it's its part's revise, the designer's, whatever its
+    # words would read as; a key that isn't one of the part's pieces is said. A question waiting lapses either way
+    said = None
+    if piece:
+        from . import awaiting
+
+        awaiting.clear(store)
+        if not _a_piece_of(store, piece, scope):  # gone since the menu opened, or never one: said, never the words (#332)
+            said = TurnResult(action="ask", ok=False, part=scope, events=events,
+                              reply=f"{scope or 'the part'} has no {piece} now: nothing was changed.")
+    else:
+        # what Caliper's own last question waits for (#98): a short go-ahead or no answers it, with no LLM
+        said = _awaited(store, typed, scope, author=author, client=client, max_rounds=max_rounds, events=events,
+                        on_event=on_event, use_llm=use_llm, drafter=drafter, promote_feedback=promote_feedback)
+        if said is None:
+            said = _remove_or_restore(store, typed, scope, events=events, on_event=on_event)
     if said is not None:
         if not logged:
             store.append_log({"kind": "message", "text": message, "scope": scope, "action": said.action,

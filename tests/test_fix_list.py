@@ -45,9 +45,11 @@ def test_v6_s_unsized_strips_are_one_choice_and_its_joints_a_known_limit(tmp_pat
     (row,) = got["rows"]
     assert row["id"] == "unsized" and row["measured"]
     assert row["problem"] == "The inside corner fillet strips aren't checked: their size isn't declared"
-    assert [c["fix"] for c in row["choices"]] == ["Remove the inside corner fillet strips",
-                                                 "Give the inside corner fillet strips a declared size"]
-    assert {c["kind"] for c in row["choices"]} == {"designer"}
+    assert [c["fix"] for c in row["choices"]] == [                                  # Theo's three ways out (#324)
+        "They're trim, not holding anything up: declare the inside corner fillet strips trim",
+        "Give the inside corner fillet strips their size: a declared section, in mm",
+        "Remove the inside corner fillet strips"]
+    assert {c["kind"] for c in row["choices"]} == {"designer"}                       # no number turns them off here
     assert row["choices"][0]["cost"] == "a designer edit on the stool (one Claude call)"
     assert got["limits"] == ["Its joints aren't checked: the check takes its 4 joints as solid wood"]
 
@@ -485,3 +487,39 @@ def test_only_the_joint_that_gives_first_says_so(tmp_path):
         "The joint between the side back and the stretcher gives first under a foot: three #8 screws pulled out of the "
         f"stretcher's edge; under 0.1× where it needs {NEED}×")                     # the card's "under 0.1"
     assert rows["joint:side front|top"]["problem"].startswith("The joint between the top and the side front gives too under")
+
+
+def test_unsized_strips_a_number_turns_off_are_removed_by_it_at_once(tmp_path):
+    """#324, Theo's step_stool: fillet_r = 0 skips its strips, so Remove them is a number change, no Claude."""
+    from .test_piece_delete import STRIPPED
+
+    from caliper import pieces
+
+    store = _store(tmp_path, STRIPPED, "stool")
+    _check(store, "stool", 2.15, thinnest=19.05, spacing=4.76, unsized=["fillet strips"],
+           unseen=[{"mm": None, "piece": "fillet strips"}])
+    pieces.off_switch(store, "stool", "fillet strips")      # its Delete… built it (#332: Things to fix never does)
+    (row,) = [r for r in _list(store)["rows"] if r["id"] == "unsized"]
+    rm = row["choices"][2]
+    assert (rm["fix"], rm["kind"], rm["param"], rm["value"]) == ("Remove the fillet strips: fillet_r to 0", "number",
+                                                                 "fillet_r", 0)
+    assert [c["kind"] for c in row["choices"][:2]] == ["designer", "designer"]
+
+
+def test_things_to_fix_never_builds_to_find_a_number_and_says_the_designer_s_way_till_one_is_known(tmp_path, monkeypatch):
+    """#332 review: the off switch's builds took 37–110 s on step_stool, and Things to fix asks on every open."""
+    from caliper import pieces
+
+    from .test_piece_delete import STRIPPED
+
+    store = _store(tmp_path, STRIPPED, "stool")
+    _check(store, "stool", 2.15, thinnest=19.05, spacing=4.76, unsized=["fillet strips"],
+           unseen=[{"mm": None, "piece": "fillet strips"}])
+    monkeypatch.setattr(pieces, "_FOUND", {})
+
+    def built(*a, **k):
+        raise AssertionError("built")
+
+    monkeypatch.setattr(pieces, "_build", built)
+    (row,) = [r for r in _list(store)["rows"] if r["id"] == "unsized"]
+    assert (row["choices"][2]["fix"], row["choices"][2]["kind"]) == ("Remove the fillet strips", "designer")

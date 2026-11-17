@@ -373,8 +373,12 @@ const LONG_PRESS_MS = 550;
 function menuItems(design, pid, piece) {
   const p = (design.parts || []).find((x) => x.id === pid);
   if (!p) return [];
-  if (piece != null) return [{ id: 'rename', label: 'Rename…' }, { id: 'only', label: 'Show only this' }, { id: 'ask', label: 'Ask about this' }];
   const t = seen(), study = {};
+  if (piece != null) {                         // a piece: Delete… and Hide too (#324: the fillet strips v6 brought back)
+    return [{ id: 'deletePiece', label: 'Delete…' }, { id: 'rename', label: 'Rename…' },
+      { id: 'hide', label: t.pieces.has(pieceId(pid, piece)) ? 'Show' : 'Hide' }, { id: 'only', label: 'Show only this' },
+      { id: 'ask', label: 'Ask about this' }];
+  }
   (((design.studies || {}).menu || {})[pid] || []).forEach((m) => { study[m.kind] = m; });
   const items = [{ id: 'delete', label: 'Delete…' }];
   if (p.role !== 'fixed') items.push({ id: 'rename', label: 'Rename…' });
@@ -415,6 +419,26 @@ function confirmHtml(pid, said, mirroredBy) {    // the page's own confirm, neve
   return `<div class="pmenu-said">${esc(said || `Delete ${pid}? It goes to the design's trash; you can put it back.`)}</div>
     <div class="pmenu-row"><button role="menuitem" class="danger" data-menu="deleteYes">Delete</button>
       <button role="menuitem" data-menu="keep">Keep it</button></div>`;
+}
+function pieceConfirmHtml(plan) {               // Delete… on a piece: what it takes, said before it's done (#324)
+  return `<div class="pmenu-said">${esc(plan.said)}</div>
+    <div class="pmenu-row"><button role="menuitem" class="danger" data-menu="deletePieceYes">Delete</button>
+      <button role="menuitem" data-menu="keep">Keep it</button></div>`;
+}
+async function deletePiece(pid, piece, plan) {   // by its number, built first to be sure; else the designer's revise, by the piece's key (#332)
+  if (plan.how !== 'number') { closeMenu(); return send(`Remove the ${plan.name} from ${pid}.`, pid, null, null, null, piece); }
+  try {
+    const got = await api('POST', `/api/designs/${S.slug}/parts/${pid}/pieces/${encodeURIComponent(piece)}/delete`);
+    if (got.how === 'designer') {                   // built, it does more than take the piece away: said, and asked again
+      if (S.menu) S.menu.plan = got;
+      return menuConfirm(pieceConfirmHtml(got));
+    }
+    closeMenu();
+    S.design = got.design;
+    render();
+    say(got.said);
+    await syncParts(S.design, false);
+  } catch (e) { closeMenu(); showErr(plainly(e.message)); }
 }
 function openMenu(pid, piece, x, y, from) {
   closeMenu(false);
@@ -476,6 +500,12 @@ async function menuDo(id) {
   if (!m) return;
   const { pid, piece } = m, t = seen();
   if (id === 'delete') return menuConfirm(confirmHtml(pid));
+  if (id === 'deletePiece') {                  // asks what it takes first: a number that turns it off, or the designer
+    try { m.plan = await api('GET', `/api/designs/${S.slug}/parts/${pid}/pieces/${encodeURIComponent(piece)}/delete`); }
+    catch (e) { closeMenu(); return showErr(plainly(e.message)); }
+    return menuConfirm(pieceConfirmHtml(m.plan));
+  }
+  if (id === 'deletePieceYes') return deletePiece(pid, piece, m.plan);
   if (id === 'versions') return menuConfirm(versionsHtml(S.design.parts.find((x) => x.id === pid)));   // ▸ (#299)
   if (id === 'keep') return closeMenu();
   if (id === 'deleteYes' || id === 'deleteBoth') return deletePart(pid, id === 'deleteBoth' ? m.mirroredBy || [] : []);
@@ -492,7 +522,7 @@ async function menuDo(id) {
     t.rename = { part: pid, key: piece, draft: pc ? pc.name : (p.label || p.name || p.id) };
     return renderTree();
   }
-  if (id === 'hide') return toggleHidden(pid, null);
+  if (id === 'hide') return toggleHidden(pid, piece ?? null);
   if (id === 'only') return showOnly(pid, piece);
   if (id === 'all') { t.parts = new Set(); t.pieces = new Set(); keepTree(); renderTree(); paint(); return; }
   if (id === 'ask') return setScope(pid, piece);
@@ -1597,14 +1627,14 @@ function aboutPiece(text) {
   const piece = pieceInScope();
   return piece ? `About the ${piece.name}: ${text}` : text;
 }
-async function send(text, scope, pick, shown, typed) {
+async function send(text, scope, pick, shown, typed, piece) {
   if (S.busy || S.opening || !text.trim()) return;      // never to a design that isn't on screen yet (#173)
   if (!S.slug) return createDesign(text);
   S.busy = true; $('send').disabled = true;
   const sent = S.pick;                          // the pick this message is about: one made while it's answered isn't it
   const live = liveTurn(shown || text, scope);
   try {
-    const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}), ...(shown ? { shown } : {}), ...(typed ? { typed } : {}) });
+    const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}), ...(shown ? { shown } : {}), ...(typed ? { typed } : {}), ...(piece != null ? { piece } : {}) });
     await follow(job_id, (ev) => live.step(ev));
     S.busy = false;
     if (shown && S.pick === sent) clearPick();                     // it's been used; after an error it stays, so asking again doesn't mean picking again
@@ -3853,7 +3883,7 @@ function loadCase(p, run, c, i) {
   })() : '';
   return `<div class="card loadcase ${on ? 'on' : ''}" style="margin-top:8px">
       <div><b>${esc(c.name)}</b> <span class="muted small">${lbs(c.lb)} × ${c.factor}</span> ${holds}</div>
-      ${c.blind ? `<div class="small" style="margin-top:2px">The check couldn't see any stress here: the piece under the load may be too thin for its voxels, the load's patch may be smaller than the voxels, or the load may go straight into what holds it.</div>`
+      ${c.blind ? `<div class="small" style="margin-top:2px">${c.rests ? `Not resolved: ${esc(c.rests.said)}.` : 'The check couldn\'t see any stress here: the piece under the load may be too thin for its voxels, the load\'s patch may be smaller than the voxels, or the load may go straight into what holds it.'}</div>`
       : c.unresolved && c.verdict && c.verdict.kind !== 'fails' && (c.verdict.why || (c.governs && c.governs !== 'fea'))
         ? `<div class="small" style="margin-top:2px">${caseWhy(c, run, false)} <span class="muted">(it needs ${run.min_safety}x)</span></div>`
       : c.unresolved ? `<div class="small" style="margin-top:2px">The FEA read ${sx(c.safety, run.min_safety)}
@@ -4222,7 +4252,7 @@ async function showHeat(pid, run, index) {
     bar.innerHTML = `<div><div><b>${esc(c.name)}</b> · ${lbs(c.lb)} × ${c.factor} →
         ${partOf(pid).untrusted ? `<b style="color:var(--bad)">${notTrusted(partOf(pid).untrusted)}</b>`
           : c.verdict && (c.verdict.kind === 'unresolved' || c.verdict.kind === 'unchecked')   // no "holds" (CALI-110)
-            ? `<b style="color:var(--amber)">${c.blind ? 'not resolved: the check couldn\'t see any stress here' : `${caseWhy(c, run)}`}</b>`
+            ? `<b style="color:var(--amber)">${c.blind ? (c.rests ? `not resolved: ${esc(c.rests.said)}` : 'not resolved: the check couldn\'t see any stress here') : `${caseWhy(c, run)}`}</b>`
             : c.verdict && c.verdict.kind === 'edge'     // the middle only (CALI-94): no "holds" where people stand
               ? `<b style="color:var(--amber)">middle only: the middle read ${sx(c.safety, run.min_safety)}; the front edge, where people stand, isn't checked</b>`
             : settled(c.verdict)           // the verdict's word and colour (CALI-112): never green unless it holds
@@ -4709,13 +4739,18 @@ async function showVersion(pid, v) {
   } catch (e) { showErr(plainly(e.message)); }
 }
 async function goBackTo(pid, v) {
+  const once = `goback:${S.slug}/${pid}`;        // pressed twice saved two versions (#324): taken once, its buttons off
+  if (S.running[once]) return;
+  S.running[once] = true;
+  document.querySelectorAll('[data-goback-v]').forEach((b) => { b.disabled = true; });
   try {
     const got = await api('POST', `/api/designs/${S.slug}/parts/${pid}/restore`, { version: v });
     clearStation();
     S.design = got.design;
     render();
     await syncParts(S.design, false);
-  } catch (e) { showErr(plainly(e.message)); }
+  } catch (e) { showErr(plainly(e.message)); } finally { delete S.running[once];
+    document.querySelectorAll('[data-goback-v]').forEach((b) => { b.disabled = false; }); }
 }
 document.addEventListener('click', (e) => {     // the history's buttons, and the preview bar's
   const pv = e.target.closest('[data-preview-v]'), gb = e.target.closest('[data-goback-v]');
