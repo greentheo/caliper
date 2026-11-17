@@ -809,10 +809,10 @@ RING = [np.array([100.0, 0.0, 0.0]), np.array([-100.0, 0.0, 0.0]), np.array([0.0
 
 
 def test_a_ring_of_short_supports_isn_t_split_half_each_way():
-    """Four posts at ±100, the load at (90, 0): half each way reads the near one at 0.475, where statics needs 0.9 or more."""
-    with pytest.raises(JC.NotChain) as e:
-        JC._lever(RING, np.array([90.0, 0.0, 0.0]), "pairs", spans=[(20.0, 200.0)] * 4)
-    assert e.value.why == "its supports are short, so how the load splits isn't simple"
+    """Four posts at ±100, the load at (90, 0): half each way read the near one at 0.475. #311 left them not checked;
+    #316 shares them by the rigid-top rule (tests/test_posts.py): the far one let go, the near one 0.9."""
+    got = JC._lever(RING, np.array([90.0, 0.0, 0.0]), "pairs", spans=[(20.0, 200.0)] * 4)
+    assert got == pytest.approx([0.9, 0.0, 0.05, 0.05]) and got[0] != pytest.approx(0.475)
 
 
 def test_supports_running_most_of_the_way_across_still_pair():

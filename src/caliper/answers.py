@@ -687,6 +687,10 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         except Exception as e:  # noqa: BLE001 — said, never a crash of the card
             work.append(_line(f"Tipping: not checked ({scrubbed(e)}).", "warn", study="tip"))
             missing = []
+        latest = next((r for r in state.get("load_runs") or [] if r["part"] == pid and r.get("version") == p["version"]), None)
+        if latest and any(r.get("between", "").endswith(", as a column") for c in latest.get("cases") or []
+                          for r in (c.get("joints") or {}).get("rows") or []):
+            missing = [m for m in missing if m != tipping.LEGS_BUCKLING]     # its legs checked as columns (#316)
         if missing:                             # a seat's cases nobody checked, said (#86 item 3)
             work.append(_line("Not checked yet for a seat: " + "; ".join(missing) + ".", "warn", study="tip"))
     frames = [r for r in state.get("frame_runs") or [] if r["part"] == pid]
