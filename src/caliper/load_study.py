@@ -506,6 +506,22 @@ def governing_words(case: dict) -> str:
     return f"the {piece.replace('_', ' ')}'s {governs} check" if piece else f"the {governs} check"
 
 
+def weak_link(case: dict) -> Optional[str]:
+    """What gives first in a case, by the check that governs it (#329): the panel its plate check fails, the wall that
+    folds, the joint ("joint between the top and the left"), and the FEA's piece only where the FEA governs. None
+    where the governing check names none."""
+    governs = case.get("governs", "fea")
+    if governs == "plate":
+        return (case.get("plate") or {}).get("piece")
+    if governs == "joint":
+        g = (case.get("joints") or {}).get("governing") or {}
+        return f"joint between {g['between']}" if g.get("between") else None
+    if governs == "buckling":
+        done = [r for r in case.get("buckling") or [] if r.get("done")]
+        return min(done, key=lambda r: r["safety"])["piece"] if done else None
+    return (case.get("fea") or {}).get("in")
+
+
 def unchecked(run: dict, case: dict) -> bool:
     """Unresolved, and no run a study may make is fine enough to resolve it: not checked (CALI-97)."""
     return unresolved(run, case) and not run.get("finer")
@@ -1937,7 +1953,7 @@ def already_fails(store: DesignStore, part_id: str) -> Optional[str]:
     was offered and run on the bar stool at 0.53x; carving only takes material away). In words, "it already fails
     (0.53x, in the cone around z 15.3 in): make it hold first", or None."""
     from . import verdicts
-    from .answers import _times, worst_at
+    from .answers import _times, fails_where
 
     rec = default_check(store, part_id)
     if rec is None:
@@ -1947,7 +1963,7 @@ def already_fails(store: DesignStore, part_id: str) -> Optional[str]:
         return None
     worst = min((c for c in rec.get("cases") or [] if c.get("safety") is not None), key=lambda c: c["safety"],
                 default=None)
-    where, _ = worst_at(rec, worst, store.design.display_units == "in") if worst else ("", None)
+    where = fails_where(rec, worst, store.design.display_units == "in") if worst else ""   # what fails, never the FEA's spot (#329)
     times = _times(rec["safety"], need=rec.get("min_safety")) if rec.get("safety") is not None else "as checked"
     if v.get("coarse") or (worst is not None and unresolved(rec, worst)):      # as the strength line says it (#139)
         return (f"its check says it fails ({times}, a coarse run: the fail may be the model's"

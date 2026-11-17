@@ -202,8 +202,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
                 capped = capped or at_most
                 span = span or L.fixed_ends({"min_safety": min_safety}, case)                  # no ✓ on an FEA alone between its holds (CALI-153)
                 if case.get("safety") is not None and (worst is None or case["safety"] < worst):
-                    worst, weak = case["safety"], (case.get("plate") or {}).get("piece") if case["governs"] == "plate" \
-                        else case["fea"].get("in")
+                    worst, weak = case["safety"], L.weak_link(case)    # what its governing check fails (#329)
                 if r.supported:                                    # the printed part's own: what the carve changes
                     judged = r.solid & ~wood & ~ndimage.binary_dilation(ctx["attach"], iterations=1)
                     worked = float((r.von_mises[judged] / printed_strength).max()) if judged.any() else 0.0
