@@ -307,7 +307,9 @@ def put(store: DesignStore, part_id: str, shape, *, subject: str = "picture", wh
         raise ValueError(f"there isn't room on the {panel['name']} for a {subject} a jigsaw can cut")
     min_safety = min_safety or firstrun._min_safety(store)
     script = store.read_script(part_id)
-    has_loads = "def loads(" in script
+    from .scenarios import says_loads
+
+    has_loads = says_loads(store, part_id, script)          # a case kept in the editor is one too (#337 review)
     checked, predicted, shrunk = has_loads and strength, None, 0
     if checked:
         emit("step", "Checking it still holds with the picture cut out", step="check")

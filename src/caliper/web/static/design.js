@@ -3368,11 +3368,23 @@ function supportRow(s, i) {
       <input data-f="lo" value="${xyz(s.lo)}" style="width:12em"> to <input data-f="hi" value="${xyz(s.hi)}" style="width:12em"> mm
       <button class="ghost" data-sup-del="${i}">Remove</button></div>`;
 }
+// the first case added to a part whose script says none: across the whole top of its box, 2 mm deep, so it rests on whatever
+// is highest (a roof, or an open box's wall tops) and the first save works; the person narrows it from there (#337 review: a
+// 10 mm box at the origin pushed on thin air, 453.6 mm from the cargo box)
+function newLoadBox(p) {
+  const b = p && p.bbox;
+  if (!b || !b.min || !b.max) return { lo: [0, 0, 0], hi: [10, 10, 10] };
+  const r = (v) => Math.round(v * 10) / 10;
+  return { lo: [r(b.min[0]), r(b.min[1]), r(b.max[2] - 2)], hi: [r(b.max[0]), r(b.max[1]), r(b.max[2])] };
+}
 function scenariosView(p, got) {
   if (!got) return '<div class="small muted">reading them…</div>';
-  return `${got.overridden ? '<div class="small">Yours where you edited them; the rest as its script says them, now and as it changes.</div>'
-      : !got.scenarios.some((s) => s.source === 'script')    // none of them its script's: none, or added here (#327)
-        ? `<div class="small">Its script doesn't say what it must hold: ${got.scenarios.length ? 'save yours to keep them' : 'add a scenario'}.</div>`
+  // none of them its script's: none, or added here (#327), saved or not (#337 review: saved, it read "…the rest as its
+  // script says them" where its script says none)
+  const none = !got.scenarios.some((s) => s.source === 'script');
+  return `${none ? `<div class="small">Its script doesn't say what it must hold: ${!got.scenarios.length ? 'add a scenario'
+        : got.overridden ? 'these are yours, and what it\'s checked against' : 'save yours to keep them'}.</div>`
+      : got.overridden ? '<div class="small">Yours where you edited them; the rest as its script says them, now and as it changes.</div>'
       : '<div class="small muted">As its script says them. Edit and save to keep yours instead.</div>'}
     ${got.scenarios.map(scenarioRow).join('')}
     <div class="actions"><button class="ghost" id="scenAdd">Add a scenario</button></div>
@@ -3446,8 +3458,9 @@ function wireScenarioRows(p) {
   });
   const add = $('scenAdd');
   if (add) add.onclick = () => { keep(); const last = S.scen[p.id].scenarios.slice(-1)[0] || {};
+    const box = last.lo ? { lo: last.lo, hi: last.hi } : newLoadBox(p);
     S.scen[p.id].scenarios.push({ name: 'a new load', amount: 50, unit: 'lb', direction: [0, 0, -1], factor: 1, on: true,
-      lo: last.lo || [0, 0, 0], hi: last.hi || [10, 10, 10] }); repaint(); };
+      lo: box.lo, hi: box.hi }); repaint(); };
   const sAdd = $('supAdd');
   if (sAdd) sAdd.onclick = () => { keep(); S.scen[p.id].supports.push({ name: 'held here', lo: [0, 0, 0], hi: [10, 10, 10] }); repaint(); };
   const floor = $('supFloor');

@@ -33,6 +33,7 @@ from . import one_study
 from .design import DesignStore
 from .jobs import Cancelled
 from . import verdicts
+from .scenarios import says_loads
 
 GOALS = "scorecard.yaml"
 LB = 0.224809                      # lbf per N
@@ -441,8 +442,8 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     loads_said = []                   # each part's loads turned off, or with a question open: on the check shown (#312)
     asked_any = False
     for p in store.design.parts:
-        if not store.is_scripted(p.id) or "def loads(" not in store.read_script(p.id):
-            continue
+        if not store.is_scripted(p.id) or not says_loads(store, p.id):     # its script's loads(), or a case kept in
+            continue                                                         # the editor (#337 review)
         loaded = True
         # a stored run of this version, unless it's one from before CALI-152 sitting on its limit (#214 review)
         usable = lambda r: r.get("version") == p.version and not verdicts.needs_recheck(r)  # noqa: E731
@@ -540,14 +541,14 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
     from .consistency import filled
 
     untrue = next((why for p in store.design.parts if store.is_scripted(p.id)
-                   and "def loads(" in store.read_script(p.id) for why in [filled(store, p.id)] if why), None)
+                   and says_loads(store, p.id) for why in [filled(store, p.id)] if why), None)
     if untrue is None and ran_filled:                  # the run of this version says so itself (#70)
         untrue = load_study.FILLED_NOTE
     # loaded in the middle only, where a two-sided top is strongest: no pass from it (CALI-94, #106 review)
     from .consistency import MIDDLE_ONLY, bare_edge
 
     edgeless = next((why for p in store.design.parts if store.is_scripted(p.id)
-                     and "def loads(" in store.read_script(p.id) for why in [bare_edge(store, p.id)] if why), None)
+                     and says_loads(store, p.id) for why in [bare_edge(store, p.id)] if why), None)
 
     # CALI-113 (#115): a part that says what it must hold is held to it, goal or none. A design made without goals
     # (no key, an older one, a hand-made scorecard.yaml) released "ready to cut" on a strength ✗.
