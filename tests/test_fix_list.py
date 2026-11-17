@@ -183,7 +183,7 @@ def test_the_route_lists_them(tmp_path, monkeypatch):
 def _page(extra):
     from .test_carve_click import _page as page, _run
 
-    return _run(page(["fixesView", "fixRow"], consts=["esc", "fixRowKey"], extra=extra))
+    return _run(page(["fixesView", "fixRow", "fixGo", "fixTicked"], consts=["esc", "fixRowKey"], extra=extra))
 
 
 ROWS = {"part": "stool", "rows": [
@@ -339,10 +339,11 @@ def test_a_finding_that_wasn_t_measured_is_no_row(tmp_path, monkeypatch):
     assert _list(store)["rows"] == []
 
 
-def test_the_page_keys_the_list_by_design_and_part_and_clears_it_for_another_design():
+def test_the_page_keys_the_list_by_design_and_part_and_clears_it_for_another_design_but_not_your_rows():
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     assert "const fixKey = (part) => `${S.slug}/${part}`;" in src
-    assert "if (first) { S.fixes = {}; S.fixMine = {}; S.fixOpen = null; }" in src
+    assert "if (first) { S.fixes = {}; S.fixOpen = null; }" in src                 # your own rows kept per design (#318)
+    assert "S.fixMine = {}" not in src
     assert "S.fixes[part]" not in src and "S.fixMine[part]" not in src
     assert "const fixRowKey = (r) => `${r.id}|${r.problem}`;" in src                 # a new number is a new row
 
@@ -487,6 +488,58 @@ def test_only_the_joint_that_gives_first_says_so(tmp_path):
         "The joint between the side back and the stretcher gives first under a foot: three #8 screws pulled out of the "
         f"stretcher's edge; under 0.1× where it needs {NEED}×")                     # the card's "under 0.1"
     assert rows["joint:side front|top"]["problem"].startswith("The joint between the top and the side front gives too under")
+
+
+def test_a_joint_weakest_where_a_panel_governs_never_says_it_gives_first(tmp_path):
+    """#318: "gives first" only where a joint governs the case; where the plate or the FEA does, the weakest joint."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 1.2, governs="plate")
+    run = _run(store)
+    weakest = {"pieces": ["side back", "stretcher"], "between": "the side back and the stretcher", "mode": "withdrawal",
+               "safety": 1.4, "need": 2.0, "holds": False, "said": "three #8 screws pulled out of the stretcher's edge"}
+    other = {"pieces": ["side front", "top"], "between": "the top and the side front", "mode": "shear", "safety": 1.6,
+             "need": 2.0, "holds": False, "said": "three #8 screws in shear into the top's edge"}
+    run["cases"][0].update(governs="plate", joints={"chain": True, "n": 4, "unchecked": [], "governing": weakest,
+                                                    "rows": [weakest, other]})
+    _resave(store, run)
+    rows = _by_id(_list(store))
+    assert rows["joint:side back|stretcher"]["problem"].startswith(
+        "The joint between the side back and the stretcher is the weakest joint under a foot: ")
+    assert rows["joint:side front|top"]["problem"].startswith("The joint between the top and the side front gives too under")
+    assert not any("gives first" in r["problem"] for r in rows.values())
+
+
+def test_a_row_of_your_own_loads_is_badged_so_and_an_open_question_starts_unticked(tmp_path):
+    """#318: the person's own loads aren't a measurement; an untouched question never settles itself."""
+    from caliper import scenarios as S
+
+    from .test_scenarios import RAISED, RATED
+
+    store = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", RATED, intent="a step stool")
+    got = S.get(store, "stool")
+    S.put(store, "stool", [{**got["scenarios"][0], "amount": 260}, {**got["scenarios"][1], "on": False}], got["supports"])
+    store.write_part("stool", RAISED, intent="heavier")
+    rows = _by_id(_list(store))
+    q, off = rows["asked:stepping on the front edge"], rows["off:its rating (EN 14183, 150 kg)"]
+    assert (q["measured"], q["badge"], q["ticked"]) == (False, "your loads", False)
+    assert (off["measured"], off["badge"]) == (False, "your loads") and off.get("ticked", True) is True
+
+
+def test_a_joint_failing_in_two_cases_is_one_row_speaking_for_both(tmp_path):
+    """#322 review: Fix these reads a row's cases to say whether it's fixed, so a joint's row names each it gives in."""
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 1.4)
+    run = _run(store)
+    weak = {"pieces": ["front rail", "left side"], "between": "the front rail and the left side", "mode": "withdrawal",
+            "safety": 1.4, "need": 2.0, "holds": False, "said": "two #8 screws pulled out of the front rail's edge"}
+    run["cases"][0].update(governs="joint", joints={"chain": True, "n": 1, "unchecked": [], "governing": weak,
+                                                    "rows": [weak]})
+    run["cases"].append({**run["cases"][0], "name": "a hand"})
+    _resave(store, run)
+    (row,) = _list(store)["rows"]
+    assert (row["id"], row["cases"], row["what"]) == ("joint:front rail|left side", ["a foot", "a hand"],
+                                                      "the joint between the front rail and the left side")
 
 
 def test_unsized_strips_a_number_turns_off_are_removed_by_it_at_once(tmp_path):

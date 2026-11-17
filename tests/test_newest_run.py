@@ -206,8 +206,8 @@ def test_the_page_s_blocked_carve_and_lighten_hedge_on_a_coarse_run():
                    "first, then carve",
              "Its check says it fails (0.5 times over, a coarse run: the fail may be the model's): make it hold first, "
              "then lighten it"),
-            (False, "it already fails (0.5 times over): make it hold first, then carve",
-             "It already fails (0.5 times over): make it hold first, then lighten it")):
+            (False, "it already fails (0.5 times over, by the plate check): make it hold first, then carve",   # (#329)
+             "It already fails (0.5 times over, by the plate check): make it hold first, then lighten it")):
         check = {"version": 7, "seconds": 60, "spacing_mm": 4.6, "safety": 0.53, "min_safety": 2,
                  "thinnest_mm": 4.0 if coarse else 19.0, "across": 4.0 / 4.6 if coarse else 19.0 / 4.6,
                  "cases": [fea if coarse else {**fea, "governs": "plate"}]}

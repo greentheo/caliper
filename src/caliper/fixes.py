@@ -51,6 +51,12 @@ def _row(rid: str, problem: str, choices: list[dict], part: str) -> dict:
     return {"id": rid, "problem": problem, "choices": choices, "part": part, "measured": True}
 
 
+def _spoke(row: dict, cases, what: str) -> dict:
+    """A check-made row with the cases it speaks for and what it's of, in words (#322 review): Fix these calls it fixed
+    only where those cases pass in a fresh check, or no new row speaks for any of them."""
+    return {**row, "cases": list(dict.fromkeys(cases)), "what": what}
+
+
 def _removed(store: DesignStore, pid: str, names: list[str], these: str, name: str) -> dict:
     """Remove them (#324): a number change where one number turns every one of them off, built to be sure (step_stool's
     ``fillet_r``: 0 skips its strips; a ``fillet_gap`` that only shares the name doesn't), else the designer's. Only what
@@ -194,10 +200,11 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
     for pick in better._sheet_picks(run, fails=True):     # a panel the plate check fails: the thinnest that holds
         on = [c for c, _ in failing if (c.get("plate") or {}).get("piece") == pick["piece"]]
         covered |= {c["name"] for c in on}
-        rows.append(_row(f"plate:{pick['piece']}", f"The {pick['piece']} fails by the plate check: "
-                                                  f"{_x(pick['now_safety'], need)} where it needs {need:g}×"
-                                                  + note(c["name"] for c in on),
-                         thicker(pick["piece"], pick["t_mm"], pick["label"], pick["label_now"]), pid))
+        rows.append(_spoke(_row(f"plate:{pick['piece']}", f"The {pick['piece']} fails by the plate check: "
+                                                         f"{_x(pick['now_safety'], need)} where it needs {need:g}×"
+                                                         + note(c["name"] for c in on),
+                                thicker(pick["piece"], pick["t_mm"], pick["label"], pick["label_now"]), pid),
+                           [c["name"] for c in on], f"the {pick['piece']}"))
     panels: dict = {}
     for c, _ in failing:                        # a panel the plate check fails that no stock sheet clears
         pl = c.get("plate") or {}
@@ -210,9 +217,11 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
         common = sorted(set.intersection(*(set(t) for t in tables))) if tables else []
         thickest = (f": the thickest, {tables[0][common[-1]]['label']}, is "
                     f"{_x(min(tb[common[-1]]['safety_across'] for tb in tables), need)}") if common else ""
-        rows.append(_row(f"plate:{piece}", f"The {piece} fails by the plate check: {_x(min(c['safety'] for c in on), need)} "
-                                           f"where it needs {need:g}×; no stock sheet clears it{thickest}"
-                                           + note(c["name"] for c in on), otherwise(piece), pid))
+        rows.append(_spoke(_row(f"plate:{piece}", f"The {piece} fails by the plate check: "
+                                                  f"{_x(min(c['safety'] for c in on), need)} "
+                                                  f"where it needs {need:g}×; no stock sheet clears it{thickest}"
+                                                  + note(c["name"] for c in on), otherwise(piece), pid),
+                           [c["name"] for c in on], f"the {piece}"))
     for c, v in failing:
         if c["name"] in covered or c.get("governs") != "buckling":
             continue
@@ -239,7 +248,7 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
                         f"{_x(b['safety'] * (top / b['thickness_mm']) ** 3, need)}")
             choices = [_choice(f"Brace the {b['piece']}", DESIGNER, _designer_cost(name)),
                        _choice("Ask it to hold less: a lighter load in its loads()", DESIGNER, _designer_cost(name))]
-        rows.append(_row(rid, problem + note([c["name"]]), choices, pid))
+        rows.append(_spoke(_row(rid, problem + note([c["name"]]), choices, pid), [c["name"]], f"the {b['piece']}"))
     for c, v in said:                           # a joint that gives first (#301): its own row, its fix by how it gives
         J = c.get("joints") or {}
         for jr in J.get("rows") or []:
@@ -248,13 +257,18 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
             if v["kind"] == "fails" and c.get("governs") == "joint":
                 covered.add(c["name"])
             rid = f"joint:{'|'.join(jr['pieces'])}"
-            if any(r["id"] == rid for r in rows):
+            had = next((r for r in rows if r["id"] == rid), None)
+            if had is not None:                  # one row a joint: each case it gives in, spoken for
+                had["cases"] = list(dict.fromkeys((had.get("cases") or []) + [c["name"]]))
                 continue
-            first = (J.get("governing") or {}).get("pieces") == jr["pieces"]     # "gives first" is the governing one's
-            rows.append(_row(rid, f"The joint between {jr['between']} {'gives first' if first else 'gives too'} under "
-                                  f"{c['name']}: {jr['said']}; "
-                                  f"{_x(jr['safety'], need)} where it needs {need:g}×" + note([c["name"]]),
-                             _joint_choices(jr, name), pid))
+            first = (J.get("governing") or {}).get("pieces") == jr["pieces"]
+            # "gives first" only where a joint governs the case; where a panel or the FEA does, the weakest joint (#318)
+            verb = ("gives first under" if first and c.get("governs") == "joint" else
+                    "is the weakest joint under" if first else "gives too under")
+            rows.append(_spoke(_row(rid, f"The joint between {jr['between']} {verb} "
+                                         f"{c['name']}: {jr['said']}; "
+                                         f"{_x(jr['safety'], need)} where it needs {need:g}×" + note([c["name"]]),
+                                    _joint_choices(jr, name), pid), [c["name"]], f"the joint between {jr['between']}"))
         if any(jr.get("said") == _racking() for jr in J.get("rows") or []):
             from .answers import RACKING
 
@@ -264,11 +278,12 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
             continue
         fea = L.judged_by(run, c) == "fea"          # "works hardest in" is the FEA's to say (#318 re-check)
         where = (c.get("fea") or {}).get("in") if fea else None
-        rows.append(_row(f"fails:{c['name']}", f"It doesn't hold {c['name']}: {_x(c['safety'], need)} where it needs {need:g}×"
+        rows.append(_spoke(_row(f"fails:{c['name']}", f"It doesn't hold {c['name']}: {_x(c['safety'], need)} where it needs {need:g}×"
                                               + (f"; it works hardest in the {where}" if where else "") + note([c["name"]]),
                          [_choice(f"Make the {where} stronger: thicker, or with a rib or a brace" if where
                                   else "Make it stronger where it fails", DESIGNER, _designer_cost(name)),
-                          _choice("Ask it to hold less: a lighter load in its loads()", DESIGNER, _designer_cost(name))], pid))
+                          _choice("Ask it to hold less: a lighter load in its loads()", DESIGNER, _designer_cost(name))], pid),
+                           [c["name"]], f"'{c['name']}'"))
     for c, v in said:                           # what Caliper can't fix by itself: said apart, never ticked
         b = verdicts.wood_brace(run, c)          # joints #311 didn't reach, as the card reads them (#318 re-check)
         if b:
@@ -345,11 +360,13 @@ def _scenario_rows(store: DesignStore, pid: str) -> list[dict]:
             choices = ([_choice("Take the design's", LOADS, LOADS_COST, scenario=e["of"], take="design")]
                        if e.get("design") else [])
             choices.append(_choice("Keep mine", LOADS, LOADS_COST, scenario=e["of"], take="mine"))
-            out.append(_row(f"asked:{e['of']}", q[:1].upper() + q[1:], choices, pid))
+            out.append({**_row(f"asked:{e['of']}", q[:1].upper() + q[1:], choices, pid), "measured": False,
+                        "badge": "your loads", "ticked": False})        # never settles itself untouched (#318)
         elif not e["row"].get("on", True):
             nm = SC.name(e["row"])
-            out.append(_row(f"off:{e.get('of') or nm}", f"'{nm}' is turned off, so nothing checks it",
-                            [_choice("Turn it back on", LOADS, LOADS_COST, scenario=e.get("of") or nm, take="on")], pid))
+            out.append({**_row(f"off:{e.get('of') or nm}", f"'{nm}' is turned off, so nothing checks it",
+                               [_choice("Turn it back on", LOADS, LOADS_COST, scenario=e.get("of") or nm, take="on")], pid),
+                        "measured": False, "badge": "your loads"})       # the person's own edit, not a measurement
     return out
 
 
@@ -362,11 +379,12 @@ def _finding_rows(store: DesignStore, pid: str, name: str) -> list[dict]:
     except Exception:  # noqa: BLE001 — the list goes without them, and says nothing it didn't measure
         return []
     out = []
-    for i, f in enumerate(found.get("findings") or []):
+    for f in found.get("findings") or []:
         if pid not in (f.get("parts") or []) or not f.get("measured"):
             continue
         said = f["said"][:1].upper() + f["said"][1:]
-        out.append(_row(f"finding:{f.get('kind')}:{f.get('id') or i}", said,
+        # by what it is, never its place in the list: one fixed moves the rest up (#300 slice B: it read "fixed")
+        out.append(_row(f"finding:{f.get('kind')}:{f.get('id') or f['said']}", said,
                         [_choice(f["fix"].rstrip("."), DESIGNER, _designer_cost(name))], pid))
     return out
 
@@ -381,9 +399,9 @@ def listed(store: DesignStore, state: dict, pid: str, *, findings: bool = True) 
     if p.get("role") == "fixed" or not store.is_scripted(pid):
         return {"part": pid, "rows": [], "limits": []}
     name = _part_name(p)
-    rows = [_row(f"rule:{i}", f"It breaks its rule {r['said']}",
+    rows = [_row(f"rule:{r.get('id') or r.get('expr') or r['said']}", f"It breaks its rule {r['said']}",
                  [_choice(f"Make it keep its rule {r['said']}", DESIGNER, _designer_cost(name))], pid)
-            for i, r in enumerate(part_rules.failing(p.get("rules") or []))]
+            for r in part_rules.failing(p.get("rules") or [])]      # by the rule's own id, never its place (#322)
     limits: list[str] = []
     runs = [r for r in state.get("load_runs") or [] if r["part"] == pid]
     if runs:
