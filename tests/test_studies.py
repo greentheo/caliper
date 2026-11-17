@@ -165,7 +165,7 @@ def test_the_menu_follows_the_chain_it_builds_it_holds_then_lighten_and_the_cut_
     assert all(not first[k]["ready"] and first[k]["why"] == "check it holds first" for k in ("lighten", "aero", "cutplan"))
     fails = m(stool, {"ok": False, "safety": 1.1, "need": 1.3})
     assert fails["load"]["ready"]
-    assert fails["lighten"]["why"] == "it doesn't pass its loads yet: 1.10 where it needs 1.3"
+    assert fails["lighten"]["why"] == "it doesn't pass its loads yet: 1.1 where it needs 1.3"   # cut, as the card (#331)
     assert not fails["cutplan"]["ready"] and not fails["aero"]["ready"]
     for check in ({"ok": True, "safety": 2.15, "need": 1.3}, {"ok": None, "safety": 2.15, "need": 1.3}):
         got = m(stool, check)
@@ -184,6 +184,6 @@ def test_the_index_gives_the_menu_the_check_of_the_part_as_it_is(tmp_path):
     run = {"id": "L1", "part": "stool", "created": 300, "version": 2, "holds": False, "min_safety": 1.3,
            "safety": 1.1, "cases": [{"name": "standing on the top", "safety": 1.1, "holds": False}]}
     menu = {x["kind"]: x for x in studies.index(s, {"load": [run]}, parts)["menu"]["stool"]}
-    assert menu["lighten"]["why"] == "it doesn't pass its loads yet: 1.10 where it needs 1.3"
+    assert menu["lighten"]["why"] == "it doesn't pass its loads yet: 1.1 where it needs 1.3"   # cut, as the card (#331)
     older = {x["kind"]: x for x in studies.index(s, {"load": [{**run, "version": 1}]}, parts)["menu"]["stool"]}
     assert older["lighten"]["why"] == "check it holds first"         # an older version's check isn't the part as it is

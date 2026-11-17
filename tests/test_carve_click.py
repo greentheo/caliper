@@ -298,8 +298,8 @@ def _fn(src: str, name: str) -> str:
 def test_the_cards_redraw_while_the_shop_plan_is_loading():
     """The page error on Theo's run: makingView read m.data while its fetch was still out."""
     src = open(JS).read()
-    script = _fn(src, "makingView") + """
-const S = { making: {}, shopKey: 0 };
+    script = _fn(src, "makingView") + _fn(src, "makingKey") + """
+const S = { slug: 's', making: {}, shopKey: 0 };
 const esc = (s) => String(s);
 let asked = 0;
 function loadMaking(p, key) { asked += 1; S.making[p.id] = { key, loading: true }; }

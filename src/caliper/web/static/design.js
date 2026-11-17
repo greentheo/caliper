@@ -2178,20 +2178,36 @@ function fixesView(got, mine) {
 }
 // Things to fix as a section of Will it work? (#325): its mark and its count once its list is read
 function fixesSection(part) {
-  const got = S.fixes && S.fixes[fixKey(part)], fresh = got && got.v === fixVersion(part);
+  const got = S.fixes && S.fixes[fixKey(part)], fresh = got && got.v === fixStamp(part);
   const n = fresh ? (got.rows || []).length : null;
-  return { k: 'fix', title: 'Things to fix', tone: n == null ? 'info' : n ? 'warn' : 'ok',
-    answer: n == null ? 'measured, with what each would take' : n ? `${n} measured wrong` : 'nothing measured wrong',
+  const unchecked = n === 0 && !fixChecked(part);     // an empty list with nothing measured isn't a ✓ (#331 review)
+  return { k: 'fix', title: 'Things to fix', tone: n == null || unchecked ? 'info' : n ? 'warn' : 'ok',
+    answer: n == null ? 'measured, with what each would take' : unchecked ? 'not checked yet' : n ? `${n} measured wrong`
+      : 'nothing measured wrong',
     attrs: ` id="fixBox" data-fix-part="${esc(part)}"`,
     body: `<div id="fixBody">${fresh ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div>` };
 }
 function fixVersion(part) { return ((S.design.parts.find((p) => p.id === part)) || {}).version; }
+// what the list was read against (#331 review): the part's version and its newest strength check, so a check of the same
+// version reads it again
+function fixStamp(part) {
+  const ids = loadRuns(part).map((r) => r.id).sort();
+  return `${fixVersion(part)}|${ids.length ? ids[ids.length - 1] : ''}`;
+}
+function fixChecked(part) {
+  const v = fixVersion(part);
+  return loadRuns(part).some((r) => r.version === v);
+}
 async function loadFixes(part) {
   S.fixes = S.fixes || {};
-  const v = fixVersion(part), k = fixKey(part);
+  const v = fixStamp(part), k = fixKey(part);
+  S.fixReading = S.fixReading || {};
+  if (S.fixReading[k] === v) return;                // already asked, for this stamp
+  S.fixReading[k] = v;
   let got;
   try { got = { ...(await api('GET', `/api/designs/${S.slug}/parts/${part}/fixes`)), v }; }
   catch (e) { got = { rows: [], limits: [], error: plainly(e.message), v }; }
+  if (S.fixReading[k] === v) delete S.fixReading[k];
   if (k !== fixKey(part)) return;                 // another design opened while it asked
   S.fixes[k] = got;
   paintFixes(part);
@@ -2210,9 +2226,11 @@ function wireFixes() {
   if (!box) return;
   const part = box.dataset.fixPart;
   // of this design (its key) and this version only
-  const fresh = () => { const got = S.fixes && S.fixes[fixKey(part)]; return !!got && got.v === fixVersion(part); };
+  const fresh = () => { const got = S.fixes && S.fixes[fixKey(part)]; return !!got && got.v === fixStamp(part); };
   box.ontoggle = () => { S.fixOpen = box.open ? fixKey(part) : null; if (box.open) { if (fresh()) paintFixes(part); else loadFixes(part); } };
-  if (box.open) { if (fresh()) wireFixRows(part); else loadFixes(part); }
+  // its header's mark shows closed too: read the list again once a check lands, open or not (#331 review)
+  if (!fresh()) loadFixes(part);
+  else if (box.open) wireFixRows(part);
 }
 function wireFixRows(part) {
   const mine = fixMine(part), body = $('fixBody');
@@ -2818,9 +2836,11 @@ function partActions(p) {
   ].filter(Boolean);
   const buttons = acts.map(([kind, id, label, again]) => {
     const m = menu[kind] || { ready: true, why: '' };
-    const running = kind === 'carve' && S.carveJob[carveKey(p.id)];
+    // a job of this part's running says so on its button (#331 review: Theo asked for "Lightening…")
+    const running = kind === 'carve' ? S.carveJob[carveKey(p.id)]
+      : ((S.design.running || []).find((r) => r.part === p.id && r.kind === kind));
     const off = !m.ready ? ` aria-disabled="true" data-why="${esc(m.why)}" title="${esc(`Not yet: ${m.why}`)}"` : '';
-    return `<button class="small${m.ready ? '' : ' off'}" id="${id}"${again}${off}${running ? ' disabled' : ''}>${label}</button>`;
+    return `<button class="small${m.ready ? '' : ' off'}" id="${id}"${again}${off}${running ? ' disabled' : ''}>${running ? ({ load: 'Checking…', lighten: 'Lightening…', carve: 'Carving…' })[kind] || label : label}</button>`;
   }).join('');
   return `<div class="pacts" role="toolbar" aria-label="What to do with it" id="pacts">${buttons}</div>
     <div class="small muted pacts-why" id="pactsWhy" aria-live="polite"></div>`;
@@ -2893,10 +2913,9 @@ function partView(p) {
       body: `<div id="whittleBox">${whittleView(p)}</div>` }]);
   const buy = p.built ? ssecs('buy', [{ k: 'stock', title: 'Built from <span class="badge">weight &amp; shopping list</span>', tone: 'info',
     answer: 'the stock and what to buy', body: `<div id="buildBox">${buildView(p)}</div>` }]) : '';
-  const cut = cutplanRun(p), shop = S.making[p.id] && S.making[p.id].data;
+  const cut = cutplanRun(p);
   const make = p.built ? ssecs('make', [
-    { k: 'shop', title: 'Made in your shop', tone: shop ? (shop.ok ? 'ok' : 'bad') : 'info',
-      answer: shop ? (shop.ok ? 'all of it' : 'not all of it') : 'planning…', body: `<div id="makingBox">${makingView(p)}</div>` },
+    makingSection(p),
     { k: 'patterns', title: 'Patterns for hand tools', tone: 'info', answer: 'every flat piece, full size',
       body: `<div id="patternBox">${patternView(p)}</div>` },
     { k: 'cutplan', title: 'Cut plan', tone: cut && cut.version != null && cut.version !== p.version ? 'warn' : 'info',
@@ -3088,8 +3107,19 @@ function builtResults(p, c) {
 }
 
 // made in your shop (CALI-48): what cuts each piece, printed parts fitted to the printer, and what's missing
+// its plan's key (#331 review): this design's, this version's, this shop's. Without the design, another design's plan
+// for a part of the same name and version stood in for this one's
+function makingKey(p) {
+  return `${S.slug}:${p.id}:${p.version}:${S.shopKey || 0}`;
+}
+function makingSection(p) {                     // its header: only this plan's answer; one that doesn't build can't be planned
+  const m = S.making[p.id], shop = m && m.key === makingKey(p) ? m.data : null, cant = !!shop && shop.ok == null;
+  return { k: 'shop', title: 'Made in your shop', tone: shop && !cant ? (shop.ok ? 'ok' : 'bad') : 'info',
+    answer: !shop ? 'planning…' : cant ? "can't plan it: it doesn't build" : shop.ok ? 'all of it' : 'not all of it',
+    body: `<div id="makingBox">${makingView(p)}</div>` };
+}
 function makingView(p) {
-  const key = `${p.id}:${p.version}:${S.shopKey || 0}`;
+  const key = makingKey(p);
   const m = S.making[p.id];
   const planning = '<h5 style="margin:14px 0 4px">Made in your shop</h5><div class="small muted">planning…</div>';
   if (!m || m.key !== key) { loadMaking(p, key); return planning; }
@@ -3111,7 +3141,11 @@ async function loadMaking(p, key) {
   try { S.making[p.id] = { key, data: await api('GET', `/api/designs/${S.slug}/parts/${p.id}/making`) }; }
   catch (e) { S.making[p.id] = { key, error: e.message }; }
   const box = $('makingBox');
-  if (box && S.scope === p.id) { box.innerHTML = makingView(p); wireMaking(); }
+  if (!box || S.scope !== p.id || key !== makingKey(p)) return;    // another part or design on screen by now
+  box.innerHTML = makingView(p); wireMaking();
+  const sec = box.closest('details'), head = sec && sec.querySelector('summary'), x = makingSection(p);
+  if (head) head.innerHTML = subHead(x);           // its header, drawn before its plan came back (#331 review)
+  if (sec) { sec.className = sec.className.replace(/\bt-\w+/, `t-${x.tone}`); sec.classList.toggle('attn', ATTN(x.tone)); }
 }
 function wireMaking() {
   document.querySelectorAll('#inspector .openShop').forEach((a) => { a.onclick = (e) => { e.preventDefault(); openShop(); }; });
@@ -3311,16 +3345,18 @@ function wireCutplan(p) {
   document.querySelectorAll('[data-preview]').forEach((b) => { b.onclick = () => previewStep(b); });
   const go = $('cpGo');
   if (!go) return;
+  // where its section has no progress line (cut plans can't be made here), what it says goes under the buttons: a
+  // click never throws and leaves the button dead (#331 review)
+  const say = (html, text) => { const pr = $('cpProgress'), w = $('pactsWhy'); if (pr) pr.innerHTML = html; else if (w) w.textContent = text; };
   go.onclick = async () => {
-    const prog = $('cpProgress');
     go.disabled = true;
-    prog.innerHTML = '<div class="small muted" id="cpMsg">unfolding…</div>';
+    say('<div class="small muted" id="cpMsg">unfolding…</div>', 'unfolding…');
     try {
       const { job_id } = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/cutplan`);
       await follow(job_id, (ev) => { const m = $('cpMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
       await refresh();
     } catch (e) {
-      prog.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`;
+      say(`<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`, `⚠ ${e.message}`);
       go.disabled = false;
     }
   };

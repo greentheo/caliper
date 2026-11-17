@@ -190,17 +190,18 @@ def test_lighten_carve_and_things_to_fix_are_sections_of_will_it_work():
     assert "lightenView(p)" not in load and "carveView(p)" not in load
     assert "fixesBox" not in src and "return qlines(c);" in _fn(src, "cardLines")
     part = _fn(src, "partView")
-    for k in ("result", "lighten", "carve", "trial", "aero", "size", "rules", "history", "adv", "stock", "shop", "patterns",
+    for k in ("result", "lighten", "carve", "trial", "aero", "size", "rules", "history", "adv", "stock", "patterns",
               "cutplan"):
         assert f"k: '{k}'" in part, k
-    assert "fixesSection(p.id)" in part
+    assert "fixesSection(p.id)" in part and "makingSection(p)" in part and "k: 'shop'" in _fn(src, "makingSection")
     got = _run(_page(["fixesSection"], consts=["ATTN"], extra="""
-const esc = (s) => String(s), fixKey = (p) => 's/' + p, fixVersion = () => 3, fixMine = () => ({}), fixesView = () => 'LIST';
+const esc = (s) => String(s), fixKey = (p) => 's/' + p, fixMine = () => ({}), fixesView = () => 'LIST';
+const fixStamp = () => '3|R1', fixChecked = () => true;     // the version and its newest check (#331 review)
 const S = { fixes: {} };
 const none = fixesSection('stool');
-S.fixes['s/stool'] = { v: 3, rows: [{}, {}] }; const two = fixesSection('stool');
-S.fixes['s/stool'] = { v: 3, rows: [] }; const zero = fixesSection('stool');
-S.fixes['s/stool'] = { v: 2, rows: [{}] }; const old = fixesSection('stool');
+S.fixes['s/stool'] = { v: '3|R1', rows: [{}, {}] }; const two = fixesSection('stool');
+S.fixes['s/stool'] = { v: '3|R1', rows: [] }; const zero = fixesSection('stool');
+S.fixes['s/stool'] = { v: '2|R0', rows: [{}] }; const old = fixesSection('stool');
 out = { none, two, zero, old };"""))
     assert (got["none"]["tone"], got["none"]["answer"]) == ("info", "measured, with what each would take")
     assert (got["two"]["tone"], got["two"]["answer"]) == ("warn", "2 measured wrong") and "LIST" in got["two"]["body"]
