@@ -458,7 +458,8 @@ def unseen(run: dict, case: dict) -> str:
         names = run["unsized"]
         many = len(names) > 1 or names[0].rstrip().endswith("s")
         return (f"the {' and the '.join(names)} {'are' if many else 'is'}n't checked: {'their' if many else 'its'} size "
-                f"isn't declared")
+                f"isn't declared: say {'they' if many else 'it'}'{'re' if many else 's'} trim, give "
+                f"{'their' if many else 'its'} size, or remove {'them' if many else 'it'} (Things to fix has each)")
     fea = case.get("fea") or {}
     if judged_by(run, case) in FEA or fea.get("supported") is not True or fea.get("safety") is None:
         return ""

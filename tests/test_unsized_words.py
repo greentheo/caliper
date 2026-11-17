@@ -110,10 +110,12 @@ def test_lighten_s_lead_is_the_unsized_line(monkeypatch):
     from caliper import studies
 
     run = _unsized_run()
-    assert L.unseen_lead(run) == ("The inside corner fillet strips aren't checked: their size isn't declared. Lighten leaves "
-                                  "them out and cuts only the sheets.")
+    assert L.unseen_lead(run) == ("The inside corner fillet strips aren't checked: their size isn't declared: say they're "
+                                  "trim, give their size, or remove them (Things to fix has each). Lighten leaves them out "
+                                  "and cuts only the sheets.")
     assert L.unseen_lead({**run, "unsized": ["fillet strip"], "unseen": [{"mm": None, "piece": "fillet strip"}]}) == (
-        "The fillet strip isn't checked: its size isn't declared. Lighten leaves it out and cuts only the sheets.")
+        "The fillet strip isn't checked: its size isn't declared: say it's trim, give its size, or remove it (Things to fix "
+        "has each). Lighten leaves it out and cuts only the sheets.")
     assert L.unseen_lead({"unseen": []}) == ""
     monkeypatch.setattr(studies, "made_of", lambda store, pid: {"study": "lighten"})
     monkeypatch.setattr(L, "_blocked", lambda store, pid: {"why": "unresolved", "lighten": "x", "carve": "y"})
