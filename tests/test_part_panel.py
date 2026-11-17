@@ -75,7 +75,7 @@ const p = { id: 'stool', study: 'lighten', built: true, loads: true, role: 'mova
 
 
 def test_the_actions_are_small_buttons_in_the_chain_s_order_greyed_with_the_menu_s_reason():
-    html = _run(_page(["partActions"], extra=BAR + "out = partActions(p);"))
+    html = _run(_page(["partActions", "runningLabel"], extra=BAR + "out = partActions(p);"))
     order = [html.index(f'id="{i}"') for i in ("lGo", "lightGo", "cpGo")]
     assert order == sorted(order) and 'id="carveGo"' not in html and 'id="aGo"' not in html   # its study, in air only
     assert '>Check it again<' in html
@@ -86,7 +86,7 @@ def test_the_actions_are_small_buttons_in_the_chain_s_order_greyed_with_the_menu
 
 
 def test_a_running_carve_shows_on_its_button():
-    html = _run(_page(["partActions"], extra=BAR + """
+    html = _run(_page(["partActions", "runningLabel"], extra=BAR + """
 S.design.studies.menu.stool[2] = { kind: 'carve', ready: true, why: '' }; p.study = 'carve';
 S.carveJob.stool = { job: 'j1' };
 out = partActions(p);"""))
@@ -194,7 +194,7 @@ def test_lighten_carve_and_things_to_fix_are_sections_of_will_it_work():
               "cutplan"):
         assert f"k: '{k}'" in part, k
     assert "fixesSection(p.id)" in part and "makingSection(p)" in part and "k: 'shop'" in _fn(src, "makingSection")
-    got = _run(_page(["fixesSection"], consts=["ATTN"], extra="""
+    got = _run(_page(["fixesSection", "fixFresh"], consts=["ATTN"], extra="""
 const esc = (s) => String(s), fixKey = (p) => 's/' + p, fixMine = () => ({}), fixesView = () => 'LIST';
 const fixStamp = () => '3|R1', fixChecked = () => true;     // the version and its newest check (#331 review)
 const S = { fixes: {} };

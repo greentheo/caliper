@@ -51,6 +51,7 @@ async function api(method, url, body) {
     let msg = `HTTP ${r.status}`, errorId = '';
     try { const j = await r.json(); msg = j.detail || j.error || msg; errorId = j.error_id || ''; } catch (e) { /* not JSON */ }
     const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    err.status = r.status;                       // what kind of no it was: a 422 is the part's (#331 review)
     if (errorId) { err.errorId = errorId; (window.__errIds = window.__errIds || {})[err.message] = errorId; }   // a crash the server kept (CALI-59)
     // a 409 is a refusal the server meant, not a bug: it shows as a plain line with no Report it (#70 item 24)
     if (r.status === 409) { err.refused = true; (window.__refused = window.__refused || {})[err.message] = true; }
@@ -2208,14 +2209,20 @@ function fixesView(got, mine) {
 }
 // Things to fix as a section of Will it work? (#325): its mark and its count once its list is read
 function fixesSection(part) {
-  const got = S.fixes && S.fixes[fixKey(part)], fresh = got && got.v === fixStamp(part);
+  const got = S.fixes && S.fixes[fixKey(part)], fresh = fixFresh(part), failed = !!got && got.error != null;
   const n = fresh ? (got.rows || []).length : null;
   const unchecked = n === 0 && !fixChecked(part);     // an empty list with nothing measured isn't a ✓ (#331 review)
   return { k: 'fix', title: 'Things to fix', tone: n == null || unchecked ? 'info' : n ? 'warn' : 'ok',
-    answer: n == null ? 'measured, with what each would take' : unchecked ? 'not checked yet' : n ? `${n} measured wrong`
-      : 'nothing measured wrong',
+    answer: failed ? "couldn't read them" : n == null ? 'measured, with what each would take' : unchecked ? 'not checked yet'
+      : n ? `${n} measured wrong` : 'nothing measured wrong',
     attrs: ` id="fixBox" data-fix-part="${esc(part)}"`,
-    body: `<div id="fixBody">${fresh ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div>` };
+    body: `<div id="fixBody">${fresh || failed ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div>` };
+}
+// this design's list, read for this version and its newest check, and read: a failed read is never fresh, so the next
+// draw reads it again (#331 review: a 500 from /fixes stored an empty list under the stamp and read ✓)
+function fixFresh(part) {
+  const got = S.fixes && S.fixes[fixKey(part)];
+  return !!got && got.v === fixStamp(part) && got.error == null;
 }
 function fixVersion(part) { return ((S.design.parts.find((p) => p.id === part)) || {}).version; }
 // what the list was read against (#331 review): the part's version and its newest strength check, so a check of the same
@@ -2256,7 +2263,7 @@ function wireFixes() {
   if (!box) return;
   const part = box.dataset.fixPart;
   // of this design (its key) and this version only
-  const fresh = () => { const got = S.fixes && S.fixes[fixKey(part)]; return !!got && got.v === fixStamp(part); };
+  const fresh = () => fixFresh(part);
   box.ontoggle = () => { S.fixOpen = box.open ? fixKey(part) : null; if (box.open) { if (fresh()) paintFixes(part); else loadFixes(part); } };
   // its header's mark shows closed too: read the list again once a check lands, open or not (#331 review)
   if (!fresh()) loadFixes(part);
@@ -2870,7 +2877,7 @@ function partActions(p) {
     const running = kind === 'carve' ? S.carveJob[carveKey(p.id)]
       : ((S.design.running || []).find((r) => r.part === p.id && r.kind === kind));
     const off = !m.ready ? ` aria-disabled="true" data-why="${esc(m.why)}" title="${esc(`Not yet: ${m.why}`)}"` : '';
-    return `<button class="small${m.ready ? '' : ' off'}" id="${id}"${again}${off}${running ? ' disabled' : ''}>${running ? ({ load: 'Checking…', lighten: 'Lightening…', carve: 'Carving…' })[kind] || label : label}</button>`;
+    return `<button class="small${m.ready ? '' : ' off'}" id="${id}"${again}${off}${running ? ' disabled' : ''}>${running ? runningLabel(kind) || label : label}</button>`;
   }).join('');
   return `<div class="pacts" role="toolbar" aria-label="What to do with it" id="pacts">${buttons}</div>
     <div class="small muted pacts-why" id="pactsWhy" aria-live="polite"></div>`;
@@ -2949,7 +2956,7 @@ function partView(p) {
     { k: 'patterns', title: 'Patterns for hand tools', tone: 'info', answer: 'every flat piece, full size',
       body: `<div id="patternBox">${patternView(p)}</div>` },
     { k: 'cutplan', title: 'Cut plan', tone: cut && cut.version != null && cut.version !== p.version ? 'warn' : 'info',
-      answer: !cut ? 'not made yet' : cut.version != null && cut.version !== p.version ? `of v${cut.version}: the part has changed since`
+      answer: !cut ? (S.design.cutplan_unavailable ? 'not here' : 'not made yet') : cut.version != null && cut.version !== p.version ? `of v${cut.version}: the part has changed since`
         : 'the sheets laid out flat', body: `<div id="cutplanBox">${cutplanView(p)}</div>` }]) : '';
   // the heading is the part's own name; its id and how it was made are one click down, under Advanced (#70 item 21);
   // its actions beside it, its numbers under it, then the four questions (#325)
@@ -3142,10 +3149,14 @@ function builtResults(p, c) {
 function makingKey(p) {
   return `${S.slug}:${p.id}:${p.version}:${S.shopKey || 0}`;
 }
-function makingSection(p) {                     // its header: only this plan's answer; one that doesn't build can't be planned
-  const m = S.making[p.id], shop = m && m.key === makingKey(p) ? m.data : null, cant = !!shop && shop.ok == null;
-  return { k: 'shop', title: 'Made in your shop', tone: shop && !cant ? (shop.ok ? 'ok' : 'bad') : 'info',
-    answer: !shop ? 'planning…' : cant ? "can't plan it: it doesn't build" : shop.ok ? 'all of it' : 'not all of it',
+// its header: only this plan's answer. The route answers a part that doesn't build with a 422, never a plan (#331
+// review: the broken-build copy read "planning…" over its error); any other failed read says so, never ✓ or ✗
+function makingSection(p) {
+  const m = S.making[p.id], mine = m && m.key === makingKey(p) ? m : null, shop = mine && mine.data;
+  const failed = !!mine && !shop && mine.error != null;
+  return { k: 'shop', title: 'Made in your shop', tone: shop ? (shop.ok ? 'ok' : 'bad') : 'info',
+    answer: shop ? (shop.ok ? 'all of it' : 'not all of it') : !failed ? 'planning…'
+      : mine.status === 422 ? "can't plan it: it doesn't build" : "couldn't plan it",
     body: `<div id="makingBox">${makingView(p)}</div>` };
 }
 function makingView(p) {
@@ -3169,7 +3180,7 @@ function makingView(p) {
 async function loadMaking(p, key) {
   S.making[p.id] = { key, loading: true };
   try { S.making[p.id] = { key, data: await api('GET', `/api/designs/${S.slug}/parts/${p.id}/making`) }; }
-  catch (e) { S.making[p.id] = { key, error: e.message }; }
+  catch (e) { S.making[p.id] = { key, error: e.message, status: e.status }; }
   const box = $('makingBox');
   if (!box || S.scope !== p.id || key !== makingKey(p)) return;    // another part or design on screen by now
   box.innerHTML = makingView(p); wireMaking();
@@ -4294,10 +4305,22 @@ function syncRunning() {
 }
 function jobPart(id) { return (((S.design && S.design.parts) || []).find((p) => p.id === id) || {}).name || id; }
 // what a job turned off, and only that, it turns back on: what was off for its own reasons stays off
-function jobOff(b) {
+// a job's button while it runs: off, and its words say so where it has some ("Lightening…"), in the tab that started it
+// too (#331 review: "Lighten it" stayed, disabled, through 16 s of steps); jobOn gives both back
+function jobOff(b, label) {
   if (!b.disabled) b.dataset.jobOff = '1';
   b.disabled = true;
   b.title = 'It\'s running now';
+  if (label && b.dataset.jobLabel == null && b.dataset.jobOff) { b.dataset.jobLabel = b.textContent; b.textContent = label; }
+}
+function jobOn(b) {
+  b.disabled = false;
+  b.title = '';
+  delete b.dataset.jobOff;
+  if (b.dataset.jobLabel != null) { b.textContent = b.dataset.jobLabel; delete b.dataset.jobLabel; }
+}
+function runningLabel(kind) {
+  return ({ load: 'Checking…', lighten: 'Lightening…', carve: 'Carving…' })[kind] || '';
 }
 function jobHtml(t, named) {
   const pct = typeof t.progress === 'number' ? Math.round(t.progress * 100) : null;
@@ -4318,13 +4341,13 @@ function paintJobs() {
   const note = $('jobNote');
   if (!note) return;
   const lines = [];
-  document.querySelectorAll('#inspector [data-job-off]').forEach((b) => { b.disabled = false; b.title = ''; delete b.dataset.jobOff; });
+  document.querySelectorAll('#inspector [data-job-off]').forEach(jobOn);
   for (const t of jobsHere()) {
     const here = t.kind === 'release' || S.scope === t.part, panel = here ? $(JOB_BOX[t.kind]) : null;
     const box = panel && panel.closest && panel.closest('details:not([open]), [hidden]') ? null : panel;   // folded away isn't on screen
     if (box) { box.innerHTML = jobHtml(t, false); box.dataset.job = t.job; } else lines.push(jobHtml(t, true));
     const go = here && $(JOB_GO[t.kind]);
-    if (go) jobOff(go);
+    if (go) jobOff(go, runningLabel(t.kind));
     if (t.kind === 'load' && here && $('lFiner')) jobOff($('lFiner'));
     document.querySelectorAll(`#inspector [data-better-action="${t.kind}"][data-better-part="${t.part}"]`).forEach(jobOff);
   }

@@ -8,6 +8,8 @@
 
 import os
 
+import pytest
+
 from caliper import studies
 
 from .test_carve_click import _fn, _page, _run
@@ -32,7 +34,7 @@ function mark(runs, rows, stamp) {
 
 
 def _fix(body):
-    return _run(_page(["fixesSection", "fixStamp", "fixChecked", "fixesView"],
+    return _run(_page(["fixesSection", "fixFresh", "fixStamp", "fixChecked", "fixesView"],
                       consts=["fixKey"], extra=FIX + body))
 
 
@@ -58,9 +60,10 @@ def test_things_to_fix_read_before_the_newest_check_isn_t_its_mark():
 
 
 def test_things_to_fix_reads_its_list_again_when_a_check_lands_open_or_not():
-    fn = _fn(open(JS).read(), "wireFixes")
-    assert "if (!fresh()) loadFixes(part);" in fn and "getFixes" not in fn
-    assert "got.v === fixStamp(part)" in fn                             # its stamp: the version and the newest check
+    src = open(JS).read()
+    fn = _fn(src, "wireFixes")
+    assert "if (!fresh()) loadFixes(part);" in fn and "getFixes" not in fn and "fixFresh(part)" in fn
+    assert "got.v === fixStamp(part)" in _fn(src, "fixFresh")          # its stamp: the version and the newest check
 
 
 SHOP = """
@@ -83,9 +86,8 @@ def test_made_in_your_shop_is_this_design_s_plan_and_a_part_that_doesn_t_build_c
     """reviewer-2: the broken-build copy's "⚠ … ply_t must be positive" under the v12 copy, which builds; and a ✗ "not all
     of it" under ✓ How do I make it?"""
     got = _run(_page(["makingSection", "makingKey"], extra=SHOP + """
-out = { bad: head('a', { ok: false, missing: [] }), none: head('a', { ok: null, missing: [] }) };"""))
+out = { bad: head('a', { ok: false, missing: [] }) };"""))
     assert got["bad"]["other"] == ["info", "planning…"] and got["bad"]["mine"] == ["bad", "not all of it"]
-    assert got["none"]["mine"] == ["info", "can't plan it: it doesn't build"]
 
 
 def test_made_in_your_shop_repaints_its_header_when_its_plan_lands():
@@ -148,9 +150,146 @@ def test_the_chain_s_safety_is_cut_never_rounded_up_to_the_line():
 
 
 def test_a_running_check_or_lighten_shows_on_its_button():
-    html = _run(_page(["partActions"], extra=BAR + """
+    html = _run(_page(["partActions", "runningLabel"], extra=BAR + """
 S.design.studies.menu.stool[1] = { kind: 'lighten', ready: true, why: '' };
 S.design.running = [{ job: 'j1', kind: 'lighten', part: 'stool' }, { job: 'j2', kind: 'load', part: 'other' }];
 out = partActions(p);"""))
     assert '>Lightening…<' in html and 'id="lightGo" disabled' in html
     assert '>Check it again<' in html and 'id="lGo" disabled' not in html      # another part's check isn't this one's
+
+
+#: a part whose script raises where it reads its numbers, as the broken-build copy's ply_t −1 did
+BROKEN = """import cadquery as cq
+
+PARAMS = {"ply_t": -1.0}
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    if p["ply_t"] <= 0:
+        raise ValueError("ply_t must be positive")
+    return cq.Workplane().box(100, 100, p["ply_t"])
+
+
+def construction(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    if p["ply_t"] <= 0:
+        raise ValueError("ply_t must be positive")
+    return [{"name": "top", "kind": "sheet", "material": "plywood", "thickness": p["ply_t"],
+             "outline": [(0, 0, 0), (100, 0, 0), (100, 100, 0), (0, 100, 0)]}]
+"""
+
+#: the page's own fetch, answering as the route did
+FETCH = """
+let answer;
+globalThis.fetch = async () => ({ ok: answer.status < 400, status: answer.status, json: async () => answer.body });
+const window = {};
+"""
+
+
+def _route(tmp_path, monkeypatch, script, path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper.design import DesignStore
+    from caliper.server import create_app
+
+    s = DesignStore.create("a broken stool", base=str(tmp_path / "designs"))
+    s.write_part("stool", script, intent="a stool")
+    monkeypatch.setenv("CALIPER_DESIGNS", str(tmp_path / "designs"))
+    got = TestClient(create_app()).get(f"/api/designs/{s.design.slug}/parts/stool/{path}")
+    return {"status": got.status_code, "body": got.json()}
+
+
+def test_made_in_your_shop_on_a_part_that_doesn_t_build_reads_can_t_plan_it(tmp_path, monkeypatch):
+    """reviewer-2 at 09c753c: the route answers a part that doesn't build with a 422, never ``ok: null``, so the header
+    sat at "planning…" over "⚠ couldn't read what 'step_stool' is built from: ValueError: ply_t must be positive"."""
+    import json
+
+    answer = _route(tmp_path, monkeypatch, BROKEN, "making")
+    assert answer["status"] == 422 and "ply_t must be positive" in answer["body"]["detail"], answer
+    got = _run(_page(["loadMaking", "makingSection", "makingKey", "api"], extra=FETCH + f"""
+answer = {json.dumps(answer)};
+const esc = (s) => String(s), makingView = () => '', $ = () => null;
+const S = {{ slug: 'a', making: {{}}, shopKey: 0, scope: 'stool' }};
+const p = {{ id: 'stool', version: 1 }};
+await loadMaking(p, makingKey(p));
+const broke = makingSection(p);
+answer = {{ status: 500, body: {{ detail: 'Internal Server Error' }} }};
+await loadMaking(p, makingKey(p));
+const other = makingSection(p);
+out = {{ broke: [broke.tone, broke.answer], other: [other.tone, other.answer] }};"""))
+    assert got["broke"] == ["info", "can't plan it: it doesn't build"]
+    assert got["other"] == ["info", "couldn't plan it"]                  # a failed read isn't the part's, nor a ✓ or ✗
+
+
+FAILING = """
+const esc = (s) => String(s), plainly = (s) => s;
+const fixMine = () => ({}), fixRow = () => '<div class="fixrow"></div>', paintFixes = () => {};
+const S = { slug: 's', fixes: {}, design: { parts: [{ id: 'stool', version: 3 }],
+                                           load_runs: [{ id: '20261117-020000-check', part: 'stool', version: 3 }] } };
+const fixVersion = () => 3;
+const loadRuns = (pid) => S.design.load_runs.filter((r) => r.part === pid);
+let asked = 0;
+const read = globalThis.fetch;
+globalThis.fetch = async (...a) => { asked += 1; return read(...a); };
+"""
+
+
+def test_a_failed_read_of_things_to_fix_says_so_and_is_read_again():
+    """reviewer-2 at 09c753c: a 500 from /fixes beside "✗ Will it hold? · doesn't hold 1.0x" read "✓ Things to fix ·
+    nothing measured wrong", and stayed ✓ once the server's list had 3 rows."""
+    got = _run(_page(["loadFixes", "fixesSection", "fixFresh", "fixStamp", "fixChecked", "fixesView", "wireFixes", "api"],
+                     consts=["fixKey"], extra=FETCH + FAILING + """
+const box = { dataset: { fixPart: 'stool' }, open: false };
+const $ = (id) => (id === 'fixBox' ? box : null);
+answer = { status: 500, body: { detail: 'Internal Server Error' } };
+await loadFixes('stool');
+const failed = fixesSection('stool');
+const stale = fixFresh('stool');
+answer = { status: 200, body: { rows: [{ id: 'a' }, { id: 'b' }, { id: 'c' }], limits: [] } };
+wireFixes();                                            // the next draw
+await new Promise((r) => setTimeout(r, 0));
+const again = fixesSection('stool');
+out = { failed: [failed.tone, failed.answer], stale, again: [again.tone, again.answer], asked };"""))
+    assert got["failed"] == ["info", "couldn't read them"] and got["stale"] is False
+    assert got["again"] == ["warn", "3 measured wrong"] and got["asked"] == 2
+
+
+def test_things_to_fix_repaints_its_header_when_its_list_lands():
+    """reviewer-2's M10: without it the closed header kept "measured, with what each would take"."""
+    got = _run(_page(["paintFixes"], extra="""
+const head = { innerHTML: 'measured, with what each would take' };
+const box = { dataset: { fixPart: 'stool' }, querySelector: (q) => (q === 'summary' ? head : null),
+              classList: { toggle: () => {} } };
+const els = { fixBody: { innerHTML: '' }, fixBox: box };
+const $ = (id) => els[id] || null;
+const S = { fixes: { k: { rows: [1, 2, 3] } } };
+const fixKey = () => 'k', fixMine = () => ({}), fixesView = () => 'rows', wireFixRows = () => {}, ATTN = () => true;
+const fixesSection = () => ({ answer: '3 measured wrong' }), subHead = (x) => `· ${x.answer}`;
+paintFixes('stool');
+out = head.innerHTML;"""))
+    assert got == "· 3 measured wrong"
+
+
+def test_a_job_started_here_says_so_on_its_button_and_gives_it_back():
+    """reviewer-2: "Lighten it" stayed, disabled, through 16 s of steps in the tab that pressed it."""
+    got = _run(_page(["jobOff", "jobOn", "runningLabel"], extra="""
+const b = { disabled: false, title: '', textContent: 'Lighten it', dataset: {} };
+jobOff(b, runningLabel('lighten'));
+const on = [b.textContent, b.disabled];
+jobOn(b); jobOff(b, runningLabel('lighten'));            // drawn again while it runs
+const again = b.textContent;
+jobOn(b);
+const drawn = { disabled: true, title: '', textContent: 'Lightening…', dataset: {} };   // drawn running by partActions
+jobOff(drawn, runningLabel('lighten'));
+out = { on, again, off: [b.textContent, b.disabled], drawn: drawn.textContent, other: runningLabel('release') };"""))
+    assert got == {"on": ["Lightening…", True], "again": "Lightening…", "off": ["Lighten it", False], "drawn": "Lightening…",
+                   "other": ""}
+    assert "jobOff(go, runningLabel(t.kind))" in _fn(open(JS).read(), "paintJobs")
+
+
+def test_the_cut_plan_section_says_not_here_where_it_can_t_be_made():
+    """reviewer-2: the button read "not here", its section "· Cut plan · not made yet"."""
+    part = _fn(open(JS).read(), "partView")
+    assert "!cut ? (S.design.cutplan_unavailable ? 'not here' : 'not made yet')" in part
