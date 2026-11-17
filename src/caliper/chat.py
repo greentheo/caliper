@@ -2436,6 +2436,29 @@ def _one_edit(a: str, b: str) -> bool:
     return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
 
 
+def _names_a_piece(store: DesignStore, words: str, scope: Optional[str]) -> bool:
+    """Whether a remove's words name one of a part's declared pieces (#332 review): "the top from step_stool", or "the
+    top" with step_stool selected. A piece's Delete… sends these as a revise of the part; the part remove asked "Remove
+    which part?" and offered to trash step_stool."""
+    from .tree import pieces
+
+    m = re.match(r"^(?:the\s+)?(.+?)\s+(?:from|of|off|on)\s+(?:the\s+)?(.+?)$", words.strip(), re.I)
+    tries = [(m.group(1), _named_part(store, m.group(2), scope))] if m else []
+    if scope:
+        tries.append((re.sub(r"^the\s+", "", words.strip(), flags=re.I), scope))
+    norm = lambda t: " ".join(str(t).lower().replace("_", " ").split())  # noqa: E731
+    for piece, pid in tries:
+        if pid is None or store.design.part(pid) is None or not store.is_scripted(pid):
+            continue
+        try:
+            names = {norm(x) for pc in pieces(store, pid) for x in (pc["key"], pc["name"])}
+        except Exception:  # noqa: BLE001 — a part whose pieces can't be read names none here
+            continue
+        if norm(piece) in names:
+            return True
+    return False
+
+
 def _remove_target(store: DesignStore, words: str, scope: Optional[str]):
     """The part a remove names (#287): exactly (:func:`_named_part`); or closely, its words in any order, one letter
     astray or an underscore stray, the selected one where several are close. A list of the parts to ask between where
@@ -2445,6 +2468,8 @@ def _remove_target(store: DesignStore, words: str, scope: Optional[str]):
     pid = _named_part(store, words, scope)
     if pid is not None:
         return pid
+    if _names_a_piece(store, words, scope):          # a piece of a part: its revise, the designer's (#332 review)
+        return None
     ids = [p.id for p in store.design.parts]
     w = _words_of(words)
     if not w:
