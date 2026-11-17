@@ -151,8 +151,7 @@ def check(pieces: list[dict], load: dict, mat: dict, tol: float, held: Optional[
             row = {"piece": pc["name"], "load_n": round(push, 1), "down": bool(d[2] < -(1 - SQUARE))}
             if rests is not None:
                 out.append({**row, "done": False, "rests": True,
-                            "why": f"the load goes straight through the {rests[0]['name']} into "
-                                   f"{L.support_name(rests[1])}, so it doesn't run down this wall"})
+                            "why": L.rest_words(rests[0]["name"], rests[1], ", so it doesn't run down this wall")})
                 continue
             why = None
             if len(poly) != 4 or len(pc["polys"]) != 1:

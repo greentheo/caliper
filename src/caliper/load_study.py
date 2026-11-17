@@ -105,7 +105,7 @@ def parse_held(items, bounds, depth: float) -> list[dict]:
     if not items:
         (x0, y0, z0), (x1, y1, _) = bounds
         return [{"name": "the floor", "lo": [x0 - 1, y0 - 1, z0 - 1], "hi": [x1 + 1, y1 + 1, z0 + depth],
-                 "default": True}]
+                 "default": True, "ground": z0}]       # where it stands: the slab's own face is a voxel's depth above (#334)
     out = []
     for i, item in enumerate(items):
         if item.get("floor"):                 # the floor beside other supports, kept (#312 review)
@@ -846,7 +846,37 @@ def _backed(pc: dict, k: int, load: dict, held: list[dict], tol: float, voxel: O
                               for q in (pts + away * d for d in np.linspace(0.0, reach, 5))], axis=0))
     if float(np.mean(np.any(inside, axis=0))) < BACKED:
         return None
-    return held[int(np.argmax([float(np.mean(i)) for i in inside]))]
+    j = int(np.argmax([float(np.mean(i)) for i in inside]))
+    return {**held[j], "gap_mm": _gap(pts[inside[j]], away, held[j]), "reach_mm": reach}
+
+
+#: A panel's face within this of its support's is on it (a declared size rounded); further, but within the voxel's reach,
+#: it's said as a gap the check can't see (#334 re-check: a floor 4 mm over open air read "goes straight into" it).
+ON_MM = 1.0
+
+
+def _gap(pts: np.ndarray, away: np.ndarray, h: dict) -> float:
+    """How far a panel's face is from its support's face, along ``away``: the ground for the floor the part stands on
+    (its slab's own face is a voxel's depth above it), else the box's face it enters. The middle of the footprint's."""
+    if h.get("default") and h.get("ground") is not None:
+        d = (pts - np.array([0.0, 0.0, float(h["ground"])])) @ -away
+    else:
+        enter = [((float(h["lo"][k]) if away[k] > 0 else float(h["hi"][k])) - pts[:, k]) / away[k]
+                 for k in range(3) if abs(away[k]) > 1e-9]
+        d = np.max(enter, axis=0) if enter else np.zeros(len(pts))
+    return max(0.0, float(np.median(d))) if len(d) else 0.0
+
+
+def rest_words(piece: str, h: dict, what: str, it: Optional[str] = None) -> str:
+    """What's said of a panel a support backs (#328, #334): the load going straight through it (``it``, else the
+    ``piece`` by name) into the support, then ``what``; or, where its face is off the support's but within a voxel, that
+    the check can't tell."""
+    gap = float(h.get("gap_mm") or 0.0)
+    if gap > ON_MM:
+        where = "the ground" if h.get("default") else f"'{h['name']}'"
+        return (f"the {piece} is {gap:.0f} mm above {where}, under one voxel ({float(h.get('reach_mm') or 0):.1f} mm): "
+                f"the check can't tell whether it spans or bottoms out")
+    return f"the load goes straight through {it or 'the ' + piece} into {support_name(h)}{what}"
 
 
 def own_material(pc: dict, mat: dict) -> dict:
@@ -926,8 +956,8 @@ def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=Non
             rests = _backed(pc, k, load, held or [], tol, voxel)
             if rests is not None:
                 return {**base, "done": False, "rests_on": rests["name"],
-                        "why": f"the load goes straight through it into {support_name(rests)}, so it doesn't span: the "
-                               f"FEA is the number for it"}
+                        "why": rest_words(pc["name"], rests, ", so it doesn't span: the FEA is the number for it",
+                                          it="it")}
             if len(poly) == 4 and sorted(which) in ([0, 2], [1, 3]):
                 # held on two opposite edges (a top on two sides): a beam across them (CALI-82)
                 e0, e1 = poly[which[0]], poly[(which[0] + 1) % 4]
@@ -1523,8 +1553,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     rest = rests_on(ctx["pieces"], load, ctx.get("held"), ctx["tol"], ctx.get("spacing"))     # straight into a support: said, never ✓ or ✗ (#328)
     if rest is not None:
         case["rests"] = {"piece": rest[0]["name"], "on": rest[1]["name"],
-                         "said": f"the load goes straight through the {rest[0]['name']} into {support_name(rest[1])}: "
-                                 f"nothing between to check"}
+                         "said": rest_words(rest[0]["name"], rest[1], ": nothing between to check")}
     fea = {"supported": True, "peak_mpa": round(peak, 2), "robust_mpa": round(float(r.peak_stress), 2),
            "safety": fea_safety(float(worked[hot])),
            "deflection_mm": round(float(r.max_displacement), 3),

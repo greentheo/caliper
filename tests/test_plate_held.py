@@ -343,3 +343,72 @@ def test_a_resting_case_is_blind_only_where_the_fea_is():
     for safety, blind in ((None, True), (2.0, True), (1360.9, True), (1.99, False), (0.02, False)):
         c = {**case, "fea": {"supported": True, "safety": safety}, "safety": safety, "holds": bool(safety and safety >= 2)}
         assert L.blind(run, c) is blind, safety
+
+
+# --- #334 re-check: within a voxel of the ground, said as that; a panel declared by its loaded face ----------------------
+
+def _under(src):
+    """The floor declared by its underside (the face the load pushes toward), its thickness up: the camper sample's way."""
+    import re
+
+    got = re.sub(r'"outline": \[\(0, 0, ([^)]*?)T\), \(W, 0, \1T\), \(W, D, \1T\), \(0, D, \1T\)\]',
+                 lambda m: '"outline": [(0, 0, {0}0), (W, 0, {0}0), (W, D, {0}0), (0, D, {0}0)]'.format(m.group(1)), src)
+    assert got != src
+    return got
+
+
+def _gap_words(n, voxel):
+    return f"the floor is {n} mm above the ground, under one voxel ({voxel:.1f} mm): the check can't tell whether it spans " \
+           f"or bottoms out"
+
+
+def test_a_floor_a_few_mm_over_open_air_says_so_never_that_it_rests(tmp_path):
+    """The re-check: 4 mm up, within the voxel's reach, the words said the load went into what it stands on."""
+    ctx, pl = _plate(tmp_path, _raised(4))
+    assert pl["rests_on"] == "the floor" and not pl["done"]                     # not resolved, as before: never ✓, never ✗
+    assert pl["why"] == _gap_words(4, ctx["spacing"])
+    _, rows = _walls(tmp_path / "walls", _raised(4))
+    assert rows and all(r["rests"] and r["why"] == _gap_words(4, ctx["spacing"]) for r in rows)
+
+
+def test_a_floor_on_the_ground_still_says_the_load_goes_into_it(tmp_path):
+    ctx, pl = _plate(tmp_path, _raised(0.5))                                       # a declared size rounded
+    assert pl["why"].startswith("the load goes straight through it into what it stands on")
+
+
+def test_a_floor_a_few_mm_over_a_named_pad_names_it(tmp_path):
+    ctx, pl = _plate(tmp_path, _held(("a pad", "(0, 0, -8)", "(W, D, -3)")))
+    assert pl["rests_on"] == "a pad"
+    assert pl["why"] == (f"the floor is 3 mm above 'a pad', under one voxel ({ctx['spacing']:.1f} mm): the check can't tell "
+                         f"whether it spans or bottoms out")
+
+
+@pytest.mark.parametrize("r, rests", [(0, True), (4, True), (12, False)], ids=["on the ground", "4 mm up", "12 mm up"])
+def test_a_floor_declared_by_its_loaded_face_is_probed_from_its_far_face(tmp_path, r, rests):
+    """The camper sample's floor is declared by its underside, its thickness away from the load: probed from there, down."""
+    src = _under(_raised(r)) if r else _under(BOX)
+    ctx, pl = _plate(tmp_path, src)
+    assert ("rests_on" in pl) is rests and pl["done"] is not rests
+    if r == 4:
+        assert pl["why"] == _gap_words(4, ctx["spacing"])
+
+
+def test_the_study_and_the_release_card_say_the_gap(tmp_path, monkeypatch):
+    pytest.importorskip("whittle")
+    from caliper import release
+    from caliper import verdicts as V
+
+    monkeypatch.setattr(L, "VOXELS_THROUGH", 2)
+    store = DesignStore.create("a cargo box", base=str(tmp_path / "designs"))
+    store.write_part("box", _raised(4), intent="a foam box with a plywood floor")
+    rec = L.study(store, "box")
+    (case,) = rec["cases"]
+    words = _gap_words(4, rec["spacing_mm"])
+    assert case["rests"]["said"] == words
+    got = V.case(rec, case)
+    if got.get("blind"):                                     # the FEA held the floor: blind, said with the gap's words
+        assert got["why"] == f"Not resolved: {words}."
+        cell, _ = release._safety_cell({**case, "verdict": got})
+        assert cell == release._e(f"not resolved: {words}")
+    else:                                                    # it read the floor: its own verdict, under the bar or not
+        assert got["kind"] in ("fails", "holds", "close")
