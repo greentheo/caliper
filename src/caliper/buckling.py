@@ -117,7 +117,8 @@ def _held(pc: dict, k: int, e: int, pieces: list[dict], tol: float) -> bool:
     return True
 
 
-def check(pieces: list[dict], load: dict, mat: dict, tol: float, held: Optional[list] = None) -> list[dict]:
+def check(pieces: list[dict], load: dict, mat: dict, tol: float, held: Optional[list] = None,
+          voxel: Optional[float] = None) -> list[dict]:
     """Each sheet in line with ``load`` (its force within :data:`IN_PLANE` of the sheet's plane): its buckling check, or why it
     isn't checked. ``load["force"]`` is in N, before its factor. A row says what its wall was taken as: ``braced_by`` (the piece
     whose unchecked joint is taken to hold its top square, or None), ``share`` (of the load, by the lever rule), and for a braced
@@ -135,7 +136,7 @@ def check(pieces: list[dict], load: dict, mat: dict, tol: float, held: Optional[
     out, walls = [], []
     if size <= 0:
         return out
-    rests = L.rests_on(pieces, load, held, tol) if held else None
+    rests = L.rests_on(pieces, load, held, tol, voxel) if held else None
     for pc in pieces:
         if pc["kind"] != "sheet":
             continue

@@ -419,7 +419,8 @@ def blind(run: dict, case: dict) -> bool:
     if "safety" not in fea:           # a case that doesn't say isn't one that saw nothing
         return False
     if case.get("rests"):             # its load goes straight into a support: nothing between for it to see (#328)
-        return True
+        # unless it saw something under the bar: a load that rests can still crush a soft panel (#334 review)
+        return fea["safety"] is None or fea["safety"] >= (run.get("min_safety") or MIN_SAFETY)
     if fea["safety"] is None:
         return True
     if not fea["safety"]:             # rounded to 0.00: the stress was huge, so it broke. The opposite of seeing nothing
@@ -811,10 +812,14 @@ def fea_safety(worked: float) -> Optional[float]:
 BACKED = 0.9
 
 
-def _backed(pc: dict, k: int, load: dict, held: list[dict], tol: float) -> Optional[dict]:
-    """The support a panel rests on right under a load (#328): its far face, under the load's footprint, inside a
+def _backed(pc: dict, k: int, load: dict, held: list[dict], tol: float, voxel: Optional[float] = None) -> Optional[dict]:
+    """The support a panel rests on right under a load (#328): its far face, under the load's footprint, touching a
     support's box (the floor a part stands on when it doesn't say included: the FEA holds it there too). Such a panel
-    doesn't span, so the plate check doesn't span it. None where no support backs it there."""
+    doesn't span, so the plate check doesn't span it. None where no support backs it there.
+
+    Touching (#334 review): along the panel's normal the box isn't grown, and the face must be in it or within one voxel
+    of it (``voxel``, the FEA's spacing; ``tol`` where there's none), so a floor a cleat above open air spans. Across
+    the face the box grows by ``tol``. Only the panel's own points under the load are asked."""
     from .consistency import _frame, _inside2d
 
     if not held:
@@ -828,12 +833,17 @@ def _backed(pc: dict, k: int, load: dict, held: list[dict], tol: float) -> Optio
     grid = grid[_inside2d(grid, flat)]
     if not len(grid):
         return None
-    # the slab runs from its outline's plane ``side`` ways by its thickness: the face the load pushes toward, and past it
+    # the slab runs from its outline's plane ``side`` ways by its thickness: the face the load pushes toward, and away
     toward = float(np.asarray(load["force"], float) @ (side * n)) > 0
-    beyond = side * n * (t + 2 * tol) if toward else -side * n * 2 * tol
-    pts = o + grid[:, :1] * u + grid[:, 1:] * v + beyond
-    inside = [np.all((pts >= np.asarray(h["lo"], float) - 3 * tol) & (pts <= np.asarray(h["hi"], float) + 3 * tol),
-                     axis=1) for h in held]
+    face, away = (side * n * t, side * n) if toward else (0.0 * n, -side * n)
+    pts = o + grid[:, :1] * u + grid[:, 1:] * v + face
+    grow = tol * (1.0 - np.abs(away))             # across the face only: never along the normal
+    reach = float(voxel) if voxel else tol
+    inside = []
+    for h in held:
+        b0, b1 = np.asarray(h["lo"], float) - grow, np.asarray(h["hi"], float) + grow
+        inside.append(np.any([np.all((q >= b0) & (q <= b1), axis=1)
+                              for q in (pts + away * d for d in np.linspace(0.0, reach, 5))], axis=0))
     if float(np.mean(np.any(inside, axis=0))) < BACKED:
         return None
     return held[int(np.argmax([float(np.mean(i)) for i in inside]))]
@@ -867,7 +877,8 @@ def _lands(pc: dict, k: int, load: dict, tol: float) -> bool:
                 or abs(float(f @ n)) < 0.7 * float(np.linalg.norm(f)))
 
 
-def rests_on(pieces: list[dict], load: dict, held: Optional[list], tol: float) -> Optional[tuple]:
+def rests_on(pieces: list[dict], load: dict, held: Optional[list], tol: float,
+             voxel: Optional[float] = None) -> Optional[tuple]:
     """The sheet a load lands on face-on, the one the plate check takes, and the support it rests on right under the
     load (#328): ``(piece, support)``, or None where it lands on none or nothing backs it there (:func:`_backed`)."""
     for pc in pieces:
@@ -875,7 +886,7 @@ def rests_on(pieces: list[dict], load: dict, held: Optional[list], tol: float) -
             continue
         for k in range(len(pc["polys"])):
             if _lands(pc, k, load, tol):
-                h = _backed(pc, k, load, held or [], tol)
+                h = _backed(pc, k, load, held or [], tol, voxel)
                 return (pc, h) if h is not None else None
     return None
 
@@ -887,7 +898,7 @@ def support_name(h: dict) -> str:
 
 
 def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=None,
-                held: Optional[list] = None) -> Optional[dict]:
+                held: Optional[list] = None, voxel: Optional[float] = None) -> Optional[dict]:
     """The sheet a load pushes on face-on, checked as a plate in its own material — or None if it lands on no sheet,
     or on one that isn't held all round or that rests on a support right under the load (the FEA is the number for
     that one). ``held``: the part's supports, as :func:`parse_held` gives them."""
@@ -912,7 +923,7 @@ def plate_check(pieces: list[dict], load: dict, mat: dict, tol: float, under=Non
             mat = own_material(pc, mat)           # every path below returns: this panel's material only
             base = {"piece": pc["name"], "a_mm": round(a, 1), "b_mm": round(b, 1), "material": mat.get("name"),
                     "edges": len(poly), "edges_held": edges, "footprint_mm": [round(fu, 1), round(fv, 1)]}
-            rests = _backed(pc, k, load, held or [], tol)
+            rests = _backed(pc, k, load, held or [], tol, voxel)
             if rests is not None:
                 return {**base, "done": False, "rests_on": rests["name"],
                         "why": f"the load goes straight through it into {support_name(rests)}, so it doesn't span: the "
@@ -1053,7 +1064,7 @@ BUCKLING_CHECKED = ("Buckling is checked by hand for each wall the load runs dow
 
 def buckling_notes(pieces: list[dict], loads: list[dict], mat: dict, tol: float = 2.0,
                    sheet_mat: Optional[dict] = None, printed_names: Optional[list] = None,
-                   held: Optional[list] = None) -> list[str]:
+                   held: Optional[list] = None, voxel: Optional[float] = None) -> list[str]:
     """What's said of buckling, if the part has a wall to carry a load in its own plane: :data:`BUCKLING` for a printed
     part, or where a sheet in line with a load couldn't be checked (naming it, and why); else :data:`BUCKLING_CHECKED`. On a
     part of sheets and printed pieces, each judged as what it is: its sheets checked in their own material, its printed
@@ -1064,7 +1075,8 @@ def buckling_notes(pieces: list[dict], loads: list[dict], mat: dict, tol: float 
     from . import buckling as B
 
     # a wall a load doesn't reach (it rests on a support under the panel it lands on, #328) isn't a gap: not said
-    rows = [r for ld in loads for r in B.check(pieces, ld, sheet_mat or mat, tol, held=held) if not r.get("rests")]
+    rows = [r for ld in loads for r in B.check(pieces, ld, sheet_mat or mat, tol, held=held, voxel=voxel)
+            if not r.get("rests")]
     if not rows:
         return []
     left = {}
@@ -1508,7 +1520,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     hot = np.unravel_index(int(np.argmax(worked)), vm.shape)
     at = np.asarray(ls.grid.origin) + ls.grid.spacing * np.asarray(hot)
     peak = float(vm[hot])
-    rest = rests_on(ctx["pieces"], load, ctx.get("held"), ctx["tol"])     # straight into a support: said, never ✓ or ✗ (#328)
+    rest = rests_on(ctx["pieces"], load, ctx.get("held"), ctx["tol"], ctx.get("spacing"))     # straight into a support: said, never ✓ or ✗ (#328)
     if rest is not None:
         case["rests"] = {"piece": rest[0]["name"], "on": rest[1]["name"],
                          "said": f"the load goes straight through the {rest[0]['name']} into {support_name(rest[1])}: "
@@ -1518,7 +1530,8 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
            "deflection_mm": round(float(r.max_displacement), 3),
            "at": [round(float(x), 1) for x in at], **_peak_in(ctx, at, ls.grid.spacing)}
     pl = plate_check(ctx["pieces"], load, ctx.get("plate_mat") or mat, ctx["tol"],
-                     under=with_held(ctx.get("under"), ctx.get("held") or [], ctx["tol"]), held=ctx.get("held"))
+                     under=with_held(ctx.get("under"), ctx.get("held") or [], ctx["tol"]), held=ctx.get("held"),
+                     voxel=ctx.get("spacing"))
     options = [("fea", fea["safety"])]
     if pl and pl.get("done"):
         options.append(("plate", pl["safety_across"]))
@@ -1530,7 +1543,8 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     from . import buckling as B
 
     folds = [{**r, "safety": V.cut(r["safety"])} if r["done"] else r
-             for r in B.check(ctx["pieces"], load, ctx.get("plate_mat") or mat, ctx["tol"], held=ctx.get("held"))]
+             for r in B.check(ctx["pieces"], load, ctx.get("plate_mat") or mat, ctx["tol"], held=ctx.get("held"),
+                                 voxel=ctx.get("spacing"))]
     weakest = B.governing(folds)
     if weakest is not None and (safety is None or weakest["safety"] < safety):
         case["over"] = governs
@@ -1630,6 +1644,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     fea_seconds = time.time() - t1
     notes = [f"{mat['name']}: E {mat['E']:g} MPa, strength {mat['strength']:g} MPa — {mat['basis']}.", *NOTES,
              *buckling_notes(ctx["pieces"], loads, mat, ctx["tol"], ctx.get("plate_mat"), held=ctx.get("held"),   # #328
+                             voxel=ctx.get("spacing"),
                              printed_names=[p["name"] for p in printed_pieces(ctx["declared"])]
                              if ctx.get("rest") is not None else None)]          # a sheet part's printed pieces (#276)
     if mat.get("note"):

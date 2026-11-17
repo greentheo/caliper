@@ -258,7 +258,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: Optional[float] = Non
                             "and checks it again: that's the number to go by.", *([CAPPED] if capped else []),
                             *([mat["note"]] if mat.get("note") else []),
                             *L.buckling_notes(ctx["pieces"], ctx["loads"], mat, ctx["tol"], ctx.get("plate_mat"),
-                                              held=ctx.get("held"))]}
+                                              held=ctx.get("held"), voxel=ctx.get("spacing"))]}
         keep(record)
         store.append_history(part_id, {"kind": "carve", "action": "studied", "run": rid, "stations": len(out)})
         store.append_log({"kind": "carve", "action": "studied", "part": part_id, "run": rid})
