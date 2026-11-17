@@ -182,6 +182,54 @@ def test_a_row_whose_piece_was_renamed_is_still_open_not_fixed(tmp_path, monkeyp
     assert (r["status"], r["why"]) == ("still open", "it's measured as 'the seat' now"), r
 
 
+def test_a_row_whose_case_isn_t_checked_any_more_is_still_open(tmp_path, monkeypatch):
+    """reviewer-2's rule, its gap (the foreman's must-fix on #322): the designer renamed the case, so the fresh run has no
+    'a foot' and no row speaks for it. That's not a fix: every case it spoke for must be in the fresh run, and pass."""
+    from caliper import chat, load_study
+
+    store = _failing_plate(tmp_path)
+    (row,) = _rows(store)
+    monkeypatch.setattr(chat, "refine_part", Designer())
+
+    def study(store, pid, **kw):                                   # the same panel, its case now called 'a hand'
+        _check(store, pid, 3.1, rid=f"20261116-1{store.design.part(pid).version:05d}-check")
+        run = _run(store)
+        run["cases"][0]["name"] = "a hand"
+        _resave(store, run)
+
+    monkeypatch.setattr(load_study, "study", study)
+    got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0, "words": "Make the top from 1 in"}])
+    (r,) = got["results"]
+    assert (r["status"], r["why"]) == ("still open", "'a foot' isn't checked any more"), r
+
+
+def test_a_joint_fixed_while_its_case_fails_on_the_plate_is_fixed_and_says_the_case_still_fails(tmp_path, monkeypatch):
+    """reviewer-2's small ask: a fixed joint read "measured as 'the top' now", blaming the joint for the plate. A row looks
+    only at rows of its own kind."""
+    from caliper import chat, load_study
+
+    store = _store(tmp_path, BOX_STOOL, "stool")
+    _check(store, "stool", 1.4)
+    run = _run(store)
+    weak = {"pieces": ["front rail", "left side"], "between": "the front rail and the left side", "mode": "withdrawal",
+            "safety": 1.4, "need": 2.0, "holds": False, "said": "two #8 screws pulled out of the front rail's edge"}
+    run["cases"][0].update(governs="joint", joints={"chain": True, "n": 1, "unchecked": [], "governing": weak, "rows": [weak]})
+    _resave(store, run)
+    (row,) = _rows(store)
+    assert row["id"] == "joint:front rail|left side"
+    monkeypatch.setattr(chat, "refine_part", Designer())
+
+    def study(store, pid, **kw):                                   # the joint holds now; the top fails by the plate
+        _check(store, pid, 1.4, rid=f"20261116-1{store.design.part(pid).version:05d}-check",
+               plate={**_plate(t=12.7), "safety_across": 1.4}, sheet={"pieces": {"top": "t"}})
+
+    monkeypatch.setattr(load_study, "study", study)
+    got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0}])
+    assert [r["id"] for r in _rows(store)] == ["plate:top"]
+    (r,) = got["results"]
+    assert (r["status"], r["why"]) == ("fixed", "fixed (the joint), and the case still fails: the top's plate"), r
+
+
 def test_a_row_whose_cases_now_pass_is_fixed_though_another_row_speaks_of_them(tmp_path, monkeypatch):
     """The foreman's rule, its first half: the cases it spoke for pass in the fresh check, so it's fixed, though a joint
     in the same case is a row of its own."""
@@ -204,7 +252,7 @@ def test_a_row_whose_cases_now_pass_is_fixed_though_another_row_speaks_of_them(t
     got = fixing.apply(store, "stool", [{"id": row["id"], "choice": 0}])
     assert [(r["id"], r["cases"]) for r in _rows(store)] == [("joint:leg|top", ["a foot"])]
     (r,) = got["results"]
-    assert r["status"] == "fixed", r
+    assert (r["status"], r["why"]) == ("fixed", "measured: it's off the list now"), r      # its cases pass: nothing more
 
 
 def test_a_rule_is_known_by_its_own_id_so_fixing_another_never_credits_it(tmp_path, monkeypatch):

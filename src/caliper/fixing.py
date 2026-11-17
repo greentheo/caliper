@@ -42,9 +42,18 @@ def _spoken(row: dict) -> dict:
     return {k: row[k] for k in ("cases", "what") if k in row}
 
 
+#: A check-made row's kind (its id's head), in words: what was fixed, and what a case still fails on (#322).
+_KIND = {"plate": "plate", "joint": "joint", "buckling": "buckling", "fails": "check"}
+
+
 def _moved(item: dict, run: Optional[dict], rows: list[dict]) -> Optional[dict]:
-    """Where a check-made row gone from the list is measured now (#322 review: a piece renamed is a new id, not a fix):
-    the new row that speaks for any of its cases, unless every one of them passes in the fresh check. None: fixed."""
+    """Whether a check-made row gone from the list is fixed (#322, the foreman's rule): only where every case it spoke
+    for is in the fresh run and passes. None: fixed, nothing to add. Else ``{"status", "why"}``:
+
+    - a case not in the fresh run: still open, "'…' isn't checked any more";
+    - a case failing, a row of its own kind speaking for it (a piece renamed is a new id): still open, "it's measured
+      as '…' now";
+    - a case failing on another kind only (a joint fixed, its case failing on the plate): fixed, and said."""
     from . import verdicts
 
     spoke = item.get("cases") or []
@@ -52,9 +61,23 @@ def _moved(item: dict, run: Optional[dict], rows: list[dict]) -> Optional[dict]:
         return None
     by = {c.get("name"): c for c in (run or {}).get("cases") or []}
     need = (run or {}).get("min_safety")
-    if all(n in by and verdicts.meets(by[n].get("safety"), need)["counts_as_pass"] for n in spoke):
+    missing = [n for n in spoke if n not in by]
+    if missing:
+        return {"status": "still open",
+                "why": " and ".join(f"'{n}'" for n in missing) + (" aren't" if len(missing) > 1 else " isn't")
+                + " checked any more"}
+    failing = {n for n in spoke if not verdicts.meets(by[n].get("safety"), need)["counts_as_pass"]}
+    if not failing:
         return None
-    return next((r for r in rows if set(r.get("cases") or []) & set(spoke)), None)
+    kind = str(item.get("id") or "").split(":")[0]
+    covers = [r for r in rows if set(r.get("cases") or []) & failing]
+    same = next((r for r in covers if str(r["id"]).split(":")[0] == kind), None)
+    if same is not None:
+        return {"status": "still open", "why": f"it's measured as '{same.get('what') or same['problem']}' now"}
+    other = covers[0] if covers else None
+    on = (f": {other.get('what') or other['problem']}'s {_KIND.get(str(other['id']).split(':')[0], 'check')}"
+          if other is not None else "")
+    return {"status": "fixed", "why": f"fixed (the {_KIND.get(kind, 'check')}), and the case still fails{on}"}
 
 
 def plan(store: DesignStore, state: dict, pid: str, picked: list[dict], own: Optional[list[dict]] = None) -> dict:
@@ -229,8 +252,7 @@ def apply(store: DesignStore, pid: str, picked: list[dict], own: Optional[list[d
             results.append({"id": rid, "fix": item["fix"], "status": "still open",
                             "why": check_why or "not checked again, so not measured as fixed"})
         elif from_check and (moved := _moved(item, run_after, rows_after)) is not None:
-            results.append({"id": rid, "fix": item["fix"], "status": "still open",
-                            "why": f"it's measured as '{moved.get('what') or moved['problem']}' now"})
+            results.append({"id": rid, "fix": item["fix"], **moved})
         else:
             results.append({"id": rid, "fix": item["fix"], "status": "fixed", "why": "measured: it's off the list now"})
     n = {s: sum(1 for r in results if r["status"] == s) for s in ("fixed", "still open", "not done")}
