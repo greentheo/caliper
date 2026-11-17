@@ -339,8 +339,8 @@ def test_the_job_html_carries_the_change_and_the_record_carries_the_version():
     from .test_carve_click import _fn
 
     assert "${changedUnder(t)}" in _fn(open(lighten.__file__.replace("lighten.py", "web/static/design.js")).read(), "jobHtml")
-    view = _fn(open(lighten.__file__.replace("lighten.py", "web/static/design.js")).read(), "loadView")
-    assert "${lightenShown(p, runs) ? lightenView(p) : ''}" in view and ": (runs.length ? lightenView(p)" not in view
+    view = _fn(open(lighten.__file__.replace("lighten.py", "web/static/design.js")).read(), "partView")   # its own section (#325)
+    assert "p.study === 'lighten' && lightenShown(p, runs) && {" in view and "(runs.length ? lightenView(p)" not in view
     src = inspect.getsource(design_api)
     # a load check's and a Lighten's, through the one helper every part job uses now (#302 review)
     assert src.count("meta=_on_part(slug, req.part, version=store.design.part(req.part).version)") == 2

@@ -10,11 +10,15 @@ from .test_carve_click import _fn, _node
 from .test_small_words import _js
 
 #: partView's neighbours, stubbed: only its heading and its Advanced line are under test.
-STUBS = """const S = { design: { rules: [], in_air: { yes: false } } };
+STUBS = """const S = { design: { rules: [], in_air: { yes: false } }, making: {} };
 const len = (x) => String(x);
 const ruleItem = () => '', historyItem = () => '', loadView = () => '', trialView = () => '', frameView = () => '',
   aeroView = () => '', whittleView = () => '', aeroRuns = () => [], runsFor = () => [], buildView = () => '',
   makingView = () => '', patternView = () => '', cutplanView = () => '', paramView = () => '';
+const partActions = () => '', cutplanRun = () => null, sizeText = () => '', loadRuns = () => [], lightenRuns = () => [],
+  carveRuns = () => [], runWord = () => '', verdictTone = () => 'ok', fixesSection = () => null, lightenShown = () => false;
+// the sections (#325): each its title and answer as a summary, then its body
+const ssecs = (card, list) => list.filter(Boolean).map((x) => `<summary>${x.title} ${x.answer}</summary>${x.body}`).join('');
 function cardsView(c) { return c.what; }
 """
 
@@ -32,7 +36,7 @@ def test_the_part_view_heading_is_the_part_s_own_name(kw, word):
                .replace("False", "false"), STUBS)
     heading = re.search(r"<h2>(.*?)</h2>", html, re.S).group(1)
     assert heading.strip() == "Step stool"
-    advanced = re.search(r"<summary>(.*?)</summary>", html, re.S).group(1)
+    advanced = re.search(r"<summary>(Advanced.*?)</summary>", html, re.S).group(1)       # its own, one level down
     assert "step_stool" in advanced and word in advanced
 
 

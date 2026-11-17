@@ -548,6 +548,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     for rel in runs["release"]:                # ready, as made and for the parts as they are now (#132 review)
         rel["verdict"] = verdicts.release(rel, current)
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
+    cut_off = cutplan.available()                           # why cut plans can't be made here: the menu and the page's
     skipped: list = []
     log = store.log(skipped)
     return {
@@ -586,10 +587,10 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "releases": runs["release"],
         # does it move through air? drag studies only when it does (CALI-67)
         "in_air": air,
-        "studies": studies.index(store, runs, parts, air),
+        "studies": studies.index(store, runs, parts, air, cut_off),   # the menu greys the cut plan where it can't run
         "has_goals": os.path.exists(scorecard.goals_path(store)),
         "goals": _goals_summary(store),
-        "cutplan_unavailable": cutplan.available(),
+        "cutplan_unavailable": cut_off,
         "aero_available": _aero_available(),
     }
 
