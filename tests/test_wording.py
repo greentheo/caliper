@@ -258,7 +258,7 @@ def test_no_carve_is_offered_where_the_carve_button_refuses_it(monkeypatch, runs
         if offer:
             assert offer["action"] == "carve"
     if why == "already_fails":
-        assert button == "it already fails (0.5 times over): make it hold first, then carve"
+        assert button == "it already fails (0.5 times over, by the plate check): make it hold first, then carve"
 
 
 def test_the_design_state_carries_each_part_s_blocked(tmp_path):

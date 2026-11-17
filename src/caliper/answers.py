@@ -303,6 +303,13 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
                      else "the whole load on it")
             return (f" The {w['piece']} folds first: it's too slender for the load running down it (a hand buckling check, "
                     f"its {'sides' if w.get('braced_by') else 'edges'} and stiffness taken on the safe side{held}, and {share}).")
+    from . import load_study as L
+
+    judge = L.judged_by(run, c)
+    if judge not in L.FEA:                           # a hand check fails it: what fails, never the FEA's spot (#329)
+        piece = (c.get("plate") or {}).get("piece") if judge == "plate" else None
+        return (f" The {piece} fails first, by its plate check (a hand check of the panel on its own)." if piece
+                else f" It fails first {fails_where(run, c, inches)}.")
     where, thin_here = worst_at(run, c, inches)
     wall = _wall(c["fea"]["wall_mm"], inches) if where else ""
     if v.get("coarse") and thin_here:                # among walls the voxels can't see: the fail may be the model's
@@ -435,6 +442,18 @@ def _thin_at(run: dict, inches: bool) -> str:
     w = run.get("thinnest_where") or {}
     return (f" in the {w['piece']}" if w.get("piece") else
             f" around z {_len(w['at'][2], inches)}" if w.get("at") else "")
+
+
+def fails_where(run: dict, c: dict, inches: bool) -> str:
+    """Where a failing case fails, inside a sentence (#329): by the hand check that governs it ("by the floor's plate
+    check", "at the joint between the front rail and the left side"), and where the FEA's worst stress is ("in the back
+    around z 22.4 in") only where the FEA governs. The floor's plate at 0.01× read "in the back", which held 1,361 times over."""
+    from . import load_study as L
+
+    judge = L.judged_by(run, c)
+    if judge in L.FEA:                               # a holed panel stood on is the FEA's, calibrated (#338 review)
+        return worst_at(run, c, inches)[0]
+    return f"{'at' if judge == 'joint' else 'by'} {L.governing_words({**c, 'governs': judge})}"
 
 
 def worst_at(run: dict, c: dict, inches: bool) -> tuple[str, Optional[bool]]:

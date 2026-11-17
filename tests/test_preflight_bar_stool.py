@@ -151,7 +151,7 @@ def test_the_page_doesn_t_offer_carve_on_a_part_that_fails():
              "cases": [{"name": "sitting", "safety": 0.53, "holds": False, "governs": "plate"}]}
     got = load_study.blocked(_checked([check]), "stool")
     out = _run(_page(["carveBlocked"], extra=f"out = carveBlocked({{id: 'stool', version: 7, blocked: {json.dumps(got)}}});"))
-    assert out == "it already fails (0.5 times over): make it hold first, then carve"
+    assert out == "it already fails (0.5 times over, by the plate check): make it hold first, then carve"
 
 
 # --- 4. a carve's time, from its start ---------------------------------------------------------------------------------
@@ -241,7 +241,7 @@ def test_the_page_doesn_t_offer_lighten_on_a_part_that_fails_and_says_why():
         got = load_study.blocked(_checked([check]), "stool")
         out.append(_run(_page(["lightenBlocked"], extra=(
             f"out = lightenBlocked({{id: 'stool', version: 7, blocked: {json.dumps(got)}}});"))))
-    assert out == ["It already fails (0.5 times over): make it hold first, then lighten it",
+    assert out == ["It already fails (0.5 times over, by the plate check): make it hold first, then lighten it",
                    "Can't lighten it by strength: its 0.25 mm walls … check it by hand or with a test piece instead.", ""]
 
 
