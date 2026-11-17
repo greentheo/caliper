@@ -89,11 +89,11 @@ def _mark(v: dict) -> str:
 
 def _unheld(store: DesignStore, built: dict) -> bool:
     """A built part that says what it must hold, with no strength check of this version."""
-    from . import load_study
+    from . import load_study, scenarios
 
     for pid in built:
         entry = store.design.part(pid)
-        if entry and store.is_scripted(pid) and "def loads(" in store.read_script(pid) and not any(
+        if entry and store.is_scripted(pid) and scenarios.says_loads(store, pid) and not any(
                 r.get("version") == entry.version for r in load_study.list_runs(store, pid)):
             return True
     return False
