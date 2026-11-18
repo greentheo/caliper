@@ -4771,7 +4771,8 @@ function aeroView(p) {
   const runs = aeroRuns(p.id);
   const own = Object.values(p.suggest || {}).some((sg) => sg.from === 'part');
   return `<div class="tw"><table class="st"><tr><th>search</th><th>now</th><th>from</th><th>to</th></tr>${rows}</table></div>
-    <div class="muted small" style="margin:4px 0 8px">Values in mm (or degrees). The current value must sit inside its range.
+    <div class="muted small" style="margin:4px 0 8px">The script's own numbers: lengths in mm, angles in degrees, whatever units
+      the rest shows. The current value must sit inside its range.
       ${own ? 'Ticked ranges are the part’s own (its <code>RANGES</code>).' : ''}
       ${p.keeps ? 'What it has to hold (its <code>keeps()</code> — the pale slab when you open <b>Built from</b>) is kept clear whatever the search tries.' : ''}</div>
     <div class="form">
@@ -4791,7 +4792,36 @@ function aeroLabel(r) {
   const held = Object.entries(r.start || {}).filter(([k]) => /curve/.test(k) && !r.searched.includes(k));
   const shape = r.searched.some((k) => /curve/.test(k)) ? 'curve free'
     : held.length ? `curve held at ${held.map(([, v]) => +v).join('/')}` : 'searched';
-  return `${shape} · ${r.searched.length} numbers · ${r.builds} builds`;
+  const effort = r.effort == null ? '' : ` · ${AERO_EFFORT[r.effort] || `effort ${r.effort}`} search`;
+  return `${shape} · ${r.searched.length} numbers${effort} · ${r.builds} builds${r.created ? ` · ${aeroWhen(r.created)}` : ''}`;
+}
+// the search menu's words (#330: two runs read alike but for their build count)
+const AERO_EFFORT = { 0.3: 'quick', 0.6: 'normal', 1: 'thorough' };
+function aeroWhen(created) {
+  const d = new Date(created * 1000);
+  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${String(d.getHours()).padStart(2, '0')}:${
+    String(d.getMinutes()).padStart(2, '0')}`;
+}
+// a number as Use writes it: to its places, or, where it's the part's own with more (15.25 in is 387.35 mm), as it is
+function aeroNum(v, places) {
+  if (v == null) return '—';
+  return Number(Number(v).toFixed(places)) === Number(v) ? Number(v).toFixed(places) : String(Number(Number(v).toFixed(6)));
+}
+// the same numbers as an earlier design: said, not read as another result (#341 review)
+function aeroSame(run, s) {
+  const key = (x) => run.searched.map((k) => aeroUses(run, x)[k]).join('|');
+  const was = run.stations.find((x) => x.index < s.index && key(x) === key(s));
+  return was ? ` <span class="muted small">same as ${was.index}</span>` : '';
+}
+// a design's numbers, as Use writes them (the server's, to its range's places, #330)
+function aeroUses(run, s) {
+  return s.uses || s.design;
+}
+// the design the part has now: each searched number what Use would write for it (#330: after Use, the table still read
+// design 0 as 0% and offered design 3 again)
+function aeroInUse(p, run, s) {
+  const u = aeroUses(run, s) || {}, now = p.params || {}, ks = run.searched || [];
+  return ks.length > 0 && ks.every((k) => now[k] != null && u[k] != null && Math.abs(+now[k] - +u[k]) <= 1e-9 * Math.max(1, Math.abs(+u[k])));
 }
 
 function aeroResults(p, run, runs) {
@@ -4803,11 +4833,15 @@ function aeroResults(p, run, runs) {
       · ${run.seconds}s${run.obstacles && run.obstacles.length ? ' · behind ' + esc(run.obstacles.join(', ')) : ' · free air'}</div>
     <div class="tw"><table class="st"><tr><th>#</th><th>volume</th><th>drag</th><th>${inches() ? 'saved lbf' : 'saved N'}</th><th>kWh/100mi</th>
       ${run.searched.map((k) => `<th>${esc(k)}</th>`).join('')}</tr>
-      ${run.stations.map((s) => `<tr class="pick ${s.index === on ? 'on' : ''}" data-ast="${s.index}"><td>${s.index}</td>
+      ${run.stations.map((s) => `<tr class="pick ${s.index === on ? 'on' : ''}" data-ast="${s.index}"><td>${s.index}${
+        aeroInUse(p, run, s) ? ' <span class="badge ok">in use</span>' : ''}${aeroSame(run, s)}</td>
         <td>${pct(-s.removed)}</td><td>${pct(s.metrics.drag)}</td><td>${saved(s)}</td>
         <td>${s.derived ? fixed(s.derived.saved_kwh_per_100mi, 2) : '—'}</td>
-        ${run.searched.map((k) => `<td>${fixed(s.design[k], 0)}</td>`).join('')}</tr>`).join('')}</table></div>
-    <div class="muted small" style="margin-top:6px">Click a row to see it in place; “volume” is the change against the part as it stands.
+        ${run.searched.map((k) => `<td>${aeroNum(aeroUses(run, s)[k], (run.places || {})[k] ?? 1)}</td>`).join('')}</tr>`).join('')}</table></div>
+    <div class="muted small" style="margin-top:6px">Click a row to see it in place; “volume” is the change against the part this
+      search started from${run.version != null ? ` (v${run.version})` : ''}${run.stations.some((s) => aeroInUse(p, run, s))
+        ? '; “in use” is the design the part has now' : ''}.
+      Each design's drag was found at its unrounded numbers; Use writes them to the places shown, a hair off.
       Using a design writes those numbers into the script — it stays parametric.</div>
     ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`;
 }
@@ -5016,6 +5050,9 @@ function stationAction(pid, run, index, st) {
   if ((lightened || carved) && run.version != null && now != null && run.version !== now) {
     return `<span class="small" id="staleRun">${lightened ? 'This lightening' : 'This carve'} is of v${run.version}, and the part
       has changed since (it's v${now}): ${lightened ? 'lighten' : 'carve'} it again.</span>`;
+  }
+  if (run.kind === 'parametric' && aeroInUse(partOf(pid), run, st)) {     // used already: said, not offered again (#330)
+    return `<span class="small" id="inUse">In use: ${esc(pid)} v${partOf(pid).version} has these numbers.</span>`;
   }
   const no = (lightened || carved) && !holdsHere(st) ? `It can't be used: ${st.verdict ? st.verdict.word : 'not checked'}` : '';
   return `<button class="primary" id="adoptBtn" ${no ? `disabled title="${esc(no)}"` : ''}>${lightened ? 'Cut these holes in '
