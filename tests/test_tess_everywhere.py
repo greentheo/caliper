@@ -108,15 +108,51 @@ def test_the_page_s_faces_never_call_tessellate(never):
     assert len(got["faces"]) == 6 and all(len(f["tris"]) == 6 for f in got["faces"])     # 2 triangles a face
 
 
+def _tessellates(source: str) -> list[int]:
+    """The lines of ``source`` that reach a ``tessellate``: any attribute named so (a call, a bare reference kept to call
+    later, with spaces before its brackets), or getattr/hasattr asking for it by a constant name. Read from the AST, so
+    a comment or a docstring that names it isn't one."""
+    import ast
+
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Attribute) and node.attr == "tessellate":
+            found.append(node.lineno)
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("getattr", "hasattr")
+              and len(node.args) > 1 and isinstance(node.args[1], ast.Constant) and node.args[1].value == "tessellate"):
+            found.append(node.lineno)
+    return sorted(set(found))
+
+
+@pytest.mark.parametrize("source", [
+    "v, f = shape.tessellate(0.05)",
+    "v, f = shape.tessellate (0.05, 0.1)",
+    "v, f = getattr(shape, 'tessellate')(0.05)",
+    "fn = shape.tessellate\nv, f = fn(0.05)",
+    "ok = hasattr(shape, 'tessellate')",
+    "v, f = shape.val().tessellate(0.05)",
+    "v, f = (\n    shape\n    .tessellate(0.05))"])
+def test_the_guard_catches_every_way_to_reach_tessellate(source):
+    assert _tessellates(source)
+
+
+@pytest.mark.parametrize("source", [
+    "# shape.tessellate(0.05) was slow",
+    "'''the arrays shape.tessellate(tol) gives'''",
+    "v, f = triangles(shape, 0.05)",
+    "x = 'tessellate'",
+    "v = shape.tessellated"])
+def test_the_guard_leaves_what_only_names_it(source):
+    assert _tessellates(source) == []
+
+
 def test_nothing_in_the_app_calls_tessellate_any_more():
-    """Every mesh is read through the helper: a new one that calls tessellate() is caught here."""
+    """Every mesh is read through the helper: a new one that reaches tessellate() any way is caught here (#342 review)."""
     import pathlib
-    import re
 
     from caliper import tess
 
     src = pathlib.Path(tess.__file__).parent
-    calls = [f"{p.name}:{n}" for p in src.rglob("*.py") if p.name != "tess.py"      # it says what it matches
-             for n, line in enumerate(p.read_text().splitlines(), 1)
-             if re.search(r"\.tessellate\(", line) and not line.lstrip().startswith("#")]
+    calls = [f"{p.name}:{n}" for p in sorted(src.rglob("*.py")) if p.name != "tess.py"     # it says what it matches
+             for n in _tessellates(p.read_text())]
     assert calls == []
