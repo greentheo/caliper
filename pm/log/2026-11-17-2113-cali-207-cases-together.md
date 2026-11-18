@@ -71,4 +71,8 @@ That's +127 MB (5%). **`TOGETHER_MAX`** is 30 M node-cases, about 5× this part,
 8. no whittle check
 9. Lighten solves each alone *(survived the first pass: see above)*
 
+**The full suite, under both whittles** (the pinned 25e282e and whittle#9's solve_each): one failure, the same in
+each. test_resolved's stand-in for `check_load` didn't take the solve the study now hands it (`got=`). My test was out of
+date, not the code; it takes `got` now, and the file runs green under both.
+
 **Not this PR:** the coarsest level's factorization, 20 s of the 84, is a whittle change. It's noted on #298 and not queued.

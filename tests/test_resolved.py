@@ -299,7 +299,7 @@ def test_a_run_that_didnt_connect_gives_no_time_for_the_finer_one(tmp_path, monk
     pytest.importorskip("whittle")
     monkeypatch.setattr(load_study, "VOXELS_THROUGH", 1)
 
-    def unjoined(ctx, i, min_safety, solid=None):
+    def unjoined(ctx, i, min_safety, solid=None, got=None):          # got: the solve study made (#345)
         load = ctx["loads"][i]
         return ({"name": load["name"], "lb": load["lb"], "factor": load["factor"], "holds": False, "safety": 0.0,
                  "governs": "fea", "fea": {"supported": False}, "plate": None},
