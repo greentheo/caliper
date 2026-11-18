@@ -88,7 +88,9 @@ def test_the_page_disables_carve_and_lighten_with_the_reason():
     import os
 
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
-    assert "id=\"carveGo\"${run ? ' data-again=\"1\"' : ''} ${S.carveJob[carveKey(p.id)] || carveBlocked(p) ? 'disabled' : ''}" in src
+    # the button is the panel's, top right (#325): greyed with the menu's why, which is the server's blocked reason
+    assert "const off = !m.ready ? ` aria-disabled=\"true\" data-why=\"${esc(m.why)}\"" in src
+    assert "if (go) go.disabled = !!S.carveJob[carveKey(pid)] || !!(part && carveBlocked(part));" in src
     # the reason is the server's one test (#144 review), the words its own
     assert "return (p && p.blocked && p.blocked.carve) || '';" in src
     assert "return (p && p.blocked && p.blocked.lighten) || '';" in src
@@ -278,4 +280,4 @@ def test_lighten_on_a_coarse_run_says_not_resolved_not_nothing_holds():
     assert "Not checked: its walls are too thin for the voxels" in view("unchecked")
     assert "Nothing lighter still holds" not in view("unresolved")
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
-    assert "id=\"lightGo\"${run ? ' data-again=\"1\"' : ''} ${lightenBlocked(p) ? 'disabled' : ''}" in src                 # #137: one reason, both
+    assert "${lightenBlocked(p) ? `<div class=\"muted small\">${esc(lightenBlocked(p))}</div>` : ''}" in src   # #137: said in its view

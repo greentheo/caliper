@@ -657,8 +657,11 @@ def filled(store, part_id: str) -> Optional[str]:
     if key not in _FILLED:
         out = None
         try:
+            from . import scenarios
+
             declared = C.declared(store, part_id)
-            if declared.get("loads"):                # script's loads: whether it has any, for a filled-in block
+            # a filled-in block is said where it must hold anything: its script's loads or a case added in the editor (#327)
+            if declared.get("loads") or scenarios.says_loads(store, part_id, script):   # script's loads: whether it has any
                 vol = next((r for r in checked(store, part_id) if r.id == "construction_volume"), None)
                 if vol is not None and not vol.passed and PANEL_SAID in (vol.detail or ""):
                     out = not_accounted(store, part_id) or vol.detail       # in words for a person, where it's the pieces that are short
@@ -683,7 +686,10 @@ def checked(store, part_id: str) -> list[AssertionResult]:
     entry = store.design.part(part_id)
     key = (store.root, part_id, entry.version if entry else None, hash(store.read_script(part_id)))
     if key not in _CHECKED:
-        _CHECKED[key] = check(C.declared(store, part_id), store.part_geometry(part_id))
+        from . import scenarios
+
+        _CHECKED[key] = check(C.declared(store, part_id), store.part_geometry(part_id),
+                              strength=scenarios.says_loads(store, part_id))   # its script's loads, or a case added (#327)
         while len(_CHECKED) > 64:
             _CHECKED.pop(next(iter(_CHECKED)))
     return _CHECKED[key]
@@ -747,8 +753,10 @@ def not_accounted(store, part_id: str) -> Optional[str]:
     return _ACCOUNTED[key]
 
 
-def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
-    """The declarations measured against the built solid: [] when the part declares nothing."""
+def check(declared: Optional[dict], geometry, strength: Optional[bool] = None) -> list[AssertionResult]:
+    """The declarations measured against the built solid: [] when the part declares nothing. ``strength``: whether its
+    strength check analyses the solid, where the caller knows (a case added in the editor, #327); else its script's
+    loads()."""
     if not declared:
         return []
     if declared.get("error"):
@@ -776,7 +784,8 @@ def check(declared: Optional[dict], geometry) -> list[AssertionResult]:
         out.append(_on_its_face(mesh, pieces, tol))
         if not rest:
             out.append(_covers(mesh, pieces, tol))
-            vol = _volume(mesh, pieces, strength=bool(declared.get("loads")), tol=tol)   # script's loads: any at all
+            vol = _volume(mesh, pieces, tol=tol,          # what its strength check analyses: the solid, or not
+                          strength=bool(declared.get("loads")) if strength is None else strength)  # script's loads: no caller said
             out += [vol] if vol else []
     inside = _holes_inside(declared.get("construction") or [])     # (#66 item 4)
     out += [inside] if inside else []

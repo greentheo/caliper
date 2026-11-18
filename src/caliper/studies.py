@@ -257,9 +257,11 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
     return "", None
 
 
-def index(store, runs: dict[str, list[dict]], parts: list[dict], air: Optional[dict] = None) -> dict:
+def index(store, runs: dict[str, list[dict]], parts: list[dict], air: Optional[dict] = None,
+          cut_off: Optional[str] = None) -> dict:
     """``{"runs": [...], "menu": {part: [...]}}`` from the runs ``design_state`` already loaded (by kind)
-    and its part summaries; ``air`` is :func:`in_air`'s answer (drag studies need it)."""
+    and its part summaries; ``air`` is :func:`in_air`'s answer (drag studies need it); ``cut_off`` why cut plans can't
+    be made here."""
     current = {p["id"]: p["version"] for p in parts}
     history = {p["id"]: store.history(p["id"]) for p in parts}
     rows = []
@@ -292,11 +294,46 @@ def index(store, runs: dict[str, list[dict]], parts: list[dict], air: Optional[d
     rows.sort(key=lambda x: x["created"] or 0, reverse=True)
     whole = [{"kind": k, "label": KINDS[k][0], "what": KINDS[k][1], "ready": bool(parts), "why": "no parts yet"}
              for k in ("scorecard", "release")]
-    return {"runs": rows, "menu": {p["id"]: menu(p, air) for p in parts}, "design": whole}
+    checks = {}                                   # each part's latest check of the version it is now (#325)
+    for r in sorted(runs.get("load") or [], key=lambda r: _epoch(r.get("created")) or 0, reverse=True):
+        pid = r.get("part")
+        if pid in current and pid not in checks and (r.get("version") or version_at(history[pid], _epoch(r.get("created"))))\
+                == current[pid]:
+            _, ok = _headline("load", r)
+            checks[pid] = {"ok": ok, "safety": r.get("safety") if r.get("safety") is not None else
+                           min((c.get("safety") for c in r.get("cases") or [] if c.get("safety") is not None), default=None),
+                           "need": r.get("min_safety")}
+    return {"runs": rows, "menu": {p["id"]: menu(p, air, checks.get(p["id"]), cut_off) for p in parts}, "design": whole}
 
 
-def menu(p: dict, air: Optional[dict] = None) -> list[dict]:
-    """Every study, for one part: can it run here, and if not, why not (what to say or do to get it)."""
+def chain(p: dict, check=...) -> str:
+    """Where a part stands in the chain the panel's buttons follow (#325): it builds, then it holds its loads. "" where
+    the next steps can run; else why not. ``check``: its latest strength check of this version, ``{"ok", "safety",
+    "need"}`` (ok None: it couldn't settle, which, as Lighten itself, doesn't hold them back: only a fail does), None
+    where it has none; left out, not known here, so only the build is asked."""
+    if "bbox" in p and p["bbox"] is None:
+        return "it doesn't build yet"
+    if not p.get("loads") or check is ...:
+        return ""
+    if check is None:
+        return "check it holds first"
+    if check.get("ok") is False:
+        from .answers import safety_num
+
+        safety, need = check.get("safety"), check.get("need")
+        return (f"it doesn't pass its loads yet: {safety_num(safety, need)} where it needs {need:g}"   # cut, as the card
+                if safety is not None and need else "it doesn't pass its loads yet")
+    return ""
+
+
+#: The studies that come after the strength check in the chain (#325).
+AFTER_CHECK = ("lighten", "carve", "aero", "whittle", "patterns", "cutplan")
+
+
+def menu(p: dict, air: Optional[dict] = None, check=..., cut_off: Optional[str] = None) -> list[dict]:
+    """Every study, for one part: can it run here, and if not, why not (what to say or do to get it). Where a study could
+    run but the chain (:func:`chain`) holds it back, that's its why: the panel's buttons and this menu read the same.
+    ``cut_off``: why cut plans can't be made here (``cutplan.available()``), None where they can."""
     mesh = not p.get("scripted")
     roll = "it's a mesh right now: say “roll it back” to get its script back"
     if p.get("role") == "fixed":
@@ -306,8 +343,13 @@ def menu(p: dict, air: Optional[dict] = None) -> list[dict]:
 
     airborne, grounded = (air is None or air["yes"]), (air or {}).get("why", "")
 
+    held = chain(p, check)                       # where the chain holds a study back, ready on its own (#325)
+
     def item(kind, ready, why=""):
         label, what = KINDS[kind]
+        first = held == "it doesn't build yet"         # the chain's first link wins over a study's own why (#331 review)
+        if held and (kind in AFTER_CHECK or (kind == "load" and first)) and (ready or (first and not mesh)):
+            ready, why = False, held
         return {"kind": kind, "label": label, "what": what, "ready": bool(ready), "why": "" if ready else why}
 
 
@@ -342,7 +384,9 @@ def menu(p: dict, air: Optional[dict] = None) -> list[dict]:
         item("patterns", p.get("built") and not p.get("framed"),
              roll if mesh else "a frame's tubes are on its cut list" if p.get("framed")
              else "it doesn't say what it's built from (construction())"),
-        item("cutplan", p.get("built"), roll if mesh else "it doesn't say what it's built from (construction())"),
+        item("cutplan", p.get("built") and not cut_off,
+             roll if mesh else f"not here: {cut_off}" if p.get("built") else
+             "it doesn't say what it's built from (construction())"),
     ]
     return out
 

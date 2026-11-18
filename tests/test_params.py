@@ -288,7 +288,8 @@ _LIST = """[
   { name: 'mesh_rows', note: 'rows of holes', value: 4, unit: 'count', range: [1, 8], read: true },
   { name: 'spare', note: '', value: 3, unit: 'mm', range: null, read: false },
   { name: 'tilt', note: 'lean angle', value: 5, unit: 'deg', range: null, read: true } ]"""
-_FNS = ("inchText", "paramName", "readNumber", "paramRange", "paramProblem", "paramRows", "paramsHtml", "paramView")
+_FNS = ("inchText", "paramName", "readNumber", "paramRange", "paramProblem", "paramRows", "paramsHtml", "paramView",
+        "paramsHead", "paramsOpen")
 
 
 def _page(body: str, units: str = "in") -> dict:
@@ -307,6 +308,8 @@ const paramText = (e, v) => (isLength(e) && inches() ? inchText(v) : `${+Number(
 const paramUnit = (e) => (isLength(e) ? (inches() ? 'in' : 'mm') : e.unit === 'deg' ? 'deg' : '');
 let loaded = 0;
 const loadParams = () => { loaded += 1; };
+const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' }, loadRuns = () => [];      // Parameters' own header (#325)
+const localStorage = { getItem: () => null };
 globalThis.setTimeout = (f) => f();
 const LIST = LIST_HERE;
 const P = { id: 'box', version: 5, scripted: true, role: 'part' };
@@ -493,11 +496,14 @@ def test_rebuild_asks_for_the_new_model():
     assert fn.index("S.design = got.design;") < fn.index("await syncParts(S.design, false);")
 
 
-def test_the_panel_sits_after_will_it_work():
+def test_the_panel_sits_at_the_top():
+    """#325, Theo: Parameters at the top, under the part's name, always in view; not inside the four questions."""
     from .test_carve_click import _fn
 
-    fn = _fn(open(JS).read(), "cardsView")
-    assert "${k === 'work' ? groups.params || '' : ''}" in fn
+    src = open(JS).read()
+    part = _fn(src, "partView")
+    assert part.index('<div id="paramBox">${paramView(p)}</div>') < part.index("${cardsView({ what, work, buy, make })}")
+    assert "groups.params" not in _fn(src, "cardsView")
 
 
 @pytest.mark.parametrize("name,note,said", [

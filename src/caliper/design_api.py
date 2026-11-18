@@ -454,7 +454,8 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             # what it has to hold (keeps()) — a drag study keeps it clear (CALI-42)
             "keeps": "def keeps(" in script,
             "shell": "def shell(" in script,      # its walls can carry load in a frame study (CALI-44)
-            "loads": "def loads(" in script,      # what it must hold: a strength study (CALI-54)
+            # what it must hold: a strength study (CALI-54); its script's, or a case added in the editor (#327)
+            "loads": scenarios.says_loads(store, p.id, script),
             # printed, whole or the rest beside its sheets: carved free-form, not lightened with holes (CALI-82)
             "printed": bool(re.search(r"""["']kind["']\s*:\s*["']printed["']""", script)),
             # sheet pieces: lightened with holes (a printed part is carved) (#92)
@@ -463,7 +464,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             # Lighten or Carve, never both, by where its volume is: what the panel, the card and blocked() read (#272)
             "study": studies.made_of(store, p.id)["study"],
             # its strength rests on a filled-in solid (or a shape that couldn't be checked): no "holds" (CALI-96)
-            "untrusted": consistency.filled(store, p.id) if "def loads(" in script else None,
+            "untrusted": consistency.filled(store, p.id) if scenarios.says_loads(store, p.id, script) else None,
             "not_accounted": consistency.not_accounted(store, p.id) if construction.declares(script) else None,  # (CALI-155)
             "suggest": {k: aero.suggest(k, v, ranges) for k, v in (params or {}).items()},
             "id": p.id, "intent": p.intent, "version": p.version, "origin": p.origin,
@@ -547,6 +548,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     for rel in runs["release"]:                # ready, as made and for the parts as they are now (#132 review)
         rel["verdict"] = verdicts.release(rel, current)
     air = studies.in_air(d, parts, has_runs=bool(runs["aero"] or runs["whittle"]))
+    cut_off = cutplan.available()                           # why cut plans can't be made here: the menu and the page's
     skipped: list = []
     log = store.log(skipped)
     return {
@@ -585,10 +587,10 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "releases": runs["release"],
         # does it move through air? drag studies only when it does (CALI-67)
         "in_air": air,
-        "studies": studies.index(store, runs, parts, air),
+        "studies": studies.index(store, runs, parts, air, cut_off),   # the menu greys the cut plan where it can't run
         "has_goals": os.path.exists(scorecard.goals_path(store)),
         "goals": _goals_summary(store),
-        "cutplan_unavailable": cutplan.available(),
+        "cutplan_unavailable": cut_off,
         "aero_available": _aero_available(),
     }
 

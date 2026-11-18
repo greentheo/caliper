@@ -255,6 +255,19 @@ def _load(sc: dict) -> dict:
             "lo": list(sc["lo"]), "hi": list(sc["hi"])}
 
 
+def says_loads(store, pid: str, script: Optional[str] = None) -> bool:
+    """Whether a part says what it must hold (#327): its script's ``loads()``, or a case the person keeps in the editor:
+    one they added, or an edit whose case the design has since dropped (its check still reads it, #312). A save with
+    every case off is refused, so any of them is one it checks. What the page's ``p.loads`` is, so a part with no ``loads()`` given one there shows its check,
+    its results and Lighten, as one whose script says it."""
+    if script is None:
+        script = store.read_script(pid) if store.is_scripted(pid) else ""
+    if "def loads(" in script:
+        return True
+    said = _said(store, pid)
+    return bool(said) and bool(_edits(said))
+
+
 def loads(store, pid: str, declared: dict) -> list:
     """The strength loads a check reads, as ``loads()`` items: the edited scenarios that are on, else the script's own
     (the very same items, so a part never edited checks byte for byte as it did)."""

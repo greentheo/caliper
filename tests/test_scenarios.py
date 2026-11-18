@@ -239,7 +239,8 @@ def test_the_editor_shows_each_row_and_a_standard_s_way_back():
     assert "the standard is 150 kg" in html and 'data-scen-std="0"' in html and "Back to the standard" in html
     assert "the floor at its underside" in html and 'value="the wall"' in html
     assert "Back to its script" in html and "Saving makes a new version of stool" in html
-    plain = _page("""out = scenariosView({id: 'stool'}, {overridden: false, scenarios: [], supports: []});""")
+    mine = {**{k: v for k, v in rating.items() if k != "standard"}, "of": "rating", "source": "script"}  # its script's own (#327)
+    plain = _page(f"""out = scenariosView({{id: 'stool'}}, {{overridden: false, scenarios: [{json.dumps(mine)}], supports: []}});""")
     assert "Back to its script" not in plain and "As its script says them" in plain
 
 

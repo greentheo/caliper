@@ -298,8 +298,8 @@ def _fn(src: str, name: str) -> str:
 def test_the_cards_redraw_while_the_shop_plan_is_loading():
     """The page error on Theo's run: makingView read m.data while its fetch was still out."""
     src = open(JS).read()
-    script = _fn(src, "makingView") + """
-const S = { making: {}, shopKey: 0 };
+    script = _fn(src, "makingView") + _fn(src, "makingKey") + """
+const S = { slug: 's', making: {}, shopKey: 0 };
 const esc = (s) => String(s);
 let asked = 0;
 function loadMaking(p, key) { asked += 1; S.making[p.id] = { key, loading: true }; }
@@ -329,10 +329,10 @@ S.carveJob.stool = { job: 'j1', text: 'step 2: 20% of the printed part carved aw
                      t0: Date.now() - 600000, p0t: Date.now() - 300000, p0: 0.1 };
 out = { before, during: carveView(p) };
 """))
-    assert "a few minutes" not in out["before"] and 'id="carveGo" >' in out["before"]
+    assert "a few minutes" not in out["before"] and 'id="carveGo"' not in out["before"]   # its button is top right (#325)
     assert "at least about 68 min at this size" in out["before"]               # 90 s x 45
     during = out["during"]
-    assert 'id="carveGo" disabled' in during
+    assert 'id="carveGo"' not in during                    # a running carve shows on the bar's button (test_part_panel)
     assert "step 3 of 7: 20% of the printed part carved away" in during and 'width:40%' in during
     assert "about 10 min left" in during                       # 0.3 of the way in 5 min: 0.6 to go, 10 min
     assert 'id="carveStop"' in during and ">Cancel<" in during

@@ -51,6 +51,7 @@ async function api(method, url, body) {
     let msg = `HTTP ${r.status}`, errorId = '';
     try { const j = await r.json(); msg = j.detail || j.error || msg; errorId = j.error_id || ''; } catch (e) { /* not JSON */ }
     const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    err.status = r.status;                       // what kind of no it was: a 422 is the part's (#331 review)
     if (errorId) { err.errorId = errorId; (window.__errIds = window.__errIds || {})[err.message] = errorId; }   // a crash the server kept (CALI-59)
     // a 409 is a refusal the server meant, not a bug: it shows as a plain line with no Report it (#70 item 24)
     if (r.status === 409) { err.refused = true; (window.__refused = window.__refused || {})[err.message] = true; }
@@ -1866,8 +1867,29 @@ function paramsHtml(p, st, done) {
   const said = done && done.part === p.id && done.version === p.version ? `<div class="pdone">v${done.version} written: ${esc(done.said)} set exactly as typed; the whole design re-measured.</div>
     ${done.followed ? `<div class="pnote">${esc(done.followed.charAt(0).toUpperCase() + done.followed.slice(1))}.</div>` : ''}
     ${done.warning ? `<div class="pnote warn">${esc(done.warning)}.</div>` : ''}${(done.notes || []).map((n) => `<div class="pnote">${esc(n)}.</div>`).join('')}` : '';
-  return `<section class="params"><div class="phead"><b>Parameters</b><span class="small muted">set by hand, no Claude call</span></div>
-    ${body}${foot}${st.err ? `<div class="pnote bad">${esc(st.err)}</div>` : ''}${said}</section>`;
+  const head = paramsHead(p, rows);
+  return `<details class="params psec t-${head.tone}" id="paramSec"${paramsOpen() ? ' open' : ''}><summary class="phead">
+      <span class="qmark">${QMARK[head.tone]}</span><b>Parameters</b><span class="small muted">${esc(head.answer)}</span></summary>
+    <div class="small muted">set by hand, no Claude call</div>
+    ${body}${foot}${st.err ? `<div class="pnote bad">${esc(st.err)}</div>` : ''}${said}</details>`;
+}
+// Parameters' own header (#325): how many, the sheet's thickness where it has one, and a mark where something needs a
+// look: a number that won't do (✗), one typed and not rebuilt yet, one saved outside its range, or a part changed since
+// its check (!)
+function paramsHead(p, rows) {
+  const n = rows.length, bad = rows.filter((r) => r.problem), dirty = rows.filter((r) => r.changed);
+  const out = rows.filter((r) => r.e.range && (r.e.value < r.e.range[0] - 1e-9 || r.e.value > r.e.range[1] + 1e-9));
+  const run = p.loads ? (loadRuns(p.id) || [])[0] : null, since = !!(run && run.version !== p.version);
+  const sheet = rows.find((r) => /(^|_)(t|ply|thick|sheet)(_|$)|thick/i.test(r.e.name));
+  const what = `${n} number${n === 1 ? '' : 's'}${sheet ? ` · ${paramName(sheet.e)} ${sheet.shown}${paramUnit(sheet.e) ? ` ${paramUnit(sheet.e)}` : ''}` : ''}`;
+  if (bad.length) return { tone: 'bad', answer: `${what} · ${bad.length} won't do` };
+  if (dirty.length) return { tone: 'warn', answer: `${what} · ${dirty.length} changed, not rebuilt yet` };
+  if (out.length) return { tone: 'warn', answer: `${what} · ${paramName(out[0].e)} is outside its range` };
+  if (since) return { tone: 'warn', answer: `${what} · changed since its check` };
+  return { tone: 'info', answer: what };
+}
+function paramsOpen() {                          // open by default; kept as it was left
+  try { return localStorage.getItem('caliper.params.open') !== '0'; } catch (e) { return true; }
 }
 function paramView(p) {
   if (!S.design || !p || !p.scripted || p.role === 'fixed') return '';
@@ -2093,7 +2115,8 @@ function designView(d) {
   const buy = d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : '';
   const make = `<h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>`;
   return `<h2>${esc(d.name)} ${status}</h2>
-    ${cardsView({ what, work, buy, make, params: d.parts.length === 1 ? `<div id="paramBox">${paramView(d.parts[0])}</div>` : '' })}`;
+    ${d.parts.length === 1 ? `<div id="paramBox">${paramView(d.parts[0])}</div>` : ''}
+    ${cardsView({ what, work, buy, make })}`;
 }
 
 // ------------------------------------------------------------- the four questions (spec step 1)
@@ -2104,8 +2127,6 @@ const QUESTIONS = [['what', 'What is it?'], ['work', 'Will it work?'], ['buy', '
 const QMARK = { ok: '✓', warn: '!', bad: '✗', info: '·' };
 const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', release: 'relBox', trial: 'trialBox',
   carve: 'loadBox' };                 // the carve's panel is under Will it hold? (#89 item 6)
-function numbersOpen(k) { try { return localStorage.getItem(`caliper.numbers.${k}`) === '1'; } catch (e) { return false; } }
-function keepNumbersOpen(k, on) { try { localStorage.setItem(`caliper.numbers.${k}`, on ? '1' : '0'); } catch (e) { /* private window */ } }
 
 function answersKey() {               // what the answers depend on: a change to any of it asks again
   const d = S.design;
@@ -2118,7 +2139,7 @@ function answersKey() {               // what the answers depend on: a change to
 // a card's lines, and under a part's Will it work? its Things to fix (#300): one painter, for the first draw and the
 // fill when its answers come in (a fill with qlines alone dropped the list)
 function cardLines(k, c) {
-  return qlines(c) + (k === 'work' && S.scope && c ? fixesBox(S.scope) : '');
+  return qlines(c);                             // Things to fix is a section of the card now (#325)
 }
 function qlines(c) {
   if (!c) return '<div class="qline muted"><span class="spin"></span>answering…</div>';
@@ -2189,20 +2210,52 @@ function fixesView(got, mine) {
       <div class="small muted">a designer edit, in your words</div></div>`).join('')}
     <div class="small fixadd"><input data-fix-add placeholder="add your own: “and round the top’s corners”" style="width:70%">
       <button class="ghost" data-fix-add-go="1">Add</button></div>
-    ${fixGo(mine, rows.length + own.length)}
+    ${fixGo(mine)}
     ${(got.limits || []).length ? `<div class="qbetter-h" style="margin-top:6px">Known limits</div>
       <ul class="small muted fixlimits">${got.limits.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`;
 }
 // Fix these (#300 slice B): its cost first, from the server's own plan (pressing Go ahead is the person's word for any
-// designer call it names); while it runs, said; after, each row Fixed only where measured, Still open, or Not done
-function fixGo(mine, n) {
+// designer call it names); while it runs, said; after, each row Fixed only where measured, Still open, or Not done. The
+// button that asks the plan is the part's, top right (fixAct, #325)
+function fixGo(mine) {
   const results = (mine.results || []).length ? `<div class="qbetter-h" style="margin-top:6px">The last fix</div><ul class="small fixresults">${
     mine.results.map((x) => `<li>${esc(x.fix || x.id || '')}: <b>${esc(x.status)}</b> <span class="muted">${esc(x.why || '')}</span></li>`).join('')}</ul>` : '';
   if (mine.running) return `<div class="small muted">fixing… ${esc(mine.running === true ? '' : mine.running)}</div>${results}`;
   if (mine.plan) return `<div class="small">It takes ${esc(mine.plan.said)}.
       <button class="primary" data-fix-go="1">Go ahead</button> <button class="ghost" data-fix-cancel="1">Not now</button></div>${results}`;
-  return `<div class="actions"><button class="primary" data-fix-plan="1"${n ? '' : ' disabled'}>Fix these</button></div>
-    ${mine.error ? `<div class="small" style="color:var(--bad)">${esc(mine.error)}</div>` : ''}${results}`;
+  return `${mine.error ? `<div class="small" style="color:var(--bad)">${esc(mine.error)}</div>` : ''}${results}`;
+}
+// Fix these, top right with the part's other actions (#325): where its list, read for this version and its newest check,
+// has rows; greyed, with why, while none is ticked; "Fixing…" while it runs. It opens Things to fix (GO_OPENS) and asks
+// the plan, whose cost is said there before anything runs
+function fixAct(part) {
+  if (!fixFresh(part)) return '';
+  const got = S.fixes[fixKey(part)], mine = fixMine(part);
+  if (!(got.rows || []).length && !(mine.own || []).length) return '';
+  const sel = fixPicked(part), n = sel.picked.length + sel.own.length;
+  const why = "nothing's ticked in Things to fix";
+  const off = n ? '' : ` aria-disabled="true" data-why="${esc(why)}" title="${esc(`Not yet: ${why}`)}"`;
+  return `<button class="small${n ? '' : ' off'}" id="fixGo"${off}${mine.running ? ' disabled' : ''}>${
+    mine.running ? runningLabel('fix') : 'Fix these'}</button>`;
+}
+// the bar's Fix these drawn again, alone, as the list lands or a tick changes: the other buttons keep their wiring
+function paintFixAct(part) {
+  const bar = $('pacts');
+  if (!bar || S.scope !== part) return;
+  const old = $('fixGo'), html = fixAct(part);
+  if (old) old.remove();
+  if (html) bar.insertAdjacentHTML('beforeend', html);
+  const b = $('fixGo');
+  if (b) b.onclick = () => fixPlan(part);
+}
+async function fixPlan(part) {
+  const mine = fixMine(part), b = $('fixGo');
+  if (b) b.disabled = true;
+  mine.error = null;
+  try { mine.plan = await api('POST', `/api/designs/${S.slug}/parts/${part}/fixes/plan`, fixPicked(part)); }
+  catch (e) { mine.error = plainly(e.message); }
+  if (b) b.disabled = false;
+  paintFixes(part);
 }
 // what's ticked, as the server reads it: each row by its id and the choice made, the person's words where they gave them
 function fixPicked(part) {
@@ -2214,38 +2267,69 @@ function fixPicked(part) {
     own: (mine.own || []).filter((o) => !o.off).map((o) => ({ fix: o.fix })),
   };
 }
-function fixesBox(part) {
-  const open = S.fixOpen === fixKey(part);
-  const got = open && S.fixes && S.fixes[fixKey(part)];
-  return `<details class="qbetter qfix" id="fixBox" data-fix-part="${esc(part)}"${open ? ' open' : ''}><summary>Things to fix
-      <span class="muted small">measured, with what each would take</span></summary>
-    <div id="fixBody">${got ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div></details>`;
+// Things to fix as a section of Will it work? (#325): its mark and its count once its list is read
+function fixesSection(part) {
+  const got = S.fixes && S.fixes[fixKey(part)], fresh = fixFresh(part), failed = !!got && got.error != null;
+  const n = fresh ? (got.rows || []).length : null;
+  const unchecked = n === 0 && !fixChecked(part);     // an empty list with nothing measured isn't a ✓ (#331 review)
+  return { k: 'fix', title: 'Things to fix', tone: n == null || unchecked ? 'info' : n ? 'warn' : 'ok',
+    answer: failed ? "couldn't read them" : n == null ? 'measured, with what each would take' : unchecked ? 'not checked yet'
+      : n ? `${n} measured wrong` : 'nothing measured wrong',
+    attrs: ` id="fixBox" data-fix-part="${esc(part)}"`,
+    body: `<div id="fixBody">${fresh || failed ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div>` };
+}
+// this design's list, read for this version and its newest check, and read: a failed read is never fresh, so the next
+// draw reads it again (#331 review: a 500 from /fixes stored an empty list under the stamp and read ✓)
+function fixFresh(part) {
+  const got = S.fixes && S.fixes[fixKey(part)];
+  return !!got && got.v === fixStamp(part) && got.error == null;
 }
 function fixVersion(part) { return ((S.design.parts.find((p) => p.id === part)) || {}).version; }
+// what the list was read against (#331 review): the part's version and its newest strength check, so a check of the same
+// version reads it again
+function fixStamp(part) {
+  const ids = loadRuns(part).map((r) => r.id).sort();
+  return `${fixVersion(part)}|${ids.length ? ids[ids.length - 1] : ''}`;
+}
+function fixChecked(part) {
+  const v = fixVersion(part);
+  return loadRuns(part).some((r) => r.version === v);
+}
 async function loadFixes(part) {
   S.fixes = S.fixes || {};
-  const v = fixVersion(part), k = fixKey(part);
+  const v = fixStamp(part), k = fixKey(part);
+  S.fixReading = S.fixReading || {};
+  if (S.fixReading[k] === v) return;                // already asked, for this stamp
+  S.fixReading[k] = v;
   let got;
   try { got = { ...(await api('GET', `/api/designs/${S.slug}/parts/${part}/fixes`)), v }; }
   catch (e) { got = { rows: [], limits: [], error: plainly(e.message), v }; }
+  if (S.fixReading[k] === v) delete S.fixReading[k];
   if (k !== fixKey(part)) return;                 // another design opened while it asked
   S.fixes[k] = got;
   paintFixes(part);
 }
 function paintFixes(part) {
+  paintFixAct(part);
   const b = $('fixBody'), got = S.fixes && S.fixes[fixKey(part)];
   if (!b || !got || (($('fixBox') || {}).dataset || {}).fixPart !== part) return;
   b.innerHTML = fixesView(got, fixMine(part));
+  const head = $('fixBox').querySelector('summary'), x = fixesSection(part);   // its header: the count, its mark
+  if (head) head.innerHTML = subHead(x);
+  $('fixBox').classList.toggle('attn', ATTN(x.tone));
   wireFixRows(part);
 }
 function wireFixes() {
   const box = $('fixBox');
   if (!box) return;
   const part = box.dataset.fixPart;
+  paintFixAct(part);
   // of this design (its key) and this version only
-  const fresh = () => { const got = S.fixes && S.fixes[fixKey(part)]; return !!got && got.v === fixVersion(part); };
+  const fresh = () => fixFresh(part);
   box.ontoggle = () => { S.fixOpen = box.open ? fixKey(part) : null; if (box.open) { if (fresh()) paintFixes(part); else loadFixes(part); } };
-  if (box.open) { if (fresh()) wireFixRows(part); else loadFixes(part); }
+  // its header's mark shows closed too: read the list again once a check lands, open or not (#331 review)
+  if (!fresh()) loadFixes(part);
+  else if (box.open) wireFixRows(part);
 }
 function wireFixRows(part) {
   const mine = fixMine(part), body = $('fixBody');
@@ -2254,6 +2338,7 @@ function wireFixRows(part) {
     const id = t.dataset.fixTick;
     mine.untick = mine.untick.filter((x) => x !== id).concat(t.checked ? [] : [id]);
     mine.tick = (mine.tick || []).filter((x) => x !== id).concat(t.checked ? [id] : []);
+    paintFixAct(part);
   }; });
   body.querySelectorAll('[data-fix-pick]').forEach((t) => { t.onchange = () => { mine.pick[t.dataset.fixPick] = +t.value; paintFixes(part); }; });
   body.querySelectorAll('[data-fix-word]').forEach((b) => { b.onclick = () => { mine.editing = b.dataset.fixWord; paintFixes(part); }; });
@@ -2269,15 +2354,10 @@ function wireFixRows(part) {
     i.onkeydown = (e) => { if (e.key === 'Enter') done(); if (e.key === 'Escape') { mine.editing = null; paintFixes(part); } };
     i.onblur = done;
   });
-  body.querySelectorAll('[data-fix-own-tick]').forEach((t) => { t.onchange = () => { mine.own[+t.dataset.fixOwnTick].off = !t.checked; }; });
+  body.querySelectorAll('[data-fix-own-tick]').forEach((t) => { t.onchange = () => {
+    mine.own[+t.dataset.fixOwnTick].off = !t.checked; paintFixAct(part);
+  }; });
   body.querySelectorAll('[data-fix-own-del]').forEach((b) => { b.onclick = () => { mine.own.splice(+b.dataset.fixOwnDel, 1); paintFixes(part); }; });
-  const plan = body.querySelector('[data-fix-plan]');
-  if (plan) plan.onclick = async () => {
-    plan.disabled = true; mine.error = null;
-    try { mine.plan = await api('POST', `/api/designs/${S.slug}/parts/${part}/fixes/plan`, fixPicked(part)); }
-    catch (e) { mine.error = plainly(e.message); }
-    paintFixes(part);
-  };
   const cancel = body.querySelector('[data-fix-cancel]');
   if (cancel) cancel.onclick = () => { mine.plan = null; paintFixes(part); };
   const goNow = body.querySelector('[data-fix-go]');
@@ -2357,19 +2437,94 @@ async function focusCard(k) {
   }
   renderLayers && renderLayers();
 }
+// the four questions as an accordion (#325): one open at a time, each header keeping its mark and its answer line, so a
+// closed card still says how it stands. Which is open is kept per design and part; else the first that fails, else Will it
+// work?
+const cardStore = () => `${S.slug}/${S.scope || ''}`;
+function openCardFor(a) {
+  const k = cardStore();
+  if (S.openCard && k in S.openCard) return S.openCard[k];
+  try { const kept = localStorage.getItem(`caliper.open.${k}`); if (kept !== null) return kept; } catch (e) { /* none allowed */ }
+  const bad = a && a.cards.find((c) => c.status === 'bad');
+  return bad ? bad.key : 'work';
+}
 function cardsView(groups) {
   const a = S.answers && S.answers.key === answersKey() && S.answers.cards ? S.answers : null;
   if (!a && !(S.answers && S.answers.key === answersKey() && S.answers.loading)) setTimeout(loadAnswers, 0);
+  const open = openCardFor(a);
   return QUESTIONS.map(([k, q]) => {
-    const c = a ? a.cards.find((x) => x.key === k) : null;
-    return `<section class="qcard q-${c ? c.status : 'info'}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
-      <div class="qhead" title="${S.scope ? 'show this in 3D' : ''}"><span class="qmark">${c ? QMARK[c.status] : '·'}</span><h3>${q}</h3></div>
+    const c = a ? a.cards.find((x) => x.key === k) : null, on = k === open;
+    return `<section class="qcard q-${c ? c.status : 'info'}${on ? ' open' : ''}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
+      <h3 class="qhead"><button type="button" class="qtoggle" aria-expanded="${on}" aria-controls="qbody-${k}" data-qopen="${k}"${S.scope ? ' title="show this in 3D"' : ''}><span class="qmark">${c ? QMARK[c.status] : '·'}</span><span class="qtitle">${q}</span>${/class="ssec[^"]*\battn\b/.test(groups[k] || '') ? '<span class="qinside" title="something inside needs a look">● inside</span>' : ''}<span class="qcaret" aria-hidden="true">${on ? '▾' : '▸'}</span></button></h3>
       <div class="qlines" id="q-${k}">${cardLines(k, c)}</div>
       ${k === 'what' && picturePart() ? '<div class="qlinks"><button class="btn" data-picture="1">🦖 Put a picture on it</button></div>' : ''}
-      <details class="numbers" data-card="${k}" ${numbersOpen(k) ? 'open' : ''}><summary>the numbers</summary>
-        ${groups[k] || '<div class="empty">Nothing here yet.</div>'}</details>
-    </section>${k === 'work' ? groups.params || '' : ''}`;
+      <div class="qbody" id="qbody-${k}" role="region" aria-label="${q}"${on ? '' : ' hidden'}>${groups[k] || '<div class="empty">Nothing here yet.</div>'}</div>
+    </section>`;
   }).join('');
+}
+function openCard(k) {                          // opening one closes the others; the open one closes again on its head
+  const now = document.querySelector('#inspector .qcard.open');
+  const to = now && now.dataset.card === k ? '' : k;
+  S.openCard = S.openCard || {};
+  S.openCard[cardStore()] = to;
+  try { localStorage.setItem(`caliper.open.${cardStore()}`, to); } catch (e) { /* private window */ }
+  showOpen(to);
+}
+function showOpen(to) {
+  document.querySelectorAll('#inspector .qcard').forEach((sec) => {
+    const on = sec.dataset.card === to, b = sec.querySelector('.qtoggle'), body = sec.querySelector('.qbody');
+    sec.classList.toggle('open', on);
+    if (b) { b.setAttribute('aria-expanded', String(on)); b.querySelector('.qcaret').textContent = on ? '▾' : '▸'; }
+    if (body) body.hidden = !on;
+  });
+}
+// a block one level down, closed until opened, kept open or closed by what it is (#325)
+// the sections inside a card (#325, Theo's refinements): a sub-accordion, each header with its own mark and its one-line
+// answer, so a problem shows while everything is closed. SUB_ONE is the one switch: true, one open at a time within a
+// card; false, each opens and closes on its own (Theo isn't sure which he wants)
+const SUB_ONE = true;
+const subKey = (card, k) => `${cardStore()}/${card}${SUB_ONE ? '' : `/${k}`}`;
+function subKept(card, k) {
+  const key = subKey(card, k);
+  if (S.subOpen && key in S.subOpen) return S.subOpen[key];
+  try { return localStorage.getItem(`caliper.ssec.${key}`); } catch (e) { return null; }
+}
+const ATTN = (tone) => tone === 'bad' || tone === 'warn';
+// which are open: SUB_ONE, the one kept, else the first that needs attention, else the first; else each by what it was
+// left as, else open where it needs attention
+function subsOpen(card, list) {
+  if (!SUB_ONE) return new Set(list.filter((x) => { const kept = subKept(card, x.k); return kept != null ? kept === '1' : ATTN(x.tone); }).map((x) => x.k));
+  const kept = subKept(card, null);
+  if (kept != null && (kept === '' || list.some((x) => x.k === kept))) return new Set(kept ? [kept] : []);
+  const first = list.find((x) => x.tone === 'bad') || list.find((x) => x.tone === 'warn') || list[0];
+  return new Set(first ? [first.k] : []);
+}
+const subHead = (x) => `<span class="qmark">${QMARK[x.tone] || '·'}</span><span class="stitle">${x.title}</span>${x.answer ? `<span class="sanswer">${x.answer}</span>` : ''}`;
+function ssecs(card, list) {
+  const open = subsOpen(card, list.filter(Boolean));
+  return list.filter(Boolean).map((x) => `<details class="ssec t-${x.tone}${ATTN(x.tone) ? ' attn' : ''}" data-ssec="${x.k}" data-in="${card}"${x.attrs || ''}${open.has(x.k) ? ' open' : ''}>
+    <summary>${subHead(x)}</summary><div class="sbody">${x.body}</div></details>`).join('');
+}
+function keepSub(dt) {                          // what's left open is kept; with SUB_ONE, opening one closes the others
+  const card = dt.dataset.in, k = dt.dataset.ssec;
+  if (SUB_ONE && dt.open) {
+    document.querySelectorAll(`#inspector details.ssec[data-in="${card}"]`).forEach((o) => { if (o !== dt && o.open) o.open = false; });
+  }
+  const now = SUB_ONE ? (dt.open ? k : ([...document.querySelectorAll(`#inspector details.ssec[data-in="${card}"]`)].find((o) => o.open) || {}).dataset?.ssec || '')
+    : (dt.open ? '1' : '0');
+  S.subOpen = S.subOpen || {};
+  S.subOpen[subKey(card, k)] = now;
+  try { localStorage.setItem(`caliper.ssec.${subKey(card, k)}`, now); } catch (e) { /* private window */ }
+}
+// what each action opens (#325): the section it feeds, in its card, so its progress and its result are in view
+const GO_OPENS = { lGo: ['work', 'result'], lightGo: ['work', 'lighten'], carveGo: ['work', 'carve'], aGo: ['work', 'aero'],
+  cpGo: ['make', 'cutplan'], fixGo: ['work', 'fix'] };
+function showSection(card, k) {
+  const sec = document.querySelector(`#inspector .qcard[data-card="${card}"]`);
+  if (sec && !sec.classList.contains('open')) openCard(card);
+  const dt = document.querySelector(`#inspector details.ssec[data-in="${card}"][data-ssec="${k}"]`);
+  if (dt && !dt.open) { dt.open = true; keepSub(dt); }
+  if (dt) dt.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 // ------------------------------------------------------------------- test it (CALI-80)
 // What the strength check predicts at each load step, what to measure the sag with, and what the real one did.
@@ -2541,10 +2696,11 @@ async function loadAnswers() {
   for (const c of S.answers.cards) {
     const card = document.querySelector(`#inspector .qcard[data-card="${c.key}"]`);
     if (!card) continue;
-    card.className = `qcard q-${c.status}`;
+    card.className = `qcard q-${c.status}${card.classList.contains('open') ? ' open' : ''}${card.classList.contains('focus') ? ' focus' : ''}`;
     card.querySelector('.qmark').textContent = QMARK[c.status];
     card.querySelector('.qlines').innerHTML = cardLines(c.key, c);
   }
+  showOpen(openCardFor(S.answers));                    // drawn before its marks: the first that fails, unless one was kept
   wireCards();
   // a print time still being worked out (#97): ask again until it's in, while the same cards are showing
   if ((S.answers.cards || []).some((c) => c.lines.some((ln) => ln.working))) {
@@ -2553,8 +2709,14 @@ async function loadAnswers() {
 }
 function wireCards() {
   wireFixes();                                            // Things to fix, under Will it work? (#300)
-  document.querySelectorAll('#inspector details.numbers').forEach((dt) => { dt.ontoggle = () => keepNumbersOpen(dt.dataset.card, dt.open); });
-  document.querySelectorAll('#inspector .qcard .qhead').forEach((h) => { h.onclick = () => focusCard(h.parentElement.dataset.card); });
+  document.querySelectorAll('#inspector details.ssec').forEach((dt) => {
+    if (dt.dataset.wiredSub) return;
+    dt.dataset.wiredSub = '1';
+    dt.addEventListener('toggle', () => keepSub(dt));     // its own ontoggle (Things to fix's, Advanced's) stays its own
+  });
+  document.querySelectorAll('#inspector .qtoggle').forEach((b) => {
+    b.onclick = () => { openCard(b.dataset.qopen); focusCard(b.dataset.qopen); };
+  });
   document.querySelectorAll('#inspector .qline[data-goto]').forEach((ln) => { ln.onclick = () => goTo(ln.dataset.goto); });
   document.querySelectorAll('#inspector [data-better]').forEach((b) => {
     b.onclick = (e) => {
@@ -2587,8 +2749,9 @@ function goTo(id, again) {            // open the card's numbers and bring that 
     setTimeout(() => goTo(id, true), 50);
     return;
   }
-  const dt = box.closest('details.numbers');
-  if (dt && !dt.open) dt.open = true;
+  const sec = box.closest('.qcard');                // its card open, and every block it sits in (#325)
+  if (sec && !sec.classList.contains('open')) openCard(sec.dataset.card);
+  for (let dt = box.closest('details'); dt; dt = dt.parentElement && dt.parentElement.closest('details')) dt.open = true;
   (box.previousElementSibling || box).scrollIntoView({ behavior: 'smooth', block: 'start' });
   box.classList.add('flash');
   setTimeout(() => box.classList.remove('flash'), 1600);
@@ -2775,46 +2938,114 @@ function historyItem(h, now) {
   return '';
 }
 
+// the part's actions, small, top right, in the chain's order (#325): each greyed until it can run, with the right-click
+// menu's own ready/why (design.studies.menu), so the two never disagree; a running job shows on its button (jobOff). The
+// ids are the panels' own, so their wiring and progress go as before: each action has one place.
+function partActions(p) {
+  const menu = {};
+  ((((S.design.studies || {}).menu) || {})[p.id] || []).forEach((m) => { menu[m.kind] = m; });
+  const air = !p.framed && !!((S.design.in_air && S.design.in_air.yes) || aeroRuns(p.id).length || runsFor(p.id).length);
+  const cut = cutplanRun(p);
+  const acts = [
+    p.role !== 'fixed' && !p.framed && ['load', 'lGo', loadRuns(p.id).length ? 'Check it again' : 'Check it holds', ''],
+    p.study === 'lighten' && ['lighten', 'lightGo', lightenRuns(p.id).length ? 'Lighten it again' : 'Lighten it', lightenRuns(p.id).length ? ' data-again="1"' : ''],
+    p.study === 'carve' && ['carve', 'carveGo', carveRuns(p.id).length ? 'Carve it again' : 'Carve it', carveRuns(p.id).length ? ' data-again="1"' : ''],
+    air && ['aero', 'aGo', 'Shape for drag', ''],
+    p.built && ['cutplan', 'cpGo', cut ? 'Make the cut plan again' : 'Make the cut plan', ''],
+  ].filter(Boolean);
+  const buttons = acts.map(([kind, id, label, again]) => {
+    const m = menu[kind] || { ready: true, why: '' };
+    // a job of this part's running says so on its button (#331 review: Theo asked for "Lightening…")
+    const running = kind === 'carve' ? S.carveJob[carveKey(p.id)]
+      : ((S.design.running || []).find((r) => r.part === p.id && r.kind === kind));
+    const off = !m.ready ? ` aria-disabled="true" data-why="${esc(m.why)}" title="${esc(`Not yet: ${m.why}`)}"` : '';
+    return `<button class="small${m.ready ? '' : ' off'}" id="${id}"${again}${off}${running ? ' disabled' : ''}>${running ? runningLabel(kind) || label : label}</button>`;
+  }).join('');
+  return `<div class="pacts" role="toolbar" aria-label="What to do with it" id="pacts">${buttons}${fixAct(p.id)}</div>
+    <div class="small muted pacts-why" id="pactsWhy" aria-live="polite"></div>`;
+}
+function wirePartActions() {                    // a greyed one says why, on a click or a tap, and never runs
+  const bar = $('pacts'), why = $('pactsWhy');
+  if (!bar || bar.dataset.wired) return;
+  bar.dataset.wired = '1';
+  bar.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || b.getAttribute('aria-disabled') !== 'true') {
+      if (why) why.textContent = '';
+      if (b && GO_OPENS[b.id]) showSection(...GO_OPENS[b.id]);        // its section open first: its progress shows there
+      return;
+    }
+    e.stopPropagation(); e.preventDefault();
+    if (why) why.textContent = b.dataset.why;
+  }, true);
+}
+function cutplanRun(p) { return (S.design.cutplans || []).find((r) => r.part === p.id) || null; }
 function partView(p) {
   const d = S.design;
   const mine = (r) => new RegExp(`\\b${p.id}\\b`).test(r.expr);
   const designRules = d.rules.filter(mine);
   const origin = p.origin === 'whittled' ? '<span class="badge whittled">whittled mesh</span>'
     : p.scripted ? '<span class="badge">parametric</span>' : '<span class="badge">imported</span>';
-  const what = `<h4>Size</h4>
-    ${p.bbox ? `<div class="kv">
+  const rules = [...p.rules, ...designRules], failing = rules.filter((r) => r.verdict && r.verdict.kind === 'fails');
+  const revisions = p.history.filter((h) => h.kind === 'revision').length;
+  const what = `<label class="small muted" style="display:block;margin-top:2px">
+      <input type="checkbox" id="roleRef" ${p.role === 'fixed' ? 'checked' : ''}> treat as a reference (context, e.g. the car)</label>
+    ${ssecs('what', [
+      { k: 'size', title: 'Size', tone: p.bbox ? 'info' : 'bad', answer: p.bbox ? sizeText(p.bbox.size) : 'it won\'t build',
+        body: p.bbox ? `<div class="kv">
       <span class="k">width</span><span>${len(p.bbox.size[1])}</span>
       <span class="k">depth</span><span>${len(p.bbox.size[0])}</span>
       <span class="k">height</span><span>${len(p.bbox.size[2])}</span>
-      <span class="k">bottom at</span><span>${len(p.bbox.min[2])}</span></div>` : '<div class="empty">won\'t build</div>'}
-    <label class="small muted" style="display:block;margin-top:8px">
-      <input type="checkbox" id="roleRef" ${p.role === 'fixed' ? 'checked' : ''}> treat as a reference (context, e.g. the car)</label>
-    <h4>Rules on this part</h4>
-    ${p.rules.length || designRules.length ? '<ul class="list">' +
-      [...p.rules, ...designRules].map(ruleItem).join('') + '</ul>'
-    : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>'}
-    <h4 id="partHistory">History</h4>
-    <ul class="list">${p.history.slice().reverse().map((h) => historyItem(h, p.version)).join('')}</ul>
-    <details id="adv"><summary>Advanced — script &amp; spec <span class="muted">${esc(p.id)}</span> ${origin}</summary><div id="advBody" class="small muted">loading…</div></details>`;
-  const work = `${!p.framed && (p.built || p.loads) && p.role !== 'fixed' ? `<h4>Will it hold? <span class="badge">strength</span></h4>
-    <div id="loadBox">${loadView(p)}</div>` : ''}
-    ${p.loads && p.role !== 'fixed' ? `<h4>Test it <span class="badge">the real one</span></h4>
-    <div id="trialBox">${trialView(p)}</div>` : ''}
-    ${p.framed ? `<h4>Size the frame <span class="badge">tubes back</span></h4>
-    <div id="frameBox">${frameView(p)}</div>` : ''}
-    ${!p.framed && (S.design.in_air.yes || aeroRuns(p.id).length || runsFor(p.id).length) ? `<h4>Shape it for drag <span class="badge">numbers back</span></h4>
-    <div id="aeroBox">${aeroView(p)}</div>
-    <h4>whittle carving <span class="badge">mesh back</span></h4>
-    <div id="whittleBox">${whittleView(p)}</div>` : ''}`;
-  const buy = p.built ? `<h4>Built from <span class="badge">weight &amp; shopping list</span></h4>
-    <div id="buildBox">${buildView(p)}</div>` : '';
-  const make = p.built ? `<div id="makingBox">${makingView(p)}</div>
-    <div id="patternBox">${patternView(p)}</div>
-    <div id="cutplanBox">${cutplanView(p)}</div>` : '';
-  // the heading is the part's own name; its id and how it was made are one click down, under Advanced (#70 item 21)
-  return `<h2>${esc(p.name || p.id)}</h2>
-    <div class="muted small">v${p.version}</div>
-    ${cardsView({ what, work, buy, make, params: `<div id="paramBox">${paramView(p)}</div>` })}`;
+      <span class="k">bottom at</span><span>${len(p.bbox.min[2])}</span></div>` : '<div class="empty">won\'t build</div>' },
+      { k: 'rules', title: 'Rules on this part', tone: failing.length ? 'bad' : rules.length ? 'ok' : 'info',
+        answer: !rules.length ? 'none yet' : failing.length ? `${failing.length} of ${rules.length} broken` : `${rules.length}, all kept`,
+        body: rules.length ? `<ul class="list">${rules.map(ruleItem).join('')}</ul>`
+          : '<div class="empty">None yet. Say something like “it must clear the car by 2 in” and I\'ll offer to lock it in.</div>' },
+      { k: 'history', title: 'History', tone: 'info', answer: `${revisions} version${revisions === 1 ? '' : 's'}, now v${p.version}`,
+        attrs: ' id="partHistory"', body: `<ul class="list">${p.history.slice().reverse().map((h) => historyItem(h, p.version)).join('')}</ul>` },
+      { k: 'adv', title: 'Advanced', tone: 'info', answer: `script &amp; spec <span class="muted">${esc(p.id)}</span> ${origin}`,
+        attrs: ' id="adv"', body: '<div id="advBody" class="small muted">loading…</div>' }])}`;
+  const runs = loadRuns(p.id), run = runs[0];
+  const checked = !run ? { tone: 'info', answer: p.loads ? 'not checked yet' : 'it doesn\'t say what it must carry yet' }
+    : run.version !== p.version ? { tone: 'warn', answer: `${runWord(run)}, of v${run.version}: the part has changed since` }
+      : { tone: run.verdict ? (verdictTone(run.verdict) === 'ok' ? 'ok' : verdictTone(run.verdict) === 'bad' ? 'bad' : 'warn') : 'info',
+        answer: run.verdict && run.verdict.short ? run.verdict.short : runWord(run) };
+  const light = lightenRuns(p.id)[0], carve = carveRuns(p.id)[0];
+  const later = (r, none) => (!r ? { tone: 'info', answer: none } : r.version != null && r.version !== p.version
+    ? { tone: 'warn', answer: `of v${r.version}: the part has changed since` } : { tone: 'info', answer: `its steps, of v${r.version != null ? r.version : p.version}` });
+  const air = !p.framed && (S.design.in_air.yes || aeroRuns(p.id).length || runsFor(p.id).length);
+  const work = ssecs('work', [
+    !p.framed && (p.built || p.loads) && p.role !== 'fixed' && { k: 'result', title: 'Will it hold? <span class="badge">strength</span>', ...checked,
+      body: `<div id="loadBox">${loadView(p)}</div>` },
+    S.scope && p.role !== 'fixed' && fixesSection(p.id),
+    p.study === 'lighten' && lightenShown(p, runs) && { k: 'lighten', title: 'Make it lighter', ...later(light, 'not lightened yet'),
+      body: lightenView(p) },
+    p.study === 'carve' && (runs.length || carveRuns(p.id).length) && { k: 'carve', title: 'Carve it <span class="badge">printed, any shape</span>',
+      ...later(carve, 'not carved yet'), body: carveView(p) },
+    p.loads && p.role !== 'fixed' && { k: 'trial', title: 'Test it <span class="badge">the real one</span>', tone: 'info',
+      answer: 'what to measure, and what it did', body: `<div id="trialBox">${trialView(p)}</div>` },
+    p.framed && { k: 'frame', title: 'Size the frame <span class="badge">tubes back</span>', tone: 'info', answer: '',
+      body: `<div id="frameBox">${frameView(p)}</div>` },
+    air && { k: 'aero', title: 'Shape it for drag <span class="badge">numbers back</span>', tone: 'info',
+      answer: `${aeroRuns(p.id).length} search${aeroRuns(p.id).length === 1 ? '' : 'es'}`, body: `<div id="aeroBox">${aeroView(p)}</div>` },
+    air && { k: 'whittle', title: 'whittle carving <span class="badge">mesh back</span>', tone: 'info', answer: '',
+      body: `<div id="whittleBox">${whittleView(p)}</div>` }]);
+  const buy = p.built ? ssecs('buy', [{ k: 'stock', title: 'Built from <span class="badge">weight &amp; shopping list</span>', tone: 'info',
+    answer: 'the stock and what to buy', body: `<div id="buildBox">${buildView(p)}</div>` }]) : '';
+  const cut = cutplanRun(p);
+  const make = p.built ? ssecs('make', [
+    makingSection(p),
+    { k: 'patterns', title: 'Patterns for hand tools', tone: 'info', answer: 'every flat piece, full size',
+      body: `<div id="patternBox">${patternView(p)}</div>` },
+    { k: 'cutplan', title: 'Cut plan', tone: cut && cut.version != null && cut.version !== p.version ? 'warn' : 'info',
+      answer: !cut ? (S.design.cutplan_unavailable ? 'not here' : 'not made yet') : cut.version != null && cut.version !== p.version ? `of v${cut.version}: the part has changed since`
+        : 'the sheets laid out flat', body: `<div id="cutplanBox">${cutplanView(p)}</div>` }]) : '';
+  // the heading is the part's own name; its id and how it was made are one click down, under Advanced (#70 item 21);
+  // its actions beside it, its numbers under it, then the four questions (#325)
+  return `<div class="parthead"><div><h2>${esc(p.name || p.id)}</h2>
+    <div class="muted small">v${p.version}</div></div>${partActions(p)}</div>
+    <div id="paramBox">${paramView(p)}</div>
+    ${cardsView({ what, work, buy, make })}`;
 }
 
 function wireInspector(p) {
@@ -2840,6 +3071,7 @@ function wireInspector(p) {
     };
   });
   if (!p) { wireBalance(); wireScore(); wireRelease(); return; }
+  wirePartActions();                                // the actions top right: a greyed one says why (#325)
   wireBuilt(p);
   wireCutplan(p);
   wireTrial(p);
@@ -2994,8 +3226,23 @@ function builtResults(p, c) {
 }
 
 // made in your shop (CALI-48): what cuts each piece, printed parts fitted to the printer, and what's missing
+// its plan's key (#331 review): this design's, this version's, this shop's. Without the design, another design's plan
+// for a part of the same name and version stood in for this one's
+function makingKey(p) {
+  return `${S.slug}:${p.id}:${p.version}:${S.shopKey || 0}`;
+}
+// its header: only this plan's answer. The route answers a part that doesn't build with a 422, never a plan (#331
+// review: the broken-build copy read "planning…" over its error); any other failed read says so, never ✓ or ✗
+function makingSection(p) {
+  const m = S.making[p.id], mine = m && m.key === makingKey(p) ? m : null, shop = mine && mine.data;
+  const failed = !!mine && !shop && mine.error != null;
+  return { k: 'shop', title: 'Made in your shop', tone: shop ? (shop.ok ? 'ok' : 'bad') : 'info',
+    answer: shop ? (shop.ok ? 'all of it' : 'not all of it') : !failed ? 'planning…'
+      : mine.status === 422 ? "can't plan it: it doesn't build" : "couldn't plan it",
+    body: `<div id="makingBox">${makingView(p)}</div>` };
+}
 function makingView(p) {
-  const key = `${p.id}:${p.version}:${S.shopKey || 0}`;
+  const key = makingKey(p);
   const m = S.making[p.id];
   const planning = '<h5 style="margin:14px 0 4px">Made in your shop</h5><div class="small muted">planning…</div>';
   if (!m || m.key !== key) { loadMaking(p, key); return planning; }
@@ -3015,9 +3262,13 @@ function makingView(p) {
 async function loadMaking(p, key) {
   S.making[p.id] = { key, loading: true };
   try { S.making[p.id] = { key, data: await api('GET', `/api/designs/${S.slug}/parts/${p.id}/making`) }; }
-  catch (e) { S.making[p.id] = { key, error: e.message }; }
+  catch (e) { S.making[p.id] = { key, error: e.message, status: e.status }; }
   const box = $('makingBox');
-  if (box && S.scope === p.id) { box.innerHTML = makingView(p); wireMaking(); }
+  if (!box || S.scope !== p.id || key !== makingKey(p)) return;    // another part or design on screen by now
+  box.innerHTML = makingView(p); wireMaking();
+  const sec = box.closest('details'), head = sec && sec.querySelector('summary'), x = makingSection(p);
+  if (head) head.innerHTML = subHead(x);           // its header, drawn before its plan came back (#331 review)
+  if (sec) { sec.className = sec.className.replace(/\bt-\w+/, `t-${x.tone}`); sec.classList.toggle('attn', ATTN(x.tone)); }
 }
 function wireMaking() {
   document.querySelectorAll('#inspector .openShop').forEach((a) => { a.onclick = (e) => { e.preventDefault(); openShop(); }; });
@@ -3208,7 +3459,7 @@ function cutplanView(p) {
       ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`
       : `<div class="muted small">Flatten every panel onto the sheets it's cut from — score lines where it bends — and list every
          stick to cut. Uses unfold-to-sheets.</div>`}
-    <div class="actions"><button id="cpGo">${run ? 'Make it again' : 'Make the cut plan'}</button></div><div id="cpProgress"></div>`;
+    <div id="cpProgress"></div>`;
 }
 
 function wireCutplan(p) {
@@ -3217,16 +3468,18 @@ function wireCutplan(p) {
   document.querySelectorAll('[data-preview]').forEach((b) => { b.onclick = () => previewStep(b); });
   const go = $('cpGo');
   if (!go) return;
+  // where its section has no progress line (cut plans can't be made here), what it says goes under the buttons: a
+  // click never throws and leaves the button dead (#331 review)
+  const say = (html, text) => { const pr = $('cpProgress'), w = $('pactsWhy'); if (pr) pr.innerHTML = html; else if (w) w.textContent = text; };
   go.onclick = async () => {
-    const prog = $('cpProgress');
     go.disabled = true;
-    prog.innerHTML = '<div class="small muted" id="cpMsg">unfolding…</div>';
+    say('<div class="small muted" id="cpMsg">unfolding…</div>', 'unfolding…');
     try {
       const { job_id } = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/cutplan`);
       await follow(job_id, (ev) => { const m = $('cpMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
       await refresh();
     } catch (e) {
-      prog.innerHTML = `<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`;
+      say(`<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`, `⚠ ${e.message}`);
       go.disabled = false;
     }
   };
@@ -3364,24 +3617,22 @@ function loadRuns(pid) { return (S.design.load_runs || []).filter((r) => r.part 
 
 function loadView(p) {
   if (!S.design.aero_available) return '<div class="empty">whittle isn\'t installed in Caliper\'s environment.</div>';
-  if (!p.loads) {
-    return `<div class="empty">It doesn't say what it must carry yet. Tell me, like “it has to hold me, 200 lb,
-      stepping onto the top”, and I'll add its <code>loads()</code>.</div>
-      <div class="actions"><button id="lAsk">Say what it must hold</button></div>`;
+  if (!p.loads) {                               // the designer's way, or the person's own in the editor (#327)
+    return `<div class="empty">It doesn't say what it must hold yet: add a scenario below, or tell me, like “it has to
+      hold me, 200 lb, stepping onto the top”, and I'll add its <code>loads()</code>.</div>
+      <div class="actions"><button id="lAsk">Say what it must hold</button></div>
+      ${scenariosBox(p)}`;
   }
   const runs = loadRuns(p.id);
   const pick = Math.min(S.loadRun[p.id] || 0, Math.max(runs.length - 1, 0));
   return `<div class="form">
       <span>least safety</span><span><input type="number" id="lSafety" value="${(runs[0] && runs[0].min_safety) || 2}" min="1" max="10" step="0.5">
         × at each load times its factor</span></div>
-    <div class="actions"><button class="primary" id="lGo">${runs.length ? 'Check it again' : 'Check it holds'}</button>
-      ${runs[0] && runs[0].finer && runs[0].version === p.version ? `<button id="lFiner" title="voxels of ${wallLen(runs[0].finer.spacing_mm)}, enough
+    <div class="actions">${runs[0] && runs[0].finer && runs[0].version === p.version ? `<button id="lFiner" title="voxels of ${wallLen(runs[0].finer.spacing_mm)}, enough
         to see its ${wallLen(runs[0].thinnest_mm)} walls">Check it again finer${runs[0].finer.minutes ? ` (about ${runs[0].finer.minutes} min)` : ' (how long: unknown)'}</button>` : ''}</div>
     ${scenariosBox(p)}
     <div id="lProgress"></div>
-    ${runs.length ? loadResults(p, runs[pick], runs) : ''}
-    ${p.study === 'carve' ? (runs.length || carveRuns(p.id).length ? carveView(p) : '') : ''}
-    ${lightenShown(p, runs) ? lightenView(p) : ''}`;
+    ${runs.length ? loadResults(p, runs[pick], runs) : ''}`;
 }
 
 // --------------------------------------------------------------------- scenarios and supports (CALI-185, #296 slice A)
@@ -3449,9 +3700,23 @@ function supportRow(s, i) {
       <input data-f="lo" value="${xyz(s.lo)}" style="width:12em"> to <input data-f="hi" value="${xyz(s.hi)}" style="width:12em"> mm
       <button class="ghost" data-sup-del="${i}">Remove</button></div>`;
 }
+// the first case added to a part whose script says none: across the whole top of its box, 2 mm deep, so it rests on whatever
+// is highest (a roof, or an open box's wall tops) and the first save works; the person narrows it from there (#337 review: a
+// 10 mm box at the origin pushed on thin air, 453.6 mm from the cargo box)
+function newLoadBox(p) {
+  const b = p && p.bbox;
+  if (!b || !b.min || !b.max) return { lo: [0, 0, 0], hi: [10, 10, 10] };
+  const r = (v) => Math.round(v * 10) / 10;
+  return { lo: [r(b.min[0]), r(b.min[1]), r(b.max[2] - 2)], hi: [r(b.max[0]), r(b.max[1]), r(b.max[2])] };
+}
 function scenariosView(p, got) {
   if (!got) return '<div class="small muted">reading them…</div>';
-  return `${got.overridden ? '<div class="small">Yours where you edited them; the rest as its script says them, now and as it changes.</div>'
+  // none of them its script's: none, or added here (#327), saved or not (#337 review: saved, it read "…the rest as its
+  // script says them" where its script says none)
+  const none = !got.scenarios.some((s) => s.source === 'script');
+  return `${none ? `<div class="small">Its script doesn't say what it must hold: ${!got.scenarios.length ? 'add a scenario'
+        : got.overridden ? 'these are yours, and what it\'s checked against' : 'save yours to keep them'}.</div>`
+      : got.overridden ? '<div class="small">Yours where you edited them; the rest as its script says them, now and as it changes.</div>'
       : '<div class="small muted">As its script says them. Edit and save to keep yours instead.</div>'}
     ${got.scenarios.map(scenarioRow).join('')}
     <div class="actions"><button class="ghost" id="scenAdd">Add a scenario</button></div>
@@ -3525,8 +3790,9 @@ function wireScenarioRows(p) {
   });
   const add = $('scenAdd');
   if (add) add.onclick = () => { keep(); const last = S.scen[p.id].scenarios.slice(-1)[0] || {};
+    const box = last.lo ? { lo: last.lo, hi: last.hi } : newLoadBox(p);
     S.scen[p.id].scenarios.push({ name: 'a new load', amount: 50, unit: 'lb', direction: [0, 0, -1], factor: 1, on: true,
-      lo: last.lo || [0, 0, 0], hi: last.hi || [10, 10, 10] }); repaint(); };
+      lo: box.lo, hi: box.hi }); repaint(); };
   const sAdd = $('supAdd');
   if (sAdd) sAdd.onclick = () => { keep(); S.scen[p.id].supports.push({ name: 'held here', lo: [0, 0, 0], hi: [10, 10, 10] }); repaint(); };
   const floor = $('supFloor');
@@ -3565,8 +3831,7 @@ function carveView(p) {
   const head = `<h5 style="margin:14px 0 4px">Carve it <span class="badge">printed, any shape</span></h5>
     <div class="muted small">A printer makes any shape, so the printed part can be carved wherever it isn't working: in steps,
       each one checked. ${p.carved ? 'It\'s carved now; carving again starts from its shape as drawn.' : ''}</div>
-    <div class="actions"><button class="${run ? '' : 'primary'}" id="carveGo"${run ? ' data-again="1"' : ''} ${S.carveJob[carveKey(p.id)] || carveBlocked(p) ? 'disabled' : ''}>${run ? 'Carve it again' : 'Carve it'}</button>
-      <span class="muted small">${esc(carveTime(p))}</span></div><div id="carveProgress">${carveProgress(p.id)}</div>`;
+    <div class="muted small">${esc(carveTime(p))}</div><div id="carveProgress">${carveProgress(p.id)}</div>`;
   if (!run) return head;
   if (run.status === 'cancelled' || run.status === 'timed_out') {   // stopped: the steps it finished (CALI-101)
     // past its limit isn't a cancel nobody made (#211 review)
@@ -3806,8 +4071,7 @@ function lightenView(p) {
     <div class="muted small">Down until the safety runs out: holes in the walls where the wood isn't working (a jigsaw cuts
       them, a solid rim where it's glued and screwed), then hole-saw holes in the panel you stand on, one at a time,
       then thinner sheet. Every step is checked again.</div>
-    <div class="actions"><button id="lightGo"${run ? ' data-again="1"' : ''} ${lightenBlocked(p) ? 'disabled' : ''}>${run ? 'Lighten it again' : 'Lighten it'}</button>
-      ${lightenBlocked(p) ? `<span class="muted small">${esc(lightenBlocked(p))}</span>` : ''}</div>
+    ${lightenBlocked(p) ? `<div class="muted small">${esc(lightenBlocked(p))}</div>` : ''}
     <div id="lightProgress"></div>
     ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
       ? (run.not_trusted ? esc(run.not_trusted) : p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
@@ -4139,10 +4403,22 @@ function syncRunning() {
 }
 function jobPart(id) { return (((S.design && S.design.parts) || []).find((p) => p.id === id) || {}).name || id; }
 // what a job turned off, and only that, it turns back on: what was off for its own reasons stays off
-function jobOff(b) {
+// a job's button while it runs: off, and its words say so where it has some ("Lightening…"), in the tab that started it
+// too (#331 review: "Lighten it" stayed, disabled, through 16 s of steps); jobOn gives both back
+function jobOff(b, label) {
   if (!b.disabled) b.dataset.jobOff = '1';
   b.disabled = true;
   b.title = 'It\'s running now';
+  if (label && b.dataset.jobLabel == null && b.dataset.jobOff) { b.dataset.jobLabel = b.textContent; b.textContent = label; }
+}
+function jobOn(b) {
+  b.disabled = false;
+  b.title = '';
+  delete b.dataset.jobOff;
+  if (b.dataset.jobLabel != null) { b.textContent = b.dataset.jobLabel; delete b.dataset.jobLabel; }
+}
+function runningLabel(kind) {
+  return ({ load: 'Checking…', lighten: 'Lightening…', carve: 'Carving…', fix: 'Fixing…' })[kind] || '';
 }
 function jobHtml(t, named) {
   const pct = typeof t.progress === 'number' ? Math.round(t.progress * 100) : null;
@@ -4163,13 +4439,13 @@ function paintJobs() {
   const note = $('jobNote');
   if (!note) return;
   const lines = [];
-  document.querySelectorAll('#inspector [data-job-off]').forEach((b) => { b.disabled = false; b.title = ''; delete b.dataset.jobOff; });
+  document.querySelectorAll('#inspector [data-job-off]').forEach(jobOn);
   for (const t of jobsHere()) {
     const here = t.kind === 'release' || S.scope === t.part, panel = here ? $(JOB_BOX[t.kind]) : null;
-    const box = panel && panel.closest && panel.closest('details:not([open])') ? null : panel;   // folded away isn't on screen
+    const box = panel && panel.closest && panel.closest('details:not([open]), [hidden]') ? null : panel;   // folded away isn't on screen
     if (box) { box.innerHTML = jobHtml(t, false); box.dataset.job = t.job; } else lines.push(jobHtml(t, true));
     const go = here && $(JOB_GO[t.kind]);
-    if (go) jobOff(go);
+    if (go) jobOff(go, runningLabel(t.kind));
     if (t.kind === 'load' && here && $('lFiner')) jobOff($('lFiner'));
     document.querySelectorAll(`#inspector [data-better-action="${t.kind}"][data-better-part="${t.part}"]`).forEach(jobOff);
   }
@@ -4507,7 +4783,6 @@ function aeroView(p) {
       <span>designs</span><input type="number" id="aStations" value="4" min="2" max="8">
       <span>search</span><select id="aEffort"><option value="0.3">quick</option><option value="0.6" selected>normal</option><option value="1">thorough</option></select>
     </div>
-    <div class="actions"><button class="primary" id="aGo">Shape it</button></div>
     <div id="aProgress"></div>
     ${runs.length ? aeroResults(p, runs[Math.min(S.aeroRun[p.id] || 0, runs.length - 1)], runs) : ''}`;
 }

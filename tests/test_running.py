@@ -160,7 +160,8 @@ def _run(names, body):
     return json.loads(got.stdout)
 
 
-ALL = ("trackJob", "jobOver", "rereadWhenBack", "pollRunning", "syncRunning", "jobPart", "jobOff", "jobHtml", "changedUnder",
+ALL = ("trackJob", "jobOver", "rereadWhenBack", "pollRunning", "syncRunning", "jobPart", "jobOff", "jobOn", "runningLabel",
+       "jobHtml", "changedUnder",
        "paintJobs", "cancelJob")
 
 
@@ -358,8 +359,9 @@ def test_the_cancel_button_is_listened_for():
     assert "$('inspector').addEventListener('click', cancelJob);" in open(JS).read()
 
 
-def test_a_panel_folded_away_isn_t_on_screen_so_the_top_line_says_it():
-    got = _run(ALL, """el('lProgress').closest = (q) => (q === 'details:not([open])' ? {} : null);
+@pytest.mark.parametrize("folded", ["details:not([open])", "[hidden]"])     # a closed block, or a closed card (#325)
+def test_a_panel_folded_away_isn_t_on_screen_so_the_top_line_says_it(folded):
+    got = _run(ALL, """el('lProgress').closest = (q) => (q.split(', ').includes('""" + folded + """') ? {} : null);
         S.design.running = [{ job: 'j1', kind: 'load', part: 'p', text: 'waiting', waiting: true }]; syncRunning(); paintJobs();
         return { note: el('jobNote').innerHTML, box: el('lProgress').innerHTML };""")
     assert "Strength check of p: waiting" in got["note"] and "data-job-cancel" in got["note"] and got["box"] == ""

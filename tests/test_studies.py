@@ -144,3 +144,46 @@ def test_an_old_carve_keeps_its_meaning(monkeypatch):
     # the page labels every run by its own share, in all three places it says one
     js = open(os.path.join(os.path.dirname(studies.__file__), "web", "static", "design.js")).read()
     assert js.count("${carveShare(run)}") == 3 and "of the printed part carved away" not in js
+
+
+def test_the_menu_follows_the_chain_it_builds_it_holds_then_lighten_and_the_cut_plan():
+    """#325: the panel's buttons and the right-click menu read one ready/why, in the chain's order: it builds, it holds
+    its loads, then Lighten / Carve / Shape for drag, then the cut plan. Only a failing check holds them back, as Lighten
+    itself refuses one (already_fails); a check that can't settle doesn't."""
+    stool = {"id": "stool", "scripted": True, "built": True, "loads": True, "study": "lighten", "params": {"w": 1},
+             "bbox": {"size": [1, 1, 1]}}
+    air = {"yes": True, "why": ""}
+
+    def m(part, check):
+        return {x["kind"]: x for x in studies.menu(part, air, check)}
+
+    broke = m({**stool, "bbox": None}, None)
+    assert all(not broke[k]["ready"] and broke[k]["why"] == "it doesn't build yet"
+               for k in ("load", "lighten", "aero", "cutplan"))
+    first = m(stool, None)
+    assert first["load"]["ready"]
+    assert all(not first[k]["ready"] and first[k]["why"] == "check it holds first" for k in ("lighten", "aero", "cutplan"))
+    fails = m(stool, {"ok": False, "safety": 1.1, "need": 1.3})
+    assert fails["load"]["ready"]
+    assert fails["lighten"]["why"] == "it doesn't pass its loads yet: 1.1 where it needs 1.3"   # cut, as the card (#331)
+    assert not fails["cutplan"]["ready"] and not fails["aero"]["ready"]
+    for check in ({"ok": True, "safety": 2.15, "need": 1.3}, {"ok": None, "safety": 2.15, "need": 1.3}):
+        got = m(stool, check)
+        assert got["lighten"]["ready"] and got["aero"]["ready"] and got["cutplan"]["ready"], check
+    own = m({**stool, "study": "carve"}, {"ok": False, "safety": 1.1, "need": 1.3})
+    assert own["lighten"]["why"] != fails["lighten"]["why"]          # its own reason first: it isn't Lighten's part
+    loose = m({**stool, "loads": False}, None)
+    assert loose["cutplan"]["ready"]                                 # nothing to hold: the cut plan follows the build
+
+
+def test_the_index_gives_the_menu_the_check_of_the_part_as_it_is(tmp_path):
+    s = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    s.write_part("stool", BOX, intent="a stool")
+    parts = [{"id": "stool", "version": 2, "scripted": True, "built": True, "loads": True, "study": "lighten",
+              "params": {"w": 1}}]
+    run = {"id": "L1", "part": "stool", "created": 300, "version": 2, "holds": False, "min_safety": 1.3,
+           "safety": 1.1, "cases": [{"name": "standing on the top", "safety": 1.1, "holds": False}]}
+    menu = {x["kind"]: x for x in studies.index(s, {"load": [run]}, parts)["menu"]["stool"]}
+    assert menu["lighten"]["why"] == "it doesn't pass its loads yet: 1.1 where it needs 1.3"   # cut, as the card (#331)
+    older = {x["kind"]: x for x in studies.index(s, {"load": [{**run, "version": 1}]}, parts)["menu"]["stool"]}
+    assert older["lighten"]["why"] == "check it holds first"         # an older version's check isn't the part as it is
