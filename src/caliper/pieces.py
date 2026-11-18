@@ -161,8 +161,10 @@ def _meshed(shape):
     its own skin's error, never the whole part's."""
     import trimesh
 
-    vs, fs = shape.tessellate(0.05, 0.1)
-    return trimesh.Trimesh([(v.x, v.y, v.z) for v in vs], fs)
+    from .tess import triangles
+
+    vs, fs = triangles(shape, 0.05, 0.1)            # tessellate()'s, read straight off OCC (#298)
+    return trimesh.Trimesh(vs, fs)
 
 
 def _also(before: dict, after: dict, piece: str) -> Optional[str]:

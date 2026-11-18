@@ -82,11 +82,13 @@ class Geometry:
 
 
 def _cadquery_to_trimesh(wp: Any, tol: float = 0.05) -> trimesh.Trimesh:
-    """Tessellate a CadQuery Workplane/Solid to a trimesh mesh, without the CAD mesher's strays (:func:`clean`)."""
+    """Tessellate a CadQuery Workplane/Solid to a trimesh mesh, without the CAD mesher's strays (:func:`clean`). The
+    triangles are read straight off OCC (:func:`caliper.tess.triangles`, #298): ``tessellate(tol)``'s, element for
+    element, without its slow copy."""
+    from .tess import triangles
+
     solid = wp.val() if hasattr(wp, "val") else wp
-    verts, faces = solid.tessellate(tol)
-    v = np.array([[p.x, p.y, p.z] for p in verts], dtype=float)
-    f = np.array(faces, dtype=int)
+    v, f = triangles(solid, tol, 0.1)                # tessellate()'s own angle
     return clean(trimesh.Trimesh(vertices=v, faces=f, process=True))
 
 
