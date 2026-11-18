@@ -406,7 +406,7 @@ def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
                 continue
             # a pull waived with no hand number beside it: the load's route is the joint, so never ✓ through the
             # waiver (the foreman); what's left failing still fails
-            if fea["waived"] and (fea["safety"] is None or fea["safety"] >= min_safety):
+            if fea["waived"] and (fea["safety"] is None or fea["safety"] >= min_safety):   # producer
                 out["unchecked"].append(f"the joint between {between} ({NO_PULL.format(edge=j['edge'], face=j['face'])})")
                 continue
             hand = {"pieces": j["pieces"], "between": between, "edge": j["edge"], "face": j["face"], "mode": None,
@@ -433,9 +433,9 @@ def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
         hs, fs = hand.get("safety"), fea["safety"]
         if fs is not None and (hs is None or fs < hs):
             hand.update({"safety": fs, "mode": fea["mode"], "by": "fea", "need": min_safety,
-                         "verdict": V.meets(fs, min_safety), "holds": fs >= min_safety})
+                         "verdict": V.meets(fs, min_safety), "holds": fs >= min_safety})  # producer
             hand["said"] = f"{hand.get('said') or ''}; by the FEA: {fea['said']}".lstrip("; ")
-            if fs < min_safety:                              # what would take it past: said on the row (#316)
+            if fs < min_safety:                  # producer: what would take it past, said on the row (#316)
                 fix = fix_it(j, fea["mode"], fea["demand_lb"].get(fea["mode"], 0.0) * LBF, min_safety, setup_["screw_mm"])
                 if fix:
                     hand["fix"] = fix

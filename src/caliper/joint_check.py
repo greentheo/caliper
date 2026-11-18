@@ -896,7 +896,7 @@ def rake_rows(joints: list[dict], by: dict, arrived: dict, rows: list[dict], unc
             r = next((x for x in rows if tuple(x.get("pieces") or ()) == tuple(j["pieces"])), None)
             mine = {"pieces": j["pieces"], "between": f"the {leg} and the {j['edge']}", "edge": j["edge"], "face": leg,
                     "mode": mode, "safety": safety, "need": min_safety, "verdict": V.meets(safety, min_safety),
-                    "holds": safety >= min_safety,
+                    "holds": safety >= min_safety,  # producer
                     "demand_lb": {m: round(parts[m] / LBF, 1) for m in ratio},
                     "capacity_lb": {m: round(cap[m] / LBF, 1) for m in ratio},
                     "said": f"{said} (it leans {deg:.0f}°)", "assumed": j.get("assumed"),
