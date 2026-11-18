@@ -10,8 +10,10 @@ statics.
   screwed joint is semi-rigid and takes less, so the bonded moment errs safe for the joint itself (the foreman, #316).
 - **A statics pin, per piece.** The joints into a piece, plus the load the solver put on it, plus the reactions where
   it's held, must sum to zero. Each node is read once: a piece's own, or a joint's. A solve that didn't converge, a voxel
-  read as the wrong piece, or a load landing on a joint leaves a residual. Over :data:`STATICS_TOL` of the case's load, no
-  joint of that case is read from the FEA.
+  no piece has (an overlap, below), or a load landing on a joint leaves a residual. Over :data:`STATICS_TOL` of the
+  case's load, no joint of that case is read from the FEA. **It can't see a voxel given to the wrong real piece:** each
+  piece's joints still carry exactly what reaches it, so that one balances, and only moves force from one of the
+  piece's joints to another (caliper-reviewer, #344). The labelling's own tests and the finer-grid check cover that.
 - **A joint it can't see** reads not checked, never a number:
   - a piece fewer than ``VOXELS_THROUGH`` voxels through;
   - fewer than :data:`MIN_NODES` shared nodes;
@@ -24,7 +26,6 @@ statics.
 
 from __future__ import annotations
 
-import math
 from typing import Optional
 
 import numpy as np
@@ -89,28 +90,6 @@ def labels(centres: np.ndarray, pieces: list[dict], h: float) -> np.ndarray:
     out = np.where(inside.any(axis=0), near, NONE)
     out[deep.sum(axis=0) > 1] = OVERLAP
     return out
-
-
-#: What would take a joint the FEA fails past its need: more of its screws, or a glue block (the foreman, #316).
-FIX_IT = "{more} more #8 screw{s} at the {edge}'s {side}, or a glue block, would take it past {need:g}"
-
-
-def fix_it(j: dict, mode: str, demand_n: float, need: float, screw_mm: float) -> Optional[str]:
-    """The cheapest fix that would take joint ``j`` past ``need`` in ``mode`` (shear or withdrawal), in words: how many
-    more #8 screws, at its present screws' values, or a glue block. None where screws don't help (bearing)."""
-    from .joint_check import capacity
-
-    if mode not in ("shear", "withdrawal") or demand_n <= 0:
-        return None
-    n = int(j.get("screws") or 0)
-    bare = capacity({**j, "screws": 0}, screw_mm)[mode]
-    one = capacity({**j, "screws": 1, "fix": sorted(set(j.get("fix") or []) | {"screws"})}, screw_mm)[mode] - bare
-    if one <= 0:
-        return None
-    want = max(0, math.ceil((demand_n * need - bare) / one - 1e-9))
-    more = max(1, want - n)
-    side = "end" if j.get("apron") or j.get("post") else "edge"
-    return FIX_IT.format(more=more, s="" if more == 1 else "s", edge=j["edge"], side=side, need=need)
 
 
 def _how(j: dict, setup_: dict) -> str:
@@ -200,7 +179,6 @@ def read(solver, result, grid, pieces: list[dict], joints: list[dict], through: 
     # piece exactly its own nodal force
     at = np.flatnonzero(count > 1)
     nb = len(bodies)
-    col = {b: i for i, b in enumerate(bodies)}
     T = np.stack([touch[b][at] > 0 for b in bodies], axis=1)                   # (shared nodes, bodies)
     g = np.stack([force[b][at] - outer[at] * (touch[b][at] / np.maximum(voxels[at], 1))[:, None] for b in bodies],
                  axis=1)                                                       # each body's force there, less its load
@@ -260,7 +238,7 @@ def read(solver, result, grid, pieces: list[dict], joints: list[dict], through: 
         ids, onto = pairs.get((a, b), (np.zeros(0, int), np.zeros((0, 3))))   # on the face piece, from the edge
         n = len(np.unique(ids))
         thin = min(_through(pieces[a]), _through(pieces[b])) / h
-        if thin < through or n < MIN_NODES:
+        if not sees(thin, through, n):
             rows[pair_key] = {"unread": CANT_SEE.format(h=h), "nodes": n}
             continue
         if bool(on_node[ids].any()):
@@ -268,8 +246,20 @@ def read(solver, result, grid, pieces: list[dict], joints: list[dict], through: 
             continue
         arm = pos[ids] - np.asarray(j["mid"], float)
         rows[pair_key] = {"force": onto.sum(axis=0), "moment": np.cross(arm, onto).sum(axis=0), "nodes": n}
-    unbalanced = (UNBALANCED.format(piece=worst, pct=100 * residual) if residual > STATICS_TOL else None)
+    unbalanced = unbalanced_by(residual, worst)
     return {"joints": rows, "residual": residual, "worst": worst, "unbalanced": unbalanced, "each": each}
+
+
+def sees(thin: float, through: int, nodes: int) -> bool:
+    """Whether the FEA can read a joint: both pieces ``through`` voxels or more through (``thin``, the thinner's), and
+    :data:`MIN_NODES` shared nodes or more."""
+    return thin >= through and nodes >= MIN_NODES
+
+
+def unbalanced_by(residual: float, worst: Optional[str]) -> Optional[str]:
+    """Why no joint of a case is read from the FEA: a piece's residual past :data:`STATICS_TOL` of its load; None at or
+    under it."""
+    return UNBALANCED.format(piece=worst, pct=100 * residual) if residual > STATICS_TOL else None
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -285,8 +275,11 @@ NO_PULL = "the FEA bonds the {edge} to the {face}, a pull its fixing can't give;
 #: An apron's end on a leg, its load from a top that bears on it by contact: the FEA's shear there stands (the
 #: foreman, #316 (α)), said so.
 HANDS = "the {top} bears on the {apron}, and it hands {lb:.0f} lb to the {leg} through {how}"
-#: The same, where the apron hangs from the top by a glue line that gets no credit: the bonded model's, waived.
-HUNG = "the FEA hangs the {apron} from the {top} by a glue line that gets no credit, so what it hands the {leg} goes round it"
+#: The same, where the apron hangs from the top: the bonded model's, waived (the foreman's (α)), naming what's there.
+HUNG = "the FEA hangs the {apron} from the {top} by {by}, so what it hands the {leg} goes round it"
+#: The same where what holds the apron to the top is credited a pull: the hang is carried by its fixings, so the shear the
+#: apron hands the leg stands (the foreman, #344).
+HUNG_HELD = "the {apron} hangs from the {top} by {by}, which hold a pull, and it hands {lb:.0f} lb to the {leg} through {how}"
 #: A net pull without the moment, on a joint that can't take one: it lifts or opens, read as that.
 LIFTS = "the FEA lifts the {edge} off the {face}"
 
@@ -361,7 +354,8 @@ def row(j: dict, reading: dict, screw_mm: float, min_safety: float, keep: float 
 
 
 def _feeds(j: dict, setup_: dict, reading: dict) -> Optional[tuple]:
-    """For an apron's end on a leg: how its load reaches the apron from the piece above it, by the FEA. ``(top, push)``:
+    """For an apron's end on a leg: how its load reaches the apron from the piece above it, by the FEA. ``(top, push,
+    joint)``:
     the joint of the apron's edge on a sheet's face that isn't a leg, and whether the apron pushes up into it (the top
     bearing down on it, by contact) rather than hangs from it. None where there's no such joint, or the FEA didn't read
     it."""
@@ -375,8 +369,35 @@ def _feeds(j: dict, setup_: dict, reading: dict) -> Optional[tuple]:
         if got is None or "force" not in got:
             continue
         parts = split(k, got["force"], apron)
-        return k["face"], parts["bearing"] >= parts["withdrawal"]
+        return k["face"], parts["bearing"] >= parts["withdrawal"], k
     return None
+
+
+def held_by(k: dict) -> str:
+    """What holds joint ``k`` in a pull, in words, as the hand check credits it (caliper-reviewer, #344: never "a glue
+    line" where it's screwed)."""
+    from .joint_check import _count
+
+    n = int(k.get("screws") or 0) if "screws" in (k.get("fix") or []) else 0
+    glue = "glue" in (k.get("fix") or [])
+    if n:
+        return f"{_count(n)} #8 screw{'' if n == 1 else 's'}" + (" and glue" if glue else "")
+    return "a glue line that gets no credit in a pull" if glue else "nothing that holds a pull"
+
+
+def _both(j: dict, got: dict, hand_n: Optional[list], keep: float, screw_mm: float, min_safety: float):
+    """A joint's row safety held by ``n`` screws, as the fresh check will read it (#344): the lower of the FEA's side
+    (its demand read again, since a pull's waiver turns on what holds it) and the hand rule's, from ``hand_n`` (each
+    demand it answers to, N by mode, unrounded), where it has a number."""
+    from . import joint_check as JC
+
+    by_hand = JC._by_hand(j, hand_n, screw_mm) if hand_n else None
+
+    def at(n: int):
+        f = row(JC.screwed(j, n), got, screw_mm, min_safety, keep=keep).get("safety")
+        h = by_hand(n) if by_hand else None
+        return min((x for x in (f, h) if x is not None), default=None)
+    return at
 
 
 def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
@@ -384,8 +405,8 @@ def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
     lower of the two; where the hand rule has none, the FEA's is the row's; where the FEA can't read the joint, it's
     said and the hand rule's stands, or the joint stays not checked, never ✓. A disagreement of :data:`DISAGREE` or more
     is said. Returns a new result."""
+    from . import joint_check as JC
     from . import verdicts as V
-    from .joint_check import LBF
 
     out = {**check, "rows": [dict(r) for r in check.get("rows") or []],
            "unchecked": list(check.get("unchecked") or []), "fea": {"residual": round(reading["residual"], 5)}}
@@ -411,19 +432,23 @@ def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
                 continue
             hand = {"pieces": j["pieces"], "between": between, "edge": j["edge"], "face": j["face"], "mode": None,
                     "safety": None, "need": min_safety, "holds": True, "said": "not checked by hand",
-                    "assumed": j.get("assumed"), "_new": True}
+                    "assumed": j.get("assumed"), "_new": True,
+                    **({"crowded": j["crowded"], "said": f"not checked by hand; {j['crowded']}"} if j.get("crowded") else {})}
             out["rows"].append(hand)
         hand["fea"] = fea
         if "unread" in fea:
             continue
         fed = _feeds(j, setup_, reading) if j.get("apron") else None
         if fed is not None and fea["mode"] == "shear":     # an apron's end on a leg: which way its load came (#316 (α))
-            top, push = fed
+            top, push, k = fed
             if push:
                 fea["said"] += "; " + HANDS.format(top=top, apron=j["edge"], leg=j["face"],
                                                    lb=fea["demand_lb"].get("shear", 0.0), how=_how(j, setup_))
-            else:
-                hung = HUNG.format(apron=j["edge"], top=top, leg=j["face"])
+            elif JC.capacity(k, setup_["screw_mm"])["withdrawal"] > 0.0:   # its fixings carry the hang: it stands
+                fea["said"] += "; " + HUNG_HELD.format(top=top, apron=j["edge"], leg=j["face"], by=held_by(k),
+                                                       lb=fea["demand_lb"].get("shear", 0.0), how=_how(j, setup_))
+            else:                                         # nothing credited holds the hang: the bonded model's, waived
+                hung = HUNG.format(apron=j["edge"], top=top, leg=j["face"], by=held_by(k))
                 if hand.pop("_new", False):               # no hand number beside it: not checked, never ✓
                     out["rows"].remove(hand)
                     out["unchecked"].append(f"the joint between {between} ({hung})")
@@ -435,10 +460,16 @@ def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
             hand.update({"safety": fs, "mode": fea["mode"], "by": "fea", "need": min_safety,
                          "verdict": V.meets(fs, min_safety), "holds": fs >= min_safety})  # producer
             hand["said"] = f"{hand.get('said') or ''}; by the FEA: {fea['said']}".lstrip("; ")
-            if fs < min_safety:                  # producer: what would take it past, said on the row (#316)
-                fix = fix_it(j, fea["mode"], fea["demand_lb"].get(fea["mode"], 0.0) * LBF, min_safety, setup_["screw_mm"])
-                if fix:
-                    hand["fix"] = fix
+        now = hand.get("safety")                 # the row's, the lower of the two: both read again at each count
+        if fs is not None and now is not None and now < min_safety:   # producer: what takes it past (#316, #344)
+            hand.pop("more_screws", None)
+            hand.pop("fix", None)
+            # a hand number with no demand to read it again by: no count, rather than one only the FEA's side passes
+            more = JC.fix_it(j, min_safety, _both(j, got, hand.get("demands_n") if hs is not None else None,
+                                                  hand.get("rake_n", 0.0), setup_["screw_mm"], min_safety)) \
+                if hs is None or hand.get("demands_n") else None
+            if more:                              # the count both sides pass at: the fresh check reads the lower
+                hand.update({"more_screws": more, "fix": more["said"]})
         hd = sum((hand.get("demand_lb") or {}).values())
         fd = sum(fea["demand_lb"].values())
         if hd > 0 and fd >= (1.0 + DISAGREE) * hd:

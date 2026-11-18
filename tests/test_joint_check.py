@@ -259,7 +259,7 @@ def test_a_box_top_between_its_walls_fails_at_the_joint_and_names_it(studied, sh
     hedge = answers.fail_hedge(rec, c, verdicts.case(rec, c), True)
     assert "gives first: three #8 screws in shear into the top's edge; by the FEA: " in hedge, hedge
     assert hedge.endswith(", 0.8x of what it needs (its joint forces from the FEA, which holds the pieces as one). "
-                          "1 more #8 screw at the top's edge, or a glue block, would take it past 2."), hedge
+                          "1 more #8 screw at the top's edge, 4 in all, would read 2.14×, past 2."), hedge   # #344
 
 
 def test_the_need_is_the_run_s_least_safety_the_same_joint_flips_between(studied, short_screws):

@@ -380,24 +380,28 @@ def test_an_upright_stool_s_top_bears_on_its_aprons_and_their_ends_shear_off_the
     assert g["by"] == "fea" and g["mode"] == "shear" and set(g["pieces"]) == {"front right leg", "front apron"}
     assert ("the top bears on the front apron, and it hands 179 lb to the front right leg through one #8 screw in shear "
             "into the front apron's edge") in g["said"], g["said"]
-    assert g["fix"] == "3 more #8 screws at the front apron's end, or a glue block, would take it past 2"   # 179 lb × 2
+    assert g["fix"] == ("3 more #8 screws at the front apron's end, 4 in all, would read 2×, past 2 (4 screws 0.75 in "
+                        "apart in a 3 in joint: close enough to split the edge; consider a longer joint or a bigger "
+                        "screw)")                                              # 179 lb × 2: no glue block (#344)
     from caliper import answers, verdicts
 
     hedge = answers.fail_hedge(rec, corner, verdicts.case(rec, corner), True)
-    assert hedge.endswith(" 3 more #8 screws at the front apron's end, or a glue block, would take it past 2."), hedge
+    assert hedge.endswith(" 3 more #8 screws at the front apron's end, 4 in all, would read 2×, past 2 (4 screws 0.75 "
+                          "in apart in a 3 in joint: close enough to split the edge; consider a longer joint or a "
+                          "bigger screw)."), hedge
     leg = next(r for r in corner["joints"]["rows"] if r["between"] == "the top and the front right leg")
     assert leg["safety"] == pytest.approx(2.93, abs=0.01) and "by" not in leg and leg["fea"]["safety"] > leg["safety"]
     for c in rec["cases"]:
         assert not [r for r in c["joints"]["rows"] if "rake_n" in r]                 # upright: no rake
 
 
-def _apron_pair(top_force):
+def _apron_pair(top_force, **top_joint):
     """An apron's end on a leg and its top edge on the top, as setup places them, and an FEA reading of each: the top
     joint by ``top_force`` (what the apron puts into the top), the end by 150 N of shear along the leg."""
     end = {**JOINT, "pieces": ["front apron", "leg"], "edge": "front apron", "face": "leg", "apron": True,
            "out": np.array([1.0, 0, 0]), "normal": np.array([1.0, 0, 0]), "along": np.array([0, 0, 1.0]), "screws": 1,
            "points": [], "edge_t": 19.05, "length_mm": 76.2}
-    top = {**JOINT, "pieces": ["front apron", "top"], "edge": "front apron", "face": "top"}
+    top = {**JOINT, "pieces": ["front apron", "top"], "edge": "front apron", "face": "top", **top_joint}
     reading = {"joints": {("front apron", "leg"): {"force": np.array([0, 0, -150.0]), "moment": np.zeros(3), "nodes": 30},
                           ("front apron", "top"): {"force": np.asarray(top_force, float), "moment": np.zeros(3),
                                                    "nodes": 90}},
@@ -409,12 +413,22 @@ def _apron_pair(top_force):
     return FJ.beside(hand, reading, _setup(end, top), 2.0)
 
 
-def test_the_fix_it_counts_the_screws_that_take_it_past_its_need_and_says_none_for_bearing():
-    j = {**JOINT, "screws": 1, "fix": ["screws"], "apron": True}
-    per = JC.capacity({**j, "screws": 1}, 50.0)["shear"]
-    assert FJ.fix_it(j, "shear", per * 1.9, 2.0, 50.0).startswith("3 more #8 screws at the apron's end")    # 3.8: 4
-    assert FJ.fix_it(j, "shear", per * 0.9, 2.0, 50.0).startswith("1 more #8 screw at the apron's end")     # 1.8: 2
-    assert FJ.fix_it(j, "bearing", 500.0, 2.0, 50.0) is None
+def test_what_the_fea_can_see_and_when_it_balances_are_pinned_at_their_bars():
+    """caliper-reviewer at #344: MIN_NODES, STATICS_TOL and DISAGREE pinned at their edges."""
+    assert (FJ.MIN_NODES, FJ.STATICS_TOL, FJ.DISAGREE) == (4, 0.01, 0.25)
+    assert FJ.sees(2.0, 2, 4) and not FJ.sees(2.0, 2, 3) and not FJ.sees(1.99, 2, 40)
+    assert FJ.unbalanced_by(0.01, "top") is None
+    assert FJ.unbalanced_by(0.0101, "top") == FJ.UNBALANCED.format(piece="top", pct=1.01)
+
+
+@pytest.mark.parametrize("fea_lb, said", [(125.0, True), (124.9, False)])
+def test_a_disagreement_is_said_from_a_quarter_more_than_the_hand_rule(fea_lb, said):
+    hand = _hand([{"pieces": ["apron", "top"], "between": "the apron and the top", "mode": "bearing", "safety": 0.01,
+                   "need": 2.0, "holds": False, "said": "by hand", "demand_lb": {"bearing": 100.0}}])
+    r = FJ.beside(hand, _reading([0, 0, fea_lb * JC.LBF]), _setup(SCREWED), 2.0)["rows"][0]
+    assert r["fea"]["demand_lb"] == {"bearing": fea_lb} and ("disagree" in r) is said
+    if said:
+        assert r["disagree"] == "the FEA puts 25% more on it than the hand rule"
 
 
 def test_an_apron_end_s_shear_stands_where_the_top_bears_on_it_and_goes_round_where_it_hangs():
@@ -423,7 +437,30 @@ def test_an_apron_end_s_shear_stands_where_the_top_bears_on_it_and_goes_round_wh
     assert "the top bears on the front apron, and it hands 34 lb to the leg through" in pushed["said"]
     hung = next(r for r in _apron_pair([0, 0, -300.0])["rows"] if r["between"] == "the leg and the front apron")
     assert hung["safety"] is None and "by" not in hung and hung["fea"]["waived"]
-    assert FJ.HUNG.format(apron="front apron", top="top", leg="leg") in hung["fea"]["said"]
+    assert FJ.HUNG.format(apron="front apron", top="top", leg="leg", by="a glue line that gets no credit in a pull") \
+        in hung["fea"]["said"]
+
+
+def test_a_hung_apron_s_shear_stands_where_its_fixings_to_the_top_hold_a_pull(monkeypatch):
+    """The foreman (#344): the waiver turns on the top joint's pull capacity, in code. Today an edge's screws hold no
+    pull (WITHDRAW_EDGE_LB 0), so a screwed hang is waived; credited one, the hang is carried and the shear stands."""
+    waived = next(r for r in _apron_pair([0, 0, -300.0], screws=2)["rows"] if r["between"] == "the leg and the front apron")
+    assert waived["safety"] is None and waived["fea"]["waived"]
+    assert "by two #8 screws and glue, so what it hands the leg goes round it" in waived["fea"]["said"]
+    monkeypatch.setattr(JC, "WITHDRAW_EDGE_LB", 50.0)
+    held = next(r for r in _apron_pair([0, 0, -300.0], screws=2)["rows"] if r["between"] == "the leg and the front apron")
+    assert held["by"] == "fea" and held["mode"] == "shear" and held["safety"] is not None and not held["fea"]["waived"]
+    assert ("the front apron hangs from the top by two #8 screws and glue, which hold a pull, and it hands 34 lb to the "
+            "leg through") in held["said"], held["said"]
+
+
+@pytest.mark.parametrize("fix, screws, by", [(["glue", "screws"], 2, "two #8 screws and glue"),
+                                             (["screws"], 1, "one #8 screw"),
+                                             (["glue"], 2, "a glue line that gets no credit in a pull"),
+                                             ([], 0, "nothing that holds a pull")])
+def test_a_hung_apron_s_words_name_what_holds_it_to_the_top(fix, screws, by):
+    """caliper-reviewer at #344: "a glue line" was said of an apron screwed to the top."""
+    assert FJ.held_by({"fix": fix, "screws": screws}) == by
 
 
 def test_legs_short_of_the_top_don_t_come_out_ticked_through_the_waiver(tmp_path):
@@ -435,3 +472,27 @@ def test_legs_short_of_the_top_don_t_come_out_ticked_through_the_waiver(tmp_path
     corner = next(c for c in _study(tmp_path, short)["cases"] if c["name"].startswith("sitting"))
     assert not corner["holds"] and corner["safety"] <= 0.94
     assert corner["joints"]["path"] == "the legs stop short of the top: it rests on its aprons, then the legs"
+
+
+def test_a_count_from_the_hand_rule_reads_the_fea_s_side_too_where_that_s_lower_then():
+    """#344: the hand rule fails in shear (1.9) and the FEA's side passes in bearing (2.2), which screws don't move. The
+    count is the hand's, 5; what it would read is the lower of the two there, the FEA's, never the hand's 2.37."""
+    shear = JC.capacity(JC.screwed(SCREWED, 4), 50.0)["shear"] / 1.9
+    hand = _hand([{"pieces": ["apron", "top"], "between": "the apron and the top", "mode": "shear", "safety": 1.9,
+                   "need": 2.0, "holds": False, "said": "by hand",
+                   "demands_n": [{"bearing": 0.0, "withdrawal": 0.0, "shear": shear}]}])
+    push = JC.capacity(SCREWED, 50.0)["bearing"] / 2.2
+    r = FJ.beside(hand, _reading([0, 0, push]), _setup(SCREWED), 2.0)["rows"][0]
+    assert r["safety"] == 1.9 and "by" not in r and r["fea"]["safety"] >= 2.0 and r["fea"]["mode"] == "bearing"
+    more = r["more_screws"]
+    by_hand = JC._by_hand(SCREWED, hand["rows"][0]["demands_n"], 50.0)
+    assert more["to"] == 5 and more["reads"] == r["fea"]["safety"] < by_hand(5)
+
+
+def test_a_hand_number_with_no_demand_to_read_again_gets_no_count():
+    """A guard: a row the hand rule numbered without saying its demand (none is built so) gets no count, rather than
+    one only the FEA's side would pass."""
+    hand = _hand([{"pieces": ["apron", "top"], "between": "the apron and the top", "mode": "shear", "safety": 1.0,
+                   "need": 2.0, "holds": False, "said": "by hand"}])
+    r = FJ.beside(hand, _reading([400.0, 0, 0]), _setup(SCREWED), 2.0)["rows"][0]
+    assert r["safety"] == 1.0 and r["fea"]["safety"] > 1.0 and "more_screws" not in r and "fix" not in r
