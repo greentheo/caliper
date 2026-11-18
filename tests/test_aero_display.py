@@ -102,7 +102,7 @@ const run = { id: 'r1', kind: 'parametric', searched: ['shoulder', 'tail_len'], 
 
 
 def _aero(body):
-    return _run(_page(["aeroResults", "aeroLabel", "aeroWhen", "aeroUses", "aeroInUse"],
+    return _run(_page(["aeroResults", "aeroLabel", "aeroWhen", "aeroUses", "aeroInUse", "aeroNum", "aeroSame"],
                       consts=["pct", "fixed", "esc", "AERO_EFFORT"], extra=PAGE + body))
 
 
@@ -154,3 +154,81 @@ def test_the_search_table_says_its_numbers_are_the_script_s():
     view = _fn(open(JS).read(), "aeroView")
     assert "Values in mm" not in view
     assert "The script's own numbers: lengths in mm, angles in degrees, whatever units\n      the rest shows." in view
+
+
+# --- #341 review: design 0 is the part; a rounded number stays inside its range -----------------------------------------
+
+def test_a_number_left_at_the_part_s_own_keeps_it_as_the_part_has_it():
+    """15.25 in is 387.35 mm: design 0 read 387.4, wasn't in use, and Use on it wrote v15 with 387.4."""
+    rec = {"searched": ["nose_len", "shoulder"], "bounds": {"nose_len": [0, 400], "shoulder": [1, 2.5]},
+           "start": {"nose_len": 387.35, "shoulder": 1.4}}
+    assert aero.uses(rec, {"design": {"nose_len": 387.35, "shoulder": 1.4}}) == {"nose_len": 387.35, "shoulder": 1.4}
+    moved = aero.uses(rec, {"design": {"nose_len": 380.3721, "shoulder": 1.4}})
+    assert moved == {"nose_len": 380.4, "shoulder": 1.4}                       # what moved is to its places
+
+
+def test_a_rounded_number_never_lands_outside_its_range():
+    """The sample's own width range, 1564.64–2346.96, wrote 1564.6 at its low end and 2347.0 at its high end."""
+    rec = {"searched": ["width"], "bounds": {"width": [1564.64, 2346.96]}, "start": {"width": 2000.0}}
+    at = lambda x: aero.uses(rec, {"design": {"width": x}})["width"]       # noqa: E731
+    assert (at(1564.64), at(1564.6400001), at(2346.96), at(2346.9599)) == (1564.7, 1564.7, 2346.9, 2346.9)
+    assert at(2000.04) == 2000.0 and at(1700.06) == 1700.1                     # inside: to its places, as before
+    assert aero._inward(6.35, 6.35, 25.4, 1) == 6.4 and aero._inward(0.07, 0.07, 0.5, 2) == 0.07   # 1/4 in; 0.07 × 100 is 7.000000000000001
+    assert aero._inward(1.0402, 1.0401, 1.0404, 3) == 1.0402                   # nothing of 3 places fits: as it is
+
+
+def test_use_on_design_0_of_a_part_in_inches_writes_its_own_numbers(tmp_path):
+    pytest.importorskip("cadquery")
+    script = SCRIPT.replace('"tail_len": 0.0,   # 0 = square back', '"tail_len": 38.35,   # 0 = square back')
+    store = DesignStore.create("an inch box", base=str(tmp_path / "designs"))
+    store.write_part("box", script, intent="a box with a tunable tail")
+    start = aero.read_params(script)
+    rec = {"id": "r1", "part": "box", "kind": "parametric", "created": 1795450000.0,
+           "bounds": {"tail_len": [0, 90], "tail_drop": [0, 50]}, "start": start, "searched": ["tail_len", "tail_drop"],
+           "script_sig": aero.shape_signature(script), "notes": [], "obstacles": [], "builds": 9, "seconds": 1,
+           "stations": [{"index": 0, "removed": 0.0, "metrics": {"drag": 1.0},
+                         "design": {"tail_len": 38.35, "tail_drop": 0.0}}]}
+    os.makedirs(os.path.join(aero.runs_dir(store), "r1"))
+    with open(os.path.join(aero.runs_dir(store), "r1", "run.json"), "w") as f:
+        json.dump(rec, f)
+    assert aero.load_run(store, "r1")["stations"][0]["uses"] == {"tail_len": 38.35, "tail_drop": 0.0}
+    assert aero.adopt(store, "r1", 0)["params"]["tail_len"] == 38.35
+    assert aero.read_params(store.read_script("box"))["tail_len"] == 38.35       # 38.4 before
+
+
+INCH = """
+const inch = { ...run, searched: ['nose_len', 'shoulder'], places: { nose_len: 1, shoulder: 2 }, stations: [
+  { index: 0, removed: 0, metrics: { drag: 1 }, design: { nose_len: 387.35, shoulder: 1.4 }, uses: { nose_len: 387.35, shoulder: 1.4 } },
+  { index: 1, removed: -0.05, metrics: { drag: 0.9 }, design: { nose_len: 380.37, shoulder: 1.371 }, uses: { nose_len: 380.4, shoulder: 1.37 } },
+  { index: 2, removed: -0.06, metrics: { drag: 0.88 }, design: { nose_len: 380.41, shoulder: 1.429 }, uses: { nose_len: 380.4, shoulder: 1.43 } },
+  { index: 3, removed: -0.06, metrics: { drag: 0.88 }, design: { nose_len: 380.42, shoulder: 1.4302 }, uses: { nose_len: 380.4, shoulder: 1.43 } }] };
+"""
+
+
+def _rows(html):
+    import re
+
+    return [(r.split("</td>", 1)[0], re.findall(r"<td>([^<]*)</td>", r.split("</tr>", 1)[0])[-2:])
+            for r in html.split('data-ast="')[1:]]
+
+
+def test_design_0_of_a_part_in_inches_reads_its_own_numbers_and_in_use():
+    rows = _rows(_aero(INCH + "out = aeroResults({ id: 'cargo_box', params: { nose_len: 387.35, shoulder: 1.4 } }, inch, [inch]);"))
+    assert rows[0][1] == ["387.35", "1.40"] and "in use" in rows[0][0]           # 387.4, and not in use, before
+    assert rows[1][1] == ["380.4", "1.37"] and "in use" not in rows[1][0]
+
+
+def test_only_the_design_written_reads_in_use_not_one_close_to_it():
+    """reviewer-2's survivor: "in use" within a whole unit marked 1.37 and 1.43 both. Designs 0.06 apart: one is."""
+    rows = _rows(_aero(INCH + "out = aeroResults({ id: 'cargo_box', params: { nose_len: 380.4, shoulder: 1.43 } }, inch, [inch]);"))
+    assert ["in use" in r[0] for r in rows] == [False, False, True, True]
+
+
+def test_a_design_with_an_earlier_one_s_numbers_says_so():
+    rows = _rows(_aero(INCH + "out = aeroResults({ id: 'cargo_box', params: {} }, inch, [inch]);"))
+    assert ["same as" in r[0] for r in rows] == [False, False, False, True] and "same as 2" in rows[3][0]
+
+
+def test_the_note_says_the_drag_was_found_at_the_unrounded_numbers():
+    html = _aero("out = aeroResults({ id: 'cargo_box', params: {} }, run, [run]);")
+    assert "Each design's drag was found at its unrounded numbers; Use writes them to the places shown, a hair off." in html

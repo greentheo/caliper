@@ -624,9 +624,29 @@ def places(lo: float, hi: float) -> int:
 
 def uses(rec: dict, st: dict) -> dict:
     """What Use writes for a design: each searched number to its :func:`places`, so the table shows what the script
-    gets (#330: Use wrote 1.1 for a scored 1.061)."""
-    bounds = rec.get("bounds") or {}
-    return {k: round(float(st["design"][k]), places(*bounds[k]) if k in bounds else 1) for k in rec["searched"]}
+    gets (#330: Use wrote 1.1 for a scored 1.061). A number the search left at the part's own keeps it as the part has
+    it: 15.25 in is 387.35 mm, and design 0 is the part, not 387.4 (#341 review). Rounded toward the inside at each end
+    of its range, so it never lands outside it (1564.64–2346.96 wrote 1564.6 and 2347.0)."""
+    bounds, start = rec.get("bounds") or {}, rec.get("start") or {}
+    out = {}
+    for k in rec["searched"]:
+        x = float(st["design"][k])
+        if k in start and abs(x - float(start[k])) <= 1e-9 * max(1.0, abs(x)):
+            out[k] = float(start[k])                      # the part's own number, unrounded
+        elif k in bounds:
+            out[k] = _inward(x, *bounds[k], places(*bounds[k]))
+        else:
+            out[k] = round(x, 1)
+    return out
+
+
+def _inward(x: float, lo: float, hi: float, p: int) -> float:
+    """``x`` to ``p`` places, kept inside ``lo``–``hi``: an end with more decimals than ``p`` rounds inward. Where no
+    number of ``p`` places fits inside, ``x`` as it is."""
+    s = 10 ** p
+    a = math.ceil(round(min(lo, hi) * s, 6)) / s
+    b = math.floor(round(max(lo, hi) * s, 6)) / s
+    return float(x) if a > b else min(max(round(float(x), p), a), b)
 
 
 def load_run(store: DesignStore, rid: str) -> Optional[dict]:

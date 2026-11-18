@@ -4527,6 +4527,17 @@ function aeroWhen(created) {
   return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} ${String(d.getHours()).padStart(2, '0')}:${
     String(d.getMinutes()).padStart(2, '0')}`;
 }
+// a number as Use writes it: to its places, or, where it's the part's own with more (15.25 in is 387.35 mm), as it is
+function aeroNum(v, places) {
+  if (v == null) return '—';
+  return Number(Number(v).toFixed(places)) === Number(v) ? Number(v).toFixed(places) : String(Number(Number(v).toFixed(6)));
+}
+// the same numbers as an earlier design: said, not read as another result (#341 review)
+function aeroSame(run, s) {
+  const key = (x) => run.searched.map((k) => aeroUses(run, x)[k]).join('|');
+  const was = run.stations.find((x) => x.index < s.index && key(x) === key(s));
+  return was ? ` <span class="muted small">same as ${was.index}</span>` : '';
+}
 // a design's numbers, as Use writes them (the server's, to its range's places, #330)
 function aeroUses(run, s) {
   return s.uses || s.design;
@@ -4548,13 +4559,14 @@ function aeroResults(p, run, runs) {
     <div class="tw"><table class="st"><tr><th>#</th><th>volume</th><th>drag</th><th>${inches() ? 'saved lbf' : 'saved N'}</th><th>kWh/100mi</th>
       ${run.searched.map((k) => `<th>${esc(k)}</th>`).join('')}</tr>
       ${run.stations.map((s) => `<tr class="pick ${s.index === on ? 'on' : ''}" data-ast="${s.index}"><td>${s.index}${
-        aeroInUse(p, run, s) ? ' <span class="badge ok">in use</span>' : ''}</td>
+        aeroInUse(p, run, s) ? ' <span class="badge ok">in use</span>' : ''}${aeroSame(run, s)}</td>
         <td>${pct(-s.removed)}</td><td>${pct(s.metrics.drag)}</td><td>${saved(s)}</td>
         <td>${s.derived ? fixed(s.derived.saved_kwh_per_100mi, 2) : '—'}</td>
-        ${run.searched.map((k) => `<td>${fixed(aeroUses(run, s)[k], (run.places || {})[k] ?? 1)}</td>`).join('')}</tr>`).join('')}</table></div>
+        ${run.searched.map((k) => `<td>${aeroNum(aeroUses(run, s)[k], (run.places || {})[k] ?? 1)}</td>`).join('')}</tr>`).join('')}</table></div>
     <div class="muted small" style="margin-top:6px">Click a row to see it in place; “volume” is the change against the part this
       search started from${run.version != null ? ` (v${run.version})` : ''}${run.stations.some((s) => aeroInUse(p, run, s))
         ? '; “in use” is the design the part has now' : ''}.
+      Each design's drag was found at its unrounded numbers; Use writes them to the places shown, a hair off.
       Using a design writes those numbers into the script — it stays parametric.</div>
     ${run.notes.map((n) => `<div class="muted small" style="margin-top:4px">• ${esc(n)}</div>`).join('')}`;
 }
