@@ -244,14 +244,22 @@ def test_a_box_top_between_its_walls_fails_at_the_joint_and_names_it(studied, sh
 
     store, rec = studied(BOX_STOOL)
     (c,) = rec["cases"]
-    assert c["governs"] == "joint" and c["safety"] == pytest.approx(1.8, abs=0.02) and not c["holds"], c
+    # #316 slice 2: the FEA puts 168 lb on the top's front and back joints, the hand rule's pairs 100 lb each way, so
+    # the FEA's 1.6 there is the lower, and governs, where the hand's 1.79 on its sides did
+    assert c["governs"] == "joint" and c["safety"] == pytest.approx(1.6, abs=0.02) and not c["holds"], c
     assert c["over"] in ("fea", "plate")                                             # what it took over from, kept
     assert load_study.judged_by(rec, c) == "joint"
-    assert load_study.governing_words(c) in ("the joint between the top and the left", "the joint between the top and the right")
-    assert c["joints"]["governing"]["said"] == "two #8 screws in shear into the top's edge"
+    assert load_study.governing_words(c) in ("the joint between the top and the front", "the joint between the top and the back")
+    g = c["joints"]["governing"]
+    assert g["by"] == "fea" and g["said"].startswith("three #8 screws in shear into the top's edge; by the FEA: ")
+    assert g["disagree"].startswith("the FEA puts 1") and g["disagree"].endswith("% more on it than the hand rule")
+    hand = {r["between"]: r for r in c["joints"]["rows"]}
+    assert hand["the top and the left"]["safety"] == pytest.approx(1.8, abs=0.02)   # the hand rule's, where it's lower
     assert verdicts.case(rec, c)["kind"] == "fails"
     hedge = answers.fail_hedge(rec, c, verdicts.case(rec, c), True)
-    assert "gives first: two #8 screws in shear into the top's edge, 0.9x of what it needs" in hedge, hedge
+    assert "gives first: three #8 screws in shear into the top's edge; by the FEA: " in hedge, hedge
+    assert hedge.endswith(", 0.8x of what it needs (its joint forces from the FEA, which holds the pieces as one). "
+                          "1 more #8 screw at the top's edge, or a glue block, would take it past 2."), hedge
 
 
 def test_the_need_is_the_run_s_least_safety_the_same_joint_flips_between(studied, short_screws):
@@ -294,6 +302,9 @@ def test_a_path_it_can_t_follow_keeps_the_note_and_never_a_tick_or_a_cross_from_
         raise JC.NotChain(JC.NOT_CHAIN)
 
     monkeypatch.setattr(JC, "demands", nowhere)
+    from caliper import load_study
+
+    monkeypatch.setattr(load_study, "fea_joints", lambda ctx, solver, r, hand, need: hand)   # the hand rule's own
     _, rec = studied(BOX_STOOL)
     (c,) = rec["cases"]
     assert c["governs"] != "joint" and c["joints"]["chain"] is False
@@ -317,9 +328,10 @@ def test_the_card_says_the_wood_s_number_and_the_weakest_joint_s(studied):
     (c,) = rec["cases"]
     assert c["governs"] != "joint"
     line = answers._case_line("stool", rec, c, None, False, True)["text"]
-    assert "Its joints, by hand: the weakest, between the top and the left, " in line \
-        or "Its joints, by hand: the weakest, between the top and the right, " in line, line
-    assert "(two #8 screws in shear into the top's edge)" in line
+    # #316 slice 2: the FEA's side is the lower on the top's front and back joints, and says so
+    assert "Its joints, by the FEA: the weakest, between the top and the front, " in line \
+        or "Its joints, by the FEA: the weakest, between the top and the back, " in line, line
+    assert "(three #8 screws in shear into the top's edge; by the FEA: the FEA holds the pieces as one" in line
 
 
 def test_a_joint_it_couldn_t_check_is_named_where_the_card_says_so():

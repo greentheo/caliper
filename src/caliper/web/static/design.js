@@ -4210,15 +4210,20 @@ function jointsTable(c, run) {
   const g = J.governing;
   const rows = [...J.rows].sort((a, b) => (a.safety == null) - (b.safety == null) || (a.safety || 0) - (b.safety || 0));
   const lb = (o) => Object.entries(o || {}).map(([m, v]) => `${Math.round(v)} lb`).join(', ');
-  return `<details class="small" style="margin-top:4px"><summary>Joints, by hand${g ? ` — the weakest: <b>${esc(g.between)}</b>,
+  const fea = J.fea && !J.fea.unread;                // the FEA's side beside the hand rule's (#316 slice 2)
+  return `<details class="small" style="margin-top:4px"><summary>Joints, by hand${fea ? ' and from the FEA' : ''}${g ? ` — the weakest: <b>${esc(g.between)}</b>,
       ${sx(g.safety, run.min_safety)}` : ''}</summary>
     <table class="st"><tr><th style="text-align:left">joint</th><th style="text-align:left">how it gives</th><th>carries</th><th>takes</th><th></th></tr>
-    ${rows.map((r) => `<tr><td style="text-align:left">${esc(r.between)}</td><td style="text-align:left">${esc(r.said)}</td>
+    ${rows.map((r) => `<tr><td style="text-align:left">${esc(r.between)}</td><td style="text-align:left">${esc(r.said)}${
+      r.disagree ? ` <span style="color:var(--amber)">(${esc(r.disagree)})</span>` : ''}${
+      r.fix ? `<div class="muted">${esc(r.fix)}</div>` : ''}</td>
       <td>${lb(r.demand_lb)}</td><td>${lb(r.capacity_lb)}</td>
       <td style="color:var(--${r.safety == null ? 'muted' : verdictTone(r.verdict)})">${r.safety == null ? '—' : sx(r.safety, run.min_safety)}</td></tr>`).join('')}</table>
-    ${(J.unchecked || []).length ? `<div class="muted">Not checked by hand: ${J.unchecked.map(esc).join('; ')}.</div>` : ''}
+    ${(J.unchecked || []).length ? `<div class="muted">Not checked: ${J.unchecked.map(esc).join('; ')}.</div>` : ''}
+    ${J.fea && J.fea.unread ? `<div class="muted">The FEA's side isn't read here: ${esc(J.fea.unread)}.</div>` : ''}
     <div class="muted">Mean breaking loads, by hand, against what the wood needs (${run.min_safety}x): screws by the thread in the edge
-      (APA E830), glue to an edge none, bearing at 360 psi: Theo's values (#301). How a long joint's load is shared is interim (#316).</div></details>`;
+      (APA E830), glue to an edge none, bearing at 360 psi: Theo's values (#301). How a long joint's load is shared is interim (#316).
+      ${fea ? 'Beside it, each joint\'s force and moment from the FEA, which holds the pieces as one: the lower number governs.' : ''}</div></details>`;
 }
 function jointsLine(c, run) {
   const b = c.verdict && c.verdict.joints ? c.verdict.brace : null;
