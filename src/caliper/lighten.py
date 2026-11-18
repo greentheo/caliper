@@ -711,8 +711,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
             if chosen[p["name"]]:
                 cut = _cut_solid(cut, p, np.any([x["cells"] for x in chosen[p["name"]]], axis=0))
         cases, results = [], []
+        every = L.solved(ctx, cut)                        # one solver a step, its cases together (#345)
         for i in range(len(ctx["loads"])):
-            case, r = L.check_load(ctx, i, min_safety, cut)
+            case, r = L.check_load(ctx, i, min_safety, cut, got=every[i])
             case = holed_buckling(case, plist + tops, holes, ctx["loads"][i], min_safety)   # its walls' holes in (#268)
             if r.supported:
                 if phase == "walls":                     # the part the top's holes go into: the latest walls

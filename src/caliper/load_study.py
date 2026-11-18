@@ -1545,15 +1545,53 @@ def as_drawn_ceiling(drawn: Optional[dict], governs: str, safety: Optional[float
     return governs, safety, pl
 
 
-def check_load(ctx: dict, i: int, min_safety: float, solid=None):
+def solved(ctx: dict, solid=None) -> list:
+    """Every case of the part solved on ``solid`` (its voxels unless given), in case order, as ``[(solver, result)]``
+    for :func:`check_load` (#345): one solver, its set-up (the operator, the multigrid hierarchy) built once, each case's
+    result bit for bit what a solver of that case alone gives (whittle's ``solve_each``). With a whittle that hasn't it,
+    or where holding every case at once would pass :data:`TOGETHER_MAX`, each case on its own solver, as before."""
+    from whittle import Load
+
+    ls = ctx["ls"]
+    on = ls.solid if solid is None else solid
+    if len(ctx["loads"]) < 2 or not together(ctx):     # one case, or too many held at once: alone
+        return [_alone(ctx, i, on) for i in range(len(ctx["loads"]))]
+    ls.loads = [Load(ls.region(box=box), tuple(float(v) * load["factor"] for v in load["force"]), case=i)
+                for i, (load, box) in enumerate(zip(ctx["loads"], ctx["boxes"]))]
+    solver = ls.solver()
+    if not hasattr(solver, "solve_each"):                # a whittle before solve_each: one solver a case
+        return [_alone(ctx, i, on) for i in range(len(ctx["loads"]))]
+    return [(solver, r) for r in solver.solve_each(on)]
+
+
+#: The most the cases of one check are held at once (#345): nodes × cases, past which they're solved one at a time.
+#: Each case held is its displacement (3 floats a node) and its stress and energy (a float a voxel each).
+TOGETHER_MAX = 30_000_000
+
+
+def together(ctx: dict) -> bool:
+    """Whether a check's cases may be held at once (:data:`TOGETHER_MAX`)."""
+    nx, ny, nz = ctx["ls"].grid.shape
+    return (nx + 1) * (ny + 1) * (nz + 1) * len(ctx["loads"]) <= TOGETHER_MAX
+
+
+def _alone(ctx: dict, i: int, on) -> tuple:
+    """Case ``i`` on a solver of its own, as every case was before #345."""
+    ls, load, box = ctx["ls"], ctx["loads"][i], ctx["boxes"][i]
+    ls.loads = []
+    ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
+    solver = ls.solver()
+    return solver, solver.solve(on)
+
+
+def check_load(ctx: dict, i: int, min_safety: float, solid=None, got=None):
     """One load through the FEA (on ``solid``, the part's voxels unless given) and the plate check.
-    Returns ``(case, result)``; the case is the record's entry for it."""
+    Returns ``(case, result)``; the case is the record's entry for it. ``got``: its ``(solver, result)`` already solved
+    with the others (:func:`solved`), else it's solved here, alone."""
     from scipy import ndimage
 
     ls, load, box, mat = ctx["ls"], ctx["loads"][i], ctx["boxes"][i], ctx["mat"]
-    ls.loads = []
-    ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
-    r = ls.solver().solve(ls.solid if solid is None else solid)
+    solver, r = got if got is not None else _alone(ctx, i, ls.solid if solid is None else solid)
     case = {"name": load["name"], "lb": load["lb"], "factor": load["factor"],
             "force_n": [round(v, 1) for v in load["force"]], "lo": load["lo"], "hi": load["hi"]}
     if not r.supported:
@@ -1682,9 +1720,11 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     os.makedirs(out_dir, exist_ok=True)
     cases = []
     t1 = time.time()                                  # the FEA's own time, for the finer run's estimate (CALI-97)
+    emit("case", f"{len(loads)} case{'s' if len(loads) != 1 else ''}, solved together", progress=0.0)
+    every = solved(ctx)                               # one solver, every case (#345)
     for i, load in enumerate(loads):
         emit("case", f"{load['name']}: {load['lb']:g} lb × {load['factor']:g}", progress=i / len(loads))
-        case, r = check_load(ctx, i, min_safety)
+        case, r = check_load(ctx, i, min_safety, got=every[i])
         if r.supported:
             with open(os.path.join(out_dir, f"case_{i:02d}.json"), "w") as f:
                 json.dump(heat_mesh(ctx["mesh"], ctx["ls"].grid, r.von_mises, r.solid, 2 * ctx["spacing"]), f)
