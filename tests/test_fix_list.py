@@ -372,12 +372,16 @@ def test_a_joint_that_gives_first_is_its_own_row_and_covers_its_case(tmp_path):
     assert row["id"] == "joint:front rail|left side"
     assert row["problem"] == ("The joint between the front rail and the left side gives first under a foot: two #8 screws "
                               f"pulled out of the front rail's edge; 1.4× where it needs {NEED}×")          # as the card
-    assert [c["fix"] for c in row["choices"]] == [
-        "Hold the front rail and the left side together another way: screws through a face, a pin or a wedge "
-        "(nothing in an edge holds a pull)",
-        "A glue block where the front rail and the left side meet",
-        "A different joint where the front rail and the left side meet: a dado or a rabbet"]
+    # only what the check credits (#344): no glue block, no dado; with no count that passes, ask it to hold less
+    assert [c["fix"] for c in row["choices"]] == ["Ask it to hold less: a lighter load in its loads()"]
     assert {c["kind"] for c in row["choices"]} == {"designer"}
+    entry = {"pieces": ["front rail", "left side"], "kind": "butt", "fix": ["glue", "screws"], "screws": 3}
+    weakest["more_screws"] = {"to": 3, "more": 1, "reads": 2.1, "entry": entry}
+    _resave(store, run)
+    (row,) = _list(store)["rows"]                                   # a count that passes: the JOINTS entry, its reading
+    assert [(c["fix"], c["entry"]) for c in row["choices"]] == [(
+        '3 #8 screws where the front rail and the left side meet, 1 more: its JOINTS entry {"pieces": ["front rail", '
+        '"left side"], "kind": "butt", "fix": ["glue", "screws"], "screws": 3}; it would read 2.1×', entry)]
 
 
 def test_a_joint_the_hand_check_couldn_t_place_is_a_known_limit(tmp_path):

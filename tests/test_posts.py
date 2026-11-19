@@ -234,7 +234,9 @@ ENDS = {"hole": 'b = b.cut(cq.Workplane().circle(5).extrude(25).translate((lo[0]
         "bore": 'b = b.cut(cq.Workplane().circle(12).extrude(25).translate((lo[0] + L / 2, lo[1] + L / 2, hi[2] - 25)))',
         "round": 'b = b.faces(">Z").edges().fillet(15)', "round18": 'b = b.faces(">Z").edges().fillet(18)',
         "notch": 'b = b.cut(cq.Workplane().box(15, 15, 3, centered=False).translate((lo[0], lo[1], hi[2] - 3)))',
-        "stub": 'b = b.union(cq.Workplane().circle(5).extrude(3).translate((lo[0] + L / 2, lo[1] + L / 2, hi[2])))'}
+        "stub": 'b = b.union(cq.Workplane().circle(5).extrude(3).translate((lo[0] + L / 2, lo[1] + L / 2, hi[2])))',
+        # a slot down one side of its end: the centre ray and the two on that side start in air, two in the solid
+        "slot": 'b = b.cut(cq.Workplane().box(13, 20, 25, centered=False).translate((lo[0] + L / 2 - 3, lo[1] + L / 2 - 10, hi[2] - 25)))'}
 
 
 def _gapped(tmp_path, built=0.0, declared=0.0, end=None):
@@ -329,6 +331,16 @@ def test_a_leg_end_no_ray_starts_inside_isn_t_measured(tmp_path):
     _, su, _, got = _gapped(tmp_path, built=0, declared=0, end="bore")
     assert not [j for j in su["joints"] if j.get("post")] and not got["chain"]
     assert "the back left leg's built end at the top isn't measured: no ray across it starts inside the solid" \
+        in got["unchecked"], got
+
+
+def test_a_leg_end_only_two_rays_start_in_isn_t_measured(tmp_path):
+    """caliper-reviewer on #321: with two or fewer rays kept, "all but one" falls back to "any", so a leg two rays read
+    flush bore on the top. Too few to say it bears: not measured, the safe side (#316 slice 2)."""
+    store, su, _, got = _gapped(tmp_path, built=0, declared=0, end="slot")
+    assert _rays(store) == pytest.approx([0, 0], abs=0.06)                      # the two that start in the solid touch
+    assert not [j for j in su["joints"] if j.get("post")] and not got["chain"]
+    assert "the back left leg's built end at the top isn't measured: only two of its rays start inside the solid" \
         in got["unchecked"], got
 
 

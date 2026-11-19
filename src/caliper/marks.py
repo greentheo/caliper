@@ -27,7 +27,19 @@ import numpy as np
 from .fasteners import PILOT_BIT, SCREW_EVERY_IN, WOOD
 
 IN = 25.4
+#: How far from each end of a joint its first and last screws go, in. A shop layout rule from the patterns' screw marks
+#: (CALI-177, #282), not taken from a standard. NEEDS ENGINEER CHECK (#344, the foreman): for comparison, EC5 Table 8.2's
+#: predrilled distances for a #8 (d = 0.164 in) run 7 d ≈ 1.15 in from an unloaded end up to 12 d ≈ 2.0 in from a loaded
+#: one, and a screw into a plywood edge splits it nearer than either says for solid wood.
 SCREW_END_IN = 1.5
+#: Closer than this, in, a declared count's screws (``JOINTS``' ``"screws": N``, #344) are said to crowd the edge: still
+#: credited, never refused (Theo: "default to even spacing on the joints"). INTERIM, NEEDS ENGINEER CHECK: 1 in is about
+#: 6 d for a #8; for comparison EC5's predrilled spacing along the grain is a1 = (4 + |cos α|) d, 0.66 to 0.82 in for a
+#: #8. Theo's to set, as the plywood's 9.7 MPa is.
+SCREW_MIN_GAP_IN = 1.0
+#: What a row says of screws that crowd (the foreman's words, #344).
+CROWDED = ("{n} screws {gap} in apart in a {length} in joint: close enough to split the edge; consider a longer joint or "
+           "a bigger screw")
 CLEARANCE_BIT = "3/16 in"
 #: Below this a cut edge is square: a builder's saw is set to 0.
 BEVEL_MIN_DEG = 2.0
@@ -40,18 +52,45 @@ GLUE_BLOCK = {"size": "1x1", "label": "a 3/4 x 3/4 in strip"}
 DEPTH = {"rabbet": 0.5, "dado": 1.0 / 3.0}
 
 
-def spots(mm: float) -> list[float]:
+def spots(mm: float, n: Optional[int] = None) -> list[float]:
     """Where a joint's screws go along it, from one end (mm): 1 1/2 in from each end, then no more than 6 in apart; one in
-    the middle of a joint too short for two."""
+    the middle of a joint too short for two. ``n``: a declared count (#344), laid out evenly between those ends, as many
+    of it as :func:`fit` lets in."""
     end, every = SCREW_END_IN * IN, SCREW_EVERY_IN * IN
+    if n is not None:                                    # even, keeping the end distance where the joint has room
+        n = max(1, int(n))
+        if n == 1:
+            return [mm / 2.0]
+        if mm < 2 * end + 1e-6:
+            return [(i + 0.5) * mm / n for i in range(n)]
+        return [float(x) for x in np.linspace(end, mm - end, n)]
     if mm < 2 * end + 1e-6:
         return [mm / 2.0]
     n = math.ceil((mm - 2 * end) / every - 1e-9) + 1
     return [float(x) for x in np.linspace(end, mm - end, max(2, n))]
 
 
-def count(mm: float) -> int:
-    return len(spots(mm))
+def count(mm: float, n: Optional[int] = None) -> int:
+    return len(spots(mm, n))
+
+
+def crowded(mm: float, n: int) -> Optional[str]:
+    """What a row says of ``n`` screws laid evenly along a joint ``mm`` long (:func:`spots`) where they come out nearer
+    than :data:`SCREW_MIN_GAP_IN`; None where they don't."""
+    at = spots(mm, n)
+    if len(at) < 2:
+        return None
+    gap = (at[1] - at[0]) / IN
+    if gap >= SCREW_MIN_GAP_IN - 1e-9:
+        return None
+    return CROWDED.format(n=len(at), gap=f"{gap:.2g}", length=f"{mm / IN:.3g}")
+
+
+def declared_screws(j: Optional[dict]) -> Optional[int]:
+    """A ``JOINTS`` entry's own screw count (#344), or None where it gives none (or one that isn't a whole number ≥ 1:
+    :func:`joints.check` says so)."""
+    n = (j or {}).get("screws")
+    return n if isinstance(n, int) and not isinstance(n, bool) and n >= 1 else None
 
 
 def thread_in(face_t: float, edge_t: float, sin: float, screw_mm: float) -> float:
@@ -537,17 +576,22 @@ def screws(pieces: list[dict], tol: float, said: Optional[list] = None) -> dict:
                         g = {"a": p3, "b": q3, "along": (q3 - p3) / (L or 1.0), "length": L}
                         face, edge = host, piece
                         break
+        said_n = declared_screws(j)                     # a count the JOINTS entry gives (#344): as many as fit
         if g is None or g["length"] < 1e-6:
-            out[key] = {"n": count(c["length_mm"]), "on": None, "into": None, "points": [], "why": ""}
+            out[key] = {"n": count(c["length_mm"], said_n), "on": None, "into": None, "points": [], "why": "",
+                        **({"declared": said_n} if said_n else {}),
+                        **({"crowded": w} if said_n and (w := crowded(c["length_mm"], said_n)) else {})}
             continue
-        pts = [g["a"] + g["along"] * s for s in spots(g["length"])]
+        pts = [g["a"] + g["along"] * s for s in spots(g["length"], said_n)]
         centre = _geom(edge)[5].mean(axis=0) if _sheet(edge) else np.mean(pts, axis=0)
         out_ = False
         if _sheet(face) and _sheet(edge):
             sin = abs(float(_geom(face)[3] @ _geom(edge)[3]))
             out_ = comes_out(float(face["thickness"]), float(edge["thickness"]), sin, screw_mm)
         out[key] = {"n": len(pts), "on": face["key"], "into": edge["key"], "points": pts,
-                    "drive": _far_face(face, centre), "why": "", "comes_out": out_}
+                    "drive": _far_face(face, centre), "why": "", "comes_out": out_,
+                    **({"declared": said_n} if said_n else {}),
+                    **({"crowded": w} if said_n and (w := crowded(g["length"], said_n)) else {})}
     return out
 
 
