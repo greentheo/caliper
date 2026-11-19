@@ -9,6 +9,9 @@ and says, with no capacity numbers yet (slice B):
 
       JOINTS = [{"pieces": ["top", "side front"], "kind": "bevel", "fix": ["glue", "screws"]}]
 
+  An entry may give its own screw count, ``"screws": N`` (#344: what Things to fix asks the designer for), laid evenly
+  along the joint (:func:`marks.spots`), one count for the patterns, the book and the joint check; otherwise the count
+  goes by the joint's length.
 - **Checked** (:func:`check`, in each authoring round): each entry's pieces exist and touch, its kind and fix are ones
   Caliper knows; and a piece that runs through another's outline (a through tenon: step-stool-5's stringer "through the
   left and right side") has the mortise cut into that outline, or the cut list would have him cut whole sides.
@@ -261,6 +264,7 @@ def check(script: str, declared: Optional[dict], mesh) -> list:
     fasteners.keys(pieces)
     names = {pc.get("name") for pc in pieces}
     touching = {frozenset(k) for k in contacts(pieces, tol)}
+    from . import marks
     from . import shop as shop_
 
     have = shop_.read()
@@ -276,6 +280,14 @@ def check(script: str, declared: Optional[dict], mesh) -> list:
             continue
         if not missing and frozenset(two) not in touching:
             wrong.append(f"{NAME} joins {_said(two[0])} and {_said(two[1])}, which don't touch")
+        if "screws" in j:                                  # a count of its own (#344): whole, and screwed
+            n = marks.declared_screws(j)
+            if n is None:
+                wrong.append(f"{NAME} gives {_said(two[0])} and {_said(two[1])} \"screws\": {j['screws']!r}, which "
+                             "isn't a whole number of 1 or more")
+            elif "screws" not in (j.get("fix") or []):
+                wrong.append(f"{NAME} gives {_said(two[0])} and {_said(two[1])} {n} screws, but its fix doesn't "
+                             "include screws")
         kind, fix = j.get("kind"), [f for f in j.get("fix") or [] if f not in FIXES]
         if kind not in KINDS or fix:
             said = []
