@@ -1548,11 +1548,24 @@ def as_drawn_ceiling(drawn: Optional[dict], governs: str, safety: Optional[float
 def solve(ls, solid):
     """whittle's solve of ``solid``, with BLAS held to one thread on the thread that runs it (CALI-208: where numpy
     loaded before Caliper, a thread started later isn't held, and solves at once come back wrong). Every solve in
-    Caliper goes through here."""
+    Caliper goes through here. Returns ``(solver, result)``: the solver too, for the joints' forces (#316)."""
     from .blas import one_thread
 
+    solver = ls.solver()
     with one_thread():
-        return ls.solver().solve(solid)
+        return solver, solver.solve(solid)
+
+
+def fea_joints(ctx: dict, solver, r, hand: dict, min_safety: float) -> dict:
+    """The joints' hand check with the FEA's side of each beside it (#316 slice 2, option C): the lower governs. Where
+    the FEA's joint forces can't be read at all, the hand check stands, said so."""
+    from . import fea_joints as FJ
+
+    try:
+        reading = FJ.read(solver, r, ctx["ls"].grid, ctx["joints"]["pieces"], ctx["joints"]["joints"], VOXELS_THROUGH)
+    except Exception as e:  # noqa: BLE001 — the hand check stands; why, said, never a throw from a strength check
+        return {**hand, "fea": {"unread": f"the FEA's joint forces couldn't be read ({type(e).__name__})"}}
+    return FJ.beside(hand, reading, ctx["joints"], min_safety)
 
 
 def check_load(ctx: dict, i: int, min_safety: float, solid=None):
@@ -1563,7 +1576,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     ls, load, box, mat = ctx["ls"], ctx["loads"][i], ctx["boxes"][i], ctx["mat"]
     ls.loads = []
     ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
-    r = solve(ls, ls.solid if solid is None else solid)
+    solver, r = solve(ls, ls.solid if solid is None else solid)
     case = {"name": load["name"], "lb": load["lb"], "factor": load["factor"],
             "force_n": [round(v, 1) for v in load["force"]], "lo": load["lo"], "hi": load["hi"]}
     if not r.supported:
@@ -1616,6 +1629,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
 
         case["joints"] = JC.check(ctx["joints"], load, ctx.get("held") or [], min_safety,
                                   mat=ctx.get("plate_mat") or mat)       # a notched side's net section, by its strength (CALI-192)
+        case["joints"] = fea_joints(ctx, solver, r, case["joints"], min_safety)
         governs, safety = JC.lower(case, governs, safety)
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
                  "holds": bool(safety is not None and safety >= min_safety),  # producer

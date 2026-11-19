@@ -260,6 +260,8 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
             had = next((r for r in rows if r["id"] == rid), None)
             if had is not None:                  # one row a joint: each case it gives in, spoken for
                 had["cases"] = list(dict.fromkeys((had.get("cases") or []) + [c["name"]]))
+                if _more(jr) > _more(had["_jr"]):   # the count every case it speaks for passes at (#344)
+                    had["choices"], had["_jr"] = _joint_choices(jr, name), jr
                 continue
             first = (J.get("governing") or {}).get("pieces") == jr["pieces"]
             # "gives first" only where a joint governs the case; where a panel or the FEA does, the weakest joint (#318)
@@ -268,11 +270,14 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
             rows.append(_spoke(_row(rid, f"The joint between {jr['between']} {verb} "
                                          f"{c['name']}: {jr['said']}; "
                                          f"{_x(jr['safety'], need)} where it needs {need:g}×" + note([c["name"]]),
-                                    _joint_choices(jr, name), pid), [c["name"]], f"the joint between {jr['between']}"))
+                                    _joint_choices(jr, name), pid), [c["name"]], f"the joint between {jr['between']}")
+                        | {"_jr": jr})
         if any(jr.get("said") == _racking() for jr in J.get("rows") or []):
             from .answers import RACKING
 
             limits.append(RACKING)
+    for r in rows:
+        r.pop("_jr", None)
     for c, v in failing:                        # any other: the FEA's, or a check with no thickness to offer
         if c["name"] in covered:
             continue
@@ -328,20 +333,30 @@ def _racking() -> Optional[str]:
     return RACKING_SAID
 
 
+def _more(jr: dict) -> tuple:
+    """How much a joint row's fix asks, to keep the one every case passes at: its screws, then the lower it'd read."""
+    m = jr.get("more_screws") or {}
+    return (m.get("to") or 0, -(m.get("reads") or 0.0))
+
+
 def _joint_choices(jr: dict, name: str) -> list[dict]:
-    """A joint's fix by how it gives (#301's modes): what holds it that way, the designer's to make."""
-    between = jr["between"]
+    """A joint's fix: only what the check credits (#344, the foreman: a glue block isn't, nor a dado or a rabbet). Where
+    screws take it past, the count the governing number asks, as the ``JOINTS`` entry that declares it, and what it
+    would read (said to crowd the edge where they come that close); else by how it gives (#301)."""
+    import json
+
+    between, cost = jr["between"], _designer_cost(name)
+    more = jr.get("more_screws")
+    if more:
+        return [_choice(f"{more['to']} #8 screws where {between} meet, {more['more']} more: its JOINTS entry "
+                        f"{json.dumps(more['entry'])}; it would read {more['reads']:g}×"
+                        + (f" ({more['crowded']})" if more.get("crowded") else ""), DESIGNER, cost, entry=more["entry"])]
     piece = (jr.get("pieces") or [""])[0]
-    by = {"withdrawal": f"Hold {between} together another way: screws through a face, a pin or a wedge "
-                        "(nothing in an edge holds a pull)",
-          "shear": f"More screws where {between} meet",
-          "bearing": f"More bearing where {between} meet: a thicker piece, or a cleat under it",
+    by = {"bearing": f"More bearing where {between} meet: a thicker piece, or a cleat under it",
           "net section": f"Leave more of the {piece} past its notch: a shallower notch, or a wider piece"}
-    fix = by.get(jr.get("mode")) or f"More fasteners where {between} meet"
-    # the joint's fixes, the designer's each (#318 re-check): what holds it that way, a glue block, a different joint
-    return [_choice(fix, DESIGNER, _designer_cost(name)),
-            _choice(f"A glue block where {between} meet", DESIGNER, _designer_cost(name)),
-            _choice(f"A different joint where {between} meet: a dado or a rabbet", DESIGNER, _designer_cost(name))]
+    first = by.get(jr.get("mode"))
+    return ([_choice(first, DESIGNER, cost)] if first else []) + [
+        _choice("Ask it to hold less: a lighter load in its loads()", DESIGNER, cost)]
 
 
 def _scenario_rows(store: DesignStore, pid: str) -> list[dict]:

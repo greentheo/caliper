@@ -111,5 +111,6 @@ def test_every_solve_in_caliper_goes_through_the_hold():
     for name in sorted(os.listdir(root)):
         if name.endswith(".py"):
             text = open(os.path.join(root, name)).read()
-            calls += [(name, m.group(0)) for m in re.finditer(r"\.solver\(\)\.solve\(", text)]
-    assert calls == [("load_study.py", ".solver().solve(")], calls
+            calls += [name for m in re.finditer(r"\b(\w+)(?:\(\))?\.solve\(", text)
+                      if m.group(1) not in ("linalg", "L")]       # numpy's isn't whittle's; L.solve is the hold
+    assert calls == ["load_study.py"], calls

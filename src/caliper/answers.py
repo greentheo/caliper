@@ -251,7 +251,8 @@ def joints_said(c: dict, need) -> str:
         return ""
     if c.get("governs") == "joint":
         return f" That's the joint between {g['between']}: {g['said']}."
-    return f" Its joints, by hand: the weakest, between {g['between']}, {_times(g['safety'], need=need)} ({g['said']})."
+    by = "by the FEA" if g.get("by") == "fea" else "by hand"          # the FEA's side, where it's the lower (#316)
+    return f" Its joints, {by}: the weakest, between {g['between']}, {_times(g['safety'], need=need)} ({g['said']})."
 
 
 def joint_said(row: dict, need) -> str:
@@ -288,8 +289,11 @@ def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
         g = (c.get("joints") or {}).get("governing") or {}
         if g.get("between"):
             need = run.get("min_safety") or 2.0
+            how = ("its joint forces from the FEA, which holds the pieces as one" if g.get("by") == "fea"
+                   else "a hand check of its joints")                # the FEA's side, where it's the lower (#316)
+            fix = f" {g['fix'][0].upper()}{g['fix'][1:]}." if g.get("fix") else ""   # what would take it past (#316)
             return (f" The joint between {g['between']} gives first: {g['said']}, {g['safety'] / need:.1f}x of what it "
-                    f"needs (a hand check of its joints).")
+                    f"needs ({how}).{fix}")
     if c.get("governs") == "buckling":
         rows = [r for r in c.get("buckling") or [] if r.get("done")]
         if rows:
