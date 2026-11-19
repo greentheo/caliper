@@ -85,6 +85,7 @@ t = threading.Thread(target=L.check_load, args=(ctx, 0, 2.0))
 t.start(); t.join()
 t = threading.Thread(target=lambda: out.__setitem__("bare", pools()))   # a thread nothing holds: the control
 t.start(); t.join()
+out["layers"] = sorted({(i["internal_api"], i.get("threading_layer")) for i in threadpool_info()})
 print(json.dumps(out))
 """
 
@@ -99,7 +100,10 @@ def test_threads_run_blas_on_one_thread_where_numpy_loaded_first():
     got = json.loads(r.stdout.strip().splitlines()[-1])
     for where in ("job", "study", "solve"):
         assert got[where] and all(n == 1 for _, n in got[where]), (where, got[where])
-    assert any(n > 1 for _, n in got["bare"]) or os.cpu_count() == 1   # an unheld thread reads more: the probe can tell
+    # the control: on the bug's build, an OpenMP OpenBLAS, a thread's count is its own, and an unheld thread reads more,
+    # so the probe can tell. Elsewhere (CI's BLIS) the count is the process's: the import's hold covers every thread
+    if ["openblas", "openmp"] in got["layers"] and (os.cpu_count() or 1) > 1:
+        assert any(n > 1 for _, n in got["bare"]), got["bare"]
 
 
 def test_every_solve_in_caliper_goes_through_the_hold():

@@ -41,3 +41,8 @@ once, 14 came back wrong, up to 2,384× off, and 11 of those reported converged.
 **Not covered:** whittle's own studies called outside a job thread (frame, aero's ParametricStudy) in a process that
 loaded numpy first. In the app they run on held job threads. **Not re-measured:** the reviewer's 27-solve hammer at this
 head; their row "each solve in `threadpool_limits(1)`: 0 of 27" is what this does.
+
+**CI, at 94e1ff2:** the control failed. The test was wrong: CI's numpy is conda-forge's BLIS, whose thread count is the
+process's, so the import's hold covers every thread and an unheld one reads 1 there too. The three held reads passed.
+The control now asserts only on the bug's build, an OpenMP OpenBLAS, where a thread's count is its own (it reads 12
+here).
