@@ -1545,6 +1545,17 @@ def as_drawn_ceiling(drawn: Optional[dict], governs: str, safety: Optional[float
     return governs, safety, pl
 
 
+def solve(ls, solid):
+    """whittle's solve of ``solid``, with BLAS held to one thread on the thread that runs it (CALI-208: where numpy
+    loaded before Caliper, a thread started later isn't held, and solves at once come back wrong). Every solve in
+    Caliper goes through here. Returns ``(solver, result)``: the solver too, for the joints' forces (#316)."""
+    from .blas import one_thread
+
+    solver = ls.solver()
+    with one_thread():
+        return solver, solver.solve(solid)
+
+
 def fea_joints(ctx: dict, solver, r, hand: dict, min_safety: float) -> dict:
     """The joints' hand check with the FEA's side of each beside it (#316 slice 2, option C): the lower governs. Where
     the FEA's joint forces can't be read at all, the hand check stands, said so."""
@@ -1565,8 +1576,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     ls, load, box, mat = ctx["ls"], ctx["loads"][i], ctx["boxes"][i], ctx["mat"]
     ls.loads = []
     ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
-    solver = ls.solver()
-    r = solver.solve(ls.solid if solid is None else solid)
+    solver, r = solve(ls, ls.solid if solid is None else solid)
     case = {"name": load["name"], "lb": load["lb"], "factor": load["factor"],
             "force_n": [round(v, 1) for v in load["force"]], "lo": load["lo"], "hi": load["hi"]}
     if not r.supported:
