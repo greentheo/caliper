@@ -1545,6 +1545,16 @@ def as_drawn_ceiling(drawn: Optional[dict], governs: str, safety: Optional[float
     return governs, safety, pl
 
 
+def solve(ls, solid):
+    """whittle's solve of ``solid``, with BLAS held to one thread on the thread that runs it (CALI-208: where numpy
+    loaded before Caliper, a thread started later isn't held, and solves at once come back wrong). Every solve in
+    Caliper goes through here."""
+    from .blas import one_thread
+
+    with one_thread():
+        return ls.solver().solve(solid)
+
+
 def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     """One load through the FEA (on ``solid``, the part's voxels unless given) and the plate check.
     Returns ``(case, result)``; the case is the record's entry for it."""
@@ -1553,7 +1563,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     ls, load, box, mat = ctx["ls"], ctx["loads"][i], ctx["boxes"][i], ctx["mat"]
     ls.loads = []
     ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
-    r = ls.solver().solve(ls.solid if solid is None else solid)
+    r = solve(ls, ls.solid if solid is None else solid)
     case = {"name": load["name"], "lb": load["lb"], "factor": load["factor"],
             "force_n": [round(v, 1) for v in load["force"]], "lo": load["lo"], "hi": load["hi"]}
     if not r.supported:

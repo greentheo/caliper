@@ -23,6 +23,8 @@ import weakref
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
+from .blas import hold
+
 #: How long a finished job's events stay readable. A page that reconnects late still gets the result.
 KEEP_FINISHED_S = 60 * 60
 
@@ -181,9 +183,11 @@ class JobRunner:
         # a chat waiting (for its design's lock, or for the study turn) holds a thread but no worker (#174): ``workers`` jobs work
         # at once, and the threads that wait are cheap
         self._slots = threading.BoundedSemaphore(workers)
-        self._pool = ThreadPoolExecutor(max_workers=max(workers, WAITING_THREADS), thread_name_prefix="caliper-job")
+        self._pool = ThreadPoolExecutor(max_workers=max(workers, WAITING_THREADS), thread_name_prefix="caliper-job",
+                                        initializer=hold)    # BLAS on one thread, on each (CALI-208)
         # studies wait their turn on a worker (#163): on workers of their own, so a queue of them can't hold up a chat (#174)
-        self._studies = ThreadPoolExecutor(max_workers=study_workers, thread_name_prefix="caliper-study")
+        self._studies = ThreadPoolExecutor(max_workers=study_workers, thread_name_prefix="caliper-study",
+                                           initializer=hold)
         self._jobs: dict[str, Job] = {}
         self._locks: dict[str, threading.Lock] = {}
         self._mu = threading.Lock()

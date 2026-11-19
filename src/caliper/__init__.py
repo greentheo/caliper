@@ -8,7 +8,9 @@ import os as _os
 # right, and faster: the FEA's sparse solves are too small to gain from threads. Only CI pinned it before (CALI-114).
 for _k in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
     _os.environ[_k] = "1"
-try:                    # where numpy was loaded before Caliper was: its pools, as they are, held to one thread too
+# Where numpy was loaded before Caliper was, this holds this thread's pools only: a thread started later runs at
+# libomp's default. The job pools and the strength check's solve hold their own threads (caliper.blas).
+try:
     from threadpoolctl import threadpool_limits as _limits
 
     _limits(limits=1)
