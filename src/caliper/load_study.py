@@ -1545,6 +1545,31 @@ def as_drawn_ceiling(drawn: Optional[dict], governs: str, safety: Optional[float
     return governs, safety, pl
 
 
+def solve(ls, solid):
+    """whittle's solve of ``solid``, with BLAS held to one thread on the thread that runs it (CALI-208: where numpy
+    loaded before Caliper, a thread started later isn't held, and solves at once come back wrong). Every solve in
+    Caliper goes through here. Returns ``(solver, result)``: the solver too, for the joints' forces (#316)."""
+    from .blas import one_thread
+
+    solver = ls.solver()
+    with one_thread():
+        return solver, solver.solve(solid)
+
+
+def fea_joints(ctx: dict, solver, r, hand: dict, min_safety: float, case: int = 0) -> dict:
+    """The joints' hand check with the FEA's side of each beside it (#316 slice 2, option C): the lower governs. Where
+    the FEA's joint forces can't be read at all, the hand check stands, said so. ``case``: which of the solver's cases
+    ``r`` is (#346: on the one solver of every case, its loads are that case's row of the forces)."""
+    from . import fea_joints as FJ
+
+    try:
+        reading = FJ.read(solver, r, ctx["ls"].grid, ctx["joints"]["pieces"], ctx["joints"]["joints"], VOXELS_THROUGH,
+                          case)
+    except Exception as e:  # noqa: BLE001 — the hand check stands; why, said, never a throw from a strength check
+        return {**hand, "fea": {"unread": f"the FEA's joint forces couldn't be read ({type(e).__name__})"}}
+    return FJ.beside(hand, reading, ctx["joints"], min_safety)
+
+
 def solved(ctx: dict, solid=None) -> list:
     """Every case of the part solved on ``solid`` (its voxels unless given), in case order, as ``[(solver, result)]``
     for :func:`check_load` (#345): one solver, its set-up (the operator, the multigrid hierarchy) built once, each case's
@@ -1562,7 +1587,11 @@ def solved(ctx: dict, solid=None) -> list:
     solver = ls.solver()
     if not hasattr(solver, "solve_each"):                # a whittle before solve_each: one solver a case, in check_load
         return [None] * len(ctx["loads"])
-    return [(solver, r) for r in solver.solve_each(on)]
+    from .blas import cases_safe, one_thread
+
+    cases_safe()                                         # its case threads one at a time where they'd be unheld (#346)
+    with one_thread():                                   # BLAS on one thread, as every solve (CALI-208)
+        return [(solver, r) for r in solver.solve_each(on)]
 
 
 #: The most the cases of one check are held at once (#345): nodes × cases, past which they're solved one at a time.
@@ -1593,8 +1622,7 @@ def _alone(ctx: dict, i: int, on) -> tuple:
     ls, load, box = ctx["ls"], ctx["loads"][i], ctx["boxes"][i]
     ls.loads = []
     ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
-    solver = ls.solver()
-    return solver, solver.solve(on)
+    return solve(ls, on)
 
 
 def check_load(ctx: dict, i: int, min_safety: float, solid=None, got=None):
@@ -1604,6 +1632,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None, got=None):
     from scipy import ndimage
 
     ls, load, box, mat = ctx["ls"], ctx["loads"][i], ctx["boxes"][i], ctx["mat"]
+    k = 0 if got is None else i                       # which of its solver's cases it is: alone, its only one
     if got is None:                                   # solved here, alone, its own load set: as main did
         got = _alone(ctx, i, ls.solid if solid is None else solid)
     else:                                             # solved with the others: its own load set after, as main left it,
@@ -1662,6 +1691,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None, got=None):
 
         case["joints"] = JC.check(ctx["joints"], load, ctx.get("held") or [], min_safety,
                                   mat=ctx.get("plate_mat") or mat)       # a notched side's net section, by its strength (CALI-192)
+        case["joints"] = fea_joints(ctx, solver, r, case["joints"], min_safety, k)
         governs, safety = JC.lower(case, governs, safety)
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
                  "holds": bool(safety is not None and safety >= min_safety),  # producer

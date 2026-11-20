@@ -350,7 +350,7 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
         _fill(ls, s, pictured, filled, key="pictures")
         held, ls.solid = ls.solid, filled                  # the panels' columns, mapped on the filled part
         try:
-            cache[i] = (ls.solver().solve(filled), {p["name"]: p for p in panels(ctx, stood_on=True)},
+            cache[i] = (L.solve(ls, filled)[1], {p["name"]: p for p in panels(ctx, stood_on=True)},
                         {p["name"]: p for p in panels(ctx, stood_on=False)}, filled)
         finally:
             ls.solid = held

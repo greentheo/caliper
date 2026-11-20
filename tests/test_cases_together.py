@@ -73,6 +73,17 @@ def test_a_check_s_cases_go_to_one_solver_each_at_its_case():
     assert all(s is _Plain.made[0] for s, _ in got)
 
 
+def test_the_cases_are_made_safe_before_they_go_together(monkeypatch):
+    """whittle's case threads take the process's BLAS default: solved() has blas.cases_safe settle it first (#346)."""
+    from caliper import blas
+
+    order = []
+    monkeypatch.setattr(blas, "cases_safe", lambda: order.append("safe"))
+    monkeypatch.setattr(_Each, "solve_each", lambda self, solid: order.append("each") or [None] * len(self.loads))
+    L.solved(_ctx())
+    assert order == ["safe", "each"]
+
+
 def test_one_case_a_whittle_without_solve_each_or_too_many_at_once_go_alone(monkeypatch):
     """Alone is check_load's to solve, case by case, its solver let go before the next (#346): never all at once here."""
     assert L.solved(_ctx(n=1)) == [None] and _Plain.made == []
@@ -249,3 +260,20 @@ def test_the_progress_line_says_together_only_where_they_are(tmp_path, monkeypat
     monkeypatch.undo()
     L.study(store, "box", emit=lambda k, t="", **d: said.append(t))
     assert not any("together" in t for t in said)
+
+
+def test_the_joints_of_every_case_read_as_each_alone(tmp_path, monkeypatch):
+    """#344 reads each joint's force off the solver, less the load applied there. On the one solver of every case
+    (solve_each) the load is that case's row of its forces, not the first's: every case's joints read as they do with
+    each case on its own solver."""
+    pytest.importorskip("cadquery")
+    from caliper.design import DesignStore
+
+    from .test_posts import LEGGED
+
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    store.write_part("stool", LEGGED, intent="a four-legged stool with aprons")
+    rec = L.study(store, "stool")
+    assert len(rec["cases"]) == 2 and all(c.get("joints") for c in rec["cases"])
+    monkeypatch.setattr(L, "solved", lambda ctx, solid=None: [None] * len(ctx["loads"]))   # each alone
+    assert _cases(L.study(store, "stool")) == _cases(rec)
