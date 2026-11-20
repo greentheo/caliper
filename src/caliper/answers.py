@@ -281,6 +281,12 @@ def joint_said(row: dict, need) -> str:
             f"the {row['piece']} is held square at its top by its joint to the {row['braced_by']}, which isn't checked")
 
 
+def worst_failed(failed: list[tuple]) -> tuple:
+    """Of several failing cases, as ``(run, case, verdict)`` or ``(case, verdict)``, the one to say: the lowest, as
+    Carve's and Lighten's refusal names it (``load_study.already_fails``). Never just the first (#339)."""
+    return min(failed, key=lambda t: t[-2]["safety"])
+
+
 def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     """What a ✗ adds about where it fails and how sure (#137 item 2), the same words on the part card and the design
     card (#139 review: the design card named the 0.25 mm webs, the part card the 5.2 mm wall at the peak). "" when
@@ -892,7 +898,8 @@ def measured(store: DesignStore, state: dict) -> dict:
         out["strength.unresolved"] = (unseen_said(r, v)[:1].upper() + unseen_said(r, v)[1:]) if v.get("why") else coarse(r, inches)
     failed = [(r, c, v) for (r, c), (_, v) in zip(cases, said) if v["kind"] == "fails" and v.get("coarse")]
     if failed:                                         # ...and a ✗ on one says it, as the part card does (#139)
-        out["strength.coarse_fail"] = fail_hedge(*failed[0], inches).strip() or coarse(failed[0][0], inches, holds=False)
+        worst = worst_failed(failed)                   # the case the refusal names (#339)
+        out["strength.coarse_fail"] = fail_hedge(*worst, inches).strip() or coarse(worst[0], inches, holds=False)
     # a breaking load from a run that can't see its walls isn't one to read, and never the rest's smallest (#191 review)
     gone = next(((r, v) for (r, c), (_, v) in zip(cases, said) if c.get("breaks_lb") and (v["kind"] not in verdicts.SETTLED or v.get("coarse"))), None)
     if gone:
