@@ -14,7 +14,7 @@ The capacities and the statics that give each joint its force follow #301's deci
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 import math
 
@@ -67,7 +67,8 @@ def setup(store, pid: str) -> dict:
                 out.append({**base, "short": got["short"], "said": got["said"]})
                 continue
             if got is not None:
-                out.append({**base, **got, "screws": int(s.get("n") or 0)})
+                out.append({**base, **got, "screws": int(s.get("n") or 0), "points": list(s.get("points") or []),
+                            **({"crowded": s["crowded"]} if s.get("crowded") else {})})
                 continue
         if c["how"] in ("through", "notch") or c["how"] == "edge" and not _edged(key, by, s, tol):
             got = _notch(by[key[0]], by[key[1]], tol) or _notch(by[key[1]], by[key[0]], tol)
@@ -96,7 +97,9 @@ def setup(store, pid: str) -> dict:
                     "sin": sin, "edge_t": t,
                     "along": np.asarray(g["along"], float), "length_mm": float(g["length"]),
                     "area_mm2": float(g["length"]) * t, "mid": (np.asarray(g["a"]) + np.asarray(g["b"])) / 2.0,
-                    "screws": int(s.get("n") or 0), "face_t": float(face["thickness"])})
+                    "screws": int(s.get("n") or 0), "points": list(s.get("points") or []),
+                            **({"crowded": s["crowded"]} if s.get("crowded") else {}),
+                    "face_t": float(face["thickness"])})
     return {"joints": out, "pieces": pieces, "tol": tol, "screw_mm": fasteners.screw_length_mm(pieces)}
 
 
@@ -188,6 +191,9 @@ def _post(stick: dict, sheet: dict, tol: float, mesh=None) -> Optional[dict]:
         if rays is None:                                 # no ray across its end starts in the solid: not measured
             return {"mismatch": f"the {name}'s built end at the {sheet['key']} isn't measured: no ray across it starts "
                                 "inside the solid"}
+        if len(rays) <= BEARS_ALL_BUT + 1:               # two or fewer: "all but one" would be "any" (#321 review)
+            return {"mismatch": f"the {name}'s built end at the {sheet['key']} isn't measured: only {_count(len(rays))} "
+                                f"of its rays start{'s' if len(rays) == 1 else ''} inside the solid"}
         touch = sum(1 for r in rays if r <= BEARS_MM)
         if 0 < touch < len(rays) - BEARS_ALL_BUT:        # some of its end touches, not all: no bearing area to take
             return {"mismatch": f"the {name} touches the {sheet['key']} at only part of its end"}
@@ -220,7 +226,8 @@ def _apron(sheet: dict, stick: dict, tol: float) -> Optional[dict]:
     for _, p, q, d, out in marks._edges(sheet):
         if abs(float(d @ ax)) < 0.95:
             continue
-        rel = a - p
+        m = (p + q) / 2.0
+        rel = a + ax * float((m - a) @ ax) - m                    # beside the edge's middle: a raked leg's foot is far off
         beyond, across = float(rel @ out), float(rel @ N)         # the leg's axis past the edge, and through the sheet
         if abs(beyond - half) > 2 * tol or across + half < -tol or across - half > t + tol:
             continue
@@ -724,6 +731,74 @@ def capacity(joint: dict, screw_mm: float) -> dict:
                     else f"glue alone on the {edge}'s {side}"}}
 
 
+#: What would take a failing joint past its need, said on its row and offered under Things to fix (#316, #344): only what
+#: the check credits (a glue block isn't, nor a dado: the foreman), by the count that a ``JOINTS`` entry can declare.
+FIX_IT = "{more} more #8 screw{s} at the {edge}'s {side}, {to} in all, would read {reads:g}×, past {need:g}"
+def screwed(j: dict, n: int) -> dict:
+    """Joint ``j`` held by ``n`` screws, as a ``JOINTS`` entry's ``"screws": n`` would make it (#344): laid where
+    :func:`marks.spots` lays them, so what a moment puts on its farthest is the fresh check's. An apron's end or a post
+    has no screw points there (its moment goes over half its length), so none here."""
+    from . import marks
+
+    out = {**j, "fix": sorted(set(j.get("fix") or []) | {"screws"}), "screws": int(n)}
+    if j.get("apron") or j.get("post"):
+        return out
+    if j.get("along") is not None and j.get("mid") is not None and j.get("length_mm"):
+        L, mid, along = float(j["length_mm"]), np.asarray(j["mid"], float), np.asarray(j["along"], float)
+        out["points"] = [mid + along * (x - L / 2.0) for x in marks.spots(L, n)]
+    return out
+
+
+def fix_it(j: dict, need: float, safety_with: Callable[[int], Optional[float]], most: int = 60) -> Optional[dict]:
+    """The fewest #8 screws that take joint ``j`` past ``need``, by ``safety_with(n)``: the joint's safety, every mode of
+    it, held by ``n`` (what the fresh check will read once its ``JOINTS`` entry says ``"screws": n``). ``{"pieces", "edge",
+    "side", "to", "more", "reads", "said", "entry"}``: laid evenly (:func:`marks.spots`), and said to crowd the edge
+    where they come out that close (Theo's even spacing, #344). None where no count takes it past (it bears)."""
+    from . import marks
+    from . import verdicts as V
+
+    n = int(j.get("screws") or 0) if "screws" in (j.get("fix") or []) else 0
+    to = reads = None
+    for k in range(n + 1, n + most + 1):
+        s = safety_with(k)
+        if s is not None and V.meets(s, need)["counts_as_pass"]:
+            to, reads = k, s
+            break
+    if to is None:
+        return None
+    side = "end" if j.get("apron") or j.get("post") else "edge"
+    close = marks.crowded(j["length_mm"], to) if j.get("length_mm") else None
+    said = FIX_IT.format(more=to - n, s="" if to - n == 1 else "s", edge=j["edge"], side=side, to=to, reads=reads,
+                         need=need) + (f" ({close})" if close else "")
+    return {"pieces": list(j["pieces"]), "edge": j["edge"], "side": side, "to": to, "more": to - n, "reads": reads,
+            "said": said, **({"crowded": close} if close else {}),
+            "entry": {"pieces": list(j["pieces"]), "kind": j.get("kind") or "butt",       # what JOINTS says, to the letter
+                      "fix": screwed(j, to)["fix"], "screws": to}}
+
+
+def _by_hand(j: dict, demands: list, screw_mm: float) -> Callable[[int], Optional[float]]:
+    """The hand rule's safety of joint ``j`` under each of ``demands`` (N by mode: the frame's load, a rake's thrust),
+    held by ``n`` screws: the lowest."""
+    from . import verdicts as V
+
+    def at(n: int) -> Optional[float]:
+        cap = capacity(screwed(j, n), screw_mm)
+        by = [cap[m] / d[m] if cap[m] > 0 else 0.0 for d in demands for m in ("bearing", "withdrawal", "shear")
+              if d.get(m, 0.0) > 1e-6]
+        return V.cut(min(by)) if by else None
+    return at
+
+
+def _fixed(row: dict, j: dict, screw_mm: float, min_safety: float) -> None:
+    """A failing row's fix-it, from every demand it answers to, or none (#344)."""
+    row.pop("more_screws", None)
+    row.pop("fix", None)
+    if row.get("safety") is not None and row["safety"] < min_safety:        # producer
+        more = fix_it(j, min_safety, _by_hand(j, row.get("demands_n") or [], screw_mm))
+        if more:
+            row.update({"more_screws": more, "fix": more["said"]})
+
+
 def _count(n: int) -> str:
     return ["no", "one", "two", "three", "four", "five", "six"][n] if 0 <= n <= 6 else str(n)
 
@@ -794,9 +869,13 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
                      "safety": safety, "need": min_safety, "verdict": V.meets(safety, min_safety),
                      "holds": safety is None or safety >= min_safety,  # producer
                      "demand_lb": {m: round(v / LBF, 1) for m, v in parts.items() if v > 1e-6},
+                     "demands_n": [{m: float(v) for m, v in parts.items()}],   # unrounded: the fix-it's (#344)
                      "capacity_lb": {m: round(cap[m] / LBF, 1) for m in by},
                      "said": cap["why"][mode] if mode else "carries none of this load", "assumed": j["assumed"],
                      **({"path": said_path} if said_path else {})})
+        if j.get("crowded"):                              # credited, and said (Theo's even spacing, #344)
+            rows[-1].update({"crowded": j["crowded"], "said": f"{rows[-1]['said']}; {j['crowded']}"})
+        _fixed(rows[-1], j, setup_["screw_mm"], min_safety)   # what would take it past, on its row (#344)
     f = np.asarray(load["force"], float)
     if float(np.linalg.norm(f[:2])) > 1e-6 * (float(np.linalg.norm(f)) or 1.0):
         # pushed sideways at all: a joint carries none only because the statics hold each side at the floor; racked, a
@@ -828,10 +907,84 @@ def check(setup_: dict, load: dict, held: list[dict], min_safety: float, share: 
                 row["said"] += f"; {COLUMN_RACKING}"
                 unchecked.append(f"the {leg} as a column ({COLUMN_RACKING})")
             rows.append(row)
+    rake_rows(joints, by, arrived, rows, unchecked, setup_["screw_mm"], min_safety)
     rated = [r for r in rows if r["safety"] is not None]
     gov = min(rated, key=lambda r: r["safety"]) if rated else None
     return {"rows": rows, "governing": gov, "unchecked": unchecked, "chain": True, "n": len(joints),
             **({"path": said_path} if said_path else {})}
+
+
+#: A raked leg's top, tied by nothing the check can place: its thrust isn't checked, said (#316 slice 2).
+RAKE_UNTIED = "the {leg} leans {deg:.0f}° and nothing ties its top"
+#: A raked leg's tie that holds no pull (#316 slice 2, the foreman's guard).
+RAKE_SAID = "the legs splay and the {tie} is all that ties them"
+
+
+def _rake(stick: dict) -> Optional[tuple]:
+    """A stick leaning off vertical by more than :data:`SPLAY_DEG`: ``(tan of its lean, degrees, the horizontal way its
+    foot goes)``, or None."""
+    a, b = np.asarray(stick["a"], float), np.asarray(stick["b"], float)
+    top, foot = (a, b) if a[2] >= b[2] else (b, a)
+    v = foot - top
+    flat = np.array([v[0], v[1], 0.0])
+    if abs(float(v[2])) < 1e-9 or float(np.linalg.norm(flat)) < 1e-9:
+        return None
+    deg = float(np.degrees(np.arctan2(float(np.linalg.norm(flat)), abs(float(v[2])))))
+    if deg < SPLAY_DEG or deg > 45.0:
+        return None
+    return float(np.linalg.norm(flat) / abs(float(v[2]))), deg, flat / np.linalg.norm(flat)
+
+
+def rake_rows(joints: list[dict], by: dict, arrived: dict, rows: list[dict], unchecked: list, screw_mm: float,
+              min_safety: float) -> None:
+    """A raked leg under a vertical load pushes its top outward, by statics: H = its down force × tan(its rake)
+    (#316 slice 2, the foreman's guard). What ties its top (an apron's end on it) takes that as a pull, checked always,
+    never waived as the bonded model's: ✗ where the tie holds no pull. Each tie's row says so, and keeps the pull
+    (``rake_n``) the FEA's waiver stops at. A raked leg with nothing tying its top is named not checked."""
+    from . import verdicts as V
+
+    for leg, f in arrived.items():
+        pc = by.get(leg)
+        if pc is None or pc["kind"] != "stick":
+            continue
+        down = max(0.0, -float(np.asarray(f, float)[2]))
+        lean = _rake(pc)
+        if lean is None or down <= 1e-9:
+            continue
+        tan, deg, out = lean
+        thrust = out * down * tan                         # what the leg's top puts out into whatever ties it
+        ties = [j for j in joints if j.get("apron") and j.get("face") == leg and "unplaced" not in j]
+        if not ties:
+            unchecked.append(RAKE_UNTIED.format(leg=leg, deg=deg))
+            continue
+        for j in ties:
+            parts = split(j, thrust, leg)
+            if parts["withdrawal"] <= 1e-9 and parts["shear"] <= 1e-9:
+                continue
+            cap = capacity(j, screw_mm)
+            ratio = {m: (cap[m] / parts[m] if cap[m] > 0 else 0.0) for m in ("withdrawal", "shear") if parts[m] > 1e-6}
+            mode = min(ratio, key=ratio.get)
+            safety = V.cut(ratio[mode])
+            said = (RAKE_SAID.format(tie=j["edge"]) if cap["withdrawal"] <= 0 and parts["withdrawal"] > 1e-6
+                    else cap["why"][mode])
+            r = next((x for x in rows if tuple(x.get("pieces") or ()) == tuple(j["pieces"])), None)
+            mine = {"pieces": j["pieces"], "between": f"the {leg} and the {j['edge']}", "edge": j["edge"], "face": leg,
+                    "mode": mode, "safety": safety, "need": min_safety, "verdict": V.meets(safety, min_safety),
+                    "holds": safety >= min_safety,  # producer
+                    "demand_lb": {m: round(parts[m] / LBF, 1) for m in ratio},
+                    "capacity_lb": {m: round(cap[m] / LBF, 1) for m in ratio},
+                    "said": f"{said} (it leans {deg:.0f}°)", "assumed": j.get("assumed"),
+                    "rake_n": round(parts["withdrawal"], 3)}
+            thrust_n = {"bearing": 0.0, "withdrawal": float(parts["withdrawal"]), "shear": float(parts["shear"])}
+            if r is None:
+                rows.append(mine)
+                r = mine
+            elif r.get("safety") is None or safety < r["safety"]:
+                r.update(mine)
+            else:
+                r["rake_n"] = mine["rake_n"]
+            r["demands_n"] = list(r.get("demands_n") or []) + [thrust_n]   # its count passes both (#344)
+            _fixed(r, j, screw_mm, min_safety)
 
 
 #: Which way a top's load goes, from the geometry, said with why (#321, the foreman's (b)).

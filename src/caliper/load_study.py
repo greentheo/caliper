@@ -1384,6 +1384,8 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
             ctx["joints"] = None
     if printed and wood:
         _two_materials(ctx, wood, sheet_mat, rest)
+    elif len({pc["material"] for pc in wood}) > 1:     # XPS walls and a plywood floor: each its own (#348)
+        _two_materials(ctx, wood, sheet_mat, None)
     return ctx
 
 
@@ -1481,23 +1483,53 @@ def per_voxel(ls) -> bool:
 def _two_materials(ctx: dict, wood: list[dict], sheet_mat: dict, rest) -> None:
     """CALI-82: a plywood top on printed sides. The voxels in a declared sheet or stick are that material, the
     rest printed: each with its stiffness (whittle's stiffness per voxel, where it has it) and judged against
-    its own strength. The plate check counts an edge held where the printed solid is under it."""
+    its own strength. The plate check counts an edge held where the printed solid is under it.
+
+    #348: any mix of declared materials, printed or not. Each piece's voxels are its own material (XPS walls as
+    XPS, a plywood floor as plywood), where the FEA had judged the whole part in its most by volume: a mostly
+    plywood box's XPS floor read 105x at plywood's strength, 1.38x at its own. A voxel two pieces of different
+    materials share is the weaker's. A voxel no piece claims is the printed material where the part is printed,
+    and the weakest of its materials where it isn't, never the stronger (the foreman)."""
     from .consistency import segment_distance, slab_distance
 
     ls, mat, s = ctx["ls"], ctx["mat"], ctx["spacing"]
     idx = np.argwhere(ls.solid)
     centres = np.asarray(ls.grid.origin) + s * idx               # as the rest of the study places voxels
-    inside = np.zeros(len(idx), dtype=bool)
+    own = {key: material([{"material": key, "volume": 1.0}]) for key in dict.fromkeys(pc["material"] for pc in wood)}
+    rest_mat = mat if rest is not None else min(own.values(), key=lambda m: m["strength"])
+    strength_v = np.full(len(idx), np.inf)
+    e_v = np.full(len(idx), rest_mat["E"], dtype=float)
     for pc in wood:
+        m = own[pc["material"]]
+        inside = np.zeros(len(idx), dtype=bool)
         if pc["kind"] == "sheet":
             for poly, side in zip(pc["polys"], pc["sides"]):
                 inside |= slab_distance(centres, poly, pc["thickness"], side) <= s * 0.5
         else:
             inside |= segment_distance(centres, pc["a"], pc["b"]) - pc["half"] <= s * 0.5
+        weaker = inside & (m["strength"] < strength_v)           # shared with a stronger piece: the weaker's
+        strength_v[weaker] = m["strength"]
+        e_v[weaker] = m["E"]
+    unclaimed = ~np.isfinite(strength_v)
+    strength_v[unclaimed] = rest_mat["strength"]
     strength = np.full(ls.grid.shape, mat["strength"], dtype=float)
-    strength[tuple(idx[inside].T)] = sheet_mat["strength"]
+    strength[tuple(idx.T)] = strength_v
     stiff = np.ones(ls.grid.shape)
-    stiff[tuple(idx[inside].T)] = sheet_mat["E"] / mat["E"]
+    stiff[tuple(idx.T)] = e_v / mat["E"]
+    if rest is None:                                             # wood of several materials (#348)
+        ctx["mat"] = {k: v for k, v in mat.items() if k != "note"}   # not "analysed as all of one" any more
+        names = ", ".join(f"the {m['name']} as {m['name']}" for m in own.values())
+        weakest = min(own.values(), key=lambda m: m["strength"])["name"]
+        if per_voxel(ls):
+            ctx["note"] = (f"Each piece in its own material: {names}, each voxel judged against its own strength; "
+                           f"a voxel no piece claims, or two of different materials share, as the weaker, {weakest}.")
+        else:
+            ctx["note"] = (f"Each piece judged against its own material's strength ({names}), but analysed at "
+                           f"{mat['name']}'s stiffness throughout (this whittle has no stiffness per voxel).")
+        ctx["strength_map"] = strength
+        if per_voxel(ls):
+            ls.stiffness = stiff
+        return
     if per_voxel(ls):                                       # whittle with a stiffness per voxel
         ls.stiffness = stiff
         ctx["note"] = (f"Two materials: the {sheet_mat['name']} as {sheet_mat['name']} and the rest as "
@@ -1545,6 +1577,29 @@ def as_drawn_ceiling(drawn: Optional[dict], governs: str, safety: Optional[float
     return governs, safety, pl
 
 
+def solve(ls, solid):
+    """whittle's solve of ``solid``, with BLAS held to one thread on the thread that runs it (CALI-208: where numpy
+    loaded before Caliper, a thread started later isn't held, and solves at once come back wrong). Every solve in
+    Caliper goes through here. Returns ``(solver, result)``: the solver too, for the joints' forces (#316)."""
+    from .blas import one_thread
+
+    solver = ls.solver()
+    with one_thread():
+        return solver, solver.solve(solid)
+
+
+def fea_joints(ctx: dict, solver, r, hand: dict, min_safety: float) -> dict:
+    """The joints' hand check with the FEA's side of each beside it (#316 slice 2, option C): the lower governs. Where
+    the FEA's joint forces can't be read at all, the hand check stands, said so."""
+    from . import fea_joints as FJ
+
+    try:
+        reading = FJ.read(solver, r, ctx["ls"].grid, ctx["joints"]["pieces"], ctx["joints"]["joints"], VOXELS_THROUGH)
+    except Exception as e:  # noqa: BLE001 — the hand check stands; why, said, never a throw from a strength check
+        return {**hand, "fea": {"unread": f"the FEA's joint forces couldn't be read ({type(e).__name__})"}}
+    return FJ.beside(hand, reading, ctx["joints"], min_safety)
+
+
 def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     """One load through the FEA (on ``solid``, the part's voxels unless given) and the plate check.
     Returns ``(case, result)``; the case is the record's entry for it."""
@@ -1553,7 +1608,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
     ls, load, box, mat = ctx["ls"], ctx["loads"][i], ctx["boxes"][i], ctx["mat"]
     ls.loads = []
     ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
-    r = ls.solver().solve(ls.solid if solid is None else solid)
+    solver, r = solve(ls, ls.solid if solid is None else solid)
     case = {"name": load["name"], "lb": load["lb"], "factor": load["factor"],
             "force_n": [round(v, 1) for v in load["force"]], "lo": load["lo"], "hi": load["hi"]}
     if not r.supported:
@@ -1606,6 +1661,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
 
         case["joints"] = JC.check(ctx["joints"], load, ctx.get("held") or [], min_safety,
                                   mat=ctx.get("plate_mat") or mat)       # a notched side's net section, by its strength (CALI-192)
+        case["joints"] = fea_joints(ctx, solver, r, case["joints"], min_safety)
         governs, safety = JC.lower(case, governs, safety)
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
                  "holds": bool(safety is not None and safety >= min_safety),  # producer
