@@ -161,9 +161,28 @@ def test_a_thinner_row_keeps_what_the_other_stock_s_holes_saved_and_thins_only_t
 
 def test_a_wall_of_the_other_stock_buckles_at_its_own_thickness():
     rows, _, _ = _two_stocks({"name": "n", "safety": 2.5, "governs": "buckling", "fea_safety": 50.0,
-                              "buckling": [{"piece": "wall", "safety": 6.0}, {"piece": "floor", "safety": 2.5}]}, {})
+                              "buckling": [{"piece": "wall", "safety": 60.0}, {"piece": "floor", "safety": 2.5}]}, {})
     row = next(r for t, r in rows.items() if abs(t - 38.1) < 0.01)
-    assert row["safety"] == pytest.approx(min(6.0 * 0.75 ** 2, 2.5), abs=0.01)     # the floor's 2.5, not 2.5 x 0.56
+    assert row["safety"] == pytest.approx(2.5, abs=0.01)                   # the floor's 2.5, never thinned
+
+
+def _row(rows, t):
+    return next(r for x, r in rows.items() if abs(x - t) < 0.01)
+
+
+def test_a_thinned_wall_s_buckling_goes_as_its_thickness_cubed():
+    """caliper-reviewer on #354: buckling.check's safety is sigma_cr x b x t / push, sigma_cr going as t^2. The all-XPS-walls
+    box's 16.88 at 2 in, rebuilt and checked, read 6.76 at 1 1/2 in and fails at 1 in (1.89). At t^2 the rows said 9.49
+    and a passing 4.22."""
+    rows, _, _ = _two_stocks({"name": "n", "safety": 16.88, "governs": "buckling", "fea_safety": 500.0,
+                              "buckling": [{"piece": "wall", "safety": 16.88}]}, {})
+    assert _row(rows, 38.1)["safety"] == pytest.approx(16.88 * 0.75 ** 3, abs=0.1)      # 7.12, not 9.49
+    assert _row(rows, 25.4)["safety"] == pytest.approx(16.88 * 0.5 ** 3, abs=0.1)       # 2.11, not 4.22
+
+
+def test_a_check_it_can_t_name_a_piece_for_goes_as_the_cube_too():
+    rows, _, _ = _two_stocks({"name": "n", "safety": 8.0, "governs": "joint", "fea_safety": 500.0}, {})
+    assert _row(rows, 38.1)["safety"] == pytest.approx(8.0 * 0.75 ** 3, abs=0.1)        # 3.37, not 4.5
 
 
 def test_a_plate_governed_case_asks_for_the_plate_at_the_thick_stock_only(monkeypatch):
@@ -171,3 +190,20 @@ def test_a_plate_governed_case_asks_for_the_plate_at_the_thick_stock_only(monkey
     monkeypatch.setattr(lighten, "_plate_at", lambda ctx, name, t, thick=None: asked.append(set(thick or ())) or 9.0)
     _two_stocks({"name": "n", "safety": 9.0, "governs": "plate", "fea_safety": 50.0}, {})
     assert asked and all(a == {"wall"} for a in asked)
+
+
+def test_a_thinner_estimate_within_cut_drift_of_its_bar_is_never_a_tick():
+    """The foreman's rule (#354): the all-XPS box's 1 in row estimates 2.11 at t^3, where the rebuilt check reads 1.89. An
+    estimate within CUT_DRIFT (7%) of its minimum doesn't hold: it's close, and the check of the part rebuilt decides."""
+    from caliper import verdicts
+
+    rows, _, _ = _two_stocks({"name": "n", "safety": 16.88, "governs": "buckling", "fea_safety": 500.0,
+                              "buckling": [{"piece": "wall", "safety": 16.88}]}, {})
+    one, inch_half = _row(rows, 25.4), _row(rows, 38.1)
+    assert one["safety"] == pytest.approx(2.1, abs=0.01)                               # 2.1 against 2: within 7%
+    v = verdicts.lighten_step(one, None, {"min_safety": 2.0})
+    assert v["kind"] == "estimate" and not v["counts_as_pass"] and v["word"] == verdicts.THIN_DECIDES
+    assert "thin it and the check decides" in v["short"]
+    far = verdicts.lighten_step(inch_half, None, {"min_safety": 2.0})
+    assert far["kind"] == "estimate" and far["word"] != verdicts.THIN_DECIDES
+    assert verdicts.thin_close(2.14, 2.0) and not verdicts.thin_close(2.15, 2.0) and not verdicts.thin_close(1.99, 2.0)

@@ -875,10 +875,11 @@ def _thinner(ctx, stations, tops, min_safety, mat, C, M) -> list[dict]:
                 pl = _plate_at(ctx, c["name"], t, thick)
                 top = pl if pl is not None else (c["safety"] or 0) * ratio ** 2
             elif c.get("governs") == "buckling" and c.get("buckling"):          # each wall, if its stock thins
-                top = min((b.get("safety") or 0) * (ratio ** 2 if b.get("piece") in thick else 1.0)
+                # buckling.check's safety is sigma_cr x b x t / push, sigma_cr going as t^2: t^3 (#354 review)
+                top = min((b.get("safety") or 0) * (ratio ** 3 if b.get("piece") in thick else 1.0)
                           for b in c["buckling"])
-            else:
-                top = (c["safety"] or 0) * ratio ** 2
+            else:                                       # a check it can't name a piece for: as buckling, the steepest
+                top = (c["safety"] or 0) * ratio ** 3
             est = min(walls, top) if walls else top
             worst = est if worst is None else min(worst, est)
         saved = base["saved_lb"] + (wood_g / 453.59237 - holed_lb) * (1 - ratio)   # what's left of that stock, thinned
