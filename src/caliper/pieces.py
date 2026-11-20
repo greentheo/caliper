@@ -144,8 +144,56 @@ def _prisms(shapes: list, mesh, margin: float = 0.5) -> Optional[list]:
             if L <= 2 * m:
                 continue
             ax = (b - a) / L
-            out.append((sh["name"], trimesh.creation.cylinder(radius=half - m, segment=[a + ax * m, b - ax * m])))
+            ring = _tube(mesh, sh, m) if sh.get("wall") else None
+            out.append((sh["name"], ring if ring is not None else
+                        trimesh.creation.cylinder(radius=half - m, segment=[a + ax * m, b - ax * m])))
     return out
+
+
+def _tube(mesh, sh: dict, m: float):
+    """A square tube as its walls, its bore open through its ends, inset by ``m`` like every prism (#336): a plug in its
+    bore isn't in it, a clip cut into its wall is. A tube declares only its centreline, so its turn about it is read off
+    the build: the turn that puts its walls beside all four corners inside the solid at a quarter, half and three quarters
+    along. None where no turn does, or its wall is too thin to inset: then the solid rod, as before."""
+    import trimesh
+
+    from . import spatial
+
+    a, b = np.asarray(sh["a"], float), np.asarray(sh["b"], float)
+    o, w = float(sh["outer"]), float(sh["wall"])
+    L = float(np.linalg.norm(b - a))
+    if w <= 2 * m or o - 2 * w <= 0 or L <= 2 * m:
+        return None
+    ax = (b - a) / L
+    u0 = np.cross(ax, [0.0, 0.0, 1.0])
+    if np.linalg.norm(u0) < 1e-6:
+        u0 = np.cross(ax, [1.0, 0.0, 0.0])
+    u0 /= np.linalg.norm(u0)
+    v0 = np.cross(ax, u0)
+    near = spatial.Proximity(mesh)
+    at = [a + ax * L * f for f in (0.25, 0.5, 0.75)]
+    best, turn = 0.0, None
+    for deg in range(90):                              # a square's turns repeat every quarter
+        t = np.radians(deg)
+        u = np.cos(t) * u0 + np.sin(t) * v0
+        v = np.cross(ax, u)
+        # in the side walls beside each corner: half a wall in from the face, a wall and a half from the corner (in the
+        # steel of a welded tube's rounded corner too, whose outside radius is twice the wall)
+        k1, k2 = o / 2 - w / 2, o / 2 - 1.5 * w
+        pts = np.array([p + su * x * u + sv * y * v for p in at for su in (-1, 1) for sv in (-1, 1)
+                        for x, y in ((k1, k2), (k2, k1))])
+        d = near.signed_distance(pts)
+        if d.min() > best:                             # every corner in the solid, the deepest in
+            best, turn = float(d.min()), (u, v)
+    if turn is None:
+        return None
+    u, v = turn
+    outer = trimesh.creation.box(extents=(o - 2 * m, o - 2 * m, L - 2 * m))
+    bore = trimesh.creation.box(extents=(o - 2 * w + 2 * m, o - 2 * w + 2 * m, L + 2.0))
+    ring = trimesh.boolean.difference([outer, bore], engine="manifold")
+    frame = np.eye(4)
+    frame[:3, 0], frame[:3, 1], frame[:3, 2], frame[:3, 3] = u, v, ax, (a + b) / 2
+    return ring.apply_transform(frame)
 
 
 def _exact(build: dict):
