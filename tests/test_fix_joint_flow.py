@@ -67,9 +67,10 @@ def test_a_joint_the_fea_fails_is_fixed_by_its_one_tick_and_reads_what_it_said(t
     assert pick["kind"] == fixes.DESIGNER
     assert pick["entry"] == {"pieces": ["front apron", "front right leg"], "kind": "butt", "fix": ["glue", "screws"],
                              "screws": 4}
+    # 2.02×: 2× before the legs were judged as lumber (#348)
     assert pick["fix"].startswith('4 #8 screws where the front right leg and the front apron meet, 3 more: its JOINTS '
                                   'entry {"pieces": ["front apron", "front right leg"], "kind": "butt", "fix": '
-                                  '["glue", "screws"], "screws": 4}; it would read 2×'), pick["fix"]
+                                  '["glue", "screws"], "screws": 4}; it would read 2.02×'), pick["fix"]
     # four in its 3 in end: credited, and said (Theo's even spacing)
     assert pick["fix"].endswith("(4 screws 0.75 in apart in a 3 in joint: close enough to split the edge; consider a "
                                 "longer joint or a bigger screw)")

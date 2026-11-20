@@ -378,15 +378,16 @@ def test_an_upright_stool_s_top_bears_on_its_aprons_and_their_ends_shear_off_the
     g = corner["joints"]["governing"]
     assert not corner["holds"] and corner["governs"] == "joint" and corner["safety"] == pytest.approx(0.5, abs=0.01)
     assert g["by"] == "fea" and g["mode"] == "shear" and set(g["pieces"]) == {"front right leg", "front apron"}
-    assert ("the top bears on the front apron, and it hands 179 lb to the front right leg through one #8 screw in shear "
+    assert ("the top bears on the front apron, and it hands 178 lb to the front right leg through one #8 screw in shear "
             "into the front apron's edge") in g["said"], g["said"]
-    assert g["fix"] == ("3 more #8 screws at the front apron's end, 4 in all, would read 2×, past 2 (4 screws 0.75 in "
+    assert g["fix"] == ("3 more #8 screws at the front apron's end, 4 in all, would read 2.02×, past 2 (4 screws 0.75 in "
                         "apart in a 3 in joint: close enough to split the edge; consider a longer joint or a bigger "
-                        "screw)")                                              # 179 lb × 2: no glue block (#344)
+                        "screw)")                                              # 178 lb × 2: no glue block (#344)
+    # 178 lb and 2.02×: 179 lb and 2× before the legs were judged as lumber (#348)
     from caliper import answers, verdicts
 
     hedge = answers.fail_hedge(rec, corner, verdicts.case(rec, corner), True)
-    assert hedge.endswith(" 3 more #8 screws at the front apron's end, 4 in all, would read 2×, past 2 (4 screws 0.75 "
+    assert hedge.endswith(" 3 more #8 screws at the front apron's end, 4 in all, would read 2.02×, past 2 (4 screws 0.75 "
                           "in apart in a 3 in joint: close enough to split the edge; consider a longer joint or a "
                           "bigger screw)."), hedge
     leg = next(r for r in corner["joints"]["rows"] if r["between"] == "the top and the front right leg")
