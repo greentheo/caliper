@@ -304,7 +304,7 @@ def test_a_path_it_can_t_follow_keeps_the_note_and_never_a_tick_or_a_cross_from_
     monkeypatch.setattr(JC, "demands", nowhere)
     from caliper import load_study
 
-    monkeypatch.setattr(load_study, "fea_joints", lambda ctx, solver, r, hand, need: hand)   # the hand rule's own
+    monkeypatch.setattr(load_study, "fea_joints", lambda ctx, solver, r, hand, need, case=0: hand)   # the hand rule's
     _, rec = studied(BOX_STOOL)
     (c,) = rec["cases"]
     assert c["governs"] != "joint" and c["joints"]["chain"] is False
