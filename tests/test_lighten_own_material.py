@@ -100,10 +100,74 @@ def test_lighten_holes_the_plywood_floor_by_plywood_and_weighs_each_panel_by_its
     for st in steps:
         grams = sum(_area(h) * own[name][0] * own[name][1] for name, hs in st["panels"].items() for h in hs)
         assert st["saved_lb"] == pytest.approx(grams / 453.59237, abs=0.011), st["index"]
-    wood_lb = sum(pc["volume"] * own[pc["name"]][1] for pc in ctx["pieces"] if pc["kind"] == "sheet") / 453.59237
-    t0 = max(pc["thickness"] for pc in ctx["pieces"] if pc["kind"] == "sheet")
+    # a thinner sheet thins the thickest stock only (#354): the 2 in walls, never the 3/4 in floor. On 79cfb35 every sheet
+    # thinned, so the "1 1/2 in" row also shaved the plywood floor to 14.3 mm: 1.41 lb of its 7.46 lb
+    sheets = [pc for pc in ctx["pieces"] if pc["kind"] == "sheet"]
+    t0 = max(pc["thickness"] for pc in sheets)
+    thick_lb = sum(pc["volume"] * own[pc["name"]][1] for pc in sheets if pc["thickness"] >= t0 - 0.01) / 453.59237
+    floor_lb = sum(pc["volume"] * own[pc["name"]][1] for pc in sheets if pc["name"] == "floor") / 453.59237
+    assert t0 == pytest.approx(50.8) and floor_lb > 1.0
     thinner = [st for st in rec["stations"] if st["phase"] == "thinner"]
-    assert thinner
+    assert any(st["thickness_mm"] == pytest.approx(38.1) for st in thinner)
     for st in thinner:
-        base = rec["stations"][st["from_step"]]["saved_lb"]
-        assert st["saved_lb"] == pytest.approx(base + (wood_lb - base) * (1 - st["thickness_mm"] / t0), abs=0.011)
+        from_ = rec["stations"][st["from_step"]]
+        assert not from_.get("top_holes") and all(n != "floor" or not hs for n, hs in from_["panels"].items())
+        base, off = from_["saved_lb"], 1 - st["thickness_mm"] / t0
+        assert st["saved_lb"] == pytest.approx(base + (thick_lb - base) * off, abs=0.011)    # the walls' stock only
+        every = base + (thick_lb + floor_lb - base) * off                                    # 79cfb35's
+        assert every - st["saved_lb"] == pytest.approx(floor_lb * off, abs=0.011)             # the floor's share, gone
+
+
+def test_a_thinner_sheet_leaves_the_floor_s_plate_check_at_its_own_thickness(tmp_path):
+    """The safety side (#354): a plate check of a sheet of the other stock reads at its own thickness, never thinned."""
+    ctx = L.prepare(_store(tmp_path, MIXED), "box")
+    walls = {pc["name"]: pc for pc in ctx["pieces"] if pc["kind"] == "sheet" and pc["thickness"] > 40}
+    name = ctx["loads"][0]["name"]
+    pl = L.plate_check(ctx["pieces"], ctx["loads"][0], lighten.sheet_of(ctx), ctx["tol"], held=ctx.get("held"),
+                       voxel=ctx.get("spacing"))
+    assert pl["done"] and pl["piece"] == "floor" and pl["piece"] not in walls
+    assert lighten._plate_at(ctx, name, 38.1, walls) == pl["safety_across"]                 # the floor stays 3/4 in
+    assert lighten._plate_at(ctx, name, 15.875, {"floor": None}) == pytest.approx(           # its own stock thins
+        min(pl["by_thickness"], key=lambda b: abs(b["thickness_mm"] - 15.875))["safety_across"])
+
+
+# --- the thinner rows, each part of the estimate, on a part of two stocks (#354) ----------------------------------------
+
+def _two_stocks(case, panels):
+    """A 2 in XPS wall (the thickest stock) and a 3/4 in plywood floor, and a base step holding at 1.0 lb saved."""
+    from caliper import construction as C, materials as M
+
+    wall = {"name": "wall", "kind": "sheet", "material": "xps", "thickness": 50.8, "volume": 50.8 * 400 * 300}
+    floor = {"name": "floor", "kind": "sheet", "material": "plywood", "thickness": 19.05, "volume": 19.05 * 600 * 400}
+    base = {"index": 0, "phase": "walls", "holds": True, "top_holes": 0, "saved_lb": 1.0, "removed": 0.1, "holes": 2,
+            "panels": panels, "cases": [case]}
+    rows = lighten._thinner({"pieces": [wall, floor], "loads": []}, [base], [], 2.0, XPS, C, M)
+    return {r["thickness_mm"]: r for r in rows}, wall, floor
+
+
+def _hole(side):
+    return [[0, 0, 0], [side, 0, 0], [side, side, 0], [0, side, 0]]
+
+
+def test_a_thinner_row_keeps_what_the_other_stock_s_holes_saved_and_thins_only_the_thick_stock():
+    rows, wall, _ = _two_stocks({"name": "n", "safety": 9.0, "governs": "fea", "fea_safety": 9.0},
+                                {"wall": [_hole(100)], "floor": [_hole(100)]})
+    floor_hole_lb = 100 * 100 * 19.05 * PLY["density"] * 1e-3 / 453.59237
+    wall_lb = wall["volume"] * XPS["density"] * 1e-3 / 453.59237
+    row = next(r for t, r in rows.items() if abs(t - 38.1) < 0.01)
+    off = 1 - 38.1 / 50.8
+    assert row["saved_lb"] == pytest.approx(1.0 + (wall_lb - (1.0 - floor_hole_lb)) * off, abs=0.006)
+
+
+def test_a_wall_of_the_other_stock_buckles_at_its_own_thickness():
+    rows, _, _ = _two_stocks({"name": "n", "safety": 2.5, "governs": "buckling", "fea_safety": 50.0,
+                              "buckling": [{"piece": "wall", "safety": 6.0}, {"piece": "floor", "safety": 2.5}]}, {})
+    row = next(r for t, r in rows.items() if abs(t - 38.1) < 0.01)
+    assert row["safety"] == pytest.approx(min(6.0 * 0.75 ** 2, 2.5), abs=0.01)     # the floor's 2.5, not 2.5 x 0.56
+
+
+def test_a_plate_governed_case_asks_for_the_plate_at_the_thick_stock_only(monkeypatch):
+    asked = []
+    monkeypatch.setattr(lighten, "_plate_at", lambda ctx, name, t, thick=None: asked.append(set(thick or ())) or 9.0)
+    _two_stocks({"name": "n", "safety": 9.0, "governs": "plate", "fea_safety": 50.0}, {})
+    assert asked and all(a == {"wall"} for a in asked)

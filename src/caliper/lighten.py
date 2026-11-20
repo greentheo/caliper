@@ -844,7 +844,11 @@ def _covered(p: dict, polys: list, s: float) -> np.ndarray:
 def _thinner(ctx, stations, tops, min_safety, mat, C, M) -> list[dict]:
     """The lightest step that holds with the panel stood on still solid, in each thinner sheet that's sold:
     until (and including) the first that wouldn't hold. Estimates: the panel stood on by the plate check at
-    that thickness, the walls by their FEA scaled with the thickness."""
+    that thickness, the walls by their FEA scaled with the thickness.
+
+    Only the sheets of the thickest stock thin (#354): a row names one stock, and a part of two (2 in XPS walls on a
+    3/4 in plywood floor) keeps its other sheets as they are. In what they weigh, and in the checks that name their
+    piece: a plate check, a wall's buckling. The FEA's number is the part's worst, wherever it is, so it still scales."""
     # from the lightest step that holds with the panel stood on still solid: there the plate check is exact at
     # any thickness, and holes in that panel save next to nothing for what they cost it
     base = max((x for x in stations if x["holds"] and not x.get("top_holes")), key=lambda x: x["saved_lb"],  # search
@@ -853,21 +857,31 @@ def _thinner(ctx, stations, tops, min_safety, mat, C, M) -> list[dict]:
     if base is None or not sheets:
         return []
     t0 = max(pc["thickness"] for pc in sheets)
-    wood_g = sum(pc["volume"] * L.own_material(pc, mat)["density"] * 1e-3 for pc in sheets)   # each its own (#335)
+    thick = {pc["name"]: pc for pc in sheets if pc["thickness"] >= t0 - 0.01}    # the stock the row names
+    dens = {pc["name"]: L.own_material(pc, mat)["density"] * 1e-3 for pc in sheets}   # each its own (#335)
+    wood_g = sum(pc["volume"] * dens[name] for name, pc in thick.items())
+    other = {pc["name"]: pc for pc in sheets if pc["name"] not in thick}
+    kept_g = sum(C.polygon([list(map(float, v)) for v in h])[0] * other[name]["thickness"] * dens[name]
+                 for name, hs in (base.get("panels") or {}).items() if name in other for h in hs)
+    holed_lb = base["saved_lb"] - kept_g / 453.59237     # the step's holes in that stock: all of them, in a part of one
     out = []
     for t in sorted((x for x in C.THICKNESSES if x < t0 - 0.01), reverse=True):
         ratio = t / t0
         worst = None
         for c in base["cases"]:
+            # the FEA's number is the part's worst, wherever it is: a sheet that thins may take it over, so it scales
             walls = (c.get("fea_safety") or 0) * ratio
             if c.get("governs") == "plate" and not base.get("top_holes"):
-                pl = _plate_at(ctx, c["name"], t)
+                pl = _plate_at(ctx, c["name"], t, thick)
                 top = pl if pl is not None else (c["safety"] or 0) * ratio ** 2
+            elif c.get("governs") == "buckling" and c.get("buckling"):          # each wall, if its stock thins
+                top = min((b.get("safety") or 0) * (ratio ** 2 if b.get("piece") in thick else 1.0)
+                          for b in c["buckling"])
             else:
                 top = (c["safety"] or 0) * ratio ** 2
             est = min(walls, top) if walls else top
             worst = est if worst is None else min(worst, est)
-        saved = base["saved_lb"] + (wood_g / 453.59237 - base["saved_lb"]) * (1 - ratio)
+        saved = base["saved_lb"] + (wood_g / 453.59237 - holed_lb) * (1 - ratio)   # what's left of that stock, thinned
         out.append({"phase": "thinner", "estimate": True, "thickness_mm": t, "label": M.nominal(t),
                     "removed": base["removed"], "holes": base["holes"], "top_holes": base.get("top_holes", 0),
                     **estimate_numbers(worst, min_safety), "saved_lb": round(saved, 2),
@@ -877,14 +891,17 @@ def _thinner(ctx, stations, tops, min_safety, mat, C, M) -> list[dict]:
     return out
 
 
-def _plate_at(ctx, case_name: str, t: float) -> Optional[float]:
-    """The plate check's safety (grain the wrong way) for a load at another sheet thickness, if it has one."""
+def _plate_at(ctx, case_name: str, t: float, thick: Optional[dict] = None) -> Optional[float]:
+    """The plate check's safety (grain the wrong way) for a load at another sheet thickness, if it has one. Where its
+    panel isn't of the stock that thins (``thick``, #354), at its own thickness."""
     i = next((k for k, ld in enumerate(ctx["loads"]) if ld["name"] == case_name), None)
     pl = (L.plate_check(ctx["pieces"], ctx["loads"][i], sheet_of(ctx), ctx["tol"], held=ctx.get("held"),
                          voxel=ctx.get("spacing"))
           if i is not None else None)
     if not pl or not pl.get("done"):
         return None
+    if thick is not None and pl.get("piece") not in thick:
+        return pl["safety_across"]
     return min(pl["by_thickness"], key=lambda b: abs(b["thickness_mm"] - t))["safety_across"]
 
 
