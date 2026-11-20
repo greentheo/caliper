@@ -1588,27 +1588,89 @@ def solve(ls, solid):
         return solver, solver.solve(solid)
 
 
-def fea_joints(ctx: dict, solver, r, hand: dict, min_safety: float) -> dict:
+def fea_joints(ctx: dict, solver, r, hand: dict, min_safety: float, case: int = 0) -> dict:
     """The joints' hand check with the FEA's side of each beside it (#316 slice 2, option C): the lower governs. Where
-    the FEA's joint forces can't be read at all, the hand check stands, said so."""
+    the FEA's joint forces can't be read at all, the hand check stands, said so. ``case``: which of the solver's cases
+    ``r`` is (#346: on the one solver of every case, its loads are that case's row of the forces)."""
     from . import fea_joints as FJ
 
     try:
-        reading = FJ.read(solver, r, ctx["ls"].grid, ctx["joints"]["pieces"], ctx["joints"]["joints"], VOXELS_THROUGH)
+        reading = FJ.read(solver, r, ctx["ls"].grid, ctx["joints"]["pieces"], ctx["joints"]["joints"], VOXELS_THROUGH,
+                          case)
     except Exception as e:  # noqa: BLE001 — the hand check stands; why, said, never a throw from a strength check
         return {**hand, "fea": {"unread": f"the FEA's joint forces couldn't be read ({type(e).__name__})"}}
     return FJ.beside(hand, reading, ctx["joints"], min_safety)
 
 
-def check_load(ctx: dict, i: int, min_safety: float, solid=None):
+def solved(ctx: dict, solid=None) -> list:
+    """Every case of the part solved on ``solid`` (its voxels unless given), in case order, as ``[(solver, result)]``
+    for :func:`check_load` (#345): one solver, its set-up (the operator, the multigrid hierarchy) built once, each case's
+    result bit for bit what a solver of that case alone gives (whittle's ``solve_each``). With one case, a whittle that
+    hasn't it, or where holding every case at once would pass :data:`TOGETHER_MAX`, ``[None] * n``: :func:`check_load`
+    solves each alone, as before, and lets its solver go before the next."""
+    from whittle import Load
+
+    ls = ctx["ls"]
+    on = ls.solid if solid is None else solid
+    if len(ctx["loads"]) < 2 or not together(ctx):     # one case, or too many held at once: each in check_load, alone,
+        return [None] * len(ctx["loads"])               # its solver dropped after it, as main did (#346)
+    ls.loads = [Load(ls.region(box=box), tuple(float(v) * load["factor"] for v in load["force"]), case=i)
+                for i, (load, box) in enumerate(zip(ctx["loads"], ctx["boxes"]))]
+    solver = ls.solver()
+    if not hasattr(solver, "solve_each"):                # a whittle before solve_each: one solver a case, in check_load
+        return [None] * len(ctx["loads"])
+    from .blas import cases_safe, one_thread
+
+    cases_safe()                                         # its case threads one at a time where they'd be unheld (#346)
+    with one_thread():                                   # BLAS on one thread, as every solve (CALI-208)
+        return [(solver, r) for r in solver.solve_each(on)]
+
+
+#: The most the cases of one check are held at once (#345): nodes × cases, past which they're solved one at a time.
+#: Held together, every case's arrays and the one solver stay alive through the check's cases, where main kept one
+#: solver at a time. Measured (#346): reviewer-2's peak footprint, the bar stool at three strengths (6.18 M node-cases),
+#: +785 MB, about 136 B a node-case; tracemalloc's held memory, 108-109 B, on that and step-stool-5 (2.7 M). The
+#: footprint governs: about +0.6 GB a check at the bar, and a study at a time can each hold that (up to 32 at once).
+#: Step-stool-5's three cases go together; the bar stool's three at once don't.
+TOGETHER_MAX = 4_400_000
+
+
+def at_once(ctx: dict) -> bool:
+    """Whether :func:`solved` holds this check's cases at once: two or more, under :data:`TOGETHER_MAX`, on a whittle
+    with ``solve_each``. What the progress line says (#346: "solved together" only where they are)."""
+    from whittle.physics.fea import VoxelFEA
+
+    return len(ctx["loads"]) > 1 and together(ctx) and hasattr(VoxelFEA, "solve_each")
+
+
+def together(ctx: dict) -> bool:
+    """Whether a check's cases may be held at once (:data:`TOGETHER_MAX`)."""
+    nx, ny, nz = ctx["ls"].grid.shape
+    return (nx + 1) * (ny + 1) * (nz + 1) * len(ctx["loads"]) <= TOGETHER_MAX
+
+
+def _alone(ctx: dict, i: int, on) -> tuple:
+    """Case ``i`` on a solver of its own, as every case was before #345."""
+    ls, load, box = ctx["ls"], ctx["loads"][i], ctx["boxes"][i]
+    ls.loads = []
+    ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
+    return solve(ls, on)
+
+
+def check_load(ctx: dict, i: int, min_safety: float, solid=None, got=None):
     """One load through the FEA (on ``solid``, the part's voxels unless given) and the plate check.
-    Returns ``(case, result)``; the case is the record's entry for it."""
+    Returns ``(case, result)``; the case is the record's entry for it. ``got``: its ``(solver, result)`` already solved
+    with the others (:func:`solved`), else it's solved here, alone."""
     from scipy import ndimage
 
     ls, load, box, mat = ctx["ls"], ctx["loads"][i], ctx["boxes"][i], ctx["mat"]
-    ls.loads = []
-    ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
-    solver, r = solve(ls, ls.solid if solid is None else solid)
+    k = 0 if got is None else i                       # which of its solver's cases it is: alone, its only one
+    if got is None:                                   # solved here, alone, its own load set: as main did
+        got = _alone(ctx, i, ls.solid if solid is None else solid)
+    else:                                             # solved with the others: its own load set after, as main left it,
+        ls.loads = []                                 # for a holed panel's filled re-solve (#346)
+        ls.load(tuple(float(v) * load["factor"] for v in load["force"]), box=box)
+    solver, r = got
     case = {"name": load["name"], "lb": load["lb"], "factor": load["factor"],
             "force_n": [round(v, 1) for v in load["force"]], "lo": load["lo"], "hi": load["hi"]}
     if not r.supported:
@@ -1661,7 +1723,7 @@ def check_load(ctx: dict, i: int, min_safety: float, solid=None):
 
         case["joints"] = JC.check(ctx["joints"], load, ctx.get("held") or [], min_safety,
                                   mat=ctx.get("plate_mat") or mat)       # a notched side's net section, by its strength (CALI-192)
-        case["joints"] = fea_joints(ctx, solver, r, case["joints"], min_safety)
+        case["joints"] = fea_joints(ctx, solver, r, case["joints"], min_safety, k)
         governs, safety = JC.lower(case, governs, safety)
     case.update({"fea": fea, "plate": pl, "safety": safety, "governs": governs,
                  "holds": bool(safety is not None and safety >= min_safety),  # producer
@@ -1738,9 +1800,12 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     os.makedirs(out_dir, exist_ok=True)
     cases = []
     t1 = time.time()                                  # the FEA's own time, for the finer run's estimate (CALI-97)
+    if at_once(ctx):
+        emit("case", f"{len(loads)} cases, solved together", progress=0.0)
+    every = solved(ctx)                               # one solver, every case (#345)
     for i, load in enumerate(loads):
         emit("case", f"{load['name']}: {load['lb']:g} lb × {load['factor']:g}", progress=i / len(loads))
-        case, r = check_load(ctx, i, min_safety)
+        case, r = check_load(ctx, i, min_safety, got=every[i])
         if r.supported:
             with open(os.path.join(out_dir, f"case_{i:02d}.json"), "w") as f:
                 json.dump(heat_mesh(ctx["mesh"], ctx["ls"].grid, r.von_mises, r.solid, 2 * ctx["spacing"]), f)
