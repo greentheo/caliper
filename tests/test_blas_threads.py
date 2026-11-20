@@ -129,8 +129,9 @@ from whittle.physics import fea
 fresh = []
 t = threading.Thread(target=lambda: fresh.extend(int(p["num_threads"]) for p in threadpool_info()))
 t.start(); t.join()
+before = fea.CASE_THREADS
 blas.cases_safe()
-print(json.dumps({{"fresh": fresh, "case_threads": fea.CASE_THREADS}}))
+print(json.dumps({{"fresh": fresh, "before": before, "case_threads": fea.CASE_THREADS}}))
 """
 
 
@@ -153,6 +154,6 @@ def test_whittle_s_case_threads_go_one_at_a_time_where_a_fresh_thread_isn_t_held
     assert r.returncode == 0, r.stderr[-2000:]
     got = json.loads(r.stdout.strip().splitlines()[-1])
     unheld = any(n > 1 for n in got["fresh"])
-    assert got["case_threads"] == (1 if unheld else fea.CASE_THREADS), got
+    assert got["case_threads"] == (1 if unheld else got["before"]), got   # its own process's, not this one's
     if first == "import caliper":
         assert not unheld, got                       # Caliper first: every thread starts at one
