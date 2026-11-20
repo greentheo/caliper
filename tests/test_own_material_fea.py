@@ -85,3 +85,46 @@ def test_a_shared_voxel_is_the_weaker_s_and_an_unclaimed_one_the_weakest(foam_fi
                             XPS["strength"]]
     assert np.allclose(ls.stiffness[:, 0, 0] * PLY["E"], [PLY["E"]] * 2 + [XPS["E"]] * 4)
     assert "note" not in ctx["mat"] and ctx["note"].startswith("Each piece in its own material: the ")
+
+
+@pytest.mark.parametrize("foam_first", [False, True])
+def test_a_printed_part_s_wood_is_each_piece_s_own_and_the_rest_printed(foam_first):
+    """Wood of two materials on a printed part (CALI-82's path): each piece its own, not the part's most-by-volume wood;
+    a voxel no piece claims is the print's."""
+    import trimesh
+
+    petg = {"key": "petg", "name": "PETG (printed)", "E": 1000.0, "strength": 12.0, "density": 1.0, "across": 1.0}
+    wood = [_stick("ply", 0.0, 2.0, "plywood"), _stick("foam", 2.0, 3.0, "xps")]
+    if foam_first:
+        wood.reverse()
+    ctx, ls = _box_ctx(wood, rest_mat=petg)
+    ctx["tol"] = 0.1
+    L._two_materials(ctx, wood, PLY, trimesh.creation.box(extents=(1.0, 1.0, 1.0)))
+    got = ctx["strength_map"][:, 0, 0]
+    assert got.tolist() == [PLY["strength"]] * 2 + [XPS["strength"]] * 2 + [petg["strength"]] * 2
+    assert np.allclose(ls.stiffness[:, 0, 0] * petg["E"], [PLY["E"]] * 2 + [XPS["E"]] * 2 + [petg["E"]] * 2)
+
+
+def test_a_piece_claims_a_voxel_within_half_a_voxel_of_it():
+    """CALI-82's reach: a voxel whose centre is within half a voxel of a piece is that piece's. The plywood stick ends at
+    1.6 mm, so voxel 2's centre is 0.2 mm past its surface: plywood. Voxel 3 is 1.2 mm off it, and 0.8 mm off the foam:
+    nobody's, so the weakest's."""
+    wood = [_stick("ply", 0.0, 1.6, "plywood"), _stick("foam", 4.0, 5.0, "xps")]
+    ctx, _ = _box_ctx(wood)
+    L._two_materials(ctx, wood, PLY, None)
+    assert ctx["strength_map"][:, 0, 0].tolist() == [PLY["strength"]] * 3 + [XPS["strength"]] * 3
+
+
+def test_a_sheet_claims_a_voxel_within_half_a_voxel_of_its_face():
+    """The same reach for a sheet: a plywood panel in the plane x = 0, 1.6 mm thick toward +x, claims voxels 0 and 1 (in
+    it) and voxel 2, 0.4 mm past its back face; not voxel 3, 1.4 mm past. An XPS stick claims 4 and 5."""
+    from caliper.consistency import slab_distance
+
+    poly = [(0.0, -1.0, -1.0), (0.0, 1.0, -1.0), (0.0, 1.0, 1.0), (0.0, -1.0, 1.0)]
+    centres = np.array([[float(x), 0.0, 0.0] for x in range(6)])
+    side = next(sd for sd in (1.0, -1.0) if slab_distance(centres, poly, 1.6, sd)[1] == 0.0)   # its thickness toward +x
+    sheet = {"name": "ply", "kind": "sheet", "material": "plywood", "thickness": 1.6, "polys": [poly], "sides": [side]}
+    wood = [sheet, _stick("foam", 4.0, 5.0, "xps")]
+    ctx, _ = _box_ctx(wood)
+    L._two_materials(ctx, wood, PLY, None)
+    assert ctx["strength_map"][:, 0, 0].tolist() == [PLY["strength"]] * 3 + [XPS["strength"]] * 3
