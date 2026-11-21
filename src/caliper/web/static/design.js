@@ -2930,7 +2930,7 @@ function historyItem(h, now) {
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
   // a number only where the check gave one: a check that couldn't run says why, never "0x" (#138 item 3)
-  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.verdict && h.verdict.kind === 'unchecked' && h.verdict.why ? `: ${esc(h.verdict.why)}` : h.safety != null && h.verdict && ['holds', 'fails'].includes(h.verdict.kind) ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.verdict && h.verdict.kind === 'unchecked' && h.verdict.why ? `: ${esc(h.verdict.why)}` : h.safety != null && h.verdict && ['holds', 'fails'].includes(h.verdict.kind) ? `, ${h.safety < 0.1 ? 'under 0.1' : Math.floor(h.safety * 10 + 1e-9) / 10}x` : ''}</li>`;   // cut, never rounded up to its limit (#64 item 1)
   if (h.kind === 'patterns' && h.action === 'made') return `<li class="hist">patterns for hand tools (${h.pieces} pieces)</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
