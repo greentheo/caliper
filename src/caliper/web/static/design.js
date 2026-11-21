@@ -433,9 +433,10 @@ function menuItems(design, pid, piece) {
     const m = study[kind];
     if (m) items.push({ id, label, off: !m.ready, why: m.ready ? '' : m.why });
   };
-  studied('load', 'check', 'Check it holds');
-  if (p.study === 'carve') studied('carve', 'carve', 'Carve it');         // whichever made_of says; neither where it says none
-  else if (p.study === 'lighten') studied('lighten', 'lighten', 'Lighten it');
+  const ran = (list) => (design[list] || []).some((r) => r.part === pid);   // "again" where it has been, as the bar says it (walk 11-21)
+  studied('load', 'check', ran('load_runs') ? 'Check it again' : 'Check it holds');
+  if (p.study === 'carve') studied('carve', 'carve', ran('carve_runs') ? 'Carve it again' : 'Carve it');   // whichever made_of says
+  else if (p.study === 'lighten') studied('lighten', 'lighten', ran('lighten_runs') ? 'Lighten it again' : 'Lighten it');
   items.push(p.mirror_of ? { id: 'unmirror', label: `Break the mirror (of ${p.mirror_of})` } : { id: 'mirror', label: 'Mirror it…' });
   if (Object.values(TREE_KEYS).some((d) => nudge(design, pid, d))) items.push({ id: 'tmove', label: 'Move in the tree ▸' });   // a phone's drag (#94)
   items.push({ id: 'versions', label: 'Versions ▸' }, { id: 'copyName', label: 'Copy its name' });
@@ -3613,16 +3614,20 @@ function wireCutplan(p) {
   if (!go) return;
   // where its section has no progress line (cut plans can't be made here), what it says goes under the buttons: a
   // click never throws and leaves the button dead (#331 review)
-  const say = (html, text) => { const pr = $('cpProgress'), w = $('pactsWhy'); if (pr) pr.innerHTML = html; else if (w) w.textContent = text; };
+  // not `say`, which is the page's foot (used below): a local `say` hid it, and the made line went in as HTML (#388 review)
+  const show = (html, text) => { const pr = $('cpProgress'), w = $('pactsWhy'); if (pr) pr.innerHTML = html; else if (w) w.textContent = text; };
   go.onclick = async () => {
     go.disabled = true;
-    say('<div class="small muted" id="cpMsg">unfolding…</div>', 'unfolding…');
+    show('<div class="small muted" id="cpMsg">unfolding…</div>', 'unfolding…');
     try {
       const { job_id } = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/cutplan`);
       await follow(job_id, (ev) => { const m = $('cpMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
       await refresh();
+      const made = `Made the cut plan for ${partOf(p.id).name || p.id}: it's under How do I make it? → Cut plan.`;
+      show(`<div class="small muted">${esc(made)}</div>`, made);   // a part's name is text, never HTML (#388 review)
+      say(made);                                  // and at the page's foot: its line may be folded away (walk 11-21)
     } catch (e) {
-      say(`<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`, `⚠ ${e.message}`);
+      show(`<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`, `⚠ ${e.message}`);
       go.disabled = false;
     }
   };
@@ -4438,23 +4443,29 @@ function grainKeep(p, pl, need) {
   if (!(pl.safety > pl.safety_across)) return '';
   return ` <button class="ghost" data-grain="${esc(pl.piece)}">Keep: cut it with its ${esc(pl.advice_phrase || 'face grain running from one support to the other')} (${sx(pl.safety, need)})</button>`;
 }
+// a piece by the name the person gave it (#94): a run's record keeps the key it ran with (walk 11-21: "tread" read "step")
+function pieceSaid(p, key) {
+  const pc = ((p && p.pieces) || []).find((x) => x.key === key);
+  return pc && pc.name ? pc.name : key;
+}
 function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
+  const piece = (k) => (((p && p.pieces) || []).find((x) => x.key === k) || {}).name || k;   // pieceSaid, kept inline for its readers
   const pl = c.plate, f = c.fea || {};
   const holds = p.untrusted ? untrustedBadge(p) : caseBadge(c);     // a filled-in shape wins (CALI-96, then 97)
   // the plate or beam check's number its verdict rests on (the worse grain's), in the verdict's colour and, where it
   // isn't settled, its word: never green on a not-trusted, unresolved or older case (#122, #132)
   const plNum = (n) => `<b style="color:var(--${verdictTone(pl.verdict)})">${sx(n, run.min_safety)}${pl.verdict && !settled(pl.verdict) ? ` (${esc(pl.verdict.word)})` : ''}</b>`;
   const plate = !pl ? '' : !pl.done
-    ? `<div class="muted small" style="margin-top:4px">No plate check for ${esc(pl.piece)}: ${esc(pl.why)}.</div>`
+    ? `<div class="muted small" style="margin-top:4px">No plate check for ${esc(piece(pl.piece))}: ${esc(pl.why)}.</div>`
     : pl.as === 'beam'      // a top on two sides: a beam, not a plate held all round (CALI-116)
-      ? `<div class="small" style="margin-top:4px"><b>Beam check</b> — ${esc(pl.piece)}: ${esc(pl.why)} ·
+      ? `<div class="small" style="margin-top:4px"><b>Beam check</b> — ${esc(piece(pl.piece))}: ${esc(pl.why)} ·
         ${plNum(pl.safety_across)} ${beamGrain(pl)} · sags ${len(pl.deflection_mm, 3)}${grainKeep(p, pl, run.min_safety)}</div>`
     : pl.support === 'ring'  // a disc on a ring (#137 item 7)
-      ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, a round plate held at its ring's outer edge (${len(pl.ring_mm)} across),
+      ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(piece(pl.piece))}, a round plate held at its ring's outer edge (${len(pl.ring_mm)} across),
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → ${plNum(pl.safety_across)} across the grain, ${sx(pl.safety, run.min_safety)} along it
         · sags ${len(pl.deflection_mm, 3)} <span class="muted">(Roark; needs an engineer's check)</span></div>`
-      : `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
+      : `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(piece(pl.piece))}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety, run.min_safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
         ${plNum(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`;
   const fea = f.supported === false ? `<div class="small" style="color:var(--bad)">${esc(c.why)}</div>`
@@ -4860,7 +4871,7 @@ async function showHeat(pid, run, index) {
       : c.governs === 'buckling'
       ? foldedBy(c)                                                       // the picture is the FEA's; the verdict isn't (#229)
       : c.governs === 'plate' && pl
-      ? `the plate check on the ${esc(pl.piece)}: ${fixed(pl.stress_mpa, 1)} MPa, with the grain the wrong way`
+      ? `the plate check on the ${esc(pieceSaid(partOf(pid), pl.piece))}: ${fixed(pl.stress_mpa, 1)} MPa, with the grain the wrong way`
       : `the FEA's peak: ${fixed(f.peak_mpa, 1)} MPa ${esc(peakWhere(f))}`;   // never an old run's label (#139 review)
     const bar = $('stationBar');
     bar.hidden = false;
@@ -5440,6 +5451,8 @@ async function takeStation(pid, wid, index, kind) {
     await api('POST', `/api/designs/${S.slug}/${STUDY_PATH[kind] || 'whittle'}/${wid}/adopt`, { station: index });
     clearStation();
     await refresh();
+    const now = partOf(pid), checks = kind === 'lighten' || kind === 'carve';   // said, not only a new version number (walk 11-21)
+    say(`Used ${kind === 'carve' ? "the carve's" : kind === 'lighten' ? "the Lighten's" : 'its'} step ${index}: ${now.name || pid} is v${now.version} now.${checks ? ' Checking it again: that number is the one to go by.' : ''}`);
     // holes cut in, or carved: check its strength again on the part as rebuilt — that's the number to go by
     if (kind === 'lighten' || kind === 'carve') {
       const p = S.design.parts.find((x) => x.id === pid);
