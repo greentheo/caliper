@@ -1406,7 +1406,7 @@ async function choose(e, hit) {
     const curve = new THREE.CatmullRomCurve3(edge.points.map((p) => new THREE.Vector3(...p)));
     drawPick(new THREE.TubeGeometry(curve, Math.max(2, edge.points.length * 2), Math.max(1, 0.003 * camera.position.distanceTo(new THREE.Vector3(...edge.centre))), 6, false));
   }
-  const now = S.design.parts.find((p) => p.id === pid);
+  const now = S.design && S.design.parts.find((p) => p.id === pid);   // a design left meanwhile has none
   if (S.pick && now) S.pick.drawn = now.drawn ?? now.version;   // where it sat when picked (#294)
   renderScope();
 }
