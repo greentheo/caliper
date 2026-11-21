@@ -281,11 +281,10 @@ def test_a_cancel_during_the_sweep_stops_it_there(tmp_path, monkeypatch):
 
 
 # --- the page --------------------------------------------------------------------------------------------------
-def _node():
-    for n in (shutil.which("node"), os.path.expanduser("~/.nvm/versions/node/v22.17.1/bin/node")):
-        if n and os.path.exists(n):
-            return n
-    pytest.skip("no node")
+def _node():                                   # a Node that imports three.js: 20 or newer (CALI-237)
+    from ._node import node
+
+    return node()
 
 
 def _fn(src: str, name: str) -> str:

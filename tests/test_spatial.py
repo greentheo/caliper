@@ -48,6 +48,7 @@ def _race(tmp_path, how):
     return subprocess.run([sys.executable, str(script), "40", how], capture_output=True, text=True, env=env, timeout=300)
 
 
+@pytest.mark.nightly                      # long, and no verdict rests on it (CALI-219, #367)
 def test_two_threads_on_one_mesh_dont_take_the_app_down(tmp_path):
     for run in range(2):                                      # through the lock it never crashes
         got = _race(tmp_path, "locked")
