@@ -1704,7 +1704,10 @@ def router():
             j.emit("step", "Claude is reading every part against what you asked for")
             return assess.run(DesignStore.load(slug))
 
-        job = RUNNER.submit(assess.JOB, work, label=f"Claude's reading · {slug}", lock=f"assess:{slug}")
+        try:                                   # refused, never queued behind: two tabs made two calls (#396 review)
+            job = RUNNER.submit(assess.JOB, work, label=f"Claude's reading · {slug}", lock=f"assess:{slug}", exclusive=True)
+        except Busy:
+            raise HTTPException(status_code=409, detail=assess.BUSY)
         return {"job_id": job.id}
 
     # -- gusset plates (CALI-46): whittle's plate mode at the joints a frame names ---------------------

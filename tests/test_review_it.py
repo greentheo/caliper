@@ -189,3 +189,38 @@ def test_nothing_built_nothing_to_read(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "a stub's: never sent")
     got = TestClient(create_app()).post(f"/api/designs/{os.path.basename(s.root)}/assess")
     assert got.status_code == 409 and got.json()["detail"] == "Nothing's built to read yet: build it first."
+
+
+def test_two_presses_at_once_make_one_call_and_the_second_is_told_it_s_running(app, monkeypatch):
+    """#396 review: two tabs' POSTs both got 200 and ran back to back: two Claude calls, never "busy". The job is
+    exclusive now: while a reading of the design is queued or running, another press is refused with assess.BUSY."""
+    import threading
+
+    from caliper import assess, jobs
+
+    from .test_assess import Claude
+    from .test_carve_click import _wait
+
+    c, slug, _ = app
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "a stub's: never sent")
+    inside, go = threading.Event(), threading.Event()
+
+    class Slow(Claude):
+        def create(self, **kw):
+            inside.set()
+            assert go.wait(10), "never let go"
+            return super().create(**kw)
+
+    slow = Slow([], [])
+    real = assess._run
+    monkeypatch.setattr(assess, "run", lambda store, **kw: real(store, client=slow))
+    first = c.post(f"/api/designs/{slug}/assess")
+    assert first.status_code == 200 and inside.wait(10)                      # the first is asking Claude
+    second = c.post(f"/api/designs/{slug}/assess")
+    assert second.status_code == 409 and second.json()["detail"] == assess.BUSY
+    go.set()
+    _wait(jobs.RUNNER.get(first.json()["job_id"]))
+    assert len(slow.seen) == 1
+    again = c.post(f"/api/designs/{slug}/assess")                            # once it's over, it can be pressed again
+    assert again.status_code == 200
+    _wait(jobs.RUNNER.get(again.json()["job_id"]))
