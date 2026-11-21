@@ -413,8 +413,7 @@ class DesignStore:
             follows.refuse_cycle(self, part_id, script)    # A follows B follows A: refused in words (#266)
 
         entry = self.design.part(part_id)
-        if entry is None and part_id in {g["id"] for g in self.design.groups}:   # a new part never takes a group's name
-            raise ValueError(f"{part_id!r} is a group of this design's plan: a part needs a name of its own (#399)")
+        self._not_a_group(part_id, entry)
         version = (entry.version if entry else 0) + 1
         pdir = self.part_dir(part_id)
         os.makedirs(pdir, exist_ok=True)
@@ -478,6 +477,11 @@ class DesignStore:
             skeleton.remeasure(self, part_id)
         return version
 
+    def _not_a_group(self, part_id: str, entry) -> None:
+        """A new part never takes a group's name (#399, and its follow-up for a mesh part's Copy…)."""
+        if entry is None and part_id in {g["id"] for g in self.design.groups}:
+            raise ValueError(f"{part_id!r} is a group of this design's plan: a part needs a name of its own (#399)")
+
     def write_mesh_part(self, part_id: str, stl: bytes, *, origin: str = "whittled",
                         action: str = "whittle", feedback: Optional[str] = None,
                         report: Optional[dict] = None, extra: Optional[dict] = None) -> int:
@@ -493,6 +497,7 @@ class DesignStore:
             raise ValueError("that isn't an STL — too short to hold even a header")
 
         entry = self.design.part(part_id)
+        self._not_a_group(part_id, entry)               # a mesh copy never lands on a group's name either
         version = (entry.version if entry else 0) + 1
         os.makedirs(self.part_dir(part_id), exist_ok=True)
         _write_bytes_atomic(self.mesh_path(part_id), stl)
