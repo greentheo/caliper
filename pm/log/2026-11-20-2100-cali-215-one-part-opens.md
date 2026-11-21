@@ -17,3 +17,6 @@ still opens on the design.
 **Tests:** `tests/test_one_part_opens.py`, 7 tests: one part, two, a lone reference and none; step-stool-5's open, scoped
 before its first draw; a two-part design unscoped; the bar being the part view's. Six fail on main. Five older Node
 harnesses that extract `openDesign` (test_design_switch, test_pick_scope) now extract `soleFor` too.
+
+**Mutants, 5 of 5 caught:** any part count opens on the first; a lone reference opened on; no scope set; the scope set
+after the first draw; an empty design scoped.
