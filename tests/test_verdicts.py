@@ -181,9 +181,9 @@ def test_a_goal_on_a_metric(met, kw, kind):
 
 
 def test_the_page_s_badges_word_and_history_are_the_verdict_s():
-    node = shutil.which("node") or os.path.expanduser("~/.nvm/versions/node/v22.17.1/bin/node")
-    if not os.path.exists(node):
-        pytest.skip("no node")
+    from ._node import node as _pick
+
+    node = _pick()                             # 20 or newer, or it skips saying why (CALI-237)
     src = open(os.path.join(SRC, "web", "static", "design.js")).read()
     consts = "".join(re.search(rf"^const {n} = .*?;\n(?=\S)", src, re.M | re.S).group(0)
                      for n in ("verdictTone", "verdictBadge", "settled", "caseBadge", "runBadge", "runWord"))
