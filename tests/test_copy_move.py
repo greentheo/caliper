@@ -330,7 +330,8 @@ def _page(body, design=None):
     from .test_part_menu import _DESIGN, _STUBS
 
     src = open(JS).read()
-    names = ("seen", "keepTree", "underPart", "treeRows", "nudge", "menuItems", "placeHtml", "placeBody", "place")   # Move in the tree ▸ (#360)
+    names = ("groupOf", "treeOver", "crossesGroup", "groupName", "seen", "keepTree", "underPart", "treeRows", "nudge", "menuItems",
+             "placeHtml", "placeBody", "place")                                  # the tree's group helpers (#400)   # Move in the tree ▸ (#360)
     extra = "".join(re.search(rf"^const {c} = .*$", src, re.M).group(0) + "\n" for c in ("SIDES", "TREE_KEYS"))
     script = (_STUBS.replace("DESIGN", design or _DESIGN) + _FORM + extra + "\n".join(_fn(src, n) for n in names)
               + f"\nconst out = await (async () => {{ {body} }})();\nconsole.log(JSON.stringify(out));")
