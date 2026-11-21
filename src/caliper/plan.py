@@ -699,6 +699,82 @@ def _was_said(s: SkeletonValue, said: list[tuple[float, str]]) -> bool:
     return any(u == want[1] and abs(x - want[0]) <= max(0.005 * abs(want[0]), 1e-9) for x, u in said)
 
 
+#: A rule that says one thing sits on another: ``bbox(a).min_z >= bbox(b).max_z - 1`` (CALI-240).
+_SITS_ON = re.compile(r"^\s*bbox\((\w+)\)\.min_z\s*>=\s*bbox\((\w+)\)\.max_z\s*(?:-\s*[\d.]+\s*)?$")
+#: Words that end a noun phrase, either way from a relation; a negation among them, so "isn't on top of" says nothing.
+_STOP = {"a", "an", "the", "and", "plus", "with", "of", "on", "in", "for", "to", "is", "it", "its", "my", "our", "that",
+         "which", "who", "then", "but", "or", "top", "atop", "sits", "sitting", "rests", "resting", "mounted", "mounts",
+         "not", "never", "no", "isn", "t", "doesn", "don", "won"}
+_SITS = {"sits", "sitting", "rests", "resting", "mounted", "mounts"}
+#: Words that say the relation isn't so: a phrase they stop says nothing (#410 re-check: "no box sits on the deck").
+_NEG = {"not", "never", "no", "isn", "t", "doesn", "don", "won", "nor", "without"}
+
+
+def _said_before(words: list, end: int) -> list:
+    """The noun phrase ending at ``words[end]``, or [] where a negation stops it ("there's no box", "not a box")."""
+    a = _np(words, end, -1)
+    j = end - len(a)
+    while j >= 0 and words[j] in ("a", "an", "the", "any"):
+        j -= 1
+    return [] if j >= 0 and words[j] in _NEG else a
+
+
+def _np(words: list, i: int, step: int) -> list:
+    """The noun phrase next to ``words[i]`` going ``step`` (−1 before, +1 after), articles skipped after: up to 3 words."""
+    out, j = [], i
+    if step > 0:
+        while j < len(words) and words[j] in ("a", "an", "the", "my", "our", "its"):
+            j += 1
+    while 0 <= j < len(words) and words[j] not in _STOP and len(out) < 3:
+        out.append(words[j])
+        j += step
+    return out[::-1] if step < 0 else out
+
+
+def relations(said: str) -> list[tuple[list, list]]:
+    """Each "A on B" the person's own words say (CALI-240), read one sentence or line at a time (#410 review: a prompt and
+    an answer joined by a newline aren't one sentence): (A's words, B's words). Only wordings that say up and down: "A on
+    top of B", "A atop B", "A sits/rests on (top of) B", and "B plus/and/with a A on top" (Theo's "a platform plus a box on
+    top"). A bare "on" isn't one: "the logo on the box", "a shelf on the wall"."""
+    out = []
+    for part in re.split(r"[\n.;:!?]", (said or "").lower()):
+        words = re.findall(r"[a-z]+", part)
+        for i, w in enumerate(words):
+            nxt = words[i + 1:i + 4]
+            if w == "on" and nxt[:2] == ["top", "of"] and (i == 0 or words[i - 1] not in _SITS):
+                out.append((_said_before(words, i - 1), _np(words, i + 3, 1)))
+            elif w == "on" and nxt[:1] == ["top"] and nxt[1:2] != ["of"]:     # "B plus a A on top"
+                a = _said_before(words, i - 1)
+                j = i - 1 - len(a)
+                while j >= 0 and words[j] in ("a", "an", "the"):
+                    j -= 1
+                if j >= 0 and words[j] in ("plus", "and", "with"):
+                    out.append((a, _np(words, j - 1, -1)))
+            elif w == "atop":
+                out.append((_said_before(words, i - 1), _np(words, i + 1, 1)))
+            elif w in _SITS and nxt[:1] == ["on"]:
+                after = i + (4 if nxt[1:3] == ["top", "of"] else 2)          # "sits on top of the deck" too
+                out.append((_said_before(words, i - 1 - (i > 0 and words[i - 1] == "that")), _np(words, after, 1)))
+    return [(a, b) for a, b in out if a and b]
+
+
+def _names_it(phrase: list, pid: str) -> bool:
+    """Whether a noun phrase names a part or group: every word of its id is in it, a plural allowed (#410 review: "a box"
+    named box_lid). "the tool box" names tool_box; "a box" doesn't."""
+    def forms(w: str) -> set:                     # a word and its singulars: boxes, box; legs, leg
+        return {w} | ({w[:-1]} if w.endswith("s") else set()) | ({w[:-2]} if w.endswith("es") else set())
+    words = set().union(*(forms(w) for w in phrase))
+    tokens = [t for t in pid.lower().split("_") if t]
+    # its last word is the id's last too (#410 re-check: "a box lid" isn't the box)
+    return bool(tokens) and all(t in words for t in tokens) and tokens[-1] in forms(phrase[-1])
+
+
+def _said_on(r: PlanRule, said: str) -> bool:
+    """A sits-on rule whose relation the person's own words state (CALI-240: stated and enforced, never inferred)."""
+    m = _SITS_ON.match(r.expr or "")
+    return bool(m) and any(_names_it(a, m.group(1)) and _names_it(b, m.group(2)) for a, b in relations(said))
+
+
 def classify(plan: Plan, said: str, prior: Optional[Plan] = None) -> Plan:
     """Each skeleton number and rule marked by where it came from, whatever the planner wrote: a number is stated
     when the person gave it ("7 ft", "1 in"), a rule when it reads only stated numbers and at least one; anything
@@ -713,7 +789,8 @@ def classify(plan: Plan, said: str, prior: Optional[Plan] = None) -> Plan:
     rules = []
     for r in plan.rules:
         read = {n.id for n in ast.walk(ast.parse(r.expr, mode="eval")) if isinstance(n, ast.Name)} & names
-        src = "kept" if (r.id, r.expr) in kept_r else "stated" if read and read <= given else "assumed"
+        src = ("kept" if (r.id, r.expr) in kept_r else "stated" if (read and read <= given) or _said_on(r, said)
+               else "assumed")                       # a sits-on the person said in words is stated too (CALI-240)
         rules.append(r.model_copy(update={"source": src}))
     # a part you have: "stated" when your words say so, else assumed and asked, never the whole plan refused (#123)
     kept_p = {p.id for p in (prior.parts if prior else []) if p.role == "fixed" and p.source == "stated"}
@@ -937,6 +1014,7 @@ hole_misalignment(a, b), holes_aligned(a, b), bbox(part).dx/.dy/.dz (sizes) and 
 with + - * / and no powers or text. A rule over skeleton numbers alone measures nothing: it's decided when it's \
 planned (true, it's a note; false, the plan contradicts itself and is refused). Lengths in rules are mm; a skeleton name in a rule reads in mm. Each part says what it mounts on (the parts it's built onto).
 
+A part that sits on another is the rule `bbox(a).min_z >= bbox(b).max_z - 1` (a on b), with a touch mate between them. \
 Give a number or a rule source "stated" only when the person gave it; anything you chose (a size, a margin, a rule \
 of thumb) is "assumed": shown to them, and not enforced until they keep it. Don't add rules nobody asked for beyond \
 what makes the parts fit.
