@@ -8,7 +8,7 @@ import pytest
 
 from caliper import plan as P
 from caliper import review
-from caliper.assembly import build_context, evaluate_assembly, group_members
+from caliper.assembly import GroupGeometry, build_context, evaluate_assembly
 from caliper.design import DesignStore
 
 pytest.importorskip("cadquery")
@@ -117,9 +117,81 @@ def test_the_group_binding_is_the_parts_together_and_a_design_without_groups_bin
     ctx = build_context(store.assembly, parts, store.design.groups)
     b = ctx["bbox"](ctx["box"])
     assert (b.min_z, b.max_z) == (pytest.approx(319), pytest.approx(831))
-    assert group_members(store.design.groups, "box") == ["floor", "wall"] and group_members(store.design.groups, "x") == []
+    assert P.group_parts(store.design.groups, "box") == ["floor", "wall"] and P.group_parts(store.design.groups, "x") == []
     flat = build_context(store.assembly, parts)
     assert set(flat) == set(build_context(store.assembly, parts, None)) == set(build_context(store.assembly, parts, []))
     assert "box" not in flat and "platform" not in flat
     same = evaluate_assembly(store.assembly, base_dir=store.root, parts=parts)
     assert same.to_dict() == evaluate_assembly(store.assembly, base_dir=store.root, parts=parts, groups=[]).to_dict()
+
+
+
+# --- #399 review (reviewer-3) -----------------------------------------------------------------------------------------
+def test_a_new_part_never_takes_a_group_s_name(tmp_path):
+    """"add a platform" on the camper got the id platform, the group's, and its rules then measured the group."""
+    from caliper import chat
+
+    store = _camper(tmp_path)
+    got = chat.offline_classify(store, "add a platform for the ladder")
+    assert got.action == "author" and got.part not in ("platform", "box"), got
+    client = __import__("tests.test_chat", fromlist=["_StubClient"])._StubClient(
+        '{"action": "author", "part": "box", "intent": "a box for tools"}')
+    assert chat.llm_classify(store, "add a box for tools", client=client).part not in ("box", "platform")
+    with pytest.raises(ValueError, match="'platform' is a group of this design's plan"):
+        store.write_part("platform", _box(100, 100, 20, 2000), intent="a shelf")
+
+
+def test_a_name_that_is_both_a_part_and_a_group_is_an_error_never_a_measurement(tmp_path):
+    """reviewer-3's case: a part called platform at 2000-2020 mm, and bbox(platform).max_z <= 400 read the group's 319."""
+    from caliper.assembly import Assembly, Part, load_parts
+    from caliper.spec import Assertion
+
+    store = _camper(tmp_path)
+    parts = load_parts(store.assembly, store.root)
+    from caliper.measure import Geometry
+    import cadquery as cq
+
+    parts["platform"] = Geometry.from_cadquery(cq.Workplane("XY").box(100, 100, 20, centered=False).translate((0, 0, 2000)))
+    asm = Assembly(name="camper", parts=list(store.assembly.parts) + [Part(id="platform", source="x.stl")],
+                   assertions=[Assertion(id="low", expr="bbox(platform).max_z <= 400")])
+    (r,) = [x for x in evaluate_assembly(asm, base_dir=store.root, parts=parts, groups=store.design.groups).results
+            if x.id == "low"]
+    assert r.status == "error" and r.detail == "platform names both a part and a group: rename the part", r
+    assert build_context(asm, parts, store.design.groups)["platform"] is parts["platform"]   # never the group over it
+
+
+def test_a_group_with_a_part_missing_isn_t_bound(tmp_path):
+    from caliper.assembly import load_parts
+
+    store = _camper(tmp_path)
+    parts = load_parts(store.assembly, store.root)
+    parts.pop("deck")
+    ctx = build_context(store.assembly, parts, store.design.groups)
+    assert "platform" not in ctx and "box" in ctx
+
+
+def test_a_group_s_geometry_keeps_its_parts_apart_for_slice_e(tmp_path):
+    store = _camper(tmp_path)
+    g, why = store.group_geometry("box")
+    assert why == "" and isinstance(g, GroupGeometry) and list(g.members) == ["floor", "wall"]
+    a, b = g.faces_of["floor"], g.faces_of["wall"]
+    assert a[0] == 0 and a[1] == b[0] and b[1] == len(g.mesh.faces)
+    assert len(g.members["wall"].mesh.faces) == b[1] - b[0]
+    assert store.group_geometry("nope") == (None, "there's no group 'nope' in this design's plan")
+    half = _camper(tmp_path / "half", build=("legs", "deck", "floor"))
+    assert half.group_geometry("box") == (None, "waits for wall to be built")
+
+
+def test_a_hole_probe_over_a_group_says_to_name_a_part(tmp_path):
+    from caliper.assembly import load_parts
+
+    store = _camper(tmp_path)
+    ctx = build_context(store.assembly, load_parts(store.assembly, store.root), store.design.groups)
+    with pytest.raises(ValueError, match="a group has no holes to find: name a part"):
+        ctx["hole_misalignment"](ctx["box"], ctx["platform"])
+
+
+def test_the_assembly_s_own_measures_are_reserved_names():
+    assert {"fit_off", "mirrors"} <= P.FUNCTIONS
+    with pytest.raises(P.PlanError, match="'mirrors' names two things"):
+        P.validate({**PLAN, "groups": PLAN["groups"] + [{"id": "mirrors", "what": "x", "parts": ["legs"]}]})

@@ -23,7 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 #: What a rule between parts may call: the assembly's measures (assembly.build_context) and plain arithmetic.
 FUNCTIONS = {"interference", "min_clearance", "clearance", "max_interference", "min_clearance_all",
-             "hole_misalignment", "holes_aligned", "bbox", "approx", "within", "fits", "abs", "min", "max"}
+             "hole_misalignment", "holes_aligned", "bbox", "approx", "within", "fits", "abs", "min", "max",
+             "fit_off", "mirrors"}     # the assembly binds these too: no part or group may take their names (#399 review)
 #: What a rule may read off a measure: a bounding box's sizes and corners (measure.bounding_box). Nothing else, and
 #: nothing private: a dunder chain is refused (#103 review).
 ATTRIBUTES = {"dx", "dy", "dz", "min_x", "min_y", "min_z", "max_x", "max_y", "max_z"}
@@ -487,17 +488,24 @@ def group_of(plan: Plan, pid: str) -> list[str]:
         at = g.id
 
 
-def group_parts(plan: Plan, gid: str) -> list[str]:
-    """Every part a group holds, through the groups it holds, in the plan's part order (CALI-36, #17)."""
-    held, todo, seen = set(), [gid], set()
+def group_parts(plan, gid: str) -> list[str]:
+    """Every part a group holds, through the groups it holds (CALI-36, #17): the one name for it (#399 review). ``plan``:
+    a :class:`Plan` (its parts in the plan's order), or ``Design.groups`` (``[{id, parts, ...}]``, in the order saved, the
+    build order). [] for a name that isn't a group."""
+    groups = plan.groups if isinstance(plan, Plan) else list(plan or [])
+    by = {(g.id if isinstance(g, PlanGroup) else g["id"]): list(g.parts if isinstance(g, PlanGroup) else g.get("parts") or [])
+          for g in groups}
+    if gid not in by:
+        return []
+    held, todo, seen = [], [gid], set()
     while todo:
-        g = _group(plan, todo.pop())
-        if g is None or g.id in seen:
+        at = todo.pop(0)
+        if at in seen:
             continue
-        seen.add(g.id)
-        for m in g.parts:
-            (todo.append(m) if _group(plan, m) else held.add(m))
-    return [p for p in plan.ids() if p in held]
+        seen.add(at)
+        for m in by[at]:
+            (todo.append(m) if m in by else held.append(m))
+    return [p for p in plan.ids() if p in set(held)] if isinstance(plan, Plan) else list(dict.fromkeys(held))
 
 
 #: How deep groups may nest: a camper → the box → its walls is two (Theo, 2026-11-20: "two deep is fine").

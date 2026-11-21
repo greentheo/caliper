@@ -68,8 +68,7 @@ def _rule_findings(store: DesignStore, report) -> dict:
     out = {"findings": [], "measured": 0, "unmeasured": [], "notes": []}
     if report is None:
         return out
-    from .assembly import group_members
-    from .plan import group_mates
+    from .plan import group_mates, group_parts
 
     ids = {p.id for p in store.design.parts}
     mates = {m.id: m for m in store.assembly.mates}
@@ -97,7 +96,7 @@ def _rule_findings(store: DesignStore, report) -> dict:
             continue
         named = list(mate.between) if mate else sorted(_names(r.expr) & (ids | {g["id"] for g in groups}))
         # a group's finding names its parts, so each one's Things to fix lists it (CALI-36, #17)
-        parts = list(dict.fromkeys(q for n in named for q in (group_members(groups, n) or [n])))
+        parts = list(dict.fromkeys(q for n in named for q in (group_parts(groups, n) or [n])))
         if mate is not None and mate.kind == "fits_in":
             inner, host = mate.between
             c = 0.3 if mate.value is None else abs(mate.value)

@@ -41,6 +41,7 @@ import yaml
 from pydantic import Field
 
 from .assembly import Assembly, Part
+from .errors import scrubbed
 from .occt import OCCT
 from .spec import Spec, _Base
 
@@ -412,6 +413,8 @@ class DesignStore:
             follows.refuse_cycle(self, part_id, script)    # A follows B follows A: refused in words (#266)
 
         entry = self.design.part(part_id)
+        if entry is None and part_id in {g["id"] for g in self.design.groups}:   # a new part never takes a group's name
+            raise ValueError(f"{part_id!r} is a group of this design's plan: a part needs a name of its own (#399)")
         version = (entry.version if entry else 0) + 1
         pdir = self.part_dir(part_id)
         os.makedirs(pdir, exist_ok=True)
@@ -631,6 +634,30 @@ class DesignStore:
 
     def log(self, skipped: Optional[list] = None) -> list[dict]:
         return _read_jsonl(self.log_path, skipped)
+
+    def group_geometry(self, group_id: str):
+        """A group's built parts together, posed (CALI-36, #17, for slice E: one rule for "not measured"), as
+        ``(GroupGeometry, "")``, or ``(None, why)``: not a group, a name a part has too, a part not built yet, or a part
+        that didn't build."""
+        from .assembly import group_geometry
+        from .plan import group_parts
+
+        groups = self.design.groups
+        members = group_parts(groups, group_id)
+        if not members:
+            return None, f"there's no group {group_id!r} in this design's plan"
+        if self.design.part(group_id) is not None:
+            return None, f"{group_id} names both a part and a group: rename the part"
+        unbuilt = [m for m in members if not (self.design.part(m) and self.design.part(m).version)]
+        if unbuilt:
+            return None, f"waits for {' and '.join(unbuilt)} to be built"
+        got = {}
+        for m in members:
+            try:
+                got[m] = self.part_geometry(m)
+            except Exception as e:  # noqa: BLE001 — a part that won't build: the group isn't measured, and says which
+                return None, f"{group_id} isn't measured: {m} didn't build ({scrubbed(e)})"
+        return group_geometry(got), ""
 
     def part_geometry(self, part_id: str):
         """Build/load one part as it sits in the design (posed, B-rep kept for scripts)."""
