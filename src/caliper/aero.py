@@ -206,10 +206,11 @@ def _restate(script: str, old: dict, values: dict) -> str:
         head, note = line[:col], line[col:]
         was, new = float(old[name]), float(values[name])
         figs = list(_FIGURE.finditer(note))
-        near = lambda f: abs(_figure_mm(f.group(1), f.group(2)) - was) <= max(0.5, 0.01 * abs(was))   # noqa: E731
-        hits = [f for f in figs if near(f)]
+        near = lambda f, x: abs(_figure_mm(f.group(1), f.group(2)) - x) <= max(0.5, 0.01 * abs(x))   # noqa: E731
+        hits = [f for f in figs if near(f, was)]
         if (not hits and len(figs) == 1 and params.unit_of(name, "") == "mm"   # a length by its name: "4 in a row" isn't one
-                and re.fullmatch(r"#\s*~?\s*", note[:figs[0].start(1)]) and _STATES.match(note, figs[0].end())):
+                and re.fullmatch(r"#\s*~?\s*", note[:figs[0].start(1)]) and _STATES.match(note, figs[0].end())
+                and not near(figs[0], new)):              # already this number: it stays as it's written
             hits = figs                                   # its one figure, stating the number, was already stale: it says this one
         for f in reversed(hits):
             said = _format(new) if f.group(2) == "mm" else _inch_text(new)
@@ -218,6 +219,14 @@ def _restate(script: str, old: dict, values: dict) -> str:
             note = note[:f.start(1)] + said + note[f.end(1):]
         lines[n - 1] = head + note
     return "".join(lines)
+
+
+def restate(script: str) -> str:
+    """The script with every ``PARAMS`` comment saying its number now (#266's design note, #267's small ask 1): a comment
+    gone stale before #267 ("height": 406.4, # 20 in) says 16 in, by :func:`_restate`'s rule for a figure stating the number.
+    A figure that's already the number, or another thing's size, stays. For what a reader is shown; nothing is written."""
+    now = read_params(script)
+    return _restate(script, {n: math.nan for n in now}, now) if now else script
 
 
 def set_params(script: str, values: dict[str, float]) -> str:
