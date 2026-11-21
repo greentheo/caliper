@@ -227,9 +227,9 @@ Output ONLY a raw JSON object (no markdown, no prose):
 
 def llm_refine(spec: Spec, instruction: str, client=None, model: Optional[str] = None) -> RefineResult:
     if client is None:
-        from anthropic import Anthropic
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
     # No assistant prefill: some models (e.g. claude-sonnet-4-6) reject a trailing assistant turn.
     msg = llm.ask(
         client,
@@ -250,6 +250,8 @@ def apply_refinement(spec: Spec, instruction: str, use_llm: bool = True, client=
     if use_llm:
         try:
             return llm_refine(spec, instruction, client=client)
+        except llm.NoKey:                         # no key: the offline parser, as before #372
+            pass
         except llm.Stopped:                       # never something else changed quietly in its place
             raise
         except Exception as e:

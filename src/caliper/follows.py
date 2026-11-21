@@ -207,14 +207,15 @@ def sources_of(store, script: str, on: Optional[str] = None) -> dict[str, Option
 
 
 def told(store, on: str) -> str:
-    """What the designer of a part added on ``on`` reads (#266): ``on``'s numbers, its comments true, and to follow them."""
+    """What the designer of a part added on ``on`` reads (#266): ``on``'s numbers, its comments true (:func:`aero.restate`:
+    the script on disk is unchanged), and to follow them."""
     if not store.design.part(on) or not store.is_scripted(on):
         return ""
     import re
 
     from . import aero
 
-    script = store.read_script(on)
+    script = aero.restate(store.read_script(on))       # its comments true, even stale from before #267 (#267's small ask 1)
     node = aero._params_node(ast.parse(script))
     if node is None:
         return ""

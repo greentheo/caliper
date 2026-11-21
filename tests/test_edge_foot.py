@@ -171,9 +171,9 @@ def test_no_reader_says_holds_on_the_middle_only(tmp_path, monkeypatch):
                            "min_safety": 2, "holds": True, "middle_only": True})
     assert "still holds" not in text and "times over" not in text and "a grown-up checks it" in text
     # the page: the badges, the run's word and the history line, run in node; the callout asks the same caveat()
-    node = shutil.which("node") or os.path.expanduser("~/.nvm/versions/node/v22.17.1/bin/node")
-    if not os.path.exists(node):
-        pytest.skip("no node")
+    from ._node import node as _pick
+
+    node = _pick()                             # 20 or newer, or it skips saying why (CALI-237)
     src = open(os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "design.js")).read()
     consts = "".join(re.search(rf"^const {n} = .*?;\n(?=\S)", src, re.M | re.S).group(0)
                      for n in ("verdictTone", "verdictBadge", "settled", "caseBadge", "runBadge", "runWord"))

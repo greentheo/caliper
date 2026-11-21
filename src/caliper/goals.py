@@ -149,9 +149,9 @@ def draft(store: DesignStore, said: str, data: dict, *, client=None, model: Opti
     """Claude's list of checks and objectives as they should now be."""
 
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
     msg = llm.ask(client, "goals", model=model, system=_SYSTEM,
                   messages=[{"role": "user", "content": _context(store, data, said)}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
@@ -187,7 +187,7 @@ def propose(store: DesignStore, said: str, *, use_llm: bool = True, client=None)
     data = read(store)
     if not ours(data):
         return None
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             return draft(store, said, data, client=client)
         except llm.Stopped as e:

@@ -1299,7 +1299,7 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     if not strength:
         raise ValueError(f"'{part_id}' only says how it might tip, not what it must hold: add a load that isn't a tip")
     loads = parse_loads(strength)
-    mesh = store.part_geometry(part_id).require_mesh()
+    mesh = store.part_local(part_id).require_mesh()   # in its own frame, where its loads and pieces are (#374)
     from .measure import closed, open_near
 
     if not closed(mesh):                       # said where, never a throw from deep in a boolean (CALI-118)
@@ -1794,16 +1794,31 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
                                        "version": store.design.part(part_id).version})
         raise
     loads, mat, held = ctx["loads"], ctx["mat"], ctx["held"]
+    if stop:                                          # voxelized: a stop here writes nothing (#398)
+        stop()
 
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     out_dir = os.path.join(runs_dir(store), rid)
     os.makedirs(out_dir, exist_ok=True)
+
+    def halt() -> None:
+        """A stop between its steps (#398, CALI-234): what's half made goes with it, so a stopped check writes no run."""
+        if stop:
+            try:
+                stop()
+            except BaseException:
+                import shutil
+
+                shutil.rmtree(out_dir, ignore_errors=True)
+                raise
     cases = []
     t1 = time.time()                                  # the FEA's own time, for the finer run's estimate (CALI-97)
     if at_once(ctx):
         emit("case", f"{len(loads)} cases, solved together", progress=0.0)
     every = solved(ctx)                               # one solver, every case (#345)
+    halt()                                            # solved together: the solve itself can't stop part way
     for i, load in enumerate(loads):
+        halt()                                        # each case: its heat and its joints
         emit("case", f"{load['name']}: {load['lb']:g} lb × {load['factor']:g}", progress=i / len(loads))
         case, r = check_load(ctx, i, min_safety, got=every[i])
         if r.supported:
@@ -1900,6 +1915,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     if filled(store, part_id):                        # what this number rests on (CALI-96)
         record["filled"] = True
         notes.append(FILLED_NOTE)
+    halt()                                            # the last: after it, the run is written whole
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
     from . import verdicts
@@ -2050,7 +2066,7 @@ def piece_at(store: DesignStore, part_id: str, at) -> Optional[str]:
     try:
         declared = C.declared(store, part_id)
         pieces = shapes(declared)
-        _sides(store.part_geometry(part_id).require_mesh(), [pc for pc in pieces if pc["kind"] == "sheet"])
+        _sides(store.part_local(part_id).require_mesh(), [pc for pc in pieces if pc["kind"] == "sheet"])
     except Exception:  # noqa: BLE001 — unnamed, then
         return None
     p = np.asarray([at], float)

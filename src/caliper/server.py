@@ -326,6 +326,8 @@ def create_app():
         intake = draft_spec(req.intent, machine=req.machine, use_llm=not req.no_llm)
         try:
             res = improve(intake.spec, max_rounds=req.max_rounds)
+        except llm.Stopped:                    # no key, declined, cut off: 422 in its words, said once (#372 review)
+            raise
         except Exception as e:  # noqa: BLE001 — almost always a missing/invalid ANTHROPIC_API_KEY
             raise HTTPException(status_code=503, detail=f"authoring needs the Claude API: {e}")
         return _finish_authored(intake.spec, res, {

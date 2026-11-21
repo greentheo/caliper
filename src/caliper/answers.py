@@ -603,6 +603,21 @@ def _line(text: str, status: str = "info", **kw) -> dict:
 # ---------------------------------------------------------------------------
 # One part
 # ---------------------------------------------------------------------------
+def seat_unchecked(store: DesignStore, state: dict, p: dict) -> list[str]:
+    """A seat's cases nobody checked (#86 item 3), as the part's card and the design's card both say them (#383: the two
+    views read the same verdict): its legs' buckling dropped where its check took them as columns (#316)."""
+    from . import scenarios as SC
+    from . import tipping
+
+    missing = tipping.unchecked(SC.declared(store, p["id"]), p.get("intent") or "")   # edited too (#312 re-check)
+    latest = next((r for r in state.get("load_runs") or [] if r["part"] == p["id"] and r.get("version") == p["version"]),
+                  None)
+    if latest and any(r.get("between", "").endswith(", as a column") for c in latest.get("cases") or []
+                      for r in (c.get("joints") or {}).get("rows") or []):
+        missing = [m for m in missing if m != tipping.LEGS_BUCKLING]
+    return missing
+
+
 def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
     from . import load_study, making
 
@@ -640,7 +655,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         try:
             from . import consistency
 
-            geom = store.part_geometry(pid)                  # cached by the assembly (path, mtime)
+            geom = store.part_local(pid)                     # its own frame, as its pieces (#375); cached by path, mtime
             said = consistency.checked(store, pid)
             smaller = consistency.plan_differs(C.declared(store, pid), geom)
             off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
@@ -715,16 +730,10 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
             if ways:
                 work.append(_line(f"Not checked yet: {' or '.join(ways)} (no push is declared that way, and its base "
                                   f"is no wider that way).", "warn", study="tip"))
-            from . import scenarios as SC
-
-            missing = tipping.unchecked(SC.declared(store, pid), p.get("intent") or "")   # edited too (#312 re-check)
+            missing = seat_unchecked(store, state, p)
         except Exception as e:  # noqa: BLE001 — said, never a crash of the card
             work.append(_line(f"Tipping: not checked ({scrubbed(e)}).", "warn", study="tip"))
             missing = []
-        latest = next((r for r in state.get("load_runs") or [] if r["part"] == pid and r.get("version") == p["version"]), None)
-        if latest and any(r.get("between", "").endswith(", as a column") for c in latest.get("cases") or []
-                          for r in (c.get("joints") or {}).get("rows") or []):
-            missing = [m for m in missing if m != tipping.LEGS_BUCKLING]     # its legs checked as columns (#316)
         if missing:                             # a seat's cases nobody checked, said (#86 item 3)
             work.append(_line("Not checked yet for a seat: " + "; ".join(missing) + ".", "warn", study="tip"))
     frames = [r for r in state.get("frame_runs") or [] if r["part"] == pid]
@@ -1261,7 +1270,12 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         # with no key the page shows the key's note where Build it would be: the line says so, never "press" (#89)
         what.append(_line("That's the plan, before anything's drawn: its numbers and the checks between the parts are "
                           "under the numbers. " + ("Say what to change, or press Build it." if state.get("claude", True)
+                                                   and not pl.get("questions")
+                                                   else "Answer its question first: Build it waits for it."
+                                                   if state.get("claude", True)
                                                    else "Building it needs Claude, which isn't set up here."), "info"))
+        for q in pl.get("questions") or []:   # only the person can say: Build it builds nothing over it (#371)
+            what.append(_line(f"Before I build it: {q}", "warn"))
     else:
         what.append(_line("Not built yet: answer its questions and press Build it.", "warn"))
     assumed = sum(1 for r in state.get("requirements") or [] if r.get("source") == "assumed")
@@ -1299,6 +1313,17 @@ def design(store: DesignStore, state: dict) -> list[dict]:
     elif not work and not broken:
         work.append(_line("Nothing to hold it to yet: say what it must do.", "warn"))
     work = broken + work
+    # what a part's own card says isn't checked yet, said here too: the design's view reads as its parts' do (#383)
+    many = len([p for p in state.get("parts") or [] if p.get("loads") and p.get("role") != "fixed" and p.get("built")]) > 1
+    for p in state.get("parts") or []:
+        if p.get("loads") and p.get("role") != "fixed" and p.get("built"):
+            try:
+                missing = seat_unchecked(store, state, p)
+            except Exception:  # noqa: BLE001 — the part's own card says why
+                missing = []
+            if missing:
+                work.append(_line((f"The {p['id']}: not" if many else "Not") + " checked yet for a seat: "
+                                  + "; ".join(missing) + ".", "warn", study="tip"))
     if solo:                                         # one part: its Make it better here too, no selecting first (#92)
         work += [ln for ln in solo["work"]["lines"] if ln.get("better")]
 
