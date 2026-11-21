@@ -301,12 +301,12 @@ def _html(view):
 
 def test_on_a_desktop_rows_can_be_dragged_and_are_indented():
     h = _html("canDrag: true")
-    assert h.count('draggable="true"') == 2 and "margin-left:18px" in h and "needs a wider window" not in h
+    assert h.count('draggable="true"') == 2 and "margin-left:18px" in h and "Hold a part" not in h
 
 
 def test_on_a_phone_rows_can_t_and_the_drawer_says_so():
     h = _html("canDrag: false")
-    assert "draggable" not in h and "Moving parts needs a wider window" in h
+    assert "draggable" not in h and "Hold a part to move it" in h          # its menu moves it now (#94, test_tree_keys)
 
 
 def test_the_tree_says_what_it_s_waiting_for():
@@ -372,8 +372,8 @@ def _render(phone, saying="null"):
 
 def test_the_real_tree_drags_on_a_desktop_and_not_on_a_phone():
     """reviewer-2 on #204: eight mutants on renderTree's wiring survived; it's run here, not its parts."""
-    assert _render("false").count('draggable="true"') == 2 and "needs a wider window" not in _render("false")
-    assert "draggable" not in _render("true") and "Moving parts needs a wider window" in _render("true")
+    assert _render("false").count('draggable="true"') == 2 and "Hold a part" not in _render("false")
+    assert "draggable" not in _render("true") and "Hold a part to move it" in _render("true")
     assert "Waiting for the job on this design" in _render("false", "'Waiting for the job on this design to finish…'")
 
 

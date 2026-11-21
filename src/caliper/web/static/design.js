@@ -253,6 +253,26 @@ function dropZone(e, row) {
   const box = row.getBoundingClientRect(), y = (e.clientY - box.top) / (box.height || 1);
   return y < 0.3 ? 'before' : y > 0.7 ? 'after' : 'into';
 }
+// a part moved one step without a mouse, by its keys or its menu (#94): up or down past the part beside it, in under the part
+// above it (as that part's last), or out of the part it sits under (to just after it). A drop the drag already makes, as
+// [target, zone] for moveInTree; null where there's nowhere to go
+function nudge(design, id, dir) {
+  const parent = (design.tree || {}).parent || {}, ids = design.parts.map((p) => p.id);
+  const over = (k) => (ids.includes(parent[k]) ? parent[k] : null);
+  const rows = treeRows(design).map((r) => r.p.id), up = over(id);
+  const level = rows.filter((k) => over(k) === up), at = level.indexOf(id);
+  const before = level[at - 1], after = level[at + 1];
+  if (dir === 'up') return before ? [before, 'before'] : null;
+  if (dir === 'down') return after ? [after, 'after'] : null;
+  if (dir === 'in') {
+    if (!before) return null;
+    const own = rows.filter((k) => over(k) === before);
+    return own.length ? [own[own.length - 1], 'after'] : [before, 'into'];
+  }
+  if (dir === 'out') return up ? [up, 'after'] : null;
+  return null;
+}
+const TREE_KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowRight: 'in', ArrowLeft: 'out' };
 function treeHtml(design, view) {
   const rows = treeRows(design).map(({ p, depth }) => {
     const fixed = p.role === 'fixed', off = view.parts.has(p.id);
@@ -260,7 +280,7 @@ function treeHtml(design, view) {
     const editing = view.rename && view.rename.part === p.id;
     const head = `<div class="trow part${view.scope === p.id && !view.piece ? ' on' : ''}${fixed ? ' ref' : ''}${off ? ' off' : ''}"${view.canDrag === false ? '' : ` draggable="true" data-drag="${esc(p.id)}"`}>
       <button class="eye" aria-label="Show or hide the whole part" data-eye="${esc(p.id)}">${off ? EYE_OFF : EYE_ON}</button>
-      <button class="tname" data-sel="${esc(p.id)}"${fixed ? ' data-fixed="1"' : ''}>${esc(p.name || p.id)}</button>
+      <button class="tname" data-sel="${esc(p.id)}"${fixed ? ' data-fixed="1"' : ''} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowRight Alt+ArrowLeft">${esc(p.name || p.id)}</button>
       <span class="side">${fixed ? 'reference' : `v${p.version}`}</span></div>`
       + (editing && view.rename.key == null ? renameRow(p.id, null, view.rename.draft) : '')
       + (p.mirror_of ? `<div class="tmirror">a mirror of ${esc(p.mirror_of)}: change it there
@@ -283,7 +303,7 @@ function treeHtml(design, view) {
   const legend = (design.legend || []).length ? `<div class="tlegend"><div class="tlegend-h">Materials</div>${design.legend.map((m) =>
     `<div class="tlegend-r"><span class="swatch" aria-hidden="true" style="background:${esc(m.color)}"></span>${esc(m.label)} · ${m.count} piece${m.count === 1 ? '' : 's'}</div>`).join('')}</div>` : '';
   return `<div class="tree-head"><button class="fold" data-fold="1" aria-expanded="${view.open}">${view.open ? '▾' : '▸'} Parts</button>
-    <span class="note">${view.saying ? esc(view.saying) : `hidden pieces are still checked${view.canDrag === false ? '. Moving parts needs a wider window' : ''}`}</span></div>${view.open ? rows + legend : ''}`;
+    <span class="note">${view.saying ? esc(view.saying) : `hidden pieces are still checked${view.canDrag === false ? '. Hold a part to move it' : ''}`}</span></div>${view.open ? rows + legend : ''}`;
 }
 function renderTree() {
   const box = $('tree');
@@ -394,8 +414,20 @@ function menuItems(design, pid, piece) {
   if (p.study === 'carve') studied('carve', 'carve', 'Carve it');         // whichever made_of says; neither where it says none
   else if (p.study === 'lighten') studied('lighten', 'lighten', 'Lighten it');
   items.push(p.mirror_of ? { id: 'unmirror', label: `Break the mirror (of ${p.mirror_of})` } : { id: 'mirror', label: 'Mirror it…' });
+  if (Object.values(TREE_KEYS).some((d) => nudge(design, pid, d))) items.push({ id: 'tmove', label: 'Move in the tree ▸' });   // a phone's drag (#94)
   items.push({ id: 'versions', label: 'Versions ▸' }, { id: 'copyName', label: 'Copy its name' });
   return items;
+}
+function treeMovesHtml(design, pid) {          // Move in the tree ▸: where it can go, by name, with the keys that do it (#94)
+  const p = design.parts.find((x) => x.id === pid), name = (id) => { const q = design.parts.find((x) => x.id === id); return q.label || q.name || id; };
+  const parent = (design.tree || {}).parent || {};
+  const ways = [['up', 'Move up', 'Alt+↑'], ['down', 'Move down', 'Alt+↓'], ['in', 'Put it under {}', 'Alt+→'], ['out', 'Take it out of {}', 'Alt+←']];
+  return `<div class="pmenu-title">${esc(p.label || p.name || p.id)} · in the tree</div>` + ways.map(([dir, label, keys]) => {
+    const to = nudge(design, pid, dir);
+    if (!to) return '';
+    const by = dir === 'in' ? dropped(design, pid, to[0], to[1]).parent[pid] : parent[pid];
+    return `<button role="menuitem" data-menu="tmove:${dir}">${esc(label.replace('{}', by ? name(by) : ''))} <span class="why">${keys}</span></button>`;
+  }).join('');
 }
 function versionsHtml(p) {                     // Versions ▸: each other version, newest first, with what was asked of it (#299)
   const said = {};
@@ -508,6 +540,7 @@ async function menuDo(id) {
   }
   if (id === 'deletePieceYes') return deletePiece(pid, piece, m.plan);
   if (id === 'versions') return menuConfirm(versionsHtml(S.design.parts.find((x) => x.id === pid)));   // ▸ (#299)
+  if (id === 'tmove') return menuConfirm(treeMovesHtml(S.design, pid));
   if (id === 'keep') return closeMenu();
   if (id === 'deleteYes' || id === 'deleteBoth') return deletePart(pid, id === 'deleteBoth' ? m.mirroredBy || [] : []);
   if (id === 'unmirrorThem') {                 // its mirrors become parts of their own; then it's asked again
@@ -523,6 +556,7 @@ async function menuDo(id) {
     t.rename = { part: pid, key: piece, draft: pc ? pc.name : (p.label || p.name || p.id) };
     return renderTree();
   }
+  if (id.startsWith('tmove:')) { const to = nudge(S.design, pid, id.slice(6)); return to ? moveInTree(pid, to[0], to[1]) : null; }
   if (id === 'hide') return toggleHidden(pid, piece ?? null);
   if (id === 'only') return showOnly(pid, piece);
   if (id === 'all') { t.parts = new Set(); t.pieces = new Set(); keepTree(); renderTree(); paint(); return; }
@@ -718,11 +752,24 @@ $('tree').addEventListener('dragover', treeDragOver);
 $('tree').addEventListener('drop', treeDrop);
 $('tree').addEventListener('dragleave', treeDragLeave);
 $('tree').addEventListener('dragend', () => { TREE.drag = null; clearDrop(); });
-$('tree').addEventListener('keydown', (e) => {
-  if (!e.target.dataset.renameInput) return;
-  if (e.key === 'Enter') { e.preventDefault(); e.target.parentElement.querySelector('[data-rename-save]').click(); }
-  if (e.key === 'Escape') { TREE.rename = null; e.target.blur(); renderTree(); }
-});
+// the tree's keys: the rename box's Enter and Escape, and Alt+arrows on a part's row to move it (#94). Alt+← is the
+// browser's Back elsewhere, so on a part's row it's always the tree's, even where the part can't go
+async function treeKey(e) {
+  if (e.target.dataset.renameInput) {
+    if (e.key === 'Enter') { e.preventDefault(); e.target.parentElement.querySelector('[data-rename-save]').click(); }
+    if (e.key === 'Escape') { TREE.rename = null; e.target.blur(); renderTree(); }
+    return;
+  }
+  const b = e.target.closest && e.target.closest('button.tname[data-sel]'), dir = TREE_KEYS[e.key];
+  if (!b || !dir || !e.altKey || e.ctrlKey || e.metaKey || b.dataset.key != null || TREE.rename || !S.design) return;
+  e.preventDefault();
+  const pid = b.dataset.sel, to = nudge(S.design, pid, dir);
+  if (!to) return;
+  await moveInTree(pid, to[0], to[1]);
+  const row = document.querySelector(`#tree button.tname[data-sel="${CSS.escape(pid)}"]:not([data-key])`);
+  if (row) row.focus();                        // redrawn: the keys go on moving the same part
+}
+$('tree').addEventListener('keydown', treeKey);
 
 // ------------------------------------------------------------------------------------- viewer
 const viewer = $('viewer');
