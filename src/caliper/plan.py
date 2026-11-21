@@ -280,10 +280,11 @@ def _by_the_numbers(rule: "PlanRule", plan: "Plan") -> Optional[str]:
 
 
 def _ground(p: PlanPart) -> bool:
-    """What it stands on, not a part: the id's LAST word is a ground word and it isn't made (#123 review:
-    "floor_lamp", "wall_shelf" and "ground_stake" are parts; "bathroom_floor" and "garage_wall" aren't; a
-    "retaining_wall" that's built is)."""
-    return p.id.split("_")[-1] in GROUND and not p.made.strip()
+    """What it stands on, not a part: what the plan says is the fixed surroundings (``role: fixed``), its id's LAST word a
+    ground word, and not made (#123 review: "floor_lamp", "wall_shelf" and "ground_stake" are parts; "bathroom_floor"
+    and "garage_wall" aren't; a "retaining_wall" that's built is). A part to be made is never dropped by its name
+    (CALI-218, #370: a camper's floor panel with no ``made`` vanished as the ground)."""
+    return p.role == "fixed" and p.id.split("_")[-1] in GROUND and not p.made.strip()
 
 
 def said_aside(plan: Plan) -> str:

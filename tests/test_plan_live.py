@@ -164,6 +164,26 @@ def test_a_part_named_for_where_it_goes_is_kept(pid):
     assert pid in got.ids() and not got.dropped and P.dropped_line(got) == ""
 
 
+@pytest.mark.parametrize("pid", ["box_floor", "floor", "cabin_wall", "camper_floor", "ground"])
+def test_a_part_to_be_made_is_never_dropped_by_its_name(pid):
+    """#370: a camper's floor panel the planner gave no ``made`` vanished as the ground. Only what the plan says is the
+    fixed surroundings (``role: fixed``) is ground; a part to be made stays, whatever its name."""
+    plan = json.loads(json.dumps(STOOL).replace("bathroom_floor", pid))
+    plan["parts"][1].update({"role": "movable", "what": "a plywood panel"})
+    got = P.validate(plan)
+    assert pid in got.ids() and not got.dropped and P.dropped_line(got) == ""
+    assert [m.between for m in got.mates] == [["step_stool", pid]]
+
+
+def test_a_fixed_part_that_says_how_it_was_made_stays_a_reference_as_before():
+    """Unchanged by #370: something the person has, with a ground word for a name but a ``made`` saying what it is, is drawn
+    as a reference part, not dropped."""
+    plan = json.loads(json.dumps(STOOL).replace("bathroom_floor", "garage_floor"))
+    plan["parts"][1]["made"] = "poured concrete"
+    got = P.validate(plan)
+    assert "garage_floor" in got.ids() and not got.dropped
+
+
 def test_a_wall_that_s_built_is_a_part():
     plan = json.loads(json.dumps(STOOL).replace("bathroom_floor", "retaining_wall"))
     plan["parts"][1].update({"made": "stacked block", "role": "movable"})
