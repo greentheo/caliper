@@ -196,7 +196,7 @@ def test_a_change_that_breaks_another_part_is_named_in_the_same_turn(gantry):
     assert res.broke == ["carriage_misses_rail"]
     assert not res.ok                                       # the part passes; the DESIGN does not
     assert "broke 1 design check" in res.reply
-    assert "carriage_misses_rail" in res.reply
+    assert "carriage misses rail" in res.reply              # named as the card names it (CALI-227)
     assert "roll it back" in res.reply                      # and it offers the way out
 
 
