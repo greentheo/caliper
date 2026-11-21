@@ -6,6 +6,8 @@ started later, which runs at libomp's default (caliper-reviewer, on #350: 13 of 
 converged). So the job pools hold each of their threads, and the strength check's solve holds the one it runs on."""
 
 import functools
+import os
+import sys
 import threading
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any
@@ -22,8 +24,10 @@ def one_thread() -> AbstractContextManager[Any]:
 
 
 def hold() -> None:
-    """This thread's pools at one thread, for good: a thread pool's initializer."""
+    """This thread's pools at one thread, for good: a thread pool's initializer. And whittle's case threads made safe
+    (:func:`cases_safe`): carve's multi-case solves go through whittle's own solve, never the strength check's (#356)."""
     one_thread()                       # threadpoolctl applies the limit as it's made; never leaving it, it stays
+    cases_safe()
 
 
 @functools.lru_cache(maxsize=None)
@@ -45,12 +49,13 @@ def cases_safe() -> None:
     """whittle's ``solve_each`` (greentheo/whittle#9) runs a check's cases on threads it starts, where the calling
     thread's BLAS is on one thread. A thread it starts takes the process's default, not the caller's: where that isn't
     one (numpy loaded before Caliper), solves at once can come back wrong. So there its cases go one at a time
-    (``CASE_THREADS = 1``), for the process: the default can't change. #352 has whittle holding its own threads."""
+    (``CASE_THREADS = 1``), for the process: the default can't change. #352 has whittle holding its own threads.
+
+    Never imports whittle (#356: ``import caliper`` calls it where numpy loaded first): a whittle not loaded yet reads
+    ``WHITTLE_CASE_THREADS`` when it loads, and one loaded already has its ``CASE_THREADS`` set."""
     if fresh_single():
         return
-    try:
-        from whittle.physics import fea
-    except ImportError:  # pragma: no cover
-        return
-    if hasattr(fea, "CASE_THREADS"):
+    os.environ["WHITTLE_CASE_THREADS"] = "1"
+    fea = sys.modules.get("whittle.physics.fea")
+    if fea is not None and hasattr(fea, "CASE_THREADS"):
         fea.CASE_THREADS = 1
