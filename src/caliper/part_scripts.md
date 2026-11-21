@@ -71,7 +71,12 @@ def construction(params, build=None):
   outline at z = H. A sloped or splayed panel's outline is its real corners in 3D, on the panel's own
   face (its four corners, top and foot), never a flat stand-in. A panel
   bent to a curve gives `facets` (a list of flat polygons) instead of `outline`. `covers` says what
-  goes on its faces, one entry per face covered (`["paint"]` for the outside only).
+  goes on its faces, one entry per face covered (`["paint"]` for the outside only). An entry is a name
+  (`"paint"`, `"fiberglass"`) or, where the thickness or face must be said, `{"material": "fiberglass",
+  "t": 0.5, "face": "in"}`. A skin (`fiberglass`, `fiberglass_2`, `pmf`, `glass_patch`) counts in the
+  panel's strength; anything else (paint) is weight only. `"face": "out"` is the face the `outline` is
+  drawn on, `"in"` the face `thickness` behind it; without `face`, the first entry is out and the second
+  in. So draw a skinned wall's outline on its outside face.
 - **stick**: a straight length from `a` to `b` along its centreline. Lumber by nominal `size`, or
   steel tube by `outer` (the square tube's outside width) and `wall`, with `"material": "steel"`.
 - **covering**: a covering on its own, over an `outline` or `facets`, such as a patch.
@@ -130,7 +135,9 @@ that change which tubes there are. Caliper writes `PLATES` itself when a plate s
 
 ## What it must hold clear: keeps(params, build=None)
 
-Boxes the shape must not cut into, like a mattress or the cargo:
+Boxes the shape must not cut into, like a mattress or the cargo. After every revision the shape's surface
+is measured against them, and a cut fails the round (`keeps_clear`, "the outside cuts 40 mm into the
+mattress"):
 
 ```python
 def keeps(params, build=None):
@@ -265,10 +272,42 @@ The bounds a drag study may take each PARAMS number between. Numbers not listed 
 
 ## Walls and roofs that carry load: shell() and roof()
 
-A part whose walls are structure (a foam core with skins) can describe them as deep beams for the
-frame study, `shell(params, build=None)`, a list of
-`{"name", "a", "b", "depth", "core", "core_t", "skins"}`, and its roof for the snow study,
-`roof(params, build=None)`. Their fields are documented in `frame_study.wall_section` and `snow.py`.
+A part whose walls are structure (a foam core with skins: a camper box, a cargo box) describes them as
+deep beams for the frame study, `shell(params, build=None)`, and its roof for the snow study,
+`roof(params, build=None)`. A foam-core box, its outlines on the outside faces:
+
+```python
+BUILD = {"core": "xps", "core_t": 50.8, "skin_out": "fiberglass", "skin_in": "fiberglass", "floor_t": 19.05}
+
+def construction(params, build=None):
+    b = {**BUILD, **(build or {})}
+    skins = [b["skin_out"], b["skin_in"]]                       # out, then in
+    wall = lambda name, outline: {"name": name, "kind": "sheet", "material": b["core"],
+                                  "thickness": b["core_t"], "outline": outline, "covers": skins}
+    return [{"name": "floor", "kind": "sheet", "material": "plywood", "thickness": b["floor_t"],
+             "outline": [...], "covers": ["paint"]},
+            wall("wall_left", [...]), wall("wall_right", [...]), wall("wall_front", [...]),
+            wall("wall_back", [...]), wall("roof", [...])]
+
+def shell(params, build=None):
+    b = {**BUILD, **(build or {})}
+    beam = lambda name, a, bb, depth: {"name": name, "a": a, "b": bb, "depth": depth, "core": b["core"],
+                                       "core_t": b["core_t"], "skins": [b["skin_out"], b["skin_in"]]}
+    return [beam("wall_left", (x0, y1, z0), (x1, y1, z0), wall_h), ...]   # along each wall's foot, depth up
+
+def roof(params, build=None):
+    b = {**BUILD, **(build or {})}
+    return {"length": ..., "width": ..., "core": b["core"], "core_t": b["core_t"],
+            "skins_out": [b["skin_out"]], "skins_in": [b["skin_in"]], "beams": {"count": 0}}
+
+def keeps(params, build=None):
+    return [{"name": "mattress", "note": "a full, 54 x 75 in, 8 in thick", "lo": (...), "hi": (...)}]
+```
+
+A beam runs `a` to `b` along the foot of its wall, `depth` up it. After every revision each beam is held to the
+walls `construction()` lists (`shell_in_walls`): it lies in a wall, of that wall's `core` and `core_t`, with at
+least its skins (an extra skin, a corner patch, must be one the construction declares). A mismatch fails the round. The
+other `roof()` fields are documented in `snow.py`; a beam's in `frame_study.wall_section`.
 
 ## A picked face or edge
 

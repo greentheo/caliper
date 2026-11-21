@@ -21,7 +21,7 @@ import sys
 import traceback
 
 #: What a part may declare beyond its shape, and checked against it (caliper.consistency).
-DECLARED = ("construction", "members", "loads", "held")
+DECLARED = ("construction", "members", "loads", "held", "shell", "keeps")   # shell, keeps: checked too (#1 slice C)
 
 
 def _declared(ns: dict, params: dict) -> dict:

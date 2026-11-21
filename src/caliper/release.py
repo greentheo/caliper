@@ -449,7 +449,7 @@ def _say_stage(pid: str, layer: str, pcs: list[dict], plan: dict, ctx: dict) -> 
             do.append(f"Cut the {', '.join(n for n in names if n in g['panels'])} from {g['label']} — "
                       f"{_router(pid, g)}/sheets/ ({g['sheets']} sheet{'s' if g['sheets'] != 1 else ''}).")
             files.append(f"{_router(pid, g)}/")
-        paint = [c for p in pcs for c in p.get("covers") or [] if c == "paint"]
+        paint = [c for p in pcs for c in p.get("covers") or [] if M.cover_name(c) == "paint"]
         if paint:
             do.append("Paint its underside and seal the edges before anything goes on it"
                       + (" — the road throws water at it." if ctx.get("hitched") else "."))
@@ -574,7 +574,7 @@ def steps(store: DesignStore, plans: dict, bom: dict, ctx: dict) -> tuple[list[d
             if mine:
                 title, do, files = _say_stage(pid, layer, mine, plans[pid], ctx)
                 add(title, do, files, mine, pid, layer)
-        skin = [p for p in pcs if any(c.startswith("fiberglass") for c in p.get("covers") or [])]
+        skin = [p for p in pcs if any(M.cover_name(c).startswith("fiberglass") for c in p.get("covers") or [])]
         if skin:
             cv = [g for g in bom.get(pid, {}).get("coverings", []) if g["material"].startswith("fiberglass")]
             yd = sum(g.get("cloth_yd", 0) for g in cv)
