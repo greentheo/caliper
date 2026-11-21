@@ -34,6 +34,7 @@ from . import construction as C
 from . import load_study as L
 from .design import DesignStore
 from .errors import scrubbed
+from .one_study import one_at_a_time
 from .runs import newest_first
 
 #: Said on every group run until Theo says what a camper on the road carries (#17, the foreman's question 2).
@@ -136,6 +137,54 @@ def _pose_joint(j: dict, M: np.ndarray, pid: str) -> dict:
     return out
 
 
+def _mounts(store: DesignStore, gid: str) -> list:
+    return list(next((g for g in store.design.groups or [] if g["id"] == gid), {}).get("mounts_on") or [])
+
+
+def _fixed_meshes(store: DesignStore, fixed: set) -> list:
+    """The fixed parts (the surroundings: a truck bed, a floor), posed, that a support may land on."""
+    out = []
+    for fid in sorted(fixed):
+        try:
+            out.append(store.part_geometry(fid).require_mesh())
+        except Exception:  # noqa: BLE001 — one that won't build holds nothing up: its supports aren't taken as held
+            continue
+    return out
+
+
+def _under(parts: dict, solid_ids: list, pid: str, lo, hi, rch: float) -> bool:
+    """Whether another part of the solid is under a support of ``pid``: it touches the support and sits no higher than
+    the support's top (one beside it, standing on the same floor, reaches higher)."""
+    for o in solid_ids:
+        if o == pid:
+            continue
+        m = parts[o]["mesh"]
+        if L.touches(m, (lo, hi), rch)[0] and float(m.bounds[1][2]) <= float(hi[2]) + rch:
+            return True
+    return False
+
+
+def _reaches(parts: dict, solid_ids: list, held_by: set, rch: float, gid: str, mounts: list, own: list) -> None:
+    """Every part of the solid reaches one that's held, part to part where they touch; else it isn't checked, said with
+    how far it is from the rest (#420 review: a tray 200 mm above the platform read ✓ on it)."""
+    from .measure import Geometry, min_clearance
+
+    reached, todo = set(held_by), list(held_by)
+    while todo:
+        at = todo.pop()
+        for o in solid_ids:
+            if o not in reached and min_clearance(Geometry(mesh=parts[at]["mesh"]), parts[o]["mesh"]) <= rch:
+                reached.add(o)
+                todo.append(o)
+    off = [p for p in solid_ids if p not in reached]
+    if not off:
+        return
+    pid = off[0]
+    gap = min(min_clearance(Geometry(mesh=parts[pid]["mesh"]), parts[o]["mesh"]) for o in reached)
+    rest = mounts[0] if pid in own and mounts else f"rest of the {gid}"
+    raise ValueError(f"the {pid} doesn't reach the {rest}: {gap:.0f} mm apart")
+
+
 def prepare_group(store: DesignStore, gid: str, emit: Optional[Callable] = None,
                   spacing: Optional[float] = None) -> dict:
     """What a strength check of a group needs, as :func:`caliper.load_study.prepare` gives a part's: the same keys, so
@@ -226,19 +275,29 @@ def prepare_group(store: DesignStore, gid: str, emit: Optional[Callable] = None,
     else:
         coarse = None
 
-    # its supports: each part's own, posed; one landing on another part of the solid is the union's to carry
+    # its supports (#420 review): only where something outside it holds it. A support on a fixed part stays; a floor at
+    # the group's lowest is the ground; a part of a group that mounts on another is held only where that one is; any other
+    # support stays unless one of its parts is under it. Then every part must reach the solid that's held
     rch = L.reach(tol, spacing)
+    mounted = bool(_mounts(store, gid))
+    fixed_meshes = _fixed_meshes(store, fixed)
+    ground = float(mesh.bounds[0][2])
     held = []
     for pid in solid_ids:
         p = parts[pid]
         for h in L.parse_held(SC.held(store, pid, p["declared"]), p["local"].bounds.tolist(), max(spacing * 0.6, 1.0)):
             lo, hi, _ = pose_box(h["lo"], h["hi"], p["M"])
-            if any(L.touches(parts[o]["mesh"], (lo, hi), rch)[0] for o in solid_ids if o != pid):
-                continue
+            if not any(L.touches(fm, (lo, hi), rch)[0] for fm in fixed_meshes):
+                if h.get("default"):
+                    if abs(float(lo[2]) + 1.0 - ground) > rch:       # a floor above the ground: it rests on something
+                        continue
+                elif (pid in own and mounted) or _under(parts, solid_ids, pid, lo, hi, rch):
+                    continue
             held.append({**h, "name": f"{pid}: {h['name']}", "part": pid, "lo": lo, "hi": hi,
                          **({"ground": float(lo[2]) + 1.0} if h.get("default") else {})})
     if not held:
-        raise ValueError(f"nothing holds the {gid} up: every support its parts give lands on another of its parts")
+        raise ValueError(f"nothing holds the {gid} up: none of its parts stands on the ground or on a fixed part")
+    _reaches(parts, solid_ids, {h["part"] for h in held}, rch, gid, _mounts(store, gid), own)
     for item, support in [(h, True) for h in held] + [(ld, False) for ld in loads]:
         on, gap = L.touches(mesh, (item["lo"], item["hi"]), rch)
         if not on:
@@ -294,6 +353,7 @@ def prepare_group(store: DesignStore, gid: str, emit: Optional[Callable] = None,
     return ctx
 
 
+@one_at_a_time                 # two solves at once give wrong FEA (concurrent OpenBLAS): one queue with a part's (#420)
 def study_group(store: DesignStore, gid: str, *, min_safety: float = L.MIN_SAFETY, emit: Optional[Callable] = None,
                 spacing: Optional[float] = None, stop: Optional[Callable[[], None]] = None) -> dict:
     """Every case of the group's own parts through the group, as :func:`caliper.load_study.study` runs a part's. The
@@ -305,11 +365,17 @@ def study_group(store: DesignStore, gid: str, *, min_safety: float = L.MIN_SAFET
     rid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     out_dir = os.path.join(runs_dir(store), rid)
     os.makedirs(out_dir, exist_ok=True)
+    from .consistency import bare_edge, filled
+
+    edged = {p for p in ctx["own"] if bare_edge(store, p)}     # a part's middle-only loads, as its own check says (#420)
     cases = []
+    t1 = time.time()
     every = L.solved(ctx)
     for i, load in enumerate(loads):
         emit("case", f"{load['name']}: {load['lb']:g} lb × {load['factor']:g}", progress=i / len(loads))
         case, r = L.check_load(ctx, i, min_safety, got=every[i])
+        if load.get("part") in edged:
+            case["middle_only"] = True
         if r.supported:
             with open(os.path.join(out_dir, f"case_{i:02d}.json"), "w") as f:
                 json.dump(L.heat_mesh(ctx["mesh"], ctx["ls"].grid, r.von_mises, r.solid, 2 * ctx["spacing"]), f)
@@ -323,6 +389,7 @@ def study_group(store: DesignStore, gid: str, *, min_safety: float = L.MIN_SAFET
             notes.append(ctx[k])
     if ctx["turned"]:
         notes.append(f"Turned other than a quarter turn, so taken as the box round it: {', '.join(ctx['turned'])}.")
+    fea_seconds = time.time() - t1
     worst = L.run_safety(cases)
     record = {
         "id": rid, "group": gid, "kind": "load", "created": time.time(),
@@ -354,6 +421,13 @@ def study_group(store: DesignStore, gid: str, *, min_safety: float = L.MIN_SAFET
         record["unseen"] = L.unseen_walls(ctx.get("found") or [], ctx["spacing"])
         record["across"] = round(thin / ctx["spacing"], 3)
         record["resolved"] = L._sees(thin / ctx["spacing"])
+        if not record["resolved"]:                    # what a finer check would take, as a part's run says it (CALI-97)
+            L.finer_said(record, ctx, cases, fea_seconds, notes)
+    shapes_off = {p: why for p in ctx["solid_ids"] for why in [filled(store, p)] if why}
+    if shapes_off:                                    # a part checked as a block, not as built: its verdict says so (#420)
+        record["filled"] = True
+        record["filled_parts"] = sorted(shapes_off)
+        notes.append(L.FILLED_NOTE)
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
     from . import verdicts

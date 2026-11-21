@@ -46,6 +46,15 @@ def loads(params, build=None):
     return [{"name": "two bags", "lb": 100, "factor": 2.0, "lo": (100, 100, t - 2), "hi": (200, 200, t)}]
 '''
 
+#: The tray held at its two ends, as a part's own check would hold it (reviewer-3's floating tray).
+HELD_ENDS = '''
+
+def held(params, build=None):
+    p = {**PARAMS, **(params or {})}
+    return [{"name": "left end", "lo": (0, 0, 0), "hi": (20, p["d"], BUILD["t"])},
+            {"name": "right end", "lo": (p["w"] - 20, 0, 0), "hi": (p["w"], p["d"], BUILD["t"])}]
+'''
+
 FRAME = '''import cadquery as cq
 
 
@@ -67,12 +76,13 @@ PLAN = {
 ON_TOP = [50.0, 50.0, 450.0]                       # the tray on the stool's top (450 tall)
 
 
-def _store(tmp_path, tray="plywood", at=None, turn=None, build=("stool", "tray"), loads=True, shift=None):
+def _store(tmp_path, tray="plywood", at=None, turn=None, build=("stool", "tray"), loads=True, shift=None, held=False,
+           plan=None):
     s = DesignStore.create("a platform and a box on it", base=str(tmp_path / "designs"))
-    P.save(s, P.validate(PLAN))
-    src = TRAY.replace("MATERIAL", tray)
+    P.save(s, P.validate(plan or PLAN))
+    src = TRAY.replace("MATERIAL", tray) + (HELD_ENDS if held else "")
     if not loads:
-        src = src[:src.index("def loads(")]
+        src = src[:src.index("def loads(")] + (HELD_ENDS if held else "")
     for pid, script in (("stool", LEGGED), ("tray", src)):
         if pid in build:
             s.write_part(pid, script, intent=pid)
@@ -231,3 +241,95 @@ def test_the_box_on_the_platform_s_run_is_kept_on_the_group_and_goes_stale_with_
     assert load_study.list_runs(store) == []                              # a part's own runs never hold it
     store.write_part("stool", LEGGED.replace('"h": 450.0', '"h": 460.0'), intent="taller")
     assert _gs().stale(store, kept) == "the stool has changed since it was checked"
+
+
+# --- #420 review (reviewer-3): no false greens ------------------------------------------------------------------------
+
+ONE = {"parts": [{"id": "stool", "what": "the stool", "made": "sheet"}],
+       "groups": [{"id": "alone", "what": "the stool alone", "parts": ["stool"]}]}
+
+
+def _centred_60():
+    from .test_consistency import STOOL
+    from .test_edge_foot import CENTRED
+
+    return (STOOL + CENTRED).replace('"lb": 200', '"lb": 60').replace("an adult", "a kid")
+
+
+def _filled():
+    from .test_filled_verdict import FILLED
+
+    return FILLED
+
+
+@pytest.mark.parametrize("src, spacing, kind", [(_centred_60, None, "edge"), (_filled, 4.7, "untrusted")],
+                         ids=["middle only", "filled in"])
+def test_a_one_part_group_s_verdict_is_its_part_s_own(tmp_path, monkeypatch, src, spacing, kind):
+    """reviewer-3: the middle-only stool and the filled box both read holds as a group, where their own checks don't."""
+    from caliper import consistency
+
+    monkeypatch.setattr(load_study, "VOXELS_THROUGH", 4)
+    store = DesignStore.create("a stool", base=str(tmp_path / "designs"))
+    P.save(store, P.validate(ONE))
+    store.write_part("stool", src(), intent="a stool")
+    own = load_study.study(store, "stool", spacing=spacing)
+    mine = verdicts.run(own, edge=bool(consistency.bare_edge(store, "stool")))
+    group = verdicts.run(_gs().study_group(store, "alone", spacing=spacing))
+    assert mine["kind"] == kind and not mine["counts_as_pass"]
+    assert [group.get(k) for k in ("kind", "counts_as_pass", "why", "safety")] == \
+        [mine.get(k) for k in ("kind", "counts_as_pass", "why", "safety")]
+    assert [c["kind"] for c in group["cases"]] == [c["kind"] for c in mine["cases"]]
+
+
+@pytest.mark.parametrize("held", [False, True], ids=["its own floor", "held at its ends"])
+def test_a_box_that_doesn_t_reach_the_platform_isn_t_checked_on_it(tmp_path, held):
+    """reviewer-3: the tray 200 mm above the stool's top kept its own supports and read holds 17.5x "on the platform"."""
+    with pytest.raises(ValueError, match="the tray doesn't reach the platform: 200 mm apart"):
+        _gs().prepare_group(_store(tmp_path, at=[50.0, 50.0, 650.0], held=held), "box")
+
+
+def test_on_the_platform_a_box_s_own_supports_go_and_the_platform_s_hold_it(tmp_path):
+    ctx = _gs().prepare_group(_store(tmp_path, held=True), "box")
+    assert [h["name"] for h in ctx["held"]] == ["stool: the floor"]
+
+
+PAIR = {"parts": [{"id": "stool", "what": "the stool", "made": "lumber"}, {"id": "tray", "what": "a tray", "made": "sheet"}],
+        "groups": [{"id": "pair", "what": "the pair", "parts": ["stool", "tray"]}]}
+
+
+def test_two_parts_side_by_side_on_the_floor_both_stand_on_it(tmp_path):
+    """reviewer-3's should-fix: each one's floor beside the other was dropped, so the pair was refused."""
+    ctx = _gs().prepare_group(_store(tmp_path, at=[400.0, 0.0, 0.0], plan=PAIR), "pair")
+    assert [h["name"] for h in ctx["held"]] == ["stool: the floor", "tray: the floor"]
+
+
+def test_a_group_s_check_takes_its_turn_as_a_part_s_does():
+    """Two solves at once give wrong FEA (concurrent OpenBLAS): E3's route runs it in the one queue."""
+    import inspect
+
+    from caliper import one_study
+
+    gs = _gs()
+    assert inspect.unwrap(gs.study_group) is not gs.study_group
+    assert gs.study_group.__code__ is load_study.study.__code__ is one_study.one_at_a_time(lambda: None).__code__
+
+
+
+def test_a_part_s_own_support_on_another_part_goes_and_beside_one_stays(tmp_path):
+    """A group that mounts on nothing: a support with another of its parts under it is the union's to carry; one with a
+    part beside it, standing on the same floor, still holds."""
+    on = _gs().prepare_group(_store(tmp_path / "on", held=True, plan=PAIR), "pair")
+    assert [h["name"] for h in on["held"]] == ["stool: the floor"]
+    beside = _gs().prepare_group(_store(tmp_path / "beside", at=[400.0, 0.0, 0.0], held=True, plan=PAIR), "pair")
+    assert [h["name"] for h in beside["held"]] == ["stool: the floor", "tray: left end", "tray: right end"]
+
+
+def test_a_support_on_a_fixed_part_stays_even_on_the_platform(tmp_path):
+    """The stool fixed (the surroundings): the tray's own ends land on it, so they hold it."""
+    store = _store(tmp_path, held=True)
+    for p in store.assembly.parts:
+        if p.id == "stool":
+            p.role = "fixed"
+    store.save()
+    ctx = _gs().prepare_group(DesignStore.load(store.root), "box")
+    assert [h["name"] for h in ctx["held"]] == ["tray: left end", "tray: right end"]
