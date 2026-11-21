@@ -144,7 +144,7 @@ def panels(store: DesignStore, part_id: str) -> list[dict]:
     from .lighten import MIN_WEB_MM, RIM_MM, _loaded_face_on
 
     declared = C.declared(store, part_id)
-    mesh = store.part_geometry(part_id).require_mesh()
+    mesh = store.part_local(part_id).require_mesh()
     pieces = shapes(declared)
     _sides(mesh, pieces)
     loads = L.parse_loads(declared["loads"]) if declared.get("loads") else []   # script's loads: the drawing of its script
