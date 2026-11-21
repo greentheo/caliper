@@ -1769,6 +1769,36 @@ def router():
         job = RUNNER.submit("scorecard", work, label="score the design", lock=f"score:{slug}")
         return {"job_id": job.id}
 
+    # -- Review it (#238 slice B, CALI-160): Claude's reading of the whole design, on the person's press only -------------
+    @r.get("/api/designs/{slug}/assess")
+    def assess_offer(slug: str):
+        """The button's words and the last reading (#368's shape): ``{"offer": assess.offer, "latest": assess.latest}``."""
+        from . import assess
+
+        store = load(slug)
+        return {"offer": assess.offer(store), "latest": assess.latest(store)}
+
+    @r.post("/api/designs/{slug}/assess")
+    def assess_run(slug: str):
+        """One reading, as a job: one Claude call. Never made by itself, and never without a key: nothing is sent."""
+        from . import assess
+
+        store = load(slug)
+        if not _claude():
+            raise HTTPException(status_code=409, detail="Reviewing it needs Claude, which isn't set up here.")
+        if not any(p.version and store.is_scripted(p.id) for p in store.design.parts):
+            raise HTTPException(status_code=409, detail="Nothing's built to read yet: build it first.")
+
+        def work(j):
+            j.emit("step", "Claude is reading every part against what you asked for")
+            return assess.run(DesignStore.load(slug))
+
+        try:                                   # refused, never queued behind: two tabs made two calls (#396 review)
+            job = RUNNER.submit("assess", work, label=f"Claude's reading · {slug}", lock=f"assess:{slug}", exclusive=True)   # assess.JOB
+        except Busy:
+            raise HTTPException(status_code=409, detail=assess.BUSY)
+        return {"job_id": job.id}
+
     # -- gusset plates (CALI-46): whittle's plate mode at the joints a frame names ---------------------
     @r.post("/api/designs/{slug}/gussets")
     def gussets_run(slug: str, req: GussetRequest):

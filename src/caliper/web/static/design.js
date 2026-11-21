@@ -2315,7 +2315,8 @@ function designView(d) {
     : '<div class="empty">None yet — say what to build first.</div>'}
     ${Object.keys(d.part_errors || {}).length ? '<h4>Won\'t build</h4><ul class="list">' +
       Object.entries(d.part_errors).map(([k, v]) => `<li><b>${esc(k)}</b> <span class="muted small">${esc(v)}</span></li>`).join('') + '</ul>' : ''}`;
-  const work = `<h4>Scorecard</h4><div id="scoreBox">${scoreView(d)}</div>
+  const work = `${d.parts.some((p) => p.built && p.role !== 'fixed') ? `<h4>Claude's reading</h4><div id="assessBox">${assessView()}</div>` : ''}
+    <h4>Scorecard</h4><div id="scoreBox">${scoreView(d)}</div>
     <h4>Design checks</h4>
     ${checks(rep || partChecks(d))}`;
   const buy = d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : '';
@@ -2487,6 +2488,77 @@ function fixCounts(got) {
 function fixesSaid(c) {
   return [c.measured ? `${c.measured} measured wrong` : '', c.readings ? `${c.readings} of Claude's readings` : '',
     c.other ? `${c.other} not measured` : ''].filter(Boolean).join(' · ');
+}
+// ------------------------------------------------------------- Review it (#238 slice B): Claude's reading, on a press
+// One Claude call reads every part against what was asked; what it reads wrong goes under Things to fix as Claude's reading,
+// never as measured (rule 6). Offered, never made by itself; the button's words (Review it / Review again, the cost, the
+// count, what's changed since) are the server's (assess.offer).
+function assessHere() {                 // this design's, never the last one's
+  return S.assess && S.assess.slug === S.slug ? S.assess : null;
+}
+async function loadAssess() {              // once per design, and again after a reading (it drops the offer)
+  const slug = S.slug, a = assessHere();
+  if (!slug || (a && (a.offer || a.loading || a.error))) return;
+  S.assess = { ...(a || {}), slug, loading: true };
+  let got;
+  try { got = await api('GET', `/api/designs/${slug}/assess`); } catch (e) { got = { error: plainly(e.message) }; }
+  if (S.slug !== slug) return;
+  S.assess = { ...S.assess, ...got, loading: false };
+  paintAssess();
+}
+function assessSince(o) {
+  const moved = Object.entries(o.stale || {}), unread = o.unread || [];
+  return [moved.length ? `read on ${moved.map(([p, v]) => `${partOf(p).name || p} v${v}`).join(', ')}; changed since` : '',
+    unread.length ? `${unread.map((p) => partOf(p).name || p).join(', ')} not read yet` : ''].filter(Boolean).join(' · ');
+}
+function assessView() {
+  const a = assessHere();
+  if (!a || !a.offer) return `<div class="small muted">${a && a.error ? esc(a.error) : 'reading…'}</div>`;
+  const o = a.offer, since = assessSince(o);
+  const why = S.claude === false ? "Reviewing it needs Claude, which isn't set up here." : '';
+  return `<div class="small">Claude reads every part against what you asked for, and says what it reads wrong. That's a reading, not a check: what it says goes under Things to fix as Claude's reading.</div>
+    ${since ? `<div class="small" style="color:var(--amber)">${esc(since)}</div>` : ''}
+    <div class="actions"><button id="assessGo"${why || a.running ? ' disabled' : ''}>${esc(o.label)}</button>
+      <span class="muted small">${esc(why || o.cost)}${o.note ? ` · ${esc(o.note)}` : ''}</span></div>
+    ${a.said ? `<div class="small" style="white-space:pre-line${a.ok === false ? ';color:var(--amber)' : ''}">${esc(a.said)}</div>` : ''}`;
+}
+// its section's header: the button's own words, and what's changed since the last reading
+function reviewSection() {
+  const a = assessHere(), o = a && a.offer;
+  return { k: 'review', title: 'Review it <span class="badge">Claude\'s reading</span>', tone: 'info',
+    // a header is drawn as HTML (subHead): a part's name in it is text
+    answer: esc(!o ? 'one Claude call, on your press' : assessSince(o) || (o.count ? `${o.count} reading${o.count > 1 ? 's' : ''} so far` : o.cost)),
+    body: `<div id="assessBox">${assessView()}</div>` };
+}
+function paintAssess() {
+  const b = $('assessBox');
+  if (!b) return;
+  b.innerHTML = assessView();
+  const sec = b.closest('details.ssec[data-ssec="review"]');    // its header too: drawn before the offer came (the walk)
+  if (sec) sec.querySelector('summary').innerHTML = subHead(reviewSection());
+  wireAssess();
+}
+function wireAssess() {
+  if (!$('assessBox')) return;
+  loadAssess();
+  const go = $('assessGo');
+  if (!go) return;
+  go.onclick = async () => {
+    const slug = S.slug;
+    go.disabled = true;
+    S.assess = { ...assessHere(), running: true, said: '' };
+    let got;
+    try {
+      const { job_id } = await api('POST', `/api/designs/${slug}/assess`);
+      got = await trackJob(job_id, { kind: 'assess', part: null, text: 'Claude is reading every part' }).done;
+    } catch (e) { got = { ok: false, said: `No reading: ${plainly(e.message)}` }; }
+    if (S.slug !== slug) return;
+    S.assess = { slug, said: got.said, ok: got.ok };               // its offer is read again: Review again, the count
+    if (got.ok) { S.fixes = {}; S.fixReading = {}; }                 // its rows are under Things to fix: read them again
+    say(got.ok ? "Claude read it: what it reads wrong is under Things to fix, as Claude's reading." : got.said);
+    await loadAssess();
+    render();
+  };
 }
 // Things to fix as a section of Will it work? (#325): its mark and its count once its list is read
 function fixesSection(part) {
@@ -2935,6 +3007,7 @@ async function loadAnswers() {
 }
 function wireCards() {
   wireFixes();                                            // Things to fix, under Will it work? (#300)
+  wireAssess();                                           // Review it, above it (#238)
   document.querySelectorAll('#inspector details.ssec').forEach((dt) => {
     if (dt.dataset.wiredSub) return;
     dt.dataset.wiredSub = '1';
@@ -3260,6 +3333,7 @@ function partView(p) {
   const work = ssecs('work', [
     !p.framed && (p.built || p.loads) && p.role !== 'fixed' && { k: 'result', title: 'Will it hold? <span class="badge">strength</span>', ...checked,
       body: `<div id="loadBox">${loadView(p)}</div>` },
+    shownPart() && p.role !== 'fixed' && p.built && reviewSection(),        // above Things to fix, where its rows go (#238)
     shownPart() && p.role !== 'fixed' && fixesSection(p.id),
     p.study === 'lighten' && lightenShown(p, runs) && { k: 'lighten', title: 'Make it lighter', ...later(light, 'not lightened yet'),
       body: lightenView(p) },
