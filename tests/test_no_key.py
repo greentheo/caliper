@@ -193,3 +193,11 @@ def test_every_gate_asks_the_one_has_a_key_check(monkeypatch):
     asks = {os.path.basename(f) for f in glob.glob(here) if re.search(r'environ\.get\("ANTHROPIC_(API_KEY|AUTH_TOKEN)"\)',
                                                                        open(f).read())}
     assert asks == {"llm.py"}, asks
+
+
+def test_review_it_with_no_key_says_so_and_keeps_nothing(stool):
+    """#368 merged before #372: its one Claude call goes through llm.client(), and no key is its reply, not a crash."""
+    from caliper import assess
+
+    got = assess.run(stool)
+    assert got == {"ok": False, "readings": [], "said": f"No reading: {llm.NO_KEY}"} and assess.count(stool) == 0
