@@ -273,6 +273,20 @@ function nudge(design, id, dir) {
   return null;
 }
 const TREE_KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowRight: 'in', ArrowLeft: 'out' };
+// what a move by the keys or the menu says, in the page's status line, for someone who can't see the tree (#360 review):
+// worked out before the move, from where the part is now; ``to`` null is where it can't go
+function treeSaid(design, id, dir, to) {
+  const name = (x) => { const q = design.parts.find((p) => p.id === x); return q ? q.label || q.name || x : x; };
+  const parent = (design.tree || {}).parent || {}, n = name(id);
+  if (!to) {
+    return { up: `${n} is already at the top`, down: `${n} is already at the bottom`, in: `${n} has no part above it to go under`,
+      out: `${n} isn't under another part` }[dir];
+  }
+  if (dir === 'up') return `Moved ${n} up, above ${name(to[0])}`;
+  if (dir === 'down') return `Moved ${n} down, below ${name(to[0])}`;
+  if (dir === 'in') return `Moved ${n} under ${name(dropped(design, id, to[0], to[1]).parent[id])}`;
+  return `Moved ${n} out of ${name(parent[id])}`;
+}
 function treeHtml(design, view) {
   const rows = treeRows(design).map(({ p, depth }) => {
     const fixed = p.role === 'fixed', off = view.parts.has(p.id);
@@ -280,7 +294,7 @@ function treeHtml(design, view) {
     const editing = view.rename && view.rename.part === p.id;
     const head = `<div class="trow part${view.scope === p.id && !view.piece ? ' on' : ''}${fixed ? ' ref' : ''}${off ? ' off' : ''}"${view.canDrag === false ? '' : ` draggable="true" data-drag="${esc(p.id)}"`}>
       <button class="eye" aria-label="Show or hide the whole part" data-eye="${esc(p.id)}">${off ? EYE_OFF : EYE_ON}</button>
-      <button class="tname" data-sel="${esc(p.id)}"${fixed ? ' data-fixed="1"' : ''} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowRight Alt+ArrowLeft">${esc(p.name || p.id)}</button>
+      <button class="tname" role="treeitem" aria-level="${depth + 1}" aria-selected="${view.scope === p.id && !view.piece}" data-sel="${esc(p.id)}"${fixed ? ' data-fixed="1"' : ''} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowRight Alt+ArrowLeft">${esc(p.name || p.id)}</button>
       <span class="side">${fixed ? 'reference' : `v${p.version}`}</span></div>`
       + (editing && view.rename.key == null ? renameRow(p.id, null, view.rename.draft) : '')
       + (p.mirror_of ? `<div class="tmirror">a mirror of ${esc(p.mirror_of)}: change it there
@@ -294,7 +308,7 @@ function treeHtml(design, view) {
       return `<div class="trow piece${view.scope === p.id && view.piece === pc.key ? ' on' : ''}${fixed ? ' ref' : ''}${pcOff ? ' off' : ''}">
         ${eye}
         <span class="swatch" aria-hidden="true" style="background:${esc(fixed ? '#9aa4ad' : pc.color)}"></span>
-        <button class="tname" data-sel="${esc(p.id)}" data-key="${esc(pc.key)}"${fixed ? ' data-fixed="1"' : ''}>${esc(pc.name)}</button>
+        <button class="tname" role="treeitem" aria-level="${depth + 2}" aria-selected="${view.scope === p.id && view.piece === pc.key}" data-sel="${esc(p.id)}" data-key="${esc(pc.key)}"${fixed ? ' data-fixed="1"' : ''}>${esc(pc.name)}</button>
         <span class="side">${esc(pc.material)}</span></div>`
         + (editing && view.rename.key === pc.key ? renameRow(p.id, pc.key, view.rename.draft) : '');
     }).join('');
@@ -303,7 +317,8 @@ function treeHtml(design, view) {
   const legend = (design.legend || []).length ? `<div class="tlegend"><div class="tlegend-h">Materials</div>${design.legend.map((m) =>
     `<div class="tlegend-r"><span class="swatch" aria-hidden="true" style="background:${esc(m.color)}"></span>${esc(m.label)} · ${m.count} piece${m.count === 1 ? '' : 's'}</div>`).join('')}</div>` : '';
   return `<div class="tree-head"><button class="fold" data-fold="1" aria-expanded="${view.open}">${view.open ? '▾' : '▸'} Parts</button>
-    <span class="note">${view.saying ? esc(view.saying) : `hidden pieces are still checked${view.canDrag === false ? '. Hold a part to move it' : ''}`}</span></div>${view.open ? rows + legend : ''}`;
+    <span class="note">${view.saying ? esc(view.saying) : `hidden pieces are still checked${view.canDrag === false ? '. Hold a part to move it' : ''}`}</span></div>${view.open
+      ? `<div role="tree" aria-label="Parts">${rows}</div>${legend}` : ''}`;   // its depth said, not only drawn (#360 review)
 }
 function renderTree() {
   const box = $('tree');
@@ -313,9 +328,17 @@ function renderTree() {
   if (!parts.length || document.activeElement === $('treeName')) return;       // never over a name being typed
   const t = seen();
   const cant = (pid, version) => { const n = noPieces.get(pid); return n && n.version === version ? n.why : null; };
+  // the row that has the focus keeps it through the redraw (#360 review: the 600 ms "Waiting…" redraw dropped it to <body>,
+  // where the next Alt+← is the browser's Back)
+  const was = document.activeElement, held = was && box.contains(was) && was.matches && was.matches('button.tname[data-sel]')
+    ? { sel: was.dataset.sel, key: was.dataset.key } : null;
   box.innerHTML = treeHtml(S.design, { parts: t.parts, pieces: t.pieces, open: t.open, rename: t.rename, scope: S.scope, piece: S.pick ? null : S.piece, canDrag: !onPhone(), saying: TREE.saying,
     oneBody: t.oneBody, cant });
   if (t.rename && $('treeName')) { $('treeName').focus(); $('treeName').select(); }
+  else if (held) {
+    const again = box.querySelector(`button.tname[data-sel="${CSS.escape(held.sel)}"]${held.key != null ? `[data-key="${CSS.escape(held.key)}"]` : ':not([data-key])'}`);
+    if (again) again.focus();
+  }
 }
 async function unmirror(part) {             // a mirror made a part of its own again, its shape kept (#246 review)
   try {
@@ -426,7 +449,7 @@ function treeMovesHtml(design, pid) {          // Move in the tree ▸: where it
     const to = nudge(design, pid, dir);
     if (!to) return '';
     const by = dir === 'in' ? dropped(design, pid, to[0], to[1]).parent[pid] : parent[pid];
-    return `<button role="menuitem" data-menu="tmove:${dir}">${esc(label.replace('{}', by ? name(by) : ''))} <span class="why">${keys}</span></button>`;
+    return `<button role="menuitem" data-menu="tmove:${dir}">${esc(label.replace('{}', by ? name(by) : ''))}${onPhone() ? '' : ` <span class="why">${keys}</span>`}</button>`;   // a phone has no keys
   }).join('');
 }
 function versionsHtml(p) {                     // Versions ▸: each other version, newest first, with what was asked of it (#299)
@@ -556,7 +579,12 @@ async function menuDo(id) {
     t.rename = { part: pid, key: piece, draft: pc ? pc.name : (p.label || p.name || p.id) };
     return renderTree();
   }
-  if (id.startsWith('tmove:')) { const to = nudge(S.design, pid, id.slice(6)); return to ? moveInTree(pid, to[0], to[1]) : null; }
+  if (id.startsWith('tmove:')) {               // as the keys do it, and said as they say it (#360 review)
+    const dir = id.slice(6), to = nudge(S.design, pid, dir), said = treeSaid(S.design, pid, dir, to);
+    if (!to) return say(said);
+    if (await moveInTree(pid, to[0], to[1])) say(said);
+    return;
+  }
   if (id === 'hide') return toggleHidden(pid, piece ?? null);
   if (id === 'only') return showOnly(pid, piece);
   if (id === 'all') { t.parts = new Set(); t.pieces = new Set(); keepTree(); renderTree(); paint(); return; }
@@ -685,7 +713,7 @@ async function moveInTree(drag, target, zone) {
     if (S.slug !== slug) return;
     TREE.saying = WAITING; renderTree();
   }, 600);
-  let got, err;
+  let got, err, saved = false;
   try {
     got = await api('POST', `/api/designs/${slug}/tree`, next);
   } catch (e) { err = e; }
@@ -697,6 +725,7 @@ async function moveInTree(drag, target, zone) {
   }
   if (err) showErr(plainly(err.message));
   else {
+    saved = true;
     S.design = got;
     const t = seen(), up = next.parent[drag];
     if (up && t.parts.has(up)) {                  // under a hidden part, it's hidden as that part is
@@ -706,6 +735,7 @@ async function moveInTree(drag, target, zone) {
   }
   TREE.saying = null;
   render();
+  return saved;                                   // the keys and the menu say a move only once it's saved
 }
 // where a drop would land, on screen: below a part means below everything that sits under it, so that's where the line goes
 function showDrop(row, zone) {
@@ -760,14 +790,21 @@ async function treeKey(e) {
     if (e.key === 'Escape') { TREE.rename = null; e.target.blur(); renderTree(); }
     return;
   }
-  const b = e.target.closest && e.target.closest('button.tname[data-sel]'), dir = TREE_KEYS[e.key];
-  if (!b || !dir || !e.altKey || e.ctrlKey || e.metaKey || b.dataset.key != null || TREE.rename || !S.design) return;
-  e.preventDefault();
-  const pid = b.dataset.sel, to = nudge(S.design, pid, dir);
-  if (!to) return;
-  await moveInTree(pid, to[0], to[1]);
-  const row = document.querySelector(`#tree button.tname[data-sel="${CSS.escape(pid)}"]:not([data-key])`);
-  if (row) row.focus();                        // redrawn: the keys go on moving the same part
+  const dir = TREE_KEYS[e.key], row = e.target.closest && e.target.closest('.trow');
+  if (!row || !dir || !e.altKey || e.ctrlKey || e.metaKey) return;
+  e.preventDefault();                          // anywhere on a row, Alt+← is never the browser's Back (#360 review: its eye too)
+  const b = row.querySelector('button.tname[data-sel]');
+  if (!b || b.dataset.key != null || TREE.rename || !S.design) return;    // a piece's row: its part moves, never the piece alone
+  const pid = b.dataset.sel, to = nudge(S.design, pid, dir), said = treeSaid(S.design, pid, dir, to);
+  if (!to) { say(said); return; }
+  if (!(await moveInTree(pid, to[0], to[1]))) return;
+  say(said);
+  // focus back on the part only if it's nowhere else: the save can take seconds, and by then the person may be typing in
+  // the chat (#360 review: the row took the focus out of a draft). Through the wait the redraw has kept it on the row
+  const now = document.activeElement;
+  if (now && now !== document.body) return;
+  const again = document.querySelector(`#tree button.tname[data-sel="${CSS.escape(pid)}"]:not([data-key])`);
+  if (again) again.focus();
 }
 $('tree').addEventListener('keydown', treeKey);
 

@@ -72,11 +72,18 @@ def test_a_parent_that_s_gone_doesn_t_count():
 
 # --- the keyboard ----------------------------------------------------------------------------------------------------------
 _KEYS = """
-const S = { slug: 'x', design: D }; const TREE = { rename: null }; const moved = []; let focused = null;
-const moveInTree = async (drag, target, zone) => { moved.push([drag, target, zone]); };
-const renderTree = () => {};
-const row = (sel, key) => ({ dataset: { sel, ...(key != null ? { key } : {}) }, closest(q) { return q.includes('tname') ? this : null; } });
-const document = { querySelector: (q) => ({ focus() { focused = q; } }) };
+const S = { slug: 'x', design: D }; const TREE = { rename: null }; const moved = [], said = [], focused = [];
+let settle = null, saves = true;                 // a save that lands when the test says so, or at once; and whether it saved
+const moveInTree = (drag, target, zone) => { moved.push([drag, target, zone]);
+  return settle ? new Promise((r) => { settle = () => { drawn = 'new'; r(saves); }; }) : Promise.resolve(saves); };
+let drawn = 'old';                               // the redraw replaces the rows: a row looked up after it is a new one
+const say = (t) => said.push(t);
+const btn = (sel, key) => ({ dataset: { sel, ...(key != null ? { key } : {}) } });
+const row = (sel, key, on) => { const b = btn(sel, key); const r = { querySelector: (q) => (q === 'button.tname[data-sel]' ? b : null) };
+  const target = on === 'eye' ? { dataset: { eye: sel }, closest: (q) => (q === '.trow' ? r : null) } : { ...b, closest: (q) => (q === '.trow' ? r : null) };
+  return target; };
+const body = { id: 'body' }, chat = { id: 'msg' };
+const document = { body, activeElement: body, querySelector: (q) => ({ focus() { focused.push([q, drawn]); } }) };
 const CSS = { escape: (s) => s };
 const key = (target, k, mods = {}) => ({ target, key: k, altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, ...mods,
   preventDefault() { this.stopped = true; } });
@@ -85,39 +92,77 @@ const key = (target, k, mods = {}) => ({ target, key: k, altKey: true, ctrlKey: 
 
 def _keys(body, tree_=None):
     src = open(JS).read()
-    return _run(_fn(src, "treeKey") + body, tree_, extra=_KEYS)
+    return _run("".join(_fn(src, n) for n in ("treeSaid", "treeKey")) + body, tree_, extra=_KEYS)
 
 
-@pytest.mark.parametrize("k,expect", [("ArrowUp", ["c", "b", "before"]), ("ArrowDown", ["c", "d", "after"]),
-                                      ("ArrowRight", ["c", "b", "into"])])
-def test_alt_arrows_on_a_part_row_move_it_and_keep_focus_on_it(k, expect):
-    got = _keys(f"const e = key(row('c'), '{k}'); await treeKey(e); return {{ moved, stopped: !!e.stopped, focused }};")
-    assert got["moved"] == [expect] and got["stopped"]
-    assert 'data-sel="c"' in got["focused"] and ":not([data-key])" in got["focused"]
+@pytest.mark.parametrize("k,expect,words", [("ArrowUp", ["c", "b", "before"], "Moved C up, above B"),
+                                            ("ArrowDown", ["c", "d", "after"], "Moved C down, below D"),
+                                            ("ArrowRight", ["c", "b", "into"], "Moved C under B")])
+def test_alt_arrows_on_a_part_row_move_it_say_so_and_keep_focus_on_it(k, expect, words):
+    got = _keys(f"const e = key(row('c'), '{k}'); await treeKey(e); return {{ moved, said, stopped: !!e.stopped, focused }};")
+    assert got["moved"] == [expect] and got["stopped"] and got["said"] == [words]
+    assert 'data-sel="c"' in got["focused"][0][0] and ":not([data-key])" in got["focused"][0][0]
 
 
-def test_alt_left_takes_it_out():
-    got = _keys("await treeKey(key(row('c'), 'ArrowLeft')); return moved;", NESTED)
-    assert got == [["c", "b", "after"]]
+def test_in_says_the_part_it_went_under_not_the_row_it_went_after():
+    """Into a part that already has some under it, the drop is after its last one: the words name the part, not that row."""
+    got = _keys("await treeKey(key(row('d'), 'ArrowRight')); return { moved, said };", NESTED)
+    assert got == {"moved": [["d", "b", "after"]], "said": ["Moved D under A"]}
 
 
-@pytest.mark.parametrize("why", ["plain", "piece", "ctrl", "meta", "nowhere", "renaming", "loading"])
-def test_nothing_moves_without_alt_on_a_piece_or_where_it_can_t_go(why):
+def test_alt_left_takes_it_out_and_says_out_of_what():
+    got = _keys("await treeKey(key(row('c'), 'ArrowLeft')); return { moved, said };", NESTED)
+    assert got == {"moved": [["c", "b", "after"]], "said": ["Moved C out of B"]}
+
+
+@pytest.mark.parametrize("pid,k,words", [("a", "ArrowUp", "A is already at the top"), ("e", "ArrowDown", "E is already at the bottom"),
+                                         ("a", "ArrowRight", "A has no part above it to go under"), ("a", "ArrowLeft", "A isn't under another part")])
+def test_where_it_can_t_go_it_says_so_and_still_takes_the_key(pid, k, words):
+    got = _keys(f"const e = key(row('{pid}'), '{k}'); await treeKey(e); return {{ moved, said, stopped: !!e.stopped }};")
+    assert got == {"moved": [], "said": [words], "stopped": True}
+
+
+def test_the_part_s_eye_moves_it_too():
+    got = _keys("const e = key(row('c', null, 'eye'), 'ArrowUp'); await treeKey(e); return { moved, stopped: !!e.stopped };")
+    assert got == {"moved": [["c", "b", "before"]], "stopped": True}
+
+
+@pytest.mark.parametrize("why,stopped", [("plain", False), ("piece", True), ("ctrl", False), ("meta", False), ("renaming", True),
+                                         ("loading", True), ("off a row", False)])
+def test_nothing_moves_without_alt_on_a_piece_or_off_a_row(why, stopped):
     body = {"plain": "const e = key(row('c'), 'ArrowUp', { altKey: false });",
-            "piece": "const e = key(row('c', 'top'), 'ArrowUp');",
+            "piece": "const e = key(row('c', 'top'), 'ArrowLeft');",           # its row's Alt+← is the tree's: never Back
             "ctrl": "const e = key(row('c'), 'ArrowUp', { ctrlKey: true });",
             "meta": "const e = key(row('c'), 'ArrowUp', { metaKey: true });",
-            "nowhere": "const e = key(row('a'), 'ArrowUp');",
             "renaming": "TREE.rename = { part: 'c' }; const e = key(row('c'), 'ArrowUp');",
-            "loading": "S.design = null; const e = key(row('c'), 'ArrowUp');"}[why]
-    got = _keys(body + " await treeKey(e); return { moved, stopped: !!e.stopped };")
-    assert got["moved"] == []
-    assert got["stopped"] == (why == "nowhere")          # where it can't go the key is still the tree's, not the page's scroll
+            "loading": "S.design = null; const e = key(row('c'), 'ArrowUp');",
+            "off a row": "const e = key({ dataset: {}, closest: () => null }, 'ArrowLeft');"}[why]
+    got = _keys(body + " await treeKey(e); return { moved, said, stopped: !!e.stopped };")
+    assert got == {"moved": [], "said": [], "stopped": stopped}
+
+
+def test_a_save_that_lands_after_the_person_moved_on_leaves_their_focus_be():
+    """#360 review: the save took 28 s, and the row took the focus back out of a draft in the chat box."""
+    got = _keys("""settle = true; const going = treeKey(key(row('c'), 'ArrowUp'));
+                   document.activeElement = chat; settle(); await going; return { focused, said };""")
+    assert got == {"focused": [], "said": ["Moved C up, above B"]}
+
+
+def test_a_save_that_lands_with_the_focus_lost_puts_it_on_the_redrawn_row():
+    """With the focus on <body> it goes to the row as drawn after the save, never the one the redraw removed (the await)."""
+    got = _keys("""settle = true; const going = treeKey(key(row('c'), 'ArrowUp')); settle(); await going; return focused;""")
+    assert len(got) == 1 and got[0][1] == "new"
+
+
+def test_a_save_that_failed_says_nothing_and_moves_no_focus():
+    got = _keys("saves = false; await treeKey(key(row('c'), 'ArrowUp')); return { said, focused };")
+    assert got == {"said": [], "focused": []}
 
 
 def test_the_rename_box_still_takes_enter_and_escape():
     got = _keys("""let saved = 0; const input = { dataset: { renameInput: '1' }, blur() {}, closest: () => null,
                       parentElement: { querySelector: () => ({ click() { saved += 1; } }) } };
+                   const renderTree = () => {};
                    const e = key(input, 'Enter', { altKey: false }); await treeKey(e);
                    TREE.rename = { part: 'c' }; await treeKey(key(input, 'Escape', { altKey: false }));
                    return { saved, stopped: !!e.stopped, rename: TREE.rename, moved };""")
@@ -131,11 +176,61 @@ def test_the_tree_listens_with_it_and_a_part_row_says_its_keys():
     assert h.count('aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowRight Alt+ArrowLeft"') == 2
 
 
-def _tree_html(view):
+def test_the_tree_says_its_depth_not_only_draws_it():
+    h = _tree_html("canDrag: true", {"parent": {"b": "a"}})
+    assert '<div role="tree" aria-label="Parts">' in h
+    assert re.search(r'role="treeitem" aria-level="1" aria-selected="false" data-sel="a"(?! data-key)', h)
+    assert re.search(r'role="treeitem" aria-level="2" aria-selected="false" data-sel="a" data-key="top"', h)   # a's piece
+    assert re.search(r'role="treeitem" aria-level="2" aria-selected="false" data-sel="b"(?! data-key)', h)     # b, under a
+    assert 'aria-selected="true" data-sel="b"' in _tree_html("canDrag: true, scope: 'b'")
+
+
+# --- the redraw keeps the focus --------------------------------------------------------------------------------------------
+_REDRAW = """
+const esc = (s) => String(s); const EYE_ON = 'o', EYE_OFF = 'x'; const renameRow = () => ''; const pieceId = (p, k) => `${p}/${k}`;
+const CSS = { escape: (s) => s }; const noPieces = new Map(); let focused = null, drawn = 0;
+const mk = (sel) => ({ dataset: { sel }, matches: (q) => q === 'button.tname[data-sel]', focus() { focused = [sel, this.n]; } });
+let rows = { a: mk('a'), b: mk('b') };
+const box = { hidden: false, set innerHTML(v) { drawn += 1; rows = { a: { ...mk('a'), n: drawn }, b: { ...mk('b'), n: drawn } }; },
+  contains: (el) => Object.values(rows).includes(el) || el === OLD,
+  querySelector: (q) => rows[/data-sel="([^"]+)"/.exec(q)[1]] };
+const OLD = rows.b;
+const $ = (id) => (id === 'tree' ? box : null);
+const document = { activeElement: null };
+const S = { slug: 'x', scope: null, piece: null, pick: false, design: D };
+const TREE = { parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, saying: null };
+const seen = () => TREE; const onPhone = () => false;
+"""
+
+
+def _redraw(body):
+    src = open(JS).read()
+    design = json.dumps({"parts": [{"id": "a", "version": 1}, {"id": "b", "version": 1}], "tree": {}})
+    script = (f"const D = {design};\n" + _REDRAW + "".join(_fn(src, n) for n in ("treeRows", "underPart", "treeHtml", "renderTree"))
+              + f"\nconsole.log(JSON.stringify((() => {{ {body} }})()));")
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    return json.loads(got.stdout)
+
+
+def test_the_waiting_redraw_keeps_the_focus_on_the_row():
+    """#360 review: the 600 ms "Waiting…" redraw replaced the rows and the focus fell to <body>."""
+    assert _redraw("document.activeElement = OLD; renderTree(); return focused;") == ["b", 1]
+
+
+def test_the_redraw_keeps_the_focus_on_the_same_row_not_another():
+    assert _redraw("const was = rows.a; document.activeElement = was; renderTree(); return focused;") == ["a", 1]
+
+
+def test_a_redraw_with_the_focus_elsewhere_takes_none():
+    assert _redraw("document.activeElement = { matches: () => true, dataset: { sel: 'b' } }; renderTree(); return focused;") is None
+
+
+def _tree_html(view, tree_=None):
     src = open(JS).read()
     head = "const esc = (s) => String(s); const EYE_ON = 'o', EYE_OFF = 'x'; const renameRow = () => ''; const pieceId = (p, k) => `${p}/${k}`;\nconst D = " + json.dumps(
         {"parts": [{"id": "a", "version": 1, "pieces": [{"key": "top", "name": "top", "material": "plywood", "color": "#fff"}]},
-                   {"id": "b", "version": 1}], "tree": {}}) + ";\n"
+                   {"id": "b", "version": 1}], "tree": tree_ or {}}) + ";\n"
     script = head + "".join(_fn(src, n) for n in ("treeRows", "underPart", "treeHtml")) + \
         f"\nconsole.log(treeHtml(D, {{ parts: new Set(), pieces: new Set(), open: true, {view} }}));"
     got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
@@ -156,8 +251,9 @@ def _menu(body, tree_=None):
     src = open(JS).read()
     design = json.dumps({"parts": [{"id": i, "name": i, "label": i.upper(), "version": 1, "role": "part", "pieces": [{"key": "top", "name": "top"}]}
                                    for i in "abcde"], "tree": tree_ or {}, "studies": {"menu": {}}})
-    names = ("seen", "keepTree", "underPart", "treeRows", "dropped", "nudge", "menuItems", "treeMovesHtml", "menuDo")
-    script = (_STUBS.replace("DESIGN", design) + _keys_const(src) + "const moved = []; const moveInTree = async (d, t, z) => moved.push([d, t, z]);\n"
+    names = ("seen", "keepTree", "underPart", "treeRows", "dropped", "nudge", "treeSaid", "menuItems", "treeMovesHtml", "menuDo")
+    script = (_STUBS.replace("DESIGN", design) + _keys_const(src)
+              + "const moved = []; const moveInTree = async (d, t, z) => { moved.push([d, t, z]); return true; }; let phone = false; const onPhone = () => phone;\n"
               + "\n".join(_fn(src, n) for n in names) + f"\nconst out = await (async () => {{ {body} }})();\nconsole.log(JSON.stringify(out));")
     got = subprocess.run([_node(), "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
@@ -186,6 +282,11 @@ def test_move_in_the_tree_lists_only_where_it_can_go_by_name_with_its_keys():
     assert 'data-menu="tmove:out"' not in top
 
 
-def test_choosing_one_moves_it_as_the_keys_do():
+def test_choosing_one_moves_it_as_the_keys_do_and_says_so():
     got = _menu("S.menu = { pid: 'd', piece: null }; await menuDo('tmove:up'); return { moved, calls };", NESTED)
-    assert got["moved"] == [["d", "a", "before"]] and "close" in got["calls"]
+    assert got["moved"] == [["d", "a", "before"]] and "close" in got["calls"] and ["say", "Moved D up, above A"] in got["calls"]
+
+
+def test_on_a_phone_the_submenu_has_no_keys():
+    got = _menu("phone = true; calls.length = 0; S.menu = { pid: 'd', piece: null }; await menuDo('tmove'); return calls[0][1];", NESTED)
+    assert "Move up" in got and "Alt+" not in got

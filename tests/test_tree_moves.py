@@ -288,6 +288,14 @@ def test_a_refused_move_is_said():
     assert got == {"errs": ["no"], "redraws": 1}
 
 
+def test_a_move_says_whether_it_saved():
+    """The keys and the menu say a move only once it's saved (#360 review)."""
+    got = _drag("""const ok = await moveInTree('c', 'a', 'into'); answer = () => { throw new Error('no'); };
+                   const refused = await moveInTree('d', 'a', 'into'); const nowhere = await moveInTree('a', 'a', 'into');
+                   return { ok, refused, nowhere: !!nowhere };""")
+    assert got == {"ok": True, "refused": False, "nowhere": False}
+
+
 def _html(view):
     src = open(JS).read()
     head = "const esc = (s) => String(s); const EYE_ON = 'o', EYE_OFF = 'x'; const renameRow = () => '';\nconst D = " + json.dumps(
@@ -358,7 +366,7 @@ def test_a_switch_clears_the_waiting_line():
 def _render(phone, saying="null"):
     src = open(JS).read()
     head = ("const esc = (s) => String(s); const EYE_ON = 'o', EYE_OFF = 'x'; const renameRow = () => '';\n"
-            "const box = { hidden: false, innerHTML: '' }; const $ = (id) => (id === 'tree' ? box : null);\n"
+            "const box = { hidden: false, innerHTML: '', contains: () => false }; const $ = (id) => (id === 'tree' ? box : null);\n"
             "const document = { activeElement: { id: 'body' } }; const noPieces = new Map();\n"
             "const S = { slug: 'x', scope: null, piece: null, pick: false, design: " + json.dumps(
                 {"parts": [{"id": "a", "version": 1}, {"id": "b", "version": 1}], "tree": {}}) + " };\n"
