@@ -79,3 +79,89 @@ def test_every_client_is_made_through_the_one_door():
     here = os.path.join(os.path.dirname(chat.__file__), "*.py")
     made = {os.path.basename(f) for f in glob.glob(here) if re.search(r"\bAnthropic\(\)", open(f).read())}
     assert made == {"llm.py"}, made
+
+
+
+# --- #372 review (reviewer-3) -----------------------------------------------------------------------------------------
+from .test_chat import _box  # noqa: E402
+
+
+@pytest.fixture
+def two(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    s = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    s.write_part("side_left", _box(dx=20, dy=300, x=0), intent="the left side")
+    s.write_part("side_right", _box(dx=20, dy=300, x=300), intent="the right side")
+    return s
+
+
+def test_a_stop_partway_through_several_parts_says_what_changed_first(two):
+    """reviewer-3: the left side moved to v2, then Claude was cut off on the right; the reply said only "cut off"."""
+    right = two.read_script("side_right")
+
+    def author(spec, feedback, prior):
+        if prior == right:
+            raise llm.CutOff("Claude's reply was cut off at 8000 tokens, before it finished")
+        return _box(dx=20, dy=300, x=0).replace("10)", "60)")
+    res = chat.turn(two, "make both sides taller", use_llm=False, author=author)
+    first = res.reply.splitlines()[0]
+    assert first == ("! Changed side_left (now v2); then side_right stopped: Claude's reply was cut off at 8000 tokens, "
+                     "before it finished."), res.reply
+    assert not res.ok and two.design.part("side_left").version == 2 and two.design.part("side_right").version == 1
+
+
+def test_a_stop_on_the_first_of_several_parts_is_said_alone(two):
+    res = chat.turn(two, "make both sides taller")              # no key: the first designer call stops
+    assert res.reply == SAID and not res.ok
+
+
+def test_whatever_moved_before_a_stop_is_said_with_its_version(stool, monkeypatch):
+    """Any path: the turn compares versions, so a revision that landed is never hidden behind the stop's words."""
+    def landed_then_stopped(store, pid, message, **kw):
+        store.write_part(pid, BOX.format(h=300), intent="a step stool")
+        raise llm.Declined("Claude declined to answer this one")
+    monkeypatch.setattr(chat, "refine_part", landed_then_stopped)
+    res = chat.turn(stool, "make it 2 in taller", scope="stool")
+    assert res.reply == "stool is now v2. Then: Claude declined to answer this one.", res.reply
+
+
+def test_the_message_is_logged_once(stool):
+    chat.turn(stool, "make it 2 in thicker", scope="stool")
+    assert [r["kind"] for r in stool.log()].count("message") == 1
+
+
+def test_with_no_key_the_classic_draft_and_refine_go_offline_as_before(monkeypatch):
+    """The foreman's call: where main fell back to the offline draft, it still does, and the CLI says why."""
+    from caliper import intake, refine
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    got = intake.draft_spec("an L bracket, 60 mm, four M5 holes")
+    assert got.source == "offline"
+    assert refine.apply_refinement(got.spec, "make it 80 mm").source == "offline"
+
+
+def test_the_cli_says_the_offline_fallback(monkeypatch, capsys):
+    """cli.py's hint, written for this fallback, fires again (#372 review: it couldn't)."""
+    import types
+
+    from caliper import cli
+    from caliper.spec import Spec
+
+    class _Stop(Exception):
+        pass
+
+    def stop(self):                              # the run stops at the draft: nothing is built
+        raise _Stop()
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(Spec, "to_yaml", stop)
+    with pytest.raises(_Stop):
+        cli._cmd_run(types.SimpleNamespace(intent="an L bracket, 60 mm, four M5 holes", machine=None, no_llm=False,
+                                           yes=True, out=None))
+    out = capsys.readouterr().out
+    assert "── draft spec (offline) ──" in out and "LLM path unavailable — used offline. Set ANTHROPIC_API_KEY" in out
+
+
+def test_an_auth_token_counts_as_a_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "test-token-not-real")
+    assert llm.client() is not None

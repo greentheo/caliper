@@ -289,6 +289,8 @@ def draft_spec(
     if use_llm:
         try:
             return llm_draft(intent, machine=machine, client=client)
+        except llm.NoKey:                         # no key: the offline draft, as before #372 (the CLI says why)
+            pass
         except llm.Stopped:                       # never something else made quietly in its place
             raise
         except Exception as e:  # SDK/key/network unavailable or bad response → deterministic fallback

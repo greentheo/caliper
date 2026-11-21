@@ -2255,6 +2255,7 @@ def refine_several(store: DesignStore, parts: list[str], message: str, *, scope:
     on_event = kw.get("on_event")
     _emit(events, on_event, "authoring", f"revising {len(parts)} parts: {', '.join(parts)}", parts=list(parts))
     done, left, still, results, became = [], [], [], [], []
+    stopped, untried = None, []
     for n, pid in enumerate(parts, 1):
         others = [p for p in parts if p != pid]
         focus = (f"This request names {_listed(parts)}. This revision is to {pid} only: {_listed(others)} "
@@ -2262,8 +2263,14 @@ def refine_several(store: DesignStore, parts: list[str], message: str, *, scope:
         if became:
             focus += " Already revised for it: " + "; ".join(became) + "."
         prior = store.read_script(pid) if store.is_scripted(pid) else ""
-        r = refine_part(store, pid, message, events=events, focus=focus, keep_same=False, of=f"{n} of {len(parts)}",
-                        pick=pick if pid == scope else None, **kw)
+        try:
+            r = refine_part(store, pid, message, events=events, focus=focus, keep_same=False, of=f"{n} of {len(parts)}",
+                            pick=pick if pid == scope else None, **kw)
+        except llm.Stopped as e:                   # Claude stopped on this part: what changed before it is said (#372 review)
+            if not results:
+                raise                              # nothing changed yet: the turn says it alone
+            stopped, untried = (pid, llm.said(e)), parts[n:]
+            break
         results.append(r)
         if r.version is not None and r.moved is False:   # written, but nothing measured moved: kept, said, no ✓ (#242)
             still.append(pid)
@@ -2279,7 +2286,11 @@ def refine_several(store: DesignStore, parts: list[str], message: str, *, scope:
             left.append((pid, why))
     mirror = _mirror_asked(message, parts)
     notes = ([f"{pid} not changed: {why}" for pid, why in left]
-             + [f"{pid}: the code changed, but no number, size or position I measure moved" for pid in still])
+             + [f"{pid}: the code changed, but no number, size or position I measure moved" for pid in still]
+             + ([f"then {stopped[0]} stopped: {stopped[1]}"] if stopped else [])
+             + ([f"{_listed(untried)} not tried"] if untried else []))
+    if stopped:                                    # each part that moved, with its version (#372 review)
+        done = [f"{pid} (now v{store.design.part(pid).version})" for pid in done]
     if done:
         tick = not notes and not mirror and all(r.ok for r in results)       # never over a break, a gap or a hedge
         first = f"{'✓' if tick else '!'} Changed {_listed(done)}" + (f"; {'; '.join(notes)}" if notes else "") + "."
@@ -2297,7 +2308,8 @@ def refine_several(store: DesignStore, parts: list[str], message: str, *, scope:
     lines += ["\n\n".join(r.reply for r in results if r.reply)]
     broke = sorted({b for r in results for b in r.broke})
     last = next((r for r in reversed(results) if r.version is not None), results[-1])
-    return TurnResult(action="refine", ok=not left and not still and not mirror and all(r.ok for r in results), part=parts[0],
+    return TurnResult(action="refine", ok=not left and not still and not mirror and not stopped and all(r.ok for r in results),
+                      part=parts[0],
                       version=last.version, part_report=last.part_report, report=last.report, broke=broke,
                       fixed=sorted({f for r in results for f in r.fixed} - set(broke)),
                       part_errors={k: v for r in results for k, v in r.part_errors.items()},
@@ -2801,11 +2813,16 @@ def _grain_reply(got: dict) -> TurnResult:
 def turn(store: DesignStore, message: str, scope: Optional[str] = None, **kw) -> TurnResult:
     """One conversational turn (:func:`_turn`). Where Claude gives no usable answer, or isn't set up here (no key), the
     turn says so in words, never "Something went wrong" (CALI-217, #366): nothing was changed by what didn't run."""
+    before = {p.id: p.version for p in store.design.parts}
+    rows = len(store.log())
     try:
         return _turn(store, message, scope, **kw)
     except llm.Stopped as e:
-        words = llm.said(e) + "."
-        if not kw.get("logged"):
+        store = DesignStore.load(store.root)
+        # whatever had already changed is said first, with its version (#372 review: a revision landed, the chat hid it)
+        moved = [f"{p.id} is now v{p.version}" for p in store.design.parts if before.get(p.id) != p.version]
+        words = ("; ".join(moved) + ". Then: " if moved else "") + llm.said(e) + "."
+        if not kw.get("logged") and not any(r.get("kind") == "message" for r in store.log()[rows:]):   # once (#372 review)
             store.append_log({"kind": "message", "text": message, "scope": scope, "action": "answer", "part": scope,
                               "routed_by": "stopped"})
         store.append_log({"kind": "reply", "action": "answer", "part": scope, "ok": False, "reply": words})

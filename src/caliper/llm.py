@@ -76,7 +76,7 @@ NO_KEY = ("That needs Claude, which isn't set up here: put a Claude API key in A
 def client():
     """The Claude client every request is made with, or :class:`NoKey` where there's no key (CALI-217, #366: the client
     was made anyway and failed inside the request as a TypeError, read as a crash). Raised before anything is sent."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):   # the SDK takes either
         raise NoKey(NO_KEY)
     from anthropic import Anthropic  # lazy; may be absent
 

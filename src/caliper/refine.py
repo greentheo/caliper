@@ -250,6 +250,8 @@ def apply_refinement(spec: Spec, instruction: str, use_llm: bool = True, client=
     if use_llm:
         try:
             return llm_refine(spec, instruction, client=client)
+        except llm.NoKey:                         # no key: the offline parser, as before #372
+            pass
         except llm.Stopped:                       # never something else changed quietly in its place
             raise
         except Exception as e:
