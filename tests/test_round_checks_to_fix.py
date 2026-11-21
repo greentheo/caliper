@@ -1,4 +1,4 @@
-"""CALI-235 (#406) — a check that fails in the designer's round on a built part is a Things to fix row.
+"""CALI-238 (#406) — a check that fails in the designer's round on a built part is a Things to fix row.
 
 Found by #1 slice D's end-to-end camper: a first build doesn't repair every round check, so a part can be written with
 one failing (a sheet off its face, a wall beam off its wall, the mattress cut). The What is it? card said it; Things to

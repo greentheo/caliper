@@ -433,7 +433,7 @@ def _reading_rows(store: DesignStore, pid: str, name: str) -> list[dict]:
     return out
 
 
-#: A round check's own fix, where the card's (``answers.fix_for``: the shape or its pieces) isn't it (CALI-235, #406).
+#: A round check's own fix, where the card's (``answers.fix_for``: the shape or its pieces) isn't it (CALI-238, #406).
 ROUND_FIX = {
     "shell_in_walls": "Put each wall beam shell() gives in its wall, of that wall's core, thickness and skins",
     "keeps_clear": "Keep the outside out of what keeps() holds clear: move or shrink the shape, or move the box it keeps",
@@ -444,7 +444,7 @@ _ONLY_WARN = {"loads_edge"}
 
 
 def _round_rows(store: DesignStore, pid: str, name: str, have: list[dict]) -> list[dict]:
-    """The checks that failed in the designer's round on the part as built, each a row (CALI-235, #406: the card said
+    """The checks that failed in the designer's round on the part as built, each a row (CALI-238, #406: the card said
     them, Things to fix didn't): its words, as the card says them, and its fix. Measured, so after Fix these it reads
     Fixed when the check passes on the new version."""
     import re

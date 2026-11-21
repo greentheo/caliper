@@ -1,4 +1,4 @@
-### 2026-11-21 · CALI-235 (#406) · A check that fails in the designer's round on a built part is a Things to fix row
+### 2026-11-21 · CALI-238 (#406) · A check that fails in the designer's round on a built part is a Things to fix row
 
 Found by #1 slice D's end-to-end camper run (stub planner and designer, under `tests/`).
 - A first build doesn't repair every round check (`build_plan.REPAIRS`), so a part can be written with one failing: a sheet off its face, or (with #404) a wall beam off its wall, or the mattress cut by a wall.
