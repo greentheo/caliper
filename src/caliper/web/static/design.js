@@ -3757,7 +3757,21 @@ function scenMarksFor(got, bbox) {             // what to draw: [{kind: 'load'|'
 function arrowLen(n, most, reach) {            // the biggest load's arrow is the reach; the rest by the square root, never a dot
   return reach * (0.35 + 0.65 * Math.sqrt(Math.max(0, n) / (most || 1)));
 }
+// a part's own frame on the model (CALI-220, #375): rows are in the part's own frame, as its script's loads() are; drawn
+// under its pose, and a picked face's posed points brought back out of it. No pose said (main before #375): the identity
+function scenFrame(p) {
+  const m = new THREE.Matrix4();
+  if (!p || !Array.isArray(p.position) || !Array.isArray(p.rotation)) return m;
+  const r = new THREE.Euler(...p.rotation.map((d) => (Number(d) || 0) * Math.PI / 180), 'XYZ');
+  return m.compose(new THREE.Vector3(...p.position.map((v) => Number(v) || 0)), new THREE.Quaternion().setFromEuler(r), new THREE.Vector3(1, 1, 1));
+}
+function unposed(verts, frame) {              // posed points, back into the part's own frame
+  const inv = frame.clone().invert(), v = new THREE.Vector3(), out = [];
+  for (let k = 0; k + 2 < verts.length; k += 3) { v.set(verts[k], verts[k + 1], verts[k + 2]).applyMatrix4(inv); out.push(v.x, v.y, v.z); }
+  return out;
+}
 const scenMarks = new THREE.Group();
+scenMarks.matrixAutoUpdate = false;           // its matrix is the part's frame, set each draw
 scene.add(scenMarks);
 function clearScenMarks() {
   scenMarks.children.slice().forEach((m) => { scenMarks.remove(m); m.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); });
@@ -3767,6 +3781,8 @@ function drawScenarios() {
   const pid = S.scenOpen, got = pid && (S.scen || {})[pid], box = $('scenBox');
   if (!got || !box || !box.open || !S.design) return;
   const p = S.design.parts.find((x) => x.id === pid);
+  scenMarks.matrix.copy(scenFrame(p));         // the rows are in the part's own frame (#375): drawn where the part is
+  scenMarks.matrixWorldNeedsUpdate = true;
   const marks = scenMarksFor($('scenSave') ? { ...got, ...readScenarios(got) } : got, p && p.bbox);   // as typed, saved or not
   const size = p && p.bbox ? Math.max(...p.bbox.size) : 400, reach = size * 0.3;
   const most = Math.max(1, ...marks.filter((m) => m.kind === 'load').map((m) => m.n));
@@ -3825,7 +3841,7 @@ async function pickScenarioFace(hit) {
   const got = S.scen[pid];
   if ($('scenSave')) Object.assign(got, readScenarios(got));   // what's typed in the other rows is kept (first: it's new arrays)
   const rows = at.kind === 'load' ? got.scenarios : got.supports;
-  const box = faceBox(f.verts), what = String(f.said || 'that face').replace(/^face: /, '');   // the chip's "face: " isn't for a sentence
+  const box = faceBox(unposed(f.verts, scenFrame(partOf(pid)))), what = String(f.said || 'that face').replace(/^face: /, '');   // the chip's "face: " isn't for a sentence
   rows[at.i] = { ...rows[at.i], lo: box.lo, hi: box.hi };
   stopScenPick(`Picked ${what}`);
   repaintScen(pid);

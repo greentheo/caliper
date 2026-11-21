@@ -78,6 +78,9 @@ let slow = null;
 const features = async (pid) => (slow ? slow : DATA);
 const facePicked = () => FACE;
 const hitOn = (pid) => ({ object: { userData: { partId: pid } } });
+// the part's frame: a stand-in that moves x by the part's position (the real one is three.js, tested below)
+const scenFrame = (p) => ({ dx: p && p.position ? p.position[0] : 0 });
+const unposed = (v, f) => v.map((x, k) => (k % 3 === 0 ? x - f.dx : x));
 """
 
 
@@ -95,6 +98,39 @@ def test_a_load_s_box_becomes_the_face_clicked_and_the_rows_redraw():
     assert got["row"]["amount"] == 250 and got["row"]["direction"] == [0, 0, -1]          # what it is and which way: kept
     assert got["picking"] is None and got["hint"] == "Picked the top face, 12 in by 12 in" and got["repainted"] == "stool"
     assert "The box is now the top face, 12 in by 12 in. Save them to keep it." in got["said"]
+
+
+def test_a_posed_part_s_picked_box_is_in_its_own_frame():
+    """CALI-220 (#375): rows are in the part's own frame, as its script's loads() are; #109's faces are posed. A part moved
+    500 mm along x: the face clicked at x 500..800 is the row's 0..300."""
+    got = _pick("""S.design.parts[0].position = [500, 0, 0]; S.design.parts[0].rotation = [0, 0, 0];
+                   FACE = { said: 'face: the top', verts: [500, 0, 400, 800, 0, 400, 800, 300, 400] };
+                   startScenPick('stool', 'load', 0); await pickScenarioFace(hitOn('stool'));
+                   return S.scen.stool.scenarios[0];""")
+    assert got["lo"] == [-1, -1, 399] and got["hi"] == [301, 301, 401]
+
+
+def test_the_frame_is_the_part_s_pose_and_unposing_undoes_it():
+    """scenFrame and unposed with the page's own three.js: a part at (100, 0, 0) turned 90° about z."""
+    src = open(JS).read()
+    three = os.path.join(os.path.dirname(JS), "vendor", "three", "three.module.js")
+    script = (f"import * as THREE from {json.dumps('file://' + three)};\n" + _fn(src, "scenFrame") + _fn(src, "unposed")
+              + """const f = scenFrame({ position: [100, 0, 0], rotation: [0, 0, 90] });
+const posed = new THREE.Vector3(10, 0, 0).applyMatrix4(f);
+const back = unposed([posed.x, posed.y, posed.z], f);
+const none = scenFrame({ id: 'p' }).equals(new THREE.Matrix4());
+console.log(JSON.stringify({ posed: [posed.x, posed.y, posed.z].map((v) => Math.round(v * 1e6) / 1e6), back: back.map((v) => Math.round(v * 1e6) / 1e6), none }));""")
+    got = subprocess.run([_node(), "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    out = json.loads(got.stdout)
+    assert out["posed"] == [100, 10, 0] and out["back"] == [10, 0, 0] and out["none"] is True   # no pose said: the identity
+
+
+def test_the_marks_are_drawn_in_the_part_s_frame():
+    src = open(JS).read()
+    assert "scenMarks.matrix.copy(scenFrame(p));" in _fn(src, "drawScenarios")
+    assert "scenMarks.matrixAutoUpdate = false;" in src
+    assert "const box = faceBox(unposed(f.verts, scenFrame(partOf(pid))))" in _fn(src, "pickScenarioFace")
 
 
 def test_a_support_s_box_becomes_the_face_clicked():
