@@ -2137,9 +2137,17 @@ function renderInspector() {
 
 // one rule on a part, with its verdict as measured on this version, and what it measured where it doesn't hold
 // (#137 item 1: the bar stool's locked shell wall broke, and this list showed no mark)
+// a rule as it's read (#386): "one_body body_count == 1" was code on the page. Said in words where it's one Caliper
+// writes, a wall rule by its number, else by its name in words; the expression stays in its title, for whoever wants it
+const RULE_WORDS = { 'body_count == 1': "it's one solid piece", is_watertight: "it's closed all round", 'body_count == 1 and is_watertight': "it's one solid piece, closed all round", is_manifold: 'its surface has no gaps or folds' };
+function ruleSaid(id, expr) {
+  const e = String(expr || '').trim().replace(/\s+/g, ' '), wall = e.match(/^min_wall >=? (\d+(?:\.\d+)?)$/);
+  const words = RULE_WORDS[e] || (wall ? `its walls are at least ${+wall[1]} mm` : String(id || e).replace(/_/g, ' '));
+  return `<b title="${esc(e)}">${esc(words)}</b>`;
+}
 function ruleItem(r) {
   const v = r.verdict;
-  return `<li class="rule">🔒 ${v ? `${verdictBadge(v)} ` : ''}<b>${esc(r.id)}</b> <code>${esc(r.expr)}</code>${
+  return `<li class="rule">🔒 ${v ? `${verdictBadge(v)} ` : ''}${ruleSaid(r.id, r.expr)}${
     v && v.kind !== 'holds' && r.said ? `<div class="small">${esc(r.said)}</div>` : ''}</li>`;
 }
 // the parts' own rules, measured, where the design has no checks of its own (#137 item 1: "Nothing to measure yet"
@@ -2154,8 +2162,8 @@ function checks(report, only) {
   if (!rows.length) return '<div class="empty">No checks.</div>';
   return '<ul class="list">' + rows.map((r) => `<li class="check ${r.status}">
     <span class="s">${r.status === 'pass' ? '✓' : r.status === 'deferred' ? '·' : '✗'}</span>
-    <span><b>${esc(r.id)}</b> <code>${esc(r.expr)}</code>${r.actual != null && r.status !== 'pass'
-      ? ` <span class="muted">→ ${esc(typeof r.actual === 'number' ? r.actual.toFixed(3) : r.actual)}</span>` : ''}${r.status === 'deferred' && r.detail
+    <span>${ruleSaid(r.id, r.expr)}${r.actual != null && typeof r.actual !== 'boolean' && r.status !== 'pass'   // a yes/no: its words say it
+      ? ` <span class="muted">: measured ${esc(typeof r.actual === 'number' ? +r.actual.toFixed(3) : r.actual)}</span>` : ''}${r.status === 'deferred' && r.detail
       ? ` <span class="muted">· ${esc(r.detail)}</span>` : ''}</span>
     </li>`).join('') + '</ul>';
 }
@@ -2194,7 +2202,7 @@ function designView(d) {
       ${d.plan.numbers.length ? '<div class="small"><b>The numbers they share</b></div><ul class="list">'
         + d.plan.numbers.map((n) => `<li class="small">${esc(n)}</li>`).join('') + '</ul>' : ''}
       ${d.plan.checks.length ? '<div class="small"><b>Checked between them</b></div><ul class="list">'
-        + d.plan.checks.map((c) => `<li class="small"><b>${esc(c.id)}</b> <code>${esc(c.expr)}</code>${c.source === 'assumed'
+        + d.plan.checks.map((c) => `<li class="small">${ruleSaid(c.id, c.expr)}${c.source === 'assumed'
           ? ` <span class="badge">assumed: not checked until you keep it</span>${c.why ? ` <span class="muted">${esc(c.why)}</span>` : ''}
             <button class="ghost small" data-plankeep="${esc(c.id)}">Keep</button>` : ''}</li>`).join('') + '</ul>' : ''}` : ''}
     <h4>Parts</h4>
