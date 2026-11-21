@@ -440,7 +440,7 @@ _JS = os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "st
 
 def test_a_finished_carve_or_lighten_asks_the_cards_again():
     head = """const S = { slug: 'x', scope: 'p', shopKey: 0, design: { parts: [], carve_runs: [{ id: 'a', status: 'running' }], lighten_runs: [] } };\n"""
-    got = _page(("answersKey",), head, """const a = answersKey();
+    got = _page(("soleFor", "shownPart", "answersKey"), head, """const a = answersKey();
         S.design.carve_runs = [{ id: 'a', status: 'done' }];
         const b = answersKey();
         S.design.lighten_runs = [{ id: 'l', status: 'done' }];
