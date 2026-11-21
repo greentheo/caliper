@@ -382,18 +382,24 @@ def _carving(slug: str) -> Optional[dict]:
             if j is not None else None)
 
 
+#: The jobs that can stop part way, at their next step (``stop=j.check``): the busy overlay offers Stop on these (#363).
+STOPPABLE = ("load", "lighten", "carve", "fix", "release", "preview")
+
+
 def _running(slug: str) -> list[dict]:
-    """The strength checks, Lightens and build packages queued or running for this design, as ``carving`` is for a carve:
-    what a page draws from on load and on every redraw, so a study isn't lost to a switch, a reload or a redraw (#178)."""
+    """Every job queued or running for this design, as ``carving`` is for a carve: what a page draws from on load and on
+    every redraw, so a study isn't lost to a switch, a reload or a redraw (#178). Every kind, so the busy overlay (#363)
+    shows a carve, a cut plan, a Shape for drag or a chat turn as it shows a check; ``stoppable`` says which can stop."""
     out = []
     for j in RUNNER.active():
-        if j.meta.get("slug") != slug or j.kind not in ("load", "lighten", "release", "firstrun"):
+        if j.meta.get("slug") != slug:
             continue
         said = j.since(0)
         words = [ev["text"] for ev in said if ev.get("text") and ev.get("kind") != "started"]
         out.append({"job": j.id, "kind": j.kind, "part": j.meta.get("part"), "version": j.meta.get("version"),
                     "text": words[-1] if words else "",
                     "waiting": bool(said and said[-1].get("kind") == "waiting"), "stopping": j.stopping,
+                    "stoppable": j.kind in STOPPABLE,
                     "elapsed_s": round(time.time() - j.started) if j.started else 0})
     return out
 
@@ -785,7 +791,8 @@ def router():
                 raise
             return turn_result(res)
 
-        job = RUNNER.submit("chat", work, label=req.message[:60], lock=_lock(slug))
+        # what it works on, as every part's job says (#363: the busy overlay greys the part a revise is on)
+        job = RUNNER.submit("chat", work, label=req.message[:60], lock=_lock(slug), meta=_on_part(slug, req.scope or None))
         return {"job_id": job.id}
 
     @r.get("/api/designs/{slug}/parts/{pid}.stl")

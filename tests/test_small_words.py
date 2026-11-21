@@ -180,6 +180,7 @@ def test_the_banner_says_older_only_when_it_is():
 
 
 _SEND = """
+const trackJob = () => ({ done: Promise.resolve() });   // the busy overlay's follow (#363)
 const els = {}; const $ = (id) => (els[id] = els[id] || {});
 let S = { slug: 'a', busy: false, opening: null, pick: { said: 'edge', id: 'e1' } };
 const PICK = { turn: 0, overlay: null }; const scene = { remove() {} };

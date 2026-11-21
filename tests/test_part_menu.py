@@ -402,7 +402,8 @@ def test_lighten_and_carve_aren_t_offered_on_a_mirror():
 PART_JOBS = {"load": "checked", "lighten": "lightened", "carve": "carved", "whittle": "whittled", "frame": "sized",
              "gussets": "given gussets", "aero": "shaped for drag", "picture": "given a picture",
              "cutplan": "planned for cutting", "preview": "previewed",         # a step's preview copies the part (#297)
-             "fix": "fixed"}                                                    # Things to fix, done (#300 slice B)
+             "fix": "fixed",                                                    # Things to fix, done (#300 slice B)
+             "chat": "revised"}                                                 # says its part for the busy overlay (#363)
 
 
 def test_every_part_job_is_submitted_saying_its_part():
@@ -417,7 +418,7 @@ def test_every_part_job_is_submitted_saying_its_part():
             meta = next((k.value for k in node.keywords if k.arg == "meta"), None)
             kinds[node.args[0].value] = (isinstance(meta, ast.Call) and getattr(meta.func, "id", "") == "_on_part")
     assert {k for k, on in kinds.items() if on} == set(PART_JOBS), kinds
-    assert set(kinds) - set(PART_JOBS) == {"chat", "firstrun", "release", "clarify", "goals", "scorecard"}
+    assert set(kinds) - set(PART_JOBS) == {"firstrun", "release", "clarify", "goals", "scorecard"}
 
 
 def _hold(kind, lock, meta, gate):
@@ -609,7 +610,7 @@ def test_a_mirror_keeps_its_check_s_why(site, monkeypatch, why):
 
 
 _SEND_STUBS = """
-const S = { slug: 'step-stool-5', busy: false, opening: false, pick: null };
+const S = { slug: 'step-stool-5', busy: false, opening: false, pick: null }; const trackJob = () => ({ done: Promise.resolve() });   // the busy overlay's follow (#363)
 const el = { disabled: false };
 const $ = () => el;
 const posted = [];

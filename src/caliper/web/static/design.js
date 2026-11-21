@@ -1636,6 +1636,7 @@ async function send(text, scope, pick, shown, typed, piece) {
   const live = liveTurn(shown || text, scope);
   try {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/chat`, { message: text, scope, ...(pick ? { pick } : {}), ...(shown ? { shown } : {}), ...(typed ? { typed } : {}), ...(piece != null ? { piece } : {}) });
+    trackJob(job_id, { kind: 'chat', part: scope || null, text: 'reading your message…' }).done.catch(() => {});   // the overlay (#363)
     await follow(job_id, (ev) => live.step(ev));
     S.busy = false;
     if (shown && S.pick === sent) clearPick();                     // it's been used; after an error it stays, so asking again doesn't mean picking again
@@ -3476,6 +3477,7 @@ function wireCutplan(p) {
     say('<div class="small muted" id="cpMsg">unfolding…</div>', 'unfolding…');
     try {
       const { job_id } = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/cutplan`);
+      trackJob(job_id, { kind: 'cutplan', part: p.id, text: 'unfolding…' }).done.catch(() => {});   // the overlay (#363)
       await follow(job_id, (ev) => { const m = $('cpMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
       await refresh();
     } catch (e) {
@@ -3907,6 +3909,7 @@ async function runCarve(p, again) {
 async function followCarve(p, jobId, stopping, keyed) {
   const key = keyed || carveKey(p.id), slug = S.slug;
   const cj = S.carveJob[key] = { ...(S.carveJob[key] || { text: 'carving…', progress: 0, t0: Date.now() }), job: jobId };
+  trackJob(jobId, { kind: 'carve', part: p.id, text: 'carving…', t0: cj.t0 }).done.catch(() => {});   // the overlay (#363)
   if (stopping) cj.stopping = true;                // asked to stop before this page loaded (#102 review)
   paintCarve(p.id);
   try {
@@ -4357,9 +4360,11 @@ const jobsHere = () => Object.values(S.tracked).filter((t) => t.slug === S.slug)
 const trackedFor = (kind, part) => jobsHere().find((t) => t.kind === kind && (t.part || null) === (part || null));
 function trackJob(id, info) {
   if (S.tracked[id]) return S.tracked[id];
-  const t = S.tracked[id] = { job: id, slug: S.slug, text: '', progress: null, waiting: false, ...info };
+  const t = S.tracked[id] = { job: id, slug: S.slug, text: '', progress: null, waiting: false, t0: Date.now(),
+    stoppable: STOPS.has(info.kind), ...info };
   paintJobs();
   t.done = follow(id, (ev) => {
+    if (ev.kind === 'stopping') t.stopping = true;
     if (ev.text && ev.kind !== 'started') t.text = ev.text;
     if (typeof ev.progress === 'number') t.progress = ev.progress;
     t.waiting = ev.kind === 'waiting';
@@ -4403,7 +4408,8 @@ async function pollRunning() {
 function syncRunning() {
   for (const r of (S.design && S.design.running) || []) {
     if (r.kind === 'firstrun' || S.tracked[r.job]) continue;     // the first build has its own bubble in the thread
-    trackJob(r.job, { kind: r.kind, part: r.part, version: r.version, text: r.text, waiting: r.waiting }).done.catch(() => {});   // jobOver re-reads
+    trackJob(r.job, { kind: r.kind, part: r.part, version: r.version, text: r.text, waiting: r.waiting, stopping: !!r.stopping,
+      t0: Date.now() - (r.elapsed_s || 0) * 1000 }).done.catch(() => {});   // jobOver re-reads; its clock from when it began
   }
 }
 function jobPart(id) { return (((S.design && S.design.parts) || []).find((p) => p.id === id) || {}).name || id; }
@@ -4448,7 +4454,9 @@ function paintJobs() {
   for (const t of jobsHere()) {
     const here = t.kind === 'release' || S.scope === t.part, panel = here ? $(JOB_BOX[t.kind]) : null;
     const box = panel && panel.closest && panel.closest('details:not([open]), [hidden]') ? null : panel;   // folded away isn't on screen
-    if (box) { box.innerHTML = jobHtml(t, false); box.dataset.job = t.job; } else lines.push(jobHtml(t, true));
+    // its panel's own line, where it has one (hidden while the overlay greys that panel); the line at the top only for the
+    // build package: every part's job is the overlay's now (#363), and the kinds the panels never had stay off them
+    if (box) { box.innerHTML = jobHtml(t, false); box.dataset.job = t.job; } else if (t.kind === 'release') lines.push(jobHtml(t, true));
     const go = here && $(JOB_GO[t.kind]);
     if (go) jobOff(go, runningLabel(t.kind));
     if (t.kind === 'load' && here && $('lFiner')) jobOff($('lFiner'));
@@ -4458,7 +4466,82 @@ function paintJobs() {
   for (const box of document.querySelectorAll('#inspector [data-job]')) {     // it's over: nothing left over from it
     if (!S.tracked[box.dataset.job]) { box.innerHTML = ''; delete box.dataset.job; }
   }
+  paintBusy();
 }
+
+// ------------------------------------------------------------- a running job, plain to see (#363)
+// Theo, after Fix these on step-stool-5: "the indicator is really pretty small and hard to see ... making the main part
+// screen grey and not working with some circle/timer indicator in the upper right corner ... some text below it to say
+// what it's currently doing". One overlay for every job, drawn from what the page follows (S.tracked): top right of the
+// view, a large spinner, how long it's run, what's running on which part, its step in words and its bar where it knows
+// its count; the view greys, and the part's panel greys over and can't be acted on. The chat and other designs stay usable.
+const STOPS = new Set(['load', 'lighten', 'carve', 'fix', 'release', 'preview']);   // stop at their next step (design_api.STOPPABLE)
+const BUSY_DOING = { load: 'Checking', lighten: 'Lightening', carve: 'Carving', fix: 'Fixing', cutplan: 'Making the cut plan for',
+  aero: 'Shaping {} for drag', chat: 'Working on', whittle: 'Whittling', frame: 'Sizing the frame of', gussets: 'Adding gussets to',
+  picture: 'Drawing', preview: 'Previewing a step of', release: 'Making the build package', clarify: 'Thinking about your design',
+  goals: 'Working out its goals', scorecard: 'Scoring the design' };
+function busyJobs(jobs, scope) {               // the one shown big, and the rest: the part on screen's first, then the oldest
+  const shown = jobs.filter((t) => t.kind !== 'firstrun');    // the first build has its own bubble in the thread
+  const mine = shown.filter((t) => scope && t.part === scope);
+  const order = [...mine, ...shown.filter((t) => !mine.includes(t))];
+  return { main: order[0] || null, more: order.slice(1) };
+}
+function busyTitle(t, name) {
+  const doing = BUSY_DOING[t.kind] || 'Working on';
+  if (!t.part) return t.kind === 'chat' ? 'Working on your message' : doing.replace(' {}', '').replace(/ (of|for|to)$/, '');
+  return doing.includes('{}') ? doing.replace('{}', name) : `${doing} ${name}`;
+}
+function clock(s) {                            // 0:07, 12:30, 1:02:05
+  const n = Math.max(0, Math.floor(s)), h = Math.floor(n / 3600), m = Math.floor(n / 60) % 60, sec = String(n % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
+}
+function busyStep(t) {
+  return t.stopping ? 'stopping at the next step…' : t.text || (t.waiting ? 'waiting for another job on this design' : 'starting…');
+}
+function busyHtml(main, more, now, name) {
+  const pct = typeof main.progress === 'number' ? Math.round(main.progress * 100) : null;
+  const stop = main.stopping ? '' : main.waiting ? 'Cancel' : main.stoppable ? 'Stop it' : '';
+  return `<div class="busy-spin" aria-hidden="true"></div>
+    <div class="busy-time" data-t0="${main.t0}" title="how long it's run">${clock((now - main.t0) / 1000)}</div>
+    <div class="busy-what">${esc(busyTitle(main, name(main.part)))}…</div>
+    <div class="busy-step">${esc(busyStep(main))}</div>
+    ${pct != null ? `<div class="bar busy-bar" role="progressbar" aria-label="How far it's got" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>` : ''}
+    ${stop ? `<button class="ghost busy-stop" data-job-cancel="${esc(main.job)}">${stop}</button>` : ''}
+    ${more.map((t) => `<div class="busy-more">and ${esc(busyTitle(t, name(t.part)).replace(/^./, (c) => c.toLowerCase()))}: ${esc(busyStep(t))}</div>`).join('')}
+    <div class="busy-note">${main.part ? `${esc(name(main.part))} waits till it's done. ` : ''}The chat and your other designs still work.</div>`;
+}
+function paintBusy() {
+  const box = $('busy');
+  if (!box) return;
+  const here = S.design ? jobsHere() : [], { main, more } = busyJobs(here, S.scope), insp = $('inspector');
+  // its panel greys when the part on screen is the one being worked on (a design-wide job leaves the design view be)
+  const grey = !!main && !!S.scope && here.some((t) => t.kind !== 'firstrun' && t.part === S.scope);
+  insp.classList.toggle('is-busy', grey);   // not .busy: that's the overlay's box
+  insp.inert = grey;
+  if (grey) insp.setAttribute('aria-busy', 'true'); else insp.removeAttribute('aria-busy');
+  $('busyShade').hidden = box.hidden = !main;
+  // drawn once per shape, then its words and bar changed in place: a box redrawn on every event replaced Stop it under the
+  // pointer, so a press and its release landed on two buttons and the click was lost (found on the walk)
+  const shape = main ? [main.job, !!main.stopping, !!main.waiting, !!main.stoppable, typeof main.progress === 'number',
+    more.map((t) => t.job).join()].join('|') : '';
+  const html = main ? busyHtml(main, more, Date.now(), jobPart) : '';
+  if (box.dataset.shape !== shape) { box.innerHTML = html; box.dataset.shape = shape; }
+  else if (main) busyUpdate(box, html);
+  const said = main ? `${busyTitle(main, jobPart(main.part))}: ${busyStep(main)}` : '';
+  if ($('busyLive').textContent !== said) $('busyLive').textContent = said;   // said when it changes, not every tick
+}
+function busyUpdate(box, html) {               // the same box, its words and bar as they are now
+  const fresh = document.createElement('div');
+  fresh.innerHTML = html;
+  for (const sel of ['.busy-what', '.busy-step', '.busy-note']) box.querySelector(sel).textContent = fresh.querySelector(sel).textContent;
+  box.querySelectorAll('.busy-more').forEach((m, i) => { m.textContent = fresh.querySelectorAll('.busy-more')[i].textContent; });
+  const bar = box.querySelector('.busy-bar'), now = fresh.querySelector('.busy-bar');
+  if (bar && now) { bar.setAttribute('aria-valuenow', now.getAttribute('aria-valuenow')); bar.firstElementChild.style.width = now.firstElementChild.style.width; }
+}
+setInterval(() => {                            // the clock moves while nothing else does
+  const t = document.querySelector('#busy .busy-time');
+  if (t) t.textContent = clock((Date.now() - Number(t.dataset.t0)) / 1000);
+}, 1000);
 function cancelJob(e) {
   const b = e.target.closest('[data-job-cancel]');
   if (!b) return;
@@ -4479,6 +4562,7 @@ $('paneTabs').onclick = (e) => {
 };
 setPane('chat');
 $('inspector').addEventListener('click', cancelJob);
+$('busy').addEventListener('click', cancelJob);         // the overlay's Stop it / Cancel (#363)
 $('inspector').addEventListener('toggle', paintJobs, true);    // folded or unfolded mid-wait: toggle doesn't bubble, so captured
 setInterval(pollRunning, 5000);
 async function runLoad(p, spacing) {
@@ -4884,6 +4968,7 @@ async function runAero(p) {
   prog.innerHTML = '<div class="bar"><i></i></div><div class="small muted" id="aMsg">starting…</div>';
   try {
     const { job_id } = await api('POST', `/api/designs/${S.slug}/aero`, body);
+    trackJob(job_id, { kind: 'aero', part: p.id, text: 'starting…' }).done.catch(() => {});   // the overlay (#363)
     S.aeroRun[p.id] = 0;
     await follow(job_id, (ev) => {
       const msg = $('aMsg'), bar = prog.querySelector('.bar > i');

@@ -65,7 +65,7 @@ def test_the_design_s_record_says_what_s_running(api):
     time.sleep(0.05)
     (r,) = c.get(f"/api/designs/{slug}").json()["running"]
     assert r == {"job": jid, "kind": "load", "part": "box", "text": "checking the first load", "waiting": False, "stopping": False,
-                 "elapsed_s": r["elapsed_s"], "version": 1}       # the version it's of: a change under it is said (#268)                 # how long it's run, for a first build's bubble (CALI-154)
+                 "stoppable": True, "elapsed_s": r["elapsed_s"], "version": 1}       # the version it's of: a change under it is said (#268)                 # how long it's run, for a first build's bubble (CALI-154)
     assert c.get(f"/api/designs/{other}").json()["running"] == []          # the same part id on another design isn't it
     gate.set()
     _wait(jobs.RUNNER.get(jid))
@@ -134,6 +134,7 @@ const document = { querySelectorAll: (q) => { asked.push(q);
     : q.includes('[data-job-off]') ? [...Object.values(made), ...offers].filter((m) => m.dataset.jobOff)
       : q.includes('data-better-action') ? offers : []; } };
 const esc = (s) => String(s);
+const STOPS = new Set(['load', 'lighten', 'carve', 'fix', 'release', 'preview']); let busyPaints = 0; const paintBusy = () => { busyPaints += 1; };
 const JOB_NAME = { load: 'Strength check', lighten: 'Lighten', release: 'Build package' };
 const JOB_BOX = { load: 'lProgress', lighten: 'lightProgress', release: 'relProgress' };
 const JOB_GO = { load: 'lGo', lighten: 'lightGo', release: 'relGo' };
@@ -179,13 +180,15 @@ def test_the_panel_shows_it_and_its_button_is_off():
     assert "step 2" in got["box"] and got["off"] is True and "running" in got["why"]
 
 
-def test_with_its_panel_not_on_screen_it_says_so_at_the_top():
+def test_with_its_panel_not_on_screen_the_overlay_says_it_not_a_line_at_the_top():
+    """#363: the busy overlay at the top right of the view says what's running; the small line at the top of the panel is
+    the build package's alone now."""
     got = _run(ALL, """onScreen.lProgress = false; onScreen.lGo = false;
         S.scope = null;
         S.design.running = [{ job: 'j1', kind: 'load', part: 'p', text: 'step 2', waiting: false }];
         syncRunning(); paintJobs();
-        return { note: el('jobNote').innerHTML };""")
-    assert "Strength check of p: step 2" in got["note"]
+        return { note: el('jobNote').innerHTML, busyPaints };""")
+    assert got["note"] == "" and got["busyPaints"] >= 1
 
 
 def test_cancel_shows_only_while_it_waits():
@@ -360,11 +363,12 @@ def test_the_cancel_button_is_listened_for():
 
 
 @pytest.mark.parametrize("folded", ["details:not([open])", "[hidden]"])     # a closed block, or a closed card (#325)
-def test_a_panel_folded_away_isn_t_on_screen_so_the_top_line_says_it(folded):
+def test_a_panel_folded_away_isn_t_on_screen_so_the_overlay_says_it(folded):
+    """#363: what the top line said (and its Cancel) is the busy overlay's now; a folded panel still gets nothing."""
     got = _run(ALL, """el('lProgress').closest = (q) => (q.split(', ').includes('""" + folded + """') ? {} : null);
         S.design.running = [{ job: 'j1', kind: 'load', part: 'p', text: 'waiting', waiting: true }]; syncRunning(); paintJobs();
-        return { note: el('jobNote').innerHTML, box: el('lProgress').innerHTML };""")
-    assert "Strength check of p: waiting" in got["note"] and "data-job-cancel" in got["note"] and got["box"] == ""
+        return { note: el('jobNote').innerHTML, box: el('lProgress').innerHTML, busyPaints };""")
+    assert got["note"] == "" and got["box"] == "" and got["busyPaints"] >= 1
 
 
 def test_the_top_line_uses_the_part_s_name():
