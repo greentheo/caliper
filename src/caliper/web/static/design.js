@@ -2366,14 +2366,27 @@ function fixPicked(part) {
     own: (mine.own || []).filter((o) => !o.off).map((o) => ({ fix: o.fix })),
   };
 }
+// the list's rows said apart (#368's counts, #387): a check of another version, the person's own loads and Claude's readings
+// aren't "measured wrong". From the server's counts; counted the same way where a list has none
+function fixCounts(got) {
+  if (got.counts) return got.counts;
+  const rows = got.rows || [], readings = rows.filter((r) => String(r.id || '').startsWith('reading:')).length;
+  const measured = rows.filter((r) => r.measured !== false).length;
+  return { measured, readings, other: rows.length - measured - readings };
+}
+function fixesSaid(c) {
+  return [c.measured ? `${c.measured} measured wrong` : '', c.readings ? `${c.readings} of Claude's readings` : '',
+    c.other ? `${c.other} not measured` : ''].filter(Boolean).join(' · ');
+}
 // Things to fix as a section of Will it work? (#325): its mark and its count once its list is read
 function fixesSection(part) {
   const got = S.fixes && S.fixes[fixKey(part)], fresh = fixFresh(part), failed = !!got && got.error != null;
-  const n = fresh ? (got.rows || []).length : null;
+  const n = fresh ? (got.rows || []).length : null, c = fresh ? fixCounts(got) : null;
   const unchecked = n === 0 && !fixChecked(part);     // an empty list with nothing measured isn't a ✓ (#331 review)
-  return { k: 'fix', title: 'Things to fix', tone: n == null || unchecked ? 'info' : n ? 'warn' : 'ok',
+  // only what's measured wrong, or Claude's reading of it, is a warning; a row of neither is never a ✓ either
+  return { k: 'fix', title: 'Things to fix', tone: n == null || unchecked ? 'info' : c.measured || c.readings ? 'warn' : n ? 'info' : 'ok',
     answer: failed ? "couldn't read them" : n == null ? 'measured, with what each would take' : unchecked ? 'not checked yet'
-      : n ? `${n} measured wrong` : 'nothing measured wrong',
+      : n ? fixesSaid(c) : 'nothing measured wrong',
     attrs: ` id="fixBox" data-fix-part="${esc(part)}"`,
     body: `<div id="fixBody">${fresh || failed ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div>` };
 }

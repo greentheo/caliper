@@ -124,8 +124,10 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
     need = run.get("min_safety") or L.MIN_SAFETY
     stale = run.get("version") != p["version"]
     if stale:                                   # its numbers are of another version: none of them is this part's
-        rows.append(_row("stale", f"Its strength check is of v{run.get('version')}, not this version",
-                         [_choice("Check it again", CHECK, _check_cost((run.get("seconds") or 0) / 60))], pid))
+        # out of date, not measured wrong: nothing about this version is measured (#387: "2 measured wrong", one of them this)
+        rows.append({**_row("stale", f"Its strength check is of v{run.get('version')}, not this version",
+                            [_choice("Check it again", CHECK, _check_cost((run.get("seconds") or 0) / 60))], pid),
+                     "measured": False, "badge": "out of date"})
         return rows, limits
     filled = consistency.filled(store, pid)
     edge = consistency.bare_edge(store, pid)
