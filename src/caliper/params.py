@@ -52,7 +52,8 @@ def notes(script: str) -> dict[str, str]:
 #: What a number is, by what the script says (#147 review, the foreman's call: never by whether it's written 6 or 6.0).
 _LENGTH_UNIT = re.compile(r"\b(?:mm|cm|millimet(?:re|er)s?|inch(?:es)?)\b|\d\s*(?:in\b|\")", re.I)
 _LENGTH_NAME = re.compile(r"(?:_t|_r|_d|_h|_w|_len|_l)$|width|height|depth|radius|diameter|thick|wall|fillet|gap|length|"
-                          r"offset|clearance|chamfer|_z$|_x$|_y$", re.I)
+                          r"offset|clearance|chamfer|_z$|_x$|_y$|"
+                          r"overhang|lift|inset|setback|spacing", re.I)   # CALI-171: Theo's foot_overhang, stringer_lift
 #: A length, as its comment says it in words ("width of the box", "how tall it stands").
 _LENGTH_WORD = re.compile(r"\b(?:width|wide|height|tall|depth|deep|radius|diameter|thickness|thick|wall|fillet|gap|"
                           r"length|long|offset|clearance)\b", re.I)

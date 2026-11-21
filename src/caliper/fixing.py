@@ -22,7 +22,8 @@ from __future__ import annotations
 from typing import Optional
 
 from .design import DesignStore
-from .fixes import CHECK, DESIGNER, LOADS, NUMBER, listed
+from .jobs import Cancelled
+from .fixes import CHECK, DESIGNER, LOADS, NUMBER, READING, listed
 
 #: A row whose measurement comes from the strength check: gone from the list only means fixed after a fresh one.
 _FROM_CHECK = ("stale", "unsized", "finer", "filled", "plate:", "buckling:", "joint:", "fails:")
@@ -258,10 +259,15 @@ def apply(store: DesignStore, pid: str, picked: list[dict], own: Optional[list[d
         designer_changed = bool(res.ok) and store.design.part(pid).version != before
     checked, check_why = False, ""
     if check and p["check"] and (done_numbers or done_loads or designer_changed or not p["designer"]):
+        if stop:                                      # before its check: what it fixed stays, the check isn't run (#398)
+            stop()
         say("checking", "the strength check again")
         try:
-            load_study.study(store, pid, **({"spacing": p["check"]["spacing_mm"]} if p["check"]["spacing_mm"] else {}))
+            load_study.study(store, pid, **({"spacing": p["check"]["spacing_mm"]} if p["check"]["spacing_mm"] else {}),
+                             stop=stop)               # and its check stops between its steps too (#398)
             checked = True
+        except Cancelled:                             # a stop is the job's, never "not checked again: Cancelled"
+            raise
         except Exception as e:  # noqa: BLE001 — said in each row it leaves unmeasured, never a crash of the fix
             check_why = f"not checked again: {type(e).__name__}"
         store = DesignStore.load(store.root)
@@ -286,6 +292,10 @@ def apply(store: DesignStore, pid: str, picked: list[dict], own: Optional[list[d
         if item.get("own") and rid is None:                # the person's own: done, but nothing measures it
             results.append({"id": rid, "fix": item["fix"], "status": "done, not measured",
                             "why": "your words: nothing in the list measures them"})
+            continue
+        if str(rid).startswith(READING):                # Claude's reading: nothing measures it, so never fixed (#238 B)
+            results.append({"id": rid, "fix": item["fix"], "status": "done, not measured",
+                            "why": "Claude's reading: nothing measures it. Review again to have it read"})
             continue
         from_check = str(rid).startswith(_FROM_CHECK)
         if rid in after:

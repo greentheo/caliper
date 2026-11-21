@@ -74,7 +74,7 @@ def closed_under(store, part_id: str, case: dict, plate: dict) -> bool:
     from . import spatial
 
     try:
-        mesh = store.part_geometry(part_id).require_mesh()
+        mesh = store.part_local(part_id).require_mesh()
     except Exception:  # noqa: BLE001 — a part that can't say: read from below, as before
         return False
     lo, hi = np.asarray(case["lo"], float), np.asarray(case["hi"], float)

@@ -22,7 +22,7 @@ from typing import Optional, Union
 
 from pydantic import BaseModel, field_validator
 
-from . import (aero, mirror, better, previews, scenarios, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
+from . import (aero, mirror, placing, better, previews, scenarios, consistency, answers, carve, chat, clarify, construction, cutplan, errors, firstrun, frame_study, goals, grain,
                lighten,
                load_study, making, part_rules, patterns, promote, release, samples, scorecard, shop, studies, trash, tree,
                verdicts)
@@ -75,6 +75,37 @@ class RemovePart(BaseModel):
 class RestorePart(BaseModel):
     part: Optional[str] = None            # its newest removal
     id: Optional[str] = None              # or one removal, by its trash id
+
+
+class Place(BaseModel):
+    """Where Copy… or Move… puts a part (CALI-183, #294), in mm: one of ``offset``, ``at``, ``beside``, and a ``turn``.
+    ``to``, a whole pose, is Put it back: where a move found it."""
+    offset: Optional[list[float]] = None
+    at: Optional[list[float]] = None
+    beside: Optional[dict] = None         # {"part", "side": "+x" … "-z"}
+    turn: Optional[dict] = None           # {"axis": "x"|"y"|"z", "deg": 0|90|180|270}
+    to: Optional[dict] = None             # {"position", "rotation"}
+
+    def how(self) -> dict:
+        return {k: v for k, v in (("offset", self.offset), ("at", self.at), ("beside", self.beside), ("turn", self.turn))
+                if v is not None}
+
+
+def _pose(store, pid: str) -> Optional[dict]:
+    try:
+        return placing.pose(store, pid)
+    except KeyError:                               # planned, not in the assembly yet
+        return None
+
+
+def _drawn(store, pid: str, version: int) -> str:
+    """The version and where it sits, as the view keys a part's mesh: a Move… changes no version (CALI-183, #294)."""
+    at = _pose(store, pid)
+    if at is None or (not any(at["position"]) and not any(at["rotation"])):
+        return str(version)
+    import hashlib
+
+    return f"{version}-" + hashlib.sha1(repr((at["position"], at["rotation"])).encode()).hexdigest()[:8]
 
 
 def _listed(xs: list) -> str:
@@ -286,7 +317,7 @@ NEEDS_KEY = "Building a new design needs a Claude key (see .env.example). Until 
 def _claude() -> bool:
     """Whether Claude can be asked: a key is set (the CLI loads .env). Without one nothing is sent anywhere, and a
     first build can't run, so it isn't started (CALI-91)."""
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return llm.has_key()
 
 
 def first_build(slug: str):
@@ -339,6 +370,7 @@ def _plan(store: DesignStore) -> Optional[dict]:
     by = {p.id: p for p in pl.parts}
     return {"status": (store.design.plan or {}).get("status", "review"), "headline": P.headline(pl, store.design.name),
             "dropped": P.dropped_line(pl),
+            "questions": pl.questions,                # only the person can say; Build it builds nothing over them (#371)
             "notes": pl.notes, "dropped_rules": pl.dropped_rules,     # said, never silent (CALI-119)
             "parts": [{**by[i].model_dump(), "built": bool(store.design.part(i) and store.design.part(i).version)}
                       for i in P.order(pl)],
@@ -445,6 +477,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     slug = d.slug
     roles = {p.id: p.role for p in store.assembly.parts}
     parts = []
+    placed = {a.id: a for a in store.assembly.parts}       # each part's pose (#375)
     for p in d.parts:
         spec = store.read_spec(p.id) if store.is_scripted(p.id) or os.path.exists(
             store.spec_path(p.id)) else None
@@ -481,7 +514,12 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "pieces": tree.pieces(store, p.id) if construction.declares(script) else [],
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
             "mirror_of": mirror.of(script)["source"] if mirror.of(script) else None,     # (#246 review)
-            "stl_url": f"/api/designs/{slug}/parts/{p.id}.stl?v={p.version}",
+            "stl_url": f"/api/designs/{slug}/parts/{p.id}.stl?v={_drawn(store, p.id, p.version)}",
+            # where it sits: a run's overlay drawn in its own frame (#375), and #294's Move… (one pose, these two keys)
+            "position": list(placed[p.id].position) if p.id in placed else [0.0, 0.0, 0.0],
+            "rotation": list(placed[p.id].rotation) if p.id in placed else [0.0, 0.0, 0.0],
+            # what the view keys its mesh on: a move is drawn again, with no new version (#294)
+            "drawn": _drawn(store, p.id, p.version),
             "bbox": _bbox(store, p.id, geo),
             # each measured on the part as it is now, with its verdict (#137 item 1)
             "rules": part_rules.measured(store, p.id, geo),
@@ -1046,6 +1084,52 @@ def router():
             store.append_log({"kind": "reply", "action": "restore", "part": pid, "ok": True, "reply": said})
             return {"state": design_state(store), "said": said}
 
+    @r.post("/api/designs/{slug}/parts/{pid}/move")
+    def move_part(slug: str, pid: str, req: Place):
+        """Move… from a part's menu (CALI-183, #294): its pose in the assembly, kept in its history with where it was, then
+        measured against every other part. ``to`` puts it back where a move found it."""
+        if load(slug).design.part(pid) is None:
+            raise HTTPException(404, f"no part {pid!r}")
+        _refuse_while_busy(slug, [pid])
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            units = store.design.display_units
+            try:
+                if req.to is not None:
+                    placing.refuse_mirrored(store, pid, "move")
+                    was = placing.set_pose(store, pid, req.to, said="put back where it was", action="put back")
+                    near = placing.measured(store, pid)
+                    got = {"from": was, "to": placing.pose(store, pid), "near": near,
+                           "said": f"Put {pid} back where it was." + placing.said_near(pid, near)}
+                    asked = f"Put {pid} back where it was (from its menu)"
+                else:
+                    got = placing.move(store, pid, req.how(), units)
+                    asked = f"Move {pid}: {placing.described(req.how(), units)} (from its menu)"
+            except ValueError as e:
+                raise HTTPException(409 if "mirror" in str(e) else 422, str(e))
+            store.append_log({"kind": "message", "text": asked, "action": "move", "part": pid, "routed_by": "menu"})
+            store.append_log({"kind": "reply", "action": "move", "part": pid, "ok": True, "reply": got["said"]})
+            return {**got, "state": design_state(store)}
+
+    @r.post("/api/designs/{slug}/parts/{pid}/copy")
+    def copy_part(slug: str, pid: str, req: Place):
+        """Copy… from a part's menu (CALI-183, #294): a new part from its script, a part of its own, placed by the form
+        (beside the original on +x when it says nothing), then measured. Delete takes it away again, to the trash."""
+        if load(slug).design.part(pid) is None:
+            raise HTTPException(404, f"no part {pid!r}")
+        _refuse_while_busy(slug, [pid])
+        with RUNNER.locked(_lock(slug)):
+            store = load(slug)
+            units = store.design.display_units
+            try:
+                got = placing.copy(store, pid, req.how(), units)
+            except ValueError as e:
+                raise HTTPException(422, str(e))
+            store.append_log({"kind": "message", "text": f"Copy {pid} (from its menu)", "action": "copy", "part": pid,
+                              "routed_by": "menu"})
+            store.append_log({"kind": "reply", "action": "copy", "part": got["part"], "ok": True, "reply": got["said"]})
+            return {**got, "state": design_state(store)}
+
     @r.post("/api/designs/{slug}/tree")
     def set_tree(slug: str, req: TreeLayout):
         """Move a part in the tree (#94): display only, so no part's id, file, version or check changes."""
@@ -1081,7 +1165,12 @@ def router():
                 name = joints.namer(store, pid)
             except Exception:  # noqa: BLE001 — the edges, said as edges
                 name = None
-            return features.with_words(features.for_part(store, pid), store.design.display_units == "in", joint=name)
+            try:                                   # a face on one piece, as that piece's: "the tread's top face"
+                piece = joints.piece_namer(store, pid)
+            except Exception:  # noqa: BLE001 — the faces, said as faces
+                piece = None
+            return features.with_words(features.for_part(store, pid), store.design.display_units == "in", joint=name,
+                                       piece=piece)
         except KeyError:
             raise HTTPException(404, f"no part {pid!r}")
         except Exception as e:  # noqa: BLE001 — a part that doesn't build has no faces to pick: said, as for its pieces (#172)

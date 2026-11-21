@@ -45,6 +45,9 @@ LOADED_AT = "a load or a support lands on the joint itself, so the FEA's force t
 UNBALANCED = "the FEA's forces don't balance on the {piece} ({pct:.1f}% of the load), so no joint of this case is read from it"
 
 
+#: A joint the hand rule couldn't follow, which the FEA read (#344): checked, by the FEA, and said so (#383)
+CHECKED_BY_FEA = "checked by the FEA"
+
 def _stick(points: np.ndarray, pc: dict) -> tuple[np.ndarray, np.ndarray]:
     """A stick's distance from each point (outside its inscribed radius, and past its flat ends), and whether each is
     surely inside it: within that radius and between its ends. Its section's turn about its axis isn't declared, so its
@@ -431,9 +434,9 @@ def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
                 out["unchecked"].append(f"the joint between {between} ({NO_PULL.format(edge=j['edge'], face=j['face'])})")
                 continue
             hand = {"pieces": j["pieces"], "between": between, "edge": j["edge"], "face": j["face"], "mode": None,
-                    "safety": None, "need": min_safety, "holds": True, "said": "not checked by hand",
+                    "safety": None, "need": min_safety, "holds": True, "said": CHECKED_BY_FEA,
                     "assumed": j.get("assumed"), "_new": True,
-                    **({"crowded": j["crowded"], "said": f"not checked by hand; {j['crowded']}"} if j.get("crowded") else {})}
+                    **({"crowded": j["crowded"], "said": f"{CHECKED_BY_FEA}; {j['crowded']}"} if j.get("crowded") else {})}
             out["rows"].append(hand)
         hand["fea"] = fea
         if "unread" in fea:
@@ -459,7 +462,10 @@ def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
         if fs is not None and (hs is None or fs < hs):
             hand.update({"safety": fs, "mode": fea["mode"], "by": "fea", "need": min_safety,
                          "verdict": V.meets(fs, min_safety), "holds": fs >= min_safety})  # producer
-            hand["said"] = f"{hand.get('said') or ''}; by the FEA: {fea['said']}".lstrip("; ")
+            if hand.get("_new"):                 # the hand rule had none: the FEA checked it, said once (#383)
+                hand["said"] = f"{CHECKED_BY_FEA}: {fea['said']}" + (f"; {hand['crowded']}" if hand.get("crowded") else "")
+            else:
+                hand["said"] = f"{hand.get('said') or ''}; by the FEA: {fea['said']}".lstrip("; ")
         now = hand.get("safety")                 # the row's, the lower of the two: both read again at each count
         if fs is not None and now is not None and now < min_safety:   # producer: what takes it past (#316, #344)
             hand.pop("more_screws", None)

@@ -197,7 +197,7 @@ def _ids(items):
 def test_a_part_s_menu_has_every_item_and_a_piece_s_only_what_applies():
     got = _menu("""return { part: menuItems(S.design, 'step_stool', null), piece: menuItems(S.design, 'step_stool', 'top'),
                          printed: menuItems(S.design, 'inside_corner_fillets', null) };""")
-    assert _ids(got["part"]) == ["delete", "rename", "hide", "only", "ask", "check", "lighten", "mirror", "tmove",
+    assert _ids(got["part"]) == ["delete", "rename", "hide", "only", "ask", "check", "lighten", "mirror", "copy", "move", "tmove",
                                  "versions", "copyName"]
     assert [i["label"] for i in got["part"]][:5] == ["Delete…", "Rename…", "Hide", "Show only this", "Ask about this"]
     light = next(i for i in got["part"] if i["id"] == "lighten")
