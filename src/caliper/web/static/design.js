@@ -3959,12 +3959,120 @@ function drawScenarios() {
     }
     if (m.kind === 'load') {
       const dir = new THREE.Vector3(...m.dir).normalize(), len = arrowLen(m.n, most, reach);
-      const arrow = new THREE.ArrowHelper(dir, mid.clone().sub(dir.clone().multiplyScalar(len)), len, color, len * 0.25, len * 0.12);
+      const tail = mid.clone().sub(dir.clone().multiplyScalar(len));
+      const arrow = new THREE.ArrowHelper(dir, tail, len, color, len * 0.25, len * 0.12);
       arrow.traverse((o) => { if (o.material) { o.material.depthTest = false; } o.renderOrder = 10; });
       scenMarks.add(arrow);
+      // its handles (#296 B2): the box's middle moves it, the arrow's tail turns it
+      for (const [what, at, hex] of [['move', mid, color], ['turn', tail, 0xffffff]]) {
+        const h = new THREE.Mesh(new THREE.SphereGeometry(Math.max(reach * 0.045, 4), 14, 10),
+          new THREE.MeshBasicMaterial({ color: hex, depthTest: false }));
+        h.position.copy(at); h.renderOrder = 11; h.userData = { scenHandle: what, i: m.i };
+        scenMarks.add(h);
+      }
     }
   }
 }
+// ------------------------------------------------------------- dragging a case on the model (#296, slice B2)
+// Theo: "maybe clicking and dragging the load arrow". A load's middle handle moves its box over the part (it snaps to the
+// surface under the pointer), its tail handle turns the arrow (snapping to the picker's named ways within 8°). The row's
+// fields follow as it moves and the numbers are said; nothing is saved until Save, as for a typed edit. All of it in the
+// part's own frame (scenFrame), as the rows are
+function movedBox(lo, hi, c) {                 // the same box, its middle at c
+  const r = (v) => Math.round(v * 10) / 10;
+  return { lo: lo.map((v, a) => r(c[a] - (hi[a] - lo[a]) / 2)), hi: hi.map((v, a) => r(c[a] + (hi[a] - lo[a]) / 2)) };
+}
+function snapDir(d, within = 8) {              // one of the named ways when it's that close, else as dragged (a unit vector)
+  const n = Math.hypot(...d) || 1, u = d.map((v) => v / n);
+  for (const v of Object.values(SCEN_DIRS)) {
+    const dot = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    if (Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI <= within) return v.slice();
+  }
+  return u.map((v) => Math.round(v * 1e4) / 1e4);
+}
+function dirWords(d) {                         // as the picker says it
+  const k = pickFromDir(d);
+  return k.kind === 'angle' ? `${k.deg}° from straight down, heading ${k.heading}°` : SCEN_SAID[k.kind];
+}
+function handleAt(e, near = 14) {              // the case's handle nearest the pointer on screen, within ``near`` px (a few
+  const rect = renderer.domElement.getBoundingClientRect(), v = new THREE.Vector3();   // mm across is a pixel or two)
+  let best = null;
+  scenMarks.updateMatrixWorld(true);
+  for (const o of scenMarks.children) {
+    if (!o.userData || !o.userData.scenHandle) continue;
+    v.setFromMatrixPosition(o.matrixWorld).project(camera);
+    if (v.z > 1) continue;                       // behind the camera
+    const d = Math.hypot(rect.left + (v.x + 1) / 2 * rect.width - e.clientX, rect.top + (1 - v.y) / 2 * rect.height - e.clientY);
+    if (d <= near && (!best || d < best.d)) best = { ...o.userData, d };
+  }
+  return best;
+}
+function writeScenRow(i, row) {               // a dragged row's fields, as if typed
+  const el = document.querySelector(`#scenBody [data-scen="${i}"]`);
+  if (!el) return;
+  const f = (k) => el.querySelector(`[data-f="${k}"]`);
+  if (row.lo) { f('lo').value = xyz(row.lo); f('hi').value = xyz(row.hi); }
+  if (row.direction) {
+    const k = pickFromDir(row.direction);
+    f('dir').value = k.kind;
+    el.querySelector('[data-angle]').hidden = k.kind !== 'angle';
+    if (k.kind === 'angle') { f('deg').value = k.deg; f('heading').value = k.heading; }
+  }
+}
+function startScenDrag(h) {
+  const pid = S.scenOpen, got = (S.scen || {})[pid];
+  if (!got || !$('scenSave')) return false;
+  const rows = readScenarios(got).scenarios, row = rows[h.i];
+  if (!row || !row.lo) return false;
+  const frame = scenFrame(partOf(pid)), inv = frame.clone().invert();
+  const mid = new THREE.Vector3(...row.lo.map((v, a) => (v + row.hi[a]) / 2)).applyMatrix4(frame);
+  const facing = new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), mid);
+  S.scenDrag = { pid, i: h.i, what: h.scenHandle, lo: row.lo, hi: row.hi, frame, inv, mid, facing, moved: false };
+  return true;
+}
+function moveScenDrag(e) {
+  const d = S.scenDrag;
+  if (!d) return;
+  const rect = renderer.domElement.getBoundingClientRect(), r = new THREE.Raycaster();
+  r.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+  const onPlane = r.ray.intersectPlane(d.facing, new THREE.Vector3());
+  if (d.what === 'move') {
+    const hit = scenHit(e), at = hit && hit.object.userData.partId === d.pid ? hit.point.clone() : onPlane;   // its surface, under a stress map too
+    if (!at) return;
+    const c = at.applyMatrix4(d.inv), box = movedBox(d.lo, d.hi, [c.x, c.y, c.z]);
+    writeScenRow(d.i, box);
+    pickHint(`where: ${xyz(box.lo)} to ${xyz(box.hi)} mm`);
+  } else {
+    if (!onPlane) return;
+    const world = d.mid.clone().sub(onPlane);   // the arrow runs from its tail to the box: tail where the pointer is
+    if (world.length() < 1e-6) return;
+    const q = new THREE.Quaternion().setFromRotationMatrix(d.inv), local = world.normalize().applyQuaternion(q);
+    const dir = snapDir([local.x, local.y, local.z]);
+    writeScenRow(d.i, { direction: dir });
+    pickHint(`which way: ${dirWords(dir)}`);
+  }
+  d.moved = true;
+  drawScenarios();
+}
+function endScenDrag() {
+  const d = S.scenDrag;
+  S.scenDrag = null;
+  if (!d || !d.moved) return;
+  const got = S.scen[d.pid];
+  Object.assign(got, readScenarios(got));
+  repaintScen(d.pid);
+  const said = $('scenSaid');
+  if (said) said.innerHTML = `<div class="small">${d.what === 'move' ? 'Moved' : 'Turned'} "${esc(got.scenarios[d.i].said || got.scenarios[d.i].name)}". Save them to keep it.</div>`;
+}
+viewer.addEventListener('pointerdown', (e) => {   // a handle, before the view's own orbit takes the press
+  if (e.button !== 0 || !S.scenOpen || S.scenPick) return;
+  const h = handleAt(e);
+  if (!h || !startScenDrag(h)) return;
+  e.stopPropagation(); e.preventDefault();
+  const move = (ev) => moveScenDrag(ev), up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); endScenDrag(); };
+  addEventListener('pointermove', move);
+  addEventListener('pointerup', up);
+}, true);
 // Pick on the model: the row waits for one click on its part; the face clicked becomes its box (#296 B1)
 function faceBox(verts, pad = 1) {             // a face's corners, from its triangles' points, a millimetre out each way
   let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];

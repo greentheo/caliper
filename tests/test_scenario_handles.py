@@ -211,6 +211,67 @@ def _three(body, names, head=""):
     return json.loads(got.stdout)
 
 
+# --- slice B2: dragging a case on the model ------------------------------------------------------------------------------
+def _consts_b2(src):
+    import re
+
+    return "".join(re.search(rf"^const {c} = .*$", src, re.M).group(0) + "\n" for c in ("SCEN_DIRS",)) + \
+        re.search(r"^const SCEN_SAID = \{.*?\};$", src, re.M | re.S).group(0) + "\n"
+
+
+def _b2(body, names=("movedBox", "snapDir", "pickFromDir", "dirWords")):
+    src = open(JS).read()
+    script = _consts_b2(src) + "".join(_fn(src, n) for n in names) + \
+        f"\nconsole.log(JSON.stringify((() => {{ {body} }})()));"
+    got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    return json.loads(got.stdout)
+
+
+def test_a_moved_box_keeps_its_size_with_its_middle_where_it_was_dropped():
+    assert _b2("return movedBox([0, 0, 400], [100, 50, 402], [300, 200, 10]);") == {"lo": [250, 175, 9], "hi": [350, 225, 11]}
+
+
+@pytest.mark.parametrize("d,want", [([0.05, 0, -1], [0, 0, -1]), ([0, -1, 0.1], [0, -1, 0]),       # within 8°: the named way
+                                    ([0, 0, -2], [0, 0, -1]), ([0.5, 0, -1], [0.4472, 0, -0.8944])])  # else as dragged, a unit
+def test_a_turned_arrow_snaps_to_a_named_way_when_it_s_that_close(d, want):
+    assert _b2(f"return snapDir({json.dumps(d)});") == want
+
+
+def test_the_way_is_said_as_the_picker_says_it():
+    assert _b2("return [dirWords([0, 0, -1]), dirWords([1, 0, 0]), dirWords([0.4472, 0, -0.8944])];") == \
+        ["down", "toward the right", "26.6° from straight down, heading 90°"]
+
+
+_DRAG = """
+const S = { scenOpen: 'stool', scen: { stool: { scenarios: [{ name: 'on top', said: 'on top', lo: [0, 0, 0], hi: [100, 100, 2], direction: [0, 0, -1] }], supports: [] } },
+  design: { parts: [{ id: 'stool', position: POS, rotation: ROT }] }, scenPick: null };
+const partOf = (pid) => S.design.parts.find((x) => x.id === pid) || {};
+const camera = new THREE.PerspectiveCamera(40, 1, 1, 100000); camera.up.set(0, 0, 1);
+camera.position.set(CAM); camera.lookAt(new THREE.Vector3(LOOK)); camera.updateMatrixWorld();
+const renderer = { domElement: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 200 }) } };
+let partHit = null; const scenHit = () => partHit;     // the drag lands on the part under a stress map too
+const written = []; const writeScenRow = (i, row) => written.push(row);
+let hint = ''; const pickHint = (t) => { hint = t; }; const drawScenarios = () => {};
+let rowsShown = true; const $ = (id) => (id === 'scenSave' ? (rowsShown ? {} : null) : null);
+const readScenarios = (got) => ({ scenarios: got.scenarios, supports: got.supports });
+const xyz = (v) => v.join(', ');
+"""
+
+
+def _drag(body, pos=(0, 0, 0), rot=(0, 0, 0), cam=(50, -1000, 1), look=(50, 50, 1)):
+    src = open(JS).read()
+    three = os.path.join(os.path.dirname(JS), "vendor", "three", "three.module.js")
+    head = (_DRAG.replace("POS", json.dumps(list(pos))).replace("ROT", json.dumps(list(rot)))
+            .replace("CAM", ", ".join(map(str, cam))).replace("LOOK", ", ".join(map(str, look))))
+    names = ("scenFrame", "movedBox", "snapDir", "pickFromDir", "dirWords", "startScenDrag", "moveScenDrag", "handleAt")
+    script = (f"import * as THREE from {json.dumps('file://' + three)};\n" + _consts_b2(src) + head
+              + "".join(_fn(src, n) for n in names) + f"\nconsole.log(JSON.stringify((() => {{ {body} }})()));")
+    got = subprocess.run([_node(), "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    return json.loads(got.stdout)
+
+
 def test_a_pick_finds_the_part_under_a_stress_map_that_hides_it():
     """Must-fix: with a check's stress map up only its picture is visible, and the pick said "no face there"."""
     got = _three("""const part = new THREE.Mesh(new THREE.BoxGeometry(100, 100, 100), new THREE.MeshBasicMaterial());
@@ -254,3 +315,70 @@ def test_clearing_the_marks_lets_go_of_their_geometry_and_material():
         geo.dispose = () => { g += 1; }; mat.dispose = () => { m += 1; }; scenMarks.add(new THREE.Mesh(geo, mat)); }
       clearScenMarks(); return { g, m, left: scenMarks.children.length };""", ("clearScenMarks",))
     assert got == {"g": 3, "m": 3, "left": 0}
+
+
+def test_dragging_the_middle_moves_the_box_onto_the_surface_in_the_part_s_frame():
+    """A part moved 500 mm along x: dropped on its surface at x 600, the box's middle is at x 100 in the part's frame."""
+    got = _drag("""startScenDrag({ scenHandle: 'move', i: 0 });
+                   partHit = { object: { userData: { partId: 'stool' } }, point: new THREE.Vector3(600, 20, 51) };
+                   moveScenDrag({ clientX: 100, clientY: 100 }); return { written, hint, moved: S.scenDrag.moved };""", pos=(500, 0, 0))
+    assert got["written"] == [{"lo": [50, -30, 50], "hi": [150, 70, 52]}] and got["moved"] is True
+    assert got["hint"] == "where: 50, -30, 50 to 150, 70, 52 mm"
+
+
+def test_dragging_off_the_part_slides_it_on_a_plane_facing_you():
+    got = _drag("""startScenDrag({ scenHandle: 'move', i: 0 }); moveScenDrag({ clientX: 100, clientY: 100 }); return written[0];""")
+    assert got == {"lo": [0, 0, 0], "hi": [100, 100, 2]}          # straight through its middle: where it was
+
+
+@pytest.mark.parametrize("x,y,want,words", [(100, 20, [0, 0, -1], "down"), (180, 100, [-1, 0, 0], "toward the left")])
+def test_dragging_the_tail_turns_the_arrow_toward_the_box(x, y, want, words):
+    """Looking along +y at the box: the tail dragged above it pushes down; dragged to its right, it pushes toward the left."""
+    got = _drag(f"""startScenDrag({{ scenHandle: 'turn', i: 0 }}); moveScenDrag({{ clientX: {x}, clientY: {y} }}); return {{ written, hint }};""")
+    assert got["written"] == [{"direction": want}] and got["hint"] == f"which way: {words}"
+
+
+def test_a_turned_part_s_arrow_is_said_in_its_own_frame():
+    """The part turned 90° about z: the way that's toward the left in the design is toward the back in its own frame."""
+    got = _drag("startScenDrag({ scenHandle: 'turn', i: 0 }); moveScenDrag({ clientX: 180, clientY: 100 }); return written[0];",
+                rot=(0, 0, 90))
+    assert got == {"direction": [0, 1, 0]}
+
+
+def test_with_the_editor_closed_or_no_box_there_s_no_drag():
+    assert _drag("S.scenOpen = 'other'; return startScenDrag({ scenHandle: 'move', i: 0 });") is False
+    assert _drag("S.scen.stool.scenarios[0].lo = null; return startScenDrag({ scenHandle: 'move', i: 0 });") is False
+
+
+def test_the_handles_are_drawn_and_take_the_press_before_the_view_turns():
+    src = open(JS).read()
+    draw = _fn(src, "drawScenarios")
+    assert "h.userData = { scenHandle: what, i: m.i };" in draw and "['move', mid, color], ['turn', tail, 0xffffff]" in draw
+    i = src.index("viewer.addEventListener('pointerdown', (e) => {   // a handle")
+    grab = src[i:src.index("}, true);", i) + 9]
+    assert "e.stopPropagation(); e.preventDefault();" in grab and grab.endswith("}, true);")   # capture: OrbitControls never sees it
+    assert "if (e.button !== 0 || !S.scenOpen || S.scenPick) return;" in grab
+    end = _fn(src, "endScenDrag")
+    assert "Object.assign(got, readScenarios(got));" in end and "Save them to keep it." in end
+
+
+def test_a_handle_is_taken_within_14_px_of_the_pointer_the_nearest_first():
+    """Found on the walk: a handle a few mm across is a pixel or two on screen, under its arrow's head. It's taken by its
+    place on screen: the nearest within 14 px."""
+    got = _drag("""const scenMarks = new THREE.Group();
+      for (const [what, x] of [['move', 50], ['turn', 60]]) { const o = new THREE.Object3D(); o.position.set(x, 50, 1); o.userData = { scenHandle: what, i: 0 }; scenMarks.add(o); }
+      const at = (cx, cy) => { const h = handleAt({ clientX: cx, clientY: cy }); return h && h.scenHandle; };
+      return [at(100, 100), at(108, 100), at(100, 130), at(150, 100)];""".replace("const scenMarks", "globalThis.scenMarks"),
+                )
+    assert got[0] == "move" and got[2] is None and got[3] is None
+
+
+def test_dropped_over_another_part_it_slides_on_its_plane_not_onto_that_part():
+    got = _drag("""startScenDrag({ scenHandle: 'move', i: 0 });
+                   partHit = { object: { userData: { partId: 'rail' } }, point: new THREE.Vector3(900, 900, 900) };
+                   moveScenDrag({ clientX: 100, clientY: 100 }); return written[0];""")
+    assert got == {"lo": [0, 0, 0], "hi": [100, 100, 2]}
+
+
+def test_with_the_rows_not_on_screen_there_s_no_drag():
+    assert _drag("rowsShown = false; return startScenDrag({ scenHandle: 'move', i: 0 });") is False
