@@ -27,6 +27,7 @@ from typing import Optional
 
 from . import llm
 from .design import DesignStore
+from .errors import scrubbed
 
 JOB = "assess"
 #: The most readings one call may list.
@@ -225,7 +226,7 @@ def run(store: DesignStore, *, client=None, model: Optional[str] = None, found: 
     except llm.Stopped as e:
         return {"ok": False, "readings": [], "said": f"No reading: {llm.said(e)}"}
     except ValueError as e:
-        return {"ok": False, "readings": [], "said": f"No reading: {e}."}
+        return {"ok": False, "readings": [], "said": f"No reading: {scrubbed(e)}."}
     rec = _save(store, {"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "versions": _versions(store), **got})
     return {**rec, "ok": True, "said": said(rec)}
 
