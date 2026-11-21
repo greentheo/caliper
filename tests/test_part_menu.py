@@ -181,9 +181,9 @@ def _menu(body: str) -> dict:
     from .test_carve_click import _fn, _node
 
     src = open(JS).read()
-    names = ("seen", "keepTree", "underPart", "menuItems", "menuHtml", "confirmHtml", "toggleHidden", "showOnly",
+    names = ("seen", "keepTree", "underPart", "treeRows", "dropped", "nudge", "menuItems", "menuHtml", "confirmHtml", "toggleHidden", "showOnly",
              "menuDo", "deletePart", "pieceConfirmHtml", "deletePiece")
-    script = (_STUBS.replace("DESIGN", _DESIGN) + "\n".join(_fn(src, n) for n in names)
+    script = (_STUBS.replace("DESIGN", _DESIGN) + re.search(r"^const TREE_KEYS = .*$", src, re.M).group(0) + "\n" + "\n".join(_fn(src, n) for n in names)
               + f"\nconst out = await (async () => {{ {body} }})();\nconsole.log(JSON.stringify(out));")
     got = subprocess.run([_node(), "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
@@ -197,8 +197,8 @@ def _ids(items):
 def test_a_part_s_menu_has_every_item_and_a_piece_s_only_what_applies():
     got = _menu("""return { part: menuItems(S.design, 'step_stool', null), piece: menuItems(S.design, 'step_stool', 'top'),
                          printed: menuItems(S.design, 'inside_corner_fillets', null) };""")
-    assert _ids(got["part"]) == ["delete", "rename", "hide", "only", "ask", "check", "lighten", "mirror", "versions",
-                                 "copyName"]
+    assert _ids(got["part"]) == ["delete", "rename", "hide", "only", "ask", "check", "lighten", "mirror", "tmove",
+                                 "versions", "copyName"]
     assert [i["label"] for i in got["part"]][:5] == ["Delete…", "Rename…", "Hide", "Show only this", "Ask about this"]
     light = next(i for i in got["part"] if i["id"] == "lighten")
     assert light["off"] and light["why"] == "check what it must hold first (its loads())"   # the panels' own rule
