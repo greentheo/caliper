@@ -98,3 +98,18 @@ def test_the_plus_form_needs_plus_and_or_with():
     """"the truck has a box on top" says where the box is on the truck only by a guess: it stays assumed."""
     assert _rule("box", "truck", "the truck has a box on top") == "assumed"
     assert _rule("box", "truck", "the truck with a box on top") == "stated"
+
+
+
+# --- #410 re-check (reviewer-3) ---------------------------------------------------------------------------------------
+def test_the_phrase_s_last_word_is_the_id_s_last_word():
+    """"a box lid on top of the deck" is the lid on the deck, not the box."""
+    assert _rule("box", "deck", "a box lid on top of the deck") == "assumed"
+    assert _rule("box_lid", "deck", "a box lid on top of the deck") == "stated"
+    assert _rule("box", "deck", "two boxes on top of the deck") == "stated"          # a plural is the same word
+
+
+@pytest.mark.parametrize("said", ["no box sits on the deck", "there's no box on top of the deck",
+                                  "not a box on top of the deck", "without a box atop the deck"])
+def test_a_negated_phrase_states_no_relation(said):
+    assert _rule("box", "deck", said) == "assumed"

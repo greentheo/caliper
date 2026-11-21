@@ -22,3 +22,9 @@
 - **And:** a negation ends a phrase by rule ("isn't on top of", "never on top of"). The plus-form needs plus, and or with ("the truck has a box on top" stays assumed). "it" names no part.
 
 17 more tests and 2 changed: "a box on the deck" is now assumed, and the "on it" case is pinned as "on top of it". 12 fail at 02b9b65. All 8 rework mutants are caught, including the reviewer's two survivors. The plan (all five), plan-groups, first-run and build-plan files pass, 227.
+
+**Re-check (reviewer-3, the foreman's two one-line fixes):**
+1. **The phrase's last word is the id's last word too** (singulars of "-s" and "-es" read). "a box lid on top of the deck" states `box_lid` on `deck`, not `box`. "two boxes on top of the deck" states `box`.
+2. **A phrase a negation stops says nothing:** "no box sits on the deck", "there's no box on top of the deck", "not a box …", "without a box atop …" stay assumed. An article between them doesn't hide it.
+
+6 more tests; 5 fail at 9d68a9c. All 4 mutants are caught.

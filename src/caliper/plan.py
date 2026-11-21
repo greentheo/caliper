@@ -706,6 +706,17 @@ _STOP = {"a", "an", "the", "and", "plus", "with", "of", "on", "in", "for", "to",
          "which", "who", "then", "but", "or", "top", "atop", "sits", "sitting", "rests", "resting", "mounted", "mounts",
          "not", "never", "no", "isn", "t", "doesn", "don", "won"}
 _SITS = {"sits", "sitting", "rests", "resting", "mounted", "mounts"}
+#: Words that say the relation isn't so: a phrase they stop says nothing (#410 re-check: "no box sits on the deck").
+_NEG = {"not", "never", "no", "isn", "t", "doesn", "don", "won", "nor", "without"}
+
+
+def _said_before(words: list, end: int) -> list:
+    """The noun phrase ending at ``words[end]``, or [] where a negation stops it ("there's no box", "not a box")."""
+    a = _np(words, end, -1)
+    j = end - len(a)
+    while j >= 0 and words[j] in ("a", "an", "the", "any"):
+        j -= 1
+    return [] if j >= 0 and words[j] in _NEG else a
 
 
 def _np(words: list, i: int, step: int) -> list:
@@ -731,27 +742,31 @@ def relations(said: str) -> list[tuple[list, list]]:
         for i, w in enumerate(words):
             nxt = words[i + 1:i + 4]
             if w == "on" and nxt[:2] == ["top", "of"] and (i == 0 or words[i - 1] not in _SITS):
-                out.append((_np(words, i - 1, -1), _np(words, i + 3, 1)))
+                out.append((_said_before(words, i - 1), _np(words, i + 3, 1)))
             elif w == "on" and nxt[:1] == ["top"] and nxt[1:2] != ["of"]:     # "B plus a A on top"
-                a = _np(words, i - 1, -1)
+                a = _said_before(words, i - 1)
                 j = i - 1 - len(a)
                 while j >= 0 and words[j] in ("a", "an", "the"):
                     j -= 1
                 if j >= 0 and words[j] in ("plus", "and", "with"):
                     out.append((a, _np(words, j - 1, -1)))
             elif w == "atop":
-                out.append((_np(words, i - 1, -1), _np(words, i + 1, 1)))
+                out.append((_said_before(words, i - 1), _np(words, i + 1, 1)))
             elif w in _SITS and nxt[:1] == ["on"]:
                 after = i + (4 if nxt[1:3] == ["top", "of"] else 2)          # "sits on top of the deck" too
-                out.append((_np(words, i - 1 - (i > 0 and words[i - 1] == "that"), -1), _np(words, after, 1)))
+                out.append((_said_before(words, i - 1 - (i > 0 and words[i - 1] == "that")), _np(words, after, 1)))
     return [(a, b) for a, b in out if a and b]
 
 
 def _names_it(phrase: list, pid: str) -> bool:
     """Whether a noun phrase names a part or group: every word of its id is in it, a plural allowed (#410 review: "a box"
     named box_lid). "the tool box" names tool_box; "a box" doesn't."""
-    words = set(phrase) | {w[:-1] for w in phrase if w.endswith("s")}
-    return all(t in words for t in pid.lower().split("_") if t)
+    def forms(w: str) -> set:                     # a word and its singulars: boxes, box; legs, leg
+        return {w} | ({w[:-1]} if w.endswith("s") else set()) | ({w[:-2]} if w.endswith("es") else set())
+    words = set().union(*(forms(w) for w in phrase))
+    tokens = [t for t in pid.lower().split("_") if t]
+    # its last word is the id's last too (#410 re-check: "a box lid" isn't the box)
+    return bool(tokens) and all(t in words for t in tokens) and tokens[-1] in forms(phrase[-1])
 
 
 def _said_on(r: PlanRule, said: str) -> bool:
