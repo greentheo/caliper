@@ -52,3 +52,19 @@ part. Now:
 - **A panel judged by `S.scope` again:** panel by scope; carve by scope; jobs by scope; answers by scope; fixes by
   scope; fix bar by scope.
 - **The links:** no way to the design; no way back; links unwired.
+
+**Round 3 (reviewer-3's re-check): the rest of the part view's readers.**
+- **History's Preview and Go back** did nothing in the unscoped part view: their click handler read `S.scope`. They read
+  `shownPart()`.
+- **Swept** every `S.scope` read that's about which part's view is on screen:
+  - `focusCard` (the card's 3D view);
+  - `cardStore` (which card is kept open);
+  - `cardsView`'s focus and "show this in 3D";
+  - `showMarks` (the part's weight, CoG and keeps in 3D);
+  - `reportError`'s "a part's cards";
+  - `goTo`'s way to the build package, which now asks for the whole design's view.
+- **What stays on `S.scope`:** the chat, the chip, the tree's selection, picking and the keyboard's menu.
+- **The test harnesses:** `test_carve_click._page` and `test_small_words._js` bring the page's own `soleFor` and
+  `shownPart` along whenever an extracted function calls `shownPart()`. test_fix_act's three failures were this.
+- **Walked:** step-stool-5's unscoped part view → History → Preview v13 shows its bar, with Go back. The chip stays
+  hidden.

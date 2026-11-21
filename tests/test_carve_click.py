@@ -343,7 +343,15 @@ def _page(names, consts=(), extra=""):
     script; prints what the script leaves in ``out``."""
     src = open(JS).read()
     lines = [re.search(rf"^const {c} = .*?;\n(?=\S)", src, re.M | re.S).group(0) for c in consts]
-    return "\n".join(lines + [_fn(src, n) for n in names]) + "\nlet out;\n" + extra + "\nconsole.log(JSON.stringify(out));"
+    return "\n".join(lines + [_fn(src, n) for n in _with_shown(src, names, lines)]) + "\nlet out;\n" + extra + "\nconsole.log(JSON.stringify(out));"
+
+
+def _with_shown(src, names, extra=()):
+    """``names``, and the page's own soleFor and shownPart where one of them asks which part's view is shown (#364)."""
+    names = list(names)
+    if "shownPart" not in names and any("shownPart(" in t for t in [_fn(src, n) for n in names] + list(extra)):
+        names = ["soleFor", "shownPart"] + names
+    return names
 
 
 def _run(script):

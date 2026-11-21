@@ -66,7 +66,7 @@ async function api(method, url, body) {
 async function reportError(errorId, message) {
   try {
     // where on the page, never which design: its name is the person's own words
-    const where = S.scope ? "a part's cards" : (S.slug ? 'a design' : 'the welcome');
+    const where = shownPart() ? "a part's cards" : (S.slug ? 'a design' : 'the welcome');
     if (!errorId) errorId = (await api('POST', '/api/errors', { where, error: message || 'something broke' })).id;
     const rep = await api('GET', `/api/errors/report?id=${encodeURIComponent(errorId)}`);
     let dlg = $('reportDlg');
@@ -2433,7 +2433,7 @@ async function useBetter(ln) {
 async function focusCard(k) {
   S.focus = k;
   document.querySelectorAll('#inspector .qcard').forEach((c) => c.classList.toggle('focus', c.dataset.card === k));
-  const pid = S.scope;
+  const pid = shownPart();                       // the part whose cards these are, picked or not (#364)
   if (!pid) return;
   const p = S.design.parts.find((x) => x.id === pid);
   if (!p) return;
@@ -2455,7 +2455,8 @@ async function focusCard(k) {
 // the four questions as an accordion (#325): one open at a time, each header keeping its mark and its answer line, so a
 // closed card still says how it stands. Which is open is kept per design and part; else the first that fails, else Will it
 // work?
-const cardStore = () => `${S.slug}/${S.scope || ''}`;
+// kept per the part shown, picked or not (#364)
+const cardStore = () => `${S.slug}/${shownPart() || ''}`;
 function openCardFor(a) {
   const k = cardStore();
   if (S.openCard && k in S.openCard) return S.openCard[k];
@@ -2469,8 +2470,8 @@ function cardsView(groups) {
   const open = openCardFor(a);
   return QUESTIONS.map(([k, q]) => {
     const c = a ? a.cards.find((x) => x.key === k) : null, on = k === open;
-    return `<section class="qcard q-${c ? c.status : 'info'}${on ? ' open' : ''}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
-      <h3 class="qhead"><button type="button" class="qtoggle" aria-expanded="${on}" aria-controls="qbody-${k}" data-qopen="${k}"${S.scope ? ' title="show this in 3D"' : ''}><span class="qmark">${c ? QMARK[c.status] : '·'}</span><span class="qtitle">${q}</span>${/class="ssec[^"]*\battn\b/.test(groups[k] || '') ? '<span class="qinside" title="something inside needs a look">● inside</span>' : ''}<span class="qcaret" aria-hidden="true">${on ? '▾' : '▸'}</span></button></h3>
+    return `<section class="qcard q-${c ? c.status : 'info'}${on ? ' open' : ''}${S.focus === k && shownPart() ? ' focus' : ''}" data-card="${k}">
+      <h3 class="qhead"><button type="button" class="qtoggle" aria-expanded="${on}" aria-controls="qbody-${k}" data-qopen="${k}"${shownPart() ? ' title="show this in 3D"' : ''}><span class="qmark">${c ? QMARK[c.status] : '·'}</span><span class="qtitle">${q}</span>${/class="ssec[^"]*\battn\b/.test(groups[k] || '') ? '<span class="qinside" title="something inside needs a look">● inside</span>' : ''}<span class="qcaret" aria-hidden="true">${on ? '▾' : '▸'}</span></button></h3>
       <div class="qlines" id="q-${k}">${cardLines(k, c)}</div>
       ${k === 'what' && picturePart() ? '<div class="qlinks"><button class="btn" data-picture="1">🦖 Put a picture on it</button></div>' : ''}
       <div class="qbody" id="qbody-${k}" role="region" aria-label="${q}"${on ? '' : ' hidden'}>${groups[k] || '<div class="empty">Nothing here yet.</div>'}</div>
@@ -2759,7 +2760,7 @@ function goTo(id, again) {            // open the card's numbers and bring that 
       const only = S.design.parts.filter((p) => p.role !== 'fixed');
       if (only.length !== 1) return;
       setScope(only[0].id);
-    } else if (id === 'relBox' && S.scope) setScope(null);
+    } else if (id === 'relBox' && shownPart()) { S.whole = true; setScope(null); }   // the build package is the whole design's (#364)
     else return;
     setTimeout(() => goTo(id, true), 50);
     return;
@@ -3598,9 +3599,9 @@ scene.add(marks);
 function showMarks() {
   for (const m of [...marks.children]) { marks.remove(m); m.geometry && m.geometry.dispose(); }
   if (S.station && S.station.kind === 'load') return;     // the stress picture has the floor to itself
-  const c = S.scope && S.built[S.scope];
-  const b = S.scope ? (c && c.balance) : (S.balance && S.balance.data);
-  const cog = S.scope ? (c && c.report && c.report.cog) : (b && b.mass_kg ? b.cog : null);
+  const shown = shownPart(), c = shown && S.built[shown];       // the part whose view is on screen, picked or not (#364)
+  const b = shown ? (c && c.balance) : (S.balance && S.balance.data);
+  const cog = shown ? (c && c.report && c.report.cog) : (b && b.mass_kg ? b.cog : null);
   const across = contentBox().getSize(new THREE.Vector3()).length();
   const size = Math.max(across / 160, Math.min(8, across / 25));    // 8 mm would cover most of a small part
   const dot = (at, color) => {
@@ -3614,9 +3615,9 @@ function showMarks() {
     marks.add(line);
   };
   if (cog) dot(cog, 0xff4d3d);
-  if (b && b.hitch && (!S.scope || cog)) dot(b.hitch, 0x3fb950);
+  if (b && b.hitch && (!shown || cog)) dot(b.hitch, 0x3fb950);
   // what the part has to hold (keeps(): the mattress) — a pale slab if it fits, red if the outside cuts in
-  for (const k of (S.scope && c && c.report && c.report.keeps) || []) {
+  for (const k of (shown && c && c.report && c.report.keeps) || []) {
     const lo = new THREE.Vector3(...k.lo), hi = new THREE.Vector3(...k.hi);
     const geom = new THREE.BoxGeometry(...hi.clone().sub(lo).toArray()), color = k.clear ? 0xd8ecff : 0xff4d3d;
     const at = lo.clone().add(hi).multiplyScalar(0.5);
@@ -5125,9 +5126,9 @@ async function goBackTo(pid, v) {
     document.querySelectorAll('[data-goback-v]').forEach((b) => { b.disabled = false; }); }
 }
 document.addEventListener('click', (e) => {     // the history's buttons, and the preview bar's
-  const pv = e.target.closest('[data-preview-v]'), gb = e.target.closest('[data-goback-v]');
-  if (pv && S.scope) showVersion(S.scope, Number(pv.dataset.previewV));
-  else if (gb && (S.scope || (S.station && S.station.part))) goBackTo(S.scope || S.station.part, Number(gb.dataset.gobackV));
+  const pv = e.target.closest('[data-preview-v]'), gb = e.target.closest('[data-goback-v]'), shown = shownPart();   // its view, picked or not (#364)
+  if (pv && shown) showVersion(shown, Number(pv.dataset.previewV));
+  else if (gb && (shown || (S.station && S.station.part))) goBackTo(shown || S.station.part, Number(gb.dataset.gobackV));
 });
 function clearStation(keepBar) {
   if (stationMesh) { scene.remove(stationMesh); stationMesh.geometry.dispose(); stationMesh = null; }

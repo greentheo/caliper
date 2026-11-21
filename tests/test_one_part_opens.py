@@ -92,11 +92,24 @@ def test_the_panel_draws_what_shownpart_says_and_both_views_lead_to_each_other()
 @pytest.mark.parametrize("fn,check", [
     ("paintFixAct", "shownPart() !== part"), ("loadAnswers", "shownPart() ? `?part="), ("answersKey", "[S.slug, shownPart(),"),
     ("paintCarve", "if (shownPart() !== pid) return;"), ("paintJobs", "shownPart() === t.part"),
-    ("partView", "shownPart() && p.role !== 'fixed' && fixesSection(p.id)")])
+    ("partView", "shownPart() && p.role !== 'fixed' && fixesSection(p.id)"),
+    ("focusCard", "const pid = shownPart();"), ("cardsView", "S.focus === k && shownPart() ? ' focus' : ''"),
+    ("cardsView", "${shownPart() ? ' title=\"show this in 3D\"' : ''}"), ("showMarks", "const shown = shownPart(), c = shown && S.built[shown];"),
+    ("goTo", "} else if (id === 'relBox' && shownPart()) { S.whole = true; setScope(null); }")])
 def test_every_panel_that_asks_whether_its_part_is_on_screen_asks_shownpart(fn, check):
     """The part's view drawn with no scope: its panels must still know they're on screen, or a carve's progress, a job's
     line and Things to fix would never paint there."""
     assert check in _fn(open(JS).read(), fn)
+
+
+def test_the_history_s_preview_and_go_back_work_in_the_part_s_view_unpicked():
+    """#364 re-check: in the unscoped part view, Preview and Go back did nothing: their click handler read S.scope."""
+    src = open(JS).read()
+    i = src.index("document.addEventListener('click', (e) => {     // the history's buttons")
+    handler = src[i:src.index("});", i)]
+    assert "shown = shownPart()" in handler and "if (pv && shown) showVersion(shown," in handler
+    assert "goBackTo(shown || S.station.part," in handler and "S.scope" not in handler
+    assert "const cardStore = () => `${S.slug}/${shownPart() || ''}`;" in src
 
 
 def test_the_first_message_after_opening_goes_unscoped():
