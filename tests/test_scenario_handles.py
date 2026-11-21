@@ -78,6 +78,7 @@ let slow = null;
 const features = async (pid) => (slow ? slow : DATA);
 const facePicked = () => FACE;
 const hitOn = (pid) => ({ object: { userData: { partId: pid } } });
+let phone = false; const panes = []; const onPhone = () => phone; const setPane = (p) => panes.push(p);
 // the part's frame: a stand-in that moves x by the part's position (the real one is three.js, tested below)
 const scenFrame = (p) => ({ dx: p && p.position ? p.position[0] : 0 });
 const unposed = (v, f) => v.map((x, k) => (k % 3 === 0 ? x - f.dx : x));
@@ -128,7 +129,8 @@ console.log(JSON.stringify({ posed: [posed.x, posed.y, posed.z].map((v) => Math.
 
 def test_the_marks_are_drawn_in_the_part_s_frame():
     src = open(JS).read()
-    assert "scenMarks.matrix.copy(scenFrame(p));" in _fn(src, "drawScenarios")
+    assert "scenMarks.matrix.copy(scenMatrixOf(p));" in _fn(src, "drawScenarios")
+    assert "const own = p && p.bbox ? localBox(p.bbox, scenMatrixOf(p)) : null;" in _fn(src, "drawScenarios")
     assert "scenMarks.matrixAutoUpdate = false;" in src
     assert "const box = faceBox(unposed(f.verts, scenFrame(partOf(pid))))" in _fn(src, "pickScenarioFace")
 
@@ -175,7 +177,7 @@ def test_the_view_s_click_goes_to_the_pick_first_and_esc_stops_it():
     src = open(JS).read()
     up = src[src.index("renderer.domElement.addEventListener('pointerup'"):]
     up = up[:up.index("\n});")]
-    assert "if (S.scenPick) { pickScenarioFace(hit); return; }" in up
+    assert "if (S.scenPick) { pickScenarioFace(scenHit(e)); return; }" in up
     assert up.index("pickScenarioFace") < up.index("choose(e, hit)")                 # before the chat's pick
     assert "if (e.key === 'Escape' && S.scenPick) { e.preventDefault(); stopScenPick('Stopped picking'); }" in src
 
@@ -192,7 +194,63 @@ def test_the_picture_follows_the_rows_and_goes_with_the_editor():
     src = open(JS).read()
     rows = _fn(src, "wireScenarioRows")
     assert "body.oninput = () => drawScenarios();" in rows and "drawScenarios();" in rows
-    assert "if (!box.open) { clearScenMarks(); if (S.scenPick) stopScenPick(); }" in _fn(src, "wireScenarios")
+    assert "if (!box.open) { clearScenMarks(); if (S.scenPick) stopScenPick(); return; }" in _fn(src, "wireScenarios")
     assert "if (!scen || !scen.open) { clearScenMarks(); if (S.scenPick) stopScenPick(); }" in _fn(src, "renderInspector")
     draw = _fn(src, "drawScenarios")
     assert "readScenarios(got)" in draw and "if (!got || !box || !box.open || !S.design) return;" in draw
+
+
+# --- #376 review -----------------------------------------------------------------------------------------------------------
+def _three(body, names, head=""):
+    src = open(JS).read()
+    three = os.path.join(os.path.dirname(JS), "vendor", "three", "three.module.js")
+    script = (f"import * as THREE from {json.dumps('file://' + three)};\n" + head + "".join(_fn(src, n) for n in names)
+              + f"\nconsole.log(JSON.stringify((() => {{ {body} }})()));")
+    got = subprocess.run([_node(), "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
+    assert got.returncode == 0, got.stderr
+    return json.loads(got.stdout)
+
+
+def test_a_pick_finds_the_part_under_a_stress_map_that_hides_it():
+    """Must-fix: with a check's stress map up only its picture is visible, and the pick said "no face there"."""
+    got = _three("""const part = new THREE.Mesh(new THREE.BoxGeometry(100, 100, 100), new THREE.MeshBasicMaterial());
+      part.userData = { partId: 'stool' }; part.visible = false; part.updateMatrixWorld(true);
+      const meshes = new Map([['stool', part]]), pieces3d = new Map();
+      globalThis.meshes = meshes; globalThis.pieces3d = pieces3d;
+      const h = scenHit({ clientX: 100, clientY: 100 });
+      return { part: h && h.object.userData.partId, x: h && Math.round(h.point.y) };""", ("scenHit",),
+                 head="""const camera = new THREE.PerspectiveCamera(40, 1, 1, 10000); camera.position.set(0, -500, 0); camera.lookAt(0, 0, 0); camera.updateMatrixWorld();
+const renderer = { domElement: { getBoundingClientRect: () => ({ left: 0, top: 0, width: 200, height: 200 }) } };
+const ray = new THREE.Raycaster();
+""")
+    assert got == {"part": "stool", "x": -50}
+
+
+def test_on_a_phone_a_pick_goes_to_the_model_and_back():
+    got = _pick("""phone = true; startScenPick('stool', 'load', 0); const during = panes.slice();
+                   await pickScenarioFace(hitOn('stool')); return { during, after: panes };""")
+    assert got == {"during": ["view"], "after": ["view", "cards"]}
+    assert _pick("startScenPick('stool', 'load', 0); await pickScenarioFace(hitOn('stool')); return panes;") == []   # a desktop stays
+
+
+def test_a_reopened_editor_draws_again():
+    """Should-fix 1: open 8 marks, closed 0, reopened 0 until a keystroke."""
+    tog = _fn(open(JS).read(), "wireScenarios")
+    assert "if ($('scenSave')) { drawScenarios(); return; }" in tog
+
+
+def test_the_floor_is_in_the_part_s_own_frame_not_posed_twice():
+    """Should-fix 3: the floor came from the posed bbox and was drawn under the pose again. A part moved 500 along x and
+    turned 90° about z: its own box is back at the origin, and z is untouched."""
+    got = _three("""const f = scenFrame({ position: [500, 0, 0], rotation: [0, 0, 90] });
+      const posed = { min: [480, -40, 0], max: [520, 40, 10] };       // a 80 x 40 x 10 box, turned and moved
+      return localBox(posed, f);""", ("scenFrame", "localBox"))
+    assert got == {"min": [-40, -20, 0], "max": [40, 20, 10], "size": [80, 40, 10]}
+
+
+def test_clearing_the_marks_lets_go_of_their_geometry_and_material():
+    got = _three("""globalThis.scenMarks = new THREE.Group(); let g = 0, m = 0;
+      for (let i = 0; i < 3; i++) { const geo = new THREE.BoxGeometry(1, 1, 1), mat = new THREE.MeshBasicMaterial();
+        geo.dispose = () => { g += 1; }; mat.dispose = () => { m += 1; }; scenMarks.add(new THREE.Mesh(geo, mat)); }
+      clearScenMarks(); return { g, m, left: scenMarks.children.length };""", ("clearScenMarks",))
+    assert got == {"g": 3, "m": 3, "left": 0}

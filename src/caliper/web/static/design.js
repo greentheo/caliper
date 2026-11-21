@@ -1069,8 +1069,8 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   }
   if (!d || d[2] !== 0 || e.button !== 0) return;
   if (Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 5) return;    // an orbit drag, not a click
+  if (S.scenPick) { pickScenarioFace(scenHit(e)); return; }   // a scenario's or a support's face, not the chat's (#296 B1)
   const hit = pick(e);
-  if (S.scenPick) { pickScenarioFace(hit); return; }   // a scenario's or a support's face, not the chat's (#296 B1)
   if (PICK.mode !== 'part' && (hit || S.scope)) { choose(e, hit); return; }   // just off the silhouette is still its edge
   setScope(hit ? hit.object.userData.partId : null);
 });
@@ -1091,6 +1091,14 @@ longPress(renderer.domElement, (e) => {
   const hit = pick(e);
   if (hit) openMenu(hit.object.userData.partId, null, e.clientX, e.clientY, renderer.domElement);
 });
+// a part under the pointer for Pick on the model, shown or not (#376 review: with a check's stress map up only its picture is
+// visible, and the pick said "no face there"): every part's mesh and pieces, never the stress map's
+function scenHit(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+  const pieces = [...pieces3d.values()].flatMap((s) => [...s.byKey.values()]);
+  return ray.intersectObjects([...meshes.values(), ...pieces], false)[0] || null;
+}
 function pick(e) {
   const rect = renderer.domElement.getBoundingClientRect();
   const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -3765,6 +3773,16 @@ function scenFrame(p) {
   const r = new THREE.Euler(...p.rotation.map((d) => (Number(d) || 0) * Math.PI / 180), 'XYZ');
   return m.compose(new THREE.Vector3(...p.position.map((v) => Number(v) || 0)), new THREE.Quaternion().setFromEuler(r), new THREE.Vector3(1, 1, 1));
 }
+const scenMatrixOf = (p) => scenFrame(p);    // one name for the frame the marks are drawn in
+function localBox(bbox, frame) {               // a posed box's corners, back in the part's own frame, boxed again
+  const inv = frame.clone().invert(), v = new THREE.Vector3(), lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const x of [bbox.min[0], bbox.max[0]]) for (const y of [bbox.min[1], bbox.max[1]]) for (const z of [bbox.min[2], bbox.max[2]]) {
+    v.set(x, y, z).applyMatrix4(inv);
+    [v.x, v.y, v.z].forEach((c, a) => { lo[a] = Math.min(lo[a], c); hi[a] = Math.max(hi[a], c); });
+  }
+  const r = (c) => Math.round(c * 1000) / 1000;
+  return { min: lo.map(r), max: hi.map(r), size: hi.map((c, a) => r(c - lo[a])) };
+}
 function unposed(verts, frame) {              // posed points, back into the part's own frame
   const inv = frame.clone().invert(), v = new THREE.Vector3(), out = [];
   for (let k = 0; k + 2 < verts.length; k += 3) { v.set(verts[k], verts[k + 1], verts[k + 2]).applyMatrix4(inv); out.push(v.x, v.y, v.z); }
@@ -3773,18 +3791,22 @@ function unposed(verts, frame) {              // posed points, back into the par
 const scenMarks = new THREE.Group();
 scenMarks.matrixAutoUpdate = false;           // its matrix is the part's frame, set each draw
 scene.add(scenMarks);
-function clearScenMarks() {
-  scenMarks.children.slice().forEach((m) => { scenMarks.remove(m); m.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); });
+function clearScenMarks() {                    // every mark's geometry and material let go: it's redrawn on each keystroke
+  scenMarks.children.slice().forEach((m) => {
+    scenMarks.remove(m);
+    m.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+  });
 }
 function drawScenarios() {
   clearScenMarks();
   const pid = S.scenOpen, got = pid && (S.scen || {})[pid], box = $('scenBox');
   if (!got || !box || !box.open || !S.design) return;
   const p = S.design.parts.find((x) => x.id === pid);
-  scenMarks.matrix.copy(scenFrame(p));         // the rows are in the part's own frame (#375): drawn where the part is
+  scenMarks.matrix.copy(scenMatrixOf(p));      // the rows are in the part's own frame (#375): drawn where the part is
   scenMarks.matrixWorldNeedsUpdate = true;
-  const marks = scenMarksFor($('scenSave') ? { ...got, ...readScenarios(got) } : got, p && p.bbox);   // as typed, saved or not
-  const size = p && p.bbox ? Math.max(...p.bbox.size) : 400, reach = size * 0.3;
+  const own = p && p.bbox ? localBox(p.bbox, scenMatrixOf(p)) : null;   // the floor in its own frame: bbox is posed (#376 review)
+  const marks = scenMarksFor($('scenSave') ? { ...got, ...readScenarios(got) } : got, own);   // as typed, saved or not
+  const size = own ? Math.max(...own.size) : 400, reach = size * 0.3;
   const most = Math.max(1, ...marks.filter((m) => m.kind === 'load').map((m) => m.n));
   for (const m of marks) {
     const lo = new THREE.Vector3(...m.lo), hi = new THREE.Vector3(...m.hi), mid = lo.clone().add(hi).multiplyScalar(0.5);
@@ -3821,10 +3843,13 @@ function startScenPick(pid, kind, i) {
   if (!row) return;
   S.scenPick = { pid, kind, i };
   pickHint(`Click a face of ${partOf(pid).name || pid} for "${row.said || row.name}" (Esc stops)`);
+  if (onPhone()) setPane('view');               // the model's on its own pane there (#376 review: nothing seemed to happen)
 }
 function stopScenPick(said) {
+  const was = S.scenPick;
   S.scenPick = null;
   pickHint(said);
+  if (was && onPhone()) setPane('cards');       // back to the row it was for
 }
 async function pickScenarioFace(hit) {
   const at = S.scenPick;
@@ -3884,8 +3909,8 @@ function wireScenarios(p) {
   const paint = () => { $('scenBody').innerHTML = scenariosView(p, (S.scen || {})[p.id]); wireScenarioRows(p); };
   box.ontoggle = async () => {
     S.scenOpen = box.open ? p.id : null;
-    if (!box.open) { clearScenMarks(); if (S.scenPick) stopScenPick(); }
-    if (!box.open || $('scenSave')) return;      // painted already (a render with it open): keep what it says
+    if (!box.open) { clearScenMarks(); if (S.scenPick) stopScenPick(); return; }
+    if ($('scenSave')) { drawScenarios(); return; }   // painted already: keep what it says, and draw it again (#376 review)
     S.scen = S.scen || {};
     if (!S.scen[p.id]) { paint(); S.scen[p.id] = await api('GET', `/api/designs/${S.slug}/parts/${p.id}/scenarios`); }
     paint();
