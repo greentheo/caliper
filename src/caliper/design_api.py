@@ -285,7 +285,7 @@ NEEDS_KEY = "Building a new design needs a Claude key (see .env.example). Until 
 def _claude() -> bool:
     """Whether Claude can be asked: a key is set (the CLI loads .env). Without one nothing is sent anywhere, and a
     first build can't run, so it isn't started (CALI-91)."""
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return llm.has_key()
 
 
 def first_build(slug: str):
