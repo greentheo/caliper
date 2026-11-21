@@ -66,7 +66,7 @@ def test_the_page_marks_each_rule_and_says_what_it_measured():
             "said": "shell_wall_thickness: its walls are 0.25 mm around z 16.1 in; it says at least 2.85 mm",
             "verdict": {"kind": "fails", "status": "bad", "word": "doesn't hold"}}
     ok = {**rule, "status": "pass", "verdict": {"kind": "holds", "status": "ok", "word": "holds"}}
-    out = _run(_page(["ruleItem", "partChecks", "ruleSaid"], consts=["esc", "verdictTone", "verdictBadge", "RULE_WORDS"], extra=(
+    out = _run(_page(["ruleItem", "partChecks", "ruleSaid", "ruleWords", "ruleAsWritten"], consts=["esc", "verdictTone", "verdictBadge", "RULE_WORDS", "ruleNorm"], extra=(
         f"out = [ruleItem({json.dumps(rule)}), ruleItem({json.dumps(ok)}), "
         f"partChecks({{parts: [{{rules: [{json.dumps(rule)}, {{id: 'x', expr: 'y'}}]}}]}})];")))
     assert "badge bad" in out[0] and "doesn&#39;t hold" in out[0] or "doesn't hold" in out[0]

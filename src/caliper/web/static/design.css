@@ -129,6 +129,11 @@ a.btn:hover { border-color: var(--accent); }
 .list li { padding: 5px 0; border-bottom: 1px solid #20262e; }
 .list li:last-child { border-bottom: 0; }
 .list .rule code { font-size: 11px; }
+/* a rule as written, a tap away (#391 review: a title was hover-only) */
+details.rule-expr { display: inline; font-size: 11px; color: var(--muted); }
+details.rule-expr > summary { display: inline; cursor: pointer; text-decoration: underline dotted; list-style: none; }
+details.rule-expr > summary::-webkit-details-marker { display: none; }
+details.rule-expr[open] > code { display: inline; margin-left: 4px; }
 .check { display: flex; gap: 6px; align-items: baseline; }
 .check .s { width: 12px; flex: none; }
 .check.pass .s { color: var(--ok); } .check.fail .s, .check.error .s { color: var(--bad); }

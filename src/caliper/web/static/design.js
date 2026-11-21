@@ -2137,17 +2137,64 @@ function renderInspector() {
 
 // one rule on a part, with its verdict as measured on this version, and what it measured where it doesn't hold
 // (#137 item 1: the bar stool's locked shell wall broke, and this list showed no mark)
-// a rule as it's read (#386): "one_body body_count == 1" was code on the page. Said in words where it's one Caliper
-// writes, a wall rule by its number, else by its name in words; the expression stays in its title, for whoever wants it
-const RULE_WORDS = { 'body_count == 1': "it's one solid piece", is_watertight: "it's closed all round", 'body_count == 1 and is_watertight': "it's one solid piece, closed all round", is_manifold: 'its surface has no gaps or folds' };
-function ruleSaid(id, expr) {
-  const e = String(expr || '').trim().replace(/\s+/g, ' '), wall = e.match(/^min_wall >=? (\d+(?:\.\d+)?)$/);
-  const words = RULE_WORDS[e] || (wall ? `its walls are at least ${+wall[1]} mm` : String(id || e).replace(/_/g, ' '));
-  return `<b title="${esc(e)}">${esc(words)}</b>`;
+// a rule as it's read (#386): "one_body body_count == 1" was code on the page. Said as what it asks for, the same in both
+// states, so its mark says whether it holds (#391 review: "✗ it's closed all round" stated the very thing that failed).
+// Caliper's own rules in words, a plain wall rule by its number, else by its name in words; the expression as written is
+// a tap away, by touch, keyboard or screen reader (a title was hover-only)
+const RULE_WORDS = { 'body_count == 1': 'one solid piece', is_watertight: 'closed all round', 'body_count == 1 and is_watertight': 'one solid piece, closed all round', is_manifold: 'no gaps or folds in its surface' };
+const ruleNorm = (expr) => String(expr || '').trim().replace(/\s+/g, ' ');
+function ruleWords(id, expr) {
+  const e = ruleNorm(expr), wall = e.match(/^min_wall >=? (\d+(?:\.\d+)?)$/);
+  return RULE_WORDS[e] || (wall ? `walls ${+wall[1]} mm or more` : String(id || e).replace(/_/g, ' '));
+}
+function ruleSaid(id, expr) {          // what it asks for, in words
+  return `<b>${esc(ruleWords(id, expr))}</b>`;
+}
+// the rule as written, at the end of its row: a tap to show it
+function ruleAsWritten(expr) {
+  return ` <details class="rule-expr"><summary>as written</summary><code>${esc(ruleNorm(expr))}</code></details>`;
+}
+// a side of a rule that's only numbers ("3.0 - 0.15"), its value; null where it names anything (part_rules._const, #392)
+function ruleConst(side) {
+  const t = String(side).trim();
+  if (!/^[\d.\s+\-*/()]+$/.test(t) || !/\d/.test(t)) return null;
+  try { const v = Function(`"use strict"; return (${t});`)(); return Number.isFinite(v) ? v : null; } catch (e) { return null; }
+}
+// a failing rule's number, to the rule's own precision (the most places among its numbers, at most 3; three significant
+// figures where it has none), cut away from the bound it misses, and never printed as one of the rule's own numbers or its
+// limit: a place is added until it isn't (#391 review: 1.1996 read "measured 1.2" beside "1.2 mm or more"). The server's
+// part_rules.cut (#392), for a rule of one comparison; any other is rounded, never onto a number of its own
+function ruleCut(x, expr) {
+  const e = ruleNorm(expr), nums = [...e.matchAll(/(?<![\w.])\d+(?:\.(\d+))?(?![\w.])/g)];
+  let places = nums.length ? Math.min(3, Math.max(...nums.map((m) => (m[1] || '').length)))
+    : x === 0 ? 0 : Math.max(0, Math.min(6, 2 - Math.floor(Math.log10(Math.abs(x)))));
+  const m = e.match(/^(.+?)\s*(>=|<=|==|>|<)\s*(.+)$/), limits = nums.map((n) => Number(n[0]));
+  let lim = null;
+  if (m && !/[<>=]/.test(m[3])) {
+    const right = ruleConst(m[3]), left = ruleConst(m[1]);
+    lim = right != null && left == null ? right : left != null && right == null ? left : null;
+    if (lim != null) limits.push(lim);
+  }
+  const down = lim != null && x < lim, up = lim != null && x > lim;
+  for (;;) {
+    const f = 10 ** places, v = down ? Math.floor(x * f + 1e-9) / f : up ? Math.ceil(x * f - 1e-9) / f : Math.round(x * f) / f;
+    const said = v.toFixed(places);
+    if (places >= 6 || !limits.some((l) => said === l.toFixed(places))) return said;
+    places += 1;
+  }
+}
+// what a failing rule found, as what's wrong: a yes/no "it isn't", a body count how many pieces, a number cut toward safe
+function ruleMiss(r) {
+  const e = ruleNorm(r.expr), a = r.actual;
+  if (a === false) return "it isn't";
+  if (a == null || a === true) return '';
+  if (typeof a !== 'number') return `measured ${a}`;
+  if (/^body_count == 1\b/.test(e) && Number.isInteger(a)) return `it's in ${a} pieces`;
+  return `measured ${ruleCut(a, e)}${/^min_wall\b/.test(e) ? ' mm' : ''}`;
 }
 function ruleItem(r) {
   const v = r.verdict;
-  return `<li class="rule">🔒 ${v ? `${verdictBadge(v)} ` : ''}${ruleSaid(r.id, r.expr)}${
+  return `<li class="rule">🔒 ${v ? `${verdictBadge(v)} ` : ''}${ruleSaid(r.id, r.expr)}${ruleAsWritten(r.expr)}${
     v && v.kind !== 'holds' && r.said ? `<div class="small">${esc(r.said)}</div>` : ''}</li>`;
 }
 // the parts' own rules, measured, where the design has no checks of its own (#137 item 1: "Nothing to measure yet"
@@ -2162,9 +2209,9 @@ function checks(report, only) {
   if (!rows.length) return '<div class="empty">No checks.</div>';
   return '<ul class="list">' + rows.map((r) => `<li class="check ${r.status}">
     <span class="s">${r.status === 'pass' ? '✓' : r.status === 'deferred' ? '·' : '✗'}</span>
-    <span>${ruleSaid(r.id, r.expr)}${r.actual != null && typeof r.actual !== 'boolean' && r.status !== 'pass'   // a yes/no: its words say it
-      ? ` <span class="muted">: measured ${esc(typeof r.actual === 'number' ? +r.actual.toFixed(3) : r.actual)}</span>` : ''}${r.status === 'deferred' && r.detail
-      ? ` <span class="muted">· ${esc(r.detail)}</span>` : ''}</span>
+    <span>${ruleSaid(r.id, r.expr)}${(r.status === 'fail' || r.status === 'error') && ruleMiss(r)   // what's wrong, not what holds
+      ? `<span class="muted">: ${esc(ruleMiss(r))}</span>` : ''}${r.status === 'deferred' && r.detail
+      ? ` <span class="muted">· ${esc(r.detail)}</span>` : ''}${ruleAsWritten(r.expr)}</span>
     </li>`).join('') + '</ul>';
 }
 
@@ -2202,7 +2249,7 @@ function designView(d) {
       ${d.plan.numbers.length ? '<div class="small"><b>The numbers they share</b></div><ul class="list">'
         + d.plan.numbers.map((n) => `<li class="small">${esc(n)}</li>`).join('') + '</ul>' : ''}
       ${d.plan.checks.length ? '<div class="small"><b>Checked between them</b></div><ul class="list">'
-        + d.plan.checks.map((c) => `<li class="small">${ruleSaid(c.id, c.expr)}${c.source === 'assumed'
+        + d.plan.checks.map((c) => `<li class="small">${ruleSaid(c.id, c.expr)}${ruleAsWritten(c.expr)}${c.source === 'assumed'
           ? ` <span class="badge">assumed: not checked until you keep it</span>${c.why ? ` <span class="muted">${esc(c.why)}</span>` : ''}
             <button class="ghost small" data-plankeep="${esc(c.id)}">Keep</button>` : ''}</li>`).join('') + '</ul>' : ''}` : ''}
     <h4>Parts</h4>
