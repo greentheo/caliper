@@ -1749,8 +1749,13 @@ async function followBuild(jobId, ranFor) {
   S.buildBubble = cal;
   const head = cal.querySelector('.head');
   let at = null;
+  // the group it's building in (#17 slice C, #415): said once as each starts, "The box: 5 parts", and kept beside each of its
+  // parts' lines, "The box (5 parts) · Building the box floor", till the next group or the next step
+  let group = '';
   const mark = (k, text) => {
+    if (k === 'group') { group = String(text || '').replace(/^(.*): (\d+ parts?)$/, '$1 ($2)'); paint(); return; }
     if (!BUILD_STEPS[k]) return;
+    if (k !== 'build') group = '';
     cal.querySelectorAll('li').forEach((li) => {
       const before = Object.keys(BUILD_STEPS).indexOf(li.dataset.step) < Object.keys(BUILD_STEPS).indexOf(k);
       li.classList.toggle('done', before || li.classList.contains('done'));
@@ -1760,7 +1765,7 @@ async function followBuild(jobId, ranFor) {
   };
   // the whole build's time: a reload or a switch of design doesn't restart it
   let said = 'Starting';
-  const paint = () => { head.innerHTML = `<span class="spin"></span>${esc(said)}… <span class="muted small">${elapsedText(Date.now() / 1000 - S.buildBegan)}</span>`; };
+  const paint = () => { head.innerHTML = `<span class="spin"></span>${esc(group ? `${group} · ${said}` : said)}… <span class="muted small">${elapsedText(Date.now() / 1000 - S.buildBegan)}</span>`; };
   paint();
   const tick = setInterval(() => { if (cal.isConnected) paint(); }, 1000);
   try {
