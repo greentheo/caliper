@@ -640,7 +640,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         try:
             from . import consistency
 
-            geom = store.part_geometry(pid)                  # cached by the assembly (path, mtime)
+            geom = store.part_local(pid)                     # its own frame, as its pieces (#375); cached by path, mtime
             said = consistency.checked(store, pid)
             smaller = consistency.plan_differs(C.declared(store, pid), geom)
             off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
@@ -1261,7 +1261,12 @@ def design(store: DesignStore, state: dict) -> list[dict]:
         # with no key the page shows the key's note where Build it would be: the line says so, never "press" (#89)
         what.append(_line("That's the plan, before anything's drawn: its numbers and the checks between the parts are "
                           "under the numbers. " + ("Say what to change, or press Build it." if state.get("claude", True)
+                                                   and not pl.get("questions")
+                                                   else "Answer its question first: Build it waits for it."
+                                                   if state.get("claude", True)
                                                    else "Building it needs Claude, which isn't set up here."), "info"))
+        for q in pl.get("questions") or []:   # only the person can say: Build it builds nothing over it (#371)
+            what.append(_line(f"Before I build it: {q}", "warn"))
     else:
         what.append(_line("Not built yet: answer its questions and press Build it.", "warn"))
     assumed = sum(1 for r in state.get("requirements") or [] if r.get("source") == "assumed")

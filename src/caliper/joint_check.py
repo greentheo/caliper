@@ -41,7 +41,7 @@ def setup(store, pid: str) -> dict:
     from .consistency import _sides, shapes, tolerance
 
     ok, said = J.readable(store.read_script(pid))
-    mesh = store.part_geometry(pid).require_mesh()
+    mesh = store.part_local(pid).require_mesh()
     pieces = shapes(C.declared(store, pid))
     _sides(mesh, [pc for pc in pieces if pc["kind"] == "sheet"])
     fasteners.keys(pieces)

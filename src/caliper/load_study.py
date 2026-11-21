@@ -1299,7 +1299,7 @@ def prepare(store: DesignStore, part_id: str, emit: Optional[Callable] = None, s
     if not strength:
         raise ValueError(f"'{part_id}' only says how it might tip, not what it must hold: add a load that isn't a tip")
     loads = parse_loads(strength)
-    mesh = store.part_geometry(part_id).require_mesh()
+    mesh = store.part_local(part_id).require_mesh()   # in its own frame, where its loads and pieces are (#374)
     from .measure import closed, open_near
 
     if not closed(mesh):                       # said where, never a throw from deep in a boolean (CALI-118)
@@ -2050,7 +2050,7 @@ def piece_at(store: DesignStore, part_id: str, at) -> Optional[str]:
     try:
         declared = C.declared(store, part_id)
         pieces = shapes(declared)
-        _sides(store.part_geometry(part_id).require_mesh(), [pc for pc in pieces if pc["kind"] == "sheet"])
+        _sides(store.part_local(part_id).require_mesh(), [pc for pc in pieces if pc["kind"] == "sheet"])
     except Exception:  # noqa: BLE001 — unnamed, then
         return None
     p = np.asarray([at], float)

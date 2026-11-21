@@ -646,6 +646,30 @@ class DesignStore:
                 return _build_py_part(path, part.position, part.rotation)
             return Geometry.from_stl_posed(path, part.position, part.rotation)
 
+    def part_local(self, part_id: str):
+        """Build/load one part in its OWN frame, unposed: where its script's loads, HELD, construction() pieces and
+        holes are (#374's must-fix). The studies read a part here; its pose is only where it sits in the design."""
+        from .assembly import _build_py_local, _resolve_source
+        from .measure import Geometry
+
+        part = next((p for p in self.assembly.parts if p.id == part_id), None)
+        if part is None:
+            raise KeyError(f"unknown part {part_id!r}")
+        path = _resolve_source(part.source, self.root)
+        with OCCT:
+            if path.endswith(".py"):
+                return _build_py_local(path)
+            return Geometry.from_stl(path)
+
+    def part_pose(self, part_id: str):
+        """The 4x4 pose that takes a part from its own frame to where it sits in the design."""
+        from .measure import pose_matrix
+
+        part = next((p for p in self.assembly.parts if p.id == part_id), None)
+        if part is None:
+            raise KeyError(f"unknown part {part_id!r}")
+        return pose_matrix(part.position, part.rotation)
+
     def version_stl(self, part_id: str, version: int) -> bytes:
         """One version of a part as a binary STL, posed as the part is now: what Go back to this would bring (#299)."""
         import io

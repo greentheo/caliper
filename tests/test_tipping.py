@@ -39,7 +39,8 @@ def _checked(monkeypatch, mesh, loads, own_lb=10.0):
     monkeypatch.setattr(C, "declared", lambda store, pid: {"loads": loads})
     monkeypatch.setattr(C, "report", lambda store, pid: {"mass_kg": own_lb * tipping.LB / tipping.GRAVITY,
                                                          "cog": [0.0, 0.0, 400.0]})
-    store = SimpleNamespace(part_geometry=lambda pid: SimpleNamespace(require_mesh=lambda: mesh))
+    store = SimpleNamespace(part_geometry=lambda pid: SimpleNamespace(require_mesh=lambda: mesh),
+                part_local=lambda pid: SimpleNamespace(require_mesh=lambda: mesh))     # its own frame (#375)
     return tipping.check(store, "stool")
 
 
@@ -97,8 +98,9 @@ def test_a_case_that_can_t_be_checked_is_waiting_never_a_pass(monkeypatch):
     monkeypatch.setattr(C, "report", lambda store, pid: {"mass_kg": None, "cog": None, "unweighed": "no material"})
     monkeypatch.setattr(C, "declared", lambda store, pid: {"loads": [_front_edge_case(29)]})
     mesh = _stool(18, 29)
-    (case,) = tipping.check(SimpleNamespace(part_geometry=lambda pid: SimpleNamespace(require_mesh=lambda: mesh)),
-                            "stool")
+    (case,) = tipping.check(SimpleNamespace(part_geometry=lambda pid: SimpleNamespace(require_mesh=lambda: mesh),
+                                            part_local=lambda pid: SimpleNamespace(require_mesh=lambda: mesh)),
+                            "stool")                                       # part_local: its own frame (#375)
     assert not case["checked"] and not case["verdict"]["counts_as_pass"]
     text, status = tipping.line(case)
     assert text == "Tipping when someone sits on the front edge and leans: not checked: no material." \
@@ -287,7 +289,8 @@ def test_a_sideways_push_on_a_square_base_says_front_to_back(monkeypatch):
     sideways = {**_front_edge_case(29), "force": (20, 0, -600)}
     mesh = _stool(18, 29)
     monkeypatch.setattr(C, "declared", lambda store, pid: {"loads": [sideways]})
-    store = SimpleNamespace(part_geometry=lambda pid: SimpleNamespace(require_mesh=lambda: mesh))
+    store = SimpleNamespace(part_geometry=lambda pid: SimpleNamespace(require_mesh=lambda: mesh),
+                part_local=lambda pid: SimpleNamespace(require_mesh=lambda: mesh))     # its own frame (#375)
     assert tipping.undeclared_ways(store, "stool") == ["tipping front to back"]
     monkeypatch.setattr(C, "declared", lambda store, pid: {"loads": [sideways, _front_edge_case(29)]})
     assert tipping.undeclared_ways(store, "stool") == []                       # both ways pushed: nothing unsaid

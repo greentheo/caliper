@@ -959,9 +959,9 @@ def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[
     from . import llm
 
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
     # Opus 5.5 refuses a forced tool: it's asked to, and a reply without one is sent back round below
     content = f"{content}\n\nAnswer by calling the plan tool."
     ask = content

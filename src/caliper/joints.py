@@ -341,7 +341,7 @@ def listed(store, pid: str) -> list[dict]:
     script = store.read_script(pid)
     ok, said_joints = readable(script)
     try:
-        mesh = store.part_geometry(pid).require_mesh()
+        mesh = store.part_local(pid).require_mesh()
         pieces = shapes(C.declared(store, pid))
     except Exception:  # noqa: BLE001 — no pieces to join: none listed
         return []
@@ -390,7 +390,7 @@ def _pieces_of(store, pid: str):
     from .consistency import _sides, shapes, tolerance
 
     try:
-        mesh = store.part_geometry(pid).require_mesh()
+        mesh = store.part_local(pid).require_mesh()
         pieces = shapes(C.declared(store, pid))
     except Exception:  # noqa: BLE001 — no pieces: no joints to name
         return [], 0.0

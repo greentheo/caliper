@@ -15,10 +15,9 @@ kid can read, and the card says "not checked yet" until the check runs.
 
 from __future__ import annotations
 
-import os
 from typing import Callable, Optional
 
-from . import chat, goals, load_study
+from . import chat, goals, llm, load_study
 from .design import DesignStore
 from .errors import scrubbed
 
@@ -39,7 +38,7 @@ def first_part(store: DesignStore) -> tuple[str, str]:
 
 
 def _llm(use_llm: bool, client) -> bool:
-    return use_llm and (client is not None or bool(os.environ.get("ANTHROPIC_API_KEY")))
+    return use_llm and (client is not None or llm.has_key())
 
 
 def _min_safety(store: DesignStore) -> float:

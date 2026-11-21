@@ -742,7 +742,7 @@ def printed_solid(store: DesignStore, part_id: str, d: Optional[dict] = None):
                    None)
     if printed is None:
         return None
-    mesh = store.part_geometry(part_id).require_mesh()
+    mesh = store.part_local(part_id).require_mesh()
     from .measure import closed, open_near
 
     if not closed(mesh):                        # no boolean on an open mesh: said where it's open (CALI-118)
@@ -889,7 +889,7 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
             from . import fasteners
             from .consistency import _sides, shapes, tolerance
 
-            mesh = store.part_geometry(part_id).require_mesh()
+            mesh = store.part_local(part_id).require_mesh()
             pcs = shapes(d)
             _sides(mesh, pcs)
             bom_["fasteners"] = fasteners.estimate(pcs, tolerance(mesh), J.read(store.read_script(part_id)))
@@ -904,7 +904,7 @@ def report(store: DesignStore, part_id: str, build: Optional[dict] = None) -> di
     if d.get("keeps"):                     # what it has to hold: does it still, with these choices?
         from .aero import keep_check
 
-        g = store.part_geometry(part_id).require_mesh()
+        g = store.part_local(part_id).require_mesh()
         keeps = keep_check(g.vertices, g.faces, d["keeps"])
         for k in keeps:
             if not k["clear"]:

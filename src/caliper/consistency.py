@@ -372,7 +372,7 @@ def cut_smaller(store, part_ids) -> list[str]:
     out = []
     for pid in part_ids:
         try:
-            out += [plan_said(s, inches) for s in plan_differs(C.declared(store, pid), store.part_geometry(pid))]
+            out += [plan_said(s, inches) for s in plan_differs(C.declared(store, pid), store.part_local(pid))]
         except Exception:  # noqa: BLE001
             continue
     return out
@@ -628,7 +628,7 @@ def bare_edge(store, part_id: str) -> Optional[str]:
         try:
             declared = SC.declared(store, part_id)
             if declared.get("loads"):   # edited: scenarios.declared
-                mesh = store.part_geometry(part_id).require_mesh()
+                mesh = store.part_local(part_id).require_mesh()
                 pieces = shapes(declared)
                 rest = any(isinstance(it, dict) and it.get("kind") == "printed" and it.get("rest")
                            for it in declared.get("construction") or [])
@@ -690,7 +690,7 @@ def checked(store, part_id: str) -> list[AssertionResult]:
     if key not in _CHECKED:
         from . import scenarios
 
-        _CHECKED[key] = check(C.declared(store, part_id), store.part_geometry(part_id),
+        _CHECKED[key] = check(C.declared(store, part_id), store.part_local(part_id),
                               strength=scenarios.says_loads(store, part_id))   # its script's loads, or a case added (#327)
         while len(_CHECKED) > 64:
             _CHECKED.pop(next(iter(_CHECKED)))
@@ -707,7 +707,7 @@ def _covers_alone(store, part_id: str) -> Optional[AssertionResult]:
     if any(isinstance(it, dict) and it.get("kind") == "printed" and it.get("rest") for it in declared.get("construction") or []):
         return None
     pieces = shapes(declared)
-    mesh = getattr(store.part_geometry(part_id), "mesh", None)
+    mesh = getattr(store.part_local(part_id), "mesh", None)
     if not pieces or mesh is None:
         return None
     _sides(mesh, pieces)
@@ -719,7 +719,7 @@ def _panel_words(store, part_id: str) -> str:
     from . import construction as C
 
     declared = C.declared(store, part_id)
-    mesh = store.part_geometry(part_id).require_mesh()
+    mesh = store.part_local(part_id).require_mesh()
     pieces = shapes(declared)
     _sides(mesh, pieces)
     inches = getattr(store.design, "display_units", "in") == "in"
