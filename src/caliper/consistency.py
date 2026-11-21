@@ -791,12 +791,144 @@ def check(declared: Optional[dict], geometry, strength: Optional[bool] = None) -
             out += [vol] if vol else []
     inside = _holes_inside(declared.get("construction") or [])     # (#66 item 4)
     out += [inside] if inside else []
+    walls = _shell_in_walls(declared, pieces, tol) if pieces else None   # the walls a frame study believes (#1 slice C)
+    out += [walls] if walls else []
+    keeps = _keeps_clear(mesh, declared.get("keeps") or [])              # what it must hold clear (#1 slice C)
+    out += [keeps] if keeps else []
     if declared.get("loads") is not None:              # script's loads: they land; the edge is bare_edge's, edited too
         out.append(_loads(mesh, declared, pieces, tol))
         if pieces:
             edge = _edge_foot(mesh, declared, pieces, tol, rest)  # a warning, said in its detail (CALI-94)
             out += [edge] if edge else []
     return out
+
+
+#: How far a wall beam may sit from its wall's sheet and still be in it (mm), beside the mesh's tolerance (#1 slice C).
+SHELL_TOL_MM = 2.0
+#: How close a wall beam's core thickness must be to its sheet's (mm).
+CORE_TOL_MM = 0.5
+
+
+def _wall_top(wall: list, nodes: list, near: float, build=lambda pc: None) -> float:
+    """How high a beam's wall goes (#404 review): the panels its foot lies in, then each panel joined to the top edge of
+    what's found so far (its lowest edge at that height, and touching it), as a cargo box's side strip runs on up its
+    curved bands to the roof. A neighbouring wall standing on the floor beside it isn't followed, nor a panel of another
+    build (#404 re-check: thin bare plywood above 300 mm of foam read as 1200 mm of sandwich): ``build(sheet)``, its core,
+    thickness and skins, must be the wall's."""
+    builds = {build(f[0]) for f in wall}
+    found = list(wall)
+    top = max(float(n[2][:, 2].max()) for n in found)
+    grew = True
+    while grew:
+        grew = False
+        for n in nodes:
+            if any(n is f for f in found):
+                continue
+            pc, _, poly, _ = n
+            if build(pc) not in builds:
+                continue
+            low = float(poly[:, 2].min())
+            if low < top - near - pc["thickness"] or low > top + near + pc["thickness"]:
+                continue
+            foot = poly[poly[:, 2] <= low + near]
+            joined = any((slab_distance(foot, fp, f[0]["thickness"], f[3]) <= near + pc["thickness"]).any() for f in found
+                         for fp in [f[2]])
+            if joined:
+                found.append(n)
+                top = max(top, float(poly[:, 2].max()))
+                grew = True
+    return top
+
+
+def _shell_in_walls(declared: dict, pieces: list[dict], tol: float) -> Optional[AssertionResult]:
+    """``shell_in_walls`` (CALI-54, #1 slice C): each wall beam ``shell()`` gives a frame study lies in a wall the part is
+    built from, of the core and thickness it says, with at least that wall's skins. A beam can sit anywhere, and the study
+    believes it: the camper's walls are judged as what ``shell()`` says. Sampled along its bottom edge, a little up the wall
+    (clear of the floor under it). An extra skin on a beam (a corner patch) must be one the construction declares."""
+    from collections import Counter
+
+    from . import materials as M
+
+    beams = declared.get("shell") or []
+    sheets = [pc for pc in pieces if pc["kind"] == "sheet"]
+    if not beams or not sheets:
+        return None
+    items = {it.get("name"): it for it in declared.get("construction") or [] if isinstance(it, dict)}
+    declared_covers = {M.cover_name(c) for it in items.values() for c in it.get("covers") or []} | {
+        it.get("material") for it in items.values() if it.get("kind") == "covering"}
+    nodes = [(pc, k, np.asarray(poly, float), (pc.get("sides") or [1.0] * len(pc["polys"]))[k])
+             for pc in sheets for k, poly in enumerate(pc["polys"])]
+    near_tol = max(tol, SHELL_TOL_MM)
+    wrong = []
+    for bm in beams:
+        name = bm.get("name") or "a wall beam"
+        depth = float(bm.get("depth") or 0)
+        if depth <= 0:
+            wrong.append(f"{name} has no depth")
+            continue
+        a, b = (np.asarray(bm[k], float) for k in ("a", "b"))
+        up = np.array([0.0, 0.0, min(depth / 4.0, 100.0)])
+        pts = np.array([a + f * (b - a) + up for f in np.linspace(0.1, 0.9, 9)])
+        hit = [slab_distance(pts, poly, pc["thickness"], side) <= near_tol for pc, _, poly, side in nodes]
+        covered = np.any(hit, axis=0)
+        if not covered.all():
+            far = int((~covered).sum())
+            wrong.append(f"{name} lies in no wall the part is built from ({far} of {len(pts)} points along it)")
+            continue
+        wall = [n for h, n in zip(hit, nodes) if h.any()]
+        top = _wall_top(wall, nodes, near_tol, lambda pc: (pc.get("material"), round(pc["thickness"], 1), tuple(
+            (sk["material"], round(sk["t"], 3), sk["face"]) for sk in M.skins_of(items.get(pc["name"]) or {}))))
+        foot = float(min(a[2], b[2]))
+        if foot + depth > top + max(near_tol, 0.02 * depth):          # #404 review: 2x its wall passed, 8x as stiff
+            wrong.append(f"{name} is {depth:g} mm deep, but its wall stops {top - foot:.0f} mm up")
+            continue
+        for pc in dict.fromkeys(n[0]["name"] for n in wall):
+            pc = next(n[0] for n in wall if n[0]["name"] == pc)
+            if pc.get("material") != bm.get("core") or abs(pc["thickness"] - float(bm.get("core_t") or 0)) > CORE_TOL_MM:
+                wrong.append(f"{name} says {float(bm.get('core_t') or 0):g} mm {bm.get('core')}, but its wall "
+                             f"{pc['name']} is {pc['thickness']:g} mm {pc.get('material')}")
+                break
+            sk = M.skins_of(items.get(pc["name"]) or {})
+            unsaid = [s for s in sk if s["face"] is None]
+            if unsaid:
+                wrong.append(f"{pc['name']} has a skin past its second with no face: say \"face\": \"out\" or \"in\"")
+                break
+            thin = [s for s in sk if abs(s["t"] - M.SKINS[s["material"]]["t"]) > max(0.01, 0.05 * M.SKINS[s["material"]]["t"])]
+            if thin:                                       # #404 review: a 0.05 mm skin read as the table's 0.25
+                s0 = thin[0]
+                wrong.append(f"{pc['name']}'s {s0['material']} skin is {s0['t']:g} mm, but the frame study reads "
+                             f"{s0['material']} as {M.SKINS[s0['material']]['t']:g} mm: name the skin the wall has")
+                break
+            have = [s["material"] for s in sk]
+            says = [s for s in bm.get("skins") or [] if M.SKINS.get(s)]
+            short = Counter(have) - Counter(says)            # counted: two skins aren't one (out and in)
+            extra = [s for s in (Counter(says) - Counter(have)) if s not in declared_covers]
+            if short or extra:
+                wrong.append(f"{name}'s skins ({', '.join(says) or 'none'}) aren't its wall {pc['name']}'s "
+                             f"({', '.join(have) or 'none'})")
+                break
+    ok = not wrong
+    return AssertionResult(id="shell_in_walls", expr="each wall beam shell() gives lies in a wall it's built from, "
+                           "of that wall's core, thickness and skins", status="pass" if ok else "fail", passed=ok,
+                           actual=len(wrong), detail="; ".join(wrong))
+
+
+def _keeps_clear(mesh, keeps: list) -> Optional[AssertionResult]:
+    """``keeps_clear`` (CALI-54, #1 slice C): the shape's surface cuts into nothing ``keeps()`` says it must hold clear (a
+    mattress, the cargo), measured as the drag study and the build card measure it (``aero.keep_check``)."""
+    from .aero import keep_check
+
+    if not keeps:
+        return None
+    try:
+        got = keep_check(mesh.vertices, mesh.faces, keeps)
+    except (KeyError, TypeError, ValueError) as e:
+        return AssertionResult(id="keeps_clear", expr="every keeps() box says its lo and hi corners", status="fail",
+                               passed=False, actual=None, detail=f"keeps() isn't a list of boxes: {scrubbed(e)}")
+    cut = [k for k in got if not k["clear"]]
+    return AssertionResult(id="keeps_clear", expr="the shape cuts into nothing keeps() holds clear",
+                           status="fail" if cut else "pass", passed=not cut, actual=len(cut),
+                           detail="; ".join(f"the outside cuts {k['depth_mm']:.0f} mm into the {k['name']}" for k in cut))
 
 
 #: How far a hole may reach into the glued rim before it's said to cross it: the outline's rounding.

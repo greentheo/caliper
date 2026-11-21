@@ -336,11 +336,14 @@ def piece(item: dict) -> list[dict]:
                  "size_mm": [round(size[0], 1), round(size[1], 1)], "flat": flat,
                  "group": item.get("group"), **({"holes": len(gone)} if gone else {})}]
         for cover in item.get("covers") or []:
-            if not cover or cover == "none":
+            what = M.cover_name(cover)           # a name, or {"material", "t", "face"} (CALI-54, #1 slice C)
+            if not what or what == "none":
                 continue
-            cv = M.covering(cover)
-            rows.append({"name": f"{cv['name']} on {name}", "kind": "covering", "material": cover,
-                         "label": cv["name"], "area_mm2": area, "mass_kg": area * 1e-6 * cv["areal"],
+            cv = M.covering(what)
+            sk = M.SKINS.get(what)
+            thick = (float(cover["t"]) / sk["t"]) if isinstance(cover, dict) and cover.get("t") and sk else 1.0
+            rows.append({"name": f"{cv['name']} on {name}", "kind": "covering", "material": what,
+                         "label": cv["name"], "area_mm2": area, "mass_kg": area * 1e-6 * cv["areal"] * thick,
                          "at": list(at)})
         return rows
     if kind == "stick":

@@ -27,6 +27,7 @@ import os
 import re
 from typing import Optional
 
+from . import materials as M
 from .design import DesignStore
 from .fasteners import PILOT_BIT
 
@@ -319,7 +320,7 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
             pages.append({"title": f"Add the {words[pc['key']]}" if against else f"Start with the {words[pc['key']]}",
                           "say": say, "img": img, "grownup": bool(n_screws), "screws": n_screws})
             done.append(new)
-    if any("paint" in (p.get("covers") or []) for p in every):
+    if any("paint" in [M.cover_name(c) for c in p.get("covers") or []] for p in every):
         img = "kids/painted.png"
         with open(os.path.join(root, img), "wb") as f:
             f.write(release.draw(view, [(every, "now")]))
