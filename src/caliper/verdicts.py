@@ -156,6 +156,14 @@ CLOSE = 1.25
 CUT_DRIFT = 0.07
 #: A step that close to its minimum: it holds, and the check of the part as cut is what decides (#323).
 CUT_DECIDES = "holds, close: cut it and the check decides"
+#: A thinner sheet's estimate that close to its minimum (#354): never a ✓, the check of the part rebuilt decides. The
+#: all-XPS box's 1 in row estimated 2.11 where the rebuilt check read 1.89.
+THIN_DECIDES = "an estimate, close: thin it and the check decides"
+
+
+def thin_close(safety: Optional[float], need: Optional[float]) -> bool:
+    """A thinner sheet's estimate at or over its minimum, but within :data:`CUT_DRIFT` of it (#354)."""
+    return safety is not None and need is not None and need - 1e-9 <= safety <= need * (1 + CUT_DRIFT) + 1e-9
 #: The kinds with a number a person may build on (it holds, close to the line or not, or it fails), and the passes.
 SETTLED = ("holds", "close", "fails")
 PASSES = ("holds", "close")
@@ -437,7 +445,11 @@ def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = N
     if v["kind"] in ("fails", "span"):
         return v
     if st.get("estimate"):
-        return _make("estimate", st.get("safety"))
+        got = _make("estimate", st.get("safety"))
+        if thin_close(st.get("safety"), (run or {}).get("min_safety")):     # never a ✓ by an estimate's margin (#354)
+            got = {**got, "word": THIN_DECIDES, "near": True,
+                   "short": f"an estimate, {st['safety']:.1f}x, close: thin it and the check decides"}
+        return got
     if filled:
         return _make("untrusted", st.get("safety"), why=filled)
     if coarse(run):

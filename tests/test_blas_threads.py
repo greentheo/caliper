@@ -118,3 +118,42 @@ def test_every_solve_in_caliper_goes_through_the_hold():
             calls += [name for m in re.finditer(r"\b(\w+)(?:\(\))?\.solve\(", text)
                       if m.group(1) not in ("linalg", "L")]       # numpy's isn't whittle's; L.solve is the hold
     assert calls == ["load_study.py"], calls
+
+
+CASES = """
+import json, os, threading
+{first}
+from caliper import blas
+from threadpoolctl import threadpool_info
+from whittle.physics import fea
+fresh = []
+t = threading.Thread(target=lambda: fresh.extend(int(p["num_threads"]) for p in threadpool_info()))
+t.start(); t.join()
+before = fea.CASE_THREADS
+blas.cases_safe()
+print(json.dumps({{"fresh": fresh, "before": before, "case_threads": fea.CASE_THREADS}}))
+"""
+
+
+@pytest.mark.parametrize("first", ["import numpy, scipy.sparse.linalg", "import caliper"])
+def test_whittle_s_case_threads_go_one_at_a_time_where_a_fresh_thread_isn_t_held(first):
+    """whittle#9's solve_each starts threads of its own where the calling thread's BLAS is single (#346). A thread it starts
+    takes the process's default: the shell's 8 where numpy loaded first. There its cases go one at a time."""
+    pytest.importorskip("threadpoolctl")
+    fea = pytest.importorskip("whittle.physics.fea")
+    if not hasattr(fea, "CASE_THREADS"):
+        pytest.skip("this whittle has no case threads (before greentheo/whittle#9)")
+    whittle_src = os.path.dirname(os.path.dirname(os.path.abspath(fea.__file__)))   # .../src/whittle/physics -> src
+    whittle_src = os.path.dirname(whittle_src)
+    env = {k: v for k, v in os.environ.items() if k not in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                                                              "MKL_NUM_THREADS", "PYTHONPATH", "WHITTLE_CASE_THREADS")}
+    env.update(PYTHONPATH=os.pathsep.join([os.path.abspath(SRC), whittle_src]), OMP_NUM_THREADS="8",
+               OPENBLAS_NUM_THREADS="8")
+    r = subprocess.run([sys.executable, "-c", CASES.format(first=first)], env=env, capture_output=True, text=True,
+                       timeout=300)
+    assert r.returncode == 0, r.stderr[-2000:]
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    unheld = any(n > 1 for n in got["fresh"])
+    assert got["case_threads"] == (1 if unheld else got["before"]), got   # its own process's, not this one's
+    if first == "import caliper":
+        assert not unheld, got                       # Caliper first: every thread starts at one

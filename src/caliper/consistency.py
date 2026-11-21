@@ -157,7 +157,9 @@ def shapes(declared: dict) -> list[dict]:
             half, diag, area = _section(item)
             a, b = (np.asarray(item[k], float) for k in ("a", "b"))
             out.append({"name": name, "kind": "stick", "a": a, "b": b, "half": half, "reach": diag,
-                        "volume": float(np.linalg.norm(b - a)) * area, "material": item.get("material", "lumber")})
+                        "volume": float(np.linalg.norm(b - a)) * area, "material": item.get("material", "lumber"),
+                        **({"outer": float(item["outer"]), "wall": float(item["wall"])}       # a tube's bore (#336)
+                           if "size" not in item and "wall" in item else {})})
     return out
 
 

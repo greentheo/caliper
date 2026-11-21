@@ -356,7 +356,7 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
             ls.solid = held
     r0, tops, walls, filled = cache[i]
     near = ndimage.binary_dilation(ctx["attach"], iterations=1)
-    load, worst, allow = ctx["loads"][i], None, mat["strength"] * mat["across"]
+    load, worst = ctx["loads"][i], None
     pl = L.plate_check(ctx["pieces"], load, mat, ctx["tol"], held=ctx.get("held"),   # as the check reads it (#328)
                        voxel=ctx.get("spacing"))
     for pc in holed:
@@ -369,17 +369,17 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
         # the ring round the holes as the circles' cells have them and as this solve does (#323): the same ring Lighten's
         # step left out, where it cut the cells themselves
         peak = _panel_peak(p, r.von_mises, r.solid, near, _ring(p, cells, filled.shape) | _gone_ring(p, filled, r.solid))
+        allow = allow_of(own_of(ctx, pc["name"], mat))          # the panel's own material (#335)
         before = _column_stress(p, r0.von_mises, filled)
         edge = float(np.max(np.where(cells, before, 0.0)))
         mine = min(allow / (peak * k) if peak > 0 else np.inf, allow / (KT_HOLE * edge * k) if edge > 0 else np.inf)
         worst = mine if worst is None else min(worst, mine)
     edges = {}
-    wall_allow = ((ctx.get("plate_mat") or mat)["strength"] * (ctx.get("plate_mat") or mat)["across"])
     for pc in pictured:
         p = walls.get(pc["name"])
-        if p is not None:
+        if p is not None:                                   # the wall's own material (#335)
             edges[pc["name"]] = picture_edge(p, [_in_plane(p, h) for h in pc["pictures"]], r0.von_mises, filled, s,
-                                             wall_allow)
+                                             allow_of(own_of(ctx, pc["name"], ctx.get("plate_mat") or mat)))
     pic = min(edges.values(), default=np.inf)
     if worst is not None and np.isfinite(worst):
         fea = (case.get("fea") or {}).get("safety")
@@ -393,6 +393,24 @@ def judge_holed(ctx: dict, i: int, case: dict, r, min_safety: float) -> dict:
         case["picture_edge"] = {"piece": name, "safety": V.cut(float(edges[name])) if np.isfinite(edges[name]) else None,
                                 "kt": KT_HOLE}
     return case
+
+
+def own_of(ctx: dict, name: str, mat: dict) -> dict:
+    """The material panel ``name`` is judged and weighed in (#335): its own sheet's, as the plate check reads it (#328),
+    where it's of another than ``mat`` (a plywood floor in a part of XPS walls); ``mat`` otherwise."""
+    pc = next((pc for pc in ctx["pieces"] if pc["name"] == name), None)
+    return L.own_material(pc, mat) if pc is not None else mat
+
+
+def allow_of(m: dict) -> float:
+    """A sheet's allowable, MPa: its strength across the face grain (plywood's half)."""
+    return m["strength"] * m["across"]
+
+
+def saved_grams(ctx: dict, panels_: list[dict], holes: dict, mat: dict) -> float:
+    """What the holes in ``panels_`` weigh, g: each panel's in its own material's density (#335)."""
+    return sum(h.area * p["t"] * own_of(ctx, p["name"], mat)["density"] * 1e-3
+               for p in panels_ for h in holes.get(p["name"], []))
 
 
 def printed_untouched(store: DesignStore, part_id: str) -> Optional[str]:
@@ -652,7 +670,6 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     tops = [p for p in tops if not any(pc["name"] == p["name"] and pc.get("holes") for pc in ctx["pieces"])]
     if not plist and not tops:
         raise ValueError(f"'{part_id}' has no flat panel to lighten")
-    density = mat["density"] * 1e-3                       # g/mm³ (from g/cm³)
     whole = sum(float(p["inside"].sum()) * s * s for p in plist)
     near = ndimage.binary_dilation(ctx["attach"], iterations=1)
     spots = {p["name"]: sites(p, s) for p in tops}
@@ -711,8 +728,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
             if chosen[p["name"]]:
                 cut = _cut_solid(cut, p, np.any([x["cells"] for x in chosen[p["name"]]], axis=0))
         cases, results = [], []
+        every = L.solved(ctx, cut)                        # one solver a step, its cases together (#345)
         for i in range(len(ctx["loads"])):
-            case, r = L.check_load(ctx, i, min_safety, cut)
+            case, r = L.check_load(ctx, i, min_safety, cut, got=every[i])
             case = holed_buckling(case, plist + tops, holes, ctx["loads"][i], min_safety)   # its walls' holes in (#268)
             if r.supported:
                 if phase == "walls":                     # the part the top's holes go into: the latest walls
@@ -730,7 +748,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
                         # holes in it: the plate formula no longer applies. The rest of the panel by the FEA,
                         # and each hole's edge by KT_HOLE times the stress the solid panel had there; both
                         # scaled by how far the FEA read low against the plate check, solid
-                        kk, allow = calib.get((i, p["name"]), 1.0), mat["strength"] * mat["across"]
+                        kk, allow = calib.get((i, p["name"]), 1.0), allow_of(own_of(ctx, p["name"], mat))
                         before = _column_stress(p, vm0.get(i, r.von_mises), base)
                         edge = max(float(np.max(np.where(x["cells"], before, 0.0))) for x in chosen[p["name"]])
                         mine = min(allow / (peak * kk), allow / (KT_HOLE * edge * kk) if edge > 0 else np.inf)
@@ -740,7 +758,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
             results.append(r)
         safety = min((c["safety"] for c in cases if c.get("safety") is not None), default=None)
         wall_area = sum(h.area for p in plist for h in holes.get(p["name"], []))
-        saved_g = sum(h.area * p["t"] * density for p in plist + tops for h in holes.get(p["name"], []))
+        saved_g = saved_grams(ctx, plist + tops, holes, mat)
         st = {"index": k, "phase": phase, "target": target, "removed": round(wall_area / whole, 3) if whole else 0.0,
               "saved_lb": round(saved_g / 453.59237, 2), "holes": sum(len(v) for v in holes.values()),
               "top_holes": sum(len(chosen[p["name"]]) for p in tops),
@@ -763,7 +781,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
             break
 
     # thinner sheet, from the lightest step that holds: an estimate, until it's rebuilt and checked
-    thinner = _thinner(ctx, stations, tops, min_safety, density, C, M)
+    thinner = _thinner(ctx, stations, tops, min_safety, mat, C, M)
     stations += [dict(t, index=len(stations) + i) for i, t in enumerate(thinner)]
 
     try:                                                 # what the part weighs, for the least worth a button (#207)
@@ -824,10 +842,14 @@ def _covered(p: dict, polys: list, s: float) -> np.ndarray:
     return out & p["inside"]
 
 
-def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
+def _thinner(ctx, stations, tops, min_safety, mat, C, M) -> list[dict]:
     """The lightest step that holds with the panel stood on still solid, in each thinner sheet that's sold:
     until (and including) the first that wouldn't hold. Estimates: the panel stood on by the plate check at
-    that thickness, the walls by their FEA scaled with the thickness."""
+    that thickness, the walls by their FEA scaled with the thickness.
+
+    Only the sheets of the thickest stock thin (#354): a row names one stock, and a part of two (2 in XPS walls on a
+    3/4 in plywood floor) keeps its other sheets as they are. In what they weigh, and in the checks that name their
+    piece: a plate check, a wall's buckling. The FEA's number is the part's worst, wherever it is, so it still scales."""
     # from the lightest step that holds with the panel stood on still solid: there the plate check is exact at
     # any thickness, and holes in that panel save next to nothing for what they cost it
     base = max((x for x in stations if x["holds"] and not x.get("top_holes")), key=lambda x: x["saved_lb"],  # search
@@ -836,21 +858,32 @@ def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
     if base is None or not sheets:
         return []
     t0 = max(pc["thickness"] for pc in sheets)
-    wood_g = sum(pc["volume"] for pc in sheets) * density           # as it is now, with any holes it has
+    thick = {pc["name"]: pc for pc in sheets if pc["thickness"] >= t0 - 0.01}    # the stock the row names
+    dens = {pc["name"]: L.own_material(pc, mat)["density"] * 1e-3 for pc in sheets}   # each its own (#335)
+    wood_g = sum(pc["volume"] * dens[name] for name, pc in thick.items())
+    other = {pc["name"]: pc for pc in sheets if pc["name"] not in thick}
+    kept_g = sum(C.polygon([list(map(float, v)) for v in h])[0] * other[name]["thickness"] * dens[name]
+                 for name, hs in (base.get("panels") or {}).items() if name in other for h in hs)
+    holed_lb = base["saved_lb"] - kept_g / 453.59237     # the step's holes in that stock: all of them, in a part of one
     out = []
     for t in sorted((x for x in C.THICKNESSES if x < t0 - 0.01), reverse=True):
         ratio = t / t0
         worst = None
         for c in base["cases"]:
+            # the FEA's number is the part's worst, wherever it is: a sheet that thins may take it over, so it scales
             walls = (c.get("fea_safety") or 0) * ratio
             if c.get("governs") == "plate" and not base.get("top_holes"):
-                pl = _plate_at(ctx, c["name"], t)
+                pl = _plate_at(ctx, c["name"], t, thick)
                 top = pl if pl is not None else (c["safety"] or 0) * ratio ** 2
-            else:
-                top = (c["safety"] or 0) * ratio ** 2
+            elif c.get("governs") == "buckling" and c.get("buckling"):          # each wall, if its stock thins
+                # buckling.check's safety is sigma_cr x b x t / push, sigma_cr going as t^2: t^3 (#354 review)
+                top = min((b.get("safety") or 0) * (ratio ** 3 if b.get("piece") in thick else 1.0)
+                          for b in c["buckling"])
+            else:                                       # a check it can't name a piece for: as buckling, the steepest
+                top = (c["safety"] or 0) * ratio ** 3
             est = min(walls, top) if walls else top
             worst = est if worst is None else min(worst, est)
-        saved = base["saved_lb"] + (wood_g / 453.59237 - base["saved_lb"]) * (1 - ratio)
+        saved = base["saved_lb"] + (wood_g / 453.59237 - holed_lb) * (1 - ratio)   # what's left of that stock, thinned
         out.append({"phase": "thinner", "estimate": True, "thickness_mm": t, "label": M.nominal(t),
                     "removed": base["removed"], "holes": base["holes"], "top_holes": base.get("top_holes", 0),
                     **estimate_numbers(worst, min_safety), "saved_lb": round(saved, 2),
@@ -860,14 +893,17 @@ def _thinner(ctx, stations, tops, min_safety, density, C, M) -> list[dict]:
     return out
 
 
-def _plate_at(ctx, case_name: str, t: float) -> Optional[float]:
-    """The plate check's safety (grain the wrong way) for a load at another sheet thickness, if it has one."""
+def _plate_at(ctx, case_name: str, t: float, thick: Optional[dict] = None) -> Optional[float]:
+    """The plate check's safety (grain the wrong way) for a load at another sheet thickness, if it has one. Where its
+    panel isn't of the stock that thins (``thick``, #354), at its own thickness."""
     i = next((k for k, ld in enumerate(ctx["loads"]) if ld["name"] == case_name), None)
     pl = (L.plate_check(ctx["pieces"], ctx["loads"][i], sheet_of(ctx), ctx["tol"], held=ctx.get("held"),
                          voxel=ctx.get("spacing"))
           if i is not None else None)
     if not pl or not pl.get("done"):
         return None
+    if thick is not None and pl.get("piece") not in thick:
+        return pl["safety_across"]
     return min(pl["by_thickness"], key=lambda b: abs(b["thickness_mm"] - t))["safety_across"]
 
 

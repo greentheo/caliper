@@ -112,7 +112,7 @@ def _through(pc: dict) -> float:
     return float(pc["thickness"]) if pc["kind"] == "sheet" else 2.0 * float(pc["half"])
 
 
-def read(solver, result, grid, pieces: list[dict], joints: list[dict], through: int) -> dict:
+def read(solver, result, grid, pieces: list[dict], joints: list[dict], through: int, case: int = 0) -> dict:
     """Each placed joint's force and moment from one case's solve: ``{"joints": {pair: row}, "residual": share,
     "worst": piece key, "unbalanced": why or None, "each": {piece: share}}``. A row is ``{"force", "moment", "nodes"}``
     (what the joint's edge piece puts into its face piece, N and N mm about the joint's ``mid``), or ``{"unread": why}``.
@@ -148,7 +148,7 @@ def read(solver, result, grid, pieces: list[dict], joints: list[dict], through: 
     touch = {b: np.bincount(nodes[lab == b].ravel(), minlength=n_nodes) for b in bodies}
     count = sum((touch[b] > 0).astype(int) for b in bodies)
     voxels = sum(touch.values())
-    applied = np.asarray(solver.forces[0], float).reshape(-1, 3)
+    applied = np.asarray(solver.forces[case], float).reshape(-1, 3)
     fixed = np.asarray(solver._fixed, bool).reshape(-1, 3)
     outer = np.where(fixed, sum(force.values()), applied)      # what acts on a node from outside: its load, or reaction
     on_node = (np.abs(applied).sum(axis=1) > 0) | fixed.any(axis=1)
