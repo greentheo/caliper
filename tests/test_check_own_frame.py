@@ -80,7 +80,7 @@ def test_a_run_made_before_a_move_draws_on_the_moved_part():
     src = open(JS).read()
     part_frame = re.search(r"^const PART_FRAME = .*?;\n", src, re.M).group(0)
     script = (f"import * as THREE from {json.dumps(os.path.abspath(THREE_JS))};\n" + part_frame
-              + "const S = { design: { parts: [{ id: 'stool', position: [300, 0, 0], rotation: [0, 0, 90] },"
+              + "const S = { design: { parts: [{ id: 'stool', position: [300, 0, 0], rotation: [20, 30, 90] },"
                 " { id: 'plain' }] } };\n"
               "const partOf = (pid) => (S.design && S.design.parts.find((x) => x.id === pid)) || {};\n"
               + "\n".join(_fn(src, n) for n in ("partPose", "overlayPose")) + """
@@ -91,7 +91,7 @@ const out = { m: m.elements, pt: pt.toArray(),
   plain: overlayPose('plain', 'load').elements };
 console.log(JSON.stringify(out));""")
     got = _run(script)
-    T = pose_matrix([300, 0, 0], [0, 0, 90])
+    T = pose_matrix([300, 0, 0], [20, 30, 90])                  # three axes: 'XYZ' and 'ZYX' differ here (#389 review)
     assert np.allclose(np.asarray(got["m"]).reshape(4, 4).T, T, atol=1e-9)          # three's column-major, the server's
     assert np.allclose(got["pt"], (T @ [10, 20, 30, 1])[:3], atol=1e-9)
     assert got["kinds"] == [True, True, True, True, False, False]                     # the drag studies run posed
@@ -104,6 +104,8 @@ console.log(JSON.stringify(out));""")
 
 def _plain(x):
     """A check's result as data: an assertion as its name, pass and words; numbers to 6 places."""
+    if callable(x):                                   # a page's drawing function: made fresh each time
+        return "<function>"
     if hasattr(x, "passed") and hasattr(x, "name"):
         return ("assert", x.name, x.passed, getattr(x, "message", None))
     if isinstance(x, dict):
@@ -156,7 +158,9 @@ def test_a_scenario_saved_on_a_moved_part_is_on_the_part(tmp_path):
 
 #: the modules that pair a part's build with what its script declares: the part's own frame, never the posed mesh
 OWN_FRAME = ("load_study", "lighten", "carve", "coupons", "pictures", "trials", "consistency", "construction", "joints",
-             "joint_check", "marks", "tipping", "scenarios")
+             "joint_check", "marks", "tipping", "scenarios", "patterns", "kidbook")
+#: functions in modules that also, rightly, read where a part sits: these four pair it with its own declarations
+OWN_FRAME_FUNCS = (("answers", "part"), ("chat", "_edge_said"))
 
 
 def test_no_check_that_reads_a_part_against_its_script_reads_the_posed_mesh():
@@ -164,4 +168,48 @@ def test_no_check_that_reads_a_part_against_its_script_reads_the_posed_mesh():
     loads and pieces stay in its own frame. Where a part sits is for the fit, the drag and the build plan."""
     src = os.path.join(os.path.dirname(__file__), "..", "src", "caliper")
     found = [m for m in OWN_FRAME if "part_geometry(" in open(os.path.join(src, f"{m}.py")).read()]
+    import importlib
+    import inspect
+
+    found += [f"{m}.{f}" for m, f in OWN_FRAME_FUNCS
+              if "part_geometry(" in inspect.getsource(getattr(importlib.import_module(f"caliper.{m}"), f))]
     assert found == [], found
+
+
+
+@pytest.mark.parametrize("turn", [90.0, 30.0])
+def test_a_moved_part_s_patterns_are_its_unmoved_ones(tmp_path, turn):
+    """caliper-reviewer on #389: patterns.pieces took its middle from the posed mesh, so a moved part's pieces were drawn
+    mirrored (CALI-86's mirror, back), still labelled "outside face". Moved clear of where it was drawn, so the posed mesh
+    can't happen to cover the part's own (at 300 mm these symmetric stools read the same either way)."""
+    from caliper import patterns
+
+    here = _plain(patterns.pieces(_stool(tmp_path / "a"), "stool"))
+    there = _plain(patterns.pieces(_stool(tmp_path / "b", position=[1000.0, 0.0, 0.0], rotation=[0.0, 0.0, turn]), "stool"))
+    assert here and there == here
+
+
+def test_a_moved_part_s_kids_book_drives_every_screw(tmp_path):
+    """caliper-reviewer on #389: kidbook.make sided the pieces on the posed mesh, and its screws dropped 49 to 45 moved."""
+    from caliper import construction as C
+    from caliper import kidbook
+
+    from .test_lighten import HOLE
+    from .test_load_study import BOX_STOOL
+
+    said = []
+    for tag, pose in (("a", None), ("b", ([1000.0, 0.0, 0.0], [0.0, 0.0, 90.0]))):
+        store = DesignStore.create("a stool", base=str(tmp_path / tag / "designs"))
+        store.write_part("stool", BOX_STOOL + HOLE, intent="a box stool")
+        if pose:
+            part = next(p for p in store.assembly.parts if p.id == "stool")
+            part.position, part.rotation = pose
+            store.save()
+            store = DesignStore.load(store.root)
+        root = str(tmp_path / tag / "release")
+        os.makedirs(root, exist_ok=True)
+        kidbook.make(store, root, {"design": "Box stool", "strength": {}}, ["stool"], {"groups": []})
+        book = open(os.path.join(root, "kids.html")).read()
+        said.append((sum(int(n) for n in re.findall(r"drives in (\d+) screws", book)),
+                     C.report(store, "stool")["bom"]["fasteners"]["screws"]))
+    assert said[0][0] > 0 and said[1] == said[0] and said[0][0] == said[0][1]

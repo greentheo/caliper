@@ -69,3 +69,32 @@ was wrong, so it now moves the part clear.
 Seven failures, all in tests, none in the code. The stand-in stores in test_tipping (three) and test_stray_faces
 replaced only `part_geometry`, and these checks now read `part_local`. Each stand-in gives both now, and both files are
 green. **Full suite: CI.**
+
+#### Round two (caliper-reviewer on #389)
+
+Four more readers paired the POSED mesh with what the script declares. Each now reads the part in its own frame:
+- **`patterns.pieces`:** its middle, which says each piece's outside face. On step-stool-5 moved 300 mm, at 90° the
+  bottom stringer, middle rail and both cross rails were drawn mirrored, and at 30° the back rail, all still labelled
+  "outside face". That's CALI-86's mirror, back.
+- **`kidbook.make`:** its sides, so its screws. They dropped from 49 to 45 moved.
+- **`answers.part`:** `plan_differs`.
+- **`chat._edge_said`:** its pieces' sides. The seat and twin points it tests against them were picked on the posed
+  part, so they get the inverse pose on the way in. Otherwise the pieces and the points would still be in different
+  frames.
+
+**Pinned:**
+- **Patterns:** a moved part's patterns equal its unmoved ones, at 90° and at 30°.
+- **The kids' book:** moved, it drives every screw the shopping list counts, as unmoved.
+- **Euler order:** the viewer pin now turns about three axes, [20, 30, 90]. The 'XYZ' to 'ZYX' mutant is caught.
+- **The guard grows:**
+  - `patterns` and `kidbook` whole;
+  - `answers.part` and `chat._edge_said` as functions, since those modules also, rightly, read where a part sits.
+
+**Two of my test slips:**
+- **The pins first moved the part 300 mm, and passed on the old code:** these symmetric stools' posed mesh still covered
+  their own. That made the pins worthless, so they move the part 1,000 mm clear now. Then all three fail at 8556cb3 and
+  pass with the fix.
+- **The patterns comparison** first tripped on a page's drawing function, made fresh each call. The comparison skips
+  functions now.
+- **Area tests:** green at `-n 4`, the 25 files that drive patterns, the kids' book, the part card and the mirror
+  seating. **Full suite: CI.**

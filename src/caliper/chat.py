@@ -1540,10 +1540,11 @@ def _edge_said(store: DesignStore, seat: dict, twin: dict) -> str:
         from .consistency import _sides, shapes, slab_distance
 
         pieces = [pc for pc in shapes(C.declared(store, seat["part"])) if pc["kind"] == "sheet"]
-        _sides(store.part_geometry(seat["part"]).require_mesh(), pieces)      # which way each sheet's thickness goes
+        _sides(store.part_local(seat["part"]).require_mesh(), pieces)         # which way each sheet's thickness goes
+        back = np.linalg.inv(store.part_pose(seat["part"]))                  # picked on the posed part: to its own frame (#375)
 
         def on(points):
-            mid = np.asarray(points, float).mean(axis=0)[None, :]
+            mid = (back @ np.append(np.asarray(points, float).mean(axis=0), 1.0))[:3][None, :]
             return {pc["name"] for pc in pieces
                     if min(float(slab_distance(mid, op, pc["thickness"], sd)[0]) for op, sd in zip(pc["polys"], pc["sides"]))
                     <= SEAT_MM}

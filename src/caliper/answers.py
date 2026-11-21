@@ -640,7 +640,7 @@ def part(store: DesignStore, state: dict, pid: str) -> list[dict]:
         try:
             from . import consistency
 
-            geom = store.part_geometry(pid)                  # cached by the assembly (path, mtime)
+            geom = store.part_local(pid)                     # its own frame, as its pieces (#375); cached by path, mtime
             said = consistency.checked(store, pid)
             smaller = consistency.plan_differs(C.declared(store, pid), geom)
             off = sorted((r for r in said if r.status == "fail" and r.detail), key=lambda r: r.id != "construction_volume")
