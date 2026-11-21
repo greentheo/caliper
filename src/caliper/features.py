@@ -27,7 +27,11 @@ LINEAR = 0.4
 ANGULAR = 0.35
 EDGE_POINTS = 24
 #: bumped when what's kept changes: an older file is worked out again
-SCHEMA = 3
+SCHEMA = 5                    # 4: a flat face's outward normal, a point surely on it (#376 follow-up); 5: points over it (#402)
+#: How many of a face's biggest triangles it's sampled over, four points each, to say which pieces it lies on (#402 review)
+SAMPLED = 16
+#: A piece holds a fused face where it holds this share of its sampled area or more: a sliver of another doesn't count
+SHARE = 0.15
 #: how far along a face to step to see which way it leaves an edge, mm
 STEP = 0.05
 
@@ -168,6 +172,22 @@ def of_solid(solid, pose=None) -> dict:
             row["hollow"] = bool(float(np.dot(np.array(f.normalAt(cq.Vector(*on)).toTuple()), out_from_axis)) < 0)
         if "at" in surf:
             row["at"] = _vec(_apply(pose, surf["at"]))
+        if len(tris):                                    # a point surely on it: an L-shaped or ringed face's centre isn't
+            v, t = np.asarray(verts, float), np.asarray(tris, int)
+            big = int(np.argmax(np.linalg.norm(np.cross(v[t[:, 1]] - v[t[:, 0]], v[t[:, 2]] - v[t[:, 0]]), axis=1)))
+            row["inside"] = _vec(v[t[big]].mean(axis=0))
+            # points over it, each with the area it stands for: a face the union fused across two pieces (an L of the
+            # tread's front and the side's edge) is said as both's, not as whichever piece one point lands on (#402 review)
+            area = np.linalg.norm(np.cross(v[t[:, 1]] - v[t[:, 0]], v[t[:, 2]] - v[t[:, 0]]), axis=1) / 2
+            samples = []
+            for k in np.argsort(-area)[:SAMPLED]:
+                tri, mid = v[t[k]], v[t[k]].mean(axis=0)
+                for p in (mid, *((mid + c) / 2 for c in tri)):
+                    samples.append([*_vec(p), round(float(area[k]) / 4, 2)])
+            row["samples"] = samples
+        if f.geomType() == "PLANE":                      # which way it faces, out of the solid, as placed: "top", "underside"
+            on = row.get("inside") or c
+            row["normal"] = _vec(_turn(pose, np.array(f.normalAt(cq.Vector(*on)).toTuple())))
         out_faces.append(row)
     owners = TopTools_IndexedDataMapOfShapeListOfShape()
     TopExp.MapShapesAndAncestors_s(shape.wrapped, TopAbs_EDGE, TopAbs_FACE, owners)
@@ -249,16 +269,33 @@ def _length(mm: float, inches: bool) -> str:
     return _len(mm, inches)
 
 
-def with_words(features: dict, inches: bool, joint=None) -> dict:
+def with_words(features: dict, inches: bool, joint=None, piece=None) -> dict:
     """The features with what each is called, in the person's units, for the chip. ``joint``, a part's
-    :func:`joints.namer`: an edge on the seam where two pieces meet is said as their joint (CALI-178, #222 slice D)."""
+    :func:`joints.namer`: an edge on the seam where two pieces meet is said as their joint (CALI-178, #222 slice D).
+    ``piece``, a part's :func:`joints.piece_namer`: a face on one piece is said as that piece's ("the tread's top face")."""
     edges = []
     for e in features.get("edges") or []:
         words = said(features, "edge", e["id"], inches)
         j = joint(e["local"]) if joint and e.get("local") and words else None
         edges.append({**e, "said": f"joint between {j['said'][len('the joint between '):]}: {words[len('edge: '):]}",
                       "joint": j} if j else {**e, "said": words})
-    return {**features, "faces": [{**f, "said": said(features, "face", f["id"], inches)} for f in features.get("faces") or []],
+    def on(f):
+        """The piece a face is on, or the pieces it's fused across (each with SHARE of it or more), biggest first."""
+        if not piece:
+            return None
+        if f.get("samples"):
+            got: dict = {}
+            for x, y, z, w in f["samples"]:
+                n = piece((x, y, z))
+                if n:                                    # a seam's point is no one piece's: it counts for neither
+                    got[n] = got.get(n, 0.0) + w
+            total = sum(got.values())
+            held = [n for n, w in sorted(got.items(), key=lambda kv: -kv[1]) if total and w / total >= SHARE]
+            return held[0] if len(held) == 1 else held or None
+        at = f.get("inside") or f.get("local")
+        return piece(at) if at else None
+    return {**features, "faces": [{**f, "said": said(features, "face", f["id"], inches, piece=on(f))}
+                                  for f in features.get("faces") or []],
             "edges": edges}
 
 
@@ -266,17 +303,38 @@ _FACE_WORD = {"plane": "flat face", "cylinder": "cylinder", "cone": "cone", "sph
               "surface": "curved surface"}
 
 
-def said(features: dict, kind: str, fid: str, inches: bool) -> Optional[str]:
+#: how near straight up or down a flat face's normal is to be its top or its underside: within about 11 degrees
+LEVEL = 0.98
+
+
+def _face_word(f: dict) -> str:
+    """"top face" or "underside" for a level flat face, as it's placed; else what kind of face it is."""
+    n = f.get("normal")
+    if f["type"] == "plane" and n:
+        if n[2] >= LEVEL:
+            return "top face"
+        if n[2] <= -LEVEL:
+            return "underside"
+    return _FACE_WORD[f["type"]]
+
+
+def said(features: dict, kind: str, fid: str, inches: bool, piece=None) -> Optional[str]:
     """What a picked feature is, in words and the person's units: "edge: the circle where the cone meets the flat face, 18
-    in across, 14 mm up (inside corner)". None for an id this version hasn't got."""
+    in across, 14 mm up (inside corner)"; a face on a piece, by its name: "face: the tread's top face, 1.8 in up"; one fused
+    across pieces (``piece`` a list), each: "face: the flat face across the tread and the side, 293 mm up". None for
+    an id this version hasn't got."""
     faces = {f["id"]: f for f in features.get("faces") or []}
     if kind == "face":
         f = faces.get(fid)
         if f is None:
             return None
-        what = _FACE_WORD[f["type"]]
+        what = _face_word(f)
         size = f" {_length(2 * f['radius'], inches)} across" if f.get("radius") else ""
-        return f"face: the {what}{size}, {_length(f['centre'][2], inches)} up"
+        if isinstance(piece, list) and len(piece) > 1:   # fused across pieces: each named (#402 review)
+            across = ", ".join(f"the {n}" for n in piece[:-1]) + f" and the {piece[-1]}"
+            return f"face: the {what}{size} across {across}, {_length(f['centre'][2], inches)} up"
+        whose = f"{piece if isinstance(piece, str) else piece[0]}'s " if piece else ""
+        return f"face: the {whose}{what}{size}, {_length(f['centre'][2], inches)} up"
     e = next((x for x in features.get("edges") or [] if x["id"] == fid), None)
     if e is None:
         return None

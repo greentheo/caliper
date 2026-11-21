@@ -528,7 +528,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
         # "make it 2 in wider" on a one-part design is that part, not a new one named "part" (#65)
         return Intent(action="refine", part=ids[0], note="a change, and the design has one part")
     if wants_new or not ids:
-        new_id = part_id_from(message, set(ids))
+        new_id = part_id_from(message, set(ids) | {g["id"] for g in store.design.groups})   # never a group's (#399)
         return Intent(action="author", part=new_id, intent=(message or "").strip(),
                       note="the first part of the design" if not ids else "asks for a new part")
 
@@ -613,7 +613,8 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
     if action in ("refine", "revert") and part not in ids:
         raise ValueError(f"{action} targets unknown part {part!r}")
     if action == "author":
-        part = part if part and part not in ids else part_id_from(message, ids)
+        taken = set(ids) | {g["id"] for g in store.design.groups}                # never a group's name (#399)
+        part = part if part and part not in taken else part_id_from(message, taken)
     several: list = []
     if action == "refine":
         named = [str(x) for x in (data.get("parts") or []) if x]
@@ -720,7 +721,11 @@ def _kinds(report) -> list[str]:
     return out
 
 
-def _fail_lines(report, only: Optional[list[str]] = None, limit: int = 6) -> list[str]:
+def _fail_lines(report, only: Optional[list[str]] = None, limit: int = 6, inches: bool = False) -> list[str]:
+    """Each failing check in words, as the part card says it (CALI-227, #385: "actual=0.22303847515793196 (margin
+    -2.63)"), its number to the rule's precision and cut toward safe (:func:`part_rules.cut`)."""
+    from . import part_rules
+
     if report is None:
         return []
     out = []
@@ -729,9 +734,11 @@ def _fail_lines(report, only: Optional[list[str]] = None, limit: int = 6) -> lis
             continue
         if only is not None and r.id not in only:
             continue
-        margin = "" if r.margin is None else f" (margin {r.margin:+.3g})"
-        # the reason, where the check gives one: the line a fallback hides a feature on (CALI-107)
-        out.append(f"  • {r.id}: {r.expr} → actual={r.actual}{margin}" + (f". {r.detail}" if r.detail else ""))
+        d = r.to_dict()
+        said = part_rules._said(d, None, inches)
+        # the reason, where the check gives one and the words didn't: the line a fallback hides a feature on (CALI-107)
+        extra = f". {r.detail}" if r.detail and r.detail not in said else ""
+        out.append(f"  • {said}{extra}")
     return out[:limit]
 
 
@@ -1941,7 +1948,7 @@ def revert_part(store: DesignStore, part_id: str, *, to: Optional[int] = None, e
         lines.append(f"\u2713 That fixed: {', '.join(fixed)}")
     if broke:
         lines.append(f"\u26a0 But it broke: {', '.join(broke)}")
-        lines.extend(_fail_lines(after, only=broke))
+        lines.extend(_fail_lines(after, only=broke, inches=store.design.display_units == "in"))
     if _design_line(after):
         lines.append(_design_line(after))
     return TurnResult(action="revert", ok=(after is None or after.all_pass), part=part_id,
@@ -2066,7 +2073,7 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
     for pid, err in part_errors.items():
         lines.append(f"  ⚠ {pid} won't build: {scrubbed(err)}")
     if report is not None:
-        failing = _fail_lines(report)
+        failing = _fail_lines(report, inches=store.design.display_units == "in")
         lines.append("")
         said = report.said()                    # never "all pass" with a check that hasn't run (#103 review)
         lines.append(said[0].upper() + said[1:] + (":" if failing else "."))
@@ -2186,7 +2193,7 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     if shut:                                    # said once, by the build itself (CALI-121)
         lines.append(shut)
     if res.report is not None:
-        part_fails = _fail_lines(res.report)
+        part_fails = _fail_lines(res.report, inches=store.design.display_units == "in")
         if part_fails:
             lines.append(f"{len(part_fails)} check(s) on this part still failing:")
             lines.extend(part_fails)
@@ -2196,7 +2203,7 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     if broke:
         lines.append("")
         lines.append(f"⚠ This change **broke {len(broke)} design check(s)** that passed before:")
-        lines.extend(_fail_lines(after, only=broke))
+        lines.extend(_fail_lines(after, only=broke, inches=store.design.display_units == "in"))
         lines.append("_Tell me how to fix it, or say **roll it back** to undo this revision._")
     if fixed:
         lines.append(f"✓ It also fixed: {', '.join(fixed)}")
