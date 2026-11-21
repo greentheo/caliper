@@ -266,7 +266,7 @@ def make(store: DesignStore, root: str, rec: dict, part_ids: list[str], shop: di
     done: list[dict] = []
     for pid in part_ids:
         declared = C.declared(store, pid)
-        mesh = store.part_geometry(pid).require_mesh()
+        mesh = store.part_local(pid).require_mesh()          # its own frame, as its pieces (#375)
         pcs = shapes(declared)
         _sides(mesh, pcs)
         wood = [pc for pc in pcs if pc.get("material") in WOOD]

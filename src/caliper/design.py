@@ -41,6 +41,7 @@ import yaml
 from pydantic import Field
 
 from .assembly import Assembly, Part
+from .errors import scrubbed
 from .occt import OCCT
 from .spec import Spec, _Base
 
@@ -412,6 +413,8 @@ class DesignStore:
             follows.refuse_cycle(self, part_id, script)    # A follows B follows A: refused in words (#266)
 
         entry = self.design.part(part_id)
+        if entry is None and part_id in {g["id"] for g in self.design.groups}:   # a new part never takes a group's name
+            raise ValueError(f"{part_id!r} is a group of this design's plan: a part needs a name of its own (#399)")
         version = (entry.version if entry else 0) + 1
         pdir = self.part_dir(part_id)
         os.makedirs(pdir, exist_ok=True)
@@ -632,6 +635,30 @@ class DesignStore:
     def log(self, skipped: Optional[list] = None) -> list[dict]:
         return _read_jsonl(self.log_path, skipped)
 
+    def group_geometry(self, group_id: str):
+        """A group's built parts together, posed (CALI-36, #17, for slice E: one rule for "not measured"), as
+        ``(GroupGeometry, "")``, or ``(None, why)``: not a group, a name a part has too, a part not built yet, or a part
+        that didn't build."""
+        from .assembly import group_geometry
+        from .plan import group_parts
+
+        groups = self.design.groups
+        members = group_parts(groups, group_id)
+        if not members:
+            return None, f"there's no group {group_id!r} in this design's plan"
+        if self.design.part(group_id) is not None:
+            return None, f"{group_id} names both a part and a group: rename the part"
+        unbuilt = [m for m in members if not (self.design.part(m) and self.design.part(m).version)]
+        if unbuilt:
+            return None, f"waits for {' and '.join(unbuilt)} to be built"
+        got = {}
+        for m in members:
+            try:
+                got[m] = self.part_geometry(m)
+            except Exception as e:  # noqa: BLE001 — a part that won't build: the group isn't measured, and says which
+                return None, f"{group_id} isn't measured: {m} didn't build ({scrubbed(e)})"
+        return group_geometry(got), ""
+
     def part_geometry(self, part_id: str):
         """Build/load one part as it sits in the design (posed, B-rep kept for scripts)."""
         from .assembly import _build_py_part, _resolve_source
@@ -645,6 +672,30 @@ class DesignStore:
             if path.endswith(".py"):
                 return _build_py_part(path, part.position, part.rotation)
             return Geometry.from_stl_posed(path, part.position, part.rotation)
+
+    def part_local(self, part_id: str):
+        """Build/load one part in its OWN frame, unposed: where its script's loads, HELD, construction() pieces and
+        holes are (#374's must-fix). The studies read a part here; its pose is only where it sits in the design."""
+        from .assembly import _build_py_local, _resolve_source
+        from .measure import Geometry
+
+        part = next((p for p in self.assembly.parts if p.id == part_id), None)
+        if part is None:
+            raise KeyError(f"unknown part {part_id!r}")
+        path = _resolve_source(part.source, self.root)
+        with OCCT:
+            if path.endswith(".py"):
+                return _build_py_local(path)
+            return Geometry.from_stl(path)
+
+    def part_pose(self, part_id: str):
+        """The 4x4 pose that takes a part from its own frame to where it sits in the design."""
+        from .measure import pose_matrix
+
+        part = next((p for p in self.assembly.parts if p.id == part_id), None)
+        if part is None:
+            raise KeyError(f"unknown part {part_id!r}")
+        return pose_matrix(part.position, part.rotation)
 
     def version_stl(self, part_id: str, version: int) -> bytes:
         """One version of a part as a binary STL, posed as the part is now: what Go back to this would bring (#299)."""
@@ -697,10 +748,10 @@ class DesignStore:
             if not tolerant:
                 return evaluate_assembly(self.assembly, base_dir=self.root, values=values, unbuilt=unbuilt,
                                          parts=load_parts_tolerant(self.assembly, self.root, skip=unbuilt)[0]
-                                         if unbuilt else None)
+                                         if unbuilt else None, groups=self.design.groups or None)
             geoms, errors = load_parts_tolerant(self.assembly, base_dir=self.root, skip=unbuilt)
             return evaluate_assembly(self.assembly, base_dir=self.root, parts=geoms, values=values,
-                                     unbuilt=unbuilt), errors
+                                     unbuilt=unbuilt, groups=self.design.groups or None), errors
 
     # --- prompt context ----------------------------------------------------
     def prompt_context(self, part_id: Optional[str] = None, history_limit: int = 8) -> str:

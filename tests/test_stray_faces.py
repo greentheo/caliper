@@ -116,6 +116,7 @@ def _open(monkeypatch, store):
     lid = box.face_normals[:, 2] > 0.9
     open_box = Geometry.from_mesh(trimesh.Trimesh(box.vertices, box.faces[~lid], process=False))
     monkeypatch.setattr(type(store), "part_geometry", lambda self, pid: open_box)
+    monkeypatch.setattr(type(store), "part_local", lambda self, pid: open_box)       # the check reads its own frame (#375)
 
 
 def test_a_part_that_isn_t_closed_is_not_checked_said_where_never_thrown(tmp_path, monkeypatch):

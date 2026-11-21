@@ -23,7 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 #: What a rule between parts may call: the assembly's measures (assembly.build_context) and plain arithmetic.
 FUNCTIONS = {"interference", "min_clearance", "clearance", "max_interference", "min_clearance_all",
-             "hole_misalignment", "holes_aligned", "bbox", "approx", "within", "fits", "abs", "min", "max"}
+             "hole_misalignment", "holes_aligned", "bbox", "approx", "within", "fits", "abs", "min", "max",
+             "fit_off", "mirrors"}     # the assembly binds these too: no part or group may take their names (#399 review)
 #: What a rule may read off a measure: a bounding box's sizes and corners (measure.bounding_box). Nothing else, and
 #: nothing private: a dunder chain is refused (#103 review).
 ATTRIBUTES = {"dx", "dy", "dz", "min_x", "min_y", "min_z", "max_x", "max_y", "max_z"}
@@ -258,8 +259,12 @@ def validate(data, drop_bad_rules: bool = False, ask: bool = False) -> Plan:
         if len(m.between) != 2 or m.between[0] == m.between[1]:
             raise PlanError(f"a mate is between two different parts, not {m.between!r}")
         for pid in m.between:
-            if pid not in ids:
+            if pid not in ids and pid not in gids:
                 raise PlanError(f"a mate names {pid!r}, which isn't a part of the plan")
+        a, b = m.between                       # a group and a part in it always overlap (CALI-36, #17)
+        for g, x in ((a, b), (b, a)):
+            if g in gids and (x in group_parts(plan, g) or x in _held_groups(plan, g)):
+                raise PlanError(f"a mate between {g!r} and {x!r}, which is in it: mate it with what's outside {g!r}")
     rule_ids = [r.id for r in plan.rules]
     dup = next((r for r in rule_ids if rule_ids.count(r) > 1), None)
     if dup:
@@ -268,7 +273,7 @@ def validate(data, drop_bad_rules: bool = False, ask: bool = False) -> Plan:
     for r in plan.rules:
         try:
             try:
-                _check_rule(r, set(ids), set(names))
+                _check_rule(r, set(ids) | set(gids), set(names))     # a rule may name a group (CALI-36, #17)
             except _NumbersOnly:                 # decided now, every validate (CALI-119): a note, a contradiction
                 if not _by_the_numbers(r, plan):
                     left.append(f"the check {r.id!r} ({r.expr}): it reads only numbers")
@@ -483,17 +488,24 @@ def group_of(plan: Plan, pid: str) -> list[str]:
         at = g.id
 
 
-def group_parts(plan: Plan, gid: str) -> list[str]:
-    """Every part a group holds, through the groups it holds, in the plan's part order (CALI-36, #17)."""
-    held, todo, seen = set(), [gid], set()
+def group_parts(plan, gid: str) -> list[str]:
+    """Every part a group holds, through the groups it holds (CALI-36, #17): the one name for it (#399 review). ``plan``:
+    a :class:`Plan` (its parts in the plan's order), or ``Design.groups`` (``[{id, parts, ...}]``, in the order saved, the
+    build order). [] for a name that isn't a group."""
+    groups = plan.groups if isinstance(plan, Plan) else list(plan or [])
+    by = {(g.id if isinstance(g, PlanGroup) else g["id"]): list(g.parts if isinstance(g, PlanGroup) else g.get("parts") or [])
+          for g in groups}
+    if gid not in by:
+        return []
+    held, todo, seen = [], [gid], set()
     while todo:
-        g = _group(plan, todo.pop())
-        if g is None or g.id in seen:
+        at = todo.pop(0)
+        if at in seen:
             continue
-        seen.add(g.id)
-        for m in g.parts:
-            (todo.append(m) if _group(plan, m) else held.add(m))
-    return [p for p in plan.ids() if p in held]
+        seen.add(at)
+        for m in by[at]:
+            (todo.append(m) if m in by else held.append(m))
+    return [p for p in plan.ids() if p in set(held)] if isinstance(plan, Plan) else list(dict.fromkeys(held))
 
 
 #: How deep groups may nest: a camper → the box → its walls is two (Theo, 2026-11-20: "two deep is fine").
@@ -745,7 +757,7 @@ def save(store, plan: Plan, status: str = "review") -> None:
     """Write the plan into the design's records. A planned part goes into assembly.yaml where its script will be
     (it isn't built yet: evaluation skips it, and a rule naming it waits); the mates and rules go in as the plan's;
     the skeleton and the plan itself into design.yaml. Saving again replaces what the last plan wrote."""
-    from .assembly import Mate, Part
+    from .assembly import Mate, Part, mate_assertion
     from .spec import Assertion
 
     old = {p["id"] for p in (store.design.plan or {}).get("parts") or []}
@@ -757,16 +769,23 @@ def save(store, plan: Plan, status: str = "review") -> None:
         if p.id not in have:
             keep.append(Part(id=p.id, source=store._script_source(p.id), role=p.role))
     asm.parts = keep
+    gids = {g.id for g in plan.groups}
+    # a mate over a group is measured as the rule it makes (CALI-36, #17): the assembly's mates are between parts
+    on_groups = [m for m in plan.mates if set(m.between) & gids]
     asm.mates = [m for m in asm.mates if not m.id.startswith("plan_")] + [
-        Mate(id=f"plan_{m.between[0]}_{m.between[1]}_{m.kind}", between=m.between, kind=m.kind, value=m.value)
-        for m in plan.mates]
+        Mate(id=_mate_id(m), between=m.between, kind=m.kind, value=m.value)
+        for m in plan.mates if m not in on_groups]
     prior = {r["id"] for r in (store.design.plan or {}).get("rules") or []}
+    prior |= {_mate_id(PlanMate(**m)) for m in (store.design.plan or {}).get("group_mates") or []}
     asm.assertions = [a for a in asm.assertions if a.id not in prior] + [
-        Assertion(id=r.id, expr=r.expr) for r in binding(plan)]          # an assumed rule is shown, not enforced
+        Assertion(id=r.id, expr=r.expr) for r in binding(plan)] + [   # an assumed rule is shown, not enforced
+        Assertion(id=_mate_id(m), expr=mate_assertion(Mate(id=_mate_id(m), between=m.between, kind=m.kind,
+                                                           value=m.value)).expr) for m in on_groups]
     store.design.skeleton = [s.model_dump() for s in plan.skeleton]
     store.design.plan = {"status": status, "parts": [p.model_dump() for p in plan.parts], "order": order(plan),
                          "rules": [r.model_dump() for r in plan.rules],
                          **({"groups": _in_build_order(plan)} if plan.groups else {}),
+                         **({"group_mates": [m.model_dump() for m in on_groups]} if on_groups else {}),
                          **({"dropped": plan.dropped} if plan.dropped else {}),
                          **({"left_out": plan.left_out} if plan.left_out else {}),
                          **({"questions": plan.questions} if plan.questions else {})}
@@ -783,13 +802,28 @@ def _in_build_order(plan: Plan) -> list[dict]:
     return [{**g.model_dump(), "parts": sorted(g.parts, key=when)} for g in plan.groups]
 
 
+def _mate_id(m: PlanMate) -> str:
+    return f"plan_{m.between[0]}_{m.between[1]}_{m.kind}"
+
+
+def group_mates(store) -> dict:
+    """The plan's mates over a group, by the id of the rule each is measured as (CALI-36, #17): ``{id: Mate}``."""
+    from .assembly import Mate
+
+    out = {}
+    for m in (store.design.plan or {}).get("group_mates") or []:
+        pm = PlanMate(**m)
+        out[_mate_id(pm)] = Mate(id=_mate_id(pm), between=pm.between, kind=pm.kind, value=pm.value)
+    return out
+
+
 def load(store) -> Optional[Plan]:
     """The design's saved plan, as a :class:`Plan` (its mates read back from assembly.yaml), or None."""
     rec = store.design.plan
     if not rec:
         return None
     mates = [{"between": m.between, "kind": m.kind, "value": m.value} for m in store.assembly.mates
-             if m.id.startswith("plan_")]
+             if m.id.startswith("plan_")] + list(rec.get("group_mates") or [])
     plan = Plan.model_validate({"parts": rec["parts"], "skeleton": store.design.skeleton or [], "mates": mates,
                                 "rules": rec.get("rules") or [], "left_out": rec.get("left_out") or [],
                                 "groups": rec.get("groups") or []})
@@ -933,9 +967,9 @@ def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[
     from . import llm
 
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
     # Opus 5.5 refuses a forced tool: it's asked to, and a reply without one is sent back round below
     content = f"{content}\n\nAnswer by calling the plan tool."
     ask = content

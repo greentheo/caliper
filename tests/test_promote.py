@@ -402,7 +402,7 @@ def test_an_accepted_part_rule_fails_a_later_revision_that_violates_it(gantry):
     assert not res.ok
     failing = [r.id for r in res.part_report.results if r.status != "pass"]
     assert "carriage_height" in failing
-    assert "carriage_height" in res.reply
+    assert "carriage height" in res.reply                   # named as the card names it (CALI-227)
 
 
 def test_a_promoted_design_rule_reaches_the_author_of_a_later_revision(gantry):
