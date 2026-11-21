@@ -870,8 +870,9 @@ def _thinner(ctx, stations, tops, min_safety, mat, C, M) -> list[dict]:
         ratio = t / t0
         worst = None
         for c in base["cases"]:
-            # the FEA's number is the part's worst, wherever it is: a sheet that thins may take it over, so it scales
-            walls = (c.get("fea_safety") or 0) * ratio
+            # the FEA's number is the part's worst, wherever it is: a sheet that thins may take it over, so it scales.
+            # As a panel in bending, t^2: in compression it would be t, but the worst may be a panel stood on (#357)
+            walls = (c.get("fea_safety") or 0) * ratio ** 2
             if c.get("governs") == "plate" and not base.get("top_holes"):
                 pl = _plate_at(ctx, c["name"], t, thick)
                 top = pl if pl is not None else (c["safety"] or 0) * ratio ** 2
