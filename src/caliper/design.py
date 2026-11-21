@@ -697,10 +697,10 @@ class DesignStore:
             if not tolerant:
                 return evaluate_assembly(self.assembly, base_dir=self.root, values=values, unbuilt=unbuilt,
                                          parts=load_parts_tolerant(self.assembly, self.root, skip=unbuilt)[0]
-                                         if unbuilt else None)
+                                         if unbuilt else None, groups=self.design.groups or None)
             geoms, errors = load_parts_tolerant(self.assembly, base_dir=self.root, skip=unbuilt)
             return evaluate_assembly(self.assembly, base_dir=self.root, parts=geoms, values=values,
-                                     unbuilt=unbuilt), errors
+                                     unbuilt=unbuilt, groups=self.design.groups or None), errors
 
     # --- prompt context ----------------------------------------------------
     def prompt_context(self, part_id: Optional[str] = None, history_limit: int = 8) -> str:

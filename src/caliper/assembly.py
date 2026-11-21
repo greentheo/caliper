@@ -324,7 +324,31 @@ def load_parts_tolerant(asm: Assembly, base_dir: str = ".", skip=()) -> tuple[di
 # ---------------------------------------------------------------------------
 # Evaluation — reuses the single-part evaluator (CALI-3)
 # ---------------------------------------------------------------------------
-def build_context(asm: Assembly, parts: dict[str, Geometry]) -> dict:
+def group_members(groups: Optional[list], gid: str) -> list[str]:
+    """Every part a group holds, through the groups it holds (CALI-36, #17): ``groups`` as ``Design.groups`` gives them,
+    ``[{id, parts, ...}]``. [] for a name that isn't a group."""
+    by = {g["id"]: g for g in groups or []}
+    out, todo, seen = [], [gid], set()
+    while todo:
+        g = by.get(todo.pop(0))
+        if g is None or g["id"] in seen:
+            continue
+        seen.add(g["id"])
+        for m in g.get("parts") or []:
+            (todo.append(m) if m in by else out.append(m))
+    return out if gid in by else []
+
+
+def group_geometry(members: list[Geometry]) -> Geometry:
+    """A group's built parts together, as one thing to measure (CALI-36, #17 slice B): their meshes in one, in the
+    design's frame. No B-rep: a probe that reads a solid (a hole) reads a part. This is the box a group's rule, and its
+    own "Will it work?" (#17 slice E), measures."""
+    import trimesh
+
+    return Geometry(mesh=trimesh.util.concatenate([g.require_mesh() for g in members]))
+
+
+def build_context(asm: Assembly, parts: dict[str, Geometry], groups: Optional[list] = None) -> dict:
     """Bind the assembly namespace: each part id → its Geometry, plus N-body fit probes & helpers.
 
     The fit probes here take **two parts** (``interference(a, b)``, ``min_clearance(a, b)``), unlike
@@ -358,12 +382,16 @@ def build_context(asm: Assembly, parts: dict[str, Geometry]) -> dict:
     }
     for pid, geom in parts.items():
         ctx[pid] = geom
+    for g in groups or []:                 # a group by its id: its built parts together (CALI-36, #17); none, nothing
+        members = group_members(groups, g["id"])
+        if members and all(m in parts for m in members):
+            ctx[g["id"]] = group_geometry([parts[m] for m in members])
     return ctx
 
 
 def evaluate_assembly(
     asm: Assembly, base_dir: str = ".", parts: Optional[dict[str, Geometry]] = None,
-    values: Optional[dict] = None, unbuilt=(),
+    values: Optional[dict] = None, unbuilt=(), groups: Optional[list] = None,
 ):
     """Build (or accept) the part geometries, then evaluate every mate + assembly assertion → Report.
 
@@ -375,13 +403,23 @@ def evaluate_assembly(
     from .evaluate import AssertionResult
 
     parts = parts if parts is not None else load_parts(asm, base_dir)
-    ctx = build_context(asm, parts)
+    ctx = build_context(asm, parts, groups)
     ctx.update(values or {})               # the skeleton's numbers, by name (CALI-35)
+    gids = {g["id"] for g in groups or []}
     out = []
     fixed = {p.id for p in asm.parts if p.role == "fixed"}
     pockets = {m.id: m for m in asm.mates if m.kind == "fits_in"}
     for a in derived_assertions(asm):
-        waits = sorted(_names(a.expr) & set(unbuilt))
+        named = _names(a.expr)
+        inside = {m for gid in named & gids for m in group_members(groups, gid)}    # a group waits on its parts (#17)
+        waits = sorted((named | inside) & set(unbuilt))
+        lost = sorted(m for m in inside if m not in parts and m not in set(unbuilt))
+        if lost and not waits:             # a part of the group didn't build: the group isn't measured, and says why
+            short = sorted(g for g in named & gids if set(group_members(groups, g)) & set(lost))
+            out.append(AssertionResult(a.id, a.expr, "error", None, detail=(
+                f"{' and '.join(short)} {'isn' if len(short) == 1 else 'aren'}'t measured: {' and '.join(lost)} "
+                f"didn't build")))
+            continue
         if waits:                          # a rule over a part that's planned but not built yet (CALI-35)
             yours = [w for w in waits if w in fixed]       # the person's: never built, so its size is asked (#135)
             out.append(AssertionResult(a.id, a.expr, "deferred", None, detail=(

@@ -258,8 +258,12 @@ def validate(data, drop_bad_rules: bool = False, ask: bool = False) -> Plan:
         if len(m.between) != 2 or m.between[0] == m.between[1]:
             raise PlanError(f"a mate is between two different parts, not {m.between!r}")
         for pid in m.between:
-            if pid not in ids:
+            if pid not in ids and pid not in gids:
                 raise PlanError(f"a mate names {pid!r}, which isn't a part of the plan")
+        a, b = m.between                       # a group and a part in it always overlap (CALI-36, #17)
+        for g, x in ((a, b), (b, a)):
+            if g in gids and (x in group_parts(plan, g) or x in _held_groups(plan, g)):
+                raise PlanError(f"a mate between {g!r} and {x!r}, which is in it: mate it with what's outside {g!r}")
     rule_ids = [r.id for r in plan.rules]
     dup = next((r for r in rule_ids if rule_ids.count(r) > 1), None)
     if dup:
@@ -268,7 +272,7 @@ def validate(data, drop_bad_rules: bool = False, ask: bool = False) -> Plan:
     for r in plan.rules:
         try:
             try:
-                _check_rule(r, set(ids), set(names))
+                _check_rule(r, set(ids) | set(gids), set(names))     # a rule may name a group (CALI-36, #17)
             except _NumbersOnly:                 # decided now, every validate (CALI-119): a note, a contradiction
                 if not _by_the_numbers(r, plan):
                     left.append(f"the check {r.id!r} ({r.expr}): it reads only numbers")
@@ -745,7 +749,7 @@ def save(store, plan: Plan, status: str = "review") -> None:
     """Write the plan into the design's records. A planned part goes into assembly.yaml where its script will be
     (it isn't built yet: evaluation skips it, and a rule naming it waits); the mates and rules go in as the plan's;
     the skeleton and the plan itself into design.yaml. Saving again replaces what the last plan wrote."""
-    from .assembly import Mate, Part
+    from .assembly import Mate, Part, mate_assertion
     from .spec import Assertion
 
     old = {p["id"] for p in (store.design.plan or {}).get("parts") or []}
@@ -757,16 +761,23 @@ def save(store, plan: Plan, status: str = "review") -> None:
         if p.id not in have:
             keep.append(Part(id=p.id, source=store._script_source(p.id), role=p.role))
     asm.parts = keep
+    gids = {g.id for g in plan.groups}
+    # a mate over a group is measured as the rule it makes (CALI-36, #17): the assembly's mates are between parts
+    on_groups = [m for m in plan.mates if set(m.between) & gids]
     asm.mates = [m for m in asm.mates if not m.id.startswith("plan_")] + [
-        Mate(id=f"plan_{m.between[0]}_{m.between[1]}_{m.kind}", between=m.between, kind=m.kind, value=m.value)
-        for m in plan.mates]
+        Mate(id=_mate_id(m), between=m.between, kind=m.kind, value=m.value)
+        for m in plan.mates if m not in on_groups]
     prior = {r["id"] for r in (store.design.plan or {}).get("rules") or []}
+    prior |= {_mate_id(PlanMate(**m)) for m in (store.design.plan or {}).get("group_mates") or []}
     asm.assertions = [a for a in asm.assertions if a.id not in prior] + [
-        Assertion(id=r.id, expr=r.expr) for r in binding(plan)]          # an assumed rule is shown, not enforced
+        Assertion(id=r.id, expr=r.expr) for r in binding(plan)] + [   # an assumed rule is shown, not enforced
+        Assertion(id=_mate_id(m), expr=mate_assertion(Mate(id=_mate_id(m), between=m.between, kind=m.kind,
+                                                           value=m.value)).expr) for m in on_groups]
     store.design.skeleton = [s.model_dump() for s in plan.skeleton]
     store.design.plan = {"status": status, "parts": [p.model_dump() for p in plan.parts], "order": order(plan),
                          "rules": [r.model_dump() for r in plan.rules],
                          **({"groups": _in_build_order(plan)} if plan.groups else {}),
+                         **({"group_mates": [m.model_dump() for m in on_groups]} if on_groups else {}),
                          **({"dropped": plan.dropped} if plan.dropped else {}),
                          **({"left_out": plan.left_out} if plan.left_out else {}),
                          **({"questions": plan.questions} if plan.questions else {})}
@@ -783,13 +794,28 @@ def _in_build_order(plan: Plan) -> list[dict]:
     return [{**g.model_dump(), "parts": sorted(g.parts, key=when)} for g in plan.groups]
 
 
+def _mate_id(m: PlanMate) -> str:
+    return f"plan_{m.between[0]}_{m.between[1]}_{m.kind}"
+
+
+def group_mates(store) -> dict:
+    """The plan's mates over a group, by the id of the rule each is measured as (CALI-36, #17): ``{id: Mate}``."""
+    from .assembly import Mate
+
+    out = {}
+    for m in (store.design.plan or {}).get("group_mates") or []:
+        pm = PlanMate(**m)
+        out[_mate_id(pm)] = Mate(id=_mate_id(pm), between=pm.between, kind=pm.kind, value=pm.value)
+    return out
+
+
 def load(store) -> Optional[Plan]:
     """The design's saved plan, as a :class:`Plan` (its mates read back from assembly.yaml), or None."""
     rec = store.design.plan
     if not rec:
         return None
     mates = [{"between": m.between, "kind": m.kind, "value": m.value} for m in store.assembly.mates
-             if m.id.startswith("plan_")]
+             if m.id.startswith("plan_")] + list(rec.get("group_mates") or [])
     plan = Plan.model_validate({"parts": rec["parts"], "skeleton": store.design.skeleton or [], "mates": mates,
                                 "rules": rec.get("rules") or [], "left_out": rec.get("left_out") or [],
                                 "groups": rec.get("groups") or []})
