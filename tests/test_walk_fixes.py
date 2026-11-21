@@ -98,7 +98,43 @@ def test_the_plate_and_beam_lines_and_the_stress_bar_say_it_by_its_name():
 
 
 # --- 4. the cut plan says it's made ---------------------------------------------------------------------------------------------
-def test_the_cut_plan_says_it_s_made_and_where():
-    wire = _fn(open(JS).read(), "wireCutplan")
-    i = wire.index("await refresh();")
-    assert "await refresh();\n      say(`Made the cut plan for ${partOf(p.id).name || p.id}: it's under How do I make it? → Cut plan.`);" in wire[i:i + 300]
+_CUT = """
+const els = { cpGo: { disabled: false }, cpProgress: PROGRESS, pactsWhy: { textContent: '' } };
+const $ = (id) => els[id] || null;
+const document = { querySelectorAll: () => [] };
+const wirePatterns = () => {}, wireMaking = () => {}, previewStep = () => {}, follow = async () => {}, refresh = async () => {};
+const S = { slug: 's' }; const api = async () => ({ job_id: 'j' });
+const partOf = () => ({ name: '<b>x</b>' });
+const footer = []; const say = (t) => footer.push(t);
+"""
+MADE = "Made the cut plan for <b>x</b>: it's under How do I make it? → Cut plan."
+
+
+def _cut(progress):
+    import re
+
+    esc = re.search(r"^const esc = .*;$", open(JS).read(), re.M).group(0) + "\n"
+    return _js(("wireCutplan",), "wireCutplan({ id: 'stool' }); await els.cpGo.onclick(); return { els, footer };",
+               head=esc + _CUT.replace("PROGRESS", json.dumps(progress)))
+
+
+def test_the_cut_plan_says_it_s_made_and_where_with_its_name_as_text():
+    """#388 review: a local `say(html, text)` hid the page's own, so the line went into the progress line as HTML (a
+    label `<b>x</b>` drew bold), and the page's foot never said it."""
+    got = _cut({"innerHTML": ""})
+    assert got["els"]["cpProgress"]["innerHTML"] == \
+        "<div class=\"small muted\">Made the cut plan for &lt;b&gt;x&lt;/b&gt;: it's under How do I make it? → Cut plan.</div>"
+    assert got["footer"] == [MADE]                     # say() escapes it in turn
+
+
+def test_with_no_progress_line_it_s_said_under_the_buttons_as_text():
+    assert _cut(None)["els"]["pactsWhy"]["textContent"] == MADE
+
+
+def test_the_page_s_foot_says_a_name_as_text():
+    import re
+
+    esc = re.search(r"^const esc = .*;$", open(JS).read(), re.M).group(0) + "\n"
+    got = _js(("say",), "say('Made the cut plan for <b>x</b>.'); return bar.innerHTML;", head=esc + """
+const bar = { setAttribute() {}, hidden: true }; const $ = () => bar; const document = {};""")
+    assert "<span>Made the cut plan for &lt;b&gt;x&lt;/b&gt;.</span>" in got

@@ -3471,17 +3471,20 @@ function wireCutplan(p) {
   if (!go) return;
   // where its section has no progress line (cut plans can't be made here), what it says goes under the buttons: a
   // click never throws and leaves the button dead (#331 review)
-  const say = (html, text) => { const pr = $('cpProgress'), w = $('pactsWhy'); if (pr) pr.innerHTML = html; else if (w) w.textContent = text; };
+  // not `say`, which is the page's foot (used below): a local `say` hid it, and the made line went in as HTML (#388 review)
+  const show = (html, text) => { const pr = $('cpProgress'), w = $('pactsWhy'); if (pr) pr.innerHTML = html; else if (w) w.textContent = text; };
   go.onclick = async () => {
     go.disabled = true;
-    say('<div class="small muted" id="cpMsg">unfolding…</div>', 'unfolding…');
+    show('<div class="small muted" id="cpMsg">unfolding…</div>', 'unfolding…');
     try {
       const { job_id } = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/cutplan`);
       await follow(job_id, (ev) => { const m = $('cpMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
       await refresh();
-      say(`Made the cut plan for ${partOf(p.id).name || p.id}: it's under How do I make it? → Cut plan.`);   // its line may be folded away (walk 11-21)
+      const made = `Made the cut plan for ${partOf(p.id).name || p.id}: it's under How do I make it? → Cut plan.`;
+      show(`<div class="small muted">${esc(made)}</div>`, made);   // a part's name is text, never HTML (#388 review)
+      say(made);                                  // and at the page's foot: its line may be folded away (walk 11-21)
     } catch (e) {
-      say(`<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`, `⚠ ${e.message}`);
+      show(`<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`, `⚠ ${e.message}`);
       go.disabled = false;
     }
   };
