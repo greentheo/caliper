@@ -404,6 +404,35 @@ def _finding_rows(store: DesignStore, pid: str, name: str) -> list[dict]:
     return out
 
 
+#: A reading's row id starts so (#238 slice B): Fix these says it done, never fixed, as nothing measures it.
+READING = "reading:"
+
+
+def _reading_rows(store: DesignStore, pid: str, name: str) -> list[dict]:
+    """The last Review it's readings (#238 slice B) that name this part: Claude's reading, never measured, each its proposed
+    change. A reading of a version this part has moved on from says so ("read on v3; it's changed since")."""
+    from . import assess
+
+    rec = assess.latest(store)
+    if not rec:
+        return []
+    moved = assess.stale(store, rec)
+    out = []
+    for r in rec.get("readings") or []:
+        if pid not in (r.get("parts") or []):
+            continue
+        was = moved.get(pid)
+        badge = ("Claude's reading" + (f" · read on v{was}; it's changed since" if was else "")
+                 + (f" · may repeat what's measured: {r['may_repeat']}" if r.get("may_repeat") else ""))
+        mine = [pc for pc in r.get("pieces") or [] if pc.get("part") == pid]   # the pieces it names here (#368 re-check)
+        problem = r["said"][:1].upper() + r["said"][1:] + (f" ({', '.join(pc['name'] for pc in mine)})" if mine else "")
+        out.append({**_row(f"{READING}{rec.get('n')}:{r.get('id')}", problem,
+                           [_choice(r["fix"].rstrip("."), DESIGNER, _designer_cost(name))], pid),
+                    "measured": False, "badge": badge, "stale": bool(was),
+                    **({"pieces": [pc["piece"] for pc in mine]} if mine else {})})
+    return out
+
+
 def listed(store: DesignStore, state: dict, pid: str, *, findings: bool = True) -> dict:
     """``{"part", "rows", "limits"}``: the part's things to fix, measured, each ``{id, problem, choices, part,
     measured}`` with its choices ``{fix, kind, cost, ...}`` (a number's ``param``, ``value``, ``unit``; a check's
@@ -412,7 +441,7 @@ def listed(store: DesignStore, state: dict, pid: str, *, findings: bool = True) 
 
     p = next(x for x in state["parts"] if x["id"] == pid)
     if p.get("role") == "fixed" or not store.is_scripted(pid):
-        return {"part": pid, "rows": [], "limits": []}
+        return {"part": pid, "rows": [], "limits": [], "counts": counts([])}
     name = _part_name(p)
     rows = [_row(f"rule:{r.get('id') or r.get('expr') or r['said']}", f"It breaks its rule {r['said']}",
                  [_choice(f"Make it keep its rule {r['said']}", DESIGNER, _designer_cost(name))], pid)
@@ -426,4 +455,14 @@ def listed(store: DesignStore, state: dict, pid: str, *, findings: bool = True) 
     rows += _scenario_rows(store, pid)           # its edited loads' questions, and cases turned off (#312)
     if findings:
         rows += _finding_rows(store, pid, name)
-    return {"part": pid, "rows": rows, "limits": list(dict.fromkeys(limits))}
+        rows += _reading_rows(store, pid, name)       # Claude's reading, on the person's press, badged (#238 slice B)
+    return {"part": pid, "rows": rows, "limits": list(dict.fromkeys(limits)), "counts": counts(rows)}
+
+
+def counts(rows: list[dict]) -> dict:
+    """The list's counts, said apart (#368 review: the header counted Claude's readings as "measured wrong"):
+    ``{"measured", "readings", "other"}``. ``measured``: rows a measurement made; ``readings``: Claude's; ``other``: the
+    person's own (their loads). The header says "1 measured wrong · 2 of Claude's readings"."""
+    readings = sum(1 for r in rows if str(r.get("id", "")).startswith(READING))
+    measured = sum(1 for r in rows if r.get("measured") is not False)
+    return {"measured": measured, "readings": readings, "other": len(rows) - measured - readings}
