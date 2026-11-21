@@ -259,9 +259,9 @@ def normalize_spec_dict(d: dict) -> dict:
 
 def llm_draft(intent: str, machine: Optional[str] = None, client=None, model: Optional[str] = None) -> IntakeResult:
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
     # No assistant prefill: some models (e.g. claude-sonnet-4-6) reject a trailing assistant turn.
     # The system prompt asks for a bare JSON object and extract_json tolerates fences/prose anyway.
     msg = llm.ask(

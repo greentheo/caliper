@@ -537,9 +537,9 @@ def llm_draft(store: DesignStore, part: str, feedback: str, client=None,
               model: Optional[str] = None) -> Draft:
     """Draft with Claude, then validate the result exactly as strictly as the offline path."""
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
 
     ask = (f"{store.prompt_context(part)}\n\n"
            f"the user said this about '{part}': {feedback}\n\n"

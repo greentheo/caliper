@@ -579,9 +579,9 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
                  client=None, model: Optional[str] = None) -> Intent:
     """Route with Claude, given the design's parts as context. Raises on any failure (caller falls back)."""
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
 
     parts = "\n".join(f"  - {p.id}: {p.intent or '(no stated intent)'}" for p in store.design.parts)
     # CALI-54: the router writes a new part's intent, and the author follows the intent — so without the
@@ -1162,9 +1162,9 @@ def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = 
     if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
         try:
             if client is None:
-                from anthropic import Anthropic  # lazy; may be absent
+                from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-                client = Anthropic()
+                client = _claude()
             msg = llm.ask(
                 client, "describe", model=model, system=_DESCRIBE_SYSTEM,
                 messages=[{"role": "user", "content": f"description as it was: {old or '(none)'}\n\n"
@@ -2013,9 +2013,9 @@ def explain(store: DesignStore, message: str, scope: Optional[str] = None, clien
     """The question answered in plain words by Claude, from the facts. Raises on any failure (the caller
     falls back to the facts as they are)."""
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
     msg = llm.ask(
         client, "explain", model=model, system=_EXPLAIN_SYSTEM,
         messages=[{"role": "user", "content": f"facts:\n{_facts(store, scope)}\n\nquestion: {message}"}])
@@ -2798,10 +2798,26 @@ def _grain_reply(got: dict) -> TurnResult:
                             f"check it holds again and the Beam check uses it.")
 
 
-def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
-         use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
-         on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False,
-         pick: Optional[dict] = None, typed: Optional[str] = None, piece: Optional[str] = None) -> TurnResult:
+def turn(store: DesignStore, message: str, scope: Optional[str] = None, **kw) -> TurnResult:
+    """One conversational turn (:func:`_turn`). Where Claude gives no usable answer, or isn't set up here (no key), the
+    turn says so in words, never "Something went wrong" (CALI-217, #366): nothing was changed by what didn't run."""
+    try:
+        return _turn(store, message, scope, **kw)
+    except llm.Stopped as e:
+        words = llm.said(e) + "."
+        if not kw.get("logged"):
+            store.append_log({"kind": "message", "text": message, "scope": scope, "action": "answer", "part": scope,
+                              "routed_by": "stopped"})
+        store.append_log({"kind": "reply", "action": "answer", "part": scope, "ok": False, "reply": words})
+        events: list[Event] = []
+        _emit(events, kw.get("on_event"), "done", "answer", ok=False, part=scope)
+        return TurnResult(action="answer", reply=words, ok=False, part=scope, events=events)
+
+
+def _turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
+          use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
+          on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False,
+          pick: Optional[dict] = None, typed: Optional[str] = None, piece: Optional[str] = None) -> TurnResult:
     """One conversational turn: route the message, make the move, measure the whole design, reply.
 
     ``scope`` is the part the user clicked (``None`` = the design). ``author``/``classifier``/

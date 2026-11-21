@@ -64,6 +64,25 @@ class CutOff(Stopped):
     """The reply hit ``max_tokens`` before it finished."""
 
 
+class NoKey(Stopped):
+    """No Claude key here, so nothing was sent (CALI-217, #366): said in words, never "Something went wrong"."""
+
+
+#: What a request that needs Claude says where there's no key (CALI-217, #366), as the page says it elsewhere (CALI-91).
+NO_KEY = ("That needs Claude, which isn't set up here: put a Claude API key in ANTHROPIC_API_KEY in Caliper's .env file "
+          "(see .env.example), then start Caliper again")
+
+
+def client():
+    """The Claude client every request is made with, or :class:`NoKey` where there's no key (CALI-217, #366: the client
+    was made anyway and failed inside the request as a TypeError, read as a crash). Raised before anything is sent."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise NoKey(NO_KEY)
+    from anthropic import Anthropic  # lazy; may be absent
+
+    return Anthropic()
+
+
 def said(e: Exception) -> str:
     """What to tell the person when Claude gave no usable answer: the one place these words are read from."""
     return scrubbed(e)

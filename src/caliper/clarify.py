@@ -85,9 +85,9 @@ Reply with ONLY a JSON array:
 
 def llm_questions(prompt: str, client=None, model: Optional[str] = None) -> list[Question]:
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
     msg = llm.ask(client, "clarify", model=model, system=_SYSTEM,
                   messages=[{"role": "user", "content": prompt}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")

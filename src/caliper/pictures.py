@@ -107,9 +107,9 @@ def draw(subject: str, *, use_llm: bool = True, client=None, model: Optional[str
     if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
         try:
             if client is None:
-                from anthropic import Anthropic  # lazy; may be absent
+                from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-                client = Anthropic()
+                client = _claude()
             msg = llm.ask(client, "draw", model=model, system=_DRAW_SYSTEM,
                           messages=[{"role": "user", "content": f"Draw: {subject}"}])
             text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")

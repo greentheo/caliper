@@ -23,6 +23,7 @@ import weakref
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
+from . import llm
 from .blas import hold
 
 #: How long a finished job's events stay readable. A page that reconnects late still gets the result.
@@ -301,6 +302,10 @@ class JobRunner:
             except Cancelled:
                 job.status = "cancelled"
                 job.emit("cancelled", "cancelled: it stopped at a step, and kept the steps it finished")
+            except llm.Stopped as e:                          # no key, declined, cut off: said, not a crash (CALI-217)
+                job.error = llm.said(e)
+                job.status = "error"
+                job.emit("error", job.error, stopped=True)
             except Exception as e:  # noqa: BLE001 — every failure must reach the page, named
                 # the traceback's LAST line is the actual exception (the CALI-27 discipline)
                 tail = [ln for ln in traceback.format_exc().strip().splitlines() if ln.strip()]
