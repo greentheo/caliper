@@ -2386,9 +2386,9 @@ function fixesSaid(c) {
 function assessHere() {                 // this design's, never the last one's
   return S.assess && S.assess.slug === S.slug ? S.assess : null;
 }
-async function loadAssess(force) {
+async function loadAssess() {              // once per design, and again after a reading (it drops the offer)
   const slug = S.slug, a = assessHere();
-  if (!slug || (!force && a && (a.offer || a.loading || a.error))) return;
+  if (!slug || (a && (a.offer || a.loading || a.error))) return;
   S.assess = { ...(a || {}), slug, loading: true };
   let got;
   try { got = await api('GET', `/api/designs/${slug}/assess`); } catch (e) { got = { error: plainly(e.message) }; }
@@ -2416,13 +2416,16 @@ function assessView() {
 function reviewSection() {
   const a = assessHere(), o = a && a.offer;
   return { k: 'review', title: 'Review it <span class="badge">Claude\'s reading</span>', tone: 'info',
-    answer: !o ? 'one Claude call, on your press' : assessSince(o) || (o.count ? `${o.count} reading${o.count > 1 ? 's' : ''} so far` : o.cost),
+    // a header is drawn as HTML (subHead): a part's name in it is text
+    answer: esc(!o ? 'one Claude call, on your press' : assessSince(o) || (o.count ? `${o.count} reading${o.count > 1 ? 's' : ''} so far` : o.cost)),
     body: `<div id="assessBox">${assessView()}</div>` };
 }
 function paintAssess() {
   const b = $('assessBox');
   if (!b) return;
   b.innerHTML = assessView();
+  const sec = b.closest('details.ssec[data-ssec="review"]');    // its header too: drawn before the offer came (the walk)
+  if (sec) sec.querySelector('summary').innerHTML = subHead(reviewSection());
   wireAssess();
 }
 function wireAssess() {
@@ -2443,7 +2446,7 @@ function wireAssess() {
     S.assess = { slug, said: got.said, ok: got.ok };               // its offer is read again: Review again, the count
     if (got.ok) { S.fixes = {}; S.fixReading = {}; }                 // its rows are under Things to fix: read them again
     say(got.ok ? "Claude read it: what it reads wrong is under Things to fix, as Claude's reading." : got.said);
-    await loadAssess(true);
+    await loadAssess();
     render();
   };
 }

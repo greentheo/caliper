@@ -37,6 +37,32 @@ def test_review_again_says_what_s_changed_since_and_the_count():
     assert _view({"offer": {**o, "stale": {}}})["head"]["answer"] == "3 readings so far"
 
 
+def test_the_header_says_a_part_s_name_as_text():
+    o = {**OFFER, "label": "Review again", "stale": {"step_stool": 3}, "count": 1}
+    head = f"""const S = {{ slug: 's', claude: true, assess: {{ slug: 's', offer: {json.dumps(o)} }},
+      design: {{ parts: [{{ id: 'step_stool', name: '<i>Step</i> & stool' }}] }} }};
+const partOf = (pid) => S.design.parts.find((x) => x.id === pid) || {{}};"""
+    got = _run(_page(["assessHere", "assessSince", "assessView", "reviewSection"], consts=["esc"], extra=head + "\nout = reviewSection().answer;"))
+    assert got == "read on &lt;i&gt;Step&lt;/i&gt; &amp; stool v3; changed since"
+
+
+_PAINT = """
+const sum = { innerHTML: 'before' }, sec = { querySelector: () => sum };
+const els = { assessBox: { innerHTML: '', closest: (q) => (q === 'details.ssec[data-ssec="review"]' ? sec : null) } };
+const $ = (id) => els[id] || null;
+const S = { slug: 's', claude: true, assess: { slug: 's', offer: OFFER }, design: { parts: [] } };
+const partOf = () => ({}), subHead = (x) => `HEAD ${x.answer}`, loadAssess = () => {};
+"""
+
+
+def test_its_header_is_drawn_again_once_the_offer_comes():
+    """The walk: the header said "one Claude call, on your press" beside a body that had read its offer."""
+    o = {**OFFER, "label": "Review again", "count": 2}
+    got = _run(_page(["assessHere", "assessSince", "assessView", "reviewSection", "paintAssess", "wireAssess"], consts=["esc"],
+                     extra=_PAINT.replace("OFFER", json.dumps(o)) + "paintAssess(); out = sum.innerHTML;"))
+    assert got == "HEAD 2 readings so far"
+
+
 def test_with_no_key_it_s_said_and_never_pressed():
     got = _view({"offer": OFFER}, claude=False)
     assert '<button id="assessGo" disabled>' in got["html"] and "Reviewing it needs Claude, which isn't set up here." in got["html"]
@@ -51,7 +77,7 @@ def test_what_it_said_is_shown_as_text_line_by_line():
 
 _PRESS = """
 const calls = [], said = [];
-const els = { assessBox: { innerHTML: '' }, assessGo: { disabled: false } };
+const els = { assessBox: { innerHTML: '', closest: () => null }, assessGo: { disabled: false } };
 const $ = (id) => els[id] || null;
 const S = { slug: 's', claude: true, assess: { slug: 's', offer: OFFER }, fixes: { 's/step_stool': { rows: [] } }, fixReading: { x: 1 },
   design: { parts: [] } };
