@@ -687,6 +687,63 @@ def _was_said(s: SkeletonValue, said: list[tuple[float, str]]) -> bool:
     return any(u == want[1] and abs(x - want[0]) <= max(0.005 * abs(want[0]), 1e-9) for x, u in said)
 
 
+#: A rule that says one thing sits on another: ``bbox(a).min_z >= bbox(b).max_z - 1`` (CALI-240).
+_SITS_ON = re.compile(r"^\s*bbox\((\w+)\)\.min_z\s*>=\s*bbox\((\w+)\)\.max_z\s*(?:-\s*[\d.]+\s*)?$")
+#: Words that end a noun phrase, either way from a relation.
+_STOP = {"a", "an", "the", "and", "plus", "with", "of", "on", "in", "for", "to", "is", "it", "its", "my", "our", "that",
+         "which", "who", "then", "but", "or", "top", "atop", "sits", "sitting", "rests", "resting", "mounted", "mounts"}
+
+
+def _np(words: list, i: int, step: int) -> list:
+    """The noun phrase next to ``words[i]`` going ``step`` (−1 before, +1 after), articles skipped after: up to 3 words."""
+    out, j = [], i
+    if step > 0:
+        while j < len(words) and words[j] in ("a", "an", "the", "my", "our", "its"):
+            j += 1
+    while 0 <= j < len(words) and words[j] not in _STOP and len(out) < 3:
+        out.append(words[j])
+        j += step
+    return out[::-1] if step < 0 else out
+
+
+def relations(said: str) -> list[tuple[list, list]]:
+    """Each "A on B" the person's own words say (CALI-240): (A's words, B's words). "A on top of B", "A on B", "A sits/rests
+    on B", "A atop B", and "B plus a A on top" (Theo's "a platform plus a box on top")."""
+    words = re.findall(r"[a-z]+", (said or "").lower())
+    out = []
+    for i, w in enumerate(words):
+        nxt = words[i + 1:i + 3]
+        if w == "on" and nxt[:2] == ["top", "of"]:
+            out.append((_np(words, i - 1, -1), _np(words, i + 3, 1)))
+        elif w == "on" and nxt[:1] == ["top"]:            # "B plus a A on top": B is before the joining word
+            a = _np(words, i - 1, -1)
+            j = i - 1 - len(a)
+            while j >= 0 and words[j] in ("a", "an", "the"):
+                j -= 1
+            if j >= 0 and words[j] in ("plus", "and", "with"):
+                out.append((a, _np(words, j - 1, -1)))
+        elif w == "atop" or (w in ("sits", "sitting", "rests", "resting", "mounted", "mounts") and nxt[:1] == ["on"]):
+            out.append((_np(words, i - 1, -1) if w == "atop" else _np(words, i - 1 - (words[i - 1] == "that"), -1),
+                        _np(words, i + (1 if w == "atop" else 2), 1)))
+        elif w == "on" and nxt[:1] != ["top"] and (i == 0 or words[i - 1] not in ("sits", "sitting", "rests", "resting",
+                                                                                  "mounted", "mounts")):
+            out.append((_np(words, i - 1, -1), _np(words, i + 1, 1)))
+    return [(a, b) for a, b in out if a and b]
+
+
+def _names_it(phrase: list, pid: str) -> bool:
+    """Whether a noun phrase names a part or group: its last word is one of the id's words ("the camper box": box)."""
+    head = phrase[-1]
+    tokens = set(pid.lower().split("_"))
+    return head in tokens or head.rstrip("s") in tokens
+
+
+def _said_on(r: PlanRule, said: str) -> bool:
+    """A sits-on rule whose relation the person's own words state (CALI-240: stated and enforced, never inferred)."""
+    m = _SITS_ON.match(r.expr or "")
+    return bool(m) and any(_names_it(a, m.group(1)) and _names_it(b, m.group(2)) for a, b in relations(said))
+
+
 def classify(plan: Plan, said: str, prior: Optional[Plan] = None) -> Plan:
     """Each skeleton number and rule marked by where it came from, whatever the planner wrote: a number is stated
     when the person gave it ("7 ft", "1 in"), a rule when it reads only stated numbers and at least one; anything
@@ -701,7 +758,8 @@ def classify(plan: Plan, said: str, prior: Optional[Plan] = None) -> Plan:
     rules = []
     for r in plan.rules:
         read = {n.id for n in ast.walk(ast.parse(r.expr, mode="eval")) if isinstance(n, ast.Name)} & names
-        src = "kept" if (r.id, r.expr) in kept_r else "stated" if read and read <= given else "assumed"
+        src = ("kept" if (r.id, r.expr) in kept_r else "stated" if (read and read <= given) or _said_on(r, said)
+               else "assumed")                       # a sits-on the person said in words is stated too (CALI-240)
         rules.append(r.model_copy(update={"source": src}))
     # a part you have: "stated" when your words say so, else assumed and asked, never the whole plan refused (#123)
     kept_p = {p.id for p in (prior.parts if prior else []) if p.role == "fixed" and p.source == "stated"}
@@ -903,6 +961,7 @@ hole_misalignment(a, b), holes_aligned(a, b), bbox(part).dx/.dy/.dz (sizes) and 
 with + - * / and no powers or text. A rule over skeleton numbers alone measures nothing: it's decided when it's \
 planned (true, it's a note; false, the plan contradicts itself and is refused). Lengths in rules are mm; a skeleton name in a rule reads in mm. Each part says what it mounts on (the parts it's built onto).
 
+A part that sits on another is the rule `bbox(a).min_z >= bbox(b).max_z - 1` (a on b), with a touch mate between them. \
 Give a number or a rule source "stated" only when the person gave it; anything you chose (a size, a margin, a rule \
 of thumb) is "assumed": shown to them, and not enforced until they keep it. Don't add rules nobody asked for beyond \
 what makes the parts fit.
