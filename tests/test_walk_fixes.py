@@ -104,10 +104,10 @@ const $ = (id) => els[id] || null;
 const document = { querySelectorAll: () => [] };
 const wirePatterns = () => {}, wireMaking = () => {}, previewStep = () => {}, follow = async () => {}, refresh = async () => {};
 const S = { slug: 's' }; const api = async () => ({ job_id: 'j' });
-const partOf = () => ({ name: '<b>x</b>' });
+const partOf = () => ({ name: '<i id="inj">Step & stool</i>' });   // reviewer-3's rename, with an &
 const footer = []; const say = (t) => footer.push(t);
 """
-MADE = "Made the cut plan for <b>x</b>: it's under How do I make it? → Cut plan."
+MADE = "Made the cut plan for <i id=\"inj\">Step & stool</i>: it's under How do I make it? → Cut plan."
 
 
 def _cut(progress):
@@ -120,10 +120,10 @@ def _cut(progress):
 
 def test_the_cut_plan_says_it_s_made_and_where_with_its_name_as_text():
     """#388 review: a local `say(html, text)` hid the page's own, so the line went into the progress line as HTML (a
-    label `<b>x</b>` drew bold), and the page's foot never said it."""
+    rename `<i id="inj">Step stool</i>` put a live element on the page), and the page's foot never said it."""
     got = _cut({"innerHTML": ""})
     assert got["els"]["cpProgress"]["innerHTML"] == \
-        "<div class=\"small muted\">Made the cut plan for &lt;b&gt;x&lt;/b&gt;: it's under How do I make it? → Cut plan.</div>"
+        "<div class=\"small muted\">Made the cut plan for &lt;i id=&quot;inj&quot;&gt;Step &amp; stool&lt;/i&gt;: it's under How do I make it? → Cut plan.</div>"
     assert got["footer"] == [MADE]                     # say() escapes it in turn
 
 
@@ -135,6 +135,6 @@ def test_the_page_s_foot_says_a_name_as_text():
     import re
 
     esc = re.search(r"^const esc = .*;$", open(JS).read(), re.M).group(0) + "\n"
-    got = _js(("say",), "say('Made the cut plan for <b>x</b>.'); return bar.innerHTML;", head=esc + """
+    got = _js(("say",), "say('Made the cut plan for <i id=\"inj\">Step & stool</i>.'); return bar.innerHTML;", head=esc + """
 const bar = { setAttribute() {}, hidden: true }; const $ = () => bar; const document = {};""")
-    assert "<span>Made the cut plan for &lt;b&gt;x&lt;/b&gt;.</span>" in got
+    assert "<span>Made the cut plan for &lt;i id=&quot;inj&quot;&gt;Step &amp; stool&lt;/i&gt;.</span>" in got and "<i " not in got
