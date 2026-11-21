@@ -220,6 +220,10 @@ def offers(store: DesignStore, state: dict, pid: str) -> list[dict]:
             got += _carved_sliver(store, run) if p.get("carved") else _thin_line(store, run) + [_waiting_carve(name, takes, f"{blocked['carve'][:1].upper()}{blocked['carve'][1:]}." if blocked.get("carve") else None)]
         return [{**ln, "part": pid} for ln in got]
     if blocked and blocked.get("why") == "unchecked":           # everything else comes from the check
+        older = next((r for r in L.list_runs(store, pid) if r.get("version") != p.get("version")), None)
+        if older is not None:                   # it has one, of another version: "first" read as never checked (#387)
+            return [_line("Check it again first", f"Its check is of v{older.get('version')}. What would make it better "
+                          "comes from one of this version.", "Check it again", "load", part=pid)]
         return [_line("Check it holds first", "What would make it better comes from that.", "Check it holds", "load",
                       part=pid)]
     settled = _settled_check(store, p, run)
