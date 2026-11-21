@@ -106,6 +106,8 @@ const wirePatterns = () => {}, wireMaking = () => {}, previewStep = () => {}, fo
 const S = { slug: 's' }; const api = async () => ({ job_id: 'j' });
 const partOf = () => ({ name: '<i id="inj">Step & stool</i>' });   // reviewer-3's rename, with an &
 const footer = []; const say = (t) => footer.push(t);
+const tracked = [];                                   // the busy overlay's record of it (#373)
+const trackJob = (id, info) => { tracked.push([id, info.kind, info.part]); return { done: Promise.resolve() }; };
 """
 MADE = "Made the cut plan for <i id=\"inj\">Step & stool</i>: it's under How do I make it? → Cut plan."
 
@@ -114,7 +116,7 @@ def _cut(progress):
     import re
 
     esc = re.search(r"^const esc = .*;$", open(JS).read(), re.M).group(0) + "\n"
-    return _js(("wireCutplan",), "wireCutplan({ id: 'stool' }); await els.cpGo.onclick(); return { els, footer };",
+    return _js(("wireCutplan",), "wireCutplan({ id: 'stool' }); await els.cpGo.onclick(); return { els, footer, tracked };",
                head=esc + _CUT.replace("PROGRESS", json.dumps(progress)))
 
 
@@ -138,3 +140,8 @@ def test_the_page_s_foot_says_a_name_as_text():
     got = _js(("say",), "say('Made the cut plan for <i id=\"inj\">Step & stool</i>.'); return bar.innerHTML;", head=esc + """
 const bar = { setAttribute() {}, hidden: true }; const $ = () => bar; const document = {};""")
     assert "<span>Made the cut plan for &lt;i id=&quot;inj&quot;&gt;Step &amp; stool&lt;/i&gt;.</span>" in got and "<i " not in got
+
+
+def test_the_cut_plan_is_on_the_busy_overlay_while_it_unfolds():
+    """#373: the overlay is every running job's, the cut plan's too, and it says whose."""
+    assert _cut({"innerHTML": ""})["tracked"] == [["j", "cutplan", "stool"]]
