@@ -2886,6 +2886,17 @@ function scoreNum(v, u, need) {
   return u === '$' ? `$${n}` : `${n}${u ? ' ' + esc(u) : ''}`;
 }
 const goalLimit = (c) => (typeof c.limit === 'number' ? ` (${c.op === '<=' || c.op === '<' ? 'cap' : 'needs'} ${scoreNum(c.limit, c.unit)})` : '');
+// a goal said as a goal (#384): "holds 250 lb, 2 times over", unscored, read as a result. "must hold 250 lb, 2 times
+// over"; a label that doesn't open on a verb it knows is said as written
+const MUST = { holds: 'hold', carries: 'carry', supports: 'support', takes: 'take', bears: 'bear', weighs: 'weigh', costs: 'cost', fits: 'fit', keeps: 'keep', stays: 'stay' };
+function goalSaid(c) {
+  const label = String(c.label || c.id), m = label.match(/^(\w+)\b/), verb = m && MUST[m[1].toLowerCase()];
+  return esc(verb ? `must ${verb}${label.slice(m[1].length)}` : label);
+}
+// a strength goal's label without the factor it needs (answers._NEED, the same pattern): scored, its row leads with the
+// number it does, and "holds 250 lb, 2 times over — 3.8 ×" read as two numbers for one thing (#384, #64 item 15)
+const NEED = /,\s*(?:(?:twice|\d+(?:\.\d+)?\s*(?:times|×))\s*over|\d+(?:\.\d+)?\s*[×x]\s*safety)\s*$/i;
+const strengthGoal = (c) => String(c.metric || '').startsWith('strength') && typeof c.limit === 'number';
 function scoreView(d) {
   const card = (d.scorecards || [])[0];
   const stale = card && (card.outdated     // scored the old way (CALI-111): its numbers aren't today's
@@ -2904,7 +2915,7 @@ function scoreView(d) {
     ? '<div class="muted small">Nothing to hold it to yet but its own rules. Tell me what it must do (“it has to hold me, 200 lb”, “under $50”) and I\'ll write it down.</div>'
     : d.goals && !d.goals.ours ? '<div class="muted small">Held to its <code>scorecard.yaml</code>, as written by hand.</div>' : '';
   if (!card) {
-    return `${held.length ? `<ul class="list small">${held.map((c) => `<li>${c.source === 'proposed' ? '◇' : '·'} ${esc(c.label || c.id)} ${from(c)}
+    return `${held.length ? `<ul class="list small">${held.map((c) => `<li>${c.source === 'proposed' ? '◇' : '·'} ${goalSaid(c)} ${from(c)}
         ${c.why && c.source === 'proposed' ? `<div class="muted">${esc(c.why)}</div>` : ''}</li>`).join('')}</ul>` : ''}
       ${goals}<div class="actions"><button id="scGo">Score it</button></div><div id="scProgress"></div>`;
   }
@@ -2920,10 +2931,12 @@ function scoreView(d) {
       ${stale ? '<span class="badge bad">a part has changed since</span>' : ''}</div>
     <ul class="list small" style="margin-top:6px">${card.checks.map((c) => { const now = held.find((x) => x.id === c.id) || c;
       return `<li>${scoreMark(c, stale, when)}
-      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit, typeof c.limit === 'number' && (c.op || '>=').startsWith('>') ? c.limit : null)}${goalLimit(c)}${old}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
+      ${c.value != null && strengthGoal(c)   // scored, a strength goal leads with what it does (#384)
+        ? `<b>${num(c.value, c.unit, (c.op || '>=').startsWith('>') ? c.limit : null)}</b> — ${esc(String(c.label || c.id).replace(NEED, ''))}${goalLimit(c)}${old}`
+        : `${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit, typeof c.limit === 'number' && (c.op || '>=').startsWith('>') ? c.limit : null)}${goalLimit(c)}${old}` : ''}`}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
       ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}
       ${c.loads ? `<div class="muted">${esc(c.loads)}</div>` : ''}</li>`; }).join('')}
-      ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${esc(c.label || c.id)} ${from(c)}
+      ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${goalSaid(c)} ${from(c)}
         <span class="muted">— new since this card</span></li>`).join('')}</ul>
     <table class="st" style="margin-top:6px">${card.objectives.map((o) => `<tr><td style="text-align:left">${esc(o.label)}</td>
       <td>${num(o.value, o.unit)}${delta(o)}${old}</td><td>${tag(o.trust)}</td></tr>`).join('')}</table>

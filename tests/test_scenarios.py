@@ -926,7 +926,7 @@ def test_the_guard_catches_the_names_it_lets_through_when_they_hold_declarations
 def test_the_page_says_the_strength_line_s_loads_and_its_trust():
     from .test_carve_click import _page, _run
 
-    html = _run(_page(["scoreView", "scoreMark", "scoreNum", "safetyNum", "asOf"], consts=["esc", "TRUST", "goalLimit"],
+    html = _run(_page(["scoreView", "scoreMark", "scoreNum", "safetyNum", "asOf", "goalSaid"], consts=["esc", "TRUST", "goalLimit", "MUST", "NEED", "strengthGoal"],
                       extra="""out = scoreView({parts: [], scorecards: [{created: 0, summary: {pass: 1, fail: 0},
       objectives: [], checks: [{id: 'strength_loads', label: 'holds what its loads say', metric: 'strength.safety',
         status: 'pass', value: 3.1, unit: '×', limit: 2, op: '>=', trust: 'question open',
