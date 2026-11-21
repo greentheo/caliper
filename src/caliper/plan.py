@@ -104,7 +104,7 @@ class PlanGroup(_Base):
     and is drawn as a node of the tree (``Design.groups``)."""
     id: str
     what: str = ""
-    #: the parts and groups it holds, in their build order
+    #: the parts and groups it holds, in any order; saved in build order (:func:`save`, #369 review)
     parts: list[str] = Field(default_factory=list)
     #: what it's built onto, a group or a part: everything there is built before any of its parts
     mounts_on: list[str] = Field(default_factory=list)
@@ -349,14 +349,22 @@ def _drop_ground(plan: Plan) -> Plan:
             return {n.id for n in ast.walk(ast.parse(expr, mode="eval")) if isinstance(n, ast.Name)}
         except SyntaxError:
             return set()
+    groups = list(plan.groups)
+    while True:                          # a group left holding nothing goes with what it held (#369 review)
+        empty = {g.id for g in groups if not [m for m in g.parts if m not in gone]}
+        if not empty:
+            break
+        gone += sorted(empty)
+        groups = [g for g in groups if g.id not in empty]
+    dropped = [p.id for p in plan.parts if p.id in gone]   # what it stands on, said; an emptied group isn't
     out = plan.model_copy(update={
         "parts": [p.model_copy(update={"mounts_on": [m for m in p.mounts_on if m not in gone]})
                   for p in plan.parts if p.id not in gone],
         "groups": [g.model_copy(update={"parts": [m for m in g.parts if m not in gone],
-                                        "mounts_on": [m for m in g.mounts_on if m not in gone]}) for g in plan.groups],
+                                        "mounts_on": [m for m in g.mounts_on if m not in gone]}) for g in groups],
         "mates": [m for m in plan.mates if not set(m.between) & set(gone)],
         "rules": [r for r in plan.rules if not names(r.expr) & set(gone)]}, deep=True)
-    out._dropped = gone
+    out._dropped = dropped
     return out
 
 
@@ -503,6 +511,9 @@ def _check_groups(plan: Plan) -> None:
                 raise PlanError(f"the group {g.id!r} mounts on {m!r}, which isn't a part or a group of the plan")
             if m == g.id or m in group_parts(plan, g.id) or m in _held_groups(plan, g.id):
                 raise PlanError(f"the group {g.id!r} mounts on {m!r}, which it holds")
+            if m in group_of(plan, g.id):            # said as a part's is (#369 review), not as a circle of parts
+                raise PlanError(f"the group {g.id!r} mounts on {m!r}, the group it's in: it mounts on a part or group "
+                                f"of it, or on what {m!r} mounts on")
 
 
 def _held_groups(plan: Plan, gid: str) -> set:
@@ -726,10 +737,20 @@ def save(store, plan: Plan, status: str = "review") -> None:
     store.design.skeleton = [s.model_dump() for s in plan.skeleton]
     store.design.plan = {"status": status, "parts": [p.model_dump() for p in plan.parts], "order": order(plan),
                          "rules": [r.model_dump() for r in plan.rules],
-                         **({"groups": [g.model_dump() for g in plan.groups]} if plan.groups else {}),
+                         **({"groups": _in_build_order(plan)} if plan.groups else {}),
                          **({"dropped": plan.dropped} if plan.dropped else {}),
                          **({"left_out": plan.left_out} if plan.left_out else {})}
     store.save()
+
+
+def _in_build_order(plan: Plan) -> list[dict]:
+    """The groups as saved (``Design.groups``' contract): each one's ``parts`` in build order, a group placed at its first
+    part built (#369 review: the planner's listing order was saved, and read as the build order)."""
+    at = {pid: i for i, pid in enumerate(order(plan))}
+
+    def when(m: str) -> int:
+        return at[m] if m in at else min((at[p] for p in group_parts(plan, m) if p in at), default=len(at))
+    return [{**g.model_dump(), "parts": sorted(g.parts, key=when)} for g in plan.groups]
 
 
 def load(store) -> Optional[Plan]:
@@ -772,8 +793,12 @@ def headline(plan: Plan, name: str) -> str:
     if not tops:
         return f"{a} in {len(plan.parts)} parts: {listing([one(p) for p in plan.parts])}."
     # CALI-36 (#17): each group with its parts, then any part in none
-    chunks = [f"the {g.id.replace('_', ' ')}" + (f", {g.what.strip().rstrip('.')}" if g.what.strip() else "")
-              + f" ({listing([one(by[p]) for p in group_parts(plan, g.id)])})" for g in tops]
+    def said(gid: str) -> str:            # a group holding groups names them (#369 review: "the camper (the box …)")
+        g = _group(plan, gid)
+        inner = [said(m) if _group(plan, m) else one(by[m]) for m in g.parts if _group(plan, m) or m in by]
+        return (f"the {gid.replace('_', ' ')}" + (f", {g.what.strip().rstrip('.')}" if g.what.strip() else "")
+                + f" ({listing(inner)})")
+    chunks = [said(g.id) for g in tops]
     chunks += [one(p) for p in plan.parts if not group_of(plan, p.id)]
     return (f"{a} in {len(plan.parts)} parts, in {len(tops)} group{'s' if len(tops) != 1 else ''}: "
             + "; ".join(chunks) + ".")

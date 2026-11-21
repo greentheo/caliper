@@ -213,9 +213,11 @@ class Design(_Base):
     @property
     def groups(self) -> list[dict]:
         """CALI-36 (#17): the plan's sub-assemblies, ``[{id, what, parts, mounts_on}]``, ``parts`` holding part and group
-        ids in build order; [] for a design without them. Read from the plan, so design.yaml gains no key: the page's tree
-        and a group's checks (#17 slices B and E) read it here."""
-        return [dict(g) for g in (self.plan or {}).get("groups") or []]
+        ids in build order (a group at its first part built); [] for a design without them. Read from the plan, so
+        design.yaml gains no key: the page's tree and a group's checks (#17 slices B and E) read it here. Copies: changing
+        one changes nothing saved (#369 review)."""
+        return [{**g, "parts": list(g.get("parts") or []), "mounts_on": list(g.get("mounts_on") or [])}
+                for g in (self.plan or {}).get("groups") or []]
 
     def to_yaml(self) -> str:
         return yaml.safe_dump(self.to_dict(), sort_keys=False)
