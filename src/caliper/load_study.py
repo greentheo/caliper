@@ -1886,26 +1886,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
         record["across"] = round(thin / ctx["spacing"], 3)
         record["resolved"] = _sees(thin / ctx["spacing"])
         if not record["resolved"]:
-            seen = (f"The FEA ran at {ctx['spacing']:.2g} mm voxels across a {thin:.2g} mm wall: too coarse to see "
-                    f"it (it takes {RESOLVE_MIN:g} across).")
-            want = math.floor(thin / RESOLVE_MIN * 100) / 100
-            if want >= ctx["finest"]:
-                # a run whose voxels don't connect the load to a support stops at once: its time says nothing about
-                # a run that does (the bar stool: "about 1 min" for 39). Then no estimate, said so (#100 review)
-                joined = all((c.get("fea") or {}).get("supported") for c in cases)
-                minutes = finer_minutes(record["voxels"], ctx["spacing"], want, fea_seconds,
-                                        record["seconds"] - fea_seconds) if joined else None
-                record["finer"] = {"spacing_mm": want, "minutes": minutes}
-                notes.append(f"{seen} Check it again at {want:g} mm" + (f" (about {minutes} min)." if minutes else
-                             ": how long it takes can't be told from this run, whose voxels didn't connect the "
-                             "load to a support."))
-            else:
-                record["too_thin"] = True
-                record["sees_mm"] = round(RESOLVE_MIN * ctx["finest"], 1)      # the wall the check can see, at this size
-                if ctx.get("thin_said"):                  # where, and what to change (#136 review)
-                    record["thin_said"] = ctx["thin_said"]
-                notes.append(f"{seen} {RESOLVE_MIN:g} across would take more voxels than a study of a part this "
-                             f"size may: {NOT_CHECKED}")
+            finer_said(record, ctx, cases, fea_seconds, notes)
     if ctx.get("unsized"):                            # a printed piece of no declared size isn't checked (#272, #244)
         record["unsized"] = list(ctx["unsized"])
         record["resolved"] = False
@@ -1934,6 +1915,33 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = MIN_SAFETY,
     store.append_log({"kind": "load", "action": "studied", "part": part_id, "run": rid})
     emit("done", done_words(len(cases), v, worst), run=rid, progress=1.0)
     return record
+
+
+def finer_said(record: dict, ctx: dict, cases: list, fea_seconds: float, notes: list) -> None:
+    """A run too coarse to see its thinnest wall (CALI-97): what a finer check would take, or that none can, on the record
+    and in its notes. A part's run and a group's (#17 slice E) say it the same way."""
+    thin = ctx["thinnest"]
+    if not record["resolved"]:
+        seen = (f"The FEA ran at {ctx['spacing']:.2g} mm voxels across a {thin:.2g} mm wall: too coarse to see "
+                f"it (it takes {RESOLVE_MIN:g} across).")
+        want = math.floor(thin / RESOLVE_MIN * 100) / 100
+        if want >= ctx["finest"]:
+            # a run whose voxels don't connect the load to a support stops at once: its time says nothing about
+            # a run that does (the bar stool: "about 1 min" for 39). Then no estimate, said so (#100 review)
+            joined = all((c.get("fea") or {}).get("supported") for c in cases)
+            minutes = finer_minutes(record["voxels"], ctx["spacing"], want, fea_seconds,
+                                    record["seconds"] - fea_seconds) if joined else None
+            record["finer"] = {"spacing_mm": want, "minutes": minutes}
+            notes.append(f"{seen} Check it again at {want:g} mm" + (f" (about {minutes} min)." if minutes else
+                         ": how long it takes can't be told from this run, whose voxels didn't connect the "
+                         "load to a support."))
+        else:
+            record["too_thin"] = True
+            record["sees_mm"] = round(RESOLVE_MIN * ctx["finest"], 1)      # the wall the check can see, at this size
+            if ctx.get("thin_said"):                  # where, and what to change (#136 review)
+                record["thin_said"] = ctx["thin_said"]
+            notes.append(f"{seen} {RESOLVE_MIN:g} across would take more voxels than a study of a part this "
+                         f"size may: {NOT_CHECKED}")
 
 
 def finer_minutes(voxels: int, spacing: float, finer: float, fea_seconds: float, setup_seconds: float) -> int:
