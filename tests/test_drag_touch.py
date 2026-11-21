@@ -20,7 +20,9 @@ function removeEventListener(k, f) { if (on[k]) on[k].delete(f); }
 const fire = (k, e) => [...(on[k] || [])].forEach((f) => f(e || {}));
 const live = () => Object.fromEntries(Object.entries(on).map(([k, v]) => [k, v.size]));
 let reach = null; const handleAt = (e, near) => { reach = near; return { scenHandle: 'move', i: 0 }; };
-const startScenDrag = () => true, moveScenDrag = () => calls.push('move'), endScenDrag = () => calls.push('end');
+let starts = 0;
+const startScenDrag = () => { starts += 1; S.scenDrag = { i: starts }; return true; };
+const moveScenDrag = () => calls.push('move'), endScenDrag = () => { calls.push('end'); S.scenDrag = null; };
 const press = (type, id) => scenPress({ button: 0, pointerType: type, pointerId: id, clientX: 1, clientY: 1, stopPropagation() {}, preventDefault() {} });
 """
 
@@ -91,3 +93,14 @@ def test_a_second_finger_neither_moves_nor_ends_the_drag(ending):
     assert got["after2"] == {"pointermove": 1, "pointerup": 1, "pointercancel": 1}          # still its own
     assert got["after1"] == {"pointermove": 0, "pointerup": 0, "pointercancel": 0}
     assert got["calls"] == ["move", "end"]                                                  # only the first finger's move
+
+
+def test_a_second_finger_on_a_handle_mid_drag_doesn_t_take_it_over():
+    """#418 review: a second press started its own drag, replacing S.scenDrag, so the first finger's moves landed on the
+    other row's box and the first row's drag never ended. A press while one's under way is left alone."""
+    got = _js("""press('touch', 1); press('touch', 2); const during = { starts, live: live(), drag: S.scenDrag.i };
+                 fire('pointermove', { pointerId: 1 }); fire('pointerup', { pointerId: 1 });
+                 press('touch', 3); return { during, after: live(), calls, starts, drag: S.scenDrag && S.scenDrag.i };""")
+    assert got["during"] == {"starts": 1, "live": {"pointermove": 1, "pointerup": 1, "pointercancel": 1}, "drag": 1}
+    assert got["calls"] == ["move", "end"]
+    assert got["starts"] == 2 and got["drag"] == 2 and got["after"] == {"pointermove": 1, "pointerup": 1, "pointercancel": 1}   # a press after it ends is a new drag

@@ -4166,6 +4166,7 @@ function endScenDrag() {
 const GRAB = { mouse: 14, pen: 14, touch: 28 };
 function scenPress(e) {                       // a handle, before the view's own orbit takes the press
   if (e.button !== 0 || !S.scenOpen || S.scenPick) return;
+  if (S.scenDrag) return;                       // one at a time: a second finger on a handle mid-drag doesn't take it over (#418 review)
   const h = handleAt(e, GRAB[e.pointerType] || GRAB.mouse);
   if (!h || !startScenDrag(h)) return;
   e.stopPropagation(); e.preventDefault();
