@@ -11,21 +11,25 @@ import yaml
 HERE = os.path.dirname(__file__)
 ROOT = os.path.dirname(HERE)
 
-#: The tail, as agreed on #367 (night shift vetoed test_lighten_solves_each_step_s_cases_once: it guards #357's one solve)
+#: The tail, as agreed on #367 (night shift vetoed test_lighten_solves_each_step_s_cases_once: it guards #357's one solve;
+#: #412's review kept two more, the only per-PR guards of a rule)
 NIGHTLY = {
     ("test_server", "test_fit_end_to_end"),
     ("test_cli", "test_fit_end_to_end"),
     ("test_spatial", "test_two_threads_on_one_mesh_dont_take_the_app_down"),
-    ("test_pictures", "test_lightening_leaves_a_picture_alone"),
     ("test_pictures", "test_a_drawing_from_the_pad_is_cut_out"),
     ("test_cases_together", "test_the_progress_line_says_together_only_where_they_are"),
     ("test_guards_had_no_test", "test_the_order_of_a_kids_book_doesnt_depend_on_the_hash_seed"),
     ("test_release", "test_releases_are_numbered_and_reuse_whats_current"),
-    ("test_carve_click", "test_a_cancelled_carve_keeps_the_steps_it_finished"),
 }
 #: Guards of a verdict or a safety number: per-PR, always (night shift's list on #367)
 KEEP_FILES = {"test_lighten_own_material", "test_own_material_fea", "test_mixed", "test_check_own_frame", "test_lighten_vs_now"}
-KEEP_TESTS = {("test_cases_together", n) for n in (
+KEEP_TESTS = {
+    # the only per-PR guards of a rule (#412 review): Lighten's web round a picture (MIN_WEB_MM), and the step a cancelled
+    # carve offers (the lightest that holds)
+    ("test_pictures", "test_lightening_leaves_a_picture_alone"),
+    ("test_carve_click", "test_a_cancelled_carve_keeps_the_steps_it_finished"),
+} | {("test_cases_together", n) for n in (
     "test_a_holed_panel_s_filled_solve_reads_its_own_case_as_main_does", "test_each_lighten_step_s_cases_are_solved_on_its_cut_not_the_part",
     "test_the_joints_of_every_case_read_as_each_alone", "test_every_case_together_is_bit_for_bit_each_alone",
     "test_lighten_solves_each_step_s_cases_once")}

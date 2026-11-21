@@ -224,7 +224,6 @@ def test_a_carve_can_be_cancelled_from_its_panel(api):
 
 
 # --- the carve: it stops at a step and keeps what it finished ----------------------------------------------
-@pytest.mark.nightly                      # long, and no verdict rests on it (CALI-219, #367)
 def test_a_cancelled_carve_keeps_the_steps_it_finished(tmp_path, monkeypatch):
     """Built on #99's record (on disk from the start and after every step): a cancel writes status "cancelled", with
     the steps it checked and the best of them, and the Studies row says so."""

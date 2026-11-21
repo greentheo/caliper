@@ -99,7 +99,6 @@ def test_a_t_rex_on_the_side_is_cut_and_it_still_holds(stool):
         assert pe["safety"] is None or c["safety"] <= pe["safety"] + 0.01, c
 
 
-@pytest.mark.nightly                      # long, and no verdict rests on it (CALI-219, #367)
 def test_lightening_leaves_a_picture_alone(stool):
     got = pictures.put(stool, "stool", pictures.draw("T-rex", use_llm=False), subject="T-rex", where="front")
     rec = lighten.study(stool, "stool", steps=(1.0,))
