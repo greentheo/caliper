@@ -25,6 +25,12 @@ BEAM_CORE_T = 50.8
 BEAM_SKINS = ["fiberglass", "fiberglass"]
 KEEP_HI_Y = 1400.0
 EXTRA = []
+BEAM_DEPTH = None        # None: the wall's height
+LEFT_H = None            # None: the wall's full height
+WALL_SKINS = ["fiberglass", {"material": "fiberglass", "face": "in"}]
+BEAM_CORE = "xps"
+BEAM_X1 = None           # None: the wall's length
+BAD_KEEPS = False
 
 PARAMS = {"l": 2000.0, "w": 1500.0, "h": 1200.0}
 BUILD = {"core": "xps", "core_t": 50.8, "floor_t": 19.05}
@@ -39,14 +45,15 @@ def construction(params, build=None):
     p = {**PARAMS, **(params or {})}
     b = {**BUILD, **(build or {})}
     L, W, H = p["l"], p["w"], p["h"]
-    skins = ["fiberglass", {"material": "fiberglass", "face": "in"}]
+    skins = WALL_SKINS
+    LH = LEFT_H or H
 
     def wall(name, outline):
         return {"name": name, "kind": "sheet", "material": b["core"], "thickness": b["core_t"], "outline": outline,
                 "covers": skins}
     return [{"name": "floor", "kind": "sheet", "material": "plywood", "thickness": b["floor_t"],
              "outline": [(0, 0, 0), (L, 0, 0), (L, W, 0), (0, W, 0)], "covers": ["paint"]},
-            wall("wall_left", [(0, W, 0), (L, W, 0), (L, W, H), (0, W, H)]),
+            wall("wall_left", [(0, W, 0), (L, W, 0), (L, W, LH), (0, W, LH)]),
             wall("wall_right", [(0, 0, 0), (L, 0, 0), (L, 0, H), (0, 0, H)]),
             wall("wall_front", [(L, 0, 0), (L, W, 0), (L, W, H), (L, 0, H)]),
             wall("wall_back", [(0, 0, 0), (0, W, 0), (0, W, H), (0, 0, H)]),
@@ -59,13 +66,16 @@ def shell(params, build=None):
     L, W, H = p["l"], p["w"], p["h"]
 
     def beam(name, a, bb, core_t=b["core_t"], skins=("fiberglass", "fiberglass")):
-        return {"name": name, "a": a, "b": bb, "depth": H, "core": b["core"], "core_t": core_t, "skins": list(skins)}
-    return [beam("wall_left", (0, BEAM_Y, 0), (L, BEAM_Y, 0), BEAM_CORE_T, BEAM_SKINS),
+        return {"name": name, "a": a, "b": bb, "depth": BEAM_DEPTH if BEAM_DEPTH is not None else H, "core": BEAM_CORE,
+                "core_t": core_t, "skins": list(skins)}
+    return [beam("wall_left", (0, BEAM_Y, 0), (BEAM_X1 or L, BEAM_Y, 0), BEAM_CORE_T, BEAM_SKINS),
             beam("wall_right", (0, 0, 0), (L, 0, 0)), beam("wall_front", (L, 0, 0), (L, W, 0)),
             beam("wall_back", (0, 0, 0), (0, W, 0))]
 
 
 def keeps(params, build=None):
+    if BAD_KEEPS:
+        return [{"name": "mattress"}]
     return [{"name": "mattress", "note": "a full, on the floor", "lo": (100, 100, 19.05), "hi": (1900, KEEP_HI_Y, 250)}]
 '''
 
@@ -150,3 +160,25 @@ def test_a_skin_is_said_by_name_or_with_its_thickness_and_face():
     cov = lambda rows: next(r for r in rows if r["kind"] == "covering")    # noqa: E731
     assert cov(thick)["mass_kg"] == pytest.approx(cov(plain)["mass_kg"] * 2)    # twice the table's 0.5 mm
     assert cov(thick)["material"] == "fiberglass_2"
+
+
+
+# --- #404 review (caliper-reviewer) ------------------------------------------------------------------------------------
+@pytest.mark.parametrize("knobs,said", [
+    ({"BEAM_DEPTH": 2400.0}, "wall_left is 2400 mm deep, but its wall stops 1200 mm up"),        # 8x as stiff, passed
+    ({"LEFT_H": 300.0}, "wall_left is 1200 mm deep, but its wall stops 300 mm up"),
+    ({"WALL_SKINS": [{"material": "fiberglass", "t": 0.05}, {"material": "fiberglass", "t": 0.05, "face": "in"}]},
+     "wall_left's fiberglass skin is 0.05 mm, but the frame study reads fiberglass as 0.25 mm: name the skin the wall has"),
+    ({"WALL_SKINS": ["paint", "fiberglass", "fiberglass"]}, "has a skin past its second with no face"),
+    ({"BEAM_CORE": "eps"}, "wall_left says 50.8 mm eps, but its wall wall_left is 50.8 mm xps"),
+    ({"BEAM_X1": 3000.0}, "wall_left lies in no wall the part is built from"),               # 1.5x its wall's length
+    ({"BEAM_DEPTH": 0.0}, "wall_left has no depth"),
+])
+def test_a_beam_the_frame_study_would_overrate_fails(box, knobs, said):
+    r = box(**knobs)["shell_in_walls"]
+    assert r.status == "fail" and said in r.detail, r.detail
+
+
+def test_keeps_that_aren_t_boxes_fail(box):
+    r = box(BAD_KEEPS=True)["keeps_clear"]
+    assert r.status == "fail" and r.detail.startswith("keeps() isn't a list of boxes"), r.detail

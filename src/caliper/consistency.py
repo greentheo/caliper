@@ -809,6 +809,32 @@ SHELL_TOL_MM = 2.0
 CORE_TOL_MM = 0.5
 
 
+def _wall_top(wall: list, nodes: list, near: float) -> float:
+    """How high a beam's wall goes (#404 review): the panels its foot lies in, then each panel joined to the top edge of
+    what's found so far (its lowest edge at that height, and touching it), as a cargo box's side strip runs on up its
+    curved bands to the roof. A neighbouring wall standing on the floor beside it isn't followed."""
+    found = list(wall)
+    top = max(float(n[2][:, 2].max()) for n in found)
+    grew = True
+    while grew:
+        grew = False
+        for n in nodes:
+            if any(n is f for f in found):
+                continue
+            pc, _, poly, _ = n
+            low = float(poly[:, 2].min())
+            if low < top - near - pc["thickness"] or low > top + near + pc["thickness"]:
+                continue
+            foot = poly[poly[:, 2] <= low + near]
+            joined = any((slab_distance(foot, fp, f[0]["thickness"], f[3]) <= near + pc["thickness"]).any() for f in found
+                         for fp in [f[2]])
+            if joined:
+                found.append(n)
+                top = max(top, float(poly[:, 2].max()))
+                grew = True
+    return top
+
+
 def _shell_in_walls(declared: dict, pieces: list[dict], tol: float) -> Optional[AssertionResult]:
     """``shell_in_walls`` (CALI-54, #1 slice C): each wall beam ``shell()`` gives a frame study lies in a wall the part is
     built from, of the core and thickness it says, with at least that wall's skins. A beam can sit anywhere, and the study
@@ -825,29 +851,49 @@ def _shell_in_walls(declared: dict, pieces: list[dict], tol: float) -> Optional[
     items = {it.get("name"): it for it in declared.get("construction") or [] if isinstance(it, dict)}
     declared_covers = {M.cover_name(c) for it in items.values() for c in it.get("covers") or []} | {
         it.get("material") for it in items.values() if it.get("kind") == "covering"}
+    nodes = [(pc, k, np.asarray(poly, float), (pc.get("sides") or [1.0] * len(pc["polys"]))[k])
+             for pc in sheets for k, poly in enumerate(pc["polys"])]
+    near_tol = max(tol, SHELL_TOL_MM)
     wrong = []
     for bm in beams:
-        a, b = (np.asarray(bm[k], float) for k in ("a", "b"))
-        up = np.array([0.0, 0.0, min(float(bm.get("depth") or 0) / 4.0, 100.0)])
-        pts = np.array([a + f * (b - a) + up for f in np.linspace(0.1, 0.9, 9)])
-        hits = []
-        for pc in sheets:
-            d = np.min([slab_distance(pts, poly, pc["thickness"], side)
-                        for poly, side in zip(pc["polys"], pc.get("sides") or [1.0] * len(pc["polys"]))], axis=0)
-            hits.append((d <= max(tol, SHELL_TOL_MM), pc))
-        covered = np.any([h for h, _ in hits], axis=0)
         name = bm.get("name") or "a wall beam"
+        depth = float(bm.get("depth") or 0)
+        if depth <= 0:
+            wrong.append(f"{name} has no depth")
+            continue
+        a, b = (np.asarray(bm[k], float) for k in ("a", "b"))
+        up = np.array([0.0, 0.0, min(depth / 4.0, 100.0)])
+        pts = np.array([a + f * (b - a) + up for f in np.linspace(0.1, 0.9, 9)])
+        hit = [slab_distance(pts, poly, pc["thickness"], side) <= near_tol for pc, _, poly, side in nodes]
+        covered = np.any(hit, axis=0)
         if not covered.all():
             far = int((~covered).sum())
             wrong.append(f"{name} lies in no wall the part is built from ({far} of {len(pts)} points along it)")
             continue
-        walls = [pc for h, pc in hits if h.any()]
-        for pc in walls:
+        wall = [n for h, n in zip(hit, nodes) if h.any()]
+        top = _wall_top(wall, nodes, near_tol)
+        foot = float(min(a[2], b[2]))
+        if foot + depth > top + max(near_tol, 0.02 * depth):          # #404 review: 2x its wall passed, 8x as stiff
+            wrong.append(f"{name} is {depth:g} mm deep, but its wall stops {top - foot:.0f} mm up")
+            continue
+        for pc in dict.fromkeys(n[0]["name"] for n in wall):
+            pc = next(n[0] for n in wall if n[0]["name"] == pc)
             if pc.get("material") != bm.get("core") or abs(pc["thickness"] - float(bm.get("core_t") or 0)) > CORE_TOL_MM:
                 wrong.append(f"{name} says {float(bm.get('core_t') or 0):g} mm {bm.get('core')}, but its wall "
                              f"{pc['name']} is {pc['thickness']:g} mm {pc.get('material')}")
                 break
-            have = [s["material"] for s in M.skins_of(items.get(pc["name"]) or {})]
+            sk = M.skins_of(items.get(pc["name"]) or {})
+            unsaid = [s for s in sk if s["face"] is None]
+            if unsaid:
+                wrong.append(f"{pc['name']} has a skin past its second with no face: say \"face\": \"out\" or \"in\"")
+                break
+            thin = [s for s in sk if abs(s["t"] - M.SKINS[s["material"]]["t"]) > max(0.01, 0.05 * M.SKINS[s["material"]]["t"])]
+            if thin:                                       # #404 review: a 0.05 mm skin read as the table's 0.25
+                s0 = thin[0]
+                wrong.append(f"{pc['name']}'s {s0['material']} skin is {s0['t']:g} mm, but the frame study reads "
+                             f"{s0['material']} as {M.SKINS[s0['material']]['t']:g} mm: name the skin the wall has")
+                break
+            have = [s["material"] for s in sk]
             says = [s for s in bm.get("skins") or [] if M.SKINS.get(s)]
             short = Counter(have) - Counter(says)            # counted: two skins aren't one (out and in)
             extra = [s for s in (Counter(says) - Counter(have)) if s not in declared_covers]

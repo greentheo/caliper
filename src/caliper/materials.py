@@ -124,7 +124,8 @@ def cover_name(cover) -> str:
 def skins_of(item: dict) -> list[dict]:
     """A sheet's skins that count in strength, as #351 reads them: ``[{"material", "t", "face"}]``. A skin is an
     ``SKINS`` key whose entry isn't None (``paint`` is weight only). ``t`` defaults to the table's; ``face`` is "out" (the
-    face its ``outline`` is drawn on) or "in" (``thickness`` away), by position where it isn't said: first out, second in."""
+    face its ``outline`` is drawn on) or "in" (``thickness`` away), by position where it isn't said: first out, second in;
+    a third with no face is None, said by the wall check (#351 reads the first two only)."""
     out = []
     for i, c in enumerate(item.get("covers") or []):
         name = cover_name(c)
@@ -133,7 +134,7 @@ def skins_of(item: dict) -> list[dict]:
             continue
         given = c if isinstance(c, dict) else {}
         out.append({"material": name, "t": float(given.get("t") or sk["t"]),
-                    "face": given.get("face") or ("out" if i == 0 else "in")})
+                    "face": given.get("face") or {0: "out", 1: "in"}.get(i)})   # a third says its own (#404 review)
     return out
 
 
