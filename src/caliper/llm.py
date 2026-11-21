@@ -44,6 +44,7 @@ JOBS = {
     "goals": Job(DEFAULT_MODEL, "medium", 8000),
     "promote": Job(DEFAULT_MODEL, "medium", 8000),
     "draw": Job(DEFAULT_MODEL, "medium", 8000),
+    "assess": Job(DEFAULT_MODEL, "high", 16000),     # CALI-160 (#238) slice B: a review, so effort high; room to think
 }
 #: The server re-runs a declined request on another model by itself, on these models (server-side refusal fallbacks).
 FALLBACK_BETA = "server-side-fallback-2026-07-01"

@@ -404,6 +404,31 @@ def _finding_rows(store: DesignStore, pid: str, name: str) -> list[dict]:
     return out
 
 
+#: A reading's row id starts so (#238 slice B): Fix these says it done, never fixed, as nothing measures it.
+READING = "reading:"
+
+
+def _reading_rows(store: DesignStore, pid: str, name: str) -> list[dict]:
+    """The last Review it's readings (#238 slice B) that name this part: Claude's reading, never measured, each its proposed
+    change. A reading of a version this part has moved on from says so ("read on v3; it's changed since")."""
+    from . import assess
+
+    rec = assess.latest(store)
+    if not rec:
+        return []
+    moved = assess.stale(store, rec)
+    out = []
+    for r in rec.get("readings") or []:
+        if pid not in (r.get("parts") or []):
+            continue
+        was = moved.get(pid)
+        badge = "Claude's reading" + (f" · read on v{was}; it's changed since" if was else "")
+        out.append({**_row(f"{READING}{rec.get('n')}:{r.get('id')}", r["said"][:1].upper() + r["said"][1:],
+                           [_choice(r["fix"].rstrip("."), DESIGNER, _designer_cost(name))], pid),
+                    "measured": False, "badge": badge, "stale": bool(was)})
+    return out
+
+
 def listed(store: DesignStore, state: dict, pid: str, *, findings: bool = True) -> dict:
     """``{"part", "rows", "limits"}``: the part's things to fix, measured, each ``{id, problem, choices, part,
     measured}`` with its choices ``{fix, kind, cost, ...}`` (a number's ``param``, ``value``, ``unit``; a check's
@@ -426,4 +451,5 @@ def listed(store: DesignStore, state: dict, pid: str, *, findings: bool = True) 
     rows += _scenario_rows(store, pid)           # its edited loads' questions, and cases turned off (#312)
     if findings:
         rows += _finding_rows(store, pid, name)
+        rows += _reading_rows(store, pid, name)       # Claude's reading, on the person's press, badged (#238 slice B)
     return {"part": pid, "rows": rows, "limits": list(dict.fromkeys(limits))}

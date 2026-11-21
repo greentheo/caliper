@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import Optional
 
 from .design import DesignStore
-from .fixes import CHECK, DESIGNER, LOADS, NUMBER, listed
+from .fixes import CHECK, DESIGNER, LOADS, NUMBER, READING, listed
 
 #: A row whose measurement comes from the strength check: gone from the list only means fixed after a fresh one.
 _FROM_CHECK = ("stale", "unsized", "finer", "filled", "plate:", "buckling:", "joint:", "fails:")
@@ -286,6 +286,10 @@ def apply(store: DesignStore, pid: str, picked: list[dict], own: Optional[list[d
         if item.get("own") and rid is None:                # the person's own: done, but nothing measures it
             results.append({"id": rid, "fix": item["fix"], "status": "done, not measured",
                             "why": "your words: nothing in the list measures them"})
+            continue
+        if str(rid).startswith(READING):                # Claude's reading: nothing measures it, so never fixed (#238 B)
+            results.append({"id": rid, "fix": item["fix"], "status": "done, not measured",
+                            "why": "Claude's reading: nothing measures it. Review again to have it read"})
             continue
         from_check = str(rid).startswith(_FROM_CHECK)
         if rid in after:
