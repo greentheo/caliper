@@ -98,3 +98,28 @@ def test_a_revert_that_breaks_a_design_check_says_it_in_words(tmp_path, monkeypa
     s.save()
     res = chat.revert_part(s, "a")
     assert "• apart: it measures " in res.reply and "actual=" not in res.reply, res.reply
+
+
+# --- #392 review (caliper-reviewer) --------------------------------------------------------------------------------------
+@pytest.mark.parametrize("actual,expr,said", [
+    (400.4, "height_mm == 400", "401"),              # over its target: up, never "400"
+    (399.6, "height_mm == 400", "399"),              # under it: down
+    (299.7, "300 <= height_mm <= 400", "299"),       # under the band: down, never onto 300
+    (400.3, "300 <= height_mm <= 400", "401"),       # over it: up
+    (2.849, WALL, "2.84"),                           # the computed limit (2.85) is a limit too
+    (5.04, "approx(height_mm, 5, 0.1)", "5.04"),     # no side to cut from: places added until it isn't 5.0
+    (-0.4, "seat_mm >= leg_gap_mm", "-0.400"),       # no number: three significant figures
+])
+def test_a_failing_number_is_cut_away_from_the_bound_it_misses(actual, expr, said):
+    assert part_rules.cut(actual, expr, failing=True) == said
+
+
+def test_a_rule_with_no_number_says_three_significant_figures():
+    assert part_rules.cut(0.2230384, "seat_mm > leg_gap_mm") == "0.223"
+    r = {"id": "seat_over_gap", "expr": "seat_mm > leg_gap_mm", "status": "pass", "actual": 0.2230384}
+    assert part_rules._said(r, None, False) == "seat over gap: it measures 0.223 (seat_mm > leg_gap_mm)"
+
+
+def test_the_card_and_the_chat_say_a_failing_equality_off_its_target():
+    r = {"id": "height", "expr": "height_mm == 400", "status": "fail", "actual": 400.4}
+    assert part_rules._said(r, None, False) == "height: it measures 401 (height_mm == 400)"
