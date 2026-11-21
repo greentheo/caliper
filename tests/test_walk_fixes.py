@@ -66,7 +66,7 @@ def _menu_labels(runs):
 
     keys = re.search(r"^const TREE_KEYS = .*$", src, re.M)
     script = (_STUBS.replace("DESIGN", design) + (keys.group(0) + "\n" if keys else "")
-              + "".join(_fn(src, n) for n in ("seen", "menuItems") + (("treeRows", "dropped", "nudge") if keys else ()))
+              + "".join(_fn(src, n) for n in ("seen", "menuItems") + (("groupOf", "treeOver", "crossesGroup", "groupName", "underPart", "treeRows", "dropped", "nudge") if keys else ()))
               + "\nconsole.log(JSON.stringify({ stool: menuItems(S.design, 'stool', null).map((i) => i.label), cone: menuItems(S.design, 'cone', null).map((i) => i.label) }));")
     got = subprocess.run([_node(), "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr

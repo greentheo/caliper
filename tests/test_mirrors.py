@@ -427,7 +427,7 @@ def test_the_tree_marks_a_mirror_and_offers_to_break_it(stool):
     state = design_api.design_state(stool)
     p = next(x for x in state["parts"] if x["id"] == "side_left")
     assert p["mirror_of"] == "side_right"
-    html = _js(["treeRows", "treeHtml", "renameRow"], "return treeHtml(%s, {parts: new Set(), pieces: new Set(), open: true, scope: null, canDrag: false});"
+    html = _js(["groupOf", "treeOver", "crossesGroup", "groupName", "treeRows", "treeHtml", "renameRow"], "return treeHtml(%s, {parts: new Set(), pieces: new Set(), open: true, scope: null, canDrag: false});"
                % __import__("json").dumps({"parts": [p], "tree": {}}), "const EYE_ON = '', EYE_OFF = ''; const pieceId = (a, b) => a + '/' + b;")
     assert "a mirror of side_right" in html and 'data-unmirror="side_left"' in html
     import os

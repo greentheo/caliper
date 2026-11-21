@@ -602,6 +602,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
         "parts": parts,
         "legend": tree.legend(parts),          # what the tree's swatches mean (#94)
         "tree": tree.layout(store),            # where the tree shows the parts: display only (#94, slice b)
+        "groups": store.design.groups,         # the plan's sub-assemblies, the tree's group nodes (#17); [] without
         "mates": [{"id": m.id, "between": m.between, "kind": m.kind} for m in store.assembly.mates],
         "rules": [{"id": a.id, "expr": a.expr} for a in store.assembly.assertions],
         "report": report.to_dict() if report is not None else None,
