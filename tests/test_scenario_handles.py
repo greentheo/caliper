@@ -80,7 +80,7 @@ const facePicked = () => FACE;
 const hitOn = (pid) => ({ object: { userData: { partId: pid } } });
 let phone = false; const panes = []; const onPhone = () => phone; const setPane = (p) => panes.push(p);
 // the part's frame: a stand-in that moves x by the part's position (the real one is three.js, tested below)
-const scenFrame = (p) => ({ dx: p && p.position ? p.position[0] : 0 });
+const partPose = (p) => ({ dx: p && p.position ? p.position[0] : 0 });
 const unposed = (v, f) => v.map((x, k) => (k % 3 === 0 ? x - f.dx : x));
 """
 
@@ -112,14 +112,14 @@ def test_a_posed_part_s_picked_box_is_in_its_own_frame():
 
 
 def test_the_frame_is_the_part_s_pose_and_unposing_undoes_it():
-    """scenFrame and unposed with the page's own three.js: a part at (100, 0, 0) turned 90° about z."""
+    """partPose and unposed with the page's own three.js: a part at (100, 0, 0) turned 90° about z."""
     src = open(JS).read()
     three = os.path.join(os.path.dirname(JS), "vendor", "three", "three.module.js")
-    script = (f"import * as THREE from {json.dumps('file://' + three)};\n" + _fn(src, "scenFrame") + _fn(src, "unposed")
-              + """const f = scenFrame({ position: [100, 0, 0], rotation: [0, 0, 90] });
+    script = (f"import * as THREE from {json.dumps('file://' + three)};\n" + _fn(src, "partPose") + _fn(src, "unposed")
+              + """const f = partPose({ position: [100, 0, 0], rotation: [0, 0, 90] });
 const posed = new THREE.Vector3(10, 0, 0).applyMatrix4(f);
 const back = unposed([posed.x, posed.y, posed.z], f);
-const none = scenFrame({ id: 'p' }).equals(new THREE.Matrix4());
+const none = partPose({ id: 'p' }).equals(new THREE.Matrix4());
 console.log(JSON.stringify({ posed: [posed.x, posed.y, posed.z].map((v) => Math.round(v * 1e6) / 1e6), back: back.map((v) => Math.round(v * 1e6) / 1e6), none }));""")
     got = subprocess.run([_node(), "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
@@ -132,7 +132,7 @@ def test_the_marks_are_drawn_in_the_part_s_frame():
     assert "scenMarks.matrix.copy(scenMatrixOf(p));" in _fn(src, "drawScenarios")
     assert "const own = p && p.bbox ? localBox(p.bbox, scenMatrixOf(p)) : null;" in _fn(src, "drawScenarios")
     assert "scenMarks.matrixAutoUpdate = false;" in src
-    assert "const box = faceBox(unposed(f.verts, scenFrame(partOf(pid))))" in _fn(src, "pickScenarioFace")
+    assert "const box = faceBox(unposed(f.verts, partPose(partOf(pid))))" in _fn(src, "pickScenarioFace")
 
 
 def test_a_support_s_box_becomes_the_face_clicked():
@@ -264,7 +264,7 @@ def _drag(body, pos=(0, 0, 0), rot=(0, 0, 0), cam=(50, -1000, 1), look=(50, 50, 
     three = os.path.join(os.path.dirname(JS), "vendor", "three", "three.module.js")
     head = (_DRAG.replace("POS", json.dumps(list(pos))).replace("ROT", json.dumps(list(rot)))
             .replace("CAM", ", ".join(map(str, cam))).replace("LOOK", ", ".join(map(str, look))))
-    names = ("scenFrame", "movedBox", "snapDir", "pickFromDir", "dirWords", "startScenDrag", "moveScenDrag", "handleAt")
+    names = ("partPose", "movedBox", "snapDir", "pickFromDir", "dirWords", "startScenDrag", "moveScenDrag", "handleAt")
     script = (f"import * as THREE from {json.dumps('file://' + three)};\n" + _consts_b2(src) + head
               + "".join(_fn(src, n) for n in names) + f"\nconsole.log(JSON.stringify((() => {{ {body} }})()));")
     got = subprocess.run([_node(), "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
@@ -303,9 +303,9 @@ def test_a_reopened_editor_draws_again():
 def test_the_floor_is_in_the_part_s_own_frame_not_posed_twice():
     """Should-fix 3: the floor came from the posed bbox and was drawn under the pose again. A part moved 500 along x and
     turned 90° about z: its own box is back at the origin, and z is untouched."""
-    got = _three("""const f = scenFrame({ position: [500, 0, 0], rotation: [0, 0, 90] });
+    got = _three("""const f = partPose({ position: [500, 0, 0], rotation: [0, 0, 90] });
       const posed = { min: [480, -40, 0], max: [520, 40, 10] };       // a 80 x 40 x 10 box, turned and moved
-      return localBox(posed, f);""", ("scenFrame", "localBox"))
+      return localBox(posed, f);""", ("partPose", "localBox"))
     assert got == {"min": [-40, -20, 0], "max": [40, 20, 10], "size": [80, 40, 10]}
 
 
@@ -382,3 +382,26 @@ def test_dropped_over_another_part_it_slides_on_its_plane_not_onto_that_part():
 
 def test_with_the_rows_not_on_screen_there_s_no_drag():
     assert _drag("rowsShown = false; return startScenDrag({ scenHandle: 'move', i: 0 });") is False
+
+
+# --- on #389's partPose (the second of #389 and #376 to land swaps scenFrame for it) --------------------------------------
+def test_a_box_picked_on_a_moved_turned_part_round_trips_to_where_it_was_picked():
+    """A flat face picked on a part moved (500, 200, 0) and turned 90° about z: saved in the part's own frame, as its
+    script's loads() are (#389), and drawn back under partPose, its box's corners are the face's picked corners again."""
+    got = _three("""const p = { position: [500, 200, 0], rotation: [0, 0, 90] }, frame = partPose(p);
+      // a face 40 x 20 on the part's top, in the design's frame where it's picked (posed)
+      const posed = [480, 160, 30, 500, 160, 30, 480, 200, 30, 500, 200, 30];
+      const box = faceBox(unposed(posed, frame), 0);
+      const back = [box.lo, box.hi].map((c) => new THREE.Vector3(...c).applyMatrix4(frame)).map((v) => [v.x, v.y, v.z].map(Math.round));
+      return { local: box, back };""", ("partPose", "unposed", "faceBox"))
+    assert got["local"] == {"lo": [-40, 0, 30], "hi": [0, 20, 30]}           # in its own frame: moved back, the turn undone
+    xs, ys = sorted(c[0] for c in got["back"]), sorted(c[1] for c in got["back"])
+    assert xs == [480, 500] and ys == [160, 200] and all(c[2] == 30 for c in got["back"])
+
+
+def test_the_marks_are_drawn_under_389_s_partpose_never_a_frame_of_their_own():
+    src = open(JS).read()
+    assert "function scenFrame" not in src and "scenFrame(" not in src
+    assert "const scenMatrixOf = (p) => partPose(p);" in src
+    assert "const box = faceBox(unposed(f.verts, partPose(partOf(pid))))" in _fn(src, "pickScenarioFace")
+    assert "const frame = partPose(partOf(pid)), inv = frame.clone().invert();" in _fn(src, "startScenDrag")

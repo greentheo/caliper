@@ -3903,13 +3903,7 @@ function arrowLen(n, most, reach) {            // the biggest load's arrow is th
 }
 // a part's own frame on the model (CALI-220, #375): rows are in the part's own frame, as its script's loads() are; drawn
 // under its pose, and a picked face's posed points brought back out of it. No pose said (main before #375): the identity
-function scenFrame(p) {
-  const m = new THREE.Matrix4();
-  if (!p || !Array.isArray(p.position) || !Array.isArray(p.rotation)) return m;
-  const r = new THREE.Euler(...p.rotation.map((d) => (Number(d) || 0) * Math.PI / 180), 'XYZ');
-  return m.compose(new THREE.Vector3(...p.position.map((v) => Number(v) || 0)), new THREE.Quaternion().setFromEuler(r), new THREE.Vector3(1, 1, 1));
-}
-const scenMatrixOf = (p) => scenFrame(p);    // one name for the frame the marks are drawn in
+const scenMatrixOf = (p) => partPose(p);    // one name for the frame the marks are drawn in: #389's partPose (the part's own)
 function localBox(bbox, frame) {               // a posed box's corners, back in the part's own frame, boxed again
   const inv = frame.clone().invert(), v = new THREE.Vector3(), lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   for (const x of [bbox.min[0], bbox.max[0]]) for (const y of [bbox.min[1], bbox.max[1]]) for (const z of [bbox.min[2], bbox.max[2]]) {
@@ -3977,7 +3971,7 @@ function drawScenarios() {
 // Theo: "maybe clicking and dragging the load arrow". A load's middle handle moves its box over the part (it snaps to the
 // surface under the pointer), its tail handle turns the arrow (snapping to the picker's named ways within 8°). The row's
 // fields follow as it moves and the numbers are said; nothing is saved until Save, as for a typed edit. All of it in the
-// part's own frame (scenFrame), as the rows are
+// part's own frame (partPose, #389), as the rows are
 function movedBox(lo, hi, c) {                 // the same box, its middle at c
   const r = (v) => Math.round(v * 10) / 10;
   return { lo: lo.map((v, a) => r(c[a] - (hi[a] - lo[a]) / 2)), hi: hi.map((v, a) => r(c[a] + (hi[a] - lo[a]) / 2)) };
@@ -4024,7 +4018,7 @@ function startScenDrag(h) {
   if (!got || !$('scenSave')) return false;
   const rows = readScenarios(got).scenarios, row = rows[h.i];
   if (!row || !row.lo) return false;
-  const frame = scenFrame(partOf(pid)), inv = frame.clone().invert();
+  const frame = partPose(partOf(pid)), inv = frame.clone().invert();
   const mid = new THREE.Vector3(...row.lo.map((v, a) => (v + row.hi[a]) / 2)).applyMatrix4(frame);
   const facing = new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), mid);
   S.scenDrag = { pid, i: h.i, what: h.scenHandle, lo: row.lo, hi: row.hi, frame, inv, mid, facing, moved: false };
@@ -4110,7 +4104,7 @@ async function pickScenarioFace(hit) {
   const got = S.scen[pid];
   if ($('scenSave')) Object.assign(got, readScenarios(got));   // what's typed in the other rows is kept (first: it's new arrays)
   const rows = at.kind === 'load' ? got.scenarios : got.supports;
-  const box = faceBox(unposed(f.verts, scenFrame(partOf(pid)))), what = String(f.said || 'that face').replace(/^face: /, '');   // the chip's "face: " isn't for a sentence
+  const box = faceBox(unposed(f.verts, partPose(partOf(pid)))), what = String(f.said || 'that face').replace(/^face: /, '');   // the chip's "face: " isn't for a sentence
   rows[at.i] = { ...rows[at.i], lo: box.lo, hi: box.hi };
   stopScenPick(`Picked ${what}`);
   repaintScen(pid);
