@@ -15,11 +15,10 @@ JS = os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "sta
 HTML = os.path.join(os.path.dirname(__file__), "..", "src", "caliper", "web", "static", "index.html")
 
 
-def _node():
-    for n in (os.path.expanduser("~/.nvm/versions/node/v22.17.1/bin/node"), shutil.which("node")):
-        if n and os.path.exists(n):
-            return n
-    pytest.skip("no node")
+def _node():                                   # a Node that imports three.js: 20 or newer (CALI-237)
+    from ._node import node
+
+    return node()
 
 
 def _fn(src, name):
