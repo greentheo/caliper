@@ -224,3 +224,12 @@ def test_two_presses_at_once_make_one_call_and_the_second_is_told_it_s_running(a
     again = c.post(f"/api/designs/{slug}/assess")                            # once it's over, it can be pressed again
     assert again.status_code == 200
     _wait(jobs.RUNNER.get(again.json()["job_id"]))
+
+
+def test_its_job_kind_is_the_reading_s_own():
+    """The route submits the job by its name, as every route does (test_part_menu reads each one's kind from the source),
+    and it's assess's own JOB, so the model and effort it runs at are the reading's."""
+    from caliper import assess
+
+    src = open(os.path.join(os.path.dirname(JS), "..", "..", "design_api.py")).read()
+    assert 'RUNNER.submit("assess", work,' in src and assess.JOB == "assess"

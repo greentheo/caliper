@@ -417,7 +417,8 @@ def test_every_part_job_is_submitted_saying_its_part():
             meta = next((k.value for k in node.keywords if k.arg == "meta"), None)
             kinds[node.args[0].value] = (isinstance(meta, ast.Call) and getattr(meta.func, "id", "") == "_on_part")
     assert {k for k, on in kinds.items() if on} == set(PART_JOBS), kinds
-    assert set(kinds) - set(PART_JOBS) == {"chat", "firstrun", "release", "clarify", "goals", "scorecard"}
+    # assess (Review it, #238): a reading of the whole design, every part at once, so no one part's (#396)
+    assert set(kinds) - set(PART_JOBS) == {"chat", "firstrun", "release", "clarify", "goals", "scorecard", "assess"}
 
 
 def _hold(kind, lock, meta, gate):

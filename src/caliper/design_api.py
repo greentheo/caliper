@@ -1794,7 +1794,7 @@ def router():
             return assess.run(DesignStore.load(slug))
 
         try:                                   # refused, never queued behind: two tabs made two calls (#396 review)
-            job = RUNNER.submit(assess.JOB, work, label=f"Claude's reading · {slug}", lock=f"assess:{slug}", exclusive=True)
+            job = RUNNER.submit("assess", work, label=f"Claude's reading · {slug}", lock=f"assess:{slug}", exclusive=True)   # assess.JOB
         except Busy:
             raise HTTPException(status_code=409, detail=assess.BUSY)
         return {"job_id": job.id}
