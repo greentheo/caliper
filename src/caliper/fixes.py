@@ -124,8 +124,10 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
     need = run.get("min_safety") or L.MIN_SAFETY
     stale = run.get("version") != p["version"]
     if stale:                                   # its numbers are of another version: none of them is this part's
-        rows.append(_row("stale", f"Its strength check is of v{run.get('version')}, not this version",
-                         [_choice("Check it again", CHECK, _check_cost((run.get("seconds") or 0) / 60))], pid))
+        # out of date, not measured wrong: nothing about this version is measured (#387: "2 measured wrong", one of them this)
+        rows.append({**_row("stale", f"Its strength check is of v{run.get('version')}, not this version",
+                            [_choice("Check it again", CHECK, _check_cost((run.get("seconds") or 0) / 60))], pid),
+                     "measured": False, "badge": "out of date"})
         return rows, limits
     filled = consistency.filled(store, pid)
     edge = consistency.bare_edge(store, pid)
@@ -142,6 +144,21 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
                           _choice(f"Give the {these} {'their' if many else 'its'} size: a declared section, in mm",
                                   DESIGNER, _designer_cost(name)),
                           _removed(store, pid, names, these, name)], pid))
+    # joints nothing checked, by hand or by the FEA (#383): what isn't, and the way to have them checked. Not a wrong
+    # measurement: a row that wasn't measured, so never "nothing measured wrong" beside it. It follows the one switch:
+    # while a pass on them is a ✓ with its note (Theo's #222), they're a known limit (#318), below, never a row too
+    joints_row = verdicts.JOINT_CAP != "holds"
+    unread = [b for c, _ in said for b in [verdicts.wood_brace(run, c)] if b is not None and not b.get("trim")]
+    if unread and joints_row:
+        b = max(unread, key=lambda b: len(b["names"]) if b.get("names") else int(b.get("joints_n") or 0))
+        n = len(b["names"]) if b.get("names") else int(b.get("joints_n") or 0)
+        what = ("; ".join(b["names"][:3]) + (f"; and {len(b['names']) - 3} more" if len(b["names"]) > 3 else "")
+                if b.get("names") else b.get("unchained") or "")
+        rows.append({**_row("joints_unchecked", f"{n} joint{'s' if n != 1 else ''} not checked"
+                                                + (f": {what}" if what else ""),
+                            [_choice("Say how each is made in its JOINTS entry (glue, screws, a block), so the check can "
+                                     "read it", DESIGNER, _designer_cost(name))], pid),
+                     "measured": False, "badge": "not checked"})
     thin, spacing = run.get("thinnest_mm"), run.get("spacing_mm")
     coarse = bool(thin and spacing) and not L._sees(run.get("across") or thin / spacing)
     unresolved = [c["name"] for c, v in said if v["kind"] in ("unresolved", "unchecked")]
@@ -291,7 +308,7 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
                            [c["name"]], f"'{c['name']}'"))
     for c, v in said:                           # what Caliper can't fix by itself: said apart, never ticked
         b = verdicts.wood_brace(run, c)          # joints #311 didn't reach, as the card reads them (#318 re-check)
-        if b:
+        if b and not (joints_row and not b.get("trim")):        # a row above says them, once
             words = joint_said(b, need).strip().rstrip(".")
             limits.append(words[:1].upper() + words[1:] if b.get("names") or b.get("unchained")
                           else "Its joints aren't checked: " + words)
@@ -433,6 +450,46 @@ def _reading_rows(store: DesignStore, pid: str, name: str) -> list[dict]:
     return out
 
 
+#: A round check's own fix, where the card's (``answers.fix_for``: the shape or its pieces) isn't it (CALI-238, #406).
+ROUND_FIX = {
+    "shell_in_walls": "Put each wall beam shell() gives in its wall, of that wall's core, thickness and skins",
+    "keeps_clear": "Keep the outside out of what keeps() holds clear: move or shrink the shape, or move the box it keeps",
+}
+#: Round checks a strength run's own row already speaks for, or that only warn: never a second row.
+_SAID_BY_RUN = {"construction_volume": "filled", "construction_covers": "filled"}
+_ONLY_WARN = {"loads_edge"}
+
+
+def _round_rows(store: DesignStore, pid: str, name: str, have: list[dict]) -> list[dict]:
+    """The checks that failed in the designer's round on the part as built, each a row (CALI-238, #406: the card said
+    them, Things to fix didn't): its words, as the card says them, and its fix. Measured, so after Fix these it reads
+    Fixed when the check passes on the new version."""
+    import re
+
+    from . import answers, consistency
+
+    try:
+        got = consistency.checked(store, pid)
+    except Exception:  # noqa: BLE001 — a part that can't be checked lists nothing it didn't measure
+        return []
+    ids = {r["id"] for r in have}
+    out = []
+    for r in got:
+        if r.status not in ("fail", "error") or r.id in _ONLY_WARN or _SAID_BY_RUN.get(r.id) in ids:
+            continue
+        detail = (r.detail or r.expr or r.id).strip()
+        if r.id.startswith("construction_"):
+            problem = f"Its 3D shape and its pieces don't match: {detail}"
+            said = answers.fix_for(r.id, detail, pid)
+            fix = (re.findall(r'"([^"]+)"', said) or [said])[0]          # the first of the card's own words
+        else:
+            first = detail.split(" ", 1)[0]
+            problem = detail if "_" in first else detail[:1].upper() + detail[1:]   # an id stays as it's written
+            fix = ROUND_FIX.get(r.id) or f"Make it pass its check {r.id.replace('_', ' ')}"
+        out.append(_row(f"check:{r.id}", problem, [_choice(fix, DESIGNER, _designer_cost(name))], pid))
+    return out
+
+
 def listed(store: DesignStore, state: dict, pid: str, *, findings: bool = True) -> dict:
     """``{"part", "rows", "limits"}``: the part's things to fix, measured, each ``{id, problem, choices, part,
     measured}`` with its choices ``{fix, kind, cost, ...}`` (a number's ``param``, ``value``, ``unit``; a check's
@@ -453,6 +510,7 @@ def listed(store: DesignStore, state: dict, pid: str, *, findings: bool = True) 
         rows += got
         limits += lim
     rows += _scenario_rows(store, pid)           # its edited loads' questions, and cases turned off (#312)
+    rows += _round_rows(store, pid, name, rows)  # what failed in the designer's round on it as built (#406)
     if findings:
         rows += _finding_rows(store, pid, name)
         rows += _reading_rows(store, pid, name)       # Claude's reading, on the person's press, badged (#238 slice B)

@@ -438,6 +438,10 @@ function menuItems(design, pid, piece) {
   if (p.study === 'carve') studied('carve', 'carve', ran('carve_runs') ? 'Carve it again' : 'Carve it');   // whichever made_of says
   else if (p.study === 'lighten') studied('lighten', 'lighten', ran('lighten_runs') ? 'Lighten it again' : 'Lighten it');
   items.push(p.mirror_of ? { id: 'unmirror', label: `Break the mirror (of ${p.mirror_of})` } : { id: 'mirror', label: 'Mirror it…' });
+  const by = design.parts.filter((q) => q.mirror_of === pid).map((q) => q.id);   // a mirror sits where its plane puts it (#294)
+  const stuck = p.mirror_of ? `it mirrors ${p.mirror_of}: move that, or break the mirror first`
+    : by.length ? `${by.join(', ')} ${by.length === 1 ? 'mirrors' : 'mirror'} it and wouldn't follow: break the mirror first` : '';
+  items.push({ id: 'copy', label: 'Copy…' }, { id: 'move', label: 'Move…', off: !!stuck, why: stuck });
   if (Object.values(TREE_KEYS).some((d) => nudge(design, pid, d))) items.push({ id: 'tmove', label: 'Move in the tree ▸' });   // a phone's drag (#94)
   items.push({ id: 'versions', label: 'Versions ▸' }, { id: 'copyName', label: 'Copy its name' });
   return items;
@@ -452,6 +456,79 @@ function treeMovesHtml(design, pid) {          // Move in the tree ▸: where it
     const by = dir === 'in' ? dropped(design, pid, to[0], to[1]).parent[pid] : parent[pid];
     return `<button role="menuitem" data-menu="tmove:${dir}">${esc(label.replace('{}', by ? name(by) : ''))}${onPhone() ? '' : ` <span class="why">${keys}</span>`}</button>`;   // a phone has no keys
   }).join('');
+}
+// Copy… and Move… (#294, Theo's addition): one form, where it goes and a turn, in the design's units. The server places
+// it (placing.py) and measures it where it lands
+const SIDES = [['+x', '+x'], ['-x', '−x'], ['+y', '+y'], ['-y', '−y'], ['+z', 'above (+z)'], ['-z', 'below (−z)']];
+function placeHtml(design, pid, kind) {
+  const p = design.parts.find((x) => x.id === pid), u = inches() ? 'in' : 'mm';
+  const show = (mm) => +(inches() ? mm / IN : mm).toFixed(inches() ? 3 : 1);
+  const mid = p.bbox ? p.bbox.min.map((v, i) => show((v + p.bbox.max[i]) / 2)) : [0, 0, 0];
+  const way = kind === 'copy' ? 'beside' : 'offset';
+  const xyz = (attr, vals, what) => ['x', 'y', 'z'].map((a, i) => `<label class="pnum">${a} <input type="text" inputmode="decimal" ${attr}="${i}" value="${vals[i]}" aria-label="${what} ${a}, in ${inches() ? 'inches' : 'mm'}"></label>`).join('');
+  const radio = (v, label) => `<label class="pway"><input type="radio" name="way" value="${v}"${v === way ? ' checked' : ''}> ${label}</label>`;
+  const parts = design.parts.filter((q) => kind === 'copy' || q.id !== pid)
+    .map((q) => `<option value="${esc(q.id)}"${q.id === pid ? ' selected' : ''}>${esc(q.id === pid ? `${q.label || q.name || q.id} (the original)` : q.label || q.name || q.id)}</option>`).join('');
+  return `<div class="pmenu-title">${kind === 'copy' ? 'Copy' : 'Move'} ${esc(p.label || p.name || p.id)}</div>
+    <form class="pform" data-place="${kind}" novalidate>
+      <fieldset><legend>Where, in ${u}</legend>
+        <div>${radio('offset', 'Along')}<div class="pxyz">${xyz('data-off', [0, 0, 0], 'Along')}</div></div>
+        <div>${radio('at', 'Its middle at')}<div class="pxyz">${xyz('data-at', mid, 'Its middle at')}</div></div>
+        ${parts ? `<div>${radio('beside', 'Beside')}<div class="pxyz"><select data-beside aria-label="Beside which part">${parts}</select>
+          on its <select data-side aria-label="Which side">${SIDES.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div></div>` : ''}
+      </fieldset>
+      <label class="pturn">Turn <select data-deg aria-label="Turn by">${[0, 90, 180, 270].map((d) => `<option value="${d}">${d}°</option>`).join('')}</select>
+        about <select data-axis aria-label="Turn about">${['z', 'x', 'y'].map((a) => `<option>${a}</option>`).join('')}</select></label>
+      <div class="pmenu-said" data-place-said>${kind === 'copy' ? "A part of its own, measured where it lands." : 'Measured where it lands. Put back returns it.'}</div>
+      <div class="pmenu-row"><button type="submit" class="primary">${kind === 'copy' ? 'Copy it' : 'Move it'}</button>
+        <button type="button" role="menuitem" data-menu="keep">Cancel</button></div>
+    </form>`;
+}
+function placeBody(form) {                     // the form, in mm, as the server takes it; null with the form saying why
+  const way = (form.querySelector('input[name="way"]:checked') || {}).value, mm = (v) => (inches() ? v * IN : v);
+  const nums = (attr) => [...form.querySelectorAll(`[${attr}]`)].map((i) => Number(String(i.value).trim() || '0'));
+  const body = {};
+  if (way === 'offset' || way === 'at') {
+    const got = nums(way === 'offset' ? 'data-off' : 'data-at');
+    if (got.some((v) => !Number.isFinite(v))) {
+      form.querySelector('[data-place-said]').textContent = 'x, y and z are numbers.';
+      return null;
+    }
+    body[way] = got.map(mm);
+  } else if (way === 'beside') {
+    body.beside = { part: form.querySelector('[data-beside]').value, side: form.querySelector('[data-side]').value };
+  }
+  const deg = Number(form.querySelector('[data-deg]').value);
+  if (deg) body.turn = { axis: form.querySelector('[data-axis]').value, deg };
+  return body;
+}
+async function place(form) {
+  const m = S.menu, kind = form.dataset.place, body = placeBody(form);
+  if (!m || !body) return;
+  const pid = m.pid, slug = S.slug, go = form.querySelector('button[type="submit"]');
+  go.disabled = true;                            // taken once
+  const said = form.querySelector('[data-place-said]');
+  said.textContent = kind === 'copy' ? 'Copying, then measuring where it lands…' : 'Moving, then measuring where it lands…';
+  let got;
+  try {
+    got = await api('POST', `/api/designs/${slug}/parts/${pid}/${kind}`, body);
+  } catch (e) {
+    go.disabled = false;
+    said.textContent = plainly(e.message);       // said in the form: change it and go again
+    return;
+  }
+  if (S.slug !== slug) return;
+  closeMenu();
+  S.design = got.state;
+  if (kind === 'copy') setScope(got.part); else render();
+  say(got.said, kind === 'move' ? async () => {  // Put back: where it was found, as a move of its own
+    try {
+      const back = await api('POST', `/api/designs/${S.slug}/parts/${pid}/move`, { to: got.from });
+      S.design = back.state; render(); say(back.said);
+      await syncParts(S.design, false);
+    } catch (e) { showErr(plainly(e.message)); }
+  } : null, kind === 'copy');
+  await syncParts(S.design, false);
 }
 function versionsHtml(p) {                     // Versions ▸: each other version, newest first, with what was asked of it (#299)
   const said = {};
@@ -512,6 +589,7 @@ function openMenu(pid, piece, x, y, from) {
     const b = e.target.closest('[data-menu]');
     if (b && b.getAttribute('aria-disabled') !== 'true') menuDo(b.dataset.menu);
   });
+  box.addEventListener('submit', (e) => { e.preventDefault(); place(e.target); });   // Copy… / Move…'s form (#294)
   document.body.appendChild(box);
   placeMenu(box, x, y);
   menuFocus(0);
@@ -565,6 +643,12 @@ async function menuDo(id) {
   if (id === 'deletePieceYes') return deletePiece(pid, piece, m.plan);
   if (id === 'versions') return menuConfirm(versionsHtml(S.design.parts.find((x) => x.id === pid)));   // ▸ (#299)
   if (id === 'tmove') return menuConfirm(treeMovesHtml(S.design, pid));
+  if (id === 'copy' || id === 'move') {        // the placing form, in the menu; its first box takes the keys (#294)
+    menuConfirm(placeHtml(S.design, pid, id));
+    const box = $('partMenu');
+    if (box) { box.setAttribute('role', 'dialog'); const first = box.querySelector('input[name="way"]:checked'); if (first) first.focus(); }
+    return;
+  }
   if (id === 'keep') return closeMenu();
   if (id === 'deleteYes' || id === 'deleteBoth') return deletePart(pid, id === 'deleteBoth' ? m.mirroredBy || [] : []);
   if (id === 'unmirrorThem') {                 // its mirrors become parts of their own; then it's asked again
@@ -617,7 +701,7 @@ async function deletePart(pid, also) {
     menuConfirm(`<div class="pmenu-said">${esc(plainly(said))}</div><div class="pmenu-row"><button role="menuitem" data-menu="keep">OK</button></div>`);
   }
 }
-function say(text, act) {                      // a line at the foot of the page: what the menu did, and Put back
+function say(text, act, stay) {                // a line at the foot of the page: what the menu did, and Put back
   let bar = $('putBack');
   if (!bar) {
     bar = document.createElement('div');
@@ -632,7 +716,7 @@ function say(text, act) {                      // a line at the foot of the page
     else if (act && e.target.closest('[data-putback]')) act();
   };
   clearTimeout(say.t);
-  if (!act) say.t = setTimeout(() => { bar.hidden = true; }, 4000);
+  if (!act && !stay) say.t = setTimeout(() => { bar.hidden = true; }, 4000);   // stay: a copy's words, read before they go
 }
 function putBack(said, gone) {
   say(said, async () => {
@@ -679,7 +763,8 @@ addEventListener('pointerdown', (e) => { if ($('partMenu') && !e.target.closest(
 addEventListener('keydown', (e) => {
   if ($('partMenu')) {
     if (e.key === 'Escape') { e.preventDefault(); closeMenu(); return; }
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); menuFocus(e.key === 'ArrowDown' ? 1 : -1); }
+    const field = /INPUT|SELECT/.test(e.target.tagName);   // the placing form's boxes keep their own keys (#294)
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !field) { e.preventDefault(); menuFocus(e.key === 'ArrowDown' ? 1 : -1); }
     return;
   }
   const a = document.activeElement;
@@ -916,7 +1001,7 @@ async function syncParts(design, refit) {
   const loads = [];
   for (const p of design.parts) {
     const have = meshes.get(p.id);
-    if (have && have.userData.version === p.version && have.userData.origin === p.origin
+    if (have && have.userData.drawn === (p.drawn ?? p.version) && have.userData.origin === p.origin
         && have.userData.role === p.role) continue;
     loads.push((async () => {
       const r = await fetch(p.stl_url);
@@ -929,7 +1014,7 @@ async function syncParts(design, refit) {
       if (S.slug !== slug) return;
       geom.computeVertexNormals();
       const mesh = new THREE.Mesh(geom, material(p));
-      mesh.userData = { partId: p.id, version: p.version, origin: p.origin, role: p.role };
+      mesh.userData = { partId: p.id, version: p.version, drawn: p.drawn ?? p.version, origin: p.origin, role: p.role };   // drawn: moved (#294)
       const old = meshes.get(p.id);
       if (old) { scene.remove(old); old.geometry.dispose(); }
       meshes.set(p.id, mesh);
@@ -956,7 +1041,7 @@ function dropPieces(pid) {
 // every piece or none: a part that can't be cut into its pieces stays one body (a shape that isn't closed, say)
 async function loadPieces(p) {
   const got = await Promise.all(p.pieces.map(async (pc) => {
-    const r = await fetch(`/api/designs/${S.slug}/parts/${p.id}/piece.stl?key=${encodeURIComponent(pc.key)}&v=${p.version}`);
+    const r = await fetch(`/api/designs/${S.slug}/parts/${p.id}/piece.stl?key=${encodeURIComponent(pc.key)}&v=${encodeURIComponent(p.drawn ?? p.version)}`);
     if (!r.ok) {
       const said = await r.json().catch(() => ({}));
       throw new Error(typeof said.detail === 'string' ? said.detail : `the server answered ${r.status}`);
@@ -978,15 +1063,15 @@ async function syncPieces(design) {
   const slug = S.slug;
   if (piecesOf !== slug) { [...pieces3d.keys()].forEach(dropPieces); noPieces.clear(); piecesOf = slug; }
   const want = new Map(design.parts.filter((p) => (p.pieces || []).length && p.role !== 'fixed').map((p) => [p.id, p]));
-  for (const [pid, s] of pieces3d) if (!want.has(pid) || want.get(pid).version !== s.version) dropPieces(pid);
+  for (const [pid, s] of pieces3d) if (!want.has(pid) || (want.get(pid).drawn ?? want.get(pid).version) !== (s.drawn ?? s.version)) dropPieces(pid);   // moved too (#294)
   await Promise.all([...want.values()].filter((p) => !pieces3d.has(p.id) && (noPieces.get(p.id) || {}).version !== p.version).map(async (p) => {
     try {
       const byKey = await loadPieces(p);
       if (S.slug !== slug) return;                // two designs can share a part's id and version
-      if (!S.design || !S.design.parts.some((x) => x.id === p.id && x.version === p.version)) return;   // it moved on
+      if (!S.design || !S.design.parts.some((x) => x.id === p.id && x.version === p.version && x.drawn === p.drawn)) return;   // it moved on
       dropPieces(p.id);
       for (const m of byKey.values()) scene.add(m);
-      pieces3d.set(p.id, { version: p.version, byKey });
+      pieces3d.set(p.id, { version: p.version, drawn: p.drawn ?? p.version, byKey });
     } catch (e) {
       if (S.slug !== slug) return;
       noPieces.set(p.id, { version: p.version, why: plainly(e.message) });
@@ -1238,9 +1323,10 @@ function pickPosted(text) {
 function dropOldPick() {
   if (!S.pick || !S.design) return;
   const part = S.design.parts.find((p) => p.id === S.pick.part);
-  if (part && part.version === S.pick.version) return;
+  if (part && part.version === S.pick.version && (part.drawn ?? part.version) === (S.pick.drawn ?? S.pick.version)) return;
+  const moved = part && part.version === S.pick.version;   // a Move… keeps its version and moves what was picked (#294)
   clearPick();
-  pickHint('Rebuilt: click it again');
+  pickHint(moved ? 'Moved: click it again' : 'Rebuilt: click it again');
 }
 function clearPick() {
   S.pick = null;
@@ -1277,7 +1363,7 @@ async function loadFeatures(pid) {
 }
 // asked once per part, version and unit, however many clicks wait on it
 async function features(pid) {
-  const part = S.design.parts.find((p) => p.id === pid), key = `${pickKey(pid, part.version)}/${S.design.display_units}`;
+  const part = S.design.parts.find((p) => p.id === pid), key = `${pickKey(pid, part.drawn ?? part.version)}/${S.design.display_units}`;   // moved: its faces moved too (#294)
   if (!PICK.parts.has(key)) PICK.parts.set(key, loadFeatures(pid));
   try { return await PICK.parts.get(key); } catch (e) { PICK.parts.delete(key); throw e; }
 }
@@ -1330,6 +1416,8 @@ async function choose(e, hit) {
     const curve = new THREE.CatmullRomCurve3(edge.points.map((p) => new THREE.Vector3(...p)));
     drawPick(new THREE.TubeGeometry(curve, Math.max(2, edge.points.length * 2), Math.max(1, 0.003 * camera.position.distanceTo(new THREE.Vector3(...edge.centre))), 6, false));
   }
+  const now = S.design && S.design.parts.find((p) => p.id === pid);   // a design left meanwhile has none
+  if (S.pick && now) S.pick.drawn = now.drawn ?? now.version;   // where it sat when picked (#294)
   renderScope();
 }
 function setPickMode(mode) {
@@ -2388,14 +2476,27 @@ function fixPicked(part) {
     own: (mine.own || []).filter((o) => !o.off).map((o) => ({ fix: o.fix })),
   };
 }
+// the list's rows said apart (#368's counts, #387): a check of another version, the person's own loads and Claude's readings
+// aren't "measured wrong". From the server's counts; counted the same way where a list has none
+function fixCounts(got) {
+  if (got.counts) return got.counts;
+  const rows = got.rows || [], readings = rows.filter((r) => String(r.id || '').startsWith('reading:')).length;
+  const measured = rows.filter((r) => r.measured !== false).length;
+  return { measured, readings, other: rows.length - measured - readings };
+}
+function fixesSaid(c) {
+  return [c.measured ? `${c.measured} measured wrong` : '', c.readings ? `${c.readings} of Claude's readings` : '',
+    c.other ? `${c.other} not measured` : ''].filter(Boolean).join(' · ');
+}
 // Things to fix as a section of Will it work? (#325): its mark and its count once its list is read
 function fixesSection(part) {
   const got = S.fixes && S.fixes[fixKey(part)], fresh = fixFresh(part), failed = !!got && got.error != null;
-  const n = fresh ? (got.rows || []).length : null;
+  const n = fresh ? (got.rows || []).length : null, c = fresh ? fixCounts(got) : null;
   const unchecked = n === 0 && !fixChecked(part);     // an empty list with nothing measured isn't a ✓ (#331 review)
-  return { k: 'fix', title: 'Things to fix', tone: n == null || unchecked ? 'info' : n ? 'warn' : 'ok',
+  // only what's measured wrong, or Claude's reading of it, is a warning; a row of neither is never a ✓ either
+  return { k: 'fix', title: 'Things to fix', tone: n == null || unchecked ? 'info' : c.measured || c.readings ? 'warn' : n ? 'info' : 'ok',
     answer: failed ? "couldn't read them" : n == null ? 'measured, with what each would take' : unchecked ? 'not checked yet'
-      : n ? `${n} measured wrong` : 'nothing measured wrong',
+      : n ? fixesSaid(c) : 'nothing measured wrong',
     attrs: ` id="fixBox" data-fix-part="${esc(part)}"`,
     body: `<div id="fixBody">${fresh || failed ? fixesView(got, fixMine(part)) : '<div class="small muted">reading them…</div>'}</div>` };
 }

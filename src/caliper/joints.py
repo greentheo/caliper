@@ -434,6 +434,30 @@ def namer(store, pid: str):
     return name
 
 
+def piece_namer(store, pid: str):
+    """``name(point)``: the piece a point in the script's frame is on, by the name the tree shows it by (the person's label,
+    else its key), or None: off every piece, or on a seam where two are as near (#376 follow-up: a picked face said "the flat
+    face, 1.8 in up", never whose). The same test as :func:`namer`, a piece's surface within twice the tolerance."""
+    from . import tree
+
+    pieces, tol = _pieces_of(store, pid)
+    if not pieces:
+        return lambda point: None
+    try:                                         # fasteners keys a second "side" "side #2"; the tree, "side 2"
+        names = {pc["key"]: pc["name"] for pc in tree.pieces(store, pid)}
+    except Exception:  # noqa: BLE001 — said by its key
+        names = {}
+
+    def name(point) -> Optional[str]:
+        P = np.asarray(point, float).reshape(1, 3)
+        near = sorted((_distance(pc, P), pc["key"]) for pc in pieces)
+        if not near or near[0][0] > 2.0 * tol or (len(near) > 1 and near[1][0] <= near[0][0] + 0.5):
+            return None
+        key = near[0][1]
+        return names.get(key.replace(" #", " "), names.get(key, key))
+    return name
+
+
 def asked_kind(text: str) -> Optional[str]:
     """The kind of joint a request asks for ("make that a rabbet"), or None."""
     import re

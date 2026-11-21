@@ -528,7 +528,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
         # "make it 2 in wider" on a one-part design is that part, not a new one named "part" (#65)
         return Intent(action="refine", part=ids[0], note="a change, and the design has one part")
     if wants_new or not ids:
-        new_id = part_id_from(message, set(ids))
+        new_id = part_id_from(message, set(ids) | {g["id"] for g in store.design.groups})   # never a group's (#399)
         return Intent(action="author", part=new_id, intent=(message or "").strip(),
                       note="the first part of the design" if not ids else "asks for a new part")
 
@@ -613,7 +613,8 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
     if action in ("refine", "revert") and part not in ids:
         raise ValueError(f"{action} targets unknown part {part!r}")
     if action == "author":
-        part = part if part and part not in ids else part_id_from(message, ids)
+        taken = set(ids) | {g["id"] for g in store.design.groups}                # never a group's name (#399)
+        part = part if part and part not in taken else part_id_from(message, taken)
     several: list = []
     if action == "refine":
         named = [str(x) for x in (data.get("parts") or []) if x]
