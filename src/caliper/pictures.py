@@ -18,7 +18,6 @@ one: can you cut a T-rex out of a panel and still hold Dad?
 from __future__ import annotations
 
 import json
-import os
 import re
 from typing import Callable, Optional
 
@@ -104,7 +103,7 @@ def draw(subject: str, *, use_llm: bool = True, client=None, model: Optional[str
     for name, pts in BUILT_IN.items():
         if name in key:
             return _unit(pts)
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             if client is None:
                 from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash

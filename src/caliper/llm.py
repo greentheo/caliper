@@ -73,10 +73,16 @@ NO_KEY = ("That needs Claude, which isn't set up here: put a Claude API key in A
           "(see .env.example), then start Caliper again")
 
 
+def has_key() -> bool:
+    """Whether Claude can be asked here: an API key, or the auth token the SDK also takes. The one check every gate asks
+    (#372 review: the client took the token, the gates didn't)."""
+    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+
+
 def client():
     """The Claude client every request is made with, or :class:`NoKey` where there's no key (CALI-217, #366: the client
     was made anyway and failed inside the request as a TypeError, read as a crash). Raised before anything is sent."""
-    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):   # the SDK takes either
+    if not has_key():
         raise NoKey(NO_KEY)
     from anthropic import Anthropic  # lazy; may be absent
 

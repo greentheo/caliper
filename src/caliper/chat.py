@@ -636,7 +636,7 @@ def classify(store: DesignStore, message: str, scope: Optional[str] = None, *,
         out = classifier(store, message, scope)
         out.source = out.source or "injected"
         return out
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             return llm_classify(store, message, scope, client=client)
         except Exception as e:  # noqa: BLE001 — routing must degrade, not crash the turn
@@ -1159,7 +1159,7 @@ def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = 
                model: Optional[str] = None) -> str:
     """The part's description after a revision: re-described from the new script by Claude, or offline, the
     old one with the latest change said after it (never silently out of date)."""
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             if client is None:
                 from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
@@ -2036,7 +2036,7 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
         return TurnResult(action="answer", ok=True, part=scope, events=events, reply=note.split(": ", 1)[1])
     if note.startswith("offer a picture: "):           # "make it look like a dinosaur": offered, not done (#65)
         return TurnResult(action="answer", ok=True, part=scope, events=events, reply=_offer(note.split(": ", 1)[1]))
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             return TurnResult(action="answer", ok=True, part=scope, events=events,
                               reply=explain(store, message, scope, client=client))
@@ -2345,7 +2345,7 @@ def skeleton_edit(store: DesignStore, message: str, *, client=None, use_llm: boo
     from . import verdicts
 
     events = events if events is not None else []
-    if not P._said_numbers(message) or not (use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY"))):
+    if not P._said_numbers(message) or not (use_llm and (client is not None or llm.has_key())):
         return None
     try:
         before, after = P.revise(store, message, client=client)
@@ -2369,7 +2369,7 @@ def plan_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = 
     from . import plan as P
 
     events = events if events is not None else []
-    if not (use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY"))):
+    if not (use_llm and (client is not None or llm.has_key())):
         return TurnResult("plan", "Changing the plan needs Claude, and it isn't set up here. Press Build it to "
                                   "go on with the plan as it is.", ok=False, events=events)
     _emit(events, on_event, "step", "Changing the plan")

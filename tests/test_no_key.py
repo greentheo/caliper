@@ -165,3 +165,31 @@ def test_an_auth_token_counts_as_a_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "test-token-not-real")
     assert llm.client() is not None
+
+
+def test_api_gen_with_no_key_is_a_422_said_once(monkeypatch):
+    """#372 re-check: /api/gen answered 503, "authoring needs the Claude API: That needs Claude…", the words doubled."""
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    from caliper.server import create_app
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    got = TestClient(create_app()).post("/api/gen", json={"intent": "an L bracket, 60 mm, four M5 holes"})
+    assert got.status_code == 422 and got.json()["detail"] == llm.NO_KEY, got.json()
+
+
+def test_every_gate_asks_the_one_has_a_key_check(monkeypatch):
+    """#372 re-check: the client took ANTHROPIC_AUTH_TOKEN, but the page's gate and the routing asked for the API key."""
+    from caliper import design_api, firstrun
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "test-token-not-real")
+    assert llm.has_key() and design_api._claude() and firstrun._llm(True, None)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN")
+    assert not (llm.has_key() or design_api._claude() or firstrun._llm(True, None))
+    here = os.path.join(os.path.dirname(chat.__file__), "*.py")
+    asks = {os.path.basename(f) for f in glob.glob(here) if re.search(r'environ\.get\("ANTHROPIC_(API_KEY|AUTH_TOKEN)"\)',
+                                                                       open(f).read())}
+    assert asks == {"llm.py"}, asks

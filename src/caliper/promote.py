@@ -565,7 +565,7 @@ def draft(store: DesignStore, part: str, feedback: str, *, use_llm: bool = True,
     """Claude when available, patterns otherwise — and drafting never crashes a turn."""
     if drafter is not None:
         return drafter(store, part, feedback)
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             got = llm_draft(store, part, feedback, client=client)
             if got.proposal is not None or not got.measurable:

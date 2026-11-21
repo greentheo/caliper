@@ -187,7 +187,7 @@ def propose(store: DesignStore, said: str, *, use_llm: bool = True, client=None)
     data = read(store)
     if not ours(data):
         return None
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             return draft(store, said, data, client=client)
         except llm.Stopped as e:
