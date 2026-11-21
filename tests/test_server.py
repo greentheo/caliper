@@ -165,6 +165,7 @@ def test_refine_routes_authored_through_author_loop(tmp_path, monkeypatch):
     assert r.json()["script"] == script
 
 
+@pytest.mark.nightly                      # long, and no verdict rests on it (CALI-219, #367)
 def test_fit_end_to_end(tmp_path, monkeypatch):
     pytest.importorskip("cadquery")
     import base64

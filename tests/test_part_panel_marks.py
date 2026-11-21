@@ -34,7 +34,7 @@ function mark(runs, rows, stamp) {
 
 
 def _fix(body):
-    return _run(_page(["fixesSection", "fixFresh", "fixStamp", "fixChecked", "fixesView"],
+    return _run(_page(["fixesSection", "fixFresh", "fixStamp", "fixChecked", "fixesView", "fixCounts", "fixesSaid"],
                       consts=["fixKey"], extra=FIX + body))
 
 
@@ -240,7 +240,7 @@ globalThis.fetch = async (...a) => { asked += 1; return read(...a); };
 def test_a_failed_read_of_things_to_fix_says_so_and_is_read_again():
     """reviewer-2 at 09c753c: a 500 from /fixes beside "✗ Will it hold? · doesn't hold 1.0x" read "✓ Things to fix ·
     nothing measured wrong", and stayed ✓ once the server's list had 3 rows."""
-    got = _run(_page(["loadFixes", "fixesSection", "fixFresh", "fixStamp", "fixChecked", "fixesView", "wireFixes", "api"],
+    got = _run(_page(["loadFixes", "fixesSection", "fixFresh", "fixStamp", "fixChecked", "fixesView", "wireFixes", "api", "fixCounts", "fixesSaid"],
                      consts=["fixKey"], extra=FETCH + FAILING + """
 const box = { dataset: { fixPart: 'stool' }, open: false };
 const $ = (id) => (id === 'fixBox' ? box : null);

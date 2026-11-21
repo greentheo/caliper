@@ -297,9 +297,9 @@ def test_the_header_badge_is_never_green_or_red_for_a_check_that_hasn_t_run():
     import shutil
     import subprocess
 
-    node = shutil.which("node") or ""
-    if not node:
-        pytest.skip("no node")
+    from ._node import node as _pick
+
+    node = _pick()                             # 20 or newer, or it skips saying why (CALI-237)
     import os
     import re
 

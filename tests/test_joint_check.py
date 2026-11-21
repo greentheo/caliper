@@ -293,7 +293,7 @@ def test_when_every_joint_is_checked_the_note_goes_and_one_it_can_t_keeps_it_nam
     _, said = studied(dado)
     assert said["joints_unchecked"] == ["the joint between the front and the left (a dado)"]
     assert not [r for r in said["cases"][0]["joints"]["rows"] if sorted(r["pieces"]) == ["front", "left"]]   # no number for it
-    assert verdicts.brace_why(verdicts.wood_brace(said)) == "1 joint not checked by hand"   # the badge: short
+    assert verdicts.brace_why(verdicts.wood_brace(said)) == "1 joint not checked"   # the badge: short
     assert verdicts.wood_brace(said)["names"] == ["the joint between the front and the left (a dado)"]   # the line names it
 
 
@@ -588,7 +588,7 @@ def _brace_words(c, run=None):
 def test_a_case_whose_path_can_t_be_followed_counts_all_its_joints_and_says_why_once():
     c = {"joints": {"n": 8, "chain": False, "rows": [], "governing": None, "unchecked": [JC.NOT_CHAIN]}}
     b, badge, line = _brace_words(c)
-    assert badge == "8 joints not checked by hand", badge
+    assert badge == "8 joints not checked", badge
     assert line == "not checked by hand: its load path isn't a simple chain", line
     assert line.count("simple chain") == 1
 
@@ -604,7 +604,7 @@ def test_the_badge_counts_what_that_case_left_unchecked():
     c = {"joints": {"n": 10, "chain": True, "rows": [{"safety": 3.3}], "governing": {"safety": 3.3},
                     "unchecked": ["the joint between the stringer and the left side (a notch)"]}}
     b, badge, line = _brace_words(c, {"wood_joints": 2, "joints_unchecked": ["x", "y"]})
-    assert badge == "1 joint not checked by hand"                                    # this case's, not the run's 2
+    assert badge == "1 joint not checked"                                    # this case's, not the run's 2
     assert line == "the joint between the stringer and the left side (a notch) isn't checked by hand"
     assert _brace_words({"joints": {"n": 4, "chain": True, "rows": [{"safety": 3.0}], "unchecked": []}})[0] is None
 
@@ -635,7 +635,7 @@ def test_a_case_s_verdict_says_its_own_unchecked_joints_not_the_run_s():
     c = {"name": "an adult", "lb": 200, "factor": 2.0, "safety": 3.1, "governs": "fea", "holds": True,
          "joints": {"n": 10, "chain": True, "rows": [{"safety": 4.0}], "governing": {"safety": 4.0},
                     "unchecked": ["the joint between the a and the b (a dado)"]}}
-    assert verdicts.case(RUN, c)["why"] == "1 joint not checked by hand"
+    assert verdicts.case(RUN, c)["why"] == "1 joint not checked"
     clean = {**c, "joints": {**c["joints"], "unchecked": []}}
     assert not verdicts.case(RUN, clean).get("joints")                                # every joint of it checked: no cap
 
@@ -647,7 +647,7 @@ def test_a_lightening_step_reads_its_cases_joints():
           "cases": [{"safety": 3.0, "joints": {"n": 10, "chain": True, "rows": [{"safety": 4.0}], "unchecked": []}}]}
     assert not verdicts.lighten_step(st, None, RUN).get("joints")                    # its cases checked every joint
     st["cases"][0]["joints"]["unchecked"] = ["the joint between the a and the b (a dado)"]
-    assert verdicts.lighten_step(st, None, RUN)["why"] == "1 joint not checked by hand"
+    assert verdicts.lighten_step(st, None, RUN)["why"] == "1 joint not checked"
 
 
 def test_a_push_away_from_one_joint_slides_on_another_before_it_pulls():
@@ -1020,7 +1020,7 @@ def test_carries_none_under_a_sideways_case_says_racking_isn_t_checked_and_the_c
     assert JC.RACKING_SAID == "carries none with the sides held at the floor: racking isn't checked"
     assert f"the joint between the stringer and the left side ({JC.RACKING_SAID})" in got["unchecked"], got["unchecked"]
     brace = V.wood_brace(None, {"joints": got})                                 # never a plain "holds"
-    assert brace and any("racking" in n for n in brace["names"]) and "not checked by hand" in V.brace_why(brace)
+    assert brace and any("racking" in n for n in brace["names"]) and "not checked" in V.brace_why(brace)
     down = JC.check(su, _load(store), held, 2.0, mat=PLY)                        # straight down: as it was
     assert {r["between"]: r for r in down["rows"]}["the stringer and the left side"]["said"] == "carries none of this load"
     assert not [u for u in down["unchecked"] if "stringer" in u] and V.wood_brace(None, {"joints": down}) is None

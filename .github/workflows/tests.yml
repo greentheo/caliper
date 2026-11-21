@@ -7,9 +7,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  # everything, the nightly tail too (CALI-219, #367): each PR and push runs `not nightly`
+  schedule:
+    - cron: "17 9 * * *"          # 09:17 UTC, 02:17 in Colorado: after the night's merges
+  workflow_dispatch:              # the whole suite on demand, from the Actions tab
 
 concurrency:
-  group: tests-${{ github.ref }}
+  # by event too: a push to main never cancels the night's whole run
+  group: tests-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -69,6 +74,14 @@ jobs:
       - name: The optional tools, at the refs the Makefile pins
         run: make tools CALIPER_PY=python
 
+      - name: Which tests (CALI-219), a PR or a push leaving the nightly tail to the scheduled run
+        run: |
+          if [ "${{ github.event_name }}" = schedule ] || [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            echo "TAIL=" >> "$GITHUB_ENV"; echo "the whole suite, the nightly tail too"
+          else
+            echo "TAIL= and not nightly" >> "$GITHUB_ENV"; echo "every test but the nightly tail (the scheduled run has it)"
+          fi
+
       - name: Test, across the runner's cores (CALI-114)
         env:
           CALIPER_CHROME: none          # no headless Chrome here: build books skip the PDF
@@ -76,9 +89,9 @@ jobs:
           OMP_NUM_THREADS: "1"
           MKL_NUM_THREADS: "1"
           OPENBLAS_NUM_THREADS: "1"
-        run: python -m pytest -n auto --durations=25 -m "not serial"
+        run: python -m pytest -n auto --durations=25 -m "not serial$TAIL"
 
       - name: Test what can't share, on its own
         env:
           CALIPER_CHROME: none
-        run: python -m pytest -m serial --durations=10 || test $? -eq 5      # 5: no serial tests yet
+        run: python -m pytest -m "serial$TAIL" --durations=10 || test $? -eq 5      # 5: no serial tests (yet, or left)
