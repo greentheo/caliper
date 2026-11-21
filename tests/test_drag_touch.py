@@ -21,7 +21,7 @@ const fire = (k, e) => [...(on[k] || [])].forEach((f) => f(e || {}));
 const live = () => Object.fromEntries(Object.entries(on).map(([k, v]) => [k, v.size]));
 let reach = null; const handleAt = (e, near) => { reach = near; return { scenHandle: 'move', i: 0 }; };
 const startScenDrag = () => true, moveScenDrag = () => calls.push('move'), endScenDrag = () => calls.push('end');
-const press = (type) => scenPress({ button: 0, pointerType: type, clientX: 1, clientY: 1, stopPropagation() {}, preventDefault() {} });
+const press = (type, id) => scenPress({ button: 0, pointerType: type, pointerId: id, clientX: 1, clientY: 1, stopPropagation() {}, preventDefault() {} });
 """
 
 
@@ -78,3 +78,16 @@ def test_a_check_of_this_version_is_never_called_older():
     """Its newest check is of v8, this version: no "again", and never "its check is of v8"."""
     got = _trial([{"part": "stool", "version": 8, "id": "r3"}, {"part": "stool", "version": 4, "id": "r2"}])
     assert "of v8" not in got and "Check it again first: its check is of v4" in got
+
+
+@pytest.mark.parametrize("ending", ["pointerup", "pointercancel"])
+def test_a_second_finger_neither_moves_nor_ends_the_drag(ending):
+    """#403 review: the drag follows the pointer that took the handle. A second finger on the screen (a pinch starting, a
+    palm) moving or lifting is another gesture's."""
+    got = _js(f"""press('touch', 1);
+                  fire('pointermove', {{ pointerId: 2 }}); fire('{ending}', {{ pointerId: 2 }}); const after2 = live();
+                  fire('pointermove', {{ pointerId: 1 }}); fire('{ending}', {{ pointerId: 1 }});
+                  return {{ after2, after1: live(), calls }};""")
+    assert got["after2"] == {"pointermove": 1, "pointerup": 1, "pointercancel": 1}          # still its own
+    assert got["after1"] == {"pointermove": 0, "pointerup": 0, "pointercancel": 0}
+    assert got["calls"] == ["move", "end"]                                                  # only the first finger's move

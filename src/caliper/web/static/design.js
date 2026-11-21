@@ -4171,8 +4171,12 @@ function scenPress(e) {                       // a handle, before the view's own
   e.stopPropagation(); e.preventDefault();
   // it ends however the press does: let go, or cancelled (the browser took the gesture, a call, a palm). A cancel sends no
   // pointerup, and the listeners left would drag on the next hover or touch (#378 review). Unsaved either way, as any drag
-  const move = (ev) => moveScenDrag(ev);
-  const end = () => {
+  // the finger (or mouse) that took the handle drives it: a second finger's moves, lift or cancel are another
+  // gesture's, never this drag's (#403 review)
+  const mine = (ev) => ev.pointerId == null || e.pointerId == null || ev.pointerId === e.pointerId;
+  const move = (ev) => { if (mine(ev)) moveScenDrag(ev); };
+  const end = (ev) => {
+    if (ev && !mine(ev)) return;
     removeEventListener('pointermove', move); removeEventListener('pointerup', end); removeEventListener('pointercancel', end);
     endScenDrag();
   };
