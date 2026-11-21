@@ -1488,6 +1488,12 @@ function renderScope() {
 $('scopeClear').onclick = () => setScope(null);
 
 // --------------------------------------------------------------------------------- the thread
+// what only the person can say before it's built (#371): the plan keeps it, and Build it builds nothing while it's open,
+// so it's said above the button, not only in the reply that comes back when it's pressed
+const planAsks = (d) => (d && d.plan && d.plan.questions) || [];
+function asksHtml(qs) {
+  return qs.length ? `<div class="asks">${qs.map((q) => `<div class="small" style="color:var(--amber)"><b>Before I build it:</b> ${esc(q)}</div>`).join('')}</div>` : '';
+}
 function renderThread() {
   const t = $('thread');
   const d = S.design;
@@ -1542,8 +1548,9 @@ function renderThread() {
   if (unbuilt && d.claude === false) {             // a build needs Claude: said, not a job bound to fail (CALI-91)
     html.push('<div class="note">Building a new design needs a Claude key (see .env.example). Until then, open one of ours from New design.</div>');
   } else if (unbuilt) {
-    html.push(`<div class="actions"><button class="primary" id="buildFirst">Build it</button>
-      <span class="muted small">or say what to build first</span></div>`);
+    const asks = planAsks(d);                       // a question open: the button would only ask it again
+    html.push(`${asksHtml(asks)}<div class="actions"><button class="primary" id="buildFirst"${asks.length ? ' disabled' : ''}>Build it</button>
+      <span class="muted small">${asks.length ? "say it below, and I'll change the plan" : 'or say what to build first'}</span></div>`);
   }
   if (simplerOffered(d)) {
     html.push(`<div class="actions simpler"><button class="ghost small" data-say="Say that again in simpler words, for a kid.">
@@ -2184,6 +2191,7 @@ function designView(d) {
         : `<button class="ghost small" data-shopoffer="${i}" data-add="1">Add it</button>
       <button class="ghost small" data-shopoffer="${i}" data-add="0">No</button>`}</div>`).join('')}
     ${d.plan ? `<h4>The plan <span class="badge">${d.plan.status === 'review' ? 'to review' : 'saved'}</span></h4>
+      ${asksHtml(planAsks(d))}
       <ol class="list">${d.plan.parts.map((x) => `<li><b>${esc(x.id.replace(/_/g, ' '))}</b>
         ${x.role === 'fixed' ? (x.source === 'assumed' ? '<span class="badge">assumed: you have it? say if not</span>' : '<span class="badge ref">you have it</span>') : ''}${x.built ? '<span class="badge ok">built</span>' : ''}
         <div class="muted small">${esc(x.what)}${x.made ? ` · ${esc(x.made)}` : ''}${x.mounts_on.length
@@ -2233,7 +2241,9 @@ function answersKey() {               // what the answers depend on: a change to
   return JSON.stringify([S.slug, shownPart(), d.building || null, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
     runs(d.carve_runs), runs(d.lighten_runs),
     (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
-    (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey, d.display_units]);
+    (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey,
+    // the plan: answered, its question goes, and What is it? stops saying "answer its question first" (#393 review)
+    d.plan ? [d.plan.status, (d.plan.parts || []).map((x) => x.id), d.plan.questions || []] : null, d.display_units]);
 }
 // a card's lines, and under a part's Will it work? its Things to fix (#300): one painter, for the first draw and the
 // fill when its answers come in (a fill with qlines alone dropped the list)
