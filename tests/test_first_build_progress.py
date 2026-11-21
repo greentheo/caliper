@@ -257,7 +257,7 @@ def test_pressing_build_it_redraws_the_cards_so_they_stop_saying_press_build_it(
 
 
 def _key(design):
-    return _run("const S = {slug: 's', scope: null, design: " + design + "};\n" + _fn(open(JS).read(), "answersKey")
+    return _run("const S = {slug: 's', scope: null, design: " + design + "};\n" + "".join(_fn(open(JS).read(), n) for n in ("soleFor", "shownPart", "answersKey"))
                 + "console.log(JSON.stringify(answersKey()));")
 
 

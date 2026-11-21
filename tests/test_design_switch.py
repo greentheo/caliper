@@ -44,7 +44,7 @@ def _run(names, body: str, head: str = HEAD) -> dict:
 
 
 def test_the_slow_design_arrives_last_and_is_dropped():
-    got = _run(("openDesign",), """const a = openDesign('slow'), b = openDesign('quick');
+    got = _run(("soleFor", "openDesign",), """const a = openDesign('slow'), b = openDesign('quick');
         answer('quick', design('quick')); await b;
         answer('slow', design('slow')); await a;
         return { open: S.slug, shown: S.design.slug, log };""")
@@ -53,14 +53,14 @@ def test_the_slow_design_arrives_last_and_is_dropped():
 
 
 def test_back_to_the_first_design_shows_the_first_design():
-    got = _run(("openDesign",), """const a = openDesign('one'), b = openDesign('two'), c = openDesign('one');
+    got = _run(("soleFor", "openDesign",), """const a = openDesign('one'), b = openDesign('two'), c = openDesign('one');
         answer('one', design('one')); await c;
         return { shown: S.design.slug };""")
     assert got == {"shown": "one"}
 
 
 def test_a_refresh_for_the_design_left_is_dropped():
-    got = _run(("openDesign", "refresh"), """S.slug = 'old'; S.design = design('old');
+    got = _run(("soleFor", "openDesign", "refresh"), """S.slug = 'old'; S.design = design('old');
         const r = refresh();
         S.slug = 'new'; S.design = null;
         answer('old', design('old')); await r;
@@ -272,20 +272,20 @@ def test_a_load_that_fails_says_why():
 
 
 def test_opening_a_design_that_fails_doesn_t_throw_and_is_said():
-    got = _run(("openDesign",), """const go = openDesign('bad');
+    got = _run(("soleFor", "openDesign",), """const go = openDesign('bad');
         later.bad; const k = later['bad'];
         return { waiting: typeof k };""")
     assert got == {"waiting": "function"}
     head = HEAD.replace("const api = (m, url) => new Promise((r) => { later[url.split('/').pop()] = r; });",
                         "const api = async () => { throw new Error('gone'); };")
-    got = _run(("openDesign",), "await openDesign('bad'); return { failed, opening: S.opening };", head)
+    got = _run(("soleFor", "openDesign",), "await openDesign('bad'); return { failed, opening: S.opening };", head)
     assert got == {"failed": [["bad", "gone"]], "opening": "bad"}
 
 
 def test_a_failure_for_a_design_left_says_nothing():
     head = HEAD.replace("const api = (m, url) => new Promise((r) => { later[url.split('/').pop()] = r; });",
                         "const api = async () => { S.slug = 'other'; throw new Error('gone'); };")
-    assert _run(("openDesign",), "await openDesign('bad'); return { failed };", head) == {"failed": []}
+    assert _run(("soleFor", "openDesign",), "await openDesign('bad'); return { failed };", head) == {"failed": []}
 
 
 def test_new_design_during_a_load_ends_the_load():

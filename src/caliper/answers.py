@@ -281,6 +281,16 @@ def joint_said(row: dict, need) -> str:
             f"the {row['piece']} is held square at its top by its joint to the {row['braced_by']}, which isn't checked")
 
 
+def fail_said(pairs, inches: bool) -> Optional[str]:
+    """The line for a part whose worst failing case may be the model's fail (#139): that case's own hedge, or None where
+    the worst fail is settled or there's none. ``pairs`` are ``(run, case)``. The design card's ✗ and the scorecard say
+    it from here, of the case the refusal names (``verdicts.worst_fail``, #355)."""
+    w = verdicts.worst_fail(pairs)
+    if w is None or not w[2].get("coarse"):
+        return None
+    return fail_hedge(*w, inches).strip() or coarse(w[0], inches, holds=False)
+
+
 def fail_hedge(run: dict, c: dict, v: dict, inches: bool) -> str:
     """What a ✗ adds about where it fails and how sure (#137 item 2), the same words on the part card and the design
     card (#139 review: the design card named the 0.25 mm webs, the part card the 5.2 mm wall at the peak). "" when
@@ -890,9 +900,9 @@ def measured(store: DesignStore, state: dict) -> dict:
     if held:                                           # a ✓ can't rest on an FEA that can't see the wall (CALI-97)
         r, v = held[0]                                 # or on another check while the FEA couldn't see a wall (#244, #248)
         out["strength.unresolved"] = (unseen_said(r, v)[:1].upper() + unseen_said(r, v)[1:]) if v.get("why") else coarse(r, inches)
-    failed = [(r, c, v) for (r, c), (_, v) in zip(cases, said) if v["kind"] == "fails" and v.get("coarse")]
-    if failed:                                         # ...and a ✗ on one says it, as the part card does (#139)
-        out["strength.coarse_fail"] = fail_hedge(*failed[0], inches).strip() or coarse(failed[0][0], inches, holds=False)
+    hedge = fail_said(cases, inches)                   # the refusal's case, its own doubt (#139, #339, #355)
+    if hedge:
+        out["strength.coarse_fail"] = hedge
     # a breaking load from a run that can't see its walls isn't one to read, and never the rest's smallest (#191 review)
     gone = next(((r, v) for (r, c), (_, v) in zip(cases, said) if c.get("breaks_lb") and (v["kind"] not in verdicts.SETTLED or v.get("coarse"))), None)
     if gone:
@@ -937,6 +947,7 @@ def measured(store: DesignStore, state: dict) -> dict:
     if safeties:
         out["strength.safety"] = min(safeties)
         # the case that number is, for what it's against (#208 review: the design card as the part card says it)
+        # a failing part's lowest supported case is its worst fail, the one every line names (#355)
         worst = min(((r, c) for r, c in cases if c.get("safety") is not None
                      and (c.get("fea") or {}).get("supported") is not False), key=lambda rc: rc[1]["safety"], default=None)
         if worst is not None and abs(worst[1]["safety"] - out["strength.safety"]) < 1e-9:

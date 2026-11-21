@@ -288,6 +288,14 @@ def test_a_refused_move_is_said():
     assert got == {"errs": ["no"], "redraws": 1}
 
 
+def test_a_move_says_whether_it_saved():
+    """The keys and the menu say a move only once it's saved (#360 review)."""
+    got = _drag("""const ok = await moveInTree('c', 'a', 'into'); answer = () => { throw new Error('no'); };
+                   const refused = await moveInTree('d', 'a', 'into'); const nowhere = await moveInTree('a', 'a', 'into');
+                   return { ok, refused, nowhere: !!nowhere };""")
+    assert got == {"ok": True, "refused": False, "nowhere": False}
+
+
 def _html(view):
     src = open(JS).read()
     head = "const esc = (s) => String(s); const EYE_ON = 'o', EYE_OFF = 'x'; const renameRow = () => '';\nconst D = " + json.dumps(
@@ -301,12 +309,12 @@ def _html(view):
 
 def test_on_a_desktop_rows_can_be_dragged_and_are_indented():
     h = _html("canDrag: true")
-    assert h.count('draggable="true"') == 2 and "margin-left:18px" in h and "needs a wider window" not in h
+    assert h.count('draggable="true"') == 2 and "margin-left:18px" in h and "Hold a part" not in h
 
 
 def test_on_a_phone_rows_can_t_and_the_drawer_says_so():
     h = _html("canDrag: false")
-    assert "draggable" not in h and "Moving parts needs a wider window" in h
+    assert "draggable" not in h and "Hold a part to move it" in h          # its menu moves it now (#94, test_tree_keys)
 
 
 def test_the_tree_says_what_it_s_waiting_for():
@@ -358,7 +366,7 @@ def test_a_switch_clears_the_waiting_line():
 def _render(phone, saying="null"):
     src = open(JS).read()
     head = ("const esc = (s) => String(s); const EYE_ON = 'o', EYE_OFF = 'x'; const renameRow = () => '';\n"
-            "const box = { hidden: false, innerHTML: '' }; const $ = (id) => (id === 'tree' ? box : null);\n"
+            "const box = { hidden: false, innerHTML: '', contains: () => false }; const $ = (id) => (id === 'tree' ? box : null);\n"
             "const document = { activeElement: { id: 'body' } }; const noPieces = new Map();\n"
             "const S = { slug: 'x', scope: null, piece: null, pick: false, design: " + json.dumps(
                 {"parts": [{"id": "a", "version": 1}, {"id": "b", "version": 1}], "tree": {}}) + " };\n"
@@ -372,8 +380,8 @@ def _render(phone, saying="null"):
 
 def test_the_real_tree_drags_on_a_desktop_and_not_on_a_phone():
     """reviewer-2 on #204: eight mutants on renderTree's wiring survived; it's run here, not its parts."""
-    assert _render("false").count('draggable="true"') == 2 and "needs a wider window" not in _render("false")
-    assert "draggable" not in _render("true") and "Moving parts needs a wider window" in _render("true")
+    assert _render("false").count('draggable="true"') == 2 and "Hold a part" not in _render("false")
+    assert "draggable" not in _render("true") and "Hold a part to move it" in _render("true")
     assert "Waiting for the job on this design" in _render("false", "'Waiting for the job on this design to finish…'")
 
 
