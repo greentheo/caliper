@@ -389,7 +389,7 @@ out.thin = carveTime(p);
     # the reasons themselves are the server's, from the same default check (#144 review): pinned in test_wording
 
 
-PANEL = ["runCarve", "followCarve", "carveProgress", "paintCarve", "wireCarve"]
+PANEL = ["soleFor", "shownPart", "runCarve", "followCarve", "carveProgress", "paintCarve", "wireCarve"]
 STUBS = """
 const ran = () => '';
 const carveKey = (pid) => pid;

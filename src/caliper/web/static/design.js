@@ -1275,15 +1275,23 @@ async function loadDesigns(select) {
 $('designPick').onchange = (e) => e.target.value && openDesign(e.target.value);
 $('newBtn').onclick = startNew;
 
-// a design with one part opens on that part (#362): its action bar (Check it holds, #325) and cards are there at first look.
-// Theo's step-stool-5 opened on the design view, which has the part's Parameters but no bar. A lone reference isn't opened on
+// a design with one part shows that part's own view (#362): its action bar (Check it holds, #325), panels and cards are there
+// at first look. Theo's step-stool-5 opened on the design view, which has the part's Parameters but no bar. A lone reference
+// isn't shown so
 function soleFor(design) {
   const parts = design.parts || [];
   return parts.length === 1 && parts[0].role !== 'fixed' ? parts[0].id : null;
 }
+// the part whose view the panel shows: the one picked, or a one-part design's own part unless the person asked for the whole
+// design. Never the chat's scope (#364 review: scoped from the first look, "add a matching bench" revised the stool), so a
+// message goes exactly as it did; S.scope stays the chip, the tree's selection and what a message is about
+function shownPart() {
+  return S.scope || (S.design && !S.whole ? soleFor(S.design) : null);
+}
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
+  S.piece = null; S.focus = null; S.whole = false;     // nothing picked on the last design comes over (#364 review: its "left side")
   if (first) { S.fixes = {}; S.fixOpen = null; }      // the list is this design's; your own rows are kept per design (#318)
   if (first) { dropBuildFollow(); clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
   location.hash = encodeURIComponent(slug);
@@ -1292,7 +1300,6 @@ async function openDesign(slug) {
   try { got = await api('GET', `/api/designs/${slug}`); } catch (e) { if (S.slug === slug) loadFailed(slug, e); return; }
   if (S.slug !== slug) return;                  // another design was chosen while this one loaded (#168)
   S.design = got;
-  S.scope = soleFor(got);                       // on its one part (#362); the design view is the chip's × away
   doneLoading();
   render();
   sayMissed();
@@ -2035,7 +2042,7 @@ function wireParams(p) {
 function renderInspector() {
   const el = $('inspector'), d = S.design;
   if (!d) return;
-  const p = S.scope && d.parts.find((x) => x.id === S.scope);
+  const shown = shownPart(), p = shown && d.parts.find((x) => x.id === shown);
   const was = document.activeElement, typing = was && was.dataset && was.dataset.param ? [was.id, was.selectionStart, was.selectionEnd] : null;
   el.innerHTML = `<div id="jobNote"></div>${p ? partView(p) : designView(d)}`;
   wireInspector(p);
@@ -2121,7 +2128,8 @@ function designView(d) {
     ${checks(rep || partChecks(d))}`;
   const buy = d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : '';
   const make = `<h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>`;
-  return `<h2>${esc(d.name)} ${status}</h2>
+  const back = soleFor(d) ? `<div class="small"><button class="linkish" data-whole="0">◂ ${esc(d.parts[0].name || d.parts[0].id)}: check it, fix it, make it</button></div>` : '';
+  return `<h2>${esc(d.name)} ${status}</h2>${back}
     ${d.parts.length === 1 ? `<div id="paramBox">${paramView(d.parts[0])}</div>` : ''}
     ${cardsView({ what, work, buy, make })}`;
 }
@@ -2138,7 +2146,7 @@ const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', relea
 function answersKey() {               // what the answers depend on: a change to any of it asks again
   const d = S.design;
   const runs = (list) => (list || []).map((r) => [r.id, r.status]);   // a finished carve or Lighten changes the offers (#159)
-  return JSON.stringify([S.slug, S.scope, d.building || null, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
+  return JSON.stringify([S.slug, shownPart(), d.building || null, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
     runs(d.carve_runs), runs(d.lighten_runs),
     (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
     (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey, d.display_units]);
@@ -2248,7 +2256,7 @@ function fixAct(part) {
 // the bar's Fix these drawn again, alone, as the list lands or a tick changes: the other buttons keep their wiring
 function paintFixAct(part) {
   const bar = $('pacts');
-  if (!bar || S.scope !== part) return;
+  if (!bar || shownPart() !== part) return;
   const old = $('fixGo'), html = fixAct(part);
   if (old) old.remove();
   if (html) bar.insertAdjacentHTML('beforeend', html);
@@ -2695,7 +2703,7 @@ async function loadAnswers() {
   if (S.answers && S.answers.key === key && (S.answers.loading || S.answers.cards)) return;
   S.answers = { key, loading: true };
   try {
-    const got = await api('GET', `/api/designs/${S.slug}/answers${S.scope ? `?part=${encodeURIComponent(S.scope)}` : ''}`);
+    const got = await api('GET', `/api/designs/${S.slug}/answers${shownPart() ? `?part=${encodeURIComponent(shownPart())}` : ''}`);
     if (!S.answers || S.answers.key !== key) return;              // it moved on while we asked
     S.answers = { key, cards: got.cards };
   } catch (e) { S.answers = { key, cards: [], error: e.message }; }
@@ -3024,7 +3032,7 @@ function partView(p) {
   const work = ssecs('work', [
     !p.framed && (p.built || p.loads) && p.role !== 'fixed' && { k: 'result', title: 'Will it hold? <span class="badge">strength</span>', ...checked,
       body: `<div id="loadBox">${loadView(p)}</div>` },
-    S.scope && p.role !== 'fixed' && fixesSection(p.id),
+    shownPart() && p.role !== 'fixed' && fixesSection(p.id),
     p.study === 'lighten' && lightenShown(p, runs) && { k: 'lighten', title: 'Make it lighter', ...later(light, 'not lightened yet'),
       body: lightenView(p) },
     p.study === 'carve' && (runs.length || carveRuns(p.id).length) && { k: 'carve', title: 'Carve it <span class="badge">printed, any shape</span>',
@@ -3049,14 +3057,18 @@ function partView(p) {
         : 'the sheets laid out flat', body: `<div id="cutplanBox">${cutplanView(p)}</div>` }]) : '';
   // the heading is the part's own name; its id and how it was made are one click down, under Advanced (#70 item 21);
   // its actions beside it, its numbers under it, then the four questions (#325)
+  const whole = !S.scope ? '<button class="linkish small" data-whole="1">The whole design ▸</button>' : '';   // its one part, unpicked (#364)
   return `<div class="parthead"><div><h2>${esc(p.name || p.id)}</h2>
-    <div class="muted small">v${p.version}</div></div>${partActions(p)}</div>
+    <div class="muted small">v${p.version} ${whole}</div></div>${partActions(p)}</div>
     <div id="paramBox">${paramView(p)}</div>
     ${cardsView({ what, work, buy, make })}`;
 }
 
 function wireInspector(p) {
   document.querySelectorAll('#inspector [data-part]').forEach((a) => { a.onclick = () => setScope(a.dataset.part); });
+  document.querySelectorAll('#inspector [data-whole]').forEach((b) => {   // a one-part design: its part's view, or the whole design's (#364)
+    b.onclick = () => { S.whole = b.dataset.whole === '1'; renderInspector(); };
+  });
   showMarks();
   wireCards();
   // keep a check the planner assumed: it's enforced from then on (CALI-115)
@@ -3150,7 +3162,7 @@ async function loadBuilt(p, tried) {
   } catch (e) { S.built[p.id] = { version: p.version, tried: tried || {}, error: e.message }; }
   S.balance = null;                       // the design's balance changes with any part's what-if
   const box = $('buildBox');
-  if (box && S.scope === p.id) { box.innerHTML = buildView(p); wireBuilt(p); showMarks(); }
+  if (box && shownPart() === p.id) { box.innerHTML = buildView(p); wireBuilt(p); showMarks(); }
 }
 
 function picker(k, ch, v) {
@@ -3271,7 +3283,7 @@ async function loadMaking(p, key) {
   try { S.making[p.id] = { key, data: await api('GET', `/api/designs/${S.slug}/parts/${p.id}/making`) }; }
   catch (e) { S.making[p.id] = { key, error: e.message, status: e.status }; }
   const box = $('makingBox');
-  if (!box || S.scope !== p.id || key !== makingKey(p)) return;    // another part or design on screen by now
+  if (!box || shownPart() !== p.id || key !== makingKey(p)) return;    // another part or design on screen by now
   box.innerHTML = makingView(p); wireMaking();
   const sec = box.closest('details'), head = sec && sec.querySelector('summary'), x = makingSection(p);
   if (head) head.innerHTML = subHead(x);           // its header, drawn before its plan came back (#331 review)
@@ -3972,7 +3984,7 @@ function carveProgress(pid) {
 }
 function paintCarve(pid) {
   const prog = $('carveProgress'), go = $('carveGo');
-  if (S.scope !== pid) return;
+  if (shownPart() !== pid) return;
   const part = ((S.design && S.design.parts) || []).find((x) => x.id === pid);
   // a carve its check blocks stays off after a job ends (#136 review: Cancel re-enabled "Carve it again")
   if (go) go.disabled = !!S.carveJob[carveKey(pid)] || !!(part && carveBlocked(part));
@@ -4453,7 +4465,7 @@ function paintJobs() {
   const lines = [];
   document.querySelectorAll('#inspector [data-job-off]').forEach(jobOn);
   for (const t of jobsHere()) {
-    const here = t.kind === 'release' || S.scope === t.part, panel = here ? $(JOB_BOX[t.kind]) : null;
+    const here = t.kind === 'release' || shownPart() === t.part, panel = here ? $(JOB_BOX[t.kind]) : null;
     const box = panel && panel.closest && panel.closest('details:not([open]), [hidden]') ? null : panel;   // folded away isn't on screen
     if (box) { box.innerHTML = jobHtml(t, false); box.dataset.job = t.job; } else lines.push(jobHtml(t, true));
     const go = here && $(JOB_GO[t.kind]);
@@ -5243,7 +5255,7 @@ async function checkWhittle() {
   dot.className = 'dot ' + (S.whittle.ok ? 'ok' : 'bad');
   dot.title = S.whittle.ok ? `whittle is running at ${S.whittle.url}` : (S.whittle.error || 'whittle is not reachable');
   // redraw only when whittle came up or went down — a periodic redraw would wipe a half-filled form
-  if (was !== S.whittle.ok && S.scope && !document.querySelector('#wProgress .bar, #aProgress .bar, #lProgress .bar')) renderInspector();
+  if (was !== S.whittle.ok && shownPart() && !document.querySelector('#wProgress .bar, #aProgress .bar, #lProgress .bar')) renderInspector();
 }
 checkWhittle();
 setInterval(checkWhittle, 15000);
