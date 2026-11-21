@@ -435,6 +435,15 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
 .pmenu-row { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 6px 6px; }
 .pmenu-row [data-menu] { width: auto; border: 1px solid var(--line); }
 .pmenu .danger { color: var(--bad); }
+/* Copy… and Move…'s form (#294) */
+.pform { padding: 0 8px 4px; font-size: 13px; }
+.pform fieldset { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pform legend { font-size: 12px; color: var(--muted); padding: 0 0 4px; }
+.pform .pway { display: flex; gap: 4px; align-items: center; }
+.pform .pxyz { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 2px 0 0 22px; }
+.pform .pnum input { width: 56px; }
+.pform select, .pform input[type="text"] { font: inherit; font-size: 13px; }
+.pform .pturn { display: block; margin: 8px 0 0; }
 .putback { position: fixed; right: 16px; bottom: 16px; z-index: 55;           /* clear of the chat's Send */ display: flex; gap: 10px;
   align-items: center; max-width: calc(100vw - 32px); padding: 8px 12px; background: rgba(23,28,34,.97);
   border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }

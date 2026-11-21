@@ -153,7 +153,7 @@ def test_a_part_that_holds_with_nothing_measured_wrong_has_no_rows(tmp_path):
     store = _store(tmp_path, BOX_STOOL, "stool")
     _check(store, "stool", 3.1)
     # a plywood box's joints are taken as solid wood: its known limit, never a row
-    assert _list(store) == {"part": "stool", "rows": [],
+    assert _list(store) == {"part": "stool", "rows": [], "counts": {"measured": 0, "readings": 0, "other": 0},
                             "limits": ["Its joints aren't checked: the check takes its joints as solid wood"]}
 
 

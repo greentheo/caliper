@@ -433,10 +433,15 @@ function menuItems(design, pid, piece) {
     const m = study[kind];
     if (m) items.push({ id, label, off: !m.ready, why: m.ready ? '' : m.why });
   };
-  studied('load', 'check', 'Check it holds');
-  if (p.study === 'carve') studied('carve', 'carve', 'Carve it');         // whichever made_of says; neither where it says none
-  else if (p.study === 'lighten') studied('lighten', 'lighten', 'Lighten it');
+  const ran = (list) => (design[list] || []).some((r) => r.part === pid);   // "again" where it has been, as the bar says it (walk 11-21)
+  studied('load', 'check', ran('load_runs') ? 'Check it again' : 'Check it holds');
+  if (p.study === 'carve') studied('carve', 'carve', ran('carve_runs') ? 'Carve it again' : 'Carve it');   // whichever made_of says
+  else if (p.study === 'lighten') studied('lighten', 'lighten', ran('lighten_runs') ? 'Lighten it again' : 'Lighten it');
   items.push(p.mirror_of ? { id: 'unmirror', label: `Break the mirror (of ${p.mirror_of})` } : { id: 'mirror', label: 'Mirror it…' });
+  const by = design.parts.filter((q) => q.mirror_of === pid).map((q) => q.id);   // a mirror sits where its plane puts it (#294)
+  const stuck = p.mirror_of ? `it mirrors ${p.mirror_of}: move that, or break the mirror first`
+    : by.length ? `${by.join(', ')} ${by.length === 1 ? 'mirrors' : 'mirror'} it and wouldn't follow: break the mirror first` : '';
+  items.push({ id: 'copy', label: 'Copy…' }, { id: 'move', label: 'Move…', off: !!stuck, why: stuck });
   if (Object.values(TREE_KEYS).some((d) => nudge(design, pid, d))) items.push({ id: 'tmove', label: 'Move in the tree ▸' });   // a phone's drag (#94)
   items.push({ id: 'versions', label: 'Versions ▸' }, { id: 'copyName', label: 'Copy its name' });
   return items;
@@ -451,6 +456,79 @@ function treeMovesHtml(design, pid) {          // Move in the tree ▸: where it
     const by = dir === 'in' ? dropped(design, pid, to[0], to[1]).parent[pid] : parent[pid];
     return `<button role="menuitem" data-menu="tmove:${dir}">${esc(label.replace('{}', by ? name(by) : ''))}${onPhone() ? '' : ` <span class="why">${keys}</span>`}</button>`;   // a phone has no keys
   }).join('');
+}
+// Copy… and Move… (#294, Theo's addition): one form, where it goes and a turn, in the design's units. The server places
+// it (placing.py) and measures it where it lands
+const SIDES = [['+x', '+x'], ['-x', '−x'], ['+y', '+y'], ['-y', '−y'], ['+z', 'above (+z)'], ['-z', 'below (−z)']];
+function placeHtml(design, pid, kind) {
+  const p = design.parts.find((x) => x.id === pid), u = inches() ? 'in' : 'mm';
+  const show = (mm) => +(inches() ? mm / IN : mm).toFixed(inches() ? 3 : 1);
+  const mid = p.bbox ? p.bbox.min.map((v, i) => show((v + p.bbox.max[i]) / 2)) : [0, 0, 0];
+  const way = kind === 'copy' ? 'beside' : 'offset';
+  const xyz = (attr, vals, what) => ['x', 'y', 'z'].map((a, i) => `<label class="pnum">${a} <input type="text" inputmode="decimal" ${attr}="${i}" value="${vals[i]}" aria-label="${what} ${a}, in ${inches() ? 'inches' : 'mm'}"></label>`).join('');
+  const radio = (v, label) => `<label class="pway"><input type="radio" name="way" value="${v}"${v === way ? ' checked' : ''}> ${label}</label>`;
+  const parts = design.parts.filter((q) => kind === 'copy' || q.id !== pid)
+    .map((q) => `<option value="${esc(q.id)}"${q.id === pid ? ' selected' : ''}>${esc(q.id === pid ? `${q.label || q.name || q.id} (the original)` : q.label || q.name || q.id)}</option>`).join('');
+  return `<div class="pmenu-title">${kind === 'copy' ? 'Copy' : 'Move'} ${esc(p.label || p.name || p.id)}</div>
+    <form class="pform" data-place="${kind}" novalidate>
+      <fieldset><legend>Where, in ${u}</legend>
+        <div>${radio('offset', 'Along')}<div class="pxyz">${xyz('data-off', [0, 0, 0], 'Along')}</div></div>
+        <div>${radio('at', 'Its middle at')}<div class="pxyz">${xyz('data-at', mid, 'Its middle at')}</div></div>
+        ${parts ? `<div>${radio('beside', 'Beside')}<div class="pxyz"><select data-beside aria-label="Beside which part">${parts}</select>
+          on its <select data-side aria-label="Which side">${SIDES.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></div></div>` : ''}
+      </fieldset>
+      <label class="pturn">Turn <select data-deg aria-label="Turn by">${[0, 90, 180, 270].map((d) => `<option value="${d}">${d}°</option>`).join('')}</select>
+        about <select data-axis aria-label="Turn about">${['z', 'x', 'y'].map((a) => `<option>${a}</option>`).join('')}</select></label>
+      <div class="pmenu-said" data-place-said>${kind === 'copy' ? "A part of its own, measured where it lands." : 'Measured where it lands. Put back returns it.'}</div>
+      <div class="pmenu-row"><button type="submit" class="primary">${kind === 'copy' ? 'Copy it' : 'Move it'}</button>
+        <button type="button" role="menuitem" data-menu="keep">Cancel</button></div>
+    </form>`;
+}
+function placeBody(form) {                     // the form, in mm, as the server takes it; null with the form saying why
+  const way = (form.querySelector('input[name="way"]:checked') || {}).value, mm = (v) => (inches() ? v * IN : v);
+  const nums = (attr) => [...form.querySelectorAll(`[${attr}]`)].map((i) => Number(String(i.value).trim() || '0'));
+  const body = {};
+  if (way === 'offset' || way === 'at') {
+    const got = nums(way === 'offset' ? 'data-off' : 'data-at');
+    if (got.some((v) => !Number.isFinite(v))) {
+      form.querySelector('[data-place-said]').textContent = 'x, y and z are numbers.';
+      return null;
+    }
+    body[way] = got.map(mm);
+  } else if (way === 'beside') {
+    body.beside = { part: form.querySelector('[data-beside]').value, side: form.querySelector('[data-side]').value };
+  }
+  const deg = Number(form.querySelector('[data-deg]').value);
+  if (deg) body.turn = { axis: form.querySelector('[data-axis]').value, deg };
+  return body;
+}
+async function place(form) {
+  const m = S.menu, kind = form.dataset.place, body = placeBody(form);
+  if (!m || !body) return;
+  const pid = m.pid, slug = S.slug, go = form.querySelector('button[type="submit"]');
+  go.disabled = true;                            // taken once
+  const said = form.querySelector('[data-place-said]');
+  said.textContent = kind === 'copy' ? 'Copying, then measuring where it lands…' : 'Moving, then measuring where it lands…';
+  let got;
+  try {
+    got = await api('POST', `/api/designs/${slug}/parts/${pid}/${kind}`, body);
+  } catch (e) {
+    go.disabled = false;
+    said.textContent = plainly(e.message);       // said in the form: change it and go again
+    return;
+  }
+  if (S.slug !== slug) return;
+  closeMenu();
+  S.design = got.state;
+  if (kind === 'copy') setScope(got.part); else render();
+  say(got.said, kind === 'move' ? async () => {  // Put back: where it was found, as a move of its own
+    try {
+      const back = await api('POST', `/api/designs/${S.slug}/parts/${pid}/move`, { to: got.from });
+      S.design = back.state; render(); say(back.said);
+      await syncParts(S.design, false);
+    } catch (e) { showErr(plainly(e.message)); }
+  } : null, kind === 'copy');
+  await syncParts(S.design, false);
 }
 function versionsHtml(p) {                     // Versions ▸: each other version, newest first, with what was asked of it (#299)
   const said = {};
@@ -511,6 +589,7 @@ function openMenu(pid, piece, x, y, from) {
     const b = e.target.closest('[data-menu]');
     if (b && b.getAttribute('aria-disabled') !== 'true') menuDo(b.dataset.menu);
   });
+  box.addEventListener('submit', (e) => { e.preventDefault(); place(e.target); });   // Copy… / Move…'s form (#294)
   document.body.appendChild(box);
   placeMenu(box, x, y);
   menuFocus(0);
@@ -564,6 +643,12 @@ async function menuDo(id) {
   if (id === 'deletePieceYes') return deletePiece(pid, piece, m.plan);
   if (id === 'versions') return menuConfirm(versionsHtml(S.design.parts.find((x) => x.id === pid)));   // ▸ (#299)
   if (id === 'tmove') return menuConfirm(treeMovesHtml(S.design, pid));
+  if (id === 'copy' || id === 'move') {        // the placing form, in the menu; its first box takes the keys (#294)
+    menuConfirm(placeHtml(S.design, pid, id));
+    const box = $('partMenu');
+    if (box) { box.setAttribute('role', 'dialog'); const first = box.querySelector('input[name="way"]:checked'); if (first) first.focus(); }
+    return;
+  }
   if (id === 'keep') return closeMenu();
   if (id === 'deleteYes' || id === 'deleteBoth') return deletePart(pid, id === 'deleteBoth' ? m.mirroredBy || [] : []);
   if (id === 'unmirrorThem') {                 // its mirrors become parts of their own; then it's asked again
@@ -616,7 +701,7 @@ async function deletePart(pid, also) {
     menuConfirm(`<div class="pmenu-said">${esc(plainly(said))}</div><div class="pmenu-row"><button role="menuitem" data-menu="keep">OK</button></div>`);
   }
 }
-function say(text, act) {                      // a line at the foot of the page: what the menu did, and Put back
+function say(text, act, stay) {                // a line at the foot of the page: what the menu did, and Put back
   let bar = $('putBack');
   if (!bar) {
     bar = document.createElement('div');
@@ -631,7 +716,7 @@ function say(text, act) {                      // a line at the foot of the page
     else if (act && e.target.closest('[data-putback]')) act();
   };
   clearTimeout(say.t);
-  if (!act) say.t = setTimeout(() => { bar.hidden = true; }, 4000);
+  if (!act && !stay) say.t = setTimeout(() => { bar.hidden = true; }, 4000);   // stay: a copy's words, read before they go
 }
 function putBack(said, gone) {
   say(said, async () => {
@@ -678,7 +763,8 @@ addEventListener('pointerdown', (e) => { if ($('partMenu') && !e.target.closest(
 addEventListener('keydown', (e) => {
   if ($('partMenu')) {
     if (e.key === 'Escape') { e.preventDefault(); closeMenu(); return; }
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); menuFocus(e.key === 'ArrowDown' ? 1 : -1); }
+    const field = /INPUT|SELECT/.test(e.target.tagName);   // the placing form's boxes keep their own keys (#294)
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !field) { e.preventDefault(); menuFocus(e.key === 'ArrowDown' ? 1 : -1); }
     return;
   }
   const a = document.activeElement;
@@ -915,7 +1001,7 @@ async function syncParts(design, refit) {
   const loads = [];
   for (const p of design.parts) {
     const have = meshes.get(p.id);
-    if (have && have.userData.version === p.version && have.userData.origin === p.origin
+    if (have && have.userData.drawn === (p.drawn ?? p.version) && have.userData.origin === p.origin
         && have.userData.role === p.role) continue;
     loads.push((async () => {
       const r = await fetch(p.stl_url);
@@ -928,7 +1014,7 @@ async function syncParts(design, refit) {
       if (S.slug !== slug) return;
       geom.computeVertexNormals();
       const mesh = new THREE.Mesh(geom, material(p));
-      mesh.userData = { partId: p.id, version: p.version, origin: p.origin, role: p.role };
+      mesh.userData = { partId: p.id, version: p.version, drawn: p.drawn ?? p.version, origin: p.origin, role: p.role };   // drawn: moved (#294)
       const old = meshes.get(p.id);
       if (old) { scene.remove(old); old.geometry.dispose(); }
       meshes.set(p.id, mesh);
@@ -955,7 +1041,7 @@ function dropPieces(pid) {
 // every piece or none: a part that can't be cut into its pieces stays one body (a shape that isn't closed, say)
 async function loadPieces(p) {
   const got = await Promise.all(p.pieces.map(async (pc) => {
-    const r = await fetch(`/api/designs/${S.slug}/parts/${p.id}/piece.stl?key=${encodeURIComponent(pc.key)}&v=${p.version}`);
+    const r = await fetch(`/api/designs/${S.slug}/parts/${p.id}/piece.stl?key=${encodeURIComponent(pc.key)}&v=${encodeURIComponent(p.drawn ?? p.version)}`);
     if (!r.ok) {
       const said = await r.json().catch(() => ({}));
       throw new Error(typeof said.detail === 'string' ? said.detail : `the server answered ${r.status}`);
@@ -977,15 +1063,15 @@ async function syncPieces(design) {
   const slug = S.slug;
   if (piecesOf !== slug) { [...pieces3d.keys()].forEach(dropPieces); noPieces.clear(); piecesOf = slug; }
   const want = new Map(design.parts.filter((p) => (p.pieces || []).length && p.role !== 'fixed').map((p) => [p.id, p]));
-  for (const [pid, s] of pieces3d) if (!want.has(pid) || want.get(pid).version !== s.version) dropPieces(pid);
+  for (const [pid, s] of pieces3d) if (!want.has(pid) || (want.get(pid).drawn ?? want.get(pid).version) !== (s.drawn ?? s.version)) dropPieces(pid);   // moved too (#294)
   await Promise.all([...want.values()].filter((p) => !pieces3d.has(p.id) && (noPieces.get(p.id) || {}).version !== p.version).map(async (p) => {
     try {
       const byKey = await loadPieces(p);
       if (S.slug !== slug) return;                // two designs can share a part's id and version
-      if (!S.design || !S.design.parts.some((x) => x.id === p.id && x.version === p.version)) return;   // it moved on
+      if (!S.design || !S.design.parts.some((x) => x.id === p.id && x.version === p.version && x.drawn === p.drawn)) return;   // it moved on
       dropPieces(p.id);
       for (const m of byKey.values()) scene.add(m);
-      pieces3d.set(p.id, { version: p.version, byKey });
+      pieces3d.set(p.id, { version: p.version, drawn: p.drawn ?? p.version, byKey });
     } catch (e) {
       if (S.slug !== slug) return;
       noPieces.set(p.id, { version: p.version, why: plainly(e.message) });
@@ -1153,6 +1239,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   }
   if (!d || d[2] !== 0 || e.button !== 0) return;
   if (Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 5) return;    // an orbit drag, not a click
+  if (S.scenPick) { pickScenarioFace(scenHit(e)); return; }   // a scenario's or a support's face, not the chat's (#296 B1)
   const hit = pick(e);
   if (PICK.mode !== 'part' && (hit || S.scope)) { choose(e, hit); return; }   // just off the silhouette is still its edge
   setScope(hit ? hit.object.userData.partId : null);
@@ -1174,6 +1261,14 @@ longPress(renderer.domElement, (e) => {
   const hit = pick(e);
   if (hit) openMenu(hit.object.userData.partId, null, e.clientX, e.clientY, renderer.domElement);
 });
+// a part under the pointer for Pick on the model, shown or not (#376 review: with a check's stress map up only its picture is
+// visible, and the pick said "no face there"): every part's mesh and pieces, never the stress map's
+function scenHit(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+  const pieces = [...pieces3d.values()].flatMap((s) => [...s.byKey.values()]);
+  return ray.intersectObjects([...meshes.values(), ...pieces], false)[0] || null;
+}
 function pick(e) {
   const rect = renderer.domElement.getBoundingClientRect();
   const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -1228,9 +1323,10 @@ function pickPosted(text) {
 function dropOldPick() {
   if (!S.pick || !S.design) return;
   const part = S.design.parts.find((p) => p.id === S.pick.part);
-  if (part && part.version === S.pick.version) return;
+  if (part && part.version === S.pick.version && (part.drawn ?? part.version) === (S.pick.drawn ?? S.pick.version)) return;
+  const moved = part && part.version === S.pick.version;   // a Move… keeps its version and moves what was picked (#294)
   clearPick();
-  pickHint('Rebuilt: click it again');
+  pickHint(moved ? 'Moved: click it again' : 'Rebuilt: click it again');
 }
 function clearPick() {
   S.pick = null;
@@ -1267,7 +1363,7 @@ async function loadFeatures(pid) {
 }
 // asked once per part, version and unit, however many clicks wait on it
 async function features(pid) {
-  const part = S.design.parts.find((p) => p.id === pid), key = `${pickKey(pid, part.version)}/${S.design.display_units}`;
+  const part = S.design.parts.find((p) => p.id === pid), key = `${pickKey(pid, part.drawn ?? part.version)}/${S.design.display_units}`;   // moved: its faces moved too (#294)
   if (!PICK.parts.has(key)) PICK.parts.set(key, loadFeatures(pid));
   try { return await PICK.parts.get(key); } catch (e) { PICK.parts.delete(key); throw e; }
 }
@@ -1320,6 +1416,8 @@ async function choose(e, hit) {
     const curve = new THREE.CatmullRomCurve3(edge.points.map((p) => new THREE.Vector3(...p)));
     drawPick(new THREE.TubeGeometry(curve, Math.max(2, edge.points.length * 2), Math.max(1, 0.003 * camera.position.distanceTo(new THREE.Vector3(...edge.centre))), 6, false));
   }
+  const now = S.design && S.design.parts.find((p) => p.id === pid);   // a design left meanwhile has none
+  if (S.pick && now) S.pick.drawn = now.drawn ?? now.version;   // where it sat when picked (#294)
   renderScope();
 }
 function setPickMode(mode) {
@@ -1488,6 +1586,12 @@ function renderScope() {
 $('scopeClear').onclick = () => setScope(null);
 
 // --------------------------------------------------------------------------------- the thread
+// what only the person can say before it's built (#371): the plan keeps it, and Build it builds nothing while it's open,
+// so it's said above the button, not only in the reply that comes back when it's pressed
+const planAsks = (d) => (d && d.plan && d.plan.questions) || [];
+function asksHtml(qs) {
+  return qs.length ? `<div class="asks">${qs.map((q) => `<div class="small" style="color:var(--amber)"><b>Before I build it:</b> ${esc(q)}</div>`).join('')}</div>` : '';
+}
 function renderThread() {
   const t = $('thread');
   const d = S.design;
@@ -1542,8 +1646,9 @@ function renderThread() {
   if (unbuilt && d.claude === false) {             // a build needs Claude: said, not a job bound to fail (CALI-91)
     html.push('<div class="note">Building a new design needs a Claude key (see .env.example). Until then, open one of ours from New design.</div>');
   } else if (unbuilt) {
-    html.push(`<div class="actions"><button class="primary" id="buildFirst">Build it</button>
-      <span class="muted small">or say what to build first</span></div>`);
+    const asks = planAsks(d);                       // a question open: the button would only ask it again
+    html.push(`${asksHtml(asks)}<div class="actions"><button class="primary" id="buildFirst"${asks.length ? ' disabled' : ''}>Build it</button>
+      <span class="muted small">${asks.length ? "say it below, and I'll change the plan" : 'or say what to build first'}</span></div>`);
   }
   if (simplerOffered(d)) {
     html.push(`<div class="actions simpler"><button class="ghost small" data-say="Say that again in simpler words, for a kid.">
@@ -2133,6 +2238,8 @@ function renderInspector() {
   wireParams(p || (d.parts.length === 1 ? d.parts[0] : null));
   if (typing) refocusParam(typing[0], typing.slice(1));   // a redraw mid-number
   paintJobs();
+  const scen = $('scenBox');                    // the cases on the model only while their editor's open (#296 B1)
+  if (!scen || !scen.open) { clearScenMarks(); if (S.scenPick) stopScenPick(); }
 }
 
 // one rule on a part, with its verdict as measured on this version, and what it measured where it doesn't hold
@@ -2239,6 +2346,7 @@ function designView(d) {
         : `<button class="ghost small" data-shopoffer="${i}" data-add="1">Add it</button>
       <button class="ghost small" data-shopoffer="${i}" data-add="0">No</button>`}</div>`).join('')}
     ${d.plan ? `<h4>The plan <span class="badge">${d.plan.status === 'review' ? 'to review' : 'saved'}</span></h4>
+      ${asksHtml(planAsks(d))}
       <ol class="list">${d.plan.parts.map((x) => `<li><b>${esc(x.id.replace(/_/g, ' '))}</b>
         ${x.role === 'fixed' ? (x.source === 'assumed' ? '<span class="badge">assumed: you have it? say if not</span>' : '<span class="badge ref">you have it</span>') : ''}${x.built ? '<span class="badge ok">built</span>' : ''}
         <div class="muted small">${esc(x.what)}${x.made ? ` · ${esc(x.made)}` : ''}${x.mounts_on.length
@@ -2288,7 +2396,9 @@ function answersKey() {               // what the answers depend on: a change to
   return JSON.stringify([S.slug, shownPart(), d.building || null, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
     runs(d.carve_runs), runs(d.lighten_runs),
     (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
-    (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey, d.display_units]);
+    (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey,
+    // the plan: answered, its question goes, and What is it? stops saying "answer its question first" (#393 review)
+    d.plan ? [d.plan.status, (d.plan.parts || []).map((x) => x.id), d.plan.questions || []] : null, d.display_units]);
 }
 // a card's lines, and under a part's Will it work? its Things to fix (#300): one painter, for the first draw and the
 // fill when its answers come in (a fill with qlines alone dropped the list)
@@ -2941,6 +3051,19 @@ function scoreNum(v, u, need) {
   return u === '$' ? `$${n}` : `${n}${u ? ' ' + esc(u) : ''}`;
 }
 const goalLimit = (c) => (typeof c.limit === 'number' ? ` (${c.op === '<=' || c.op === '<' ? 'cap' : 'needs'} ${scoreNum(c.limit, c.unit)})` : '');
+// a goal said as a goal (#384): "holds 250 lb, 2 times over", unscored, read as a result. "must hold 250 lb, 2 times
+// over"; a label that doesn't open on a verb it knows is said as written
+const MUST = { holds: 'hold', carries: 'carry', supports: 'support', takes: 'take', bears: 'bear', weighs: 'weigh', costs: 'cost', fits: 'fit', keeps: 'keep', stays: 'stay' };
+function goalSaid(c) {
+  const label = String(c.label || c.id), m = label.match(/^(\w+)\b/), verb = m && MUST[m[1].toLowerCase()];
+  return esc(verb ? `must ${verb}${label.slice(m[1].length)}` : label);
+}
+// a strength goal's label without the factor it needs (answers._NEED, the same pattern): scored, its row leads with the
+// number it does, and "holds 250 lb, 2 times over — 3.8 ×" read as two numbers for one thing (#384, #64 item 15)
+const NEED = /,\s*(?:(?:twice|\d+(?:\.\d+)?\s*(?:times|×))\s*over|\d+(?:\.\d+)?\s*[×x]\s*safety)\s*$/i;
+// why a goal on the card has no number, beside it: "! holds 250 lb, 2 times over" read as a claim (#390 review)
+const NO_NUMBER = { unresolved: 'not resolved', untrusted: 'not trusted', unknown: 'not measured yet' };
+const strengthGoal = (c) => String(c.metric || '').startsWith('strength') && typeof c.limit === 'number';
 function scoreView(d) {
   const card = (d.scorecards || [])[0];
   const stale = card && (card.outdated     // scored the old way (CALI-111): its numbers aren't today's
@@ -2959,7 +3082,7 @@ function scoreView(d) {
     ? '<div class="muted small">Nothing to hold it to yet but its own rules. Tell me what it must do (“it has to hold me, 200 lb”, “under $50”) and I\'ll write it down.</div>'
     : d.goals && !d.goals.ours ? '<div class="muted small">Held to its <code>scorecard.yaml</code>, as written by hand.</div>' : '';
   if (!card) {
-    return `${held.length ? `<ul class="list small">${held.map((c) => `<li>${c.source === 'proposed' ? '◇' : '·'} ${esc(c.label || c.id)} ${from(c)}
+    return `${held.length ? `<ul class="list small">${held.map((c) => `<li>${c.source === 'proposed' ? '◇' : '·'} ${goalSaid(c)} ${from(c)}
         ${c.why && c.source === 'proposed' ? `<div class="muted">${esc(c.why)}</div>` : ''}</li>`).join('')}</ul>` : ''}
       ${goals}<div class="actions"><button id="scGo">Score it</button></div><div id="scProgress"></div>`;
   }
@@ -2975,10 +3098,14 @@ function scoreView(d) {
       ${stale ? '<span class="badge bad">a part has changed since</span>' : ''}</div>
     <ul class="list small" style="margin-top:6px">${card.checks.map((c) => { const now = held.find((x) => x.id === c.id) || c;
       return `<li>${scoreMark(c, stale, when)}
-      ${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit, typeof c.limit === 'number' && (c.op || '>=').startsWith('>') ? c.limit : null)}${goalLimit(c)}${old}` : ''}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
+      ${c.value != null && strengthGoal(c)   // scored, a strength goal leads with what it does (#384)
+        ? `<b>${num(c.value, c.unit, (c.op || '>=').startsWith('>') ? c.limit : null)}</b> — ${esc(String(c.label || c.id).replace(NEED, ''))}${goalLimit(c)}${old}`
+        : c.value != null ? `${esc(c.label || c.id)} — ${num(c.value, c.unit, typeof c.limit === 'number' && (c.op || '>=').startsWith('>') ? c.limit : null)}${goalLimit(c)}${old}`
+        : `${goalSaid(c)}${NO_NUMBER[c.status] ? `: ${NO_NUMBER[c.status]}` : ''}`   // no number: still a goal (#390 review)
+      }${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
       ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}
       ${c.loads ? `<div class="muted">${esc(c.loads)}</div>` : ''}</li>`; }).join('')}
-      ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${esc(c.label || c.id)} ${from(c)}
+      ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${goalSaid(c)} ${from(c)}
         <span class="muted">— new since this card</span></li>`).join('')}</ul>
     <table class="st" style="margin-top:6px">${card.objectives.map((o) => `<tr><td style="text-align:left">${esc(o.label)}</td>
       <td>${num(o.value, o.unit)}${delta(o)}${old}</td><td>${tag(o.trust)}</td></tr>`).join('')}</table>
@@ -3085,7 +3212,7 @@ function historyItem(h, now) {
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
   // a number only where the check gave one: a check that couldn't run says why, never "0x" (#138 item 3)
-  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.verdict && h.verdict.kind === 'unchecked' && h.verdict.why ? `: ${esc(h.verdict.why)}` : h.safety != null && h.verdict && ['holds', 'fails'].includes(h.verdict.kind) ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.verdict && h.verdict.kind === 'unchecked' && h.verdict.why ? `: ${esc(h.verdict.why)}` : h.safety != null && h.verdict && ['holds', 'fails'].includes(h.verdict.kind) ? `, ${h.safety < 0.1 ? 'under 0.1' : Math.floor(h.safety * 10 + 1e-9) / 10}x` : ''}</li>`;   // cut, never rounded up to its limit (#64 item 1)
   if (h.kind === 'patterns' && h.action === 'made') return `<li class="hist">patterns for hand tools (${h.pieces} pieces)</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
@@ -3485,6 +3612,7 @@ async function saveShop() {
 }
 $('shopBtn').onclick = () => (S.shopOpen ? (S.shopOpen = false, renderShop()) : openShop());
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.shopOpen) { S.shopOpen = false; renderShop(); } });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.scenPick) { e.preventDefault(); stopScenPick('Stopped picking'); } });   // (#296 B1)
 
 // patterns for hand tools (CALI-48): most people have a jigsaw, not a CNC router — so every flat piece, holes and
 // all, to measure and mark, to print full size and tape, or to project and trace
@@ -3629,16 +3757,20 @@ function wireCutplan(p) {
   if (!go) return;
   // where its section has no progress line (cut plans can't be made here), what it says goes under the buttons: a
   // click never throws and leaves the button dead (#331 review)
-  const say = (html, text) => { const pr = $('cpProgress'), w = $('pactsWhy'); if (pr) pr.innerHTML = html; else if (w) w.textContent = text; };
+  // not `say`, which is the page's foot (used below): a local `say` hid it, and the made line went in as HTML (#388 review)
+  const show = (html, text) => { const pr = $('cpProgress'), w = $('pactsWhy'); if (pr) pr.innerHTML = html; else if (w) w.textContent = text; };
   go.onclick = async () => {
     go.disabled = true;
-    say('<div class="small muted" id="cpMsg">unfolding…</div>', 'unfolding…');
+    show('<div class="small muted" id="cpMsg">unfolding…</div>', 'unfolding…');
     try {
       const { job_id } = await api('POST', `/api/designs/${S.slug}/parts/${p.id}/cutplan`);
       await follow(job_id, (ev) => { const m = $('cpMsg'); if (m && ev.text && ev.kind !== 'started') m.textContent = ev.text; });
       await refresh();
+      const made = `Made the cut plan for ${partOf(p.id).name || p.id}: it's under How do I make it? → Cut plan.`;
+      show(`<div class="small muted">${esc(made)}</div>`, made);   // a part's name is text, never HTML (#388 review)
+      say(made);                                  // and at the page's foot: its line may be folded away (walk 11-21)
     } catch (e) {
-      say(`<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`, `⚠ ${e.message}`);
+      show(`<div class="small" style="color:var(--bad)">⚠ ${esc(e.message)}</div>`, `⚠ ${e.message}`);
       go.disabled = false;
     }
   };
@@ -3850,6 +3982,7 @@ function scenarioRow(sc, i) {
       <span>where</span><span><input data-f="lo" value="${xyz(sc.lo)}" title="one corner of the box it pushes on, x, y, z mm" style="width:12em"> to
         <input data-f="hi" value="${xyz(sc.hi)}" title="the opposite corner" style="width:12em"> mm</span>
       <span>checked</span><span><label><input data-f="on" type="checkbox"${sc.on === false ? '' : ' checked'}> on</label>
+        <button class="ghost" data-scen-pick="${i}" title="click a face of the part: the box becomes that face">Pick on the model</button>
         <button class="ghost" data-scen-del="${i}">Remove</button></span></div>${std}</div>`;
 }
 function supportRow(s, i) {
@@ -3857,6 +3990,8 @@ function supportRow(s, i) {
       <button class="ghost" data-sup-del="${i}">Remove</button></div>`;
   return `<div class="small" data-sup="${i}" style="margin-top:4px">• <input data-f="name" value="${esc(s.name)}">
       <input data-f="lo" value="${xyz(s.lo)}" style="width:12em"> to <input data-f="hi" value="${xyz(s.hi)}" style="width:12em"> mm
+      <span class="muted">doesn't move</span>
+      <button class="ghost" data-sup-pick="${i}" title="click the face that's held: the box becomes that face">Pick on the model</button>
       <button class="ghost" data-sup-del="${i}">Remove</button></div>`;
 }
 // the first case added to a part whose script says none: across the whole top of its box, 2 mm deep, so it rests on whatever
@@ -3885,6 +4020,144 @@ function scenariosView(p, got) {
       ${got.overridden ? '<button class="ghost" id="scenBack">Back to its script\'s</button>' : ''}</div>
     <div class="small muted">Saving makes a new version of ${esc(p.id)}, the same script: its checks, Lighten and carves are out
       of date until it's checked again.</div><div id="scenSaid"></div>`;
+}
+// ------------------------------------------------------------- the cases and supports, on the model (#296, slice B1)
+// Theo: "it should be identified similar to how the current stress loading is specified with the arrow ... or the 'fixed
+// plane' (i.e. the bottom of the stool or the face that doesn't move)". While "Scenarios and supports" is open, every row
+// is drawn as it reads now, typed or not: a load's box with its arrow (longer for more), a support's box held, the floor.
+// The rows stay the source: the picture follows them, and Pick on the model writes the same corners Save sends
+const SCEN_N = { lb: 4.448222, kg: 9.80665, N: 1 };
+function scenMarksFor(got, bbox) {             // what to draw: [{kind: 'load'|'support'|'floor', i, lo, hi, dir, n, on}]
+  const out = [];
+  (got.scenarios || []).forEach((sc, i) => {
+    if (!sc.lo || !sc.hi) return;
+    const n = (Number(sc.amount) || 0) * (SCEN_N[sc.unit] || 1) * (Number(sc.factor) || 1);
+    out.push({ kind: 'load', i, lo: sc.lo, hi: sc.hi, dir: sc.direction || [0, 0, -1], n, on: sc.on !== false });
+  });
+  (got.supports || []).forEach((sp, i) => {
+    if (sp.floor) {
+      if (bbox && bbox.min && bbox.max) out.push({ kind: 'floor', i, lo: [bbox.min[0], bbox.min[1], bbox.min[2]], hi: [bbox.max[0], bbox.max[1], bbox.min[2]] });
+    } else if (sp.lo && sp.hi) out.push({ kind: 'support', i, lo: sp.lo, hi: sp.hi });
+  });
+  return out;
+}
+function arrowLen(n, most, reach) {            // the biggest load's arrow is the reach; the rest by the square root, never a dot
+  return reach * (0.35 + 0.65 * Math.sqrt(Math.max(0, n) / (most || 1)));
+}
+// a part's own frame on the model (CALI-220, #375): rows are in the part's own frame, as its script's loads() are; drawn
+// under its pose, and a picked face's posed points brought back out of it. No pose said (main before #375): the identity
+function scenFrame(p) {
+  const m = new THREE.Matrix4();
+  if (!p || !Array.isArray(p.position) || !Array.isArray(p.rotation)) return m;
+  const r = new THREE.Euler(...p.rotation.map((d) => (Number(d) || 0) * Math.PI / 180), 'XYZ');
+  return m.compose(new THREE.Vector3(...p.position.map((v) => Number(v) || 0)), new THREE.Quaternion().setFromEuler(r), new THREE.Vector3(1, 1, 1));
+}
+const scenMatrixOf = (p) => scenFrame(p);    // one name for the frame the marks are drawn in
+function localBox(bbox, frame) {               // a posed box's corners, back in the part's own frame, boxed again
+  const inv = frame.clone().invert(), v = new THREE.Vector3(), lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const x of [bbox.min[0], bbox.max[0]]) for (const y of [bbox.min[1], bbox.max[1]]) for (const z of [bbox.min[2], bbox.max[2]]) {
+    v.set(x, y, z).applyMatrix4(inv);
+    [v.x, v.y, v.z].forEach((c, a) => { lo[a] = Math.min(lo[a], c); hi[a] = Math.max(hi[a], c); });
+  }
+  const r = (c) => Math.round(c * 1000) / 1000;
+  return { min: lo.map(r), max: hi.map(r), size: hi.map((c, a) => r(c - lo[a])) };
+}
+function unposed(verts, frame) {              // posed points, back into the part's own frame
+  const inv = frame.clone().invert(), v = new THREE.Vector3(), out = [];
+  for (let k = 0; k + 2 < verts.length; k += 3) { v.set(verts[k], verts[k + 1], verts[k + 2]).applyMatrix4(inv); out.push(v.x, v.y, v.z); }
+  return out;
+}
+const scenMarks = new THREE.Group();
+scenMarks.matrixAutoUpdate = false;           // its matrix is the part's frame, set each draw
+scene.add(scenMarks);
+function clearScenMarks() {                    // every mark's geometry and material let go: it's redrawn on each keystroke
+  scenMarks.children.slice().forEach((m) => {
+    scenMarks.remove(m);
+    m.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+  });
+}
+function drawScenarios() {
+  clearScenMarks();
+  const pid = S.scenOpen, got = pid && (S.scen || {})[pid], box = $('scenBox');
+  if (!got || !box || !box.open || !S.design) return;
+  const p = S.design.parts.find((x) => x.id === pid);
+  scenMarks.matrix.copy(scenMatrixOf(p));      // the rows are in the part's own frame (#375): drawn where the part is
+  scenMarks.matrixWorldNeedsUpdate = true;
+  const own = p && p.bbox ? localBox(p.bbox, scenMatrixOf(p)) : null;   // the floor in its own frame: bbox is posed (#376 review)
+  const marks = scenMarksFor($('scenSave') ? { ...got, ...readScenarios(got) } : got, own);   // as typed, saved or not
+  const size = own ? Math.max(...own.size) : 400, reach = size * 0.3;
+  const most = Math.max(1, ...marks.filter((m) => m.kind === 'load').map((m) => m.n));
+  for (const m of marks) {
+    const lo = new THREE.Vector3(...m.lo), hi = new THREE.Vector3(...m.hi), mid = lo.clone().add(hi).multiplyScalar(0.5);
+    const dim = hi.clone().sub(lo), lit = S.scenFocus && S.scenFocus.kind === (m.kind === 'load' ? 'load' : 'support') && S.scenFocus.i === m.i;
+    const color = m.kind === 'load' ? (m.on ? 0xf5a524 : 0x6e7681) : 0x58a6ff;
+    const g = new THREE.BoxGeometry(Math.max(Math.abs(dim.x), 2), Math.max(Math.abs(dim.y), 2), Math.max(Math.abs(dim.z), 2));
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color, depthTest: false }));
+    edges.position.copy(mid); edges.renderOrder = 9;
+    scenMarks.add(edges);
+    if (m.kind !== 'load' || lit) {             // a support (or the row being edited) filled, so it reads as a place
+      const fill = new THREE.Mesh(g.clone(), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: lit ? 0.35 : 0.18, depthWrite: false }));
+      fill.position.copy(mid);
+      scenMarks.add(fill);
+    }
+    if (m.kind === 'load') {
+      const dir = new THREE.Vector3(...m.dir).normalize(), len = arrowLen(m.n, most, reach);
+      const arrow = new THREE.ArrowHelper(dir, mid.clone().sub(dir.clone().multiplyScalar(len)), len, color, len * 0.25, len * 0.12);
+      arrow.traverse((o) => { if (o.material) { o.material.depthTest = false; } o.renderOrder = 10; });
+      scenMarks.add(arrow);
+    }
+  }
+}
+// Pick on the model: the row waits for one click on its part; the face clicked becomes its box (#296 B1)
+function faceBox(verts, pad = 1) {             // a face's corners, from its triangles' points, a millimetre out each way
+  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let k = 0; k + 2 < verts.length; k += 3) {
+    for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], verts[k + a]); hi[a] = Math.max(hi[a], verts[k + a]); }
+  }
+  const r = (v) => Math.round(v * 10) / 10;
+  return { lo: lo.map((v) => r(v - pad)), hi: hi.map((v) => r(v + pad)) };
+}
+function startScenPick(pid, kind, i) {
+  const got = (S.scen || {})[pid], row = got && (kind === 'load' ? got.scenarios : got.supports)[i];
+  if (!row) return;
+  S.scenPick = { pid, kind, i };
+  pickHint(`Click a face of ${partOf(pid).name || pid} for "${row.said || row.name}" (Esc stops)`);
+  if (onPhone()) setPane('view');               // the model's on its own pane there (#376 review: nothing seemed to happen)
+}
+function stopScenPick(said) {
+  const was = S.scenPick;
+  S.scenPick = null;
+  pickHint(said);
+  if (was && onPhone()) setPane('cards');       // back to the row it was for
+}
+async function pickScenarioFace(hit) {
+  const at = S.scenPick;
+  if (!at) return 'none';
+  if (!hit) { stopScenPick('Not picked: no face there'); return 'missed'; }
+  const pid = hit.object.userData.partId;
+  if (pid !== at.pid) { pickHint(`That's ${partOf(pid).name || pid}: click ${partOf(at.pid).name || at.pid} (Esc stops)`); return 'other'; }
+  let data;
+  try { data = await features(pid); } catch (e) { stopScenPick(`Can't pick on it: ${plainly(e.message)}`); return 'error'; }
+  if (S.scenPick !== at) return 'late';         // stopped, or another row asked, while its faces were worked out
+  if (data.solidMesh) { stopScenPick(`${partOf(pid).name || pid} has no faces to pick (it's a mesh): type its corners`); return 'mesh'; }
+  const f = facePicked(data, hit);
+  if (!f) { stopScenPick('Not picked: no face there'); return 'missed'; }
+  const got = S.scen[pid];
+  if ($('scenSave')) Object.assign(got, readScenarios(got));   // what's typed in the other rows is kept (first: it's new arrays)
+  const rows = at.kind === 'load' ? got.scenarios : got.supports;
+  const box = faceBox(unposed(f.verts, scenFrame(partOf(pid)))), what = String(f.said || 'that face').replace(/^face: /, '');   // the chip's "face: " isn't for a sentence
+  rows[at.i] = { ...rows[at.i], lo: box.lo, hi: box.hi };
+  stopScenPick(`Picked ${what}`);
+  repaintScen(pid);
+  const said = $('scenSaid');
+  if (said) said.innerHTML = `<div class="small">The box is now ${esc(what)}. Save them to keep it.</div>`;
+  return 'picked';
+}
+function repaintScen(pid) {                    // the editor drawn again from S.scen, and the model with it
+  const p = S.design && S.design.parts.find((x) => x.id === pid), body = $('scenBody');
+  if (!p || !body) return;
+  body.innerHTML = scenariosView(p, S.scen[pid]);
+  wireScenarioRows(p);
 }
 function scenariosBox(p) {
   const open = S.scenOpen === p.id;
@@ -3915,7 +4188,8 @@ function wireScenarios(p) {
   const paint = () => { $('scenBody').innerHTML = scenariosView(p, (S.scen || {})[p.id]); wireScenarioRows(p); };
   box.ontoggle = async () => {
     S.scenOpen = box.open ? p.id : null;
-    if (!box.open || $('scenSave')) return;      // painted already (a render with it open): keep what it says
+    if (!box.open) { clearScenMarks(); if (S.scenPick) stopScenPick(); return; }
+    if ($('scenSave')) { drawScenarios(); return; }   // painted already: keep what it says, and draw it again (#376 review)
     S.scen = S.scen || {};
     if (!S.scen[p.id]) { paint(); S.scen[p.id] = await api('GET', `/api/designs/${S.slug}/parts/${p.id}/scenarios`); }
     paint();
@@ -3927,6 +4201,17 @@ function wireScenarioRows(p) {
   if (!got) return;
   const keep = () => { S.scen[p.id] = { ...got, ...readScenarios(got) }; };
   const repaint = () => { $('scenBody').innerHTML = scenariosView(p, S.scen[p.id]); wireScenarioRows(p); };
+  document.querySelectorAll('#scenBody [data-scen-pick], #scenBody [data-sup-pick]').forEach((b) => {   // (#296 B1)
+    b.onclick = () => { keep(); b.dataset.scenPick != null ? startScenPick(p.id, 'load', +b.dataset.scenPick) : startScenPick(p.id, 'support', +b.dataset.supPick); };
+  });
+  const body = $('scenBody');
+  body.oninput = () => drawScenarios();          // the picture follows what's typed
+  body.onfocusin = (e) => {                     // the row being edited is the one lit on the model
+    const row = e.target.closest('[data-scen], [data-sup]');
+    S.scenFocus = row ? (row.dataset.scen != null ? { kind: 'load', i: +row.dataset.scen } : { kind: 'support', i: +row.dataset.sup }) : null;
+    drawScenarios();
+  };
+  drawScenarios();
   document.querySelectorAll('#scenBody [data-f="dir"]').forEach((sel) => {
     sel.onchange = () => { sel.parentElement.querySelector('[data-angle]').hidden = sel.value !== 'angle'; };
   });
@@ -4301,23 +4586,29 @@ function grainKeep(p, pl, need) {
   if (!(pl.safety > pl.safety_across)) return '';
   return ` <button class="ghost" data-grain="${esc(pl.piece)}">Keep: cut it with its ${esc(pl.advice_phrase || 'face grain running from one support to the other')} (${sx(pl.safety, need)})</button>`;
 }
+// a piece by the name the person gave it (#94): a run's record keeps the key it ran with (walk 11-21: "tread" read "step")
+function pieceSaid(p, key) {
+  const pc = ((p && p.pieces) || []).find((x) => x.key === key);
+  return pc && pc.name ? pc.name : key;
+}
 function loadCase(p, run, c, i) {
   const on = S.station && S.station.run === run.id && S.station.index === i;
+  const piece = (k) => (((p && p.pieces) || []).find((x) => x.key === k) || {}).name || k;   // pieceSaid, kept inline for its readers
   const pl = c.plate, f = c.fea || {};
   const holds = p.untrusted ? untrustedBadge(p) : caseBadge(c);     // a filled-in shape wins (CALI-96, then 97)
   // the plate or beam check's number its verdict rests on (the worse grain's), in the verdict's colour and, where it
   // isn't settled, its word: never green on a not-trusted, unresolved or older case (#122, #132)
   const plNum = (n) => `<b style="color:var(--${verdictTone(pl.verdict)})">${sx(n, run.min_safety)}${pl.verdict && !settled(pl.verdict) ? ` (${esc(pl.verdict.word)})` : ''}</b>`;
   const plate = !pl ? '' : !pl.done
-    ? `<div class="muted small" style="margin-top:4px">No plate check for ${esc(pl.piece)}: ${esc(pl.why)}.</div>`
+    ? `<div class="muted small" style="margin-top:4px">No plate check for ${esc(piece(pl.piece))}: ${esc(pl.why)}.</div>`
     : pl.as === 'beam'      // a top on two sides: a beam, not a plate held all round (CALI-116)
-      ? `<div class="small" style="margin-top:4px"><b>Beam check</b> — ${esc(pl.piece)}: ${esc(pl.why)} ·
+      ? `<div class="small" style="margin-top:4px"><b>Beam check</b> — ${esc(piece(pl.piece))}: ${esc(pl.why)} ·
         ${plNum(pl.safety_across)} ${beamGrain(pl)} · sags ${len(pl.deflection_mm, 3)}${grainKeep(p, pl, run.min_safety)}</div>`
     : pl.support === 'ring'  // a disc on a ring (#137 item 7)
-      ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, a round plate held at its ring's outer edge (${len(pl.ring_mm)} across),
+      ? `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(piece(pl.piece))}, a round plate held at its ring's outer edge (${len(pl.ring_mm)} across),
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → ${plNum(pl.safety_across)} across the grain, ${sx(pl.safety, run.min_safety)} along it
         · sags ${len(pl.deflection_mm, 3)} <span class="muted">(Roark; needs an engineer's check)</span></div>`
-      : `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(pl.piece)}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
+      : `<div class="small" style="margin-top:4px"><b>Plate check</b> — ${esc(piece(pl.piece))}, ${len(pl.a_mm)} × ${len(pl.b_mm)} held all round,
         edges free to turn: ${fixed(pl.stress_mpa, 1)} MPa → <b>${sx(pl.safety, run.min_safety)}</b> with its face grain across the ${len(pl.b_mm)} span,
         ${plNum(pl.safety_across)} the other way · sags ${len(pl.deflection_mm, 3)}</div>`;
   const fea = f.supported === false ? `<div class="small" style="color:var(--bad)">${esc(c.why)}</div>`
@@ -4711,6 +5002,8 @@ async function showHeat(pid, run, index) {
     const dir = new THREE.Vector3(...c.force_n).normalize();
     const len3 = reach * 1.6;
     stationMesh.add(new THREE.ArrowHelper(dir, mid.clone().sub(dir.clone().multiplyScalar(len3)), len3, 0xffffff, len3 * 0.3, len3 * 0.15));
+    const pose = overlayPose(pid, 'load');           // heat, box and arrow: where the part is now (#375)
+    if (pose) stationMesh.applyMatrix4(pose);
     scene.add(stationMesh);
     S.station = { part: pid, run: run.id, index, kind: 'load' };
     const grad = HEAT.map(([t, hex]) => `#${hex.toString(16).padStart(6, '0')} ${t * 100}%`).join(', ');
@@ -4721,7 +5014,7 @@ async function showHeat(pid, run, index) {
       : c.governs === 'buckling'
       ? foldedBy(c)                                                       // the picture is the FEA's; the verdict isn't (#229)
       : c.governs === 'plate' && pl
-      ? `the plate check on the ${esc(pl.piece)}: ${fixed(pl.stress_mpa, 1)} MPa, with the grain the wrong way`
+      ? `the plate check on the ${esc(pieceSaid(partOf(pid), pl.piece))}: ${fixed(pl.stress_mpa, 1)} MPa, with the grain the wrong way`
       : `the FEA's peak: ${fixed(f.peak_mpa, 1)} MPa ${esc(peakWhere(f))}`;   // never an old run's label (#139 review)
     const bar = $('stationBar');
     bar.hidden = false;
@@ -5162,6 +5455,17 @@ async function runWhittle(p) {
   }
 }
 
+// a run made in the part's own frame (#375: the studies read a part unposed) draws where the part is now: one matrix,
+// the part's current pose. Runs made before a move, all at pose 0, draw on the moved part too. whittle's drag carve and
+// aero's parametric study run on the posed mesh, in the design's frame: none for them.
+const PART_FRAME = new Set(['load', 'lighten', 'carve', 'frame']);
+function partPose(p) {
+  const t = (p && p.position) || [0, 0, 0], r = ((p && p.rotation) || [0, 0, 0]).map((d) => d * Math.PI / 180);
+  return new THREE.Matrix4().compose(new THREE.Vector3(...t), new THREE.Quaternion().setFromEuler(new THREE.Euler(...r, 'XYZ')),
+    new THREE.Vector3(1, 1, 1));
+}
+function overlayPose(pid, kind) { return PART_FRAME.has(kind) ? partPose(partOf(pid)) : null; }
+
 // show a station in place of its part, with the part's current shape as a ghost around it
 const STUDY_PATH = { parametric: 'aero', frame: 'frame-study', lighten: 'lighten', carve: 'carve' };
 async function showStation(pid, run, index) {
@@ -5171,6 +5475,8 @@ async function showStation(pid, run, index) {
     const r = await fetch(`/api/designs/${S.slug}/${STUDY_PATH[run.kind] || 'whittle'}/${run.id}/stations/${index}.stl`);
     if (!r.ok) throw new Error(`station ${index}: HTTP ${r.status}`);
     const geom = loader.parse(await r.arrayBuffer());
+    const pose = overlayPose(pid, run.kind);         // the station, not its ghost (posed already): where the part is (#375)
+    if (pose) geom.applyMatrix4(pose);
     geom.computeVertexNormals();
     clearStation(true);
     stationMesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0xffb454, roughness: 0.55, metalness: 0.05 }));
@@ -5288,6 +5594,8 @@ async function takeStation(pid, wid, index, kind) {
     await api('POST', `/api/designs/${S.slug}/${STUDY_PATH[kind] || 'whittle'}/${wid}/adopt`, { station: index });
     clearStation();
     await refresh();
+    const now = partOf(pid), checks = kind === 'lighten' || kind === 'carve';   // said, not only a new version number (walk 11-21)
+    say(`Used ${kind === 'carve' ? "the carve's" : kind === 'lighten' ? "the Lighten's" : 'its'} step ${index}: ${now.name || pid} is v${now.version} now.${checks ? ' Checking it again: that number is the one to go by.' : ''}`);
     // holes cut in, or carved: check its strength again on the part as rebuilt — that's the number to go by
     if (kind === 'lighten' || kind === 'carve') {
       const p = S.design.parts.find((x) => x.id === pid);

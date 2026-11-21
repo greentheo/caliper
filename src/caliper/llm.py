@@ -44,6 +44,7 @@ JOBS = {
     "goals": Job(DEFAULT_MODEL, "medium", 8000),
     "promote": Job(DEFAULT_MODEL, "medium", 8000),
     "draw": Job(DEFAULT_MODEL, "medium", 8000),
+    "assess": Job(DEFAULT_MODEL, "high", 16000),     # CALI-160 (#238) slice B: a review, so effort high; room to think
 }
 #: The server re-runs a declined request on another model by itself, on these models (server-side refusal fallbacks).
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
@@ -62,6 +63,31 @@ class Declined(Stopped):
 
 class CutOff(Stopped):
     """The reply hit ``max_tokens`` before it finished."""
+
+
+class NoKey(Stopped):
+    """No Claude key here, so nothing was sent (CALI-217, #366): said in words, never "Something went wrong"."""
+
+
+#: What a request that needs Claude says where there's no key (CALI-217, #366), as the page says it elsewhere (CALI-91).
+NO_KEY = ("That needs Claude, which isn't set up here: put a Claude API key in ANTHROPIC_API_KEY in Caliper's .env file "
+          "(see .env.example), then start Caliper again")
+
+
+def has_key() -> bool:
+    """Whether Claude can be asked here: an API key, or the auth token the SDK also takes. The one check every gate asks
+    (#372 review: the client took the token, the gates didn't)."""
+    return bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+
+
+def client():
+    """The Claude client every request is made with, or :class:`NoKey` where there's no key (CALI-217, #366: the client
+    was made anyway and failed inside the request as a TypeError, read as a crash). Raised before anything is sent."""
+    if not has_key():
+        raise NoKey(NO_KEY)
+    from anthropic import Anthropic  # lazy; may be absent
+
+    return Anthropic()
 
 
 def said(e: Exception) -> str:
