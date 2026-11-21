@@ -104,7 +104,7 @@ def test_through_the_route(store):
 def _page(body, tree_=None):
     src = open(JS).read()
     head = "const D = " + json.dumps({"parts": [{"id": i} for i in "abcd"], "tree": tree_ or {}}) + ";\n"
-    script = head + "".join(_fn(src, n) for n in ("treeRows", "underPart", "dropped", "dropZone")) + f"\nconsole.log(JSON.stringify((() => {{ {body} }})()));"
+    script = head + "".join(_fn(src, n) for n in ("groupOf", "treeOver", "crossesGroup", "groupName", "treeRows", "underPart", "dropped", "dropZone")) + f"\nconsole.log(JSON.stringify((() => {{ {body} }})()));"
     got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
     return json.loads(got.stdout)
@@ -211,7 +211,7 @@ const api = async (m, u, b) => { posted.push(b); if (answer) return answer(); re
 const tick = () => new Promise((r) => setImmediate(r));
 const ev = (el, y, extra) => ({ target: { closest: () => el }, clientY: y, preventDefault() { this.stopped = true; }, dataTransfer: { setData() {} }, ...extra });
 """
-_NAMES = ("treeRows", "underPart", "dropped", "dropZone", "clearDrop", "moveInTree", "showDrop", "treeDragStart", "treeDragOver", "treeDrop",
+_NAMES = ("groupOf", "treeOver", "crossesGroup", "groupName", "treeRows", "underPart", "dropped", "dropZone", "clearDrop", "moveInTree", "showDrop", "treeDragStart", "treeDragOver", "treeDrop",
           "sayMissed")
 
 
@@ -301,7 +301,7 @@ def _html(view):
     head = "const esc = (s) => String(s); const EYE_ON = 'o', EYE_OFF = 'x'; const renameRow = () => '';\nconst D = " + json.dumps(
         {"parts": [{"id": "a", "version": 1}, {"id": "b", "version": 1}], "tree": {"parent": {"b": "a"}}}) + ";\n"
     view_ = "{ parts: new Set(), pieces: new Set(), open: true, " + view + " }"
-    script = head + "".join(_fn(src, n) for n in ("treeRows", "underPart", "treeHtml")) + f"\nconsole.log(treeHtml(D, {view_}));"
+    script = head + "".join(_fn(src, n) for n in ("groupOf", "treeOver", "crossesGroup", "groupName", "treeRows", "underPart", "treeHtml")) + f"\nconsole.log(treeHtml(D, {view_}));"
     got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
     return got.stdout
@@ -372,7 +372,7 @@ def _render(phone, saying="null"):
                 {"parts": [{"id": "a", "version": 1}, {"id": "b", "version": 1}], "tree": {}}) + " };\n"
             f"const TREE = {{ parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, saying: {saying} }};\n"
             f"const seen = () => TREE; const onPhone = () => {phone};\n")
-    script = head + "".join(_fn(src, n) for n in ("treeRows", "underPart", "treeHtml", "renderTree")) + "\nrenderTree(); console.log(box.innerHTML);"
+    script = head + "".join(_fn(src, n) for n in ("groupOf", "treeOver", "crossesGroup", "groupName", "treeRows", "underPart", "treeHtml", "renderTree")) + "\nrenderTree(); console.log(box.innerHTML);"
     got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
     return got.stdout

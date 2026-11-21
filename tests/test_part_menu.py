@@ -181,7 +181,7 @@ def _menu(body: str) -> dict:
     from .test_carve_click import _fn, _node
 
     src = open(JS).read()
-    names = ("seen", "keepTree", "underPart", "treeRows", "dropped", "nudge", "menuItems", "menuHtml", "confirmHtml", "toggleHidden", "showOnly",
+    names = ("groupOf", "treeOver", "crossesGroup", "groupName", "seen", "keepTree", "underPart", "treeRows", "dropped", "nudge", "menuItems", "menuHtml", "confirmHtml", "toggleHidden", "showOnly",
              "menuDo", "deletePart", "pieceConfirmHtml", "deletePiece")
     script = (_STUBS.replace("DESIGN", _DESIGN) + re.search(r"^const TREE_KEYS = .*$", src, re.M).group(0) + "\n" + "\n".join(_fn(src, n) for n in names)
               + f"\nconst out = await (async () => {{ {body} }})();\nconsole.log(JSON.stringify(out));")

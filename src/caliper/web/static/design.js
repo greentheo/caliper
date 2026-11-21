@@ -187,7 +187,7 @@ const fixed = (v, d) => (v == null ? '—' : Number(v).toFixed(d));
 // ------------------------------------------------------------- the part tree (#94, the mockup Theo approved)
 // Every part and its pieces: a colour by material (the legend), an eye, click to select, double-click to rename.
 // What's hidden is this viewer's: kept in the browser, per design, and still in every check.
-const TREE = { slug: undefined, parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, last: null,
+const TREE = { slug: undefined, parts: new Set(), pieces: new Set(), open: true, oneBody: false, rename: null, last: null, folded: new Set(),
   waiting: new Set(), missed: {} };   // the designs with a move still waiting, and a move that failed while away, by slug (#251)
 const WAITING = 'Waiting for the job on this design to finish…';
 const pieceId = (pid, key) => `${pid}/${key}`;
@@ -198,6 +198,7 @@ function seen() {
     try { kept = JSON.parse(localStorage.getItem(`caliper-tree:${S.slug}`)) || {}; } catch (e) { /* none, or none allowed */ }
     TREE.parts = new Set(kept.parts || []); TREE.pieces = new Set(kept.pieces || []);
     TREE.open = kept.open !== false; TREE.oneBody = !!kept.oneBody; TREE.rename = null;
+    TREE.folded = new Set(kept.folded || []);     // the groups folded shut (#17)
     TREE.saying = TREE.waiting.has(S.slug) ? WAITING : null;   // another design's wait isn't this one's; its own still is (#206, #251)
     TREE.drag = null;
   }
@@ -206,7 +207,7 @@ function seen() {
 function keepTree() {
   try {
     localStorage.setItem(`caliper-tree:${S.slug}`, JSON.stringify({ parts: [...TREE.parts], pieces: [...TREE.pieces],
-      open: TREE.open, oneBody: TREE.oneBody }));
+      open: TREE.open, oneBody: TREE.oneBody, folded: [...TREE.folded] }));
   } catch (e) { /* the tree still works for this visit */ }
 }
 function isHidden(pid, key) {
@@ -219,26 +220,57 @@ function renameRow(part, key, draft) {
   return `<div class="trename"><input id="treeName" aria-label="New name" value="${esc(draft)}" maxlength="60" data-rename-input="1">
     <button class="primary" data-rename-save="1" data-part="${esc(part)}"${key != null ? ` data-key="${esc(key)}"` : ''}>Rename</button></div>`;
 }
-// the parts as the tree shows them (#94, slice b): [{ p, depth }], each followed by what sits under it. Display only
+// which group holds each part and each group, innermost (#17): { part or group id: group id }
+function groupOf(design) {
+  const out = {};
+  (design.groups || []).forEach((g) => g.parts.forEach((k) => { out[k] = g.id; }));
+  return out;
+}
+// the parts as the tree shows them (#94, slice b): [{ p, depth }], each followed by what sits under it; with the plan's
+// groups (#17), [{ g, depth, parts }] before what each holds. Display only
+// the part a part sits under, or null: the person's layout (#94), inside its group only (#17: the plan says which group,
+// the person how it's laid out in it)
+function treeOver(design) {
+  const ids = design.parts.map((p) => p.id), parent = (design.tree || {}).parent || {}, inG = groupOf(design);
+  return (k) => (ids.includes(parent[k]) && inG[parent[k]] === inG[k] ? parent[k] : null);
+}
 function treeRows(design) {
   const lay = design.tree || {}, ids = design.parts.map((p) => p.id), parent = lay.parent || {};
   const saved = (lay.order || []).filter((i) => ids.includes(i));
   const order = saved.concat(ids.filter((i) => !saved.includes(i)));
+  const groups = (design.groups || []).filter((g) => g && g.id), inG = groupOf(design), over = treeOver(design);
   const out = [];
   const walk = (id, depth) => {
     out.push({ p: design.parts.find((x) => x.id === id), depth });
-    order.filter((k) => parent[k] === id).forEach((k) => walk(k, depth + 1));
+    order.filter((k) => over(k) === id).forEach((k) => walk(k, depth + 1));
   };
-  order.filter((k) => !ids.includes(parent[k])).forEach((k) => walk(k, 0));
+  if (!groups.length) {                                  // no groups: as it always was
+    order.filter((k) => !ids.includes(parent[k])).forEach((k) => walk(k, 0));
+    return out;
+  }
+  const gById = Object.fromEntries(groups.map((g) => [g.id, g]));
+  const under = (gid) => ids.filter((k) => { for (let at = inG[k]; at; at = inG[at]) if (at === gid) return true; return false; });
+  const walkG = (g, depth) => {
+    out.push({ g, depth, parts: under(g.id) });
+    g.parts.filter((k) => gById[k]).forEach((k) => walkG(gById[k], depth + 1));
+    order.filter((k) => inG[k] === g.id && !over(k)).forEach((k) => walk(k, depth + 1));
+  };
+  groups.filter((g) => !gById[inG[g.id]]).forEach((g) => walkG(g, 0));
+  order.filter((k) => !inG[k] && !over(k)).forEach((k) => walk(k, 0));
   return out;
 }
 function underPart(design, id) {           // everything that sits under a part, however deep
-  const parent = (design.tree || {}).parent || {};
-  return design.parts.map((p) => p.id).filter((k) => { for (let at = parent[k]; at; at = parent[at]) if (at === id) return true; return false; });
+  const over = treeOver(design);
+  return design.parts.map((p) => p.id).filter((k) => { for (let at = over(k); at; at = over(at)) if (at === id) return true; return false; });
+}
+// a move into or out of a group: the plan's to say, never the tree's (#17)
+function crossesGroup(design, drag, target) {
+  const inG = groupOf(design);
+  return inG[drag] !== inG[target];
 }
 // where a drop puts a part: before or after another, at that part's level, or into it. null if it's nowhere new (itself, or inside itself)
 function dropped(design, drag, target, zone) {
-  if (drag === target || underPart(design, drag).includes(target)) return null;
+  if (drag === target || underPart(design, drag).includes(target) || crossesGroup(design, drag, target)) return null;
   const lay = design.tree || {}, ids = design.parts.map((p) => p.id);
   const parent = { ...(lay.parent || {}) };
   const saved = (lay.order || []).filter((i) => ids.includes(i));
@@ -257,10 +289,9 @@ function dropZone(e, row) {
 // above it (as that part's last), or out of the part it sits under (to just after it). A drop the drag already makes, as
 // [target, zone] for moveInTree; null where there's nowhere to go
 function nudge(design, id, dir) {
-  const parent = (design.tree || {}).parent || {}, ids = design.parts.map((p) => p.id);
-  const over = (k) => (ids.includes(parent[k]) ? parent[k] : null);
-  const rows = treeRows(design).map((r) => r.p.id), up = over(id);
-  const level = rows.filter((k) => over(k) === up), at = level.indexOf(id);
+  const over = treeOver(design), inG = groupOf(design);
+  const rows = treeRows(design).filter((r) => r.p).map((r) => r.p.id), up = over(id);
+  const level = rows.filter((k) => over(k) === up && inG[k] === inG[id]), at = level.indexOf(id);   // its group's, never another's
   const before = level[at - 1], after = level[at + 1];
   if (dir === 'up') return before ? [before, 'before'] : null;
   if (dir === 'down') return after ? [after, 'after'] : null;
@@ -288,7 +319,19 @@ function treeSaid(design, id, dir, to) {
   return `Moved ${n} out of ${name(parent[id])}`;
 }
 function treeHtml(design, view) {
-  const rows = treeRows(design).map(({ p, depth }) => {
+  const folded = view.folded || new Set();
+  let shut = null;                                 // the depth of a folded group whose members are being passed over (#17)
+  const rows = treeRows(design).map(({ p, g, depth, parts }) => {
+    if (shut != null && depth > shut) return '';
+    shut = null;
+    if (g) {                                       // a group (#17): fold it, hide or show it as one; it doesn't move
+      const isShut = folded.has(g.id), allOff = parts.length > 0 && parts.every((k) => view.parts.has(k));
+      if (isShut) shut = depth;
+      return `<div class="tgroup" data-tgroup="${esc(g.id)}" style="margin-left:${depth * 18}px"><div class="trow group${allOff ? ' off' : ''}">
+        <button class="eye" aria-label="Show or hide everything in the ${esc(groupName(g).toLowerCase())}" data-geye="${esc(g.id)}">${allOff ? EYE_OFF : EYE_ON}</button>
+        <button class="tname" role="treeitem" aria-level="${depth + 1}" aria-expanded="${!isShut}" data-gfold="${esc(g.id)}"><span class="caret" aria-hidden="true">${isShut ? '▸' : '▾'}</span> ${esc(groupName(g))}</button>
+        <span class="side">${parts.length} part${parts.length === 1 ? '' : 's'}</span></div>${g.what ? `<div class="tgwhat">${esc(g.what)}</div>` : ''}</div>`;
+    }
     const fixed = p.role === 'fixed', off = view.parts.has(p.id);
     const cant = view.cant ? view.cant(p.id, p.version) : null, oneBody = view.oneBody || !!cant;   // no piece eye can act then
     const editing = view.rename && view.rename.part === p.id;
@@ -333,7 +376,7 @@ function renderTree() {
   const was = document.activeElement, held = was && box.contains(was) && was.matches && was.matches('button.tname[data-sel]')
     ? { sel: was.dataset.sel, key: was.dataset.key } : null;
   box.innerHTML = treeHtml(S.design, { parts: t.parts, pieces: t.pieces, open: t.open, rename: t.rename, scope: S.scope, piece: S.pick ? null : S.piece, canDrag: !onPhone(), saying: TREE.saying,
-    oneBody: t.oneBody, cant });
+    oneBody: t.oneBody, cant, folded: t.folded });
   if (t.rename && $('treeName')) { $('treeName').focus(); $('treeName').select(); }
   else if (held) {
     const again = box.querySelector(`button.tname[data-sel="${CSS.escape(held.sel)}"]${held.key != null ? `[data-key="${CSS.escape(held.key)}"]` : ':not([data-key])'}`);
@@ -359,6 +402,8 @@ async function saveTreeName(part, key) {
 function treeClick(el, now) {
   const d = el.dataset, t = seen();
   if (d.fold) { t.open = !t.open; keepTree(); renderTree(); return 'fold'; }
+  if (d.gfold) { if (!t.folded.delete(d.gfold)) t.folded.add(d.gfold); keepTree(); renderTree(); return 'gfold'; }   // a group (#17)
+  if (d.geye) { toggleGroup(d.geye); return 'geye'; }
   if (d.unmirror) { unmirror(d.unmirror); return 'unmirror'; }
   if (d.renameSave) { saveTreeName(d.part, d.key != null ? d.key : null); return 'save'; }
   if (d.eye) { toggleHidden(d.eye, d.key != null ? d.key : null); return 'eye'; }
@@ -398,6 +443,27 @@ function toggleHidden(pid, key) {            // the eye, and the menu's Hide / S
   const hide = !set.has(id);
   (key != null ? [id] : [id, ...underPart(S.design, pid)]).forEach((x) => (hide ? set.add(x) : set.delete(x)));
   keepTree(); renderTree(); paint();
+}
+// a group's eye (#17): every part in it, however deep, hidden or shown as one; shown again unless every one is hidden
+function groupParts(design, gid) {
+  const inG = groupOf(design);
+  return design.parts.map((p) => p.id).filter((k) => { for (let at = inG[k]; at; at = inG[at]) if (at === gid) return true; return false; });
+}
+function toggleGroup(gid) {
+  const t = seen(), ids = groupParts(S.design, gid), hide = !ids.every((k) => t.parts.has(k));
+  ids.forEach((k) => (hide ? t.parts.add(k) : t.parts.delete(k)));
+  keepTree(); renderTree(); paint();
+}
+// what a group is called in the tree and in what's said of it: its id in words ("Box"), with the plan's what beside it
+function groupName(g) {
+  const w = String(g.id).replace(/_/g, ' ');
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+// what a move into or out of a group says (#17): the plan says which group a part is in, so the chat changes it
+function groupRefusal(design, drag, target) {
+  const inG = groupOf(design), gid = inG[drag] || inG[target], g = (design.groups || []).find((x) => x.id === gid);
+  const n = g ? groupName(g).toLowerCase() : 'group';
+  return `The ${n}${n.endsWith('s') ? "'" : "'s"} parts are the plan's: to move one into or out of it, say it in the chat.`;
 }
 function showOnly(pid, key) {                // the menu's Show only this: every other part hidden (a piece: its part's others too)
   const t = seen(), keep = new Set([pid, ...underPart(S.design, pid)]);
@@ -706,6 +772,7 @@ function clearDrop() {
 async function moveInTree(drag, target, zone) {
   if (!S.design) return;                           // a design is loading: nothing to move in (#251 review)
   const next = dropped(S.design, drag, target, zone);
+  if (!next && crossesGroup(S.design, drag, target)) { say(groupRefusal(S.design, drag, target)); return; }   // said, never a silent no (#17)
   if (!next) return;
   const slug = S.slug;                            // the design it's moved in: another may be open by the time it's done (#206)
   const slow = setTimeout(() => {                  // the lock can be minutes
@@ -741,7 +808,7 @@ async function moveInTree(drag, target, zone) {
 function showDrop(row, zone) {
   const id = row.dataset.drag;
   if (zone !== 'after') { row.classList.add(`drop-${zone}`); return; }
-  const under = underPart(S.design, id), last = treeRows(S.design).map((r) => r.p.id).filter((x) => x === id || under.includes(x)).pop();
+  const under = underPart(S.design, id), last = treeRows(S.design).filter((r) => r.p).map((r) => r.p.id).filter((x) => x === id || under.includes(x)).pop();
   const block = document.querySelector(`#tree [data-tpart="${CSS.escape(last)}"]`);
   (block || row).classList.add('drop-after');
 }
@@ -755,6 +822,10 @@ function treeDragStart(e) {
 function treeDragOver(e) {
   const row = e.target.closest('[data-drag]');
   clearDrop();
+  if (row && TREE.drag && S.design && TREE.drag !== row.dataset.drag && crossesGroup(S.design, TREE.drag, row.dataset.drag)) {
+    e.preventDefault();                            // no line, but the drop is taken, so it's said why not (#17)
+    return;
+  }
   if (!row || !TREE.drag || !S.design || !dropped(S.design, TREE.drag, row.dataset.drag, 'into')) return;
   e.preventDefault();
   showDrop(row, dropZone(e, row));

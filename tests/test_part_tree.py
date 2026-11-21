@@ -217,7 +217,7 @@ def _page(body: str) -> dict:
     from .test_carve_click import _fn, _node
 
     src = open(JS).read()
-    names = ("seen", "keepTree", "isHidden", "renameRow", "treeRows", "underPart", "treeHtml", "treeClick",
+    names = ("groupOf", "treeOver", "crossesGroup", "groupName", "seen", "keepTree", "isHidden", "renameRow", "treeRows", "underPart", "treeHtml", "treeClick",
              "toggleHidden")                                                 # the eye's, and the part menu's (CALI-183)
     script = _PAGE.replace("DESIGN", _DESIGN) + "\n".join(_fn(src, n) for n in names) + f"\nconst out = (() => {{ {body} }})();\n" \
         "console.log(JSON.stringify(out));"

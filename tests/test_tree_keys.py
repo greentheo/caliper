@@ -26,7 +26,7 @@ def _run(body, tree_=None, extra=""):
     design = json.dumps({"parts": [{"id": i, "name": i, "label": i.upper(), "version": 1, "role": "part", "pieces": []} for i in "abcde"],
                          "tree": tree_ or {}})
     head = f"const D = {design};\n" + _keys_const(src) + extra
-    names = ("treeRows", "underPart", "dropped", "nudge")
+    names = ("groupOf", "treeOver", "crossesGroup", "groupName", "treeRows", "underPart", "dropped", "nudge")
     script = head + "".join(_fn(src, n) for n in names) + f"\n(async () => {{ const out = await (async () => {{ {body} }})(); console.log(JSON.stringify(out)); }})();"
     got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
@@ -92,7 +92,7 @@ const key = (target, k, mods = {}) => ({ target, key: k, altKey: true, ctrlKey: 
 
 def _keys(body, tree_=None):
     src = open(JS).read()
-    return _run("".join(_fn(src, n) for n in ("treeSaid", "treeKey")) + body, tree_, extra=_KEYS)
+    return _run("".join(_fn(src, n) for n in ("groupOf", "treeOver", "crossesGroup", "groupName", "treeSaid", "treeKey")) + body, tree_, extra=_KEYS)
 
 
 @pytest.mark.parametrize("k,expect,words", [("ArrowUp", ["c", "b", "before"], "Moved C up, above B"),
@@ -206,7 +206,7 @@ const seen = () => TREE; const onPhone = () => false;
 def _redraw(body):
     src = open(JS).read()
     design = json.dumps({"parts": [{"id": "a", "version": 1}, {"id": "b", "version": 1}], "tree": {}})
-    script = (f"const D = {design};\n" + _REDRAW + "".join(_fn(src, n) for n in ("treeRows", "underPart", "treeHtml", "renderTree"))
+    script = (f"const D = {design};\n" + _REDRAW + "".join(_fn(src, n) for n in ("groupOf", "treeOver", "crossesGroup", "groupName", "treeRows", "underPart", "treeHtml", "renderTree"))
               + f"\nconsole.log(JSON.stringify((() => {{ {body} }})()));")
     got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
@@ -231,7 +231,7 @@ def _tree_html(view, tree_=None):
     head = "const esc = (s) => String(s); const EYE_ON = 'o', EYE_OFF = 'x'; const renameRow = () => ''; const pieceId = (p, k) => `${p}/${k}`;\nconst D = " + json.dumps(
         {"parts": [{"id": "a", "version": 1, "pieces": [{"key": "top", "name": "top", "material": "plywood", "color": "#fff"}]},
                    {"id": "b", "version": 1}], "tree": tree_ or {}}) + ";\n"
-    script = head + "".join(_fn(src, n) for n in ("treeRows", "underPart", "treeHtml")) + \
+    script = head + "".join(_fn(src, n) for n in ("groupOf", "treeOver", "crossesGroup", "groupName", "treeRows", "underPart", "treeHtml")) + \
         f"\nconsole.log(treeHtml(D, {{ parts: new Set(), pieces: new Set(), open: true, {view} }}));"
     got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
@@ -251,7 +251,7 @@ def _menu(body, tree_=None):
     src = open(JS).read()
     design = json.dumps({"parts": [{"id": i, "name": i, "label": i.upper(), "version": 1, "role": "part", "pieces": [{"key": "top", "name": "top"}]}
                                    for i in "abcde"], "tree": tree_ or {}, "studies": {"menu": {}}})
-    names = ("seen", "keepTree", "underPart", "treeRows", "dropped", "nudge", "treeSaid", "menuItems", "treeMovesHtml", "menuDo")
+    names = ("groupOf", "treeOver", "crossesGroup", "groupName", "seen", "keepTree", "underPart", "treeRows", "dropped", "nudge", "treeSaid", "menuItems", "treeMovesHtml", "menuDo")
     script = (_STUBS.replace("DESIGN", design) + _keys_const(src)
               + "const moved = []; const moveInTree = async (d, t, z) => { moved.push([d, t, z]); return true; }; let phone = false; const onPhone = () => phone;\n"
               + "\n".join(_fn(src, n) for n in names) + f"\nconst out = await (async () => {{ {body} }})();\nconsole.log(JSON.stringify(out));")

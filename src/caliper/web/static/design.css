@@ -434,3 +434,8 @@ canvas.pad { display: block; width: 100%; max-width: 320px; aspect-ratio: 32 / 2
   align-items: center; max-width: calc(100vw - 32px); padding: 8px 12px; background: rgba(23,28,34,.97);
   border: 1px solid var(--line); border-radius: 10px; font-size: 13px; }
 #tree .tname, #viewer canvas { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+
+/* the plan's groups in the tree (#17): a node above its parts, folded or open, hidden or shown as one */
+.tgroup .trow.group .tname { font-weight: 600; }
+.tgroup .trow.group .caret { display: inline-block; width: 1em; color: var(--muted); }
+.tgroup .tgwhat { font-size: 11px; color: var(--muted); margin: -2px 0 2px 30px; }
