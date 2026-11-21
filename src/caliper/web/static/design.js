@@ -2764,7 +2764,10 @@ function trialView(p) {
   const t = S.trial && S.trial.part === p.id && S.trial.key === p.version ? S.trial.data : null;
   if (!t) { setTimeout(() => loadTrial(p), 0); return '<div class="muted small"><span class="spin"></span>working out what to expect…</div>'; }
   const pr = t.prediction;
-  if (!pr) return '<div class="empty">Check it holds first: the test is set beside what that predicts.</div>';
+  if (!pr) {                                   // an older check isn't none: "first" read as never checked (#395, as #394's Make it better)
+    const older = loadRuns(p.id).find((r) => r.version !== p.version);
+    return `<div class="empty">${older ? `Check it again first: its check is of v${older.version}` : 'Check it holds first'}: the test is set beside what that predicts.</div>`;
+  }
   const rows = t.rows.filter((r) => !r.stale);
   const show = pr.steps.filter((st, i) => i < 3 || st.lb === pr.lb || i === pr.steps.length - 1
     || st.lb % (pr.steps.length > 20 ? 200 : 100) === 0);
@@ -4159,15 +4162,25 @@ function endScenDrag() {
   const said = $('scenSaid');
   if (said) said.innerHTML = `<div class="small">${d.what === 'move' ? 'Moved' : 'Turned'} "${esc(got.scenarios[d.i].said || got.scenarios[d.i].name)}". Save them to keep it.</div>`;
 }
-viewer.addEventListener('pointerdown', (e) => {   // a handle, before the view's own orbit takes the press
+// a handle's reach on screen, by what's pressing: a finger needs more than a mouse (#378 review: 14 px is about 4 mm)
+const GRAB = { mouse: 14, pen: 14, touch: 28 };
+function scenPress(e) {                       // a handle, before the view's own orbit takes the press
   if (e.button !== 0 || !S.scenOpen || S.scenPick) return;
-  const h = handleAt(e);
+  const h = handleAt(e, GRAB[e.pointerType] || GRAB.mouse);
   if (!h || !startScenDrag(h)) return;
   e.stopPropagation(); e.preventDefault();
-  const move = (ev) => moveScenDrag(ev), up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); endScenDrag(); };
+  // it ends however the press does: let go, or cancelled (the browser took the gesture, a call, a palm). A cancel sends no
+  // pointerup, and the listeners left would drag on the next hover or touch (#378 review). Unsaved either way, as any drag
+  const move = (ev) => moveScenDrag(ev);
+  const end = () => {
+    removeEventListener('pointermove', move); removeEventListener('pointerup', end); removeEventListener('pointercancel', end);
+    endScenDrag();
+  };
   addEventListener('pointermove', move);
-  addEventListener('pointerup', up);
-}, true);
+  addEventListener('pointerup', end);
+  addEventListener('pointercancel', end);
+}
+viewer.addEventListener('pointerdown', scenPress, true);
 // Pick on the model: the row waits for one click on its part; the face clicked becomes its box (#296 B1)
 function faceBox(verts, pad = 1) {             // a face's corners, from its triangles' points, a millimetre out each way
   let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
