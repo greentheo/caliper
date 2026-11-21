@@ -64,9 +64,45 @@ def _listing(xs: list[str]) -> str:
 
 
 def _top(plan, pid: str) -> Optional[str]:
-    """The outermost group a part is in, or None (CALI-36, #17)."""
+    """The group a part is directly in, or None (CALI-36, #17): two deep, the platform and the box under a camper keep
+    their own heads (#415 review)."""
     chain = P.group_of(plan, pid)
-    return chain[0] if chain else None
+    return chain[-1] if chain else None
+
+
+def _short(pid: str, gid: Optional[str]) -> str:
+    """A part said within its group: the box's floor, not its box floor."""
+    words = pid.split("_")
+    lead = gid.split("_") if gid else []
+    if lead and words[:len(lead)] == lead and len(words) > len(lead):
+        words = words[len(lead):]
+    return " ".join(words)
+
+
+def _stopped(plan, pid: str, why: str, made: list, built: dict) -> str:
+    """What a stop says in a plan in groups (#415 review): the part and its group, what stays (a group whole, or the parts
+    of the stopped group built before it), and what isn't built yet."""
+    g = _top(plan, pid)
+    first = f"I couldn't build the {_said(pid)}" + (f", in the {_said(g)}" if g else "") + f": {why.strip()}."
+    keys = list(dict.fromkeys(_top(plan, x) for x in made))
+    whole, partial = [], []
+    for k in keys:
+        mine = [x for x in made if _top(plan, x) == k]
+        done = [x for x in mine if x in built]
+        if k is None:
+            whole += [f"the {_said(x)}" for x in done]
+        elif done and len(done) == len(mine):
+            whole.append(f"the {_said(k)}'s {len(mine)} part{'s' if len(mine) != 1 else ''}")
+        elif done:
+            partial.append(f"the {_said(k)}'s {_listing([_short(x, k) for x in done])}")
+    rest = [f"the {_said(x)}" for x in made if x not in built and x != pid]
+    said = ""
+    if whole or partial:
+        stays = (_listing(whole) + (", and " + _listing(partial) if partial else "") if whole else _listing(partial))
+        said = stays[:1].upper() + stays[1:] + " stay"
+    if rest:
+        said += ("; " if said else "") + f"{_listing(rest)} {'aren' if len(rest) > 1 else 'isn'}'t built yet"
+    return first + "\n\n" + (said + ". " if said else "") + "Build it again to retry it, change the plan, or carry on without it."
 
 
 def cost(plan) -> str:
@@ -204,16 +240,18 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
         emit(ev.kind, ev.text, **ev.data)
 
     said, built, kept, failed = [], {}, [], None
-    heading = object()                                    # the group whose parts are being said (CALI-36, #17)
+    heads: dict = {}                                       # each group's lines, said under one head (#415 review)
+    to_make = set(P.buildable(plan))
     for pid in order:
         p, name = by[pid], pid.replace("_", " ")
         top = _top(plan, pid) if plan.groups else None
-        if plan.groups and top != heading:
-            heading = top
-            said.append(f"The {_said(top)}:" if top else "On its own:")
-            if top:
-                n = len([x for x in order if _top(plan, x) == top])
-                emit("step", f"The {_said(top)}: {n} part{'s' if n != 1 else ''}", step="group", group=top)
+        if plan.groups:
+            if top not in heads:
+                heads[top] = []
+                if top:
+                    n = len([x for x in order if _top(plan, x) == top and x in to_make])   # as the cost counts
+                    emit("step", f"The {_said(top)}: {n} part{'s' if n != 1 else ''}", step="group", group=top)
+            said = heads[top]
         if p.role == "fixed":
             said.append(f"- the {name}: yours, not designed")
             continue
@@ -256,6 +294,8 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
         said.append(f"- the {name}: built" + (f" {head}" if head else "") + (f" ({marks})" if marks else ""))
         emit("step", f"The {name}: built" + (f" ({marks})" if marks else ""), step="built", part=pid)
 
+    if plan.groups:                                        # each head once, its parts under it, in the order first met
+        said = [line for k, lines in heads.items() for line in [f"The {_said(k)}:" if k else "On its own:", *lines]]
     made = [pid for pid in order if by[pid].role != "fixed"]
     status = "stopped" if failed else "built"
     store.design.plan = {**store.design.plan, "status": status}
@@ -268,7 +308,8 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
     if failed:
         pid, why = failed
         before = [x.replace("_", " ") for x in made[:made.index(pid)]]
-        reply = (f"I couldn't build the {pid.replace('_', ' ')}: {why.strip()}.\n\n"
+        reply = (_stopped(plan, pid, why, made, built) if plan.groups else
+                 f"I couldn't build the {pid.replace('_', ' ')}: {why.strip()}.\n\n"
                  + (f"The parts before it stay ({', '.join(before)}). " if before else "")
                  + "Build it again to retry it, change the plan, or carry on without it.")
     else:

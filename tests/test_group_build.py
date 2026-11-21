@@ -92,3 +92,82 @@ def test_the_group_line_is_for_the_designer_never_the_part_s_intent(tmp_path):
     s, _, _, _ = _build(tmp_path, CAMPER)
     assert s.design.part("floor").intent == "the box's floor (sheet)"
     assert not any("This part is in" in (p.intent or "") for p in s.design.parts)
+
+
+# --- #415 review (reviewer-2) -----------------------------------------------------------------------------------------
+class Refuses(Stub):
+    def __init__(self, no):
+        super().__init__()
+        self.no = no
+
+    def __call__(self, spec, feedback, prior):
+        self.asked.setdefault(spec.part, spec.intent)
+        if spec.part == self.no:
+            return "def build(params):\n    raise ValueError('the stub says no')\n"
+        return SCRIPTS[spec.part]
+
+
+def _run(tmp_path, plan, author):
+    s = DesignStore.create("a slide-in camper for my small truck", base=str(tmp_path / "designs"))
+    P.save(s, P.validate(plan), status="review")
+    steps = []
+    got = build_plan.build(s, {}, lambda kind, text, **k: steps.append((text, k)), author=author, use_llm=False)
+    return s, got, steps
+
+
+def test_a_stop_in_a_group_names_the_group_what_stays_and_what_isn_t_built(tmp_path):
+    _, got, _ = _run(tmp_path, CAMPER, Refuses("wall"))
+    assert got["reply"] == ("I couldn't build the wall, in the box: the stub says no.\n\nThe platform's 2 parts, and the "
+                            "box's floor stay; the ladder isn't built yet. Build it again to retry it, change the plan, "
+                            "or carry on without it."), got["reply"]
+
+
+def test_a_stop_in_a_plan_without_groups_says_what_it_said(tmp_path):
+    flat = {"parts": [{**p, "mounts_on": [m for m in p.get("mounts_on", []) if m != "platform"]} for p in CAMPER["parts"]]}
+    _, got, _ = _run(tmp_path, flat, Refuses("wall"))
+    assert got["reply"].startswith("I couldn't build the wall: the stub says no.\n\nThe parts before it stay ("), got["reply"]
+
+
+def test_a_group_whose_parts_aren_t_listed_together_is_headed_once(tmp_path):
+    split = {"parts": [{"id": "legs", "what": "four legs", "made": "lumber"},
+                       {"id": "ladder", "what": "a ladder", "made": "printed"},
+                       {"id": "deck", "what": "the deck", "made": "sheet"}],
+             "groups": [{"id": "platform", "what": "the bed platform", "parts": ["legs", "deck"]}]}
+    _, got, steps = _run(tmp_path, split, Stub())
+    assert [t for t, k in steps if k.get("step") == "group"] == ["The platform: 2 parts"]
+    assert got["reply"].count("The platform:") == 1 and "\nThe platform:\n- the legs: built" in got["reply"]
+    assert got["reply"].index("- the deck: built") < got["reply"].index("On its own:"), got["reply"]
+
+
+def test_two_deep_groups_keep_their_own_heads(tmp_path):
+    deep = {**CAMPER, "groups": CAMPER["groups"] + [{"id": "camper", "what": "the whole camper", "parts": ["box", "platform"]}]}
+    assert build_plan.cost(P.validate(deep)).startswith("5 parts to make (the platform: 2, the box: 2, and 1 on its own)")
+    _, got, steps = _run(tmp_path, deep, Stub())
+    assert [t for t, k in steps if k.get("step") == "group"] == ["The platform: 2 parts", "The box: 2 parts"]
+
+
+def test_a_part_you_have_isn_t_counted_in_its_group_s_progress(tmp_path):
+    mine = {**CAMPER, "parts": CAMPER["parts"] + [{"id": "bed_liner", "what": "the bed liner I have", "role": "fixed"}],
+            "groups": [CAMPER["groups"][0], {**CAMPER["groups"][1], "parts": ["legs", "deck", "bed_liner"]}]}
+    assert "the platform: 2" in build_plan.cost(P.validate(mine))
+    _, _, steps = _run(tmp_path, mine, Stub())
+    assert "The platform: 2 parts" in [t for t, k in steps if k.get("step") == "group"]
+
+
+def test_what_a_designer_is_told_two_deep_and_of_a_group_on_a_part():
+    deep = P.validate({**CAMPER, "groups": [
+        {"id": "box", "what": "the camper box", "parts": ["floor", "wall"], "mounts_on": ["ladder"]},
+        {"id": "platform", "what": "the bed platform", "parts": ["legs", "deck"]},
+        {"id": "camper", "what": "the whole camper", "parts": ["platform"], "mounts_on": ["ladder"]}]})
+    legs = build_plan.told(deep, "legs")
+    assert "This part is in the platform (the bed platform), part of the camper, with the deck." in legs, legs  # inner
+    assert "The platform sits on the ladder, built before it." in legs, legs          # the outer group's mount, said
+    floor = build_plan.told(deep, "floor")
+    assert "The box sits on the ladder, built before it." in floor, floor             # on a part: no "(the ladder)"
+    assert floor.rstrip().endswith("Build only this part: the group's other parts are built on their own, from the same "
+                                   "skeleton.")
+
+
+def test_the_group_line_never_reaches_the_stored_spec(tmp_path):
+    s, _, _, _ = _build(tmp_path, CAMPER)
+    assert "This part is in" not in (s.read_spec("floor").intent or "")
