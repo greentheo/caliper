@@ -4617,9 +4617,9 @@ function busyHtml(main, more, now, name) {
 function paintBusy() {
   const box = $('busy');
   if (!box) return;
-  const here = S.design ? jobsHere() : [], { main, more } = busyJobs(here, S.scope), insp = $('inspector');
+  const shown = shownPart(), here = S.design ? jobsHere() : [], { main, more } = busyJobs(here, shown), insp = $('inspector');   // the part on screen, picked or the one part (#364)
   // its panel greys when the part on screen is the one being worked on (a design-wide job leaves the design view be)
-  const grey = !!main && !!S.scope && here.some((t) => t.kind !== 'firstrun' && t.part === S.scope);
+  const grey = !!main && !!shown && here.some((t) => t.kind !== 'firstrun' && t.part === shown);
   insp.classList.toggle('is-busy', grey);   // not .busy: that's the overlay's box
   insp.inert = grey;
   if (grey) insp.setAttribute('aria-busy', 'true'); else insp.removeAttribute('aria-busy');

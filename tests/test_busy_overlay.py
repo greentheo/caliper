@@ -113,7 +113,7 @@ const view = () => ({ shown: !els.busy.hidden, shade: !els.busyShade.hidden, gre
 
 
 def _paint(body):
-    return _run(body, names=("busyJobs", "busyTitle", "clock", "busyStep", "busyHtml", "paintBusy"), head=_DOM)
+    return _run(body, names=("soleFor", "shownPart", "busyJobs", "busyTitle", "clock", "busyStep", "busyHtml", "paintBusy"), head=_DOM)
 
 
 def test_the_part_on_screen_greys_and_can_t_be_acted_on_while_its_job_runs():
@@ -131,7 +131,22 @@ def test_another_part_s_job_shows_the_overlay_but_leaves_this_panel_usable():
 
 
 def test_the_design_view_isn_t_greyed_by_a_job():
-    got = _paint("S.scope = null; tracked = [{ job: 'j', kind: 'load', part: 'step_stool', t0: Date.now() }]; paintBusy(); return view();")
+    """"The whole design ▸" on a one-part design: the design's view, with nothing of the part's to act on."""
+    got = _paint("S.scope = null; S.whole = true; tracked = [{ job: 'j', kind: 'load', part: 'step_stool', t0: Date.now() }]; paintBusy(); return view();")
+    assert got["shown"] and not got["grey"]
+
+
+def test_a_one_part_design_opened_unpicked_greys_its_part_s_view():
+    """#364: step-stool-5 opens on its part's view with the chat unscoped (S.scope null). A job on that part greys what's
+    on screen, as a picked part does: by shownPart(), not S.scope."""
+    got = _paint("""S.scope = null; tracked = [{ job: 'j', kind: 'load', part: 'step_stool', t0: Date.now(), text: 'a' }];
+                    paintBusy(); return view();""")
+    assert got["grey"] and got["inert"] and got["busy"] == "true"
+
+
+def test_a_two_part_design_with_nothing_picked_isn_t_greyed():
+    got = _paint("""S.scope = null; S.design.parts.push({ id: 'bench', name: 'Bench' });
+                    tracked = [{ job: 'j', kind: 'load', part: 'step_stool', t0: Date.now() }]; paintBusy(); return view();""")
     assert got["shown"] and not got["grey"]
 
 
@@ -241,3 +256,11 @@ def test_stop_it_stays_the_same_button_while_the_job_reports():
     assert got == {"first": True, "kept": "SAME", "updates": 1, "redrawn": True}    # words in place; a new state, drawn again
     for kept in ("main.job", "!!main.stopping", "!!main.waiting", "!!main.stoppable", "typeof main.progress === 'number'"):
         assert kept in paint
+
+
+def test_unpicked_the_one_part_s_own_job_is_the_one_shown_big():
+    """With two jobs running, the part on screen's goes first, older or not: on a one-part design opened unpicked too."""
+    got = _paint("""S.scope = null; tracked = [{ job: 'a', kind: 'load', part: 'bench', t0: Date.now() - 60000, text: 'older' },
+                                          { job: 'b', kind: 'fix', part: 'step_stool', t0: Date.now(), text: 'fixing it' }];
+                    paintBusy(); return view();""")
+    assert got["live"] == "Fixing Step stool: fixing it"
