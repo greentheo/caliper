@@ -197,7 +197,7 @@ def test_the_route_says_each_in_the_person_s_units(store, monkeypatch):
     monkeypatch.setenv("CALIPER_DESIGNS", os.path.dirname(store.root))
     c, slug = TestClient(create_app()), os.path.basename(store.root)
     got = c.get(f"/api/designs/{slug}/parts/box/features.json").json()
-    assert all(f["said"].startswith("face: the flat face") for f in got["faces"])
+    assert sorted(f["said"].split(",")[0] for f in got["faces"]).count("face: the flat face") == 4   # and its top, its underside (CALI-230)
     assert all(e["said"].startswith("edge: the line between two flat faces") for e in got["edges"])
 
 
