@@ -209,7 +209,7 @@ def _opened(body):
     point = "".join(src[src.index(f"const {n} = "):src.index("\n", src.index(f"const {n} = ")) + 1] for n in ("pointSaid", "pointTold"))
     head = """S.design.parts[0].version = 9; PICK.mode = 'face'; globalThis.features = async () => ({ solidMesh: false, version: 9 });
               await choose({}, HIT);\n"""
-    return _page(head + body, extra=("clearPick", "choose", "pickPosted", "dropOldPick", "openDesign"),
+    return _page(head + body, extra=("clearPick", "choose", "pickPosted", "dropOldPick", "soleFor", "openDesign"),
                  more=_PICKED.replace("const pickHint = () => {};", "const pickHint = (t) => { hint = t; };") + point + _OPEN)
 
 

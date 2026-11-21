@@ -14,8 +14,10 @@ pytest.importorskip("cadquery")
 
 
 def _js(names, body, head=""):
+    from .test_carve_click import _with_shown
+
     src = open(JS).read()
-    script = "const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');\n" + head + "\n".join(_fn(src, n) for n in names) + f"\nconsole.log(JSON.stringify((() => {{ {body} }})()));"
+    script = "const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');\n" + head + "\n".join(_fn(src, n) for n in _with_shown(src, names)) + f"\nconsole.log(JSON.stringify((() => {{ {body} }})()));"
     got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
     return json.loads(got.stdout)

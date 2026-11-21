@@ -133,10 +133,16 @@ class Plan(_Base):
     left_out: list[str] = Field(default_factory=list)
     #: parts validation dropped: the floor, the ground, the room (#117)
     _dropped: list = PrivateAttr(default_factory=list)
+    #: what only the person can answer before it's built (#371 review): a floor or wall that's neither fixed nor made
+    _questions: list = PrivateAttr(default_factory=list)
 
     @property
     def dropped(self) -> list[str]:
         return list(self._dropped)
+
+    @property
+    def questions(self) -> list[str]:
+        return list(self._questions)
 
     @property
     def dropped_rules(self) -> list[str]:
@@ -160,12 +166,28 @@ class Plan(_Base):
         return next((s for s in self.skeleton if s.name == name), None)
 
 
-def validate(data, drop_bad_rules: bool = False) -> Plan:
+def _unsure(p: PlanPart) -> bool:
+    """A part named for what a design stands on that's neither the person's (``fixed``) nor says how it's made: a camper's
+    floor panel or the bathroom floor (#371 review). Neither guess is safe, so it's asked, never picked."""
+    return p.role != "fixed" and p.id.split("_")[-1] in GROUND and not p.made.strip()
+
+
+def _unsure_said(pid: str) -> tuple[str, str]:
+    """(why the planner's plan is refused, the question for the person) about an unsure part."""
+    said = pid.replace("_", " ")
+    return (f"{pid!r} is named for what a design stands on, but it isn't marked fixed and doesn't say how it's made: say "
+            f"how the {said} is made, or mark it fixed if it's what the design stands on",
+            f"Is the {said} something to make? Say how it's made, or that it's what it stands on (then it's left out).")
+
+
+def validate(data, drop_bad_rules: bool = False, ask: bool = False) -> Plan:
     """A plan from the planner's JSON (or a :class:`Plan`), checked: every name well formed and used once, every
     skeleton number with a unit, every mate and rule over parts and numbers the plan has, the rules in the
     language the assembly measures and each measuring a part, a part you have that isn't one to be made, and a build
     order with no cycle. What it stands on (the bathroom floor, the garage wall) is dropped, with what names it, and
-    said (:func:`dropped_line`). Raises :class:`PlanError` with the reason."""
+    said (:func:`dropped_line`). A part named for it that's neither fixed nor made is refused, asking which (#371 review);
+    with ``ask`` (the planner's retry) it's kept, and the question goes to the person (:attr:`Plan.questions`). Raises
+    :class:`PlanError` with the reason."""
     try:
         plan = data if isinstance(data, Plan) else Plan.model_validate(data)
     except Exception as e:  # noqa: BLE001 — pydantic's first complaint, in words (never its raw text or its URL)
@@ -173,6 +195,9 @@ def validate(data, drop_bad_rules: bool = False) -> Plan:
     plan = _drop_ground(plan)
     if not plan.parts:
         raise PlanError("the plan has no parts")
+    unsure = [p.id for p in plan.parts if _unsure(p)]
+    if unsure and not ask:
+        raise PlanError(_unsure_said(unsure[0])[0])
     for p in plan.parts:
         made = MAKING.search(p.made) if p.role == "fixed" else None
         if made:
@@ -237,7 +262,9 @@ def validate(data, drop_bad_rules: bool = False) -> Plan:
     # revision adds the prior plan's (revise)
     out = plan.model_copy(update={"rules": kept, "left_out": list(dict.fromkeys(left))})
     order(out)                                   # a cycle is refused here: the plan's, not a rule's
-    return out._carry(plan)
+    out = out._carry(plan)
+    out._questions = [_unsure_said(pid)[1] for pid in unsure]
+    return out
 
 
 def numbers_only(rule: "PlanRule", plan: "Plan") -> bool:
@@ -280,16 +307,18 @@ def _by_the_numbers(rule: "PlanRule", plan: "Plan") -> Optional[str]:
 
 
 def _ground(p: PlanPart) -> bool:
-    """What it stands on, not a part: the id's LAST word is a ground word and it isn't made (#123 review:
-    "floor_lamp", "wall_shelf" and "ground_stake" are parts; "bathroom_floor" and "garage_wall" aren't; a
-    "retaining_wall" that's built is)."""
-    return p.id.split("_")[-1] in GROUND and not p.made.strip()
+    """What it stands on, not a part: what the plan says is the fixed surroundings (``role: fixed``), its id's LAST word a
+    ground word, and not made (#123 review: "floor_lamp", "wall_shelf" and "ground_stake" are parts; "bathroom_floor"
+    and "garage_wall" aren't; a "retaining_wall" that's built is). A part to be made is never dropped by its name
+    (CALI-218, #370: a camper's floor panel with no ``made`` vanished as the ground)."""
+    return p.role == "fixed" and p.id.split("_")[-1] in GROUND and not p.made.strip()
 
 
 def said_aside(plan: Plan) -> str:
     """What the review says besides the parts (CALI-119): checks left out, each with why, and the notes that hold
     by the numbers. Never a silent drop."""
-    out = "".join(f"\n\nI left out {d}." for d in plan.dropped_rules)
+    out = "".join(f"\n\nBefore I build it: {q}" for q in plan.questions)       # only the person can say (#371 review)
+    out += "".join(f"\n\nI left out {d}." for d in plan.dropped_rules)
     if plan.notes:
         out += "\n\nBy the numbers: " + "; ".join(plan.notes) + "."
     return out
@@ -601,7 +630,8 @@ def save(store, plan: Plan, status: str = "review") -> None:
     store.design.plan = {"status": status, "parts": [p.model_dump() for p in plan.parts], "order": order(plan),
                          "rules": [r.model_dump() for r in plan.rules],
                          **({"dropped": plan.dropped} if plan.dropped else {}),
-                         **({"left_out": plan.left_out} if plan.left_out else {})}
+                         **({"left_out": plan.left_out} if plan.left_out else {}),
+                         **({"questions": plan.questions} if plan.questions else {})}
     store.save()
 
 
@@ -615,6 +645,7 @@ def load(store) -> Optional[Plan]:
     plan = Plan.model_validate({"parts": rec["parts"], "skeleton": store.design.skeleton or [], "mates": mates,
                                 "rules": rec.get("rules") or [], "left_out": rec.get("left_out") or []})
     plan._dropped = list(rec.get("dropped") or [])
+    plan._questions = list(rec.get("questions") or [])
     return plan
 
 
@@ -745,7 +776,7 @@ def _ask(client, model: Optional[str], content: str, said: str, prior: Optional[
         try:
             if got is None:
                 raise PlanError("the planner didn't answer with a plan")
-            return classify(validate(got, drop_bad_rules=drop and attempt == 2), said, prior)
+            return classify(validate(got, drop_bad_rules=drop and attempt == 2, ask=attempt == 2), said, prior)
         except PlanError as e:
             if attempt == 2:
                 raise

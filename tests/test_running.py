@@ -160,7 +160,7 @@ def _run(names, body):
     return json.loads(got.stdout)
 
 
-ALL = ("trackJob", "jobOver", "rereadWhenBack", "pollRunning", "syncRunning", "jobPart", "jobOff", "jobOn", "runningLabel",
+ALL = ("soleFor", "shownPart", "trackJob", "jobOver", "rereadWhenBack", "pollRunning", "syncRunning", "jobPart", "jobOff", "jobOn", "runningLabel",
        "jobHtml", "changedUnder",
        "paintJobs", "cancelJob")
 

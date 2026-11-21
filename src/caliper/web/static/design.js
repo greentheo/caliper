@@ -66,7 +66,7 @@ async function api(method, url, body) {
 async function reportError(errorId, message) {
   try {
     // where on the page, never which design: its name is the person's own words
-    const where = S.scope ? "a part's cards" : (S.slug ? 'a design' : 'the welcome');
+    const where = shownPart() ? "a part's cards" : (S.slug ? 'a design' : 'the welcome');
     if (!errorId) errorId = (await api('POST', '/api/errors', { where, error: message || 'something broke' })).id;
     const rep = await api('GET', `/api/errors/report?id=${encodeURIComponent(errorId)}`);
     let dlg = $('reportDlg');
@@ -253,6 +253,40 @@ function dropZone(e, row) {
   const box = row.getBoundingClientRect(), y = (e.clientY - box.top) / (box.height || 1);
   return y < 0.3 ? 'before' : y > 0.7 ? 'after' : 'into';
 }
+// a part moved one step without a mouse, by its keys or its menu (#94): up or down past the part beside it, in under the part
+// above it (as that part's last), or out of the part it sits under (to just after it). A drop the drag already makes, as
+// [target, zone] for moveInTree; null where there's nowhere to go
+function nudge(design, id, dir) {
+  const parent = (design.tree || {}).parent || {}, ids = design.parts.map((p) => p.id);
+  const over = (k) => (ids.includes(parent[k]) ? parent[k] : null);
+  const rows = treeRows(design).map((r) => r.p.id), up = over(id);
+  const level = rows.filter((k) => over(k) === up), at = level.indexOf(id);
+  const before = level[at - 1], after = level[at + 1];
+  if (dir === 'up') return before ? [before, 'before'] : null;
+  if (dir === 'down') return after ? [after, 'after'] : null;
+  if (dir === 'in') {
+    if (!before) return null;
+    const own = rows.filter((k) => over(k) === before);
+    return own.length ? [own[own.length - 1], 'after'] : [before, 'into'];
+  }
+  if (dir === 'out') return up ? [up, 'after'] : null;
+  return null;
+}
+const TREE_KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowRight: 'in', ArrowLeft: 'out' };
+// what a move by the keys or the menu says, in the page's status line, for someone who can't see the tree (#360 review):
+// worked out before the move, from where the part is now; ``to`` null is where it can't go
+function treeSaid(design, id, dir, to) {
+  const name = (x) => { const q = design.parts.find((p) => p.id === x); return q ? q.label || q.name || x : x; };
+  const parent = (design.tree || {}).parent || {}, n = name(id);
+  if (!to) {
+    return { up: `${n} is already at the top`, down: `${n} is already at the bottom`, in: `${n} has no part above it to go under`,
+      out: `${n} isn't under another part` }[dir];
+  }
+  if (dir === 'up') return `Moved ${n} up, above ${name(to[0])}`;
+  if (dir === 'down') return `Moved ${n} down, below ${name(to[0])}`;
+  if (dir === 'in') return `Moved ${n} under ${name(dropped(design, id, to[0], to[1]).parent[id])}`;
+  return `Moved ${n} out of ${name(parent[id])}`;
+}
 function treeHtml(design, view) {
   const rows = treeRows(design).map(({ p, depth }) => {
     const fixed = p.role === 'fixed', off = view.parts.has(p.id);
@@ -260,7 +294,7 @@ function treeHtml(design, view) {
     const editing = view.rename && view.rename.part === p.id;
     const head = `<div class="trow part${view.scope === p.id && !view.piece ? ' on' : ''}${fixed ? ' ref' : ''}${off ? ' off' : ''}"${view.canDrag === false ? '' : ` draggable="true" data-drag="${esc(p.id)}"`}>
       <button class="eye" aria-label="Show or hide the whole part" data-eye="${esc(p.id)}">${off ? EYE_OFF : EYE_ON}</button>
-      <button class="tname" data-sel="${esc(p.id)}"${fixed ? ' data-fixed="1"' : ''}>${esc(p.name || p.id)}</button>
+      <button class="tname" role="treeitem" aria-level="${depth + 1}" aria-selected="${view.scope === p.id && !view.piece}" data-sel="${esc(p.id)}"${fixed ? ' data-fixed="1"' : ''} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowRight Alt+ArrowLeft">${esc(p.name || p.id)}</button>
       <span class="side">${fixed ? 'reference' : `v${p.version}`}</span></div>`
       + (editing && view.rename.key == null ? renameRow(p.id, null, view.rename.draft) : '')
       + (p.mirror_of ? `<div class="tmirror">a mirror of ${esc(p.mirror_of)}: change it there
@@ -274,7 +308,7 @@ function treeHtml(design, view) {
       return `<div class="trow piece${view.scope === p.id && view.piece === pc.key ? ' on' : ''}${fixed ? ' ref' : ''}${pcOff ? ' off' : ''}">
         ${eye}
         <span class="swatch" aria-hidden="true" style="background:${esc(fixed ? '#9aa4ad' : pc.color)}"></span>
-        <button class="tname" data-sel="${esc(p.id)}" data-key="${esc(pc.key)}"${fixed ? ' data-fixed="1"' : ''}>${esc(pc.name)}</button>
+        <button class="tname" role="treeitem" aria-level="${depth + 2}" aria-selected="${view.scope === p.id && view.piece === pc.key}" data-sel="${esc(p.id)}" data-key="${esc(pc.key)}"${fixed ? ' data-fixed="1"' : ''}>${esc(pc.name)}</button>
         <span class="side">${esc(pc.material)}</span></div>`
         + (editing && view.rename.key === pc.key ? renameRow(p.id, pc.key, view.rename.draft) : '');
     }).join('');
@@ -283,7 +317,8 @@ function treeHtml(design, view) {
   const legend = (design.legend || []).length ? `<div class="tlegend"><div class="tlegend-h">Materials</div>${design.legend.map((m) =>
     `<div class="tlegend-r"><span class="swatch" aria-hidden="true" style="background:${esc(m.color)}"></span>${esc(m.label)} · ${m.count} piece${m.count === 1 ? '' : 's'}</div>`).join('')}</div>` : '';
   return `<div class="tree-head"><button class="fold" data-fold="1" aria-expanded="${view.open}">${view.open ? '▾' : '▸'} Parts</button>
-    <span class="note">${view.saying ? esc(view.saying) : `hidden pieces are still checked${view.canDrag === false ? '. Moving parts needs a wider window' : ''}`}</span></div>${view.open ? rows + legend : ''}`;
+    <span class="note">${view.saying ? esc(view.saying) : `hidden pieces are still checked${view.canDrag === false ? '. Hold a part to move it' : ''}`}</span></div>${view.open
+      ? `<div role="tree" aria-label="Parts">${rows}</div>${legend}` : ''}`;   // its depth said, not only drawn (#360 review)
 }
 function renderTree() {
   const box = $('tree');
@@ -293,9 +328,17 @@ function renderTree() {
   if (!parts.length || document.activeElement === $('treeName')) return;       // never over a name being typed
   const t = seen();
   const cant = (pid, version) => { const n = noPieces.get(pid); return n && n.version === version ? n.why : null; };
+  // the row that has the focus keeps it through the redraw (#360 review: the 600 ms "Waiting…" redraw dropped it to <body>,
+  // where the next Alt+← is the browser's Back)
+  const was = document.activeElement, held = was && box.contains(was) && was.matches && was.matches('button.tname[data-sel]')
+    ? { sel: was.dataset.sel, key: was.dataset.key } : null;
   box.innerHTML = treeHtml(S.design, { parts: t.parts, pieces: t.pieces, open: t.open, rename: t.rename, scope: S.scope, piece: S.pick ? null : S.piece, canDrag: !onPhone(), saying: TREE.saying,
     oneBody: t.oneBody, cant });
   if (t.rename && $('treeName')) { $('treeName').focus(); $('treeName').select(); }
+  else if (held) {
+    const again = box.querySelector(`button.tname[data-sel="${CSS.escape(held.sel)}"]${held.key != null ? `[data-key="${CSS.escape(held.key)}"]` : ':not([data-key])'}`);
+    if (again) again.focus();
+  }
 }
 async function unmirror(part) {             // a mirror made a part of its own again, its shape kept (#246 review)
   try {
@@ -394,8 +437,20 @@ function menuItems(design, pid, piece) {
   if (p.study === 'carve') studied('carve', 'carve', 'Carve it');         // whichever made_of says; neither where it says none
   else if (p.study === 'lighten') studied('lighten', 'lighten', 'Lighten it');
   items.push(p.mirror_of ? { id: 'unmirror', label: `Break the mirror (of ${p.mirror_of})` } : { id: 'mirror', label: 'Mirror it…' });
+  if (Object.values(TREE_KEYS).some((d) => nudge(design, pid, d))) items.push({ id: 'tmove', label: 'Move in the tree ▸' });   // a phone's drag (#94)
   items.push({ id: 'versions', label: 'Versions ▸' }, { id: 'copyName', label: 'Copy its name' });
   return items;
+}
+function treeMovesHtml(design, pid) {          // Move in the tree ▸: where it can go, by name, with the keys that do it (#94)
+  const p = design.parts.find((x) => x.id === pid), name = (id) => { const q = design.parts.find((x) => x.id === id); return q.label || q.name || id; };
+  const parent = (design.tree || {}).parent || {};
+  const ways = [['up', 'Move up', 'Alt+↑'], ['down', 'Move down', 'Alt+↓'], ['in', 'Put it under {}', 'Alt+→'], ['out', 'Take it out of {}', 'Alt+←']];
+  return `<div class="pmenu-title">${esc(p.label || p.name || p.id)} · in the tree</div>` + ways.map(([dir, label, keys]) => {
+    const to = nudge(design, pid, dir);
+    if (!to) return '';
+    const by = dir === 'in' ? dropped(design, pid, to[0], to[1]).parent[pid] : parent[pid];
+    return `<button role="menuitem" data-menu="tmove:${dir}">${esc(label.replace('{}', by ? name(by) : ''))}${onPhone() ? '' : ` <span class="why">${keys}</span>`}</button>`;   // a phone has no keys
+  }).join('');
 }
 function versionsHtml(p) {                     // Versions ▸: each other version, newest first, with what was asked of it (#299)
   const said = {};
@@ -508,6 +563,7 @@ async function menuDo(id) {
   }
   if (id === 'deletePieceYes') return deletePiece(pid, piece, m.plan);
   if (id === 'versions') return menuConfirm(versionsHtml(S.design.parts.find((x) => x.id === pid)));   // ▸ (#299)
+  if (id === 'tmove') return menuConfirm(treeMovesHtml(S.design, pid));
   if (id === 'keep') return closeMenu();
   if (id === 'deleteYes' || id === 'deleteBoth') return deletePart(pid, id === 'deleteBoth' ? m.mirroredBy || [] : []);
   if (id === 'unmirrorThem') {                 // its mirrors become parts of their own; then it's asked again
@@ -522,6 +578,12 @@ async function menuDo(id) {
     t.open = true;
     t.rename = { part: pid, key: piece, draft: pc ? pc.name : (p.label || p.name || p.id) };
     return renderTree();
+  }
+  if (id.startsWith('tmove:')) {               // as the keys do it, and said as they say it (#360 review)
+    const dir = id.slice(6), to = nudge(S.design, pid, dir), said = treeSaid(S.design, pid, dir, to);
+    if (!to) return say(said);
+    if (await moveInTree(pid, to[0], to[1])) say(said);
+    return;
   }
   if (id === 'hide') return toggleHidden(pid, piece ?? null);
   if (id === 'only') return showOnly(pid, piece);
@@ -651,7 +713,7 @@ async function moveInTree(drag, target, zone) {
     if (S.slug !== slug) return;
     TREE.saying = WAITING; renderTree();
   }, 600);
-  let got, err;
+  let got, err, saved = false;
   try {
     got = await api('POST', `/api/designs/${slug}/tree`, next);
   } catch (e) { err = e; }
@@ -663,6 +725,7 @@ async function moveInTree(drag, target, zone) {
   }
   if (err) showErr(plainly(err.message));
   else {
+    saved = true;
     S.design = got;
     const t = seen(), up = next.parent[drag];
     if (up && t.parts.has(up)) {                  // under a hidden part, it's hidden as that part is
@@ -672,6 +735,7 @@ async function moveInTree(drag, target, zone) {
   }
   TREE.saying = null;
   render();
+  return saved;                                   // the keys and the menu say a move only once it's saved
 }
 // where a drop would land, on screen: below a part means below everything that sits under it, so that's where the line goes
 function showDrop(row, zone) {
@@ -718,11 +782,31 @@ $('tree').addEventListener('dragover', treeDragOver);
 $('tree').addEventListener('drop', treeDrop);
 $('tree').addEventListener('dragleave', treeDragLeave);
 $('tree').addEventListener('dragend', () => { TREE.drag = null; clearDrop(); });
-$('tree').addEventListener('keydown', (e) => {
-  if (!e.target.dataset.renameInput) return;
-  if (e.key === 'Enter') { e.preventDefault(); e.target.parentElement.querySelector('[data-rename-save]').click(); }
-  if (e.key === 'Escape') { TREE.rename = null; e.target.blur(); renderTree(); }
-});
+// the tree's keys: the rename box's Enter and Escape, and Alt+arrows on a part's row to move it (#94). Alt+← is the
+// browser's Back elsewhere, so on a part's row it's always the tree's, even where the part can't go
+async function treeKey(e) {
+  if (e.target.dataset.renameInput) {
+    if (e.key === 'Enter') { e.preventDefault(); e.target.parentElement.querySelector('[data-rename-save]').click(); }
+    if (e.key === 'Escape') { TREE.rename = null; e.target.blur(); renderTree(); }
+    return;
+  }
+  const dir = TREE_KEYS[e.key], row = e.target.closest && e.target.closest('.trow');
+  if (!row || !dir || !e.altKey || e.ctrlKey || e.metaKey) return;
+  e.preventDefault();                          // anywhere on a row, Alt+← is never the browser's Back (#360 review: its eye too)
+  const b = row.querySelector('button.tname[data-sel]');
+  if (!b || b.dataset.key != null || TREE.rename || !S.design) return;    // a piece's row: its part moves, never the piece alone
+  const pid = b.dataset.sel, to = nudge(S.design, pid, dir), said = treeSaid(S.design, pid, dir, to);
+  if (!to) { say(said); return; }
+  if (!(await moveInTree(pid, to[0], to[1]))) return;
+  say(said);
+  // focus back on the part only if it's nowhere else: the save can take seconds, and by then the person may be typing in
+  // the chat (#360 review: the row took the focus out of a draft). Through the wait the redraw has kept it on the row
+  const now = document.activeElement;
+  if (now && now !== document.body) return;
+  const again = document.querySelector(`#tree button.tname[data-sel="${CSS.escape(pid)}"]:not([data-key])`);
+  if (again) again.focus();
+}
+$('tree').addEventListener('keydown', treeKey);
 
 // ------------------------------------------------------------------------------------- viewer
 const viewer = $('viewer');
@@ -1275,9 +1359,23 @@ async function loadDesigns(select) {
 $('designPick').onchange = (e) => e.target.value && openDesign(e.target.value);
 $('newBtn').onclick = startNew;
 
+// a design with one part shows that part's own view (#362): its action bar (Check it holds, #325), panels and cards are there
+// at first look. Theo's step-stool-5 opened on the design view, which has the part's Parameters but no bar. A lone reference
+// isn't shown so
+function soleFor(design) {
+  const parts = design.parts || [];
+  return parts.length === 1 && parts[0].role !== 'fixed' ? parts[0].id : null;
+}
+// the part whose view the panel shows: the one picked, or a one-part design's own part unless the person asked for the whole
+// design. Never the chat's scope (#364 review: scoped from the first look, "add a matching bench" revised the stool), so a
+// message goes exactly as it did; S.scope stays the chip, the tree's selection and what a message is about
+function shownPart() {
+  return S.scope || (S.design && !S.whole ? soleFor(S.design) : null);
+}
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
+  S.piece = null; S.focus = null; S.whole = false;     // nothing picked on the last design comes over (#364 review: its "left side")
   if (first) { S.fixes = {}; S.fixOpen = null; }      // the list is this design's; your own rows are kept per design (#318)
   if (first) { dropBuildFollow(); clearPick(); pickHint(); }    // a pick is on this design's part: never posted to another (#196 review)
   location.hash = encodeURIComponent(slug);
@@ -2028,7 +2126,7 @@ function wireParams(p) {
 function renderInspector() {
   const el = $('inspector'), d = S.design;
   if (!d) return;
-  const p = S.scope && d.parts.find((x) => x.id === S.scope);
+  const shown = shownPart(), p = shown && d.parts.find((x) => x.id === shown);
   const was = document.activeElement, typing = was && was.dataset && was.dataset.param ? [was.id, was.selectionStart, was.selectionEnd] : null;
   el.innerHTML = `<div id="jobNote"></div>${p ? partView(p) : designView(d)}`;
   wireInspector(p);
@@ -2114,7 +2212,8 @@ function designView(d) {
     ${checks(rep || partChecks(d))}`;
   const buy = d.parts.some((p) => p.built) ? `<h4>Weight &amp; balance</h4><div id="balanceBox">${balanceView()}</div>` : '';
   const make = `<h4>Build package <span class="badge">to the shop</span></h4><div id="relBox">${releaseView(d)}</div>`;
-  return `<h2>${esc(d.name)} ${status}</h2>
+  const back = soleFor(d) ? `<div class="small"><button class="linkish" data-whole="0">◂ ${esc(d.parts[0].name || d.parts[0].id)}: check it, fix it, make it</button></div>` : '';
+  return `<h2>${esc(d.name)} ${status}</h2>${back}
     ${d.parts.length === 1 ? `<div id="paramBox">${paramView(d.parts[0])}</div>` : ''}
     ${cardsView({ what, work, buy, make })}`;
 }
@@ -2131,7 +2230,7 @@ const GOTO = { load: 'loadBox', frame: 'frameBox', patterns: 'patternBox', relea
 function answersKey() {               // what the answers depend on: a change to any of it asks again
   const d = S.design;
   const runs = (list) => (list || []).map((r) => [r.id, r.status]);   // a finished carve or Lighten changes the offers (#159)
-  return JSON.stringify([S.slug, S.scope, d.building || null, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
+  return JSON.stringify([S.slug, shownPart(), d.building || null, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
     runs(d.carve_runs), runs(d.lighten_runs),
     (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
     (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey, d.display_units]);
@@ -2241,7 +2340,7 @@ function fixAct(part) {
 // the bar's Fix these drawn again, alone, as the list lands or a tick changes: the other buttons keep their wiring
 function paintFixAct(part) {
   const bar = $('pacts');
-  if (!bar || S.scope !== part) return;
+  if (!bar || shownPart() !== part) return;
   const old = $('fixGo'), html = fixAct(part);
   if (old) old.remove();
   if (html) bar.insertAdjacentHTML('beforeend', html);
@@ -2418,7 +2517,7 @@ async function useBetter(ln) {
 async function focusCard(k) {
   S.focus = k;
   document.querySelectorAll('#inspector .qcard').forEach((c) => c.classList.toggle('focus', c.dataset.card === k));
-  const pid = S.scope;
+  const pid = shownPart();                       // the part whose cards these are, picked or not (#364)
   if (!pid) return;
   const p = S.design.parts.find((x) => x.id === pid);
   if (!p) return;
@@ -2440,7 +2539,8 @@ async function focusCard(k) {
 // the four questions as an accordion (#325): one open at a time, each header keeping its mark and its answer line, so a
 // closed card still says how it stands. Which is open is kept per design and part; else the first that fails, else Will it
 // work?
-const cardStore = () => `${S.slug}/${S.scope || ''}`;
+// kept per the part shown, picked or not (#364)
+const cardStore = () => `${S.slug}/${shownPart() || ''}`;
 function openCardFor(a) {
   const k = cardStore();
   if (S.openCard && k in S.openCard) return S.openCard[k];
@@ -2454,8 +2554,8 @@ function cardsView(groups) {
   const open = openCardFor(a);
   return QUESTIONS.map(([k, q]) => {
     const c = a ? a.cards.find((x) => x.key === k) : null, on = k === open;
-    return `<section class="qcard q-${c ? c.status : 'info'}${on ? ' open' : ''}${S.focus === k && S.scope ? ' focus' : ''}" data-card="${k}">
-      <h3 class="qhead"><button type="button" class="qtoggle" aria-expanded="${on}" aria-controls="qbody-${k}" data-qopen="${k}"${S.scope ? ' title="show this in 3D"' : ''}><span class="qmark">${c ? QMARK[c.status] : '·'}</span><span class="qtitle">${q}</span>${/class="ssec[^"]*\battn\b/.test(groups[k] || '') ? '<span class="qinside" title="something inside needs a look">● inside</span>' : ''}<span class="qcaret" aria-hidden="true">${on ? '▾' : '▸'}</span></button></h3>
+    return `<section class="qcard q-${c ? c.status : 'info'}${on ? ' open' : ''}${S.focus === k && shownPart() ? ' focus' : ''}" data-card="${k}">
+      <h3 class="qhead"><button type="button" class="qtoggle" aria-expanded="${on}" aria-controls="qbody-${k}" data-qopen="${k}"${shownPart() ? ' title="show this in 3D"' : ''}><span class="qmark">${c ? QMARK[c.status] : '·'}</span><span class="qtitle">${q}</span>${/class="ssec[^"]*\battn\b/.test(groups[k] || '') ? '<span class="qinside" title="something inside needs a look">● inside</span>' : ''}<span class="qcaret" aria-hidden="true">${on ? '▾' : '▸'}</span></button></h3>
       <div class="qlines" id="q-${k}">${cardLines(k, c)}</div>
       ${k === 'what' && picturePart() ? '<div class="qlinks"><button class="btn" data-picture="1">🦖 Put a picture on it</button></div>' : ''}
       <div class="qbody" id="qbody-${k}" role="region" aria-label="${q}"${on ? '' : ' hidden'}>${groups[k] || '<div class="empty">Nothing here yet.</div>'}</div>
@@ -2688,7 +2788,7 @@ async function loadAnswers() {
   if (S.answers && S.answers.key === key && (S.answers.loading || S.answers.cards)) return;
   S.answers = { key, loading: true };
   try {
-    const got = await api('GET', `/api/designs/${S.slug}/answers${S.scope ? `?part=${encodeURIComponent(S.scope)}` : ''}`);
+    const got = await api('GET', `/api/designs/${S.slug}/answers${shownPart() ? `?part=${encodeURIComponent(shownPart())}` : ''}`);
     if (!S.answers || S.answers.key !== key) return;              // it moved on while we asked
     S.answers = { key, cards: got.cards };
   } catch (e) { S.answers = { key, cards: [], error: e.message }; }
@@ -2744,7 +2844,7 @@ function goTo(id, again) {            // open the card's numbers and bring that 
       const only = S.design.parts.filter((p) => p.role !== 'fixed');
       if (only.length !== 1) return;
       setScope(only[0].id);
-    } else if (id === 'relBox' && S.scope) setScope(null);
+    } else if (id === 'relBox' && shownPart()) { S.whole = true; setScope(null); }   // the build package is the whole design's (#364)
     else return;
     setTimeout(() => goTo(id, true), 50);
     return;
@@ -2930,7 +3030,7 @@ function historyItem(h, now) {
   if (h.kind === 'frame' && h.action === 'studied') return `<li class="hist">frame study (${h.stations} designs)</li>`;
   if (h.kind === 'lighten' && h.action === 'studied') return `<li class="hist">lightening study (${h.stations} steps)</li>`;
   // a number only where the check gave one: a check that couldn't run says why, never "0x" (#138 item 3)
-  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.verdict && h.verdict.kind === 'unchecked' && h.verdict.why ? `: ${esc(h.verdict.why)}` : h.safety != null && h.verdict && ['holds', 'fails'].includes(h.verdict.kind) ? `, ${+h.safety.toFixed(1)}x` : ''}</li>`;
+  if (h.kind === 'load' && h.action === 'studied') return `<li class="hist">strength check: ${esc(h.verdict ? h.verdict.word : 'not checked yet')}${h.verdict && h.verdict.kind === 'unchecked' && h.verdict.why ? `: ${esc(h.verdict.why)}` : h.safety != null && h.verdict && ['holds', 'fails'].includes(h.verdict.kind) ? `, ${h.safety < 0.1 ? 'under 0.1' : Math.floor(h.safety * 10 + 1e-9) / 10}x` : ''}</li>`;   // cut, never rounded up to its limit (#64 item 1)
   if (h.kind === 'patterns' && h.action === 'made') return `<li class="hist">patterns for hand tools (${h.pieces} pieces)</li>`;
   if (h.kind === 'cutplan' && h.action === 'made') return `<li class="hist">cut plan (${h.sheets} sheet${h.sheets === 1 ? '' : 's'})</li>`;
   if (h.kind === 'aero' && h.action === 'studied') return `<li class="hist">shape search: ${esc((h.searched || []).join(', '))}</li>`;
@@ -3017,7 +3117,7 @@ function partView(p) {
   const work = ssecs('work', [
     !p.framed && (p.built || p.loads) && p.role !== 'fixed' && { k: 'result', title: 'Will it hold? <span class="badge">strength</span>', ...checked,
       body: `<div id="loadBox">${loadView(p)}</div>` },
-    S.scope && p.role !== 'fixed' && fixesSection(p.id),
+    shownPart() && p.role !== 'fixed' && fixesSection(p.id),
     p.study === 'lighten' && lightenShown(p, runs) && { k: 'lighten', title: 'Make it lighter', ...later(light, 'not lightened yet'),
       body: lightenView(p) },
     p.study === 'carve' && (runs.length || carveRuns(p.id).length) && { k: 'carve', title: 'Carve it <span class="badge">printed, any shape</span>',
@@ -3042,14 +3142,18 @@ function partView(p) {
         : 'the sheets laid out flat', body: `<div id="cutplanBox">${cutplanView(p)}</div>` }]) : '';
   // the heading is the part's own name; its id and how it was made are one click down, under Advanced (#70 item 21);
   // its actions beside it, its numbers under it, then the four questions (#325)
+  const whole = !S.scope ? '<button class="linkish small" data-whole="1">The whole design ▸</button>' : '';   // its one part, unpicked (#364)
   return `<div class="parthead"><div><h2>${esc(p.name || p.id)}</h2>
-    <div class="muted small">v${p.version}</div></div>${partActions(p)}</div>
+    <div class="muted small">v${p.version} ${whole}</div></div>${partActions(p)}</div>
     <div id="paramBox">${paramView(p)}</div>
     ${cardsView({ what, work, buy, make })}`;
 }
 
 function wireInspector(p) {
   document.querySelectorAll('#inspector [data-part]').forEach((a) => { a.onclick = () => setScope(a.dataset.part); });
+  document.querySelectorAll('#inspector [data-whole]').forEach((b) => {   // a one-part design: its part's view, or the whole design's (#364)
+    b.onclick = () => { S.whole = b.dataset.whole === '1'; renderInspector(); };
+  });
   showMarks();
   wireCards();
   // keep a check the planner assumed: it's enforced from then on (CALI-115)
@@ -3143,7 +3247,7 @@ async function loadBuilt(p, tried) {
   } catch (e) { S.built[p.id] = { version: p.version, tried: tried || {}, error: e.message }; }
   S.balance = null;                       // the design's balance changes with any part's what-if
   const box = $('buildBox');
-  if (box && S.scope === p.id) { box.innerHTML = buildView(p); wireBuilt(p); showMarks(); }
+  if (box && shownPart() === p.id) { box.innerHTML = buildView(p); wireBuilt(p); showMarks(); }
 }
 
 function picker(k, ch, v) {
@@ -3264,7 +3368,7 @@ async function loadMaking(p, key) {
   try { S.making[p.id] = { key, data: await api('GET', `/api/designs/${S.slug}/parts/${p.id}/making`) }; }
   catch (e) { S.making[p.id] = { key, error: e.message, status: e.status }; }
   const box = $('makingBox');
-  if (!box || S.scope !== p.id || key !== makingKey(p)) return;    // another part or design on screen by now
+  if (!box || shownPart() !== p.id || key !== makingKey(p)) return;    // another part or design on screen by now
   box.innerHTML = makingView(p); wireMaking();
   const sec = box.closest('details'), head = sec && sec.querySelector('summary'), x = makingSection(p);
   if (head) head.innerHTML = subHead(x);           // its header, drawn before its plan came back (#331 review)
@@ -3579,9 +3683,9 @@ scene.add(marks);
 function showMarks() {
   for (const m of [...marks.children]) { marks.remove(m); m.geometry && m.geometry.dispose(); }
   if (S.station && S.station.kind === 'load') return;     // the stress picture has the floor to itself
-  const c = S.scope && S.built[S.scope];
-  const b = S.scope ? (c && c.balance) : (S.balance && S.balance.data);
-  const cog = S.scope ? (c && c.report && c.report.cog) : (b && b.mass_kg ? b.cog : null);
+  const shown = shownPart(), c = shown && S.built[shown];       // the part whose view is on screen, picked or not (#364)
+  const b = shown ? (c && c.balance) : (S.balance && S.balance.data);
+  const cog = shown ? (c && c.report && c.report.cog) : (b && b.mass_kg ? b.cog : null);
   const across = contentBox().getSize(new THREE.Vector3()).length();
   const size = Math.max(across / 160, Math.min(8, across / 25));    // 8 mm would cover most of a small part
   const dot = (at, color) => {
@@ -3595,9 +3699,9 @@ function showMarks() {
     marks.add(line);
   };
   if (cog) dot(cog, 0xff4d3d);
-  if (b && b.hitch && (!S.scope || cog)) dot(b.hitch, 0x3fb950);
+  if (b && b.hitch && (!shown || cog)) dot(b.hitch, 0x3fb950);
   // what the part has to hold (keeps(): the mattress) — a pale slab if it fits, red if the outside cuts in
-  for (const k of (S.scope && c && c.report && c.report.keeps) || []) {
+  for (const k of (shown && c && c.report && c.report.keeps) || []) {
     const lo = new THREE.Vector3(...k.lo), hi = new THREE.Vector3(...k.hi);
     const geom = new THREE.BoxGeometry(...hi.clone().sub(lo).toArray()), color = k.clear ? 0xd8ecff : 0xff4d3d;
     const at = lo.clone().add(hi).multiplyScalar(0.5);
@@ -3965,7 +4069,7 @@ function carveProgress(pid) {
 }
 function paintCarve(pid) {
   const prog = $('carveProgress'), go = $('carveGo');
-  if (S.scope !== pid) return;
+  if (shownPart() !== pid) return;
   const part = ((S.design && S.design.parts) || []).find((x) => x.id === pid);
   // a carve its check blocks stays off after a job ends (#136 review: Cancel re-enabled "Carve it again")
   if (go) go.disabled = !!S.carveJob[carveKey(pid)] || !!(part && carveBlocked(part));
@@ -4446,7 +4550,7 @@ function paintJobs() {
   const lines = [];
   document.querySelectorAll('#inspector [data-job-off]').forEach(jobOn);
   for (const t of jobsHere()) {
-    const here = t.kind === 'release' || S.scope === t.part, panel = here ? $(JOB_BOX[t.kind]) : null;
+    const here = t.kind === 'release' || shownPart() === t.part, panel = here ? $(JOB_BOX[t.kind]) : null;
     const box = panel && panel.closest && panel.closest('details:not([open]), [hidden]') ? null : panel;   // folded away isn't on screen
     if (box) { box.innerHTML = jobHtml(t, false); box.dataset.job = t.job; } else lines.push(jobHtml(t, true));
     const go = here && $(JOB_GO[t.kind]);
@@ -5106,9 +5210,9 @@ async function goBackTo(pid, v) {
     document.querySelectorAll('[data-goback-v]').forEach((b) => { b.disabled = false; }); }
 }
 document.addEventListener('click', (e) => {     // the history's buttons, and the preview bar's
-  const pv = e.target.closest('[data-preview-v]'), gb = e.target.closest('[data-goback-v]');
-  if (pv && S.scope) showVersion(S.scope, Number(pv.dataset.previewV));
-  else if (gb && (S.scope || (S.station && S.station.part))) goBackTo(S.scope || S.station.part, Number(gb.dataset.gobackV));
+  const pv = e.target.closest('[data-preview-v]'), gb = e.target.closest('[data-goback-v]'), shown = shownPart();   // its view, picked or not (#364)
+  if (pv && shown) showVersion(shown, Number(pv.dataset.previewV));
+  else if (gb && (shown || (S.station && S.station.part))) goBackTo(shown || S.station.part, Number(gb.dataset.gobackV));
 });
 function clearStation(keepBar) {
   if (stationMesh) { scene.remove(stationMesh); stationMesh.geometry.dispose(); stationMesh = null; }
@@ -5236,7 +5340,7 @@ async function checkWhittle() {
   dot.className = 'dot ' + (S.whittle.ok ? 'ok' : 'bad');
   dot.title = S.whittle.ok ? `whittle is running at ${S.whittle.url}` : (S.whittle.error || 'whittle is not reachable');
   // redraw only when whittle came up or went down — a periodic redraw would wipe a half-filled form
-  if (was !== S.whittle.ok && S.scope && !document.querySelector('#wProgress .bar, #aProgress .bar, #lProgress .bar')) renderInspector();
+  if (was !== S.whittle.ok && shownPart() && !document.querySelector('#wProgress .bar, #aProgress .bar, #lProgress .bar')) renderInspector();
 }
 checkWhittle();
 setInterval(checkWhittle, 15000);
