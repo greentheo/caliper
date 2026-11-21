@@ -436,6 +436,7 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
     slug = d.slug
     roles = {p.id: p.role for p in store.assembly.parts}
     parts = []
+    placed = {a.id: a for a in store.assembly.parts}       # each part's pose (#375)
     for p in d.parts:
         spec = store.read_spec(p.id) if store.is_scripted(p.id) or os.path.exists(
             store.spec_path(p.id)) else None
@@ -473,6 +474,9 @@ def design_state(store: DesignStore, history_limit: int = 30) -> dict:
             "role": roles.get(p.id, "movable"), "scripted": store.is_scripted(p.id),
             "mirror_of": mirror.of(script)["source"] if mirror.of(script) else None,     # (#246 review)
             "stl_url": f"/api/designs/{slug}/parts/{p.id}.stl?v={p.version}",
+            # where it sits, for a run's overlay drawn in its own frame (#375)
+            "position": list(placed[p.id].position) if p.id in placed else [0.0, 0.0, 0.0],
+            "rotation": list(placed[p.id].rotation) if p.id in placed else [0.0, 0.0, 0.0],
             "bbox": _bbox(store, p.id, geo),
             # each measured on the part as it is now, with its verdict (#137 item 1)
             "rules": part_rules.measured(store, p.id, geo),

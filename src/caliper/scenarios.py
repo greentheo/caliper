@@ -340,7 +340,7 @@ def _clean(store, pid: str, scenarios: list, supports: list) -> tuple[list, list
     from . import load_study as L
     from .consistency import tolerance
 
-    mesh = store.part_geometry(pid).require_mesh()
+    mesh = store.part_local(pid).require_mesh()
     script = _script_rows(C.declared(store, pid))
     # a standard's numbers are its script's, or kept with the edit: never the request's (#312 review)
     standards = {r["standard"]["name"]: r["standard"] for r in script.values() if r.get("standard")}
@@ -525,7 +525,7 @@ def drift(store, pid: str) -> str:
              and e["row"].get("on", True)]
     if moved:
         try:
-            mesh = store.part_geometry(pid).require_mesh()
+            mesh = store.part_local(pid).require_mesh()
         except Exception:  # noqa: BLE001 — no shape to say it against: said plainly
             mesh = None
         rch = L.reach(tolerance(mesh), 0.0) if mesh is not None else 0.0

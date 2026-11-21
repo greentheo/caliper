@@ -4552,6 +4552,8 @@ async function showHeat(pid, run, index) {
     const dir = new THREE.Vector3(...c.force_n).normalize();
     const len3 = reach * 1.6;
     stationMesh.add(new THREE.ArrowHelper(dir, mid.clone().sub(dir.clone().multiplyScalar(len3)), len3, 0xffffff, len3 * 0.3, len3 * 0.15));
+    const pose = overlayPose(pid, 'load');           // heat, box and arrow: where the part is now (#375)
+    if (pose) stationMesh.applyMatrix4(pose);
     scene.add(stationMesh);
     S.station = { part: pid, run: run.id, index, kind: 'load' };
     const grad = HEAT.map(([t, hex]) => `#${hex.toString(16).padStart(6, '0')} ${t * 100}%`).join(', ');
@@ -5003,6 +5005,17 @@ async function runWhittle(p) {
   }
 }
 
+// a run made in the part's own frame (#375: the studies read a part unposed) draws where the part is now: one matrix,
+// the part's current pose. Runs made before a move, all at pose 0, draw on the moved part too. whittle's drag carve and
+// aero's parametric study run on the posed mesh, in the design's frame: none for them.
+const PART_FRAME = new Set(['load', 'lighten', 'carve', 'frame']);
+function partPose(p) {
+  const t = (p && p.position) || [0, 0, 0], r = ((p && p.rotation) || [0, 0, 0]).map((d) => d * Math.PI / 180);
+  return new THREE.Matrix4().compose(new THREE.Vector3(...t), new THREE.Quaternion().setFromEuler(new THREE.Euler(...r, 'XYZ')),
+    new THREE.Vector3(1, 1, 1));
+}
+function overlayPose(pid, kind) { return PART_FRAME.has(kind) ? partPose(partOf(pid)) : null; }
+
 // show a station in place of its part, with the part's current shape as a ghost around it
 const STUDY_PATH = { parametric: 'aero', frame: 'frame-study', lighten: 'lighten', carve: 'carve' };
 async function showStation(pid, run, index) {
@@ -5012,6 +5025,8 @@ async function showStation(pid, run, index) {
     const r = await fetch(`/api/designs/${S.slug}/${STUDY_PATH[run.kind] || 'whittle'}/${run.id}/stations/${index}.stl`);
     if (!r.ok) throw new Error(`station ${index}: HTTP ${r.status}`);
     const geom = loader.parse(await r.arrayBuffer());
+    const pose = overlayPose(pid, run.kind);         // the station, not its ghost (posed already): where the part is (#375)
+    if (pose) geom.applyMatrix4(pose);
     geom.computeVertexNormals();
     clearStation(true);
     stationMesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: 0xffb454, roughness: 0.55, metalness: 0.05 }));
