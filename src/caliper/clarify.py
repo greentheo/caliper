@@ -85,9 +85,9 @@ Reply with ONLY a JSON array:
 
 def llm_questions(prompt: str, client=None, model: Optional[str] = None) -> list[Question]:
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
     msg = llm.ask(client, "clarify", model=model, system=_SYSTEM,
                   messages=[{"role": "user", "content": prompt}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
@@ -305,7 +305,7 @@ def draft_questions(prompt: str, *, use_llm: bool = True, client=None,
     person's shop, read first (CALI-124): never asked for what it says, and a question about it is tagged."""
     if asker is not None:
         return with_shop(asker(prompt)[:MAX_QUESTIONS], shop, shop_known), "injected"
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             told = shop_words(shop, shop_known) if shop else ""
             said = prompt + (f"\n\nTheir shop (what they make things with; never ask about it): {told}." if told else "")

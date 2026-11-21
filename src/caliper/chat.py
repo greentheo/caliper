@@ -528,7 +528,7 @@ def offline_classify(store: DesignStore, message: str, scope: Optional[str] = No
         # "make it 2 in wider" on a one-part design is that part, not a new one named "part" (#65)
         return Intent(action="refine", part=ids[0], note="a change, and the design has one part")
     if wants_new or not ids:
-        new_id = part_id_from(message, set(ids))
+        new_id = part_id_from(message, set(ids) | {g["id"] for g in store.design.groups})   # never a group's (#399)
         return Intent(action="author", part=new_id, intent=(message or "").strip(),
                       note="the first part of the design" if not ids else "asks for a new part")
 
@@ -579,9 +579,9 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
                  client=None, model: Optional[str] = None) -> Intent:
     """Route with Claude, given the design's parts as context. Raises on any failure (caller falls back)."""
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
 
     parts = "\n".join(f"  - {p.id}: {p.intent or '(no stated intent)'}" for p in store.design.parts)
     # CALI-54: the router writes a new part's intent, and the author follows the intent — so without the
@@ -613,7 +613,8 @@ def llm_classify(store: DesignStore, message: str, scope: Optional[str] = None,
     if action in ("refine", "revert") and part not in ids:
         raise ValueError(f"{action} targets unknown part {part!r}")
     if action == "author":
-        part = part if part and part not in ids else part_id_from(message, ids)
+        taken = set(ids) | {g["id"] for g in store.design.groups}                # never a group's name (#399)
+        part = part if part and part not in taken else part_id_from(message, taken)
     several: list = []
     if action == "refine":
         named = [str(x) for x in (data.get("parts") or []) if x]
@@ -636,7 +637,7 @@ def classify(store: DesignStore, message: str, scope: Optional[str] = None, *,
         out = classifier(store, message, scope)
         out.source = out.source or "injected"
         return out
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             return llm_classify(store, message, scope, client=client)
         except Exception as e:  # noqa: BLE001 — routing must degrade, not crash the turn
@@ -720,7 +721,11 @@ def _kinds(report) -> list[str]:
     return out
 
 
-def _fail_lines(report, only: Optional[list[str]] = None, limit: int = 6) -> list[str]:
+def _fail_lines(report, only: Optional[list[str]] = None, limit: int = 6, inches: bool = False) -> list[str]:
+    """Each failing check in words, as the part card says it (CALI-227, #385: "actual=0.22303847515793196 (margin
+    -2.63)"), its number to the rule's precision and cut toward safe (:func:`part_rules.cut`)."""
+    from . import part_rules
+
     if report is None:
         return []
     out = []
@@ -729,9 +734,11 @@ def _fail_lines(report, only: Optional[list[str]] = None, limit: int = 6) -> lis
             continue
         if only is not None and r.id not in only:
             continue
-        margin = "" if r.margin is None else f" (margin {r.margin:+.3g})"
-        # the reason, where the check gives one: the line a fallback hides a feature on (CALI-107)
-        out.append(f"  • {r.id}: {r.expr} → actual={r.actual}{margin}" + (f". {r.detail}" if r.detail else ""))
+        d = r.to_dict()
+        said = part_rules._said(d, None, inches)
+        # the reason, where the check gives one and the words didn't: the line a fallback hides a feature on (CALI-107)
+        extra = f". {r.detail}" if r.detail and r.detail not in said else ""
+        out.append(f"  • {said}{extra}")
     return out[:limit]
 
 
@@ -1159,12 +1166,12 @@ def redescribe(old: Optional[str], change: str, script: str, *, use_llm: bool = 
                model: Optional[str] = None) -> str:
     """The part's description after a revision: re-described from the new script by Claude, or offline, the
     old one with the latest change said after it (never silently out of date)."""
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             if client is None:
-                from anthropic import Anthropic  # lazy; may be absent
+                from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-                client = Anthropic()
+                client = _claude()
             msg = llm.ask(
                 client, "describe", model=model, system=_DESCRIBE_SYSTEM,
                 messages=[{"role": "user", "content": f"description as it was: {old or '(none)'}\n\n"
@@ -1540,10 +1547,11 @@ def _edge_said(store: DesignStore, seat: dict, twin: dict) -> str:
         from .consistency import _sides, shapes, slab_distance
 
         pieces = [pc for pc in shapes(C.declared(store, seat["part"])) if pc["kind"] == "sheet"]
-        _sides(store.part_geometry(seat["part"]).require_mesh(), pieces)      # which way each sheet's thickness goes
+        _sides(store.part_local(seat["part"]).require_mesh(), pieces)         # which way each sheet's thickness goes
+        back = np.linalg.inv(store.part_pose(seat["part"]))                  # picked on the posed part: to its own frame (#375)
 
         def on(points):
-            mid = np.asarray(points, float).mean(axis=0)[None, :]
+            mid = (back @ np.append(np.asarray(points, float).mean(axis=0), 1.0))[:3][None, :]
             return {pc["name"] for pc in pieces
                     if min(float(slab_distance(mid, op, pc["thickness"], sd)[0]) for op, sd in zip(pc["polys"], pc["sides"]))
                     <= SEAT_MM}
@@ -1940,7 +1948,7 @@ def revert_part(store: DesignStore, part_id: str, *, to: Optional[int] = None, e
         lines.append(f"\u2713 That fixed: {', '.join(fixed)}")
     if broke:
         lines.append(f"\u26a0 But it broke: {', '.join(broke)}")
-        lines.extend(_fail_lines(after, only=broke))
+        lines.extend(_fail_lines(after, only=broke, inches=store.design.display_units == "in"))
     if _design_line(after):
         lines.append(_design_line(after))
     return TurnResult(action="revert", ok=(after is None or after.all_pass), part=part_id,
@@ -2013,9 +2021,9 @@ def explain(store: DesignStore, message: str, scope: Optional[str] = None, clien
     """The question answered in plain words by Claude, from the facts. Raises on any failure (the caller
     falls back to the facts as they are)."""
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
     msg = llm.ask(
         client, "explain", model=model, system=_EXPLAIN_SYSTEM,
         messages=[{"role": "user", "content": f"facts:\n{_facts(store, scope)}\n\nquestion: {message}"}])
@@ -2036,7 +2044,7 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
         return TurnResult(action="answer", ok=True, part=scope, events=events, reply=note.split(": ", 1)[1])
     if note.startswith("offer a picture: "):           # "make it look like a dinosaur": offered, not done (#65)
         return TurnResult(action="answer", ok=True, part=scope, events=events, reply=_offer(note.split(": ", 1)[1]))
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             return TurnResult(action="answer", ok=True, part=scope, events=events,
                               reply=explain(store, message, scope, client=client))
@@ -2065,7 +2073,7 @@ def answer(store: DesignStore, message: str, scope: Optional[str] = None,
     for pid, err in part_errors.items():
         lines.append(f"  ⚠ {pid} won't build: {scrubbed(err)}")
     if report is not None:
-        failing = _fail_lines(report)
+        failing = _fail_lines(report, inches=store.design.display_units == "in")
         lines.append("")
         said = report.said()                    # never "all pass" with a check that hasn't run (#103 review)
         lines.append(said[0].upper() + said[1:] + (":" if failing else "."))
@@ -2185,7 +2193,7 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     if shut:                                    # said once, by the build itself (CALI-121)
         lines.append(shut)
     if res.report is not None:
-        part_fails = _fail_lines(res.report)
+        part_fails = _fail_lines(res.report, inches=store.design.display_units == "in")
         if part_fails:
             lines.append(f"{len(part_fails)} check(s) on this part still failing:")
             lines.extend(part_fails)
@@ -2195,7 +2203,7 @@ def _compose(store, part_id, version, res, after, broke, fixed, part_errors, ver
     if broke:
         lines.append("")
         lines.append(f"⚠ This change **broke {len(broke)} design check(s)** that passed before:")
-        lines.extend(_fail_lines(after, only=broke))
+        lines.extend(_fail_lines(after, only=broke, inches=store.design.display_units == "in"))
         lines.append("_Tell me how to fix it, or say **roll it back** to undo this revision._")
     if fixed:
         lines.append(f"✓ It also fixed: {', '.join(fixed)}")
@@ -2255,6 +2263,7 @@ def refine_several(store: DesignStore, parts: list[str], message: str, *, scope:
     on_event = kw.get("on_event")
     _emit(events, on_event, "authoring", f"revising {len(parts)} parts: {', '.join(parts)}", parts=list(parts))
     done, left, still, results, became = [], [], [], [], []
+    stopped, untried = None, []
     for n, pid in enumerate(parts, 1):
         others = [p for p in parts if p != pid]
         focus = (f"This request names {_listed(parts)}. This revision is to {pid} only: {_listed(others)} "
@@ -2262,8 +2271,14 @@ def refine_several(store: DesignStore, parts: list[str], message: str, *, scope:
         if became:
             focus += " Already revised for it: " + "; ".join(became) + "."
         prior = store.read_script(pid) if store.is_scripted(pid) else ""
-        r = refine_part(store, pid, message, events=events, focus=focus, keep_same=False, of=f"{n} of {len(parts)}",
-                        pick=pick if pid == scope else None, **kw)
+        try:
+            r = refine_part(store, pid, message, events=events, focus=focus, keep_same=False, of=f"{n} of {len(parts)}",
+                            pick=pick if pid == scope else None, **kw)
+        except llm.Stopped as e:                   # Claude stopped on this part: what changed before it is said (#372 review)
+            if not results:
+                raise                              # nothing changed yet: the turn says it alone
+            stopped, untried = (pid, llm.said(e)), parts[n:]
+            break
         results.append(r)
         if r.version is not None and r.moved is False:   # written, but nothing measured moved: kept, said, no ✓ (#242)
             still.append(pid)
@@ -2279,7 +2294,11 @@ def refine_several(store: DesignStore, parts: list[str], message: str, *, scope:
             left.append((pid, why))
     mirror = _mirror_asked(message, parts)
     notes = ([f"{pid} not changed: {why}" for pid, why in left]
-             + [f"{pid}: the code changed, but no number, size or position I measure moved" for pid in still])
+             + [f"{pid}: the code changed, but no number, size or position I measure moved" for pid in still]
+             + ([f"then {stopped[0]} stopped: {stopped[1]}"] if stopped else [])
+             + ([f"{_listed(untried)} not tried"] if untried else []))
+    if stopped:                                    # each part that moved, with its version (#372 review)
+        done = [f"{pid} (now v{store.design.part(pid).version})" for pid in done]
     if done:
         tick = not notes and not mirror and all(r.ok for r in results)       # never over a break, a gap or a hedge
         first = f"{'✓' if tick else '!'} Changed {_listed(done)}" + (f"; {'; '.join(notes)}" if notes else "") + "."
@@ -2297,7 +2316,8 @@ def refine_several(store: DesignStore, parts: list[str], message: str, *, scope:
     lines += ["\n\n".join(r.reply for r in results if r.reply)]
     broke = sorted({b for r in results for b in r.broke})
     last = next((r for r in reversed(results) if r.version is not None), results[-1])
-    return TurnResult(action="refine", ok=not left and not still and not mirror and all(r.ok for r in results), part=parts[0],
+    return TurnResult(action="refine", ok=not left and not still and not mirror and not stopped and all(r.ok for r in results),
+                      part=parts[0],
                       version=last.version, part_report=last.part_report, report=last.report, broke=broke,
                       fixed=sorted({f for r in results for f in r.fixed} - set(broke)),
                       part_errors={k: v for r in results for k, v in r.part_errors.items()},
@@ -2333,7 +2353,7 @@ def skeleton_edit(store: DesignStore, message: str, *, client=None, use_llm: boo
     from . import verdicts
 
     events = events if events is not None else []
-    if not P._said_numbers(message) or not (use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY"))):
+    if not P._said_numbers(message) or not (use_llm and (client is not None or llm.has_key())):
         return None
     try:
         before, after = P.revise(store, message, client=client)
@@ -2357,7 +2377,7 @@ def plan_edit(store: DesignStore, message: str, *, client=None, use_llm: bool = 
     from . import plan as P
 
     events = events if events is not None else []
-    if not (use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY"))):
+    if not (use_llm and (client is not None or llm.has_key())):
         return TurnResult("plan", "Changing the plan needs Claude, and it isn't set up here. Press Build it to "
                                   "go on with the plan as it is.", ok=False, events=events)
     _emit(events, on_event, "step", "Changing the plan")
@@ -2798,10 +2818,31 @@ def _grain_reply(got: dict) -> TurnResult:
                             f"check it holds again and the Beam check uses it.")
 
 
-def turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
-         use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
-         on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False,
-         pick: Optional[dict] = None, typed: Optional[str] = None, piece: Optional[str] = None) -> TurnResult:
+def turn(store: DesignStore, message: str, scope: Optional[str] = None, **kw) -> TurnResult:
+    """One conversational turn (:func:`_turn`). Where Claude gives no usable answer, or isn't set up here (no key), the
+    turn says so in words, never "Something went wrong" (CALI-217, #366): nothing was changed by what didn't run."""
+    before = {p.id: p.version for p in store.design.parts}
+    rows = len(store.log())
+    try:
+        return _turn(store, message, scope, **kw)
+    except llm.Stopped as e:
+        store = DesignStore.load(store.root)
+        # whatever had already changed is said first, with its version (#372 review: a revision landed, the chat hid it)
+        moved = [f"{p.id} is now v{p.version}" for p in store.design.parts if before.get(p.id) != p.version]
+        words = ("; ".join(moved) + ". Then: " if moved else "") + llm.said(e) + "."
+        if not kw.get("logged") and not any(r.get("kind") == "message" for r in store.log()[rows:]):   # once (#372 review)
+            store.append_log({"kind": "message", "text": message, "scope": scope, "action": "answer", "part": scope,
+                              "routed_by": "stopped"})
+        store.append_log({"kind": "reply", "action": "answer", "part": scope, "ok": False, "reply": words})
+        events: list[Event] = []
+        _emit(events, kw.get("on_event"), "done", "answer", ok=False, part=scope)
+        return TurnResult(action="answer", reply=words, ok=False, part=scope, events=events)
+
+
+def _turn(store: DesignStore, message: str, scope: Optional[str] = None, *, author=None, client=None,
+          use_llm: bool = True, classifier: Optional[Classifier] = None, max_rounds: int = 4,
+          on_event=None, drafter=None, promote_feedback: bool = True, logged: bool = False,
+          pick: Optional[dict] = None, typed: Optional[str] = None, piece: Optional[str] = None) -> TurnResult:
     """One conversational turn: route the message, make the move, measure the whole design, reply.
 
     ``scope`` is the part the user clicked (``None`` = the design). ``author``/``classifier``/

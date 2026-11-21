@@ -74,7 +74,7 @@ def pieces(store: DesignStore, part_id: str) -> list[dict]:
     flip = mirror.source_of(store, part_id)       # its pattern is the source's, flipped: said on every page (#239)
     made = K.of(store, part_id)                   # what's marked on each piece to make it (CALI-177, #222 slice C)
     try:
-        middle = store.part_geometry(part_id).require_mesh().bounds.mean(axis=0)
+        middle = store.part_local(part_id).require_mesh().bounds.mean(axis=0)   # its own frame, as its pieces (#375)
     except Exception:  # noqa: BLE001 — no solid to say which way is out: each piece from the face its outline gives
         middle = None
     out = []

@@ -88,7 +88,7 @@ def check(store: DesignStore, part_id: str) -> list[dict]:
         return []
     out = []
     try:
-        mesh = store.part_geometry(part_id).require_mesh()
+        mesh = store.part_local(part_id).require_mesh()
         poly = footprint(mesh)
         rep = C.report(store, part_id)
         if rep.get("mass_kg") is None or rep.get("cog") is None:
@@ -138,7 +138,7 @@ def undeclared_ways(store: DesignStore, part_id: str) -> list[str]:
     if not cases:
         return []
     try:
-        poly = footprint(store.part_geometry(part_id).require_mesh())
+        poly = footprint(store.part_local(part_id).require_mesh())
     except Exception:  # noqa: BLE001 — no base: each case already says it wasn't checked
         return []
     wide = np.ptp(poly, axis=0)                                    # the base's width across x, and across y

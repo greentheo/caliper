@@ -641,7 +641,7 @@ def glue_block_items_of(store, pid: str, declared: Optional[dict] = None) -> lis
     if not any(j.get("kind") == "glue block" for j in said):
         return []
     try:
-        mesh = store.part_geometry(pid).require_mesh()
+        mesh = store.part_local(pid).require_mesh()
         pieces = shapes(declared if declared is not None else C.declared(store, pid))
     except Exception:  # noqa: BLE001 — no pieces: no blocks between them
         return []
@@ -663,7 +663,7 @@ def of(store, pid: str) -> dict:
     empty = {"bevels": {}, "chamfers": {}, "slants": {}, "rebates": {}, "cuts": {}, "screws": {}, "glue_blocks": [],
              "pieces": []}
     try:
-        mesh = store.part_geometry(pid).require_mesh()
+        mesh = store.part_local(pid).require_mesh()
         pieces = shapes(C.declared(store, pid))
     except Exception:  # noqa: BLE001 — nothing to mark
         return empty

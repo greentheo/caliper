@@ -338,11 +338,11 @@ def _run(store: DesignStore, *, client=None, model: Optional[str] = None, found:
             found = review.findings(store)
         except Exception:  # noqa: BLE001 — the reading goes on; it's told nothing's measured
             found = {"findings": []}
-    if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
-
-        client = Anthropic()
     try:
+        if client is None:
+            from .llm import client as _claude  # CALI-217 (#366): no key is said in the reply, never a crash
+
+            client = _claude()
         msg = llm.ask(client, JOB, model=model, system=_SYSTEM,
                       messages=[{"role": "user", "content": context(store, found)}])
         text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
