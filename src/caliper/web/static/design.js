@@ -1153,6 +1153,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   }
   if (!d || d[2] !== 0 || e.button !== 0) return;
   if (Math.hypot(e.clientX - d[0], e.clientY - d[1]) > 5) return;    // an orbit drag, not a click
+  if (S.scenPick) { pickScenarioFace(scenHit(e)); return; }   // a scenario's or a support's face, not the chat's (#296 B1)
   const hit = pick(e);
   if (PICK.mode !== 'part' && (hit || S.scope)) { choose(e, hit); return; }   // just off the silhouette is still its edge
   setScope(hit ? hit.object.userData.partId : null);
@@ -1174,6 +1175,14 @@ longPress(renderer.domElement, (e) => {
   const hit = pick(e);
   if (hit) openMenu(hit.object.userData.partId, null, e.clientX, e.clientY, renderer.domElement);
 });
+// a part under the pointer for Pick on the model, shown or not (#376 review: with a check's stress map up only its picture is
+// visible, and the pick said "no face there"): every part's mesh and pieces, never the stress map's
+function scenHit(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+  const pieces = [...pieces3d.values()].flatMap((s) => [...s.byKey.values()]);
+  return ray.intersectObjects([...meshes.values(), ...pieces], false)[0] || null;
+}
 function pick(e) {
   const rect = renderer.domElement.getBoundingClientRect();
   const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -2140,6 +2149,8 @@ function renderInspector() {
   wireParams(p || (d.parts.length === 1 ? d.parts[0] : null));
   if (typing) refocusParam(typing[0], typing.slice(1));   // a redraw mid-number
   paintJobs();
+  const scen = $('scenBox');                    // the cases on the model only while their editor's open (#296 B1)
+  if (!scen || !scen.open) { clearScenMarks(); if (S.scenPick) stopScenPick(); }
 }
 
 // one rule on a part, with its verdict as measured on this version, and what it measured where it doesn't hold
@@ -3457,6 +3468,7 @@ async function saveShop() {
 }
 $('shopBtn').onclick = () => (S.shopOpen ? (S.shopOpen = false, renderShop()) : openShop());
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.shopOpen) { S.shopOpen = false; renderShop(); } });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && S.scenPick) { e.preventDefault(); stopScenPick('Stopped picking'); } });   // (#296 B1)
 
 // patterns for hand tools (CALI-48): most people have a jigsaw, not a CNC router — so every flat piece, holes and
 // all, to measure and mark, to print full size and tape, or to project and trace
@@ -3822,6 +3834,7 @@ function scenarioRow(sc, i) {
       <span>where</span><span><input data-f="lo" value="${xyz(sc.lo)}" title="one corner of the box it pushes on, x, y, z mm" style="width:12em"> to
         <input data-f="hi" value="${xyz(sc.hi)}" title="the opposite corner" style="width:12em"> mm</span>
       <span>checked</span><span><label><input data-f="on" type="checkbox"${sc.on === false ? '' : ' checked'}> on</label>
+        <button class="ghost" data-scen-pick="${i}" title="click a face of the part: the box becomes that face">Pick on the model</button>
         <button class="ghost" data-scen-del="${i}">Remove</button></span></div>${std}</div>`;
 }
 function supportRow(s, i) {
@@ -3829,6 +3842,8 @@ function supportRow(s, i) {
       <button class="ghost" data-sup-del="${i}">Remove</button></div>`;
   return `<div class="small" data-sup="${i}" style="margin-top:4px">• <input data-f="name" value="${esc(s.name)}">
       <input data-f="lo" value="${xyz(s.lo)}" style="width:12em"> to <input data-f="hi" value="${xyz(s.hi)}" style="width:12em"> mm
+      <span class="muted">doesn't move</span>
+      <button class="ghost" data-sup-pick="${i}" title="click the face that's held: the box becomes that face">Pick on the model</button>
       <button class="ghost" data-sup-del="${i}">Remove</button></div>`;
 }
 // the first case added to a part whose script says none: across the whole top of its box, 2 mm deep, so it rests on whatever
@@ -3857,6 +3872,144 @@ function scenariosView(p, got) {
       ${got.overridden ? '<button class="ghost" id="scenBack">Back to its script\'s</button>' : ''}</div>
     <div class="small muted">Saving makes a new version of ${esc(p.id)}, the same script: its checks, Lighten and carves are out
       of date until it's checked again.</div><div id="scenSaid"></div>`;
+}
+// ------------------------------------------------------------- the cases and supports, on the model (#296, slice B1)
+// Theo: "it should be identified similar to how the current stress loading is specified with the arrow ... or the 'fixed
+// plane' (i.e. the bottom of the stool or the face that doesn't move)". While "Scenarios and supports" is open, every row
+// is drawn as it reads now, typed or not: a load's box with its arrow (longer for more), a support's box held, the floor.
+// The rows stay the source: the picture follows them, and Pick on the model writes the same corners Save sends
+const SCEN_N = { lb: 4.448222, kg: 9.80665, N: 1 };
+function scenMarksFor(got, bbox) {             // what to draw: [{kind: 'load'|'support'|'floor', i, lo, hi, dir, n, on}]
+  const out = [];
+  (got.scenarios || []).forEach((sc, i) => {
+    if (!sc.lo || !sc.hi) return;
+    const n = (Number(sc.amount) || 0) * (SCEN_N[sc.unit] || 1) * (Number(sc.factor) || 1);
+    out.push({ kind: 'load', i, lo: sc.lo, hi: sc.hi, dir: sc.direction || [0, 0, -1], n, on: sc.on !== false });
+  });
+  (got.supports || []).forEach((sp, i) => {
+    if (sp.floor) {
+      if (bbox && bbox.min && bbox.max) out.push({ kind: 'floor', i, lo: [bbox.min[0], bbox.min[1], bbox.min[2]], hi: [bbox.max[0], bbox.max[1], bbox.min[2]] });
+    } else if (sp.lo && sp.hi) out.push({ kind: 'support', i, lo: sp.lo, hi: sp.hi });
+  });
+  return out;
+}
+function arrowLen(n, most, reach) {            // the biggest load's arrow is the reach; the rest by the square root, never a dot
+  return reach * (0.35 + 0.65 * Math.sqrt(Math.max(0, n) / (most || 1)));
+}
+// a part's own frame on the model (CALI-220, #375): rows are in the part's own frame, as its script's loads() are; drawn
+// under its pose, and a picked face's posed points brought back out of it. No pose said (main before #375): the identity
+function scenFrame(p) {
+  const m = new THREE.Matrix4();
+  if (!p || !Array.isArray(p.position) || !Array.isArray(p.rotation)) return m;
+  const r = new THREE.Euler(...p.rotation.map((d) => (Number(d) || 0) * Math.PI / 180), 'XYZ');
+  return m.compose(new THREE.Vector3(...p.position.map((v) => Number(v) || 0)), new THREE.Quaternion().setFromEuler(r), new THREE.Vector3(1, 1, 1));
+}
+const scenMatrixOf = (p) => scenFrame(p);    // one name for the frame the marks are drawn in
+function localBox(bbox, frame) {               // a posed box's corners, back in the part's own frame, boxed again
+  const inv = frame.clone().invert(), v = new THREE.Vector3(), lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const x of [bbox.min[0], bbox.max[0]]) for (const y of [bbox.min[1], bbox.max[1]]) for (const z of [bbox.min[2], bbox.max[2]]) {
+    v.set(x, y, z).applyMatrix4(inv);
+    [v.x, v.y, v.z].forEach((c, a) => { lo[a] = Math.min(lo[a], c); hi[a] = Math.max(hi[a], c); });
+  }
+  const r = (c) => Math.round(c * 1000) / 1000;
+  return { min: lo.map(r), max: hi.map(r), size: hi.map((c, a) => r(c - lo[a])) };
+}
+function unposed(verts, frame) {              // posed points, back into the part's own frame
+  const inv = frame.clone().invert(), v = new THREE.Vector3(), out = [];
+  for (let k = 0; k + 2 < verts.length; k += 3) { v.set(verts[k], verts[k + 1], verts[k + 2]).applyMatrix4(inv); out.push(v.x, v.y, v.z); }
+  return out;
+}
+const scenMarks = new THREE.Group();
+scenMarks.matrixAutoUpdate = false;           // its matrix is the part's frame, set each draw
+scene.add(scenMarks);
+function clearScenMarks() {                    // every mark's geometry and material let go: it's redrawn on each keystroke
+  scenMarks.children.slice().forEach((m) => {
+    scenMarks.remove(m);
+    m.traverse((o) => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); });
+  });
+}
+function drawScenarios() {
+  clearScenMarks();
+  const pid = S.scenOpen, got = pid && (S.scen || {})[pid], box = $('scenBox');
+  if (!got || !box || !box.open || !S.design) return;
+  const p = S.design.parts.find((x) => x.id === pid);
+  scenMarks.matrix.copy(scenMatrixOf(p));      // the rows are in the part's own frame (#375): drawn where the part is
+  scenMarks.matrixWorldNeedsUpdate = true;
+  const own = p && p.bbox ? localBox(p.bbox, scenMatrixOf(p)) : null;   // the floor in its own frame: bbox is posed (#376 review)
+  const marks = scenMarksFor($('scenSave') ? { ...got, ...readScenarios(got) } : got, own);   // as typed, saved or not
+  const size = own ? Math.max(...own.size) : 400, reach = size * 0.3;
+  const most = Math.max(1, ...marks.filter((m) => m.kind === 'load').map((m) => m.n));
+  for (const m of marks) {
+    const lo = new THREE.Vector3(...m.lo), hi = new THREE.Vector3(...m.hi), mid = lo.clone().add(hi).multiplyScalar(0.5);
+    const dim = hi.clone().sub(lo), lit = S.scenFocus && S.scenFocus.kind === (m.kind === 'load' ? 'load' : 'support') && S.scenFocus.i === m.i;
+    const color = m.kind === 'load' ? (m.on ? 0xf5a524 : 0x6e7681) : 0x58a6ff;
+    const g = new THREE.BoxGeometry(Math.max(Math.abs(dim.x), 2), Math.max(Math.abs(dim.y), 2), Math.max(Math.abs(dim.z), 2));
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color, depthTest: false }));
+    edges.position.copy(mid); edges.renderOrder = 9;
+    scenMarks.add(edges);
+    if (m.kind !== 'load' || lit) {             // a support (or the row being edited) filled, so it reads as a place
+      const fill = new THREE.Mesh(g.clone(), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: lit ? 0.35 : 0.18, depthWrite: false }));
+      fill.position.copy(mid);
+      scenMarks.add(fill);
+    }
+    if (m.kind === 'load') {
+      const dir = new THREE.Vector3(...m.dir).normalize(), len = arrowLen(m.n, most, reach);
+      const arrow = new THREE.ArrowHelper(dir, mid.clone().sub(dir.clone().multiplyScalar(len)), len, color, len * 0.25, len * 0.12);
+      arrow.traverse((o) => { if (o.material) { o.material.depthTest = false; } o.renderOrder = 10; });
+      scenMarks.add(arrow);
+    }
+  }
+}
+// Pick on the model: the row waits for one click on its part; the face clicked becomes its box (#296 B1)
+function faceBox(verts, pad = 1) {             // a face's corners, from its triangles' points, a millimetre out each way
+  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let k = 0; k + 2 < verts.length; k += 3) {
+    for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], verts[k + a]); hi[a] = Math.max(hi[a], verts[k + a]); }
+  }
+  const r = (v) => Math.round(v * 10) / 10;
+  return { lo: lo.map((v) => r(v - pad)), hi: hi.map((v) => r(v + pad)) };
+}
+function startScenPick(pid, kind, i) {
+  const got = (S.scen || {})[pid], row = got && (kind === 'load' ? got.scenarios : got.supports)[i];
+  if (!row) return;
+  S.scenPick = { pid, kind, i };
+  pickHint(`Click a face of ${partOf(pid).name || pid} for "${row.said || row.name}" (Esc stops)`);
+  if (onPhone()) setPane('view');               // the model's on its own pane there (#376 review: nothing seemed to happen)
+}
+function stopScenPick(said) {
+  const was = S.scenPick;
+  S.scenPick = null;
+  pickHint(said);
+  if (was && onPhone()) setPane('cards');       // back to the row it was for
+}
+async function pickScenarioFace(hit) {
+  const at = S.scenPick;
+  if (!at) return 'none';
+  if (!hit) { stopScenPick('Not picked: no face there'); return 'missed'; }
+  const pid = hit.object.userData.partId;
+  if (pid !== at.pid) { pickHint(`That's ${partOf(pid).name || pid}: click ${partOf(at.pid).name || at.pid} (Esc stops)`); return 'other'; }
+  let data;
+  try { data = await features(pid); } catch (e) { stopScenPick(`Can't pick on it: ${plainly(e.message)}`); return 'error'; }
+  if (S.scenPick !== at) return 'late';         // stopped, or another row asked, while its faces were worked out
+  if (data.solidMesh) { stopScenPick(`${partOf(pid).name || pid} has no faces to pick (it's a mesh): type its corners`); return 'mesh'; }
+  const f = facePicked(data, hit);
+  if (!f) { stopScenPick('Not picked: no face there'); return 'missed'; }
+  const got = S.scen[pid];
+  if ($('scenSave')) Object.assign(got, readScenarios(got));   // what's typed in the other rows is kept (first: it's new arrays)
+  const rows = at.kind === 'load' ? got.scenarios : got.supports;
+  const box = faceBox(unposed(f.verts, scenFrame(partOf(pid)))), what = String(f.said || 'that face').replace(/^face: /, '');   // the chip's "face: " isn't for a sentence
+  rows[at.i] = { ...rows[at.i], lo: box.lo, hi: box.hi };
+  stopScenPick(`Picked ${what}`);
+  repaintScen(pid);
+  const said = $('scenSaid');
+  if (said) said.innerHTML = `<div class="small">The box is now ${esc(what)}. Save them to keep it.</div>`;
+  return 'picked';
+}
+function repaintScen(pid) {                    // the editor drawn again from S.scen, and the model with it
+  const p = S.design && S.design.parts.find((x) => x.id === pid), body = $('scenBody');
+  if (!p || !body) return;
+  body.innerHTML = scenariosView(p, S.scen[pid]);
+  wireScenarioRows(p);
 }
 function scenariosBox(p) {
   const open = S.scenOpen === p.id;
@@ -3887,7 +4040,8 @@ function wireScenarios(p) {
   const paint = () => { $('scenBody').innerHTML = scenariosView(p, (S.scen || {})[p.id]); wireScenarioRows(p); };
   box.ontoggle = async () => {
     S.scenOpen = box.open ? p.id : null;
-    if (!box.open || $('scenSave')) return;      // painted already (a render with it open): keep what it says
+    if (!box.open) { clearScenMarks(); if (S.scenPick) stopScenPick(); return; }
+    if ($('scenSave')) { drawScenarios(); return; }   // painted already: keep what it says, and draw it again (#376 review)
     S.scen = S.scen || {};
     if (!S.scen[p.id]) { paint(); S.scen[p.id] = await api('GET', `/api/designs/${S.slug}/parts/${p.id}/scenarios`); }
     paint();
@@ -3899,6 +4053,17 @@ function wireScenarioRows(p) {
   if (!got) return;
   const keep = () => { S.scen[p.id] = { ...got, ...readScenarios(got) }; };
   const repaint = () => { $('scenBody').innerHTML = scenariosView(p, S.scen[p.id]); wireScenarioRows(p); };
+  document.querySelectorAll('#scenBody [data-scen-pick], #scenBody [data-sup-pick]').forEach((b) => {   // (#296 B1)
+    b.onclick = () => { keep(); b.dataset.scenPick != null ? startScenPick(p.id, 'load', +b.dataset.scenPick) : startScenPick(p.id, 'support', +b.dataset.supPick); };
+  });
+  const body = $('scenBody');
+  body.oninput = () => drawScenarios();          // the picture follows what's typed
+  body.onfocusin = (e) => {                     // the row being edited is the one lit on the model
+    const row = e.target.closest('[data-scen], [data-sup]');
+    S.scenFocus = row ? (row.dataset.scen != null ? { kind: 'load', i: +row.dataset.scen } : { kind: 'support', i: +row.dataset.sup }) : null;
+    drawScenarios();
+  };
+  drawScenarios();
   document.querySelectorAll('#scenBody [data-f="dir"]').forEach((sel) => {
     sel.onchange = () => { sel.parentElement.querySelector('[data-angle]').hidden = sel.value !== 'angle'; };
   });
