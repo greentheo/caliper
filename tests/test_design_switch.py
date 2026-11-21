@@ -185,7 +185,7 @@ def test_the_send_stays_off_while_a_message_is_going():
 
 
 _SEND = """
-const S = { slug: 'new', opening: 'new', busy: false };
+const S = { slug: 'new', opening: 'new', busy: false }; const trackJob = () => ({ done: Promise.resolve() });   // the busy overlay's follow (#363)
 const posts = [];
 const liveTurn = () => ({ step() {}, fail() {} });
 const api = async (m, u, b) => { posts.push([u, b.message]); return { job_id: 'j' }; };
@@ -215,7 +215,7 @@ def test_pieces_don_t_start_for_a_design_that_was_left():
 
 # --- #175: a carve belongs to its design --------------------------------------------------------------------------------
 _CARVES = """
-const S = { slug: 'a', carveJob: {}, scope: 'tube', design: { parts: [{ id: 'tube' }] } };
+const S = { slug: 'a', carveJob: {}, scope: 'tube', design: { parts: [{ id: 'tube' }] } }; const trackJob = () => ({ done: Promise.resolve() });   // the busy overlay's follow (#363)
 const carveKey = (pid) => `${S.slug}/${pid}`;
 const esc = (s) => String(s), minutesText = () => '1 min', ran = () => '';
 const posts = [], paints = [];

@@ -130,11 +130,12 @@ def _refuse_while_busy(slug: str, parts: list) -> None:
 
     for j in RUNNER.active():
         if j.meta.get("slug") == slug and j.meta.get("part") in parts:
-            raise HTTPException(409, f"{j.meta['part']} is being {DOING.get(j.kind, 'worked on')}: wait for it, or stop "
-                                     f"that first.")
+            raise HTTPException(409, f"{j.meta['part']} is being {DOING.get(j.kind, 'worked on')}: wait for it"
+                                     + (", or stop that first." if j.kind in STOPPABLE else "."))   # only where Stop stops it
     j = RUNNER.running(_lock(slug))
     if j is not None:
-        raise HTTPException(409, f"{WHOLE.get(j.kind, 'a job')} is working on the design: wait for it, or stop it first.")
+        raise HTTPException(409, f"{WHOLE.get(j.kind, 'a job')} is working on the design: wait for it"
+                                 + (", or stop it first." if j.kind in STOPPABLE else "."))
 
 
 #: What a job is doing to a part, said when a delete has to wait for it (CALI-183).
@@ -414,18 +415,26 @@ def _carving(slug: str) -> Optional[dict]:
             if j is not None else None)
 
 
+#: The jobs whose work stops part way when asked, at its next step (``stop=j.check`` and the work calls it): the busy overlay
+#: offers Stop on these only (#363). A check, Lighten and Fix these take ``stop`` but never stop between cases or steps:
+#: Stop it at 0:07 ran all three cases and wrote a run (#373 review), so they're offered none until they do (CALI-234).
+STOPPABLE = ("carve", "release", "preview")
+
+
 def _running(slug: str) -> list[dict]:
-    """The strength checks, Lightens and build packages queued or running for this design, as ``carving`` is for a carve:
-    what a page draws from on load and on every redraw, so a study isn't lost to a switch, a reload or a redraw (#178)."""
+    """Every job queued or running for this design, as ``carving`` is for a carve: what a page draws from on load and on
+    every redraw, so a study isn't lost to a switch, a reload or a redraw (#178). Every kind, so the busy overlay (#363)
+    shows a carve, a cut plan, a Shape for drag or a chat turn as it shows a check; ``stoppable`` says which can stop."""
     out = []
     for j in RUNNER.active():
-        if j.meta.get("slug") != slug or j.kind not in ("load", "lighten", "release", "firstrun"):
+        if j.meta.get("slug") != slug:
             continue
         said = j.since(0)
         words = [ev["text"] for ev in said if ev.get("text") and ev.get("kind") != "started"]
         out.append({"job": j.id, "kind": j.kind, "part": j.meta.get("part"), "version": j.meta.get("version"),
                     "text": words[-1] if words else "",
                     "waiting": bool(said and said[-1].get("kind") == "waiting"), "stopping": j.stopping,
+                    "stoppable": j.kind in STOPPABLE,
                     "elapsed_s": round(time.time() - j.started) if j.started else 0})
     return out
 
@@ -823,7 +832,8 @@ def router():
                 raise
             return turn_result(res)
 
-        job = RUNNER.submit("chat", work, label=req.message[:60], lock=_lock(slug))
+        # what it works on, as every part's job says (#363: the busy overlay greys the part a revise is on)
+        job = RUNNER.submit("chat", work, label=req.message[:60], lock=_lock(slug), meta=_on_part(slug, req.scope or None))
         return {"job_id": job.id}
 
     @r.get("/api/designs/{slug}/parts/{pid}.stl")

@@ -56,6 +56,27 @@ a.btn:hover { border-color: var(--accent); }
 .view { position: relative; min-height: 0; min-width: 0; }
 #viewer { position: absolute; inset: 0; }
 #viewer canvas { display: block; width: 100%; height: 100%; }
+/* a running job, plain to see (#363): the view greys, the part's panel greys and can't be acted on, and the top right
+   says what's running, for how long, its step and its bar */
+.busy-shade { position: absolute; inset: 0; background: rgba(12, 15, 19, .55); pointer-events: none; z-index: 4; }
+.busy { position: absolute; top: 56px; right: 14px; z-index: 5; width: min(300px, calc(100% - 28px)); padding: 16px;
+  background: var(--panel2); border: 1px solid var(--accent); border-radius: 14px; box-shadow: 0 8px 28px rgba(0,0,0,.45);
+  display: grid; justify-items: center; gap: 6px; text-align: center; }
+.busy-spin { width: 56px; height: 56px; border: 5px solid var(--line); border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 1s linear infinite; }
+.busy-time { font-size: 22px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.busy-what { font-size: 15px; font-weight: 600; }
+.busy-step { font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+.busy-bar { width: 100%; }
+.busy-more, .busy-note { font-size: 12px; color: var(--muted); }
+.inspector.is-busy { opacity: .45; filter: grayscale(.6); cursor: progress; }
+/* the panel's own small progress lines: the overlay says it now (an error after it still shows). Not on a phone: there
+   the overlay is on View, and Cards keeps its own lines (#373 review) */
+@media (min-width: 701px) {
+  .inspector.is-busy :is(#lProgress, #lightProgress, #carveProgress, #aProgress, #cpProgress, #wProgress) { display: none; }
+}
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .busy-spin { animation-duration: 3s; } }
 .inspector { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto;
   overflow-x: hidden; padding: 14px; min-height: 0; min-width: 0; }
 .tw { overflow-x: auto; max-width: 100%; }   /* wide result tables scroll on their own, not the panel */

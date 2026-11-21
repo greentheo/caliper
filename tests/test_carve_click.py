@@ -400,7 +400,7 @@ PANEL = ["soleFor", "shownPart", "runCarve", "followCarve", "carveProgress", "pa
 STUBS = """
 const ran = () => '';
 const carveKey = (pid) => pid;
-const S = { carveJob: {}, scope: 'stool', design: {} };
+const S = { carveJob: {}, scope: 'stool', design: {} }; const trackJob = () => ({ done: Promise.resolve() });   // the busy overlay's follow (#363)
 const esc = (s) => String(s), $ = () => null, showErr = () => {}, clearStation = () => {}, showStation = () => {};
 const document = { querySelectorAll: () => [] };
 const loadRuns = () => [], carveRuns = () => [];
