@@ -448,6 +448,46 @@ def _reading_rows(store: DesignStore, pid: str, name: str) -> list[dict]:
     return out
 
 
+#: A round check's own fix, where the card's (``answers.fix_for``: the shape or its pieces) isn't it (CALI-238, #406).
+ROUND_FIX = {
+    "shell_in_walls": "Put each wall beam shell() gives in its wall, of that wall's core, thickness and skins",
+    "keeps_clear": "Keep the outside out of what keeps() holds clear: move or shrink the shape, or move the box it keeps",
+}
+#: Round checks a strength run's own row already speaks for, or that only warn: never a second row.
+_SAID_BY_RUN = {"construction_volume": "filled", "construction_covers": "filled"}
+_ONLY_WARN = {"loads_edge"}
+
+
+def _round_rows(store: DesignStore, pid: str, name: str, have: list[dict]) -> list[dict]:
+    """The checks that failed in the designer's round on the part as built, each a row (CALI-238, #406: the card said
+    them, Things to fix didn't): its words, as the card says them, and its fix. Measured, so after Fix these it reads
+    Fixed when the check passes on the new version."""
+    import re
+
+    from . import answers, consistency
+
+    try:
+        got = consistency.checked(store, pid)
+    except Exception:  # noqa: BLE001 — a part that can't be checked lists nothing it didn't measure
+        return []
+    ids = {r["id"] for r in have}
+    out = []
+    for r in got:
+        if r.status not in ("fail", "error") or r.id in _ONLY_WARN or _SAID_BY_RUN.get(r.id) in ids:
+            continue
+        detail = (r.detail or r.expr or r.id).strip()
+        if r.id.startswith("construction_"):
+            problem = f"Its 3D shape and its pieces don't match: {detail}"
+            said = answers.fix_for(r.id, detail, pid)
+            fix = (re.findall(r'"([^"]+)"', said) or [said])[0]          # the first of the card's own words
+        else:
+            first = detail.split(" ", 1)[0]
+            problem = detail if "_" in first else detail[:1].upper() + detail[1:]   # an id stays as it's written
+            fix = ROUND_FIX.get(r.id) or f"Make it pass its check {r.id.replace('_', ' ')}"
+        out.append(_row(f"check:{r.id}", problem, [_choice(fix, DESIGNER, _designer_cost(name))], pid))
+    return out
+
+
 def listed(store: DesignStore, state: dict, pid: str, *, findings: bool = True) -> dict:
     """``{"part", "rows", "limits"}``: the part's things to fix, measured, each ``{id, problem, choices, part,
     measured}`` with its choices ``{fix, kind, cost, ...}`` (a number's ``param``, ``value``, ``unit``; a check's
@@ -468,6 +508,7 @@ def listed(store: DesignStore, state: dict, pid: str, *, findings: bool = True) 
         rows += got
         limits += lim
     rows += _scenario_rows(store, pid)           # its edited loads' questions, and cases turned off (#312)
+    rows += _round_rows(store, pid, name, rows)  # what failed in the designer's round on it as built (#406)
     if findings:
         rows += _finding_rows(store, pid, name)
         rows += _reading_rows(store, pid, name)       # Claude's reading, on the person's press, badged (#238 slice B)
