@@ -92,6 +92,8 @@ KINDS = {
 #: What a pass that rests on a wall held square by an unchecked joint reads, at most (#265): two walls under one step can rack,
 #: and full Euler holds only if the joint to the step holds their tops square. Theo, on #222's question 1: "go with ✓ with a
 #: note for joints", so "holds", and "joints not checked" goes with it on every surface. "close" would make it amber.
+#: #383 rule 2, waiting on Theo's word: "unchecked" makes a pass resting on joints nothing checked "not checked", never ✓.
+#: THE ONE-LINE SWITCH: flip "holds" to "unchecked" here.
 JOINT_CAP = "holds"
 JOINTS_WHY = "joints not checked"
 #: Where all a pass rests on is glued trim left out of the check (#272), not a joint: said as that (#279 review: a part of one
@@ -110,15 +112,32 @@ def brace_why(brace: Optional[dict]) -> str:
     return JOINTS_WHY
 
 
+def checked(row: dict) -> bool:
+    """A joint row someone checked: the hand rule's number, or the FEA's reading of it (#344, #383)."""
+    fea = row.get("fea") or {}
+    return row.get("safety") is not None or (fea.get("safety") is not None and "unread" not in fea)
+
+
+def joint_capped(kind: str) -> str:
+    """A pass resting on joints nothing checked, at most :data:`JOINT_CAP`. Flipped to "unchecked" (#383 rule 2), a close
+    pass is "not checked" too; as Theo's #222 answer stands, "close" stays close."""
+    if kind == "holds" or (JOINT_CAP != "holds" and kind == "close"):
+        return JOINT_CAP
+    return kind
+
+
 def wood_brace(run: Optional[dict], c: Optional[dict] = None) -> Optional[dict]:
     """A run of a part of wood pieces: its joints taken as solid wood, counted or not (#222 slice A; #275: an old run, an
     uncounted one, a Lighten step: never a bare ✓). None for a part that isn't."""
     J = (c or {}).get("joints")
     if J is not None:                           # checked by hand (#301): what this case left, said as #311's review asks
         n = int(J.get("n") or 0)
-        if J.get("chain") is False:             # its path couldn't be followed: all its joints, and why, once
+        if J.get("chain") is False:             # its path couldn't be followed: the joints nothing read, and why, once
             why = (J.get("unchecked") or ["its load path isn't a simple chain"])[0]
-            return {"joints_n": n, "wood": True, "unchained": why}
+            left = n - sum(1 for r in J.get("rows") or [] if checked(r))      # the FEA's are checked (#383)
+            if left <= 0:
+                return None
+            return {"joints_n": left, "wood": True, "unchained": why}
         names = list(J.get("unchecked") or [])
         if not names:
             return None
@@ -237,7 +256,7 @@ def case(run: dict, c: dict, *, filled: Optional[str] = None, edge: bool = False
         trim, wood = ({"trim": list(run["trim"])} if run.get("trim") else None), wood_brace(run, c)
         brace = {**trim, **wood} if trim and wood else trim or wood
     if brace is not None:                             # a pass resting on an unchecked joint: JOINT_CAP at most, and why (#265)
-        return _make(JOINT_CAP if kind == "holds" else kind, safety, why=brace_why(brace), joints=True, brace=brace,
+        return _make(joint_capped(kind), safety, why=brace_why(brace), joints=True, brace=brace,
                      **({"near": True} if kind == "close" else {}))
     return _make(kind, safety)
 
@@ -355,7 +374,7 @@ def goal(met: Optional[bool], *, untrusted: Optional[str] = None, unresolved: Op
     if estimate:
         return _make("estimate", why=estimate)
     if joints:                                 # a pass resting on a joint nothing checks: JOINT_CAP at most (#265), and why
-        return _make("close" if close else JOINT_CAP, why=joints, joints=True, **({"near": True} if close else {}),
+        return _make(joint_capped("close" if close else "holds"), why=joints, joints=True, **({"near": True} if close else {}),
                      **({"brace": brace} if brace else {}))
     return _make("close" if close else "holds")
 
@@ -478,7 +497,7 @@ def lighten_step(st: dict, filled: Optional[str] = None, run: Optional[dict] = N
              and safety <= need_n * (1 + CUT_DRIFT) + 1e-9)
     if v["counts_as_pass"] and brace is not None:      # a step resting on an unchecked joint, as its case would (#265)
         kind = "close" if drift else v["kind"]
-        got = _make(JOINT_CAP if kind == "holds" else kind, st.get("safety"), why=brace_why(brace), joints=True, brace=brace,
+        got = _make(joint_capped(kind), st.get("safety"), why=brace_why(brace), joints=True, brace=brace,
                     **({"near": True} if kind == "close" else {}))
         if drift:                                    # the cut's words stay, beside the joints' (#326 review)
             got = {**got, "word": f"{CUT_DECIDES}, and {brace_why(brace)}",
