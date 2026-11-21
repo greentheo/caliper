@@ -472,3 +472,24 @@ S.design = design;
     got = subprocess.run([_node(), "-e", script], capture_output=True, text=True, timeout=30)
     assert got.returncode == 0, got.stderr
     assert json.loads(got.stdout) == {"loads": 1, "drops": ["p", "p"], "now": "3-abc"}
+
+
+@pytest.mark.parametrize("who", ["a", "b"])
+def test_a_part_that_won_t_measure_is_said_scrubbed(site, monkeypatch, who):
+    """#374's CI (test_scrub_sweep): a part that wouldn't build put its raw exception text in the "unmeasured" row, home
+    folder and all. Either part, the one moved or the one it might meet, is said through scrubbed()."""
+    from caliper import placing
+
+    c, slug, s = site
+    home, key = os.path.expanduser("~"), "sk-ant-api03-" + "x" * 40
+    real = type(s).part_geometry
+
+    def broken(self, pid):
+        if pid == who:
+            raise ValueError(f"build failed in {home}/secret-project/parts/{pid}.py (key {key})")
+        return real(self, pid)
+
+    monkeypatch.setattr(type(s), "part_geometry", broken)
+    rows = [r for r in placing.measured(s, "a") if r["kind"] == "unmeasured"]
+    assert rows and all(home not in r["said"] and key not in r["said"] for r in rows), rows
+    assert "~/secret-project" in rows[0]["said"] and "<secret>" in rows[0]["said"]

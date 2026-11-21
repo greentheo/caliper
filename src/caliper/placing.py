@@ -25,6 +25,8 @@ from typing import Optional
 
 import numpy as np
 
+from .errors import scrubbed
+
 #: a side of a part's box: (axis index, which way)
 SIDES = {"+x": (0, 1), "-x": (0, -1), "+y": (1, 1), "-y": (1, -1), "+z": (2, 1), "-z": (2, -1)}
 TURNS = (0, 90, 180, 270)
@@ -326,7 +328,7 @@ def measured(store, pid: str) -> list[dict]:
     try:
         me = store.part_geometry(pid)
     except Exception as e:  # noqa: BLE001 — said, never as measured
-        return [{"part": pid, "kind": "unmeasured", "said": f"{pid} won't build to be measured: {e}"}]
+        return [{"part": pid, "kind": "unmeasured", "said": f"{pid} won't build to be measured: {scrubbed(e)}"}]   # (#374 CI)
     mine = me.require_mesh()
     for p in store.design.parts:
         if p.id == pid or not p.version:
@@ -345,7 +347,7 @@ def measured(store, pid: str) -> list[dict]:
             if gap <= TOUCH_MM:
                 out.append({"part": p.id, "kind": "touch", "said": f"it touches {p.id}"})
         except Exception as e:  # noqa: BLE001
-            out.append({"part": p.id, "kind": "unmeasured", "said": f"whether it meets {p.id} wasn't measured ({e})"})
+            out.append({"part": p.id, "kind": "unmeasured", "said": f"whether it meets {p.id} wasn't measured ({scrubbed(e)})"})
     return out
 
 
