@@ -38,6 +38,7 @@ pythonpath = ["src"]
 markers = [
     "serial: shares state with other tests, so CI runs it on its own after the parallel run (CALI-114)",
     "slow: takes minutes (a full carve); CI runs it, `-m \"not slow\"` skips it locally (CALI-117)",
+    "nightly: long, and not what any verdict or safety rule rests on: a PR's CI skips it, the scheduled run has it (CALI-219)",
 ]
 
 [tool.ruff]

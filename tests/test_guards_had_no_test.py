@@ -217,6 +217,7 @@ ORDER = textwrap.dedent("""
 """)
 
 
+@pytest.mark.nightly                      # long, and no verdict rests on it (CALI-219, #367)
 def test_the_order_of_a_kids_book_doesnt_depend_on_the_hash_seed():
     env = {**os.environ, "PYTHONPATH": os.pathsep.join([os.path.join(ROOT, "src"), ROOT, os.environ.get("PYTHONPATH", "")])}
     said = [subprocess.run([sys.executable, "-c", ORDER], env={**env, "PYTHONHASHSEED": seed}, cwd=ROOT, capture_output=True, text=True, timeout=120)

@@ -196,7 +196,7 @@ def test_lighten_carve_and_things_to_fix_are_sections_of_will_it_work():
               "cutplan"):
         assert f"k: '{k}'" in part, k
     assert "fixesSection(p.id)" in part and "makingSection(p)" in part and "k: 'shop'" in _fn(src, "makingSection")
-    got = _run(_page(["fixesSection", "fixFresh"], consts=["ATTN"], extra="""
+    got = _run(_page(["fixesSection", "fixFresh", "fixCounts", "fixesSaid"], consts=["ATTN"], extra="""
 const esc = (s) => String(s), fixKey = (p) => 's/' + p, fixMine = () => ({}), fixesView = () => 'LIST';
 const fixStamp = () => '3|R1', fixChecked = () => true;     // the version and its newest check (#331 review)
 const S = { fixes: {} };

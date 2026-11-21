@@ -171,9 +171,9 @@ def test_the_history_line_says_not_resolved(tmp_path, monkeypatch):
     assert h["kind"] == "load" and h["holds"] and h["unresolved"] is True
     fine, _ = _store(tmp_path, monkeypatch, TUBE, "tube", 4, GOALS)
     assert "unresolved" not in fine.history("tube")[-1]
-    node = shutil.which("node") or os.path.expanduser("~/.nvm/versions/node/v22.17.1/bin/node")
-    if not os.path.exists(node):
-        pytest.skip("no node")
+    from ._node import node as _pick
+
+    node = _pick()                             # 20 or newer, or it skips saying why (CALI-237)
     script = "const esc = (s) => String(s);\n" + _fn(open(JS).read(), "historyItem") + (
         f"console.log(JSON.stringify([historyItem({json.dumps(h)}), historyItem({json.dumps(fine.history('tube')[-1])})]));")
     got = json.loads(subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30, check=True).stdout)
