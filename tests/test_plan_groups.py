@@ -82,7 +82,7 @@ def test_a_grouping_that_can_t_be_used_is_refused_in_words(change, why):
 
 
 def test_the_floor_dropped_from_a_plan_leaves_its_group():
-    got = _with(lambda p: (p["parts"].append({"id": "truck_bed_floor", "what": "the bed's floor"}),
+    got = _with(lambda p: (p["parts"].append({"id": "truck_bed_floor", "what": "the bed's floor", "role": "fixed"}),
                            p["groups"][1]["parts"].append("truck_bed_floor")))
     plan = P.validate(got)
     assert plan.dropped == ["truck_bed_floor"] and "truck_bed_floor" not in P.group_parts(plan, "platform")
