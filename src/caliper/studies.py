@@ -159,7 +159,7 @@ def _headline(kind: str, r: dict, edge: bool = False) -> tuple[str, Optional[boo
         if best is None and verdicts.coarse(r) and any(verdicts.station(x)["counts_as_pass"] for x in st):
             # its steps hold on voxels too coarse to see the walls: not resolved, never "nothing holds" (#101)
             return "not resolved: too coarse to see its walls, so no step can be said to hold yet", None
-        if best is None or not best["saved_lb"]:
+        if best is None or (best["saved_lb"] or 0) <= 0:   # against the part as it is now (#382)
             return "nothing lighter holds", False
         out = next((x for x in st if verdicts.station(x)["kind"] == "fails"), None)
         return (f"up to {best['saved_lb']:g} lb lighter, still {safety_num(best['safety'], r.get('min_safety'))}x"

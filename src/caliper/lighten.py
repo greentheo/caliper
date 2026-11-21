@@ -788,8 +788,9 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
         part_lb = C.report(store, part_id).get("mass_lb")
     except Exception:  # noqa: BLE001 — not known: the quarter pound alone
         part_lb = None
+    now_lb = holes_now_lb(store, part_id)              # every step against the part as it is now (#382)
     record = {
-        "part_lb": part_lb,
+        "part_lb": part_lb, "now_lb": now_lb,
         "id": rid, "part": part_id, "kind": "lighten", "created": time.time(), **seen, "cut": True,   # (CALI-152)
         "version": store.design.part(part_id).version, "seconds": round(time.time() - t0, 1),
         "min_safety": min_safety, "material": mat["name"], "sheet": sheet_said(store, part_id, ctx), "spacing_mm": round(s, 2),
@@ -820,14 +821,16 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
             f"minimum reads \"{V.CUT_DECIDES}\".",
         ],
     }
+    against_now(record, now_lb)                       # each step against the part as it is now (#382)
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
     best = max((x for x in stations if x["holds"] and not x.get("estimate")), key=lambda x: x["saved_lb"], default=None)  # producer
     store.append_history(part_id, {"kind": "lighten", "action": "studied", "run": rid,
                                    "stations": len(stations), "best_removed": best and best["removed"]})
     store.append_log({"kind": "lighten", "action": "studied", "part": part_id, "run": rid})
-    emit("done", (f"{len(stations)} steps; the lightest that holds is {best['saved_lb']} lb lighter at "
-                  f"{best['safety']}x") if best else "nothing lighter holds", run=rid, progress=1.0)
+    emit("done", (f"{len(stations)} steps; the lightest that holds is {best['saved_lb']} lb lighter than now at "
+                  f"{best['safety']}x") if best and best["saved_lb"] > 0 else "nothing lighter than now holds", run=rid,
+         progress=1.0)
     return record
 
 
@@ -969,6 +972,13 @@ def load_run(store: DesignStore, rid: str) -> Optional[dict]:
                 rec["part_lb"] = C.report(store, rec["part"]).get("mass_lb")
             except Exception:  # noqa: BLE001 — can't be read: the quarter pound alone
                 pass
+    if "now_lb" not in rec:                         # older: weighed from the part with no holes (#382)
+        part = store.design.part(rec.get("part"))
+        if part is not None and rec.get("version") == part.version:
+            try:
+                against_now(rec, holes_now_lb(store, rec["part"]))
+            except Exception:  # noqa: BLE001 — its holes can't be read: nothing offered on a number that may be high
+                rec["stations"] = [{**st, "saved_lb": 0.0} for st in rec.get("stations") or []]
     from .joints import mark_uncounted
 
     mark_uncounted(store, rec)                         # its steps say the joints aren't checked (#275)
@@ -989,6 +999,39 @@ def _offered(rec: dict) -> Optional[dict]:
                            least=use_step.lighten_floor(rec.get("part_lb")))     # a few ounces gets no button (#207)
 
 
+def holes_now_lb(store: DesignStore, part_id: str) -> float:
+    """What the part's own lightening holes weigh now, lb: its ``HOLES`` (pictures aside), each in its sheet's thickness
+    and its own material (#382). Using a step replaces them with the step's, so a step is lighter than now only by what it
+    saves beyond them."""
+    from . import construction as C
+    from . import holes as H
+    from .consistency import shapes
+
+    holes = [h for h in H.read(store.read_script(part_id)) if not h.get("picture")]
+    if not holes:
+        return 0.0
+    sheets = {pc["name"]: pc for pc in shapes(C.declared(store, part_id)) if pc["kind"] == "sheet"}
+    grams = 0.0
+    for h in holes:
+        pc = sheets.get(h.get("piece"))
+        if pc is None:
+            continue
+        density = L.material([{"material": pc["material"], "volume": 1.0}])["density"] * 1e-3      # g/mm3
+        deep = min(float(h.get("depth") or pc["thickness"]), pc["thickness"])       # a pocket, or right through
+        grams += sum(C.polygon(poly)[0] for poly in h.get("polygons") or []) * deep * density
+    return round(grams / 453.59237, 2)
+
+
+def against_now(rec: dict, now_lb: float) -> dict:
+    """A lightening's steps weighed against the part as it is now, not as it was with no holes (#382): each step's
+    ``saved_lb`` less what the part's own holes save. A step that would put weight back reads below zero."""
+    for st in rec.get("stations") or []:
+        if st.get("saved_lb") is not None:
+            st["saved_lb"] = round(st["saved_lb"] - now_lb, 2)
+    rec["now_lb"] = now_lb
+    return rec
+
+
 def station_path(store: DesignStore, rid: str, index: int) -> str:
     if not rid or "/" in rid or ".." in rid:
         raise ValueError("bad run id")
@@ -1000,7 +1043,7 @@ def adopt(store: DesignStore, rid: str, index: int) -> dict:
     pid, script, st = _station_script(store, rid, index)
     version = store.write_part(pid, script, action="lighten",
                                feedback=f"lightened: {st['removed']:.0%} out of the walls, {st['holes']} holes, "
-                                        f"{st['saved_lb']} lb lighter, {st['safety']}x",
+                                        f"{st['saved_lb']} lb lighter than it was, {st['safety']}x",
                                extra={"lighten_run": rid, "station": int(index)})
     return {"version": version, "removed": st["removed"], "holes": st["holes"], "saved_lb": st["saved_lb"]}
 

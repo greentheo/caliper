@@ -4177,7 +4177,7 @@ function lightenView(p) {
       then thinner sheet. Every step is checked again.</div>
     ${lightenBlocked(p) ? `<div class="muted small">${esc(lightenBlocked(p))}</div>` : ''}
     <div id="lightProgress"></div>
-    ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb
+    ${run ? `<div class="small" style="margin-top:6px">${best && best.saved_lb > 0
       ? (run.not_trusted ? esc(run.not_trusted) : p.untrusted ? 'Not trusted: its strength check ran on a solid with more in it than its pieces, so no step can be said to hold.'
         : `${run.version != null && run.version !== p.version ? `v${run.version}'s lightest step that holds` : lightenLead(run)}: <b>${lbs(best.saved_lb)} lighter</b>, ${what(best)}, ${sx(best.safety, run.min_safety)}.${run.offer && (run.version == null || run.version === p.version) ? ` <span class="${run.offer.kind === 'room' ? 'muted' : ''}">${esc(run.offer.said)}</span>` : ''}`)
       : lightenNone(run)}${out ? ` It runs out at step ${out.index} (${sx(out.safety, run.min_safety)}).` : ''}
