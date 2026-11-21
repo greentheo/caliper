@@ -71,16 +71,23 @@ def test_the_reading_reads_the_request_the_parts_and_what_s_measured_and_is_kept
     assert llm.JOBS["assess"].model == llm.DEFAULT_MODEL and llm.JOBS["assess"].effort == "high"
 
 
-def test_a_reading_naming_no_part_or_repeating_what_s_measured_is_dropped(store):
+def test_a_point_naming_no_part_or_saying_the_same_measured_finding_is_set_aside_and_said(store):
     claude = Claude([
         {"parts": ["rail"], "said": "the rail is missing", "fix": "Add one."},                       # no such part
-        {"parts": ["side", "step"], "said": "the step is loose in the side's pocket", "fix": "Size the pocket."},
+        {"parts": ["side", "step"], "said": "the step is loose in the side's pocket", "fix": "Size the pocket.",
+         "same_as": "m1"},                                                                           # Claude: it's m1
         {"parts": ["side", "step"], "said": "the step's screws miss the side", "fix": "Move them 10 mm in."},
         {"parts": ["side"], "said": "", "fix": "x"},                                                   # says nothing
     ])
     got = assess.run(store, client=claude)
     assert [r["said"] for r in got["readings"]] == ["the step's screws miss the side"]
     assert (got["dropped"], got["repeats"]) == (2, 1)
+    assert [(a["why"], a["said"]) for a in got["set_aside"]] == [
+        ("named no part here", "the rail is missing"), ("repeated a measured finding", "the step is loose in the side's pocket"),
+        ("said nothing to change", "")]
+    assert got["said"].endswith("3 of Claude's 4 points were left out: 1 named no part here, 1 repeated a measured "
+                                "finding, 1 said nothing to change."), got["said"]
+    assert "found nothing more" not in got["said"]
 
 
 def test_a_reply_that_isn_t_readings_is_said_and_nothing_is_kept(store):
@@ -130,7 +137,8 @@ def test_fix_these_on_a_reading_says_it_done_never_fixed(store, monkeypatch):
 
 def test_the_offer_says_its_cost_again_after_a_reading_and_the_count_from_the_fourth(store):
     o = assess.offer(store)
-    assert o == {"label": "Review it", "cost": "one Claude call, about 30–60 s", "note": "", "stale": {}, "count": 0}
+    assert o == {"label": "Review it", "cost": "one Claude call, about 30–60 s", "note": "", "stale": {}, "unread": [],
+                 "count": 0}
     for _ in range(3):
         assess.run(store, client=Claude([]))
     o = assess.offer(store)
@@ -165,3 +173,107 @@ def test_a_reading_lists_at_most_eight_each_said_short(store):
     got = assess.parse(json.dumps({"readings": many}), store, {"findings": []})
     assert len(got["readings"]) == 8 and got["dropped"] == 2 and [r["id"] for r in got["readings"]][-1] == "r8"
     assert all(len(r["said"]) == assess.LONGEST for r in got["readings"])
+
+
+
+# --- #368 review (reviewer-3) ---------------------------------------------------------------------------------------------
+def test_a_part_named_as_the_person_sees_it_is_that_part(store):
+    """step-stool-5's part is step_stool, labelled "Step stool": all three readings naming it were dropped."""
+    store.design.part("step").label = "Step stool"
+    store.save()
+    got = assess.run(store, client=Claude([
+        {"parts": ["Step stool"], "said": "the step is thin", "fix": "Make it 25 mm."},
+        {"parts": ["the step"], "said": "it sags", "fix": "Add a rail."},
+        {"parts": ["stool"], "said": "it tips", "fix": "Widen it."},
+        {"parts": ["Side"], "said": "the side splits", "fix": "Glue it."}]))
+    assert [r["parts"] for r in got["readings"]] == [["step"], ["step"], ["step"], ["side"]], got
+    assert not got["set_aside"] and got["said"].startswith("Claude's reading of 2 parts (4 things")
+
+
+def test_every_point_set_aside_is_never_found_nothing_more(store):
+    got = assess.run(store, client=Claude(["the step is thin"]))                    # a bare sentence, no parts
+    assert got["ok"] and got["readings"] == [] and got["set_aside"][0]["said"] == "the step is thin"
+    assert got["said"] == ("Claude read 2 parts, and none of what it said could be kept: 1 of Claude's 1 point was left "
+                           "out: 1 named no part here. Look at it yourself."), got["said"]
+
+
+STOOL4 = [{"kind": "fit", "parts": ["step", "side"], "measured": True, "said": "the step is 0.1 mm too big for side's pocket",
+           "fix": "Size side's pocket."}]
+
+
+@pytest.mark.parametrize("reading", [
+    {"parts": ["step", "side"], "said": "the step is held to the side by glue alone and will work loose as it racks",
+     "fix": "Add a screw."},
+    {"parts": ["step", "side"], "said": "the side's pocket leaves 20 mm at a tight corner that will split",
+     "fix": "Move the pocket in."},
+    {"parts": ["step"], "said": "the step is 19 mm over its full length, too thin for a 300 lb step", "fix": "Make it 25 mm."},
+])
+def test_a_different_problem_on_the_same_parts_is_kept(store, reading):
+    """reviewer-3's step-stool-4 cases: a racking joint, a splitting pocket and a thin step were dropped as repeats."""
+    got = assess.run(store, client=Claude([reading]), found={"findings": STOOL4})
+    (kept,) = got["readings"]
+    assert kept["said"] == reading["said"] and not got["set_aside"]
+    if set(reading["parts"]) == {"step", "side"}:                # may say the fit again: badged, never dropped
+        assert kept["may_repeat"] == "the step is 0.1 mm too big for side's pocket"
+        assert "May repeat what's measured" in got["said"]
+
+
+def test_same_as_on_other_parts_keeps_the_reading(store):
+    got = assess.run(store, client=Claude([{"parts": ["step"], "said": "too big", "fix": "Trim.", "same_as": "m1"}]),
+                     found={"findings": STOOL4})
+    assert len(got["readings"]) == 1 and not got["set_aside"]
+
+
+def test_the_list_counts_readings_apart_from_what_s_measured(store, monkeypatch):
+    assess.run(store, client=Claude([{"parts": ["step"], "said": "a", "fix": "b"}, {"parts": ["step"], "said": "c", "fix": "d"}]))
+    got = fixes.listed(store, design_api.design_state(store), "step")
+    assert got["counts"] == {"measured": 1, "readings": 2, "other": 0}             # the fit finding, and two readings
+    monkeypatch.setattr(review, "findings", lambda store, report=None: {"findings": [], "checks": 3})
+    got = fixes.listed(store, design_api.design_state(store), "step")
+    assert got["counts"] == {"measured": 0, "readings": 2, "other": 0}             # only readings: none measured wrong
+    assert fixes.counts([{"id": "off:x", "measured": False}]) == {"measured": 0, "readings": 0, "other": 1}
+
+
+def test_one_reading_at_a_time_and_never_the_same_file(store, monkeypatch):
+    lock = assess._one_at_a_time(store)
+    lock.acquire()
+    try:
+        got = assess.run(store, client=Claude([]))
+        assert got == {"ok": False, "busy": True, "readings": [], "said": assess.BUSY}
+    finally:
+        lock.release()
+    assert assess.count(store) == 0
+    monkeypatch.setattr(assess, "_files", lambda store: [])         # both presses see no readings yet
+    a, b = assess._save(store, {"readings": []}), assess._save(store, {"readings": []})
+    assert (a["n"], b["n"]) == (1, 2)
+
+
+def test_a_brace_after_the_object_is_prose(store):
+    got = assess.parse('{"readings": []}\nNote: see {above}.', store, {"findings": []})
+    assert got["readings"] == [] and got["set_aside"] == []
+
+
+def test_the_offer_names_parts_added_since_and_parts_gone(store):
+    assess.run(store, client=Claude([]))
+    store.write_part("rail", SIDE, intent="a rail")
+    assert assess.offer(store)["unread"] == ["rail"]
+    store.design.parts = [p for p in store.design.parts if p.id != "side"]
+    store.save()
+    assert assess.offer(store)["stale"] == {"side": 1}
+
+
+def test_a_name_two_parts_share_words_with_is_read_exactly_or_not_at_all(store):
+    """An exact id, spoken name or label wins; a word two parts both have names neither, and is said."""
+    store.design.part("step").label = "Step stool"
+    store.save()
+    store.write_part("step_stool", STEP, intent="another step")
+    got = assess.run(store, client=Claude([
+        {"parts": ["step stool"], "said": "it's the other step", "fix": "x"},
+        {"parts": ["Step stool"], "said": "it's labelled", "fix": "y"},
+        {"parts": ["stool"], "said": "which one?", "fix": "z"}]))
+    assert [r["parts"] for r in got["readings"]] == [["step_stool"], ["step_stool"]], got
+    assert [(a["why"], a["named"]) for a in got["set_aside"]] == [("named no part here", ["stool"])]
+    store.design.part("side").label = "Stool"                 # a label whose word two other parts' names have too
+    store.save()
+    got = assess.parse(json.dumps({"readings": [{"parts": ["Stool"], "said": "a", "fix": "b"}]}), store, {"findings": []})
+    assert got["readings"][0]["parts"] == ["side"]
