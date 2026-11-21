@@ -330,8 +330,8 @@ def _page(body, design=None):
     from .test_part_menu import _DESIGN, _STUBS
 
     src = open(JS).read()
-    names = ("seen", "keepTree", "underPart", "menuItems", "placeHtml", "placeBody", "place")
-    extra = re.search(r"^const SIDES = .*$", src, re.M).group(0) + "\n"
+    names = ("seen", "keepTree", "underPart", "treeRows", "nudge", "menuItems", "placeHtml", "placeBody", "place")   # Move in the tree ▸ (#360)
+    extra = "".join(re.search(rf"^const {c} = .*$", src, re.M).group(0) + "\n" for c in ("SIDES", "TREE_KEYS"))
     script = (_STUBS.replace("DESIGN", design or _DESIGN) + _FORM + extra + "\n".join(_fn(src, n) for n in names)
               + f"\nconst out = await (async () => {{ {body} }})();\nconsole.log(JSON.stringify(out));")
     got = subprocess.run([_node(), "--input-type=module", "-e", script], capture_output=True, text=True, timeout=30)
@@ -424,7 +424,8 @@ def test_a_moved_part_is_drawn_again_though_its_version_is_the_same(site):
     _post(c, slug, "a", "move", {"offset": [0, 50, 0]})
     after = c.get(f"/api/designs/{slug}").json()["parts"][0]
     assert before["version"] == after["version"] and before["drawn"] != after["drawn"] and before["stl_url"] != after["stl_url"]
-    assert after["pose"] == {"position": [0.0, 50.0, 0.0], "rotation": [0.0, 0.0, 0.0]}
+    # one pose, #389's two keys: the overlays (partPose) and Move… read the same place (#374 folded onto #375's keys)
+    assert (after["position"], after["rotation"]) == ([0.0, 50.0, 0.0], [0.0, 0.0, 0.0]) and "pose" not in after
     assert before["drawn"] == "1"                          # a part never moved keys as it always did
     src = open(JS).read()
     assert "have.userData.drawn === (p.drawn ?? p.version)" in src
