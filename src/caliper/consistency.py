@@ -809,10 +809,13 @@ SHELL_TOL_MM = 2.0
 CORE_TOL_MM = 0.5
 
 
-def _wall_top(wall: list, nodes: list, near: float) -> float:
+def _wall_top(wall: list, nodes: list, near: float, build=lambda pc: None) -> float:
     """How high a beam's wall goes (#404 review): the panels its foot lies in, then each panel joined to the top edge of
     what's found so far (its lowest edge at that height, and touching it), as a cargo box's side strip runs on up its
-    curved bands to the roof. A neighbouring wall standing on the floor beside it isn't followed."""
+    curved bands to the roof. A neighbouring wall standing on the floor beside it isn't followed, nor a panel of another
+    build (#404 re-check: thin bare plywood above 300 mm of foam read as 1200 mm of sandwich): ``build(sheet)``, its core,
+    thickness and skins, must be the wall's."""
+    builds = {build(f[0]) for f in wall}
     found = list(wall)
     top = max(float(n[2][:, 2].max()) for n in found)
     grew = True
@@ -822,6 +825,8 @@ def _wall_top(wall: list, nodes: list, near: float) -> float:
             if any(n is f for f in found):
                 continue
             pc, _, poly, _ = n
+            if build(pc) not in builds:
+                continue
             low = float(poly[:, 2].min())
             if low < top - near - pc["thickness"] or low > top + near + pc["thickness"]:
                 continue
@@ -871,7 +876,8 @@ def _shell_in_walls(declared: dict, pieces: list[dict], tol: float) -> Optional[
             wrong.append(f"{name} lies in no wall the part is built from ({far} of {len(pts)} points along it)")
             continue
         wall = [n for h, n in zip(hit, nodes) if h.any()]
-        top = _wall_top(wall, nodes, near_tol)
+        top = _wall_top(wall, nodes, near_tol, lambda pc: (pc.get("material"), round(pc["thickness"], 1), tuple(
+            (sk["material"], round(sk["t"], 3), sk["face"]) for sk in M.skins_of(items.get(pc["name"]) or {}))))
         foot = float(min(a[2], b[2]))
         if foot + depth > top + max(near_tol, 0.02 * depth):          # #404 review: 2x its wall passed, 8x as stiff
             wrong.append(f"{name} is {depth:g} mm deep, but its wall stops {top - foot:.0f} mm up")

@@ -31,6 +31,8 @@ WALL_SKINS = ["fiberglass", {"material": "fiberglass", "face": "in"}]
 BEAM_CORE = "xps"
 BEAM_X1 = None           # None: the wall's length
 BAD_KEEPS = False
+TOP_PLY = False          # a bare plywood panel on wall_left's top, up to the roof
+SPLIT_CORE = None        # wall_left in two panels, the second of this core
 
 PARAMS = {"l": 2000.0, "w": 1500.0, "h": 1200.0}
 BUILD = {"core": "xps", "core_t": 50.8, "floor_t": 19.05}
@@ -53,7 +55,11 @@ def construction(params, build=None):
                 "covers": skins}
     return [{"name": "floor", "kind": "sheet", "material": "plywood", "thickness": b["floor_t"],
              "outline": [(0, 0, 0), (L, 0, 0), (L, W, 0), (0, W, 0)], "covers": ["paint"]},
-            wall("wall_left", [(0, W, 0), (L, W, 0), (L, W, LH), (0, W, LH)]),
+            *([wall("wall_left", [(0, W, 0), (L / 2, W, 0), (L / 2, W, LH), (0, W, LH)]),
+               {**wall("wall_left_2", [(L / 2, W, 0), (L, W, 0), (L, W, LH), (L / 2, W, LH)]), "material": SPLIT_CORE}]
+              if SPLIT_CORE else [wall("wall_left", [(0, W, 0), (L, W, 0), (L, W, LH), (0, W, LH)])]),
+            *([{"name": "ply_top", "kind": "sheet", "material": "plywood", "thickness": 6.35,
+                "outline": [(0, W, LH), (L, W, LH), (L, W, H), (0, W, H)]}] if TOP_PLY else []),
             wall("wall_right", [(0, 0, 0), (L, 0, 0), (L, 0, H), (0, 0, H)]),
             wall("wall_front", [(L, 0, 0), (L, W, 0), (L, W, H), (L, 0, H)]),
             wall("wall_back", [(0, 0, 0), (0, W, 0), (0, W, H), (0, 0, H)]),
@@ -182,3 +188,32 @@ def test_a_beam_the_frame_study_would_overrate_fails(box, knobs, said):
 def test_keeps_that_aren_t_boxes_fail(box):
     r = box(BAD_KEEPS=True)["keeps_clear"]
     assert r.status == "fail" and r.detail.startswith("keeps() isn't a list of boxes"), r.detail
+
+
+
+# --- #404 re-check (caliper-reviewer) ----------------------------------------------------------------------------------
+def test_a_panel_of_another_build_above_the_wall_isn_t_its_wall(box):
+    """300 mm of foam sandwich with thin bare plywood above it, up to 1200 mm, read as a 1200 mm sandwich beam."""
+    r = box(LEFT_H=300.0, TOP_PLY=True)["shell_in_walls"]
+    assert r.status == "fail" and "wall_left is 1200 mm deep, but its wall stops 300 mm up" in r.detail, r.detail
+
+
+@pytest.mark.parametrize("depth,ok", [(1220.0, True), (1230.0, False)])       # 2% of 1200 is 24 mm
+def test_a_beam_s_depth_may_run_two_percent_past_its_wall(box, depth, ok):
+    assert (box(BEAM_DEPTH=depth)["shell_in_walls"].status == "pass") is ok
+
+
+def test_a_skin_thicker_than_the_table_s_is_refused_too(box):
+    thick = [{"material": "fiberglass", "t": 0.5}, {"material": "fiberglass", "t": 0.5, "face": "in"}]
+    r = box(WALL_SKINS=thick)["shell_in_walls"]
+    assert r.status == "fail" and "skin is 0.5 mm, but the frame study reads fiberglass as 0.25 mm" in r.detail, r.detail
+
+
+@pytest.mark.parametrize("core_t,ok", [(51.2, True), (51.4, False)])          # CORE_TOL_MM 0.5 against 50.8
+def test_a_beam_s_core_thickness_within_half_a_millimetre(box, core_t, ok):
+    assert (box(BEAM_CORE_T=core_t)["shell_in_walls"].status == "pass") is ok
+
+
+def test_every_panel_a_beam_lies_in_is_checked_not_only_the_first(box):
+    r = box(SPLIT_CORE="eps")["shell_in_walls"]
+    assert r.status == "fail" and "its wall wall_left_2 is 50.8 mm eps" in r.detail, r.detail
