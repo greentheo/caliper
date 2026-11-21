@@ -178,7 +178,9 @@ def test_the_small_lines_give_way_and_the_page_is_wired():
     src, css, html = open(JS).read(), open(CSS).read(), open(HTML).read()
     paint = _fn(src, "paintJobs")
     assert "else if (t.kind === 'release') lines.push(jobHtml(t, true));" in paint and paint.rstrip().endswith("paintBusy();\n}")
-    assert ".inspector.is-busy :is(#lProgress, #lightProgress, #carveProgress, #aProgress, #cpProgress, #wProgress) { display: none; }" in css
+    # off a phone only: there the overlay's on View, and Cards keeps its own lines (#373 review)
+    assert ("@media (min-width: 701px) {\n  .inspector.is-busy :is(#lProgress, #lightProgress, #carveProgress, #aProgress, #cpProgress, "
+            "#wProgress) { display: none; }\n}") in css
     assert '<div id="busy" class="busy" hidden></div>' in html and 'id="busyLive" class="sr-only" role="status" aria-live="polite"' in html
     assert "$('busy').addEventListener('click', cancelJob);" in src
     assert "if (t) t.textContent = clock((Date.now() - Number(t.dataset.t0)) / 1000);" in src
@@ -225,7 +227,8 @@ def test_every_job_on_the_design_is_on_its_record_saying_whether_it_can_stop(hel
         time.sleep(0.05)
     got = {r["kind"]: r for r in design_api._running(slug)}
     assert set(got) == {"carve", "cutplan", "aero", "chat", "fix"}
-    assert {k: r["stoppable"] for k, r in got.items()} == {"carve": True, "cutplan": False, "aero": False, "chat": False, "fix": True}
+    # Fix these takes stop but never stops part way: it's offered no Stop (#373 review)
+    assert {k: r["stoppable"] for k, r in got.items()} == {"carve": True, "cutplan": False, "aero": False, "chat": False, "fix": False}
     assert got["cutplan"]["part"] == "box" and got["cutplan"]["text"] == "cutplan step one"
     assert design_api._running("another-design") == []
 
@@ -264,3 +267,56 @@ def test_unpicked_the_one_part_s_own_job_is_the_one_shown_big():
                                           { job: 'b', kind: 'fix', part: 'step_stool', t0: Date.now(), text: 'fixing it' }];
                     paintBusy(); return view();""")
     assert got["live"] == "Fixing Step stool: fixing it"
+
+
+def test_a_check_lighten_and_fix_these_are_offered_no_stop():
+    """#373 review: Stop it at 0:07, before any case, and a check ran all three cases and wrote a run. load_study.study and
+    lighten.study take stop but never call it, and Fix these's one stop point comes before its check: none stops part way,
+    so none is offered Stop until it does (CALI-234)."""
+    assert set(design_api.STOPPABLE) == {"carve", "release", "preview"}
+    for kind in ("load", "lighten", "fix"):
+        assert kind not in design_api.STOPPABLE
+
+
+@pytest.mark.parametrize("at", ["first", "last"])
+def test_a_stopped_build_package_ends_cancelled_and_writes_nothing(tmp_path, monkeypatch, at):
+    """What's still offered Stop stops: the build package, asked to stop at its first step or its last (after the score,
+    before anything's written), writes no release. A step's preview is pinned the same way in test_step_previews."""
+    pytest.importorskip("cadquery")
+    import os
+
+    from caliper import cutplan, release
+    from caliper.design import DesignStore
+    from caliper.jobs import Cancelled
+
+    from .test_consistency import STOOL
+
+    monkeypatch.setattr(cutplan, "available", lambda: None)                 # its cut plan is stood in for: no node here
+    monkeypatch.setattr(cutplan, "run", lambda store, pid, **k: {"id": "cp", "version": store.design.part(pid).version,
+                                                                  "sheets": [], "pieces": []})
+
+    def stool(name):
+        s = DesignStore.create("a stool", base=str(tmp_path / name))
+        s.write_part("stool", STOOL, intent="a step stool")
+        return s
+
+    calls = []
+    n = None
+    if at == "last":                                                         # how many steps it has, run through once
+        try:
+            release.make(stool("dry"), pdf=False, stop=lambda: calls.append(1))
+        except Exception as e:  # noqa: BLE001 — past the last stop, the stand-in cut plan may not be enough to finish
+            pass
+        n, calls = len(calls), []
+        assert n >= 2
+
+    def stop():
+        calls.append(1)
+        if len(calls) == (1 if at == "first" else n):
+            raise Cancelled()
+
+    store = stool("it")
+    with pytest.raises(Cancelled):
+        release.make(store, pdf=False, stop=stop)
+    root = release.releases_dir(store)
+    assert not os.path.isdir(root) or os.listdir(root) == []

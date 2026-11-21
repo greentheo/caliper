@@ -70,8 +70,11 @@ a.btn:hover { border-color: var(--accent); }
 .busy-bar { width: 100%; }
 .busy-more, .busy-note { font-size: 12px; color: var(--muted); }
 .inspector.is-busy { opacity: .45; filter: grayscale(.6); cursor: progress; }
-/* the panel's own small progress lines: the overlay says it now (an error after it still shows) */
-.inspector.is-busy :is(#lProgress, #lightProgress, #carveProgress, #aProgress, #cpProgress, #wProgress) { display: none; }
+/* the panel's own small progress lines: the overlay says it now (an error after it still shows). Not on a phone: there
+   the overlay is on View, and Cards keeps its own lines (#373 review) */
+@media (min-width: 701px) {
+  .inspector.is-busy :is(#lProgress, #lightProgress, #carveProgress, #aProgress, #cpProgress, #wProgress) { display: none; }
+}
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (prefers-reduced-motion: reduce) { .busy-spin { animation-duration: 3s; } }
 .inspector { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto;

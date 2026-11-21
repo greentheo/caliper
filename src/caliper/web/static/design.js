@@ -4579,7 +4579,7 @@ function paintJobs() {
 // what it's currently doing". One overlay for every job, drawn from what the page follows (S.tracked): top right of the
 // view, a large spinner, how long it's run, what's running on which part, its step in words and its bar where it knows
 // its count; the view greys, and the part's panel greys over and can't be acted on. The chat and other designs stay usable.
-const STOPS = new Set(['load', 'lighten', 'carve', 'fix', 'release', 'preview']);   // stop at their next step (design_api.STOPPABLE)
+const STOPS = new Set(['carve', 'release', 'preview']);   // the work stops at its next step (design_api.STOPPABLE, #373 review)
 const BUSY_DOING = { load: 'Checking', lighten: 'Lightening', carve: 'Carving', fix: 'Fixing', cutplan: 'Making the cut plan for',
   aero: 'Shaping {} for drag', chat: 'Working on', whittle: 'Whittling', frame: 'Sizing the frame of', gussets: 'Adding gussets to',
   picture: 'Drawing', preview: 'Previewing a step of', release: 'Making the build package', clarify: 'Thinking about your design',

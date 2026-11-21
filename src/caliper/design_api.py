@@ -99,11 +99,12 @@ def _refuse_while_busy(slug: str, parts: list) -> None:
 
     for j in RUNNER.active():
         if j.meta.get("slug") == slug and j.meta.get("part") in parts:
-            raise HTTPException(409, f"{j.meta['part']} is being {DOING.get(j.kind, 'worked on')}: wait for it, or stop "
-                                     f"that first.")
+            raise HTTPException(409, f"{j.meta['part']} is being {DOING.get(j.kind, 'worked on')}: wait for it"
+                                     + (", or stop that first." if j.kind in STOPPABLE else "."))   # only where Stop stops it
     j = RUNNER.running(_lock(slug))
     if j is not None:
-        raise HTTPException(409, f"{WHOLE.get(j.kind, 'a job')} is working on the design: wait for it, or stop it first.")
+        raise HTTPException(409, f"{WHOLE.get(j.kind, 'a job')} is working on the design: wait for it"
+                                 + (", or stop it first." if j.kind in STOPPABLE else "."))
 
 
 #: What a job is doing to a part, said when a delete has to wait for it (CALI-183).
@@ -382,8 +383,10 @@ def _carving(slug: str) -> Optional[dict]:
             if j is not None else None)
 
 
-#: The jobs that can stop part way, at their next step (``stop=j.check``): the busy overlay offers Stop on these (#363).
-STOPPABLE = ("load", "lighten", "carve", "fix", "release", "preview")
+#: The jobs whose work stops part way when asked, at its next step (``stop=j.check`` and the work calls it): the busy overlay
+#: offers Stop on these only (#363). A check, Lighten and Fix these take ``stop`` but never stop between cases or steps:
+#: Stop it at 0:07 ran all three cases and wrote a run (#373 review), so they're offered none until they do (CALI-234).
+STOPPABLE = ("carve", "release", "preview")
 
 
 def _running(slug: str) -> list[dict]:

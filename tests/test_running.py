@@ -65,7 +65,7 @@ def test_the_design_s_record_says_what_s_running(api):
     time.sleep(0.05)
     (r,) = c.get(f"/api/designs/{slug}").json()["running"]
     assert r == {"job": jid, "kind": "load", "part": "box", "text": "checking the first load", "waiting": False, "stopping": False,
-                 "stoppable": True, "elapsed_s": r["elapsed_s"], "version": 1}       # the version it's of: a change under it is said (#268)                 # how long it's run, for a first build's bubble (CALI-154)
+                 "stoppable": False, "elapsed_s": r["elapsed_s"], "version": 1}       # the version it's of: a change under it is said (#268)                 # how long it's run, for a first build's bubble (CALI-154)
     assert c.get(f"/api/designs/{other}").json()["running"] == []          # the same part id on another design isn't it
     gate.set()
     _wait(jobs.RUNNER.get(jid))
@@ -134,7 +134,7 @@ const document = { querySelectorAll: (q) => { asked.push(q);
     : q.includes('[data-job-off]') ? [...Object.values(made), ...offers].filter((m) => m.dataset.jobOff)
       : q.includes('data-better-action') ? offers : []; } };
 const esc = (s) => String(s);
-const STOPS = new Set(['load', 'lighten', 'carve', 'fix', 'release', 'preview']); let busyPaints = 0; const paintBusy = () => { busyPaints += 1; };
+const STOPS = new Set(['carve', 'release', 'preview']); let busyPaints = 0; const paintBusy = () => { busyPaints += 1; };
 const JOB_NAME = { load: 'Strength check', lighten: 'Lighten', release: 'Build package' };
 const JOB_BOX = { load: 'lProgress', lighten: 'lightProgress', release: 'relProgress' };
 const JOB_GO = { load: 'lGo', lighten: 'lightGo', release: 'relGo' };

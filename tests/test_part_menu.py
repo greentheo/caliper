@@ -89,8 +89,8 @@ def test_a_delete_while_a_job_runs_on_that_part_is_refused_in_words(site, monkey
             return []
     monkeypatch.setattr(design_api.RUNNER, "active", lambda: [Job()])
     r = c.post(f"/api/designs/{slug}/parts/inside_corner_fillets/remove", json={})
-    assert r.status_code == 409 and r.json()["detail"] == ("inside_corner_fillets is being checked: wait for it, or stop "
-                                                           "that first.")
+    # a check is offered no Stop (it never stops part way), so the refusal doesn't offer one either (#373 review)
+    assert r.status_code == 409 and r.json()["detail"] == "inside_corner_fillets is being checked: wait for it."
     assert "inside_corner_fillets" in _parts(c, slug)
     assert c.post(f"/api/designs/{slug}/parts/step_stool/remove", json={}).status_code == 200   # another part: fine
 
@@ -310,7 +310,7 @@ def test_a_mirror_s_source_asks_both_and_a_refusal_is_said_in_the_menu():
       answer = { state: S.design, said: 'Deleted both.', removed: { part: 'side_right', id: 't2' },
                  also: [{ part: 'side_left', id: 't3' }] };
       await menuDo('deleteBoth');
-      const busy = new Error('inside_corner_fillets is being checked: wait for it, or stop that first.'); busy.refused = true;
+      const busy = new Error('inside_corner_fillets is being checked: wait for it.'); busy.refused = true;
       answer = busy; S.menu = { pid: 'inside_corner_fillets', piece: null };
       calls.length = 0; await menuDo('deleteYes');
       return { first, posted, refused: calls };""")
@@ -443,7 +443,8 @@ def test_a_delete_while_each_kind_of_part_job_runs_is_refused_in_words(site, kin
             time.sleep(0.02)
         r = c.post(f"/api/designs/{slug}/parts/inside_corner_fillets/remove", json={})
         assert r.status_code == 409, r.text
-        assert r.json()["detail"] == f"inside_corner_fillets is being {PART_JOBS[kind]}: wait for it, or stop that first."
+        stop = ", or stop that first." if kind in design_api.STOPPABLE else "."      # only where Stop stops it (#373 review)
+        assert r.json()["detail"] == f"inside_corner_fillets is being {PART_JOBS[kind]}: wait for it{stop}"
     finally:
         gate.set()
     assert "inside_corner_fillets" in _parts(c, slug)
@@ -467,7 +468,8 @@ def test_a_design_wide_job_refuses_at_once_in_words_never_a_silent_wait(site, ki
         t0 = time.time()
         r = c.post(f"/api/designs/{slug}/parts/inside_corner_fillets/remove", json={})
         assert time.time() - t0 < 2.0                                                 # it never waited behind the lock
-        assert r.status_code == 409 and r.json()["detail"] == f"{who} is working on the design: wait for it, or stop it first."
+        stop = ", or stop it first." if kind in design_api.STOPPABLE else "."
+        assert r.status_code == 409 and r.json()["detail"] == f"{who} is working on the design: wait for it{stop}"
         r = c.post(f"/api/designs/{slug}/trash/restore", json={"part": "inside_corner_fillets"})
         assert r.status_code == 409 and "is working on the design" in r.json()["detail"]
     finally:
