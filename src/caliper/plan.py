@@ -689,9 +689,11 @@ def _was_said(s: SkeletonValue, said: list[tuple[float, str]]) -> bool:
 
 #: A rule that says one thing sits on another: ``bbox(a).min_z >= bbox(b).max_z - 1`` (CALI-240).
 _SITS_ON = re.compile(r"^\s*bbox\((\w+)\)\.min_z\s*>=\s*bbox\((\w+)\)\.max_z\s*(?:-\s*[\d.]+\s*)?$")
-#: Words that end a noun phrase, either way from a relation.
+#: Words that end a noun phrase, either way from a relation; a negation among them, so "isn't on top of" says nothing.
 _STOP = {"a", "an", "the", "and", "plus", "with", "of", "on", "in", "for", "to", "is", "it", "its", "my", "our", "that",
-         "which", "who", "then", "but", "or", "top", "atop", "sits", "sitting", "rests", "resting", "mounted", "mounts"}
+         "which", "who", "then", "but", "or", "top", "atop", "sits", "sitting", "rests", "resting", "mounted", "mounts",
+         "not", "never", "no", "isn", "t", "doesn", "don", "won"}
+_SITS = {"sits", "sitting", "rests", "resting", "mounted", "mounts"}
 
 
 def _np(words: list, i: int, step: int) -> list:
@@ -707,35 +709,37 @@ def _np(words: list, i: int, step: int) -> list:
 
 
 def relations(said: str) -> list[tuple[list, list]]:
-    """Each "A on B" the person's own words say (CALI-240): (A's words, B's words). "A on top of B", "A on B", "A sits/rests
-    on B", "A atop B", and "B plus a A on top" (Theo's "a platform plus a box on top")."""
-    words = re.findall(r"[a-z]+", (said or "").lower())
+    """Each "A on B" the person's own words say (CALI-240), read one sentence or line at a time (#410 review: a prompt and
+    an answer joined by a newline aren't one sentence): (A's words, B's words). Only wordings that say up and down: "A on
+    top of B", "A atop B", "A sits/rests on (top of) B", and "B plus/and/with a A on top" (Theo's "a platform plus a box on
+    top"). A bare "on" isn't one: "the logo on the box", "a shelf on the wall"."""
     out = []
-    for i, w in enumerate(words):
-        nxt = words[i + 1:i + 3]
-        if w == "on" and nxt[:2] == ["top", "of"]:
-            out.append((_np(words, i - 1, -1), _np(words, i + 3, 1)))
-        elif w == "on" and nxt[:1] == ["top"]:            # "B plus a A on top": B is before the joining word
-            a = _np(words, i - 1, -1)
-            j = i - 1 - len(a)
-            while j >= 0 and words[j] in ("a", "an", "the"):
-                j -= 1
-            if j >= 0 and words[j] in ("plus", "and", "with"):
-                out.append((a, _np(words, j - 1, -1)))
-        elif w == "atop" or (w in ("sits", "sitting", "rests", "resting", "mounted", "mounts") and nxt[:1] == ["on"]):
-            out.append((_np(words, i - 1, -1) if w == "atop" else _np(words, i - 1 - (words[i - 1] == "that"), -1),
-                        _np(words, i + (1 if w == "atop" else 2), 1)))
-        elif w == "on" and nxt[:1] != ["top"] and (i == 0 or words[i - 1] not in ("sits", "sitting", "rests", "resting",
-                                                                                  "mounted", "mounts")):
-            out.append((_np(words, i - 1, -1), _np(words, i + 1, 1)))
+    for part in re.split(r"[\n.;:!?]", (said or "").lower()):
+        words = re.findall(r"[a-z]+", part)
+        for i, w in enumerate(words):
+            nxt = words[i + 1:i + 4]
+            if w == "on" and nxt[:2] == ["top", "of"] and (i == 0 or words[i - 1] not in _SITS):
+                out.append((_np(words, i - 1, -1), _np(words, i + 3, 1)))
+            elif w == "on" and nxt[:1] == ["top"] and nxt[1:2] != ["of"]:     # "B plus a A on top"
+                a = _np(words, i - 1, -1)
+                j = i - 1 - len(a)
+                while j >= 0 and words[j] in ("a", "an", "the"):
+                    j -= 1
+                if j >= 0 and words[j] in ("plus", "and", "with"):
+                    out.append((a, _np(words, j - 1, -1)))
+            elif w == "atop":
+                out.append((_np(words, i - 1, -1), _np(words, i + 1, 1)))
+            elif w in _SITS and nxt[:1] == ["on"]:
+                after = i + (4 if nxt[1:3] == ["top", "of"] else 2)          # "sits on top of the deck" too
+                out.append((_np(words, i - 1 - (i > 0 and words[i - 1] == "that"), -1), _np(words, after, 1)))
     return [(a, b) for a, b in out if a and b]
 
 
 def _names_it(phrase: list, pid: str) -> bool:
-    """Whether a noun phrase names a part or group: its last word is one of the id's words ("the camper box": box)."""
-    head = phrase[-1]
-    tokens = set(pid.lower().split("_"))
-    return head in tokens or head.rstrip("s") in tokens
+    """Whether a noun phrase names a part or group: every word of its id is in it, a plural allowed (#410 review: "a box"
+    named box_lid). "the tool box" names tool_box; "a box" doesn't."""
+    words = set(phrase) | {w[:-1] for w in phrase if w.endswith("s")}
+    return all(t in words for t in pid.lower().split("_") if t)
 
 
 def _said_on(r: PlanRule, said: str) -> bool:
