@@ -1188,10 +1188,11 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
                 max_rounds: int = 4, events: Optional[list[Event]] = None, on_event=None,
                 use_llm: bool = True, drafter=None, promote_feedback: bool = True,
                 interfaces=None, repair_only=None, pick: Optional[dict] = None, on: Optional[str] = None,
-                asked: str = "") -> TurnResult:
+                asked: str = "", context: str = "") -> TurnResult:
     """Author a brand-new part into the design, then measure the design with it in place. ``pick``, an edge picked on the
     part ``on``: the new part must touch it, measured each round (CALI-171, #266); "and the opposite edge" in what was
-    ``asked`` makes a mirror of it on the twin edge."""
+    ``asked`` makes a mirror of it on the twin edge. ``context``: words for this part's designer only, never its stored
+    intent (CALI-36, #17: the group it's in)."""
     from . import authoring
 
     events = events if events is not None else []
@@ -1205,7 +1206,7 @@ def author_part(store: DesignStore, part_id: str, intent: str, *, author=None, c
     if on and on != part_id and store.design.part(on):   # what it's added on: its numbers, read live, never copied (#266)
         interfaces = _also(interfaces, lambda g, script: [follows.check(script, follows.sources_of(store, script, on),
                                                                         part_id, on)])
-    spec = _working_spec(store, part_id, intent + (follows.told(store, on) if on and on != part_id else "")
+    spec = _working_spec(store, part_id, intent + context + (follows.told(store, on) if on and on != part_id else "")
                          + (_seat_words(seat) if seat else "")
                          + ("\n\nMake it for the picked edge only: the opposite one is made as its mirror." if both else ""))
 

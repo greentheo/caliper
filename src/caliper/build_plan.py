@@ -55,10 +55,55 @@ ROUNDS = 2
 REPAIRS = frozenset({"construction_covers", "construction_volume", "skeleton_shadow"})   # its own sizes: fixed (#240)
 
 
+def _said(pid: str) -> str:
+    return pid.replace("_", " ")
+
+
+def _listing(xs: list[str]) -> str:
+    return ", ".join(xs[:-1]) + f" and {xs[-1]}" if len(xs) > 1 else (xs[0] if xs else "")
+
+
+def _top(plan, pid: str) -> Optional[str]:
+    """The outermost group a part is in, or None (CALI-36, #17)."""
+    chain = P.group_of(plan, pid)
+    return chain[0] if chain else None
+
+
 def cost(plan) -> str:
-    """What building a plan may take, said before Build it: "3 parts to make, up to 4 designer tries each"."""
-    n = len(P.buildable(plan))
-    return f"{n} part{'s' if n != 1 else ''} to make, up to {ROUNDS} designer tries each (at most {n * ROUNDS})"
+    """What building a plan may take, said before Build it: "3 parts to make, up to 4 designer tries each"; a plan in
+    groups says each group's share first (CALI-36, #17): "5 parts to make (the platform: 2, the box: 2, and 1 on its
+    own), …"."""
+    make = P.buildable(plan)
+    n = len(make)
+    per = ""
+    if plan.groups:
+        counts: dict = {}
+        for pid in [x for x in P.order(plan) if x in make]:
+            counts[_top(plan, pid)] = counts.get(_top(plan, pid), 0) + 1
+        loose = counts.pop(None, 0)
+        per = " (" + ", ".join(f"the {_said(g)}: {c}" for g, c in counts.items()) + (
+            f", and {loose} on its own" if loose else "") + ")"
+    return f"{n} part{'s' if n != 1 else ''} to make{per}, up to {ROUNDS} designer tries each (at most {n * ROUNDS})"
+
+
+def told(plan, pid: str) -> str:
+    """What a part's designer is told of its group (CALI-36, #17): which group it's in, its other parts, and what the
+    group sits on, built before it. '' for a part in none. The numbers they share are the skeleton's, as for any part."""
+    chain = P.group_of(plan, pid)
+    if not chain:
+        return ""
+    g = P._group(plan, chain[-1])
+    others = [f"the {_said(x)}" for x in P.group_parts(plan, g.id) if x != pid]
+    line = (f"This part is in the {_said(g.id)}" + (f" ({g.what.strip().rstrip('.')})" if g.what.strip() else "")
+            + (f", part of the {_said(chain[0])}" if len(chain) > 1 else "")
+            + (f", with {_listing(others)}" if others else "") + ".")
+    under = [m for gid in chain for m in P._group(plan, gid).mounts_on]
+    if under:
+        parts = [f"the {_said(x)}" for m in under for x in (P.group_parts(plan, m) if P._group(plan, m) else [m])]
+        line += (f" The {_said(g.id)} sits on " + _listing([f"the {_said(m)}" for m in under])
+                 + (f" ({_listing(parts)})" if parts and [f"the {_said(m)}" for m in under] != parts else "")
+                 + ", built before it.")
+    return "\n\n" + line + " Build only this part: the group's other parts are built on their own, from the same skeleton."
 
 
 def plainly(error: str) -> str:
@@ -159,8 +204,16 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
         emit(ev.kind, ev.text, **ev.data)
 
     said, built, kept, failed = [], {}, [], None
+    heading = object()                                    # the group whose parts are being said (CALI-36, #17)
     for pid in order:
         p, name = by[pid], pid.replace("_", " ")
+        top = _top(plan, pid) if plan.groups else None
+        if plan.groups and top != heading:
+            heading = top
+            said.append(f"The {_said(top)}:" if top else "On its own:")
+            if top:
+                n = len([x for x in order if _top(plan, x) == top])
+                emit("step", f"The {_said(top)}: {n} part{'s' if n != 1 else ''}", step="group", group=top)
         if p.role == "fixed":
             said.append(f"- the {name}: yours, not designed")
             continue
@@ -182,7 +235,7 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
             continue
         emit("step", f"Building the {name}", step="build", part=pid)
         check = interfaces(store, pid, built)
-        res = chat.author_part(store, pid, p.what + (f" ({p.made})" if p.made else ""), author=author,
+        res = chat.author_part(store, pid, p.what + (f" ({p.made})" if p.made else ""), author=author, context=told(plan, pid),
                                client=client, use_llm=use_llm, on_event=forward, promote_feedback=False,
                                max_rounds=max_rounds, interfaces=check, repair_only=REPAIRS)
         if not res.version:
