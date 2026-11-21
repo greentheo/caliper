@@ -157,3 +157,106 @@ def test_whittle_s_case_threads_go_one_at_a_time_where_a_fresh_thread_isn_t_held
     assert got["case_threads"] == (1 if unheld else got["before"]), got   # its own process's, not this one's
     if first == "import caliper":
         assert not unheld, got                       # Caliper first: every thread starts at one
+
+
+#: carve's multi-case solve, as its optimizer makes it: whittle's own solve() with two cases, no solved() first (#356)
+CARVE = """
+import json, threading
+{first}
+import caliper
+from threadpoolctl import threadpool_info
+import trimesh
+from whittle import Load, LoadStudy, Material, Mesh
+from whittle.physics import fea
+fresh = []
+t = threading.Thread(target=lambda: fresh.extend(int(p["num_threads"]) for p in threadpool_info()))
+t.start(); t.join()
+pools = []
+real = fea.ThreadPoolExecutor
+fea.ThreadPoolExecutor = lambda *a, **k: pools.append(1) or real(*a, **k)
+bar = trimesh.creation.box(extents=(60.0, 12.0, 12.0))
+ls = LoadStudy(Mesh(bar.vertices, bar.faces), material=Material(name="pla", youngs_modulus=2000.0, poisson_ratio=0.35,
+               strength=30.0, density=1.2), spacing=2.0)
+ls.support(box=((-31.0, -7.0, -7.0), (-28.0, 7.0, 7.0)))
+ls.loads = [Load(ls.region(box=((27.0, -7.0, 4.0), (31.0, 7.0, 7.0))), (0.0, 0.0, -10.0 * (i + 1)), case=i)
+            for i in range(2)]
+r = ls.solver().solve(ls.solid)
+print(json.dumps({{"fresh": fresh, "pools": len(pools), "case_threads": fea.CASE_THREADS, "supported": bool(r.supported)}}))
+"""
+
+
+@pytest.mark.parametrize("first", ["import numpy, scipy.sparse.linalg", ""])
+def test_carve_s_multi_case_solve_starts_no_unheld_case_threads(first):
+    """reviewer-2 on #346: in a numpy-first process carve's cases went on whittle's case threads, unheld (6 of 36 off
+    serial). ``import caliper`` now makes them safe where a fresh thread isn't held: no case pools. Caliper first, a fresh
+    thread is held, and whittle's case pools run: the control."""
+    pytest.importorskip("threadpoolctl")
+    fea = pytest.importorskip("whittle.physics.fea")
+    if not hasattr(fea, "CASE_THREADS"):
+        pytest.skip("this whittle has no case threads (before greentheo/whittle#9)")
+    whittle_src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(fea.__file__))))
+    env = {k: v for k, v in os.environ.items() if k not in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                                                              "MKL_NUM_THREADS", "PYTHONPATH", "WHITTLE_CASE_THREADS")}
+    env.update(PYTHONPATH=os.pathsep.join([os.path.abspath(SRC), whittle_src]), OMP_NUM_THREADS="8",
+               OPENBLAS_NUM_THREADS="8")
+    r = subprocess.run([sys.executable, "-c", CARVE.format(first=first)], env=env, capture_output=True, text=True,
+                       timeout=300)
+    assert r.returncode == 0, r.stderr[-2000:]
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    assert got["supported"], got
+    unheld = any(n > 1 for n in got["fresh"])
+    if unheld:                                         # numpy first, on a build whose count is a thread's own
+        assert got["pools"] == 0 and got["case_threads"] == 1, got
+    else:                                              # every fresh thread at one: whittle's case threads are safe
+        assert got["pools"] >= 1, got
+    if not first:
+        assert not unheld, got                         # Caliper first: every thread starts at one
+
+
+def test_every_held_thread_makes_whittle_s_case_threads_safe(monkeypatch):
+    """A job-pool thread is held by ``hold()``; it makes the case threads safe too, before carve can start any (#356)."""
+    from caliper import blas
+
+    called = []
+    monkeypatch.setattr(blas, "cases_safe", lambda: called.append(1))
+    blas.hold()
+    assert called == [1]
+
+
+def test_making_cases_safe_never_imports_whittle(monkeypatch):
+    """``import caliper`` calls it where numpy came first: a whittle not loaded yet reads the variable when it loads."""
+    from caliper import blas
+
+    monkeypatch.setattr(blas, "fresh_single", lambda: False)
+    monkeypatch.setenv("WHITTLE_CASE_THREADS", "4")              # so it's put back as it was, after
+    monkeypatch.delenv("WHITTLE_CASE_THREADS")
+    gone = {k: v for k, v in sys.modules.items() if k == "whittle.physics.fea"}
+    for k in gone:
+        monkeypatch.delitem(sys.modules, k)
+    blas.cases_safe()
+    assert os.environ["WHITTLE_CASE_THREADS"] == "1" and "whittle.physics.fea" not in sys.modules
+
+
+def test_a_numpy_first_import_of_caliper_loads_no_whittle():
+    """``import caliper`` makes the case threads safe where numpy came first (#356), by the variable a whittle reads when
+    it loads: whittle itself stays unloaded, and the variable is set only where a fresh thread is unheld."""
+    pytest.importorskip("threadpoolctl")
+    probe = """
+import json, os, sys, threading
+import numpy, scipy.sparse.linalg
+import caliper
+from threadpoolctl import threadpool_info
+fresh = []
+t = threading.Thread(target=lambda: fresh.extend(int(p["num_threads"]) for p in threadpool_info()))
+t.start(); t.join()
+print(json.dumps({"whittle": sorted(k for k in sys.modules if k.split(".")[0] == "whittle"), "fresh": fresh,
+                  "var": os.environ.get("WHITTLE_CASE_THREADS")}))
+"""
+    env = {k: v for k, v in os.environ.items() if k not in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                                                              "MKL_NUM_THREADS", "PYTHONPATH", "WHITTLE_CASE_THREADS")}
+    env.update(PYTHONPATH=os.path.abspath(SRC), OMP_NUM_THREADS="8", OPENBLAS_NUM_THREADS="8")
+    r = subprocess.run([sys.executable, "-c", probe], env=env, capture_output=True, text=True, timeout=300)
+    assert r.returncode == 0, r.stderr[-2000:]
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    assert got["whittle"] == [], got
+    assert got["var"] == ("1" if any(n > 1 for n in got["fresh"]) else None), got

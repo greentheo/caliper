@@ -16,6 +16,12 @@ try:
     _limits(limits=1)
 except ImportError:     # pragma: no cover — threadpoolctl isn't a dependency; the environment above is the pin
     pass
+import sys as _sys  # noqa: E402
+
+if "numpy" in _sys.modules:   # numpy first: whittle's case threads would start unheld, so they go one at a time (#356)
+    from .blas import cases_safe as _cases_safe
+
+    _cases_safe()
 
 from .assembly import Assembly, Mate, Part  # noqa: E402
 from .spec import (
