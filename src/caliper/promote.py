@@ -537,9 +537,9 @@ def llm_draft(store: DesignStore, part: str, feedback: str, client=None,
               model: Optional[str] = None) -> Draft:
     """Draft with Claude, then validate the result exactly as strictly as the offline path."""
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
 
     ask = (f"{store.prompt_context(part)}\n\n"
            f"the user said this about '{part}': {feedback}\n\n"
@@ -565,7 +565,7 @@ def draft(store: DesignStore, part: str, feedback: str, *, use_llm: bool = True,
     """Claude when available, patterns otherwise — and drafting never crashes a turn."""
     if drafter is not None:
         return drafter(store, part, feedback)
-    if use_llm and (client is not None or os.environ.get("ANTHROPIC_API_KEY")):
+    if use_llm and (client is not None or llm.has_key()):
         try:
             got = llm_draft(store, part, feedback, client=client)
             if got.proposal is not None or not got.measurable:

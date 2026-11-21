@@ -123,9 +123,9 @@ def author_script(
 ) -> str:
     """Ask Claude to write (or revise) the ``build(params)`` script for ``spec``."""
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
 
     ask = _the_spec(spec)
     if prior and feedback:
@@ -460,9 +460,9 @@ EDIT_ASK = ("Change the script below with the smallest edits that do it, and lea
 def edit_script(spec: Spec, prior: str, feedback: Optional[str], error: Optional[str] = None, client=None, model: Optional[str] = None) -> list:
     """Ask Claude for targeted replacements to ``prior``. Raises :class:`NoEdit` for a reply that isn't them."""
     if client is None:
-        from anthropic import Anthropic  # lazy; may be absent
+        from .llm import client as _claude  # CALI-217 (#366): no key is said, never a crash
 
-        client = Anthropic()
+        client = _claude()
     ask = (f"{_the_spec(spec)}\n\n{EDIT_ASK}\n\n--- the script ---\n{prior}\n--- what to change ---\n{feedback or ''}"
            + (f"\n--- your last edits didn't apply ---\n{error}" if error else ""))
     try:

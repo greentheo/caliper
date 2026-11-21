@@ -120,3 +120,12 @@ def test_a_hole_weighs_as_deep_as_it_goes(tmp_path):
     assert lighten.holes_now_lb(store, "stool") == pytest.approx(through / 2, abs=0.006)
     store.write_part("stool", BOX_STOOL + HOLE.replace('"depth": 19.05', '"depth": 40.0'), intent="deeper than its sheet")
     assert lighten.holes_now_lb(store, "stool") == pytest.approx(through, abs=0.006)
+
+
+def test_the_job_s_last_word_never_says_lighter_for_a_step_at_or_below_now():
+    """#401 review: the best holding step at -0.36 (the issue's own) would have said "-0.36 lb lighter than now"."""
+    assert lighten.done_said(9, {"saved_lb": -0.36, "safety": 2.4}) == "nothing lighter holds"
+    assert lighten.done_said(9, {"saved_lb": 0.0, "safety": 2.4}) == "nothing lighter holds"
+    assert lighten.done_said(9, None) == "nothing lighter holds"
+    assert lighten.done_said(9, {"saved_lb": 0.4, "safety": 2.4}) == (
+        "9 steps; the lightest that holds is 0.4 lb lighter than now at 2.4x")

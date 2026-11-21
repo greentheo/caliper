@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 import uuid
 from typing import Callable, Optional
@@ -678,6 +679,15 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     out_dir = os.path.join(runs_dir(store), rid)
     os.makedirs(out_dir, exist_ok=True)
 
+    def halt() -> None:
+        """A stop between its steps (#398, CALI-234): what's half made goes with it, so a stopped Lighten writes no run."""
+        if stop:
+            try:
+                stop()
+            except BaseException:
+                shutil.rmtree(out_dir, ignore_errors=True)
+                raise
+
     solid = base.copy()
     # holes it already has: free cells with no wood (opened, so a cell the grid happened to miss isn't one)
     removed = {p["name"]: ndimage.binary_opening(
@@ -692,6 +702,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
             + [("top", (n + 1) / holes_max) for n in range(holes_max)] if tops else [("walls", 0.0)] + [("walls", f) for f in steps])
     stations, last, wall_holes, wall_cover = [], None, {}, {}
     for k, (phase, target) in enumerate(plan):
+        halt()                                            # each step: its holes and its cases
         emit("station", f"step {k}: {'the walls' if phase == 'walls' else 'the top'}, {target:.0%}",
              progress=k / len(plan))
         holes = dict(wall_holes)
@@ -821,6 +832,7 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
             f"minimum reads \"{V.CUT_DECIDES}\".",
         ],
     }
+    halt()                                                # the last: after it, the run is written whole
     against_now(record, now_lb)                       # each step against the part as it is now (#382)
     with open(os.path.join(out_dir, "run.json"), "w") as f:
         json.dump(record, f, indent=2, default=str)
@@ -828,10 +840,16 @@ def study(store: DesignStore, part_id: str, *, min_safety: float = L.MIN_SAFETY,
     store.append_history(part_id, {"kind": "lighten", "action": "studied", "run": rid,
                                    "stations": len(stations), "best_removed": best and best["removed"]})
     store.append_log({"kind": "lighten", "action": "studied", "part": part_id, "run": rid})
-    emit("done", (f"{len(stations)} steps; the lightest that holds is {best['saved_lb']} lb lighter than now at "
-                  f"{best['safety']}x") if best and best["saved_lb"] > 0 else "nothing lighter than now holds", run=rid,
-         progress=1.0)
+    emit("done", done_said(len(stations), best), run=rid, progress=1.0)
     return record
+
+
+def done_said(n: int, best: Optional[dict]) -> str:
+    """The study's last word (#382): the lightest step that holds, against the part as it is now; "nothing lighter
+    holds" where none is lighter, never "-0.36 lb lighter" (#401 review)."""
+    if best and (best.get("saved_lb") or 0) > 0:
+        return f"{n} steps; the lightest that holds is {best['saved_lb']} lb lighter than now at {best['safety']}x"
+    return "nothing lighter holds"
 
 
 def _covered(p: dict, polys: list, s: float) -> np.ndarray:

@@ -126,7 +126,7 @@ def test_where_the_hand_rule_has_none_the_fea_s_is_the_row():
     got = FJ.beside(hand, _reading([0, 0, 200.0]), _setup(SCREWED), 2.0)
     assert got["chain"] and got["unchecked"] == [] and got["by_hand"] == [JC.NOT_CHAIN]
     (r,) = got["rows"]
-    assert r["by"] == "fea" and r["safety"] is not None and r["said"].startswith("not checked by hand; by the FEA")
+    assert r["by"] == "fea" and r["safety"] is not None and r["said"].startswith("checked by the FEA: ")   # (#383)
 
 
 def test_a_joint_the_fea_can_t_read_keeps_the_hand_s_or_stays_not_checked():

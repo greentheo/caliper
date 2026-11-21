@@ -184,3 +184,49 @@ def test_the_route_carries_what_followed():
     from caliper import design_api
 
     assert '"followed": got.get("followed")' in inspect.getsource(design_api)
+
+
+#: The shape of Theo's step_stool PARAMS (step-stool-5 v4): sized 16 x 16 x 14 in through Parameters before #267, so every
+#: comment but the ply's and the lift's says a number it no longer has.
+STALE = '''import cadquery as cq
+
+PARAMS = {
+    "width": 406.4,          # 24 in, side to side
+    "height": 406.4,         # 20 in, floor to the one big step's surface
+    "top_depth": 355.6,      # 11 in, step front to back
+    "foot_overhang": 101.6,   # 2 in, how far the feet reach in front of and behind the step (0.1 x height)
+    "rail_h": 152.4,          # 3 in, height of the rails under the step
+    "stringer_lift": 50.8,   # 2 in, floor to the stringer's underside
+    "seat_h": 457.0,         # 18 in, near enough
+    "edge_t": 12.0,          # 3/4 in plywood's edge band
+    "ply_t": 19.05,          # 3/4 in plywood
+}
+
+
+def build(params):
+    p = {**PARAMS, **(params or {})}
+    return cq.Workplane().box(p["width"], p["top_depth"], p["height"], centered=False)
+'''
+
+
+def test_the_designer_reads_the_source_s_comments_true_even_stale_from_before(tmp_path, monkeypatch):
+    """#267's small ask 1: Theo's step_stool kept comments stale from before #267 ("height": 406.4, # 20 in), and a comment
+    is put right only when its number is edited. The designer of a part added on it reads them true (#266's design note:
+    "comments restated"); the script on disk is unchanged."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    s = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    s.write_part("step_stool", STALE, intent="a one-step stool")
+    told = follows.told(s, "step_stool")
+    for line in ('"width": 406.4,          # 16 in, side to side',
+                 '"height": 406.4,         # 16 in, floor to the one big step\'s surface',
+                 '"top_depth": 355.6,      # 14 in, step front to back',
+                 '"foot_overhang": 101.6,   # 4 in, how far the feet reach in front of and behind the step (0.1 x height)',
+                 '"rail_h": 152.4,          # 6 in, height of the rails under the step',
+                 '"stringer_lift": 50.8,   # 2 in, floor to the stringer\'s underside',
+                 '"seat_h": 457.0,         # 18 in, near enough',       # already the number as it's written: it stays
+                 '"edge_t": 12.0,          # 3/4 in plywood\'s edge band',   # another thing's size: it stays
+                 '"ply_t": 19.05,          # 3/4 in plywood'):
+        assert line in told, (line, told)
+    assert not any(f"# {n} in," in told for n in (24, 20, 11, 3)), told
+    assert s.read_script("step_stool") == STALE
+    assert aero.restate(STRIP.replace("PARAMS", "SIZES")) == STRIP.replace("PARAMS", "SIZES")    # no PARAMS: nothing to say
