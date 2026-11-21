@@ -2241,7 +2241,9 @@ function answersKey() {               // what the answers depend on: a change to
   return JSON.stringify([S.slug, shownPart(), d.building || null, d.parts.map((p) => [p.id, p.version, p.role]), (d.load_runs || []).length,
     runs(d.carve_runs), runs(d.lighten_runs),
     (d.pattern_runs || []).length, (d.frame_runs || []).length, (d.scorecards || []).length,
-    (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey, d.display_units]);
+    (d.releases || []).length, ((d.goals || {}).checks || []).length, S.shopKey,
+    // the plan: answered, its question goes, and What is it? stops saying "answer its question first" (#393 review)
+    d.plan ? [d.plan.status, (d.plan.parts || []).map((x) => x.id), d.plan.questions || []] : null, d.display_units]);
 }
 // a card's lines, and under a part's Will it work? its Things to fix (#300): one painter, for the first draw and the
 // fill when its answers come in (a fill with qlines alone dropped the list)

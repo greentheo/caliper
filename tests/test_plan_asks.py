@@ -82,3 +82,19 @@ def test_what_is_it_asks_the_question_and_never_says_press_build_it_over_it():
     lines = [ln["text"] for ln in next(c for c in answers.design(None, state) if c["key"] == "what")["lines"]]
     assert f"Before I build it: {Q}" in lines and not any("press Build it" in ln for ln in lines), lines
     assert any(ln.endswith("Answer its question first: Build it waits for it.") for ln in lines)
+
+
+def test_an_answered_question_reads_the_cards_again():
+    """#393 review: answered in the chat, Build it came back, but What is it? kept "Answer its question first": the
+    cards' key had no plan in it, so a plan edit never asked for them again."""
+    base = {"slug": "s", "design": {"building": None, "parts": [], "display_units": "in",
+                                    "plan": {"status": "review", "parts": [{"id": "step_stool"}, {"id": "box_floor"}],
+                                             "questions": [Q]}}}
+    plans = {"answered": {"questions": []}, "part_dropped": {"parts": [{"id": "step_stool"}]}, "saved": {"status": "saved"}}
+    head = f"const S = {json.dumps(base)};"
+    body = (f"const plans = {json.dumps(plans)}; const before = answersKey(); out = {{ same: answersKey() === before }};"
+            "for (const [k, v] of Object.entries(plans)) { const was = S.design.plan; S.design.plan = { ...was, ...v };"
+            " out[k] = answersKey() !== before; S.design.plan = was; }"
+            "S.design.plan = null; out.none = answersKey() !== before;")
+    got = _run(_page(["answersKey"], extra=head + body))
+    assert got == {"same": True, "answered": True, "part_dropped": True, "saved": True, "none": True}
