@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from .errors import scrubbed
 
+import math
 import re
 from typing import Optional
 
@@ -39,6 +40,22 @@ def _wall_needs(expr: str) -> Optional[float]:
         return None
 
 
+#: A number as a rule writes it: its decimal places are the precision its result is said to (CALI-227, #385).
+_NUMBER = re.compile(r"(?<![\w.])\d+(?:\.(\d+))?(?![\w.])")
+
+
+def cut(actual: float, expr: str) -> str:
+    """A rule's measured number, to the rule's own precision (the most decimal places among its numbers, at most 3), cut
+    toward safe: down for an "at least" (``>=``), up for an "at most" (``<=``), rounded where it's neither or both
+    (CALI-227, #385: "actual=0.22303847515793196"). Never rounded onto its limit: 2.849 against at least 2.85 is 2.84."""
+    places = min(3, max((len(m.group(1) or "") for m in _NUMBER.finditer(expr or "")), default=0))
+    f = 10 ** places
+    least, most = ">" in (expr or ""), "<" in (expr or "")
+    v = (math.floor(actual * f + 1e-9) / f if least and not most else
+         math.ceil(actual * f - 1e-9) / f if most and not least else round(actual, places))
+    return f"{v:.{places}f}"
+
+
 def _plain(rule_id: str) -> str:
     return rule_id.replace("_", " ")
 
@@ -51,13 +68,14 @@ def _said(r: dict, where: Optional[list], inches: bool) -> str:
     if _is_wall(r["expr"]) and isinstance(r.get("actual"), (int, float)):
         need = _wall_needs(r["expr"])
         at = f" around z {_len(where[2], inches)}" if where else ""
-        return (f"{_plain(r['id'])}: its thinnest walls are {_wall(float(r['actual']))}{at}"
+        return (f"{_plain(r['id'])}: its thinnest walls are {cut(float(r['actual']), r['expr'])} mm{at}"
                 + (f"; it says at least {round(need, 2):g} mm" if need is not None else f" ({r['expr']})"))
     if r.get("status") in ("error", "deferred") and r.get("detail"):
         return f"{_plain(r['id'])}: {r['expr']}, not measured: {r['detail']}"
     act = r.get("actual")
-    return f"{_plain(r['id'])}: {r['expr']}" + (f", measured {act:g}" if isinstance(act, float) else
-                                        f", measured {act}" if act is not None and not isinstance(act, bool) else "")
+    if isinstance(act, (int, float)) and not isinstance(act, bool):   # in words, to its precision (CALI-227)
+        return f"{_plain(r['id'])}: it measures {cut(float(act), r['expr'])} ({r['expr']})"
+    return f"{_plain(r['id'])}: {r['expr']}" + (f", measured {act}" if act is not None and not isinstance(act, bool) else "")
 
 
 def measured(store: DesignStore, pid: str, geometry=None) -> list[dict]:
