@@ -354,9 +354,9 @@ def test_the_handles_are_drawn_and_take_the_press_before_the_view_turns():
     src = open(JS).read()
     draw = _fn(src, "drawScenarios")
     assert "h.userData = { scenHandle: what, i: m.i };" in draw and "['move', mid, color], ['turn', tail, 0xffffff]" in draw
-    i = src.index("viewer.addEventListener('pointerdown', (e) => {   // a handle")
-    grab = src[i:src.index("}, true);", i) + 9]
-    assert "e.stopPropagation(); e.preventDefault();" in grab and grab.endswith("}, true);")   # capture: OrbitControls never sees it
+    grab = _fn(src, "scenPress")                                           # named, so test_drag_touch can press it (CALI-236)
+    assert "e.stopPropagation(); e.preventDefault();" in grab
+    assert "viewer.addEventListener('pointerdown', scenPress, true);" in src   # capture: OrbitControls never sees it
     assert "if (e.button !== 0 || !S.scenOpen || S.scenPick) return;" in grab
     end = _fn(src, "endScenDrag")
     assert "Object.assign(got, readScenarios(got));" in end and "Save them to keep it." in end
