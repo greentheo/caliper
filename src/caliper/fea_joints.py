@@ -47,6 +47,14 @@ UNBALANCED = "the FEA's forces don't balance on the {piece} ({pct:.1f}% of the l
 
 #: A joint the hand rule couldn't follow, which the FEA read (#344): checked, by the FEA, and said so (#383)
 CHECKED_BY_FEA = "checked by the FEA"
+#: A new row's words before the FEA's side gives it a number: what main said, and what stays where it gives none (#413).
+NOT_BY_HAND = "not checked by hand"
+#: Why a joint whose pull the FEA waives stays unchecked where nothing the check credits would take that pull (#413): the
+#: capacity table's own sources (#301 decisions 2 and 3).
+PULL_UNCREDITED = ("a pull at its edge, which nothing the check credits holds: a screw or glue in a plywood edge or end "
+                   "grain gets no credit (NDS 2018 §12.2.2.3; the Wood Handbook)")
+#: Why a joint the FEA read carrying nothing has no number (#413).
+NO_FORCE = "the FEA reads no force on it"
 
 def _stick(points: np.ndarray, pc: dict) -> tuple[np.ndarray, np.ndarray]:
     """A stick's distance from each point (outside its inscribed radius, and past its flat ends), and whether each is
@@ -415,8 +423,11 @@ def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
            "unchecked": list(check.get("unchecked") or []), "fea": {"residual": round(reading["residual"], 5)}}
     if reading.get("unbalanced"):
         out["fea"]["unread"] = reading["unbalanced"]
+        out["open"] = _open(out, reading, setup_, {tuple(j["pieces"]): reading["unbalanced"] for j in setup_["joints"]},
+                            {}, min_safety)
         return out
     by_pair = {tuple(r["pieces"]): r for r in out["rows"] if "pieces" in r and not r.get("column")}
+    why_of: dict = {}                                  # why each joint the loop leaves unchecked is (#413)
     for j in setup_["joints"]:
         got = reading["joints"].get(tuple(j["pieces"])) if readable(j) else None
         if got is None:
@@ -427,16 +438,18 @@ def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
         if hand is None:                                     # the hand rule couldn't follow it: the FEA's is the row
             if "unread" in fea:
                 out["unchecked"].append(f"the joint between {between} ({fea['unread']})")
+                why_of[tuple(j["pieces"])] = fea["unread"]
                 continue
             # a pull waived with no hand number beside it: the load's route is the joint, so never ✓ through the
             # waiver (the foreman); what's left failing still fails
             if fea["waived"] and (fea["safety"] is None or fea["safety"] >= min_safety):   # producer
                 out["unchecked"].append(f"the joint between {between} ({NO_PULL.format(edge=j['edge'], face=j['face'])})")
+                why_of[tuple(j["pieces"])] = "pull"
                 continue
             hand = {"pieces": j["pieces"], "between": between, "edge": j["edge"], "face": j["face"], "mode": None,
-                    "safety": None, "need": min_safety, "holds": True, "said": CHECKED_BY_FEA,
+                    "safety": None, "need": min_safety, "holds": True, "said": NOT_BY_HAND,
                     "assumed": j.get("assumed"), "_new": True,
-                    **({"crowded": j["crowded"], "said": f"{CHECKED_BY_FEA}; {j['crowded']}"} if j.get("crowded") else {})}
+                    **({"crowded": j["crowded"], "said": f"{NOT_BY_HAND}; {j['crowded']}"} if j.get("crowded") else {})}
             out["rows"].append(hand)
         hand["fea"] = fea
         if "unread" in fea:
@@ -455,6 +468,7 @@ def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
                 if hand.pop("_new", False):               # no hand number beside it: not checked, never ✓
                     out["rows"].remove(hand)
                     out["unchecked"].append(f"the joint between {between} ({hung})")
+                    why_of[tuple(j["pieces"])] = hung
                     continue
                 hand["fea"] = {**fea, "safety": None, "waived": True, "said": f"{fea['said']}; {hung}"}
                 continue
@@ -490,6 +504,57 @@ def beside(check: dict, reading: dict, setup_: dict, min_safety: float) -> dict:
         out["unchecked"] = [u for u in out["unchecked"] if u not in out["by_hand"]]
     for r in out["rows"]:
         r.pop("_new", None)
+    out["open"] = _open(out, reading, setup_, why_of, by_pair, min_safety)
     rated = [r for r in out["rows"] if r.get("safety") is not None]
     out["governing"] = min(rated, key=lambda r: r["safety"]) if rated else None
     return out
+
+
+def credited(j: dict, got: dict, keep: float, screw_mm: float, min_safety: float) -> Optional[dict]:
+    """The fewest screws the check credits in joint ``j``'s pull that the fresh check reads past ``min_safety``, as
+    :func:`caliper.joint_check.fix_it` says it (its ``JOINTS`` entry), or None (#413; the foreman: offer only what the
+    check credits). A count it reads with the pull still waived isn't one: the waiver isn't a check."""
+    from . import joint_check as JC
+
+    def at(n: int) -> Optional[float]:
+        r = row(JC.screwed(j, n), got, screw_mm, min_safety, keep=keep)
+        return None if "unread" in r or r.get("waived") else r.get("safety")
+    return JC.fix_it(j, min_safety, at)
+
+
+def _open(out: dict, reading: dict, setup_: dict, why_of: dict, by_pair: dict, min_safety: float) -> list[dict]:
+    """Every joint of the part nothing checked, by hand or by the FEA: ``{"pieces", "between", "why", "fix"?}``, ``fix``
+    only where the check credits a fixing that clears it (#413). A leg short of the top isn't a joint."""
+    from . import verdicts as V
+    from .joint_check import EDGE_KINDS
+
+    done = {tuple(r["pieces"]) for r in out["rows"] if "pieces" in r and V.checked(r)}
+    kept = []
+    for j in setup_["joints"]:
+        key = tuple(j["pieces"])
+        if key in done or j.get("short") is not None:
+            continue
+        between = f"the {j['edge']} and the {j['face']}" if "edge" in j else f"the {key[0]} and the {key[1]}"
+        o = {"pieces": list(key), "between": between}
+        got = (reading.get("joints") or {}).get(key) if readable(j) else None
+        why = why_of.get(key)
+        if why == "pull":                             # a pull waived: what the table credits that takes it, if any
+            hand = by_pair.get(key) or {}
+            fix = credited(j, got, hand.get("rake_n", 0.0), setup_["screw_mm"], min_safety) if got else None
+            o.update({"why": NO_PULL.format(edge=j["edge"], face=j["face"]), "fix": fix} if fix else
+                     {"why": PULL_UNCREDITED})
+        elif why:
+            o["why"] = why
+        elif "unplaced" in j:
+            o["why"] = j["unplaced"]
+        elif j.get("notch"):
+            o["why"] = "a notch, which only the hand rule reads, and it couldn't follow the load to it"
+        elif j.get("kind") not in EDGE_KINDS:
+            o["why"] = f"a {j.get('kind')}, which the check has no rule for yet"
+        elif got is None or "unread" in got:
+            o["why"] = (got or {}).get("unread") or "the FEA didn't read it"
+        else:
+            o["why"] = NO_FORCE
+        kept.append(o)
+    return kept
+

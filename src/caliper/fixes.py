@@ -144,21 +144,24 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
                           _choice(f"Give the {these} {'their' if many else 'its'} size: a declared section, in mm",
                                   DESIGNER, _designer_cost(name)),
                           _removed(store, pid, names, these, name)], pid))
-    # joints nothing checked, by hand or by the FEA (#383): what isn't, and the way to have them checked. Not a wrong
-    # measurement: a row that wasn't measured, so never "nothing measured wrong" beside it. It follows the one switch:
-    # while a pass on them is a ✓ with its note (Theo's #222), they're a known limit (#318), below, never a row too
+    # joints nothing checked, by hand or by the FEA (#383): each named, with why (#413). It follows the one switch:
+    # while a pass on them is a ✓ with its note (Theo's #222), they're a known limit (#318), in the card's words. Flipped,
+    # a joint the check credits a fixing for is a row of its own, that fixing its one tick (Theo's fix loop: the re-check
+    # clears it); the rest one known limit naming them, never a tick that comes back unchanged (the foreman)
     joints_row = verdicts.JOINT_CAP != "holds"
-    unread = [b for c, _ in said for b in [verdicts.wood_brace(run, c)] if b is not None and not b.get("trim")]
-    if unread and joints_row:
-        b = max(unread, key=lambda b: len(b["names"]) if b.get("names") else int(b.get("joints_n") or 0))
-        n = len(b["names"]) if b.get("names") else int(b.get("joints_n") or 0)
-        what = ("; ".join(b["names"][:3]) + (f"; and {len(b['names']) - 3} more" if len(b["names"]) > 3 else "")
-                if b.get("names") else b.get("unchained") or "")
-        rows.append({**_row("joints_unchecked", f"{n} joint{'s' if n != 1 else ''} not checked"
-                                                + (f": {what}" if what else ""),
-                            [_choice("Say how each is made in its JOINTS entry (glue, screws, a block), so the check can "
-                                     "read it", DESIGNER, _designer_cost(name))], pid),
-                     "measured": False, "badge": "not checked"})
+    named = [b for c, _ in said for b in [verdicts.wood_brace(run, c)] if b is not None and b.get("open") is not None]
+    joint_limit = None
+    if named and joints_row:
+        b = max(named, key=lambda b: len(b["open"]))
+        for o in b["open"]:
+            if o.get("fix"):
+                rows.append({**_row(f"joints_unchecked:{'|'.join(o['pieces'])}",
+                                    f"The joint between {o['between']} isn't checked: {o['why']}",
+                                    _joint_choices({"between": o["between"], "pieces": o["pieces"],
+                                                    "more_screws": o["fix"]}, name), pid),
+                             "measured": False, "badge": "not checked"})
+        rest = [o for o in b["open"] if not o.get("fix")]
+        joint_limit = _uncleared(rest, b) if rest else None
     thin, spacing = run.get("thinnest_mm"), run.get("spacing_mm")
     coarse = bool(thin and spacing) and not L._sees(run.get("across") or thin / spacing)
     unresolved = [c["name"] for c, v in said if v["kind"] in ("unresolved", "unchecked")]
@@ -308,7 +311,10 @@ def _run_rows(store: DesignStore, p: dict, run: dict, name: str) -> tuple[list[d
                            [c["name"]], f"'{c['name']}'"))
     for c, v in said:                           # what Caliper can't fix by itself: said apart, never ticked
         b = verdicts.wood_brace(run, c)          # joints #311 didn't reach, as the card reads them (#318 re-check)
-        if b and not (joints_row and not b.get("trim")):        # a row above says them, once
+        if b and joints_row and b.get("open") is not None:       # named above: its rows, and the rest once
+            if joint_limit and joint_limit not in limits:
+                limits.append(joint_limit)
+        elif b:
             words = joint_said(b, need).strip().rstrip(".")
             limits.append(words[:1].upper() + words[1:] if b.get("names") or b.get("unchained")
                           else "Its joints aren't checked: " + words)
@@ -348,6 +354,22 @@ def _racking() -> Optional[str]:
     except ImportError:  # pragma: no cover — before #313
         return None
     return RACKING_SAID
+
+
+def _uncleared(rest: list[dict], b: dict) -> str:
+    """The joints nothing checked and nothing the check credits would clear yet, as one known limit (#413): named, the
+    first three of each why, and why, as the reading kept them."""
+    groups: dict = {}
+    for o in rest:
+        groups.setdefault(o["why"], []).append(o["between"])
+
+    def names(xs: list) -> str:
+        return ", ".join(xs[:3]) + (f" and {len(xs) - 3} more" if len(xs) > 3 else "")
+    n = len(rest)
+    return (f"{n} joint{'s' if n != 1 else ''} not checked"
+            + (f", by hand ({b['unchained']}) or by the FEA" if b.get("unchained") else "")
+            + f", and nothing the check credits clears {'them' if n != 1 else 'it'} yet: "
+            + "; ".join(f"{names(v)} ({k})" for k, v in groups.items()))
 
 
 def _more(jr: dict) -> tuple:

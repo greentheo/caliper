@@ -108,7 +108,7 @@ def brace_why(brace: Optional[dict]) -> str:
         return TRIM_WHY
     if b.get("names") or b.get("unchained"):    # those the hand check couldn't (#301): how many here, named where it's said
         n = len(b["names"]) if b.get("names") else int(b.get("joints_n") or 0)
-        return f"{n} joint{'s' if n != 1 else ''} not checked by hand"
+        return f"{n} joint{'s' if n != 1 else ''} not checked"           # by hand or by the FEA (#413)
     return JOINTS_WHY
 
 
@@ -134,13 +134,17 @@ def wood_brace(run: Optional[dict], c: Optional[dict] = None) -> Optional[dict]:
         n = int(J.get("n") or 0)
         if J.get("chain") is False:             # its path couldn't be followed: the joints nothing read, and why, once
             why = (J.get("unchecked") or ["its load path isn't a simple chain"])[0]
-            left = n - sum(1 for r in J.get("rows") or [] if checked(r))      # the FEA's are checked (#383)
+            opened = {"open": J["open"]} if J.get("open") is not None else {}     # each named, with why (#413)
+            left = (len(J["open"]) if opened else
+                    n - sum(1 for r in J.get("rows") or [] if checked(r)))      # the FEA's are checked (#383)
             if left <= 0:
                 return None
-            return {"joints_n": left, "wood": True, "unchained": why}
+            return {"joints_n": left, "wood": True, "unchained": why, **opened}
         names = list(J.get("unchecked") or [])
         if not names:
             return None
+        if J.get("open"):
+            return {"joints_n": len(names), "wood": True, "names": names, "open": J["open"]}
         if not J.get("rows"):                   # none it could place: today's words, exactly
             return {"joints_n": n, "wood": True}
         return {"joints_n": len(names), "wood": True, "names": names}

@@ -245,7 +245,8 @@ def own_script(text: str) -> str:
 def free_id(store, pid: str) -> str:
     """``side_left_2``, or the next number free (a part in the trash keeps its id taken)."""
     base = re.sub(r"_\d+$", "", pid) or pid
-    taken = {p.id for p in store.design.parts} | {p.id for p in store.assembly.parts}
+    taken = ({p.id for p in store.design.parts} | {p.id for p in store.assembly.parts}
+             | {g["id"] for g in store.design.groups})       # never a group's name (#399's follow-up)
     from . import trash
 
     if os.path.isdir(trash.root(store)):           # a part in the trash can be put back: its id stays taken

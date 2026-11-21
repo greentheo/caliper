@@ -38,6 +38,7 @@ def test_run_end_to_end_smoke(tmp_path, monkeypatch):
     assert stls, "expected an STL artifact"
 
 
+@pytest.mark.nightly                      # long, and no verdict rests on it (CALI-219, #367)
 def test_fit_end_to_end(tmp_path, monkeypatch):
     pytest.importorskip("cadquery")
     import trimesh

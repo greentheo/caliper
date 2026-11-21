@@ -243,6 +243,7 @@ def test_each_lighten_step_s_cases_are_solved_on_its_cut_not_the_part(tmp_path, 
     assert all(not got[~on].any() for on, got in cut)                          # solved on the cut, nothing it took out
 
 
+@pytest.mark.nightly                      # long, and no verdict rests on it (CALI-219, #367)
 def test_the_progress_line_says_together_only_where_they_are(tmp_path, monkeypatch):
     pytest.importorskip("cadquery")
     from whittle.physics.fea import VoxelFEA

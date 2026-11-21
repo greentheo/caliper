@@ -123,6 +123,7 @@ def test_a_release_files_everything_the_shop_needs(store):
     assert store.history("crate")[-1]["kind"] == "release"
 
 
+@pytest.mark.nightly                      # long, and no verdict rests on it (CALI-219, #367)
 @needs_unfolder
 def test_releases_are_numbered_and_reuse_whats_current(store):
     first = R.make(store, pdf=False)

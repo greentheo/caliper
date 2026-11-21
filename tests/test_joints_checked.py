@@ -33,7 +33,7 @@ def test_a_path_the_hand_rule_can_t_follow_counts_only_the_joints_nothing_read()
     J = {"chain": False, "n": 3, "unchecked": ["its load path isn't a simple chain"],
          "rows": [_row(safety=None, fea={"safety": 4.0}), _row(safety=None, fea={"safety": 5.0})]}
     brace = verdicts.wood_brace(run, {"joints": J})
-    assert brace["joints_n"] == 1 and verdicts.brace_why(brace) == "1 joint not checked by hand"
+    assert brace["joints_n"] == 1 and verdicts.brace_why(brace) == "1 joint not checked"
     J["rows"].append(_row(safety=None, fea={"safety": 6.0}))
     assert verdicts.wood_brace(run, {"joints": J}) is None                          # all three read: nothing left
 
@@ -46,14 +46,14 @@ RUN = {"min_safety": 2.0, "safety": 3.8, "spacing_mm": 3.0, "thinnest_mm": 19.05
 def test_as_theo_s_222_answer_stands_a_pass_on_unchecked_joints_is_a_tick_with_its_note():
     v = verdicts.case(RUN, CASE)
     assert verdicts.JOINT_CAP == "holds"
-    assert v["kind"] == "holds" and v["counts_as_pass"] and v["why"] == "19 joints not checked by hand"
+    assert v["kind"] == "holds" and v["counts_as_pass"] and v["why"] == "19 joints not checked"
 
 
 def test_the_one_switch_makes_it_not_checked_everywhere(monkeypatch):
     """#383 rule 2, ready for Theo's word: one line, and the case, the run, a close case and the goal all say it."""
     monkeypatch.setattr(verdicts, "JOINT_CAP", "unchecked")
     v = verdicts.case(RUN, CASE)
-    assert v["kind"] == "unchecked" and not v["counts_as_pass"] and v["why"] == "19 joints not checked by hand"
+    assert v["kind"] == "unchecked" and not v["counts_as_pass"] and v["why"] == "19 joints not checked"
     assert verdicts.run(RUN)["kind"] == "unchecked"
     close = {**CASE, "safety": 2.2, "fea": {"safety": 2.2}}
     assert verdicts.case({**RUN, "safety": 2.2, "cases": [close]}, close)["kind"] == "unchecked"
@@ -74,7 +74,9 @@ def test_the_design_s_view_and_the_part_s_view_read_alike(tmp_path):
     assert whole["status"] == part["status"] == "warn"
 
 
-def test_things_to_fix_lists_the_joints_nothing_checked_as_not_measured(tmp_path, monkeypatch):
+def test_an_older_run_naming_none_keeps_the_card_s_words_both_ways(tmp_path, monkeypatch):
+    """#413 moved the row: a joint the check credits a fixing for is a row of its own, the rest a named limit
+    (test_joints_row_clears). A run with no named list falls back to the card's words, never a tick it can't clear."""
     from .test_check_own_frame import _stool
 
     store = _stool(tmp_path)
@@ -83,13 +85,7 @@ def test_things_to_fix_lists_the_joints_nothing_checked_as_not_measured(tmp_path
     rows, limits = fixes._run_rows(store, p, run, "the designer")            # Theo's #222 stands: a known limit
     assert "joints_unchecked" not in [r["id"] for r in rows]
     assert limits == ["Not checked by hand: it rests on more supports one way than the other"]
-    monkeypatch.setattr(verdicts, "JOINT_CAP", "unchecked")                  # not checked: a row, and no limit beside it
-    rows, limits = fixes._run_rows(store, p, run, "the designer")
-    (row,) = [r for r in rows if r["id"] == "joints_unchecked"]
-    assert row["problem"] == "19 joints not checked: it rests on more supports one way than the other"
-    assert row["measured"] is False and row["badge"] == "not checked"
-    assert limits == [], limits
-    assert "JOINTS entry" in row["choices"][0]["fix"]
-    ok = {**RUN, "version": p["version"], "cases": [{**CASE, "joints": {"chain": True, "n": 2, "rows": [_row(safety=3.0)],
-                                                                       "unchecked": []}}]}
-    assert not [r for r in fixes._run_rows(store, p, ok, "the designer")[0] if r["id"] == "joints_unchecked"]
+    monkeypatch.setattr(verdicts, "JOINT_CAP", "unchecked")                  # flipped: an older run, nothing named
+    rows, limits = fixes._run_rows(store, p, run, "the designer")            # in it, keeps the card's words (#413)
+    assert not [r for r in rows if r["id"].startswith("joints_unchecked")]
+    assert limits == ["Not checked by hand: it rests on more supports one way than the other"]
