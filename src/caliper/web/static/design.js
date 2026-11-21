@@ -1275,6 +1275,12 @@ async function loadDesigns(select) {
 $('designPick').onchange = (e) => e.target.value && openDesign(e.target.value);
 $('newBtn').onclick = startNew;
 
+// a design with one part opens on that part (#362): its action bar (Check it holds, #325) and cards are there at first look.
+// Theo's step-stool-5 opened on the design view, which has the part's Parameters but no bar. A lone reference isn't opened on
+function soleFor(design) {
+  const parts = design.parts || [];
+  return parts.length === 1 && parts[0].role !== 'fixed' ? parts[0].id : null;
+}
 async function openDesign(slug) {
   const first = S.slug !== slug;
   S.slug = slug; S.scope = null; S.station = null;
@@ -1286,6 +1292,7 @@ async function openDesign(slug) {
   try { got = await api('GET', `/api/designs/${slug}`); } catch (e) { if (S.slug === slug) loadFailed(slug, e); return; }
   if (S.slug !== slug) return;                  // another design was chosen while this one loaded (#168)
   S.design = got;
+  S.scope = soleFor(got);                       // on its one part (#362); the design view is the chip's × away
   doneLoading();
   render();
   sayMissed();
