@@ -230,7 +230,7 @@ def test_the_design_card_and_the_part_card_name_the_same_wall():
     hedge = answers.fail_hedge(run, c, v, True)
     assert part.endswith(hedge) and "where its wall is 5.2 mm" in hedge and "0.25 mm" not in hedge
     src = open(answers.__file__).read()
-    assert 'out["strength.coarse_fail"] = fail_hedge(*worst, inches).strip()' in src     # the worst, not the first (#339)
+    assert 'hedge = fail_said(cases, inches)' in src and 'out["strength.coarse_fail"] = hedge' in src   # the worst fail's (#355)
 
 
 def test_a_rule_whose_measurement_errors_is_a_fail_not_a_pass():

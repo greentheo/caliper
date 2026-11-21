@@ -484,15 +484,12 @@ def _compute(store: DesignStore, emit: Optional[Callable] = None, stop: Optional
             brace = next((v["brace"] for _, v in said if v.get("joints")), None)
         sure = [(c, v) for c, v in said if v["kind"] in verdicts.SETTLED and not v.get("coarse")]
         breaks = [c["breaks_lb"] for c, _ in sure if c.get("breaks_lb")]
-        hedged = [(c, v) for c, v in said if v["kind"] == "fails" and v.get("coarse")]
-        from .answers import worst_failed
-
-        hedged = worst_failed(hedged) if hedged else None          # the case the refusal names (#339)
         inches = store.design.display_units == "in"
-        if hedged and unsettled is None:
-            from .answers import coarse, fail_hedge
+        from .answers import fail_said
 
-            unsettled = fail_hedge(run, *hedged, inches).strip() or coarse(run, inches, holds=False)
+        hedged = fail_said([(run, c) for c, _ in said], inches)       # the refusal's case, its own doubt (#339, #355)
+        if hedged and unsettled is None:
+            unsettled = hedged
         if no_breaks is None and len(sure) < sum(1 for c in run["cases"] if c.get("breaks_lb")):
             from .answers import coarse
 

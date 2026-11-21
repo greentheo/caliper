@@ -247,6 +247,17 @@ def near(safety: Optional[float], need: Optional[float]) -> bool:
     return safety is not None and bool(need) and need <= safety <= need * CLOSE
 
 
+def worst_fail(pairs) -> Optional[tuple]:
+    """A part's worst failing case, one definition for every line that names its failure (#355 review): the refusal,
+    the design card's ✗ and its coarse hedge, and the scorecard. Of ``(run, case)`` pairs, the lowest safety among cases
+    whose own verdict is ``fails``. An unchecked case isn't one, nor one whose FEA found no support, whatever governs it:
+    the run's own number (``load_study.run_safety``) leaves those out too. ``(run, case, verdict)``, or None. Its own
+    verdict, not the run's, says whether the fail may be the model's (``coarse``)."""
+    got = [(r, c, case(r, c)) for r, c in pairs if (c.get("fea") or {}).get("supported") is not False]   # as run_safety
+    return min(((r, c, v) for r, c, v in got if v["kind"] == "fails" and c.get("safety") is not None),
+               key=lambda t: t[1]["safety"], default=None)
+
+
 def worst(verdicts: list[dict]) -> Optional[dict]:
     """The worst of several (a run's cases, a design's parts)."""
     return min(verdicts, key=lambda v: RANK.index(v["kind"]), default=None)
