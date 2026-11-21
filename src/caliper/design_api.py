@@ -1155,7 +1155,12 @@ def router():
                 name = joints.namer(store, pid)
             except Exception:  # noqa: BLE001 — the edges, said as edges
                 name = None
-            return features.with_words(features.for_part(store, pid), store.design.display_units == "in", joint=name)
+            try:                                   # a face on one piece, as that piece's: "the tread's top face"
+                piece = joints.piece_namer(store, pid)
+            except Exception:  # noqa: BLE001 — the faces, said as faces
+                piece = None
+            return features.with_words(features.for_part(store, pid), store.design.display_units == "in", joint=name,
+                                       piece=piece)
         except KeyError:
             raise HTTPException(404, f"no part {pid!r}")
         except Exception as e:  # noqa: BLE001 — a part that doesn't build has no faces to pick: said, as for its pieces (#172)
