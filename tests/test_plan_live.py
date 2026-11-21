@@ -166,13 +166,27 @@ def test_a_part_named_for_where_it_goes_is_kept(pid):
 
 @pytest.mark.parametrize("pid", ["box_floor", "floor", "cabin_wall", "camper_floor", "ground"])
 def test_a_part_to_be_made_is_never_dropped_by_its_name(pid):
-    """#370: a camper's floor panel the planner gave no ``made`` vanished as the ground. Only what the plan says is the
-    fixed surroundings (``role: fixed``) is ground; a part to be made stays, whatever its name."""
+    """#370: a camper's floor panel vanished as the ground. A part that says how it's made stays, whatever its name."""
     plan = json.loads(json.dumps(STOOL).replace("bathroom_floor", pid))
-    plan["parts"][1].update({"role": "movable", "what": "a plywood panel"})
+    plan["parts"][1].update({"role": "movable", "what": "a plywood panel", "made": "sheet"})
     got = P.validate(plan)
-    assert pid in got.ids() and not got.dropped and P.dropped_line(got) == ""
+    assert pid in got.ids() and not got.dropped and not got.questions and P.dropped_line(got) == ""
     assert [m.between for m in got.mates] == [["step_stool", pid]]
+
+
+@pytest.mark.parametrize("pid", ["bathroom_floor", "box_floor", "cabin_wall"])
+def test_a_floor_neither_fixed_nor_made_is_asked_never_picked(pid):
+    """#371 review: dropping it loses a camper's floor, keeping it builds a bathroom floor (#117). The planner is asked;
+    on its retry it's kept, and the question goes to the person."""
+    plan = json.loads(json.dumps(STOOL).replace("bathroom_floor", pid))
+    plan["parts"][1]["role"] = "movable"
+    said = pid.replace("_", " ")
+    with pytest.raises(P.PlanError, match=f"say how the {said} is made, or mark it fixed if it's what the design stands on"):
+        P.validate(plan)
+    got = P.validate(plan, ask=True)
+    assert pid in got.ids() and not got.dropped
+    assert got.questions == [f"Is the {said} something to make? Say how it's made, or that it's what it stands on (then "
+                             f"it's left out)."]
 
 
 def test_a_fixed_part_that_says_how_it_was_made_stays_a_reference_as_before():
@@ -355,3 +369,34 @@ def test_keep_from_the_page(tmp_path, monkeypatch):
     checks = {c["id"]: c["source"] for c in got.json()["plan"]["checks"]}
     assert checks["base_stable"] == "kept" and checks["rotor_size"] == "assumed"
     assert app.post(f"/api/designs/{store.design.slug}/plan/checks/nope/keep").status_code == 404
+
+
+
+def _unfixed_stool():
+    plan = copy.deepcopy(STOOL)
+    plan["parts"][1]["role"] = "movable"
+    return plan
+
+
+def test_the_planner_asked_marks_the_floor_fixed_and_it_builds_as_one(tmp_path, monkeypatch):
+    """#371 review: the stool's bathroom floor not marked fixed. The retry says it's what it stands on: dropped, as #117."""
+    built = []
+    monkeypatch.setattr(chat, "author_part", lambda *a, **k: built.append(a[1]) or chat.TurnResult(
+        "author", "no", ok=False, error="stub"))
+    store = DesignStore.create(STOOL_SAID, base=str(tmp_path / "designs"))
+    client = fake(_unfixed_stool(), STOOL)
+    got = firstrun.build(store, use_llm=True, client=client)
+    calls = client.plan_calls()
+    assert len(calls) == 2 and "say how the bathroom floor is made, or mark it fixed" in calls[1]["messages"][0]["content"]
+    assert built and got["steps"]["plan"] == "one part (the bathroom floor is what it stands on, not a part)"
+
+
+def test_a_floor_still_unsure_after_the_retry_stops_the_plan_with_the_question(tmp_path):
+    store = DesignStore.create(STOOL_SAID, base=str(tmp_path / "designs"))
+    got = firstrun.build(store, use_llm=True, client=fake(_unfixed_stool()), author=_never)
+    assert got["plan"] == "review" and not store.design.parts
+    q = "Before I build it: Is the bathroom floor something to make? Say how it's made, or that it's what it stands on"
+    assert q in got["reply"], got["reply"]
+    assert P.load(store).questions                                      # kept with the plan
+    again = firstrun.build(store, use_llm=True, client=fake(_unfixed_stool()), author=_never)    # Build it: not built
+    assert not again["ok"] and again["reply"].startswith(q) and not store.design.parts

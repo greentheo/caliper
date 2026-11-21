@@ -147,6 +147,11 @@ def build(store: DesignStore, steps: dict, emit: Callable, *, author=None, clien
     """Build the saved plan's parts in order. Returns the first run's result: ``plan`` is ``built`` when every
     part to be made is, ``stopped`` (with ``part``, the one that wouldn't build) when one isn't."""
     plan = P.load(store)
+    if plan.questions:                          # only the person can answer these: nothing's built over them (#371 review)
+        reply = "Before I build it: " + " ".join(plan.questions) + " Say it, and I'll change the plan."
+        store.append_log({"kind": "reply", "action": "plan", "ok": False, "reply": reply, "firstrun": True})
+        emit("step", "Done", step="done")
+        return {"part": None, "ok": False, "steps": steps, "reply": reply, "plan": "review"}
     by = {p.id: p for p in plan.parts}
     order, measure = defined_first(store, plan, P.order(plan))   # a part a pocket is cut to, first, if its size isn't planned
 
