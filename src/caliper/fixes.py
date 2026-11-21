@@ -424,9 +424,12 @@ def _reading_rows(store: DesignStore, pid: str, name: str) -> list[dict]:
         was = moved.get(pid)
         badge = ("Claude's reading" + (f" · read on v{was}; it's changed since" if was else "")
                  + (f" · may repeat what's measured: {r['may_repeat']}" if r.get("may_repeat") else ""))
-        out.append({**_row(f"{READING}{rec.get('n')}:{r.get('id')}", r["said"][:1].upper() + r["said"][1:],
+        mine = [pc for pc in r.get("pieces") or [] if pc.get("part") == pid]   # the pieces it names here (#368 re-check)
+        problem = r["said"][:1].upper() + r["said"][1:] + (f" ({', '.join(pc['name'] for pc in mine)})" if mine else "")
+        out.append({**_row(f"{READING}{rec.get('n')}:{r.get('id')}", problem,
                            [_choice(r["fix"].rstrip("."), DESIGNER, _designer_cost(name))], pid),
-                    "measured": False, "badge": badge, "stale": bool(was)})
+                    "measured": False, "badge": badge, "stale": bool(was),
+                    **({"pieces": [pc["piece"] for pc in mine]} if mine else {})})
     return out
 
 

@@ -213,15 +213,15 @@ def test_a_different_problem_on_the_same_parts_is_kept(store, reading):
     got = assess.run(store, client=Claude([reading]), found={"findings": STOOL4})
     (kept,) = got["readings"]
     assert kept["said"] == reading["said"] and not got["set_aside"]
-    if set(reading["parts"]) == {"step", "side"}:                # may say the fit again: badged, never dropped
-        assert kept["may_repeat"] == "the step is 0.1 mm too big for side's pocket"
-        assert "May repeat what's measured" in got["said"]
+    assert "may_repeat" not in kept and "May repeat" not in got["said"]   # no badge from words (#368 re-check)
 
 
-def test_same_as_on_other_parts_keeps_the_reading(store):
+def test_same_as_on_other_parts_keeps_the_reading_badged(store):
     got = assess.run(store, client=Claude([{"parts": ["step"], "said": "too big", "fix": "Trim.", "same_as": "m1"}]),
                      found={"findings": STOOL4})
-    assert len(got["readings"]) == 1 and not got["set_aside"]
+    (kept,) = got["readings"]
+    assert not got["set_aside"] and kept["may_repeat"] == "the step is 0.1 mm too big for side's pocket"
+    assert "May repeat what's measured" in got["said"]
 
 
 def test_the_list_counts_readings_apart_from_what_s_measured(store, monkeypatch):
@@ -277,3 +277,41 @@ def test_a_name_two_parts_share_words_with_is_read_exactly_or_not_at_all(store):
     store.save()
     got = assess.parse(json.dumps({"readings": [{"parts": ["Stool"], "said": "a", "fix": "b"}]}), store, {"findings": []})
     assert got["readings"][0]["parts"] == ["side"]
+
+
+
+#: A one-part stool with named pieces, as Theo's step-stool-5 is (its front rail, sides and bottom stringer).
+from .test_load_study import BOX_STOOL  # noqa: E402
+
+STOOL5 = (BOX_STOOL.replace('"left":', '"side_left":').replace('"right":', '"side_right":')
+          .replace('"front":', '"front_rail":').replace('"back":', '"bottom_stringer":'))
+
+
+def test_a_piece_named_is_its_part_and_the_row_names_the_piece(tmp_path, monkeypatch):
+    """#368 re-check: on one-part step-stool-5, every point naming "front rail", "left side" or "bottom stringer" was set
+    aside as naming no part."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    s = DesignStore.create("a step stool", base=str(tmp_path / "designs"))
+    s.write_part("step_stool", STOOL5, intent="a box step stool")
+    s.design.piece_labels = {"step_stool": {"top": "Step"}}
+    s.save()
+    monkeypatch.setattr(review, "findings", lambda store, report=None: {"findings": [], "checks": 1})
+    got = assess.run(s, client=Claude([
+        {"parts": ["front rail"], "said": "the rail is thin", "fix": "Make it 1 in."},
+        {"parts": ["left side"], "said": "the side splits at the foot", "fix": "Round the foot."},
+        {"parts": ["Bottom stringer", "Step"], "said": "the stringer sags under the step", "fix": "Deepen it."},
+        {"parts": ["side"], "said": "which side?", "fix": "x"}]))
+    assert [r["parts"] for r in got["readings"]] == [["step_stool"]] * 3, got
+    assert [[pc["piece"] for pc in r["pieces"]] for r in got["readings"]] == [["front_rail"], ["side_left"],
+                                                                               ["bottom_stringer", "top"]]
+    assert [(a["why"], a["named"]) for a in got["set_aside"]] == [("named no part here", ["side"])]   # two sides: neither
+    assert "- The rail is thin (front rail on step_stool). Make it 1 in." in got["said"], got["said"]
+    rows = [r for r in fixes.listed(s, design_api.design_state(s), "step_stool")["rows"] if r["id"].startswith("reading:")]
+    assert rows[0]["problem"] == "The rail is thin (front rail)" and rows[0]["pieces"] == ["front_rail"]
+    assert rows[2]["problem"] == "The stringer sags under the step (bottom stringer, Step)"
+
+
+def test_an_unreadable_last_reading_falls_back_to_the_one_before(store):
+    assess.run(store, client=Claude([{"parts": ["step"], "said": "a", "fix": "b"}]))
+    open(os.path.join(store.root, "reviews", "assess-2.json"), "w").close()        # a crash after taking n 2
+    assert assess.latest(store)["n"] == 1

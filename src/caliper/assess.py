@@ -40,15 +40,6 @@ SAY_COUNT_FROM = 4
 #: What one reading costs, as the offer says it.
 COST = "one Claude call, about 30–60 s"
 
-#: A finding's kind (slice A) and the words a reading of the same thing may use. A reading over the same parts that says one
-#: is kept, badged "may repeat" (#368 review: these words dropped a racking joint, a splitting pocket and a thin stringer);
-#: only Claude's own ``same_as`` on the same parts sets one aside.
-_SAME = {"fit": r"\b(?:fit|fits|pocket|slot|play|clearance|loose|tight)\b",
-         "mirror": r"\bmirror",
-         "rule": r"\b(?:touch|touches|miss|misses|gap|overlap|overlaps|interfere\w*)\b",
-         "shadow": r"\b(?:cop(?:y|ies)|shared?|skeleton|own (?:copy|number))\b",
-         "stated": r"\b(?:tall|long|height|length)\b"}
-
 _SYSTEM = """You review a design that Caliper has built, part by part, before anyone checks its strength. You get what
 the person asked for, what was settled with them, the plan (its parts, the numbers they share, the rules between them),
 and every part: its intent, its version, its script and its measured size. You also get what Caliper has already
@@ -60,8 +51,10 @@ don't line up, a part sized for something else, a side that should mirror anothe
 that a part ignores, a piece that looks too thin for what it carries. Only what you can point to in the scripts or the
 sizes; no style advice, no "consider".
 
+Name each part by its id, or a piece of one by the name its script declares ("front_rail").
+
 Reply with ONLY a JSON object:
-{"readings": [{"parts": ["<part id>", ...], "said": "<what's wrong, one sentence, in the person's words>",
+{"readings": [{"parts": ["<part id or piece name>", ...], "said": "<what's wrong, one sentence, in the person's words>",
                "fix": "<the change you propose, one sentence, a thing the designer can do>",
                "same_as": "<a measured id, only where it may be the same thing; else leave it out>"}]}
 At most 8, the worst first. Part ids exactly as given. An empty list when you find nothing more."""
@@ -90,15 +83,15 @@ def count(store: DesignStore) -> int:
 
 
 def latest(store: DesignStore) -> Optional[dict]:
-    """The design's last reading, or None."""
-    files = _files(store)
-    if not files:
-        return None
-    try:
-        with open(files[-1][1]) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
+    """The design's last reading, or None. One that can't be read (a crash between taking its number and writing it) is
+    passed over for the one before (#368 re-check: the earlier readings' rows vanished)."""
+    for _, path in reversed(_files(store)):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def _versions(store: DesignStore) -> dict[str, int]:
@@ -173,20 +166,18 @@ def _repeats(r: dict, same_as, found: dict) -> Optional[dict]:
     return f if f is not None and set(f.get("parts") or []) == set(r["parts"]) else None
 
 
-def _may_repeat(r: dict, found: dict) -> Optional[str]:
-    """The measured finding a kept reading may say again (the same parts, its kind's words): its badge, never a drop."""
-    for f in _measured(found).values():
-        words = _SAME.get(str(f.get("kind")))
-        if set(f.get("parts") or []) == set(r["parts"]) and words and re.search(words, f"{r['said']} {r['fix']}", re.I):
-            return f["said"]
-    return None
+def _may_repeat(same_as, found: dict) -> Optional[str]:
+    """The measured finding a kept reading may say again: only where Claude's own ``same_as`` names one (on other parts,
+    or it would be set aside). Never from words (#368 re-check: a thin stringer was badged with an unrelated height)."""
+    f = _measured(found).get(str(same_as or "").strip())
+    return f["said"] if f is not None else None
 
 
 def _norm(name: str) -> str:
     return re.sub(r"^the ", "", re.sub(r"[\s_-]+", " ", str(name).strip().lower()))
 
 
-def _part_of(store: DesignStore, name, built: list[str]) -> Optional[str]:
+def _part_of(store: DesignStore, name, built: list[str], loose: bool = True) -> Optional[str]:
     """The part a reading names, by its id, as it's said ("step stool") or by its label ("Step stool"), normalised; or by
     words only one part's name has ("stool"). None where it names none (#368 review: every label was dropped)."""
     if not isinstance(name, str) or not name.strip():
@@ -199,6 +190,8 @@ def _part_of(store: DesignStore, name, built: list[str]) -> Optional[str]:
     for pid in built:
         if labels[pid] and want == _norm(labels[pid]):
             return pid
+    if not loose:
+        return None
     words = set(want.split())
     hits = [pid for pid in built if words and words <= set(_norm(pid).split()) | set(_norm(labels[pid]).split())]
     return hits[0] if len(hits) == 1 else None
@@ -206,6 +199,37 @@ def _part_of(store: DesignStore, name, built: list[str]) -> Optional[str]:
 
 #: Why a point of Claude's was set aside, as the reply says it.
 NO_PART, NOTHING, REPEAT, OVER = "named no part here", "said nothing to change", "repeated a measured finding", "past the 8"
+
+
+def _piece_of(store: DesignStore, name, built: list[str], seen: dict, loose: bool = True) -> Optional[dict]:
+    """The piece a reading names, as its part's script declares it or the tree labels it ("front rail", "left side"), with
+    the part that declares it: ``{part, piece, name}``; None where it names none, or two (#368 re-check: on a one-part
+    stool every piece-named point was set aside). ``seen`` keeps each part's pieces for the reply."""
+    from . import tree
+
+    if not isinstance(name, str) or not name.strip():
+        return None
+    for pid in built:
+        if pid not in seen:
+            try:
+                seen[pid] = tree.pieces(store, pid)
+            except Exception:  # noqa: BLE001 — a part that won't declare names no piece
+                seen[pid] = []
+    every = [(pid, pc) for pid in built for pc in seen[pid]]
+    want = _norm(name)
+    words = set(want.split())
+    tests = [lambda k: want in k,                                      # its key or its label, as written
+             lambda k: any(words == set(x.split()) for x in k)]        # the same words in another order ("left side")
+    if loose:
+        tests.append(lambda k: words and any(words <= set(x.split()) for x in k))   # words only one piece has
+    for test in tests:
+        hits = [(pid, pc) for pid, pc in every if test({_norm(pc["key"]), _norm(pc.get("name") or "")} - {""})]
+        if len(hits) == 1:
+            pid, pc = hits[0]
+            return {"part": pid, "piece": pc["key"], "name": (pc.get("name") or pc["key"]).replace("_", " ")}
+        if hits:
+            return None
+    return None
 
 
 def parse(text: str, store: DesignStore, found: dict) -> dict:
@@ -222,13 +246,23 @@ def parse(text: str, store: DesignStore, found: dict) -> dict:
     if not isinstance(items, list):
         raise ValueError("the reading didn't come back in a form I can use")
     built = list(_versions(store))
-    out, aside = [], []
+    out, aside, seen = [], [], {}
     for it in items:
         if not isinstance(it, dict):              # a bare sentence: its words kept, said as naming no part
             aside.append({"said": str(it).strip()[:LONGEST], "fix": "", "named": [], "why": NO_PART})
             continue
         named = [str(p) for p in (it.get("parts") or []) if isinstance(p, str)]
-        parts = list(dict.fromkeys(q for q in (_part_of(store, p, built) for p in named) if q))
+        parts, pieces = [], []
+        for n in named:                             # a part by id or label; else a piece, and its part (#368 re-check)
+            pid = _part_of(store, n, built, loose=False)               # exact names first: a part's, then a piece's,
+            pc = None if pid else _piece_of(store, n, built, seen, loose=False)   # then words only one of either has
+            pid = pid or (None if pc else _part_of(store, n, built))
+            pc = pc or (None if pid else _piece_of(store, n, built, seen))
+            if pc:
+                pieces.append(pc)
+            if pid or pc:
+                parts.append(pid or pc["part"])
+        parts = list(dict.fromkeys(parts))
         said = str(it.get("said") or "").strip()[:LONGEST]
         fix = str(it.get("fix") or "").strip()[:LONGEST]
         if not (said and fix):
@@ -237,12 +271,12 @@ def parse(text: str, store: DesignStore, found: dict) -> dict:
         if not parts:
             aside.append({"said": said, "fix": fix, "named": named, "why": NO_PART})
             continue
-        r = {"parts": parts, "said": said, "fix": fix}
+        r = {"parts": parts, **({"pieces": pieces} if pieces else {}), "said": said, "fix": fix}
         same = _repeats(r, it.get("same_as"), found)
         if same is not None:
             aside.append({**r, "named": named, "why": REPEAT, "repeats": same["said"]})
             continue
-        maybe = _may_repeat(r, found)
+        maybe = _may_repeat(it.get("same_as"), found)
         out.append({**r, **({"may_repeat": maybe} if maybe else {})})
     aside += [{**r, "named": r["parts"], "why": OVER} for r in out[MOST:]]
     return {"readings": [{**r, "id": f"r{i + 1}"} for i, r in enumerate(out[:MOST])], "set_aside": aside,
@@ -331,6 +365,12 @@ def _aside_said(aside: list[dict], total: int) -> str:
             + ", ".join(f"{c} {w}" for w, c in whys.items()) + ".")
 
 
+def _where(r: dict) -> str:
+    """What a reading names: its pieces with their part ("front rail on step_stool"), and any part named as a whole."""
+    whole = [p for p in r["parts"] if not any(pc["part"] == p for pc in r.get("pieces") or [])]
+    return ", ".join([f"{pc['name']} on {pc['part']}" for pc in r.get("pieces") or []] + whole)
+
+
 def said(rec: dict) -> str:
     """A reading, as the reply says it: each one marked as Claude's reading, never as measured; what was set aside counted,
     with why. "Found nothing more" only where Claude said nothing more and nothing was set aside (#368 review)."""
@@ -343,7 +383,7 @@ def said(rec: dict) -> str:
     if not readings:
         return f"Claude read {of}, and none of what it said could be kept: {left[:1].lower()}{left[1:]} Look at it yourself."
     lines = [f"Claude's reading of {of} ({len(readings)} thing{'s' if len(readings) != 1 else ''}; read, not measured):"]
-    lines += [f"- {r['said'][:1].upper()}{r['said'][1:]} ({', '.join(r['parts'])}). {r['fix']}"
+    lines += [f"- {r['said'][:1].upper()}{r['said'][1:]} ({_where(r)}). {r['fix']}"
               + (f" (May repeat what's measured: {r['may_repeat']}.)" if r.get("may_repeat") else "") for r in readings]
     return "\n".join(lines + ([left] if left else []))
 
