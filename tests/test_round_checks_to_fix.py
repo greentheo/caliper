@@ -40,7 +40,7 @@ def test_a_true_part_has_no_round_check_rows(stool):
     ("construction_on_its_face", "the top's outline is 19 mm off the solid's face",
      "Its 3D shape and its pieces don't match: the top's outline is 19 mm off the solid's face", None),
     ("shell_in_walls", "wall_left lies in no wall the part is built from (9 of 9 points along it)",
-     "Wall_left lies in no wall the part is built from (9 of 9 points along it)",
+     "wall_left lies in no wall the part is built from (9 of 9 points along it)",
      "Put each wall beam shell() gives in its wall, of that wall's core, thickness and skins"),
     ("keeps_clear", "the outside cuts 100 mm into the mattress", "The outside cuts 100 mm into the mattress",
      "Keep the outside out of what keeps() holds clear: move or shrink the shape, or move the box it keeps"),

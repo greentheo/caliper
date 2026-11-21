@@ -466,7 +466,8 @@ def _round_rows(store: DesignStore, pid: str, name: str, have: list[dict]) -> li
             said = answers.fix_for(r.id, detail, pid)
             fix = (re.findall(r'"([^"]+)"', said) or [said])[0]          # the first of the card's own words
         else:
-            problem = detail[:1].upper() + detail[1:]
+            first = detail.split(" ", 1)[0]
+            problem = detail if "_" in first else detail[:1].upper() + detail[1:]   # an id stays as it's written
             fix = ROUND_FIX.get(r.id) or f"Make it pass its check {r.id.replace('_', ' ')}"
         out.append(_row(f"check:{r.id}", problem, [_choice(fix, DESIGNER, _designer_cost(name))], pid))
     return out
