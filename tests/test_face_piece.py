@@ -149,7 +149,7 @@ def test_the_app_s_pick_chip_names_the_piece(tmp_path, monkeypatch):
 
 
 def test_an_older_features_file_is_worked_out_again():
-    assert features.SCHEMA == 4
+    assert features.SCHEMA == 5                            # 5: the points a fused face is named over (#402 review)
 
 
 def test_376_s_pick_writes_the_face_s_words_as_they_come():
@@ -158,3 +158,75 @@ def test_376_s_pick_writes_the_face_s_words_as_they_come():
 
     pick = _fn(open(JS).read(), "pickScenarioFace")
     assert "String(f.said || 'that face').replace(/^face: /, '')" in pick and "stopScenPick(`Picked ${what}`);" in pick
+
+
+# --- #402 review (reviewer-2) ------------------------------------------------------------------------------------------------
+def _front(tmp_path):
+    return _at(_faces(_store(tmp_path)), (W / 4, 0, H / 2))
+
+
+def test_the_fused_front_names_both_pieces_biggest_first(tmp_path):
+    """The union fuses coplanar faces: the front (y = 0, z 0–400) is an L of the tread's front (400 x 19) and the side's
+    front edge (19 x 381), about equal. It read "the tread's flat face" wherever it was clicked; now it says both."""
+    f = _front(tmp_path)
+    assert f["said"].startswith("face: the flat face across the tread and the side, "), f["said"]
+
+
+def test_the_end_is_the_side_s_its_tread_sliver_under_the_share(tmp_path):
+    """The x = 0 end: the side's outer face (300 x 381) and the tread's left end (300 x 19), under 5% of it."""
+    f = _at(_faces(_store(tmp_path)), (0, D / 2, (H - T) / 2))
+    assert f["said"].startswith("face: the side's flat face, "), f["said"]
+
+
+def test_a_moved_and_turned_part_s_face_is_named_as_it_sits(tmp_path):
+    """reviewer-2: no fixture was posed. Moved (300, 0, 0) and turned 90° about z, the tread's top is still the tread's top
+    face (its pieces are found in its own frame, its top and height as it sits)."""
+    s = _store(tmp_path)
+    part = next(p for p in s.assembly.parts if p.id == "stool")
+    part.position, part.rotation = [300.0, 0.0, 50.0], [0.0, 0.0, 90.0]
+    s.save()
+    from caliper.design import DesignStore
+
+    s = DesignStore.load(s.root)
+    faces = _faces(s)
+    top = _at(faces, (W / 2, D / 2, H))                                  # found by its own-frame centre
+    assert top["said"] == "face: the tread's top face, 450 mm up", top["said"]
+    assert _at(faces, (W / 2, D / 2, H - T))["said"].startswith("face: the tread's underside, 431 mm up")
+
+
+def test_a_sloped_face_is_never_its_top():
+    """reviewer-2: nothing checked that a 30° slope isn't "the top face" (LEVEL, about 11°)."""
+    import cadquery as cq
+
+    wedge = cq.Workplane("XZ").polyline([(0, 0), (100, 0), (100, 57.7), (0, 0)]).close().extrude(-50)   # a 30° slope
+    got = features.of_solid(wedge)
+    slope = next(f for f in got["faces"] if f["type"] == "plane" and 0.5 < f["normal"][2] < 0.98)
+    assert features.said(got, "face", slope["id"], False).startswith("face: the flat face, ")
+
+
+def _named(weights):
+    """A plane face whose samples a fake namer puts on pieces by their x: 0 is the tread, 1 the side, 2 a seam (None)."""
+    who = {0: "tread", 1: "side", 2: None}
+    samples = [[k, 0, 0, w] for k, w in weights.items() for _ in range(1)]
+    face = {"id": "f0", "type": "plane", "centre": [0, 0, 100], "normal": [0, 1, 0], "samples": samples}
+    got = features.with_words({"faces": [face], "edges": []}, False, piece=lambda p: who[int(p[0])])
+    return got["faces"][0]["said"]
+
+
+@pytest.mark.parametrize("weights,want", [
+    ({0: 90, 1: 10}, "face: the tread's flat face, 100 mm up"),               # a 10% sliver of the side: not named
+    ({0: 50, 1: 50}, "face: the flat face across the tread and the side, 100 mm up"),
+    ({0: 30, 1: 70}, "face: the flat face across the side and the tread, 100 mm up"),   # the bigger share first
+    ({0: 10, 2: 80, 1: 10}, "face: the flat face across the tread and the side, 100 mm up"),   # a seam counts for neither
+    ({2: 100}, "face: the flat face, 100 mm up")])                            # all seam: no one piece's
+def test_a_face_is_each_piece_s_that_holds_a_share_of_it(weights, want):
+    assert _named(weights) == want
+
+
+def test_a_face_is_sampled_four_points_over_each_of_its_biggest_triangles():
+    import cadquery as cq
+
+    got = features.of_solid(cq.Workplane().box(100, 50, 10))
+    for f in got["faces"]:
+        n = len(f["tris"]) // 3
+        assert len(f["samples"]) == 4 * min(features.SAMPLED, n) and all(len(x) == 4 for x in f["samples"])
