@@ -11,7 +11,7 @@ import pytest
 from .test_carve_click import JS, _page, _run
 
 FNS = ["scoreView", "scoreMark", "scoreNum", "safetyNum", "asOf", "goalSaid"]
-CONSTS = ["esc", "TRUST", "goalLimit", "MUST", "NEED", "strengthGoal"]
+CONSTS = ["esc", "TRUST", "goalLimit", "MUST", "NEED", "strengthGoal", "NO_NUMBER"]
 HOLDS = {"id": "holds", "label": "holds 250 lb, 2 times over", "metric": "strength.safety", "op": ">=", "limit": 2.0,
          "source": "assumed"}
 
@@ -71,3 +71,16 @@ def test_the_page_drops_the_need_as_answers_does(label):
     need = re.search(r"^const NEED = (/.*/i);$", src, re.M).group(1)
     got = _run(f"console.log(JSON.stringify({json.dumps(label)}.replace({need}, '').trimEnd()));")
     assert got == _without_need(label)
+
+
+@pytest.mark.parametrize("status,mark,tail", [("unresolved", "!", ": not resolved"), ("untrusted", "!", ": not trusted"),
+                                              ("unknown", "?", ": not measured yet"), ("weird", "?", "")])
+def test_a_scored_goal_with_no_number_is_still_said_as_a_goal(status, mark, tail):
+    """#390 review: a strength check the card couldn't number read "! holds 250 lb, 2 times over", a claim beside its "!"."""
+    card = {"created": 1, "summary": {"pass": 0, "fail": 0}, "objectives": [],
+            "checks": [{**HOLDS, "status": status, "value": None, "unit": "×"}]}
+    html = _score({"parts": [], "scorecards": [card], "has_goals": True, "goals": {"ours": True, "checks": [HOLDS]}})
+    row = re.sub(r"<[^>]+>", "", html[html.index("<li>"):html.index("</li>")])
+    row = " ".join(row.split())
+    assert row.startswith(f"{mark} must hold 250 lb, 2 times over{tail}"), row
+    assert "· holds" not in row and "! holds" not in row

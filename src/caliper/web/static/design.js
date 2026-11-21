@@ -2896,6 +2896,8 @@ function goalSaid(c) {
 // a strength goal's label without the factor it needs (answers._NEED, the same pattern): scored, its row leads with the
 // number it does, and "holds 250 lb, 2 times over — 3.8 ×" read as two numbers for one thing (#384, #64 item 15)
 const NEED = /,\s*(?:(?:twice|\d+(?:\.\d+)?\s*(?:times|×))\s*over|\d+(?:\.\d+)?\s*[×x]\s*safety)\s*$/i;
+// why a goal on the card has no number, beside it: "! holds 250 lb, 2 times over" read as a claim (#390 review)
+const NO_NUMBER = { unresolved: 'not resolved', untrusted: 'not trusted', unknown: 'not measured yet' };
 const strengthGoal = (c) => String(c.metric || '').startsWith('strength') && typeof c.limit === 'number';
 function scoreView(d) {
   const card = (d.scorecards || [])[0];
@@ -2933,7 +2935,9 @@ function scoreView(d) {
       return `<li>${scoreMark(c, stale, when)}
       ${c.value != null && strengthGoal(c)   // scored, a strength goal leads with what it does (#384)
         ? `<b>${num(c.value, c.unit, (c.op || '>=').startsWith('>') ? c.limit : null)}</b> — ${esc(String(c.label || c.id).replace(NEED, ''))}${goalLimit(c)}${old}`
-        : `${esc(c.label || c.id)} ${c.value != null ? `— ${num(c.value, c.unit, typeof c.limit === 'number' && (c.op || '>=').startsWith('>') ? c.limit : null)}${goalLimit(c)}${old}` : ''}`}${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
+        : c.value != null ? `${esc(c.label || c.id)} — ${num(c.value, c.unit, typeof c.limit === 'number' && (c.op || '>=').startsWith('>') ? c.limit : null)}${goalLimit(c)}${old}`
+        : `${goalSaid(c)}${NO_NUMBER[c.status] ? `: ${NO_NUMBER[c.status]}` : ''}`   // no number: still a goal (#390 review)
+      }${c.assumed ? ' <span class="badge">assumed</span>' : ''} ${from(now)} ${tag(c.trust)}
       ${now.source === 'proposed' && now.why ? `<div class="muted">${esc(now.why)}</div>` : ''}
       ${c.loads ? `<div class="muted">${esc(c.loads)}</div>` : ''}</li>`; }).join('')}
       ${held.filter((x) => !card.checks.some((c) => c.id === x.id)).map((c) => `<li>· ${goalSaid(c)} ${from(c)}
